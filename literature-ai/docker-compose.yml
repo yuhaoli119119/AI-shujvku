@@ -72,8 +72,6 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
-      - ../app:/legacy/app
-      - ../findpapers:/legacy/findpapers
       - ./storage:/data/storage
       - ./storage/docling_cache:/root/.cache/docling
       - ./.env:/app/.env
@@ -117,8 +115,6 @@ services:
       - minio
     volumes:
       - ./backend:/app
-      - ../app:/legacy/app
-      - ../findpapers:/legacy/findpapers
       - ./storage:/data/storage
       - ./storage/docling_cache:/root/.cache/docling
       - ./.env:/app/.env

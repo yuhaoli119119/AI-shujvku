@@ -311,14 +311,9 @@ class DiscoveryService:
     @staticmethod
     def _ensure_findpapers_path() -> None:
         module_path = Path(__file__).resolve()
-        candidate_paths = [
-            Path("/legacy/app"),
-            Path("/legacy"),
-            module_path.parents[4] / "app" if len(module_path.parents) > 4 else None,
-            module_path.parents[3] / "app" if len(module_path.parents) > 3 else None,
-        ]
-        for candidate in candidate_paths:
-            if candidate and candidate.exists():
-                candidate_str = str(candidate)
-                if candidate_str not in sys.path:
-                    sys.path.insert(0, candidate_str)
+        # 将 literature-ai/backend 目录加入 sys.path，保证内置子包 findpapers 能够被正确导入
+        backend_dir = module_path.parents[2]
+        if backend_dir.exists():
+            backend_dir_str = str(backend_dir)
+            if backend_dir_str not in sys.path:
+                sys.path.insert(0, backend_dir_str)
