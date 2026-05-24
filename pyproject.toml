@@ -1,0 +1,24 @@
+[project]
+name = "lit_ai_collector"
+version = "0.2.0"
+description = "Literature Collection and AI Data Extraction Desktop Application"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlmodel",
+    "httpx",
+    "pydantic-settings",
+    "pymupdf",
+    "openai",
+    "pandas",
+    "openpyxl",
+    "beautifulsoup4",
+    "lxml",
+    "PySide6",
+    "loguru",
+    "feedparser",
+    "requests",
+    "tqdm",
+]
+
+[tool.setuptools]
+packages = ["app"]

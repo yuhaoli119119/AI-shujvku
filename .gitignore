@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.env
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+.pytest_cache/
+.workbuddy/
+111/
+backend.log
+literature-ai/
+
+# 备份文件夹
+*backup*/
+literature-ai_code_backup_*
+
+# 临时补丁及差异比对文件
+patch*.py
+diff.txt
+fix.py
+*.spec
