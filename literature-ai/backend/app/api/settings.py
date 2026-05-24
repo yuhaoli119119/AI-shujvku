@@ -14,6 +14,7 @@ sensitive values (anything containing "key" or "secret").
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 from typing import Any
 
@@ -178,6 +179,23 @@ _MANAGED_KEYS = [
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
+def _is_local_request_host(client_host: str) -> bool:
+    client_host = (client_host or "").strip().lower()
+    if not client_host:
+        return False
+
+    if client_host in _LOCAL_HOSTS:
+        return True
+
+    try:
+        ip = ipaddress.ip_address(client_host)
+    except ValueError:
+        return False
+
+    # Treat private/link-local Docker/WSL bridge addresses as local-mode access.
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
 def _enforce_settings_write_access(request: Request) -> None:
     settings = __import__("app.config", fromlist=["get_settings"]).get_settings()
     provided_token = request.headers.get("X-Settings-Token") or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
@@ -189,7 +207,7 @@ def _enforce_settings_write_access(request: Request) -> None:
             raise HTTPException(status_code=403, detail="Invalid settings admin token")
         return
 
-    if client_host not in _LOCAL_HOSTS:
+    if not _is_local_request_host(client_host):
         raise HTTPException(
             status_code=403,
             detail="Settings writes are limited to local requests unless LITAI_SETTINGS_ADMIN_TOKEN is configured.",
