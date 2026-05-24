@@ -1,12 +1,31 @@
+# Python build & cache artifacts
 __pycache__/
 *.py[cod]
-*.class
-.env
 *.egg-info/
-.venv/
-venv/
+*.egg
 dist/
 build/
-*.egg
 .pytest_cache/
+.venv/
+venv/
+*.class
 
+# Environment configurations
+.env
+
+# Local databases and run metadata
+*.sqlite
+*.sqlite3
+*.db
+
+# Literature AI storage and data directories
+storage/
+data/
+backend/data/
+backend/tests/data/
+storage/docling_cache/
+
+# Document parsing and metadata files
+*.pdf
+*.docling.json
+*.tei.xml

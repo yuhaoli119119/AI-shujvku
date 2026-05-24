@@ -1,27 +1,45 @@
+# Python build & cache artifacts
 __pycache__/
 *.py[cod]
-.env
 *.egg-info/
-.venv/
-venv/
+*.egg
 dist/
 build/
-*.egg
 .pytest_cache/
-.workbuddy/
-111/
-backend.log
+.venv/
+venv/
 
+# Environment configurations
+.env
+literature-ai/.env
+
+# Node modules
+node_modules/
+
+# Local databases and run metadata
+*.sqlite
+*.sqlite3
+*.db
 config.json
 
+# Literature AI storage and data directories (untracked)
+literature-ai/storage/
+literature-ai/data/
+literature-ai/backend/data/
+literature-ai/backend/tests/data/
+literature-ai/storage/docling_cache/
 
+# Document parsing and metadata files (exclude intermediates)
+*.pdf
+*.docling.json
+*.tei.xml
 
-# 备份文件夹
+# Local backup & patches
 *backup*/
 literature-ai_code_backup_*
-
-# 临时补丁及差异比对文件
 patch*.py
 diff.txt
 fix.py
-node_modules/
+.workbuddy/
+111/
+backend.log
