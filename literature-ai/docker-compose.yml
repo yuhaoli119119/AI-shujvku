@@ -62,6 +62,7 @@ services:
       LITAI_WRITER_FALLBACK_BACKEND: ${LITAI_WRITER_FALLBACK_BACKEND:-rule}
       LITAI_WRITER_PROMPT_PATH: ${LITAI_WRITER_PROMPT_PATH:-prompts/paper_writer.yaml}
       LITAI_SETTINGS_ADMIN_TOKEN: ${LITAI_SETTINGS_ADMIN_TOKEN:-}
+      LITAI_BROWSE_ROOTS: ${LITAI_BROWSE_ROOTS:-/host/users,/data,/legacy}
       LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
@@ -77,10 +78,9 @@ services:
       - ./frontend:/frontend
       - ./storage:/data/storage
       - ./storage/docling_cache:/root/.cache/docling
-      - ./.env:/app/.env
-      # 宿主机用户目录映射，允许文献库创建在用户指定的位置
-      # Windows 用户需要在 Docker Desktop → Settings → Resources → File Sharing 中添加 C:\Users
-      - /c/Users:/host/users
+      # Host user directory browsing is optional. Override LITAI_HOST_USERS_ROOT on macOS/Linux.
+      # If you do not need host directory browsing, comment this line out.
+      - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
 
   worker:
     build:
@@ -109,6 +109,7 @@ services:
       LITAI_WRITER_FALLBACK_BACKEND: ${LITAI_WRITER_FALLBACK_BACKEND:-rule}
       LITAI_WRITER_PROMPT_PATH: ${LITAI_WRITER_PROMPT_PATH:-prompts/paper_writer.yaml}
       LITAI_SETTINGS_ADMIN_TOKEN: ${LITAI_SETTINGS_ADMIN_TOKEN:-}
+      LITAI_BROWSE_ROOTS: ${LITAI_BROWSE_ROOTS:-/host/users,/data,/legacy}
       LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
@@ -121,8 +122,7 @@ services:
       - ./backend:/app
       - ./storage:/data/storage
       - ./storage/docling_cache:/root/.cache/docling
-      - ./.env:/app/.env
-      - /c/Users:/host/users
+      - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
 
 volumes:
   postgres_data:

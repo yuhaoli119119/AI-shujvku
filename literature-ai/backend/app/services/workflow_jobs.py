@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -32,10 +32,21 @@ logger = logging.getLogger(__name__)
 DEFAULT_LIBRARY_NAME = "\u9ed8\u8ba4\u6587\u732e\u5e93"
 JOB_TYPE_AI_WORKFLOW = "ai_workflow"
 JOB_TYPE_CLASSIFY_BATCH = "classify_batch"
+JOB_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
+
+
+class JobCancelledError(RuntimeError):
+    pass
 
 
 def normalize_library_name(library_name: str | None) -> str:
     return (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
+
+
+def validate_job_status(status: str) -> str:
+    if status not in JOB_STATUSES:
+        raise ValueError(f"Unsupported workflow job status: {status}")
+    return status
 
 
 def build_job_runtime_context(settings: Settings) -> dict[str, Any]:
@@ -69,6 +80,12 @@ def serialize_job(job: WorkflowJob) -> dict[str, Any]:
     }
 
 
+def _merge_progress(existing: dict[str, Any] | None, updates: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(existing or {})
+    merged.update(updates)
+    return merged
+
+
 def create_job(
     session: Session,
     *,
@@ -93,8 +110,34 @@ def create_job(
     return job
 
 
+def list_jobs(
+    session: Session,
+    *,
+    job_type: str | None = None,
+    library_name: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[WorkflowJob]:
+    stmt = select(WorkflowJob)
+    if job_type:
+        stmt = stmt.where(WorkflowJob.type == job_type)
+    if library_name:
+        stmt = stmt.where(WorkflowJob.library_name == normalize_library_name(library_name))
+    if status:
+        stmt = stmt.where(WorkflowJob.status == validate_job_status(status))
+    stmt = stmt.order_by(desc(WorkflowJob.created_at)).limit(limit)
+    return list(session.scalars(stmt).all())
+
+
 def get_job(session: Session, job_id: str) -> WorkflowJob | None:
     return session.get(WorkflowJob, job_id)
+
+
+def get_job_or_raise(session: Session, job_id: str) -> WorkflowJob:
+    job = get_job(session, job_id)
+    if job is None:
+        raise ValueError(f"Workflow job not found: {job_id}")
+    return job
 
 
 def update_job(
@@ -106,12 +149,9 @@ def update_job(
     result: Any = None,
     error: str | None = None,
 ) -> WorkflowJob:
-    job = session.get(WorkflowJob, job_id)
-    if job is None:
-        raise ValueError(f"Workflow job not found: {job_id}")
-
+    job = get_job_or_raise(session, job_id)
     if status is not None:
-        job.status = status
+        job.status = validate_job_status(status)
     if progress is not None:
         job.progress = progress
     if result is not None or status == "completed":
@@ -123,6 +163,70 @@ def update_job(
     session.commit()
     session.refresh(job)
     return job
+
+
+def is_job_cancelled(session: Session, job_id: str) -> bool:
+    job = get_job(session, job_id)
+    return bool(job and job.status == "cancelled")
+
+
+def assert_job_not_cancelled(session: Session, job_id: str) -> None:
+    if is_job_cancelled(session, job_id):
+        raise JobCancelledError(f"Workflow job cancelled: {job_id}")
+
+
+def cancel_job(session: Session, job_id: str) -> WorkflowJob:
+    job = get_job_or_raise(session, job_id)
+    if job.status not in {"queued", "running"}:
+        raise ValueError(f"Only queued or running jobs can be cancelled: {job.status}")
+
+    message = "Cancellation requested."
+    if job.status == "running":
+        message = "Soft cancel requested while task is running."
+
+    job.status = "cancelled"
+    job.progress = _merge_progress(
+        job.progress,
+        {
+            "phase": "cancelled",
+            "message": message,
+            "cancel_mode": "soft",
+        },
+    )
+    job.updated_at = datetime.utcnow()
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    return job
+
+
+def clone_job_for_retry(session: Session, job_id: str) -> WorkflowJob:
+    source = get_job_or_raise(session, job_id)
+    if source.status not in {"failed", "cancelled"}:
+        raise ValueError(f"Only failed or cancelled jobs can be retried: {source.status}")
+
+    retry_payload = dict(source.payload or {})
+    retry_progress = {
+        "phase": "queued",
+        "message": f"Retry queued from job {source.job_id}.",
+        "retried_from_job_id": source.job_id,
+    }
+    if source.type == JOB_TYPE_AI_WORKFLOW:
+        retry_progress.update(
+            {
+                "max_results": retry_payload.get("max_results"),
+                "max_downloads": retry_payload.get("max_downloads"),
+            }
+        )
+
+    return create_job(
+        session,
+        job_type=source.type,
+        library_name=source.library_name,
+        payload=retry_payload,
+        runtime_context=dict(source.runtime_context or {}),
+        progress=retry_progress,
+    )
 
 
 def _find_existing_paper(session: Session, doi: str | None, title: str | None) -> Paper | None:
@@ -139,8 +243,8 @@ async def download_discovery_candidate(
     service: DiscoveryService,
     raw_paper: Any,
     metadata: dict[str, object],
-    dest_dir,
-):
+    dest_dir: Path,
+) -> Path:
     try:
         return await run_in_threadpool(service.download_pdf, raw_paper, dest_dir)
     except Exception as primary_exc:
@@ -159,6 +263,7 @@ async def execute_ai_workflow(
     *,
     session: Session,
     settings: Settings,
+    job_id: str | None = None,
 ) -> AIWorkflowResponse:
     from app.api.papers.common import rewrite_ai_search_query
 
@@ -184,8 +289,11 @@ async def execute_ai_workflow(
     attempted_downloads = 0
 
     for item in raw_results:
+        if job_id:
+            assert_job_not_cancelled(session, job_id)
         if attempted_downloads >= payload.max_downloads:
             break
+
         identifier = item.get("doi") or item.get("url") or item.get("identifier") or item.get("title") or ""
         if not identifier:
             failed.append(
@@ -247,6 +355,7 @@ async def execute_ai_workflow(
                     )
                 )
                 continue
+
             item_status = "completed"
             try:
                 with TemporaryDirectory() as tmpdir:
@@ -272,6 +381,7 @@ async def execute_ai_workflow(
                     source_reference=metadata.get("url") or identifier,
                 )
                 item_status = "metadata_only"
+
             ingested.append(
                 AIWorkflowIngestedPaperResponse(
                     paper_id=paper.id,
@@ -308,9 +418,9 @@ async def execute_ai_workflow(
 def run_ai_workflow_job(job_id: str) -> None:
     base_settings = get_settings()
     with session_scope(base_settings.database_url) as control_session:
-        job = get_job(control_session, job_id)
-        if job is None:
-            raise ValueError(f"Workflow job not found: {job_id}")
+        job = get_job_or_raise(control_session, job_id)
+        if job.status == "cancelled":
+            return
         runtime_settings = build_runtime_settings(base_settings, job.runtime_context)
         payload = AIWorkflowPayload.model_validate(job.payload or {})
         update_job(
@@ -328,13 +438,17 @@ def run_ai_workflow_job(job_id: str) -> None:
 
     try:
         with session_scope(runtime_settings.database_url) as job_session:
+            assert_job_not_cancelled(job_session, job_id)
             result = asyncio.run(
                 execute_ai_workflow(
                     payload,
                     session=job_session,
                     settings=runtime_settings,
+                    job_id=job_id,
                 )
             )
+            assert_job_not_cancelled(job_session, job_id)
+
         with session_scope(base_settings.database_url) as control_session:
             update_job(
                 control_session,
@@ -350,6 +464,17 @@ def run_ai_workflow_job(job_id: str) -> None:
                 result=result.model_dump(mode="json"),
                 error=None,
             )
+    except JobCancelledError:
+        with session_scope(base_settings.database_url) as control_session:
+            job = get_job(control_session, job_id)
+            if job and job.status != "cancelled":
+                update_job(
+                    control_session,
+                    job_id,
+                    status="cancelled",
+                    progress=_merge_progress(job.progress, {"phase": "cancelled", "cancel_mode": "soft"}),
+                    error=None,
+                )
     except Exception as exc:
         logger.exception("AI workflow job failed: %s", job_id)
         with session_scope(base_settings.database_url) as control_session:
@@ -398,9 +523,9 @@ def run_classify_batch_sync(
 def run_classify_batch_job(job_id: str) -> None:
     base_settings = get_settings()
     with session_scope(base_settings.database_url) as control_session:
-        job = get_job(control_session, job_id)
-        if job is None:
-            raise ValueError(f"Workflow job not found: {job_id}")
+        job = get_job_or_raise(control_session, job_id)
+        if job.status == "cancelled":
+            return
         runtime_settings = build_runtime_settings(base_settings, job.runtime_context)
         payload = ClassifyBatchPayload.model_validate(job.payload or {})
         update_job(
@@ -419,6 +544,7 @@ def run_classify_batch_job(job_id: str) -> None:
 
     try:
         with session_scope(runtime_settings.database_url) as job_session:
+            assert_job_not_cancelled(job_session, job_id)
             target_library = normalize_library_name(payload.library_name)
             stmt = select(Paper).where(Paper.library_name == target_library)
             if not payload.overwrite:
@@ -444,6 +570,7 @@ def run_classify_batch_job(job_id: str) -> None:
                 )
 
             for index, paper in enumerate(papers, start=1):
+                assert_job_not_cancelled(job_session, job_id)
                 try:
                     reprocess.classify_single_paper(paper.id, payload.overwrite)
                     classified_count += 1
@@ -487,6 +614,17 @@ def run_classify_batch_job(job_id: str) -> None:
                 },
                 error=None,
             )
+    except JobCancelledError:
+        with session_scope(base_settings.database_url) as control_session:
+            job = get_job(control_session, job_id)
+            if job and job.status != "cancelled":
+                update_job(
+                    control_session,
+                    job_id,
+                    status="cancelled",
+                    progress=_merge_progress(job.progress, {"phase": "cancelled", "cancel_mode": "soft"}),
+                    error=None,
+                )
     except Exception as exc:
         logger.exception("Batch classification job failed: %s", job_id)
         with session_scope(base_settings.database_url) as control_session:
@@ -520,9 +658,9 @@ def dispatch_job(job_id: str, background_tasks: BackgroundTasks | None = None) -
 def run_workflow_job_by_id(job_id: str) -> None:
     base_settings = get_settings()
     with session_scope(base_settings.database_url) as session:
-        job = get_job(session, job_id)
-        if job is None:
-            raise ValueError(f"Workflow job not found: {job_id}")
+        job = get_job_or_raise(session, job_id)
+        if job.status == "cancelled":
+            return
         job_type = job.type
 
     if job_type == JOB_TYPE_AI_WORKFLOW:

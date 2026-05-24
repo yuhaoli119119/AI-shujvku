@@ -2,6 +2,7 @@ import os
 import tempfile
 import pytest
 import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 from fastapi import Request
@@ -11,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import Base, Paper
+from app.db.models import Base, Paper, WorkflowJob
 from app.db.session import get_db_session
 import app.api.papers as papers_api
 
@@ -420,6 +421,88 @@ def test_ai_workflow_job_endpoint_runs_without_blocking_request(setup_test_db, m
         assert data["result"]["searched_total"] == 0
     assert captured["query"] == "background workflow"
     assert captured["limit"] == 100
+
+
+def test_ai_workflow_job_list_retry_and_cancel_endpoints(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
+    monkeypatch.setenv("LITAI_WRITER_API_KEY", "")
+    get_settings.cache_clear()
+
+    captured = {}
+
+    def fake_search(self, query, providers=None, limit=10, target_types=None):
+        captured["query"] = query
+        return []
+
+    monkeypatch.setattr(papers_api.DiscoveryService, "search", fake_search)
+
+    queued_job_id = str(uuid4())
+    failed_job_id = str(uuid4())
+    created_base = datetime.utcnow()
+    with Session() as session:
+        session.add_all(
+            [
+                WorkflowJob(
+                    job_id=queued_job_id,
+                    type="ai_workflow",
+                    status="queued",
+                    library_name="JobLibrary",
+                    payload={"query": "queued workflow", "library_name": "JobLibrary", "max_results": 5, "max_downloads": 2},
+                    runtime_context={"database_url": str(engine.url), "storage_root": str(Path.cwd())},
+                    progress={"phase": "queued"},
+                    created_at=created_base,
+                    updated_at=created_base,
+                ),
+                WorkflowJob(
+                    job_id=failed_job_id,
+                    type="ai_workflow",
+                    status="failed",
+                    library_name="JobLibrary",
+                    payload={"query": "retry workflow", "library_name": "JobLibrary", "max_results": 3, "max_downloads": 1},
+                    runtime_context={"database_url": str(engine.url), "storage_root": str(Path.cwd())},
+                    progress={"phase": "failed"},
+                    error="boom",
+                    created_at=created_base + timedelta(seconds=1),
+                    updated_at=created_base + timedelta(seconds=1),
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+
+    response = client.get("/api/papers/ai_workflow/jobs", params={"library_name": "JobLibrary", "limit": 10})
+    assert response.status_code == 200
+    jobs = response.json()
+    assert [job["job_id"] for job in jobs] == [failed_job_id, queued_job_id]
+
+    response = client.get("/api/papers/ai_workflow/jobs", params={"status": "failed", "limit": 10})
+    assert response.status_code == 200
+    failed_jobs = response.json()
+    assert len(failed_jobs) == 1
+    assert failed_jobs[0]["job_id"] == failed_job_id
+
+    response = client.post(f"/api/papers/ai_workflow/jobs/{queued_job_id}/cancel")
+    assert response.status_code == 200
+    cancelled = response.json()
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["cancel_mode"] == "soft"
+
+    response = client.post(f"/api/papers/ai_workflow/jobs/{failed_job_id}/retry")
+    assert response.status_code == 200
+    retried = response.json()
+    assert retried["job_id"] != failed_job_id
+    assert retried["status"] in {"queued", "running", "completed"}
+    assert retried["dispatch_mode"] in {"celery", "background_tasks"}
+    assert captured["query"] == "retry workflow"
+
+    with Session() as session:
+        retried_job = session.get(WorkflowJob, retried["job_id"])
+        assert retried_job is not None
+        assert retried_job.library_name == "JobLibrary"
+        assert retried_job.type == "ai_workflow"
 
 
 def test_discovery_download_falls_back_to_direct_pdf_url(setup_test_db, monkeypatch):

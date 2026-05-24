@@ -234,6 +234,18 @@
                 </div>
             </div>
 
+            <!-- Admin Token Configuration -->
+            <div class="panel">
+                <div class="panel-title">🔒 管理员 Token 配置</div>
+                <div class="panel-desc">
+                    如果从非本地 IP 访问系统，保存设置与后台某些管理操作需要提供管理员 Token。该 Token 将安全地保存在本地会话中 (sessionStorage)。
+                </div>
+                <div class="field">
+                    <label>管理员 Token (X-Settings-Token)</label>
+                    <input type="password" id="settings_token" placeholder="输入管理员 Token">
+                </div>
+            </div>
+
             <!-- Embedding Configuration -->
             <div class="panel">
                 <div class="panel-title">🔍 Embedding 模型配置</div>
@@ -445,7 +457,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                         <li><strong>文献库</strong>：/pages/literature_library/index.html</li>
                         <li><strong>论文详情</strong>：/pages/paper_detail/index.html?id=&lt;paper_id&gt;</li>
                         <li><strong>AI Writer</strong>：/pages/ai_writer/index.html</li>
-                        <li><strong>外部审稿</strong>：/pages/external_analysis_workbench/index.html</li>
+                        <li><strong>外部审稿</strong>：/pages/literature_library/index.html?tab=review</li>
                         <li><strong>设置</strong>：/pages/settings/index.html</li>
                     </ul>
                 </div>
@@ -551,11 +563,36 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             });
         }
 
+        // ===== Fetch Helper with Admin Token support =====
+        async function fetchSettingsJSON(url, options) {
+            options = options || {};
+            options.headers = options.headers || {};
+            const token = sessionStorage.getItem("litai-settings-token");
+            if (token) {
+                options.headers["X-Settings-Token"] = token;
+            }
+            const resp = await fetch(url, options);
+            if (resp.status === 403) {
+                showToast("无权访问该接口。请确认是否需要配置管理员 Token 或进行本地访问。", "error");
+                throw new Error("403 Forbidden: Admin Token Required");
+            }
+            const text = await resp.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (_) {}
+            if (!resp.ok) {
+                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
+                throw new Error(detail);
+            }
+            return data;
+        }
+
         // ===== Load Settings =====
         async function loadSettings() {
             try {
-                const resp = await fetch(`${API_BASE}/api/settings`);
-                const data = await resp.json();
+                // Restore administrator token from sessionStorage
+                document.getElementById('settings_token').value = sessionStorage.getItem("litai-settings-token") || '';
+
+                const data = await fetchSettingsJSON(`${API_BASE}/api/settings`);
 
                 document.getElementById('embedding_provider').value = data.embedding_provider || 'deterministic';
                 document.getElementById('embedding_api_base').value = data.embedding_api_base || '';
@@ -576,8 +613,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
 
         async function loadStatus() {
             try {
-                const resp = await fetch(`${API_BASE}/api/settings/status`);
-                const data = await resp.json();
+                const data = await fetchSettingsJSON(`${API_BASE}/api/settings/status`);
 
                 const html = [
                     makeBadge('Embedding', data.embedding.configured, data.embedding.provider + ' / ' + data.embedding.model),
@@ -598,6 +634,10 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
 
         // ===== Save Settings =====
         async function saveSettings() {
+            // Save administrator token to sessionStorage first
+            const tokenVal = document.getElementById('settings_token').value.trim();
+            sessionStorage.setItem("litai-settings-token", tokenVal);
+
             const settings = [
                 { key: 'embedding_provider', value: document.getElementById('embedding_provider').value },
                 { key: 'embedding_api_base', value: document.getElementById('embedding_api_base').value || null },
@@ -612,18 +652,13 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             ];
 
             try {
-                const resp = await fetch(`${API_BASE}/api/settings`, {
+                const result = await fetchSettingsJSON(`${API_BASE}/api/settings`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ settings }),
                 });
-                const result = await resp.json();
-                if (resp.ok) {
-                    showToast(`配置已保存（更新 ${result.updated} 项）`);
-                    loadStatus();
-                } else {
-                    showToast('保存失败: ' + result.detail, 'error');
-                }
+                showToast(`配置已保存（更新 ${result.updated} 项）`);
+                loadStatus();
             } catch (e) {
                 showToast('保存失败: ' + e.message, 'error');
             }
@@ -632,8 +667,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
         // ===== IDE Prompts =====
         async function loadIdePrompts() {
             try {
-                const resp = await fetch(`${API_BASE}/api/settings/ide-prompts`);
-                const data = await resp.json();
+                const data = await fetchSettingsJSON(`${API_BASE}/api/settings/ide-prompts`);
 
                 document.getElementById('prompt-text').textContent = data.suggested_prompt;
                 document.getElementById('cursor-text').textContent = data.cursor_config_json;

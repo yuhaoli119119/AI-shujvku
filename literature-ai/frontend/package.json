@@ -1,0 +1,11 @@
+{
+  "name": "literature-ai-frontend",
+  "version": "1.0.0",
+  "description": "Front-end smoke tests for Literature AI",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

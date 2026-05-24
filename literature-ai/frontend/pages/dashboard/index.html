@@ -343,11 +343,25 @@
         }
 
         async function fetchJSON(url, options) {
-            const resp = await fetch(url, options);
-            if (!resp.ok) {
-                throw new Error("HTTP error " + resp.status);
+            options = options || {};
+            options.headers = options.headers || {};
+            const token = sessionStorage.getItem("litai-settings-token");
+            if (token) {
+                options.headers["X-Settings-Token"] = token;
             }
-            return await resp.json();
+            const resp = await fetch(url, options);
+            if (resp.status === 403) {
+                showToast("无权访问该接口。请先在[设置]中配置管理员 Token。");
+                throw new Error("403 Forbidden");
+            }
+            const text = await resp.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (_) {}
+            if (!resp.ok) {
+                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
+                throw new Error(detail);
+            }
+            return data;
         }
 
         async function loadLibraries() {
@@ -383,7 +397,7 @@
         async function loadDashboardData(libName) {
             try {
                 // Fetch papers list for computation
-                const papers = await fetchJSON(`${API_BASE}?limit=1000&library_name=${encodeURIComponent(libName)}`);
+                const papers = await fetchJSON(`${API_BASE}?limit=200&library_name=${encodeURIComponent(libName)}`);
                 
                 // 1. Total papers
                 const total = papers.length;

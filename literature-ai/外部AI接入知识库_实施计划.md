@@ -1,107 +1,107 @@
-# 外部 AI 接入知识库 — 实施计划
+﻿# 澶栭儴 AI 鎺ュ叆鐭ヨ瘑搴?鈥?瀹炴柦璁″垝
 
-## 任务目标
+## 浠诲姟鐩爣
 
-在 literature-ai 项目的 MCP 服务端新增 4 个工具，让外部 AI（DeepSeek API、Cursor、VS Code Copilot、Codex 等）能够直接查询知识库、检索跨论文证据、触发 AI 审阅、导入分析结果。
+鍦?literature-ai 椤圭洰鐨?MCP 鏈嶅姟绔柊澧?4 涓伐鍏凤紝璁╁閮?AI锛圖eepSeek API銆丆ursor銆乂S Code Copilot銆丆odex 绛夛級鑳藉鐩存帴鏌ヨ鐭ヨ瘑搴撱€佹绱㈣法璁烘枃璇佹嵁銆佽Е鍙?AI 瀹￠槄銆佸鍏ュ垎鏋愮粨鏋溿€?
 
-**用户核心诉求**：不相信软件自己分析的准确度，想让外部 AI 来审核和补充。
+**鐢ㄦ埛鏍稿績璇夋眰**锛氫笉鐩镐俊杞欢鑷繁鍒嗘瀽鐨勫噯纭害锛屾兂璁╁閮?AI 鏉ュ鏍稿拰琛ュ厖銆?
 
-## 项目位置
+## 椤圭洰浣嶇疆
 
 ```
-D:\Desktop\03_代码与开发\爬虫脚步下载文章\literature-ai\backend\
+cd literature-ai/backend
 ```
 
 ---
 
-## 现有架构（不要改，只需基于它扩展）
+## 鐜版湁鏋舵瀯锛堜笉瑕佹敼锛屽彧闇€鍩轰簬瀹冩墿灞曪級
 
-### MCP 服务端
-- **文件**: `app/mcp/server.py`
-- **框架**: `FastMCP` (mcp Python SDK)，`streamable_http` 模式
-- **挂载**: `app/main.py` 第58行 `app.mount("/mcp", mcp_http_app)`
-- **已有 13 个工具**: `query_papers`, `scan_local_pdfs`, `get_paper`, `list_notes`, `append_note`, `propose_correction`, `get_parse_status`, `get_correction_queue`, `get_correction_detail`, `approve_correction`, `reject_correction`, `parse_paper`, `ingest_pdf_batch`
-- **认证**: Bearer Token，密钥格式 `source_prefix|display_name|api_key|capability1,capability2`，配置在 `LITAI_MCP_API_KEYS` 环境变量
-- **权限集合**: `read_papers`, `request_parse`, `append_notes`, `propose_corrections`, `review_corrections`
-- **每个工具开头都调用 `require_mcp_capability("xxx")`** 做权限检查
+### MCP 鏈嶅姟绔?
+- **鏂囦欢**: `app/mcp/server.py`
+- **妗嗘灦**: `FastMCP` (mcp Python SDK)锛宍streamable_http` 妯″紡
+- **鎸傝浇**: `app/main.py` 绗?8琛?`app.mount("/mcp", mcp_http_app)`
+- **宸叉湁 13 涓伐鍏?*: `query_papers`, `scan_local_pdfs`, `get_paper`, `list_notes`, `append_note`, `propose_correction`, `get_parse_status`, `get_correction_queue`, `get_correction_detail`, `approve_correction`, `reject_correction`, `parse_paper`, `ingest_pdf_batch`
+- **璁よ瘉**: Bearer Token锛屽瘑閽ユ牸寮?`source_prefix|display_name|api_key|capability1,capability2`锛岄厤缃湪 `LITAI_MCP_API_KEYS` 鐜鍙橀噺
+- **鏉冮檺闆嗗悎**: `read_papers`, `request_parse`, `append_notes`, `propose_corrections`, `review_corrections`
+- **姣忎釜宸ュ叿寮€澶撮兘璋冪敤 `require_mcp_capability("xxx")`** 鍋氭潈闄愭鏌?
 
 ### RAG Retriever
-- **文件**: `app/rag/retriever.py`
-- **类**: `Retriever(session, embedding_dimension=64)`
-- **核心方法**: `retrieve(query, paper_ids, limit_per_type, target_paper_type, paper_type_filter)` → 返回六类证据 dict:
+- **鏂囦欢**: `app/rag/retriever.py`
+- **绫?*: `Retriever(session, embedding_dimension=64)`
+- **鏍稿績鏂规硶**: `retrieve(query, paper_ids, limit_per_type, target_paper_type, paper_type_filter)` 鈫?杩斿洖鍏被璇佹嵁 dict:
   - `sections`, `dft_results`, `electrochemical_performance`, `mechanism_claims`, `writing_cards`, `figure_data_points`
-- **混合检索**: 0.65 * lexical + 0.35 * semantic (DeterministicEmbeddingService)
-- **跨类型去重**: `_global_dedup()`
+- **娣峰悎妫€绱?*: 0.65 * lexical + 0.35 * semantic (DeterministicEmbeddingService)
+- **璺ㄧ被鍨嬪幓閲?*: `_global_dedup()`
 
 ### External Analysis Service
-- **文件**: `app/services/external_analysis_service.py`
-- **类**: `ExternalAnalysisService(session, settings)`
-- **核心方法**:
-  - `import_run(paper_id, source, source_label, raw_text, raw_payload)` → 创建 `ExternalAnalysisRun` + candidates
-  - `materialize_candidates(run_id, candidate_ids, created_by)` → 将候选条目物化为 notes/corrections/relationships
-  - `list_candidates(run_id)` → 列出候选条目
-- **规范化**: 自动将自由文本/JSON 规范化为 `ExternalAnalysisNormalizedModel`（包含 review_notes, correction_proposals, supporting_papers, unmapped_items）
-- **LLM 规范化**: 如果输入不是标准结构，会调用 `LLMService.structured_extract()` 自动转换
-- **属性**: `self.llm = LLMService(settings)` — 内部已有 LLM 客户端
+- **鏂囦欢**: `app/services/external_analysis_service.py`
+- **绫?*: `ExternalAnalysisService(session, settings)`
+- **鏍稿績鏂规硶**:
+  - `import_run(paper_id, source, source_label, raw_text, raw_payload)` 鈫?鍒涘缓 `ExternalAnalysisRun` + candidates
+  - `materialize_candidates(run_id, candidate_ids, created_by)` 鈫?灏嗗€欓€夋潯鐩墿鍖栦负 notes/corrections/relationships
+  - `list_candidates(run_id)` 鈫?鍒楀嚭鍊欓€夋潯鐩?
+- **瑙勮寖鍖?*: 鑷姩灏嗚嚜鐢辨枃鏈?JSON 瑙勮寖鍖栦负 `ExternalAnalysisNormalizedModel`锛堝寘鍚?review_notes, correction_proposals, supporting_papers, unmapped_items锛?
+- **LLM 瑙勮寖鍖?*: 濡傛灉杈撳叆涓嶆槸鏍囧噯缁撴瀯锛屼細璋冪敤 `LLMService.structured_extract()` 鑷姩杞崲
+- **灞炴€?*: `self.llm = LLMService(settings)` 鈥?鍐呴儴宸叉湁 LLM 瀹㈡埛绔?
 
 ### External Analysis API
-- **文件**: `app/api/external_analysis.py`
-- **关键函数**: `_build_internal_ai_review_blob(detail)` — 将论文详情构建为审阅数据包 JSON（第44-81行）
-  - 包含: paper 元数据 + comprehensive_analysis + dft_settings_items + catalyst_samples_items + dft_results_items + electrochemical_performance_items + mechanism_claims_items + writing_cards_items + references + relationships + section_excerpts
-- **辅助函数**: `_truncate(text, limit)` — 截断长文本；`_sanitize_internal_corrections(normalized)` — 清洗修正的 target_path
-- **内部AI审阅端点**: `POST /api/external-analysis/papers/{paper_id}/internal-parse`（第168-253行）
-  - 调用链: `PaperQueryService.get_paper_detail()` → `_build_internal_ai_review_blob()` → `LLMService.structured_extract()` → `ExternalAnalysisService.import_run()` → 可选 auto_apply
+- **鏂囦欢**: `app/api/external_analysis.py`
+- **鍏抽敭鍑芥暟**: `_build_internal_ai_review_blob(detail)` 鈥?灏嗚鏂囪鎯呮瀯寤轰负瀹￠槄鏁版嵁鍖?JSON锛堢44-81琛岋級
+  - 鍖呭惈: paper 鍏冩暟鎹?+ comprehensive_analysis + dft_settings_items + catalyst_samples_items + dft_results_items + electrochemical_performance_items + mechanism_claims_items + writing_cards_items + references + relationships + section_excerpts
+- **杈呭姪鍑芥暟**: `_truncate(text, limit)` 鈥?鎴柇闀挎枃鏈紱`_sanitize_internal_corrections(normalized)` 鈥?娓呮礂淇鐨?target_path
+- **鍐呴儴AI瀹￠槄绔偣**: `POST /api/external-analysis/papers/{paper_id}/internal-parse`锛堢168-253琛岋級
+  - 璋冪敤閾? `PaperQueryService.get_paper_detail()` 鈫?`_build_internal_ai_review_blob()` 鈫?`LLMService.structured_extract()` 鈫?`ExternalAnalysisService.import_run()` 鈫?鍙€?auto_apply
 
-### LLM 配置
-- **文件**: `app/config.py`
-- **当前配置** (`.env`):
+### LLM 閰嶇疆
+- **鏂囦欢**: `app/config.py`
+- **褰撳墠閰嶇疆** (`.env`):
   ```
   LITAI_WRITER_BACKEND=openai_compatible
   LITAI_WRITER_MODEL=deepseek-v4-flash
   LITAI_WRITER_API_BASE=https://api.deepseek.com
   LITAI_WRITER_API_KEY=sk-xxx
   ```
-- **LLMService**: 使用 `openai` Python SDK，`writer_api_base` + `writer_api_key` 配置
+- **LLMService**: 浣跨敤 `openai` Python SDK锛宍writer_api_base` + `writer_api_key` 閰嶇疆
 
 ### Paper Query Service
-- **文件**: `app/services/paper_query.py`
-- **核心方法**: `get_paper_detail(paper_id: UUID)` → 返回完整的论文详情模型
+- **鏂囦欢**: `app/services/paper_query.py`
+- **鏍稿績鏂规硶**: `get_paper_detail(paper_id: UUID)` 鈫?杩斿洖瀹屾暣鐨勮鏂囪鎯呮ā鍨?
 
-### 数据库 Session 管理
-- **文件**: `app/db/session.py`
-- **工具函数**: `session_scope(database_url)` — 上下文管理器，MCP 工具中统一使用此方式
+### 鏁版嵁搴?Session 绠＄悊
+- **鏂囦欢**: `app/db/session.py`
+- **宸ュ叿鍑芥暟**: `session_scope(database_url)` 鈥?涓婁笅鏂囩鐞嗗櫒锛孧CP 宸ュ叿涓粺涓€浣跨敤姝ゆ柟寮?
 
 ---
 
-## 需要新增的 4 个 MCP 工具
+## 闇€瑕佹柊澧炵殑 4 涓?MCP 宸ュ叿
 
-### 工具 1: `retrieve_evidence` (P0 — 最高优先级)
+### 宸ュ叿 1: `retrieve_evidence` (P0 鈥?鏈€楂樹紭鍏堢骇)
 
-让外部 AI 按语义检索跨论文的结构化证据。
+璁╁閮?AI 鎸夎涔夋绱㈣法璁烘枃鐨勭粨鏋勫寲璇佹嵁銆?
 
 ```python
 @mcp_server.tool(name="retrieve_evidence", description="Semantic search across parsed papers for structured evidence (DFT results, mechanism claims, electrochemical data, writing cards, sections, figure data points). Use this to find relevant evidence across multiple papers by topic.")
 def retrieve_evidence(
-    query: str,                                    # 自然语言查询，如 "oxygen reduction reaction catalyst DFT"
-    paper_ids: list[str] | None = None,            # 限定论文ID范围
-    evidence_types: list[str] | None = None,       # 限定证据类型，可选: sections, dft_results, electrochemical_performance, mechanism_claims, writing_cards, figure_data_points
-    limit_per_type: int = 5,                       # 每类最多返回条数
-    target_paper_type: str | None = None,          # 论文分类过滤，如 A1, B2, C3, R
+    query: str,                                    # 鑷劧璇█鏌ヨ锛屽 "oxygen reduction reaction catalyst DFT"
+    paper_ids: list[str] | None = None,            # 闄愬畾璁烘枃ID鑼冨洿
+    evidence_types: list[str] | None = None,       # 闄愬畾璇佹嵁绫诲瀷锛屽彲閫? sections, dft_results, electrochemical_performance, mechanism_claims, writing_cards, figure_data_points
+    limit_per_type: int = 5,                       # 姣忕被鏈€澶氳繑鍥炴潯鏁?
+    target_paper_type: str | None = None,          # 璁烘枃鍒嗙被杩囨护锛屽 A1, B2, C3, R
 ) -> dict[str, Any]:
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         retriever = Retriever(session, embedding_dimension=settings.embedding_dimension)
-        # 将 paper_ids 字符串列表转为 UUID
+        # 灏?paper_ids 瀛楃涓插垪琛ㄨ浆涓?UUID
         uuid_paper_ids = [UUID(pid) for pid in paper_ids] if paper_ids else None
-        # 调用 retriever
+        # 璋冪敤 retriever
         result = retriever.retrieve(
             query=query,
             paper_ids=uuid_paper_ids,
             limit_per_type=limit_per_type,
             target_paper_type=target_paper_type,
         )
-        # 如果指定了 evidence_types，只返回对应类型
+        # 濡傛灉鎸囧畾浜?evidence_types锛屽彧杩斿洖瀵瑰簲绫诲瀷
         if evidence_types:
             valid_types = {"sections", "dft_results", "electrochemical_performance", "mechanism_claims", "writing_cards", "figure_data_points"}
             filtered = {k: v for k, v in result.items() if k in evidence_types and k in valid_types}
@@ -109,22 +109,22 @@ def retrieve_evidence(
         return {"results": result}
 ```
 
-**新增 import**: `from app.rag.retriever import Retriever`
+**鏂板 import**: `from app.rag.retriever import Retriever`
 
-### 工具 2: `review_paper` (P0)
+### 宸ュ叿 2: `review_paper` (P0)
 
-让外部 AI 触发对单篇论文的深度审阅。复用 `external_analysis.py` 中已有的审阅逻辑。
+璁╁閮?AI 瑙﹀彂瀵瑰崟绡囪鏂囩殑娣卞害瀹￠槄銆傚鐢?`external_analysis.py` 涓凡鏈夌殑瀹￠槄閫昏緫銆?
 
-**重要**: `_build_internal_ai_review_blob` 目前在 `app/api/external_analysis.py` 中是一个模块级私有函数。需要将其提取为共享函数，供 MCP 和 API 共同使用。
+**閲嶈**: `_build_internal_ai_review_blob` 鐩墠鍦?`app/api/external_analysis.py` 涓槸涓€涓ā鍧楃骇绉佹湁鍑芥暟銆傞渶瑕佸皢鍏舵彁鍙栦负鍏变韩鍑芥暟锛屼緵 MCP 鍜?API 鍏卞悓浣跨敤銆?
 
-方案：将 `_build_internal_ai_review_blob` 和 `_truncate` 和 `_sanitize_internal_corrections` 移到 `app/services/external_analysis_service.py` 作为模块级函数，然后在 `external_analysis.py` 中 import 回来。MCP server 也 import 使用。
+鏂规锛氬皢 `_build_internal_ai_review_blob` 鍜?`_truncate` 鍜?`_sanitize_internal_corrections` 绉诲埌 `app/services/external_analysis_service.py` 浣滀负妯″潡绾у嚱鏁帮紝鐒跺悗鍦?`external_analysis.py` 涓?import 鍥炴潵銆侻CP server 涔?import 浣跨敤銆?
 
 ```python
 @mcp_server.tool(name="review_paper", description="Trigger an AI-powered deep review of a paper using the configured LLM (e.g. DeepSeek). The AI will analyze the paper's extracted data and produce structured review notes, correction proposals, and relationship suggestions. Results are stored as candidates and can be materialized later.")
 async def review_paper(
     paper_id: str,
-    auto_apply: bool = False,                      # 是否自动应用修正（危险！默认 False）
-    source_label: str = "mcp_review",              # 审阅来源标识
+    auto_apply: bool = False,                      # 鏄惁鑷姩搴旂敤淇锛堝嵄闄╋紒榛樿 False锛?
+    source_label: str = "mcp_review",              # 瀹￠槄鏉ユ簮鏍囪瘑
 ) -> dict[str, Any]:
     require_mcp_capability("propose_corrections")
     settings = get_settings()
@@ -137,7 +137,7 @@ async def review_paper(
         if not service.llm.is_configured():
             raise ValueError("Internal AI is not configured. Set LITAI_WRITER_API_KEY and LITAI_WRITER_API_BASE.")
 
-        # 构建审阅数据包（从 external_analysis_service import 共享函数）
+        # 鏋勫缓瀹￠槄鏁版嵁鍖咃紙浠?external_analysis_service import 鍏变韩鍑芥暟锛?
         review_blob = build_internal_ai_review_blob(detail)
 
         system_prompt = (
@@ -163,7 +163,7 @@ async def review_paper(
         if normalized is None:
             raise ValueError("AI review failed to produce structured output")
 
-        # 清洗 correction 的 target_path
+        # 娓呮礂 correction 鐨?target_path
         normalized = sanitize_internal_corrections(normalized)
 
         run = service.import_run(
@@ -216,20 +216,20 @@ async def review_paper(
         }
 ```
 
-**新增 import**: `from app.services.external_analysis_service import ExternalAnalysisService, ExternalAnalysisNormalizedModel, build_internal_ai_review_blob, sanitize_internal_corrections`、`from app.services.review_service import ReviewService`
+**鏂板 import**: `from app.services.external_analysis_service import ExternalAnalysisService, ExternalAnalysisNormalizedModel, build_internal_ai_review_blob, sanitize_internal_corrections`銆乣from app.services.review_service import ReviewService`
 
-### 工具 3: `import_analysis` (P1)
+### 宸ュ叿 3: `import_analysis` (P1)
 
-让外部 AI（如 Cursor 对话）直接把自己的分析结果写回知识库。
+璁╁閮?AI锛堝 Cursor 瀵硅瘽锛夌洿鎺ユ妸鑷繁鐨勫垎鏋愮粨鏋滃啓鍥炵煡璇嗗簱銆?
 
 ```python
 @mcp_server.tool(name="import_analysis", description="Import analysis results from an external AI agent (e.g. Cursor, DeepSeek chat, Claude) into the library. Supports free-text or structured JSON. The system will auto-normalize the input into structured notes, corrections, and relationships.")
 def import_analysis(
     paper_id: str,
-    source: str,                                   # 来源标识，如 "cursor", "deepseek-chat", "claude-web"
-    source_label: str = "",                        # 显示名
-    raw_text: str | None = None,                   # 自由文本分析
-    raw_payload: dict | None = None,               # 结构化 JSON（符合 ExternalAnalysisNormalizedModel 格式则直接解析，否则 LLM 规范化）
+    source: str,                                   # 鏉ユ簮鏍囪瘑锛屽 "cursor", "deepseek-chat", "claude-web"
+    source_label: str = "",                        # 鏄剧ず鍚?
+    raw_text: str | None = None,                   # 鑷敱鏂囨湰鍒嗘瀽
+    raw_payload: dict | None = None,               # 缁撴瀯鍖?JSON锛堢鍚?ExternalAnalysisNormalizedModel 鏍煎紡鍒欑洿鎺ヨВ鏋愶紝鍚﹀垯 LLM 瑙勮寖鍖栵級
 ) -> dict[str, Any]:
     require_mcp_capability("propose_corrections")
     settings = get_settings()
@@ -262,15 +262,15 @@ def import_analysis(
         }
 ```
 
-### 工具 4: `compare_papers` (P2)
+### 宸ュ叿 4: `compare_papers` (P2)
 
-让外部 AI 对比多篇论文的抽取结果。
+璁╁閮?AI 瀵规瘮澶氱瘒璁烘枃鐨勬娊鍙栫粨鏋溿€?
 
 ```python
 @mcp_server.tool(name="compare_papers", description="Compare extracted data across multiple papers side-by-side. Returns structured results for DFT settings, catalyst samples, performance metrics, mechanism claims, etc. Useful for finding contradictions or confirming trends.")
 def compare_papers(
-    paper_ids: list[str],                          # 要对比的论文 ID 列表（2-10 篇）
-    fields: list[str] | None = None,               # 限定比较的字段，可选: dft_settings, catalyst_samples, dft_results, electrochemical_performance, mechanism_claims, writing_cards
+    paper_ids: list[str],                          # 瑕佸姣旂殑璁烘枃 ID 鍒楄〃锛?-10 绡囷級
+    fields: list[str] | None = None,               # 闄愬畾姣旇緝鐨勫瓧娈碉紝鍙€? dft_settings, catalyst_samples, dft_results, electrochemical_performance, mechanism_claims, writing_cards
 ) -> dict[str, Any]:
     require_mcp_capability("read_papers")
     if len(paper_ids) < 2 or len(paper_ids) > 10:
@@ -298,7 +298,7 @@ def compare_papers(
                 "writing_cards": [item.model_dump(mode="json") for item in detail.writing_cards_items[:15]],
             })
 
-        # 如果指定了 fields，只返回对应字段
+        # 濡傛灉鎸囧畾浜?fields锛屽彧杩斿洖瀵瑰簲瀛楁
         valid_fields = {"dft_settings", "catalyst_samples", "dft_results", "electrochemical_performance", "mechanism_claims", "writing_cards"}
         if fields:
             active_fields = set(fields) & valid_fields
@@ -321,18 +321,18 @@ def compare_papers(
 
 ---
 
-## 实施步骤
+## 瀹炴柦姝ラ
 
-### Step 1: 提取共享函数
+### Step 1: 鎻愬彇鍏变韩鍑芥暟
 
-将 `app/api/external_analysis.py` 中的三个私有函数移到 `app/services/external_analysis_service.py` 作为模块级公共函数：
+灏?`app/api/external_analysis.py` 涓殑涓変釜绉佹湁鍑芥暟绉诲埌 `app/services/external_analysis_service.py` 浣滀负妯″潡绾у叕鍏卞嚱鏁帮細
 
-1. 复制 `_truncate`、`_build_internal_ai_review_blob`、`_sanitize_internal_corrections` 到 `external_analysis_service.py` 末尾
-2. 重命名（去掉下划线前缀，变为公共函数）：
-   - `_truncate` → 保持 `_truncate`（仍为内部辅助）
-   - `_build_internal_ai_review_blob` → `build_internal_ai_review_blob`
-   - `_sanitize_internal_corrections` → `sanitize_internal_corrections`
-3. 在 `external_analysis.py` 中改为 import：
+1. 澶嶅埗 `_truncate`銆乣_build_internal_ai_review_blob`銆乣_sanitize_internal_corrections` 鍒?`external_analysis_service.py` 鏈熬
+2. 閲嶅懡鍚嶏紙鍘绘帀涓嬪垝绾垮墠缂€锛屽彉涓哄叕鍏卞嚱鏁帮級锛?
+   - `_truncate` 鈫?淇濇寔 `_truncate`锛堜粛涓哄唴閮ㄨ緟鍔╋級
+   - `_build_internal_ai_review_blob` 鈫?`build_internal_ai_review_blob`
+   - `_sanitize_internal_corrections` 鈫?`sanitize_internal_corrections`
+3. 鍦?`external_analysis.py` 涓敼涓?import锛?
    ```python
    from app.services.external_analysis_service import (
        ExternalAnalysisService,
@@ -342,13 +342,13 @@ def compare_papers(
        sanitize_internal_corrections as _sanitize_internal_corrections,
    )
    ```
-4. 运行测试确认 `/api/external-analysis/papers/{id}/internal-parse` 端点仍正常工作
+4. 杩愯娴嬭瘯纭 `/api/external-analysis/papers/{id}/internal-parse` 绔偣浠嶆甯稿伐浣?
 
-### Step 2: 在 `server.py` 新增 4 个工具
+### Step 2: 鍦?`server.py` 鏂板 4 涓伐鍏?
 
-按上面的代码模板，在 `app/mcp/server.py` 末尾依次添加 4 个工具函数。
+鎸変笂闈㈢殑浠ｇ爜妯℃澘锛屽湪 `app/mcp/server.py` 鏈熬渚濇娣诲姞 4 涓伐鍏峰嚱鏁般€?
 
-需要新增的 import：
+闇€瑕佹柊澧炵殑 import锛?
 ```python
 from app.rag.retriever import Retriever
 from app.services.external_analysis_service import (
@@ -360,23 +360,23 @@ from app.services.external_analysis_service import (
 from app.services.review_service import ReviewService
 ```
 
-### Step 3: 编写测试
+### Step 3: 缂栧啓娴嬭瘯
 
-新增测试文件 `tests/test_mcp_new_tools.py`，覆盖：
-1. `retrieve_evidence` — mock Retriever，验证参数传递和 evidence_types 过滤
-2. `review_paper` — mock ExternalAnalysisService + LLMService，验证审阅流程
-3. `import_analysis` — mock ExternalAnalysisService，验证 import_run 被正确调用
-4. `compare_papers` — mock PaperQueryService，验证字段过滤和边界检查
+鏂板娴嬭瘯鏂囦欢 `tests/test_mcp_new_tools.py`锛岃鐩栵細
+1. `retrieve_evidence` 鈥?mock Retriever锛岄獙璇佸弬鏁颁紶閫掑拰 evidence_types 杩囨护
+2. `review_paper` 鈥?mock ExternalAnalysisService + LLMService锛岄獙璇佸闃呮祦绋?
+3. `import_analysis` 鈥?mock ExternalAnalysisService锛岄獙璇?import_run 琚纭皟鐢?
+4. `compare_papers` 鈥?mock PaperQueryService锛岄獙璇佸瓧娈佃繃婊ゅ拰杈圭晫妫€鏌?
 
-### Step 4: 验证
+### Step 4: 楠岃瘉
 
-1. 运行全量测试：`cd D:/Desktop/03_代码与开发/爬虫脚步下载文章/literature-ai/backend && python -m pytest tests/ -v`（当前基线 150/150）
-2. 启动后端 `uvicorn app.main:app`
-3. 用 MCP 客户端连接 `http://localhost:8000/mcp` 测试各工具调用
+1. 杩愯鍏ㄩ噺娴嬭瘯锛歚cd literature-ai/backend && python -m pytest tests/ -v`锛堝綋鍓嶅熀绾?150/150锛?
+2. 鍚姩鍚庣 `uvicorn app.main:app`
+3. 鐢?MCP 瀹㈡埛绔繛鎺?`http://localhost:8000/mcp` 娴嬭瘯鍚勫伐鍏疯皟鐢?
 
 ---
 
-## 客户端配置参考（实施完成后提供给用户）
+## 瀹㈡埛绔厤缃弬鑰冿紙瀹炴柦瀹屾垚鍚庢彁渚涚粰鐢ㄦ埛锛?
 
 ### Cursor
 ```json
@@ -423,23 +423,26 @@ from app.services.review_service import ReviewService
 }
 ```
 
-MCP 密钥配置（在 `.env` 中）：
+MCP 瀵嗛挜閰嶇疆锛堝湪 `.env` 涓級锛?
 ```
 LITAI_MCP_API_KEYS=cursor|Cursor|sk-cursor-key|read_papers,request_parse,append_notes,propose_corrections;vscode|VS Code|sk-vscode-key|read_papers,request_parse,append_notes,propose_corrections
 ```
 
 ---
 
-## 注意事项
+## 娉ㄦ剰浜嬮」
 
-1. **最小改动原则** — 不要大范围重写现有代码，只新增工具和提取共享函数
-2. **向后兼容** — 所有新参数都有默认值，现有 API 端点和 MCP 工具不受影响
-3. **auto_apply 默认 False** — 外部 AI 的修正提案默认不自动应用，需人工审批
-4. **`_build_internal_ai_review_blob` 提取后，`external_analysis.py` 的 `internal_ai_parse_paper` 端点必须继续正常工作** — 这是最容易出问题的地方，务必测试
-5. **MCP 工具中的 session 管理** — 遵循现有模式：`with session_scope(settings.database_url) as session:` + 手动 `session.commit()`
-6. **review_paper 是 async** — 因为 `LLMService.structured_extract` 是同步的，需要 `await run_in_threadpool()` 包装（参考已有的 `parse_paper` 工具写法）
-7. **测试** — 运行 `cd D:/Desktop/03_代码与开发/爬虫脚步下载文章/literature-ai/backend && python -m pytest tests/ -v` 确认全量通过（当前基线 150/150）
+1. **鏈€灏忔敼鍔ㄥ師鍒?* 鈥?涓嶈澶ц寖鍥撮噸鍐欑幇鏈変唬鐮侊紝鍙柊澧炲伐鍏峰拰鎻愬彇鍏变韩鍑芥暟
+2. **鍚戝悗鍏煎** 鈥?鎵€鏈夋柊鍙傛暟閮芥湁榛樿鍊硷紝鐜版湁 API 绔偣鍜?MCP 宸ュ叿涓嶅彈褰卞搷
+3. **auto_apply 榛樿 False** 鈥?澶栭儴 AI 鐨勪慨姝ｆ彁妗堥粯璁や笉鑷姩搴旂敤锛岄渶浜哄伐瀹℃壒
+4. **`_build_internal_ai_review_blob` 鎻愬彇鍚庯紝`external_analysis.py` 鐨?`internal_ai_parse_paper` 绔偣蹇呴』缁х画姝ｅ父宸ヤ綔** 鈥?杩欐槸鏈€瀹规槗鍑洪棶棰樼殑鍦版柟锛屽姟蹇呮祴璇?
+5. **MCP 宸ュ叿涓殑 session 绠＄悊** 鈥?閬靛惊鐜版湁妯″紡锛歚with session_scope(settings.database_url) as session:` + 鎵嬪姩 `session.commit()`
+6. **review_paper 鏄?async** 鈥?鍥犱负 `LLMService.structured_extract` 鏄悓姝ョ殑锛岄渶瑕?`await run_in_threadpool()` 鍖呰锛堝弬鑰冨凡鏈夌殑 `parse_paper` 宸ュ叿鍐欐硶锛?
+7. **娴嬭瘯** 鈥?杩愯 `cd literature-ai/backend && python -m pytest tests/ -v` 纭鍏ㄩ噺閫氳繃锛堝綋鍓嶅熀绾?150/150锛?
 
-## 用户原话
+## 鐢ㄦ埛鍘熻瘽
 
-> 1.内部AI指接入DeepSeek等API，2.IDE中的AI指Codex、Cursor、VS Code中的AI，3.我想让这些AI直接查询知识库，主动分析文献，因为我不相信软件自己分析的准确度
+> 1.鍐呴儴AI鎸囨帴鍏eepSeek绛堿PI锛?.IDE涓殑AI鎸嘋odex銆丆ursor銆乂S Code涓殑AI锛?.鎴戞兂璁╄繖浜汚I鐩存帴鏌ヨ鐭ヨ瘑搴擄紝涓诲姩鍒嗘瀽鏂囩尞锛屽洜涓烘垜涓嶇浉淇¤蒋浠惰嚜宸卞垎鏋愮殑鍑嗙‘搴?
+
+
+

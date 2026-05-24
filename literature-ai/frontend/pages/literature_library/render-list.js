@@ -1,0 +1,108 @@
+function renderPaperList() {
+    const container = $("paperList");
+    $("paperListMeta").textContent = state.papers.length + " 篇";
+    $("globalSummary").textContent = "当前页 " + state.papers.length + " 篇文献，右侧支持内部 AI、外部 AI 审核与 AI 自动搜索。";
+    if (!state.papers.length) {
+        container.innerHTML = '<div class="workspace-empty">当前条件下没有文献。</div>';
+        if (state.currentTab === "detail") showEmptyWorkspace();
+        else renderTabLanding(state.currentTab);
+        return;
+    }
+    container.innerHTML = state.papers.map(function(paper) {
+        const active = paper.id === state.selectedPaperId ? " active" : "";
+        return (
+            '<div class="paper-card' + active + '" onclick="selectPaperById(\'' + paper.id + '\')">' +
+                '<div class="paper-title">' + (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + '</span> ' : "") + esc(paper.title || "未命名文献") + "</div>" +
+                '<div class="paper-meta">' + esc(paper.year || "-") + " | " + esc(paper.journal || "-") + " | " + esc(paper.paper_type || "未知类型") + "<br>" + paperStatusChip(paper) + "</div>" +
+                '<div class="badge-row">' +
+                    badge(paper.counts && paper.counts.sections) +
+                    badge(paper.counts && paper.counts.figures) +
+                    badge(paper.counts && paper.counts.dft_results) +
+                    badge(paper.counts && paper.counts.writing_cards) +
+                "</div>" +
+            "</div>"
+        );
+    }).join("");
+}
+
+function renderPaperListSkeleton() {
+    const container = $("paperList");
+    if (!container) return;
+    let skeletonHtml = "";
+    for (let i = 0; i < 5; i++) {
+        skeletonHtml += 
+            '<div class="skeleton-card">' +
+                '<div class="skeleton skeleton-title"></div>' +
+                '<div class="skeleton skeleton-meta"></div>' +
+                '<div class="skeleton skeleton-badge"></div>' +
+            '</div>';
+    }
+    container.innerHTML = skeletonHtml;
+}
+
+async function fetchPapers() {
+    try {
+        renderPaperListSkeleton();
+        const papers = await fetchJSON(API_BASE + "?" + getFilters().toString());
+        state.papers = papers || [];
+        if (!state.selectedPaperId || !state.papers.some(function(item) { return item.id === state.selectedPaperId; })) {
+            state.selectedPaperId = state.papers[0] ? state.papers[0].id : null;
+        }
+        if (!state.selectedPaperId && !state.hasExplicitTab && state.currentTab === "detail") {
+            state.currentTab = "ai-search";
+        }
+        renderPaperList();
+        updatePagination();
+        if (state.selectedPaperId) {
+            await loadPaperDetail(state.selectedPaperId);
+        } else {
+            switchTab(state.currentTab);
+        }
+    } catch (error) {
+        $("paperList").innerHTML = '<div class="workspace-empty">列表加载失败：' + esc(error.message) + "</div>";
+        showToast("列表加载失败：" + error.message, "error");
+    }
+}
+
+function updatePagination() {
+    const page = Math.floor(state.currentOffset / PAGE_SIZE) + 1;
+    $("pageInfo").textContent = "第 " + page + " 页";
+    $("prevBtn").disabled = state.currentOffset === 0;
+    $("nextBtn").disabled = state.papers.length < PAGE_SIZE;
+}
+
+async function selectPaperById(paperId) {
+    await loadPaperDetail(paperId);
+}
+
+function refreshCurrentPage() {
+    disconnectSSE();
+    fetchPapers();
+    initSSE();
+}
+
+function searchLocal() {
+    state.currentOffset = 0;
+    refreshCurrentPage();
+}
+
+function clearFilters() {
+    $("filterYear").value = "";
+    $("filterJournal").value = "";
+    $("filterPaperType").value = "";
+    $("filterDFT").value = "";
+    $("filterWC").value = "";
+    $("searchInput").value = "";
+    state.currentOffset = 0;
+    refreshCurrentPage();
+}
+
+function prevPage() {
+    state.currentOffset = Math.max(0, state.currentOffset - PAGE_SIZE);
+    refreshCurrentPage();
+}
+
+function nextPage() {
+    state.currentOffset += PAGE_SIZE;
+    refreshCurrentPage();
+}

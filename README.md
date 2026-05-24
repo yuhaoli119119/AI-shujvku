@@ -11,7 +11,7 @@ Literature AI 是一款先进的文献解析与 AI 写作辅助系统，专为 *
 - **完善的 API 路由**：模块化设计，提供包括文献（papers）、库管理（libraries）、参考引用（references）、系统状态（system）、写作编排（writer）及 MCP 服务等在内的全套 API 路由。
 
 ### 2. 单页模块化静态前端
-- **集成化工作台**：位于 `literature-ai/frontend/pages/` 下，核心主工作台为 [literature_library/index.html](file:///d:/Desktop/03_代码与开发/AI-shujvku/literature-ai/frontend/pages/literature_library/index.html)。
+- **集成化工作台**：位于 `literature-ai/frontend/pages/` 下，核心主工作台入口为 `http://localhost:8000/pages/literature_library/index.html`。
 - **多功能标签视图**：包含论文详情、内部 AI 整理、外部 AI 审核、在线检索入库以及数据聚合等多标签视窗，支持实时的状态更新和任务通知。
 - **极简主题切换**：支持暗色/亮色/护眼主题的外观切换，配置实时保存，界面优雅现代。
 
@@ -81,7 +81,7 @@ curl http://localhost:8000/api/health
 
 ### 3. 访问前端页面
 直接用浏览器打开前端静态网页即可开始工作：
-- [文献库主工作台](file:///d:/Desktop/03_代码与开发/AI-shujvku/literature-ai/frontend/pages/literature_library/index.html)
+- [文献库主工作台](http://localhost:8000/pages/literature_library/index.html)
 
 ---
 

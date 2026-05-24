@@ -307,13 +307,19 @@
             <!-- Right Side: Job Center / Task Queue -->
             <div class="side-col">
                 <div class="panel-card">
-                    <div class="panel-title">
+                    <div class="panel-title" style="margin-bottom:12px;">
                         <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2zm0 8H7v-2h10v2z"/></svg>
                         任务中心 (Job Center)
                     </div>
+                    <div style="margin-bottom:14px; display:flex; gap:6px; flex-wrap:wrap;">
+                        <button class="btn small primary" id="job-filter-all" onclick="filterJobs('all')">全部</button>
+                        <button class="btn small ghost" id="job-filter-running" onclick="filterJobs('running')">运行中</button>
+                        <button class="btn small ghost" id="job-filter-completed" onclick="filterJobs('completed')">已成功</button>
+                        <button class="btn small ghost" id="job-filter-failed" onclick="filterJobs('failed')">已失败</button>
+                    </div>
                     <div class="job-list" id="jobQueue">
                         <!-- Dynamically filled -->
-                        <div class="empty-state">当前没有运行中的后台收录任务。</div>
+                        <div class="empty-state">当前没有后台收录任务。</div>
                     </div>
                 </div>
             </div>
@@ -327,8 +333,10 @@
         const LIB_API = "/api/libraries";
         const state = {
             activeTab: 'pdf',
-            jobs: [] // Stored local list of job IDs we are tracking
+            currentLibrary: '',
+            jobs: [] // Recent jobs list fetched from server
         };
+        let activeJobFilter = 'all';
 
         function showToast(msg) {
             const toast = document.getElementById('toast');
@@ -340,7 +348,17 @@
         }
 
         async function fetchJSON(url, options) {
+            options = options || {};
+            options.headers = options.headers || {};
+            const token = sessionStorage.getItem("litai-settings-token");
+            if (token) {
+                options.headers["X-Settings-Token"] = token;
+            }
             const resp = await fetch(url, options);
+            if (resp.status === 403) {
+                showToast("无权访问此 API。请先在[设置]中配置管理员 Token。");
+                throw new Error("403 Forbidden");
+            }
             const text = await resp.text();
             let data = null;
             try { data = text ? JSON.parse(text) : null; } catch (_) {}
@@ -363,6 +381,7 @@
 
                 if (active) {
                     state.currentLibrary = active.name;
+                    await pollJobs();
                 }
             } catch (e) {
                 showToast("加载库列表失败：" + e.message);
@@ -405,6 +424,7 @@
                     body: formData
                 });
                 showToast("PDF 上传成功，文献已收录！标题：" + (data.title || file.name));
+                pollJobs();
             } catch (e) {
                 showToast("上传解析失败：" + e.message);
             } finally {
@@ -438,6 +458,7 @@
                     showToast("收录下载成功！标题：" + data.title);
                 }
                 document.getElementById('doiInput').value = "";
+                pollJobs();
             } catch (e) {
                 showToast("下载收录失败：" + e.message);
             }
@@ -494,6 +515,7 @@
                     })
                 });
                 showToast("成功收录文献！标题：" + (data.title || "学术文献"));
+                pollJobs();
             } catch (e) {
                 showToast("收录失败：" + e.message);
             }
@@ -525,102 +547,148 @@
                     })
                 });
                 showToast("任务已派发，任务 ID：" + job.job_id);
-                trackJob(job.job_id);
                 document.getElementById('aiQuery').value = "";
+                await pollJobs();
             } catch (e) {
                 showToast("工作流派发失败：" + e.message);
             }
         }
 
-        // Job Tracker
-        function trackJob(jobId) {
-            if (!state.jobs.includes(jobId)) {
-                state.jobs.unshift(jobId);
-                // Save to localStorage
-                localStorage.setItem("litai-ingest-jobs", JSON.stringify(state.jobs));
+        // Job Filtering
+        function filterJobs(status) {
+            activeJobFilter = status;
+            document.querySelectorAll('[id^="job-filter-"]').forEach(btn => {
+                btn.className = 'btn small ghost';
+            });
+            const selectedBtn = document.getElementById('job-filter-' + status);
+            if (selectedBtn) {
+                selectedBtn.className = 'btn small primary';
             }
             renderJobsList();
         }
 
         async function pollJobs() {
-            const completedStatuses = ['completed', 'failed'];
-            let changed = false;
-            for (let i = 0; i < state.jobs.length; i++) {
-                const id = state.jobs[i];
-                try {
-                    const job = await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(id)}`);
-                    // Cache the job status to DOM
-                    const el = document.getElementById(`job-card-${id}`);
-                    if (el) {
-                        const statusEl = el.querySelector('.job-status');
-                        statusEl.className = `job-status ${job.status}`;
-                        statusEl.textContent = job.status === 'queued' ? '排队中' : job.status === 'running' ? '运行中' : job.status === 'completed' ? '已完成' : '失败';
-                        
-                        const progressEl = el.querySelector('.job-progress');
-                        progressEl.textContent = JSON.stringify(job.progress || {}, null, 2);
-                        
-                        if (job.status === 'failed') {
-                            const errorEl = el.querySelector('.job-error');
-                            errorEl.style.display = 'block';
-                            errorEl.textContent = `失败原因：${job.error || '未知原因'}`;
-                        }
-                    }
-                } catch (e) {
-                    console.warn("Poll failed for job " + id, e);
-                }
+            if (!state.currentLibrary) return;
+            try {
+                const jobs = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=50`);
+                state.jobs = jobs || [];
+                renderJobsList();
+            } catch (e) {
+                console.warn("Poll jobs failed", e);
             }
         }
 
         function renderJobsList() {
             const container = document.getElementById('jobQueue');
-            if (!state.jobs.length) {
-                container.innerHTML = `<div class="empty-state">当前没有运行中的后台收录任务。</div>`;
+            let filtered = state.jobs;
+            
+            if (activeJobFilter === 'running') {
+                filtered = state.jobs.filter(j => j.status === 'queued' || j.status === 'running');
+            } else if (activeJobFilter === 'completed') {
+                filtered = state.jobs.filter(j => j.status === 'completed');
+            } else if (activeJobFilter === 'failed') {
+                filtered = state.jobs.filter(j => j.status === 'failed' || j.status === 'cancelled');
+            }
+            
+            if (!filtered.length) {
+                container.innerHTML = `<div class="empty-state">当前没有该状态下的任务。</div>`;
                 return;
             }
             
-            container.innerHTML = state.jobs.map(id => `
-                <div class="job-item" id="job-card-${id}">
-                    <div class="job-item-header">
-                        <strong style="font-size: 13px; font-family:var(--font-mono); color:var(--color-text);">任务 #${id.substring(0, 8)}</strong>
-                        <span class="job-status queued">同步中...</span>
+            container.innerHTML = filtered.map(job => {
+                const statusLabels = {
+                    queued: '排队中',
+                    running: '运行中',
+                    completed: '已完成',
+                    failed: '失败',
+                    cancelled: '已取消'
+                };
+                const statusText = statusLabels[job.status] || job.status;
+                
+                let errorSection = '';
+                if (job.status === 'failed') {
+                    errorSection = `<div class="job-error" style="color:var(--color-danger); margin-top:8px; font-size:12px; font-weight:500;">失败原因：${job.error || '未知原因'}</div>`;
+                } else if (job.status === 'cancelled') {
+                    errorSection = `<div class="job-error" style="color:var(--color-text-secondary); margin-top:8px; font-size:12px; font-style:italic;">任务已由用户主动取消。</div>`;
+                }
+                
+                let progressSection = '';
+                if (job.status === 'running' || job.status === 'queued') {
+                    const phaseText = job.progress && job.progress.phase ? `阶段: ${job.progress.phase}` : '初始化中...';
+                    const msgText = job.progress && job.progress.message ? job.progress.message : '正在执行...';
+                    progressSection = `
+                        <div class="job-progress">
+                            <strong>${phaseText}</strong><br>
+                            <span style="font-size:11px; color:var(--color-text-secondary);">${msgText}</span>
+                        </div>
+                    `;
+                } else if (job.status === 'completed') {
+                    const ingested = job.progress && job.progress.ingested != null ? job.progress.ingested : '-';
+                    const failedCount = job.progress && job.progress.failed != null ? job.progress.failed : '-';
+                    progressSection = `
+                        <div class="job-progress" style="border-color: var(--color-success-border); background: var(--color-success-bg);">
+                            <span style="color:var(--color-success); font-weight:700;">✓ 收录完成</span><br>
+                            成功入库: ${ingested} 篇 | 失败数: ${failedCount} 篇
+                        </div>
+                    `;
+                }
+                
+                let actionButtons = '';
+                if (job.status === 'queued' || job.status === 'running') {
+                    actionButtons = `<button class="btn danger small" onclick="cancelJobById('${job.job_id}')">🛑 取消任务</button>`;
+                } else if (job.status === 'failed' || job.status === 'cancelled') {
+                    actionButtons = `<button class="btn purple small" onclick="retryJobById('${job.job_id}')">🔄 重新运行</button>`;
+                }
+                
+                return `
+                    <div class="job-item" id="job-card-${job.job_id}" style="margin-bottom: 10px;">
+                        <div class="job-item-header">
+                            <strong style="font-size: 13px; font-family:var(--font-mono); color:var(--color-text);">任务 #${job.job_id.substring(0, 8)}</strong>
+                            <span class="job-status ${job.status}">${statusText}</span>
+                        </div>
+                        <div class="job-meta">
+                            类型：Celery Workflow Ingestion<br>
+                            更新时间：${job.updated_at ? new Date(job.updated_at).toLocaleTimeString() : '-'}
+                        </div>
+                        ${errorSection}
+                        ${progressSection}
+                        <div style="margin-top:10px; display:flex; justify-content:flex-end; gap:8px;">
+                            ${actionButtons}
+                        </div>
                     </div>
-                    <div class="job-meta">
-                        类型：Celery Workflow Ingestion<br>
-                        时间：${new Date().toLocaleTimeString()}
-                    </div>
-                    <div class="job-error subtle" style="color:var(--color-danger); margin-top:8px; display:none; font-size:12px;"></div>
-                    <div class="job-progress">
-                        { "status": "pending" }
-                    </div>
-                    <div style="margin-top:10px; display:flex; justify-content:flex-end; gap:8px;">
-                        <button class="btn ghost small" onclick="removeJobFromList('${id}')">移除记录</button>
-                    </div>
-                </div>
-            `).join('');
-            pollJobs();
+                `;
+            }).join('');
         }
 
-        function removeJobFromList(id) {
-            state.jobs = state.jobs.filter(j => j !== id);
-            localStorage.setItem("litai-ingest-jobs", JSON.stringify(state.jobs));
-            renderJobsList();
-        }
-
-        // Restore jobs from localStorage
-        function restoreJobs() {
-            const saved = localStorage.getItem("litai-ingest-jobs");
-            if (saved) {
-                try {
-                    state.jobs = JSON.parse(saved) || [];
-                } catch (_) {}
+        async function retryJobById(jobId) {
+            showToast("正在请求重试任务...");
+            try {
+                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/retry`, {
+                    method: 'POST'
+                });
+                showToast("重试任务已成功派发！");
+                await pollJobs();
+            } catch (e) {
+                showToast("重试失败：" + e.message);
             }
-            renderJobsList();
+        }
+
+        async function cancelJobById(jobId) {
+            showToast("正在请求取消任务...");
+            try {
+                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/cancel`, {
+                    method: 'POST'
+                });
+                showToast("任务取消指令已下发！");
+                await pollJobs();
+            } catch (e) {
+                showToast("取消失败：" + e.message);
+            }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
             TopNav.init({ currentPage: 'ingestion', mountId: 'topnav-mount' });
             loadLibraries();
-            restoreJobs();
             
             // Start polling timer
             setInterval(pollJobs, 3000);

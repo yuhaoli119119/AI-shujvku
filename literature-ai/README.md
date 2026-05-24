@@ -90,7 +90,11 @@ literature-ai/
 
 ## Quick start
 
-1. Copy `.env.example` to `.env` if you want local overrides.
+1. Copy `.env.example` to `.env` before the first local start:
+
+```bash
+cp .env.example .env
+```
 
 2. Start the stack:
 
@@ -99,6 +103,12 @@ docker compose up --build
 ```
 
 `docker-compose.yml` uses development-only default credentials for PostgreSQL and MinIO. Keep them only for local/dev use and override them before any shared deployment.
+
+Host directory browsing notes:
+
+- Windows default host mount root is `/c/Users`.
+- macOS/Linux users should set `LITAI_HOST_USERS_ROOT` in `.env` before starting if host directory browsing is needed.
+- If host directory browsing is not needed, you can comment out the `/host/users` volume mount in `docker-compose.yml`.
 
 3. Check health:
 
