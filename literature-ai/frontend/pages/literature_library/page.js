@@ -222,7 +222,7 @@ applyQueryParams();
 initProtocolWarning();
 initSplitDrag();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
-loadLibraries().then(function() {
+Promise.all([loadLibraries(), loadWriterSettings()]).then(function() {
     fetchPapers();
     initSSE();
     switchTab(state.currentTab);

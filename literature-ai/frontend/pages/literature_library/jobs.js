@@ -95,6 +95,23 @@ function renderDiscoveryResults(data, stats, title, prefixHtml) {
         }).join("");
 }
 
+function getAIQueryRewriteModel() {
+    if (!state.writerSettings) return null;
+    const model = (state.writerSettings.writer_model || "").trim();
+    return model || null;
+}
+
+function getAIQueryRewriteHint() {
+    if (!state.writerSettings) return "";
+    const backend = (state.writerSettings.writer_backend || "").trim() || "rule";
+    const apiBase = (state.writerSettings.writer_api_base || "").trim();
+    const apiKey = (state.writerSettings.writer_api_key || "").trim();
+    if (!apiBase || !apiKey || backend === "rule") {
+        return "当前未配置可用的 Writer LLM，已退回普通关键词检索。请在设置页填写 Writer LLM 配置。";
+    }
+    return "";
+}
+
 async function runAISearch() {
     const query = ($("aiSearchQuery").value || $("searchInput").value).trim();
     if (!query) {
@@ -110,7 +127,7 @@ async function runAISearch() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 query: query,
-                model: "deepseek-chat",
+                model: getAIQueryRewriteModel(),
                 max_results: clampSearchLimit($("aiSearchMaxResults").value),
                 providers: [],
                 skip_guard: false
@@ -144,7 +161,7 @@ async function runAIWorkflow() {
             body: JSON.stringify({
                 query: query,
                 library_name: getCurrentLibraryName(),
-                model: "deepseek-chat",
+                model: getAIQueryRewriteModel(),
                 max_results: clampSearchLimit($("aiSearchMaxResults").value),
                 max_downloads: clampSearchLimit($("aiWorkflowMaxDownloads").value),
                 providers: [],

@@ -415,9 +415,10 @@ async def execute_ai_workflow(
     )
 
 
-def run_ai_workflow_job(job_id: str) -> None:
+def run_ai_workflow_job(job_id: str, control_database_url: str | None = None) -> None:
     base_settings = get_settings()
-    with session_scope(base_settings.database_url) as control_session:
+    control_db_url = control_database_url or base_settings.database_url
+    with session_scope(control_db_url) as control_session:
         job = get_job_or_raise(control_session, job_id)
         if job.status == "cancelled":
             return
@@ -449,7 +450,7 @@ def run_ai_workflow_job(job_id: str) -> None:
             )
             assert_job_not_cancelled(job_session, job_id)
 
-        with session_scope(base_settings.database_url) as control_session:
+        with session_scope(control_db_url) as control_session:
             update_job(
                 control_session,
                 job_id,
@@ -465,7 +466,7 @@ def run_ai_workflow_job(job_id: str) -> None:
                 error=None,
             )
     except JobCancelledError:
-        with session_scope(base_settings.database_url) as control_session:
+        with session_scope(control_db_url) as control_session:
             job = get_job(control_session, job_id)
             if job and job.status != "cancelled":
                 update_job(
@@ -477,7 +478,7 @@ def run_ai_workflow_job(job_id: str) -> None:
                 )
     except Exception as exc:
         logger.exception("AI workflow job failed: %s", job_id)
-        with session_scope(base_settings.database_url) as control_session:
+        with session_scope(control_db_url) as control_session:
             update_job(
                 control_session,
                 job_id,
@@ -520,9 +521,10 @@ def run_classify_batch_sync(
     }
 
 
-def run_classify_batch_job(job_id: str) -> None:
+def run_classify_batch_job(job_id: str, control_database_url: str | None = None) -> None:
     base_settings = get_settings()
-    with session_scope(base_settings.database_url) as control_session:
+    control_db_url = control_database_url or base_settings.database_url
+    with session_scope(control_db_url) as control_session:
         job = get_job_or_raise(control_session, job_id)
         if job.status == "cancelled":
             return
@@ -556,7 +558,7 @@ def run_classify_batch_job(job_id: str) -> None:
             classified_count = 0
             reprocess = PaperReprocessingService(session=job_session, settings=runtime_settings)
 
-            with session_scope(base_settings.database_url) as control_session:
+            with session_scope(control_db_url) as control_session:
                 update_job(
                     control_session,
                     job_id,
@@ -578,7 +580,7 @@ def run_classify_batch_job(job_id: str) -> None:
                     logger.warning("Failed to classify paper %s: %s", paper.id, exc)
                     failed_items.append({"paper_id": str(paper.id), "title": paper.title, "error": str(exc)})
 
-                with session_scope(base_settings.database_url) as control_session:
+                with session_scope(control_db_url) as control_session:
                     update_job(
                         control_session,
                         job_id,
@@ -594,7 +596,7 @@ def run_classify_batch_job(job_id: str) -> None:
                 if index < total and payload.interval > 0:
                     asyncio.run(asyncio.sleep(payload.interval))
 
-        with session_scope(base_settings.database_url) as control_session:
+        with session_scope(control_db_url) as control_session:
             update_job(
                 control_session,
                 job_id,
@@ -615,7 +617,7 @@ def run_classify_batch_job(job_id: str) -> None:
                 error=None,
             )
     except JobCancelledError:
-        with session_scope(base_settings.database_url) as control_session:
+        with session_scope(control_db_url) as control_session:
             job = get_job(control_session, job_id)
             if job and job.status != "cancelled":
                 update_job(
@@ -627,7 +629,7 @@ def run_classify_batch_job(job_id: str) -> None:
                 )
     except Exception as exc:
         logger.exception("Batch classification job failed: %s", job_id)
-        with session_scope(base_settings.database_url) as control_session:
+        with session_scope(control_db_url) as control_session:
             update_job(
                 control_session,
                 job_id,
@@ -637,7 +639,12 @@ def run_classify_batch_job(job_id: str) -> None:
             )
 
 
-def dispatch_job(job_id: str, background_tasks: BackgroundTasks | None = None) -> str:
+def dispatch_job(
+    job_id: str,
+    background_tasks: BackgroundTasks | None = None,
+    *,
+    control_database_url: str | None = None,
+) -> str:
     from kombu import Connection
 
     from app.workers.tasks import run_workflow_job_task
@@ -651,22 +658,23 @@ def dispatch_job(job_id: str, background_tasks: BackgroundTasks | None = None) -
         logger.warning("Celery dispatch failed for job %s, falling back to in-process background task: %s", job_id, exc)
         if background_tasks is None:
             raise
-        background_tasks.add_task(run_workflow_job_by_id, job_id)
+        background_tasks.add_task(run_workflow_job_by_id, job_id, control_database_url)
         return "background_tasks"
 
 
-def run_workflow_job_by_id(job_id: str) -> None:
+def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None) -> None:
     base_settings = get_settings()
-    with session_scope(base_settings.database_url) as session:
+    job_database_url = control_database_url or base_settings.database_url
+    with session_scope(job_database_url) as session:
         job = get_job_or_raise(session, job_id)
         if job.status == "cancelled":
             return
         job_type = job.type
 
     if job_type == JOB_TYPE_AI_WORKFLOW:
-        run_ai_workflow_job(job_id)
+        run_ai_workflow_job(job_id, control_database_url)
         return
     if job_type == JOB_TYPE_CLASSIFY_BATCH:
-        run_classify_batch_job(job_id)
+        run_classify_batch_job(job_id, control_database_url)
         return
     raise ValueError(f"Unsupported workflow job type: {job_type}")

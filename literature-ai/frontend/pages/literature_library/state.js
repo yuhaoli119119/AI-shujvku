@@ -11,6 +11,7 @@ const state = {
     aggregateData: null,
     discoveryCache: [],
     aiWorkflowJobId: null,
+    writerSettings: null,
 };
 
 function $(id) { return document.getElementById(id); }

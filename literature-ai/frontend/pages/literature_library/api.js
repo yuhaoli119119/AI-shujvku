@@ -85,6 +85,15 @@ async function loadLibraries() {
     }
 }
 
+async function loadWriterSettings() {
+    try {
+        state.writerSettings = await fetchJSON("/api/settings");
+    } catch (error) {
+        state.writerSettings = null;
+        console.warn("loadWriterSettings failed", error);
+    }
+}
+
 async function activateLibraryByName(name) {
     if (!name) return;
     try {
