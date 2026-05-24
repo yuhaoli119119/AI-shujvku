@@ -1,33 +1,353 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>正在跳转到论文详情</title>
-  <!-- Shared Resources -->
-  <link rel="stylesheet" href="../../shared/fonts.css">
-  <link rel="stylesheet" href="../../shared/tokens.css">
-  <link rel="stylesheet" href="../../shared/components.css">
-  <link rel="stylesheet" href="../../shared/topnav.css">
-  <script src="../../shared/topnav.js"></script>
-  <script>ThemeManager.init();</script>
-  <script>
-    window.location.replace('/pages/literature_library/index.html?tab=detail');
-  </script>
-  <style>
-    body {
-      background: var(--color-bg);
-      color: var(--color-text);
-      font-family: var(--font-body);
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>机理知识聚合 - Literature AI</title>
+    <link rel="stylesheet" href="../../shared/fonts.css">
+    <link rel="stylesheet" href="../../shared/tokens.css">
+    <link rel="stylesheet" href="../../shared/components.css">
+    <link rel="stylesheet" href="../../shared/topnav.css">
+    <script src="../../shared/topnav.js"></script>
+    <script>ThemeManager.init();</script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            color: var(--color-text);
+            background: var(--color-bg);
+            min-height: 100vh;
+        }
+        .shell {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 32px 24px;
+            padding-top: calc(var(--nav-height) + 32px);
+        }
+        .header-section {
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .header-section h1 { font-size: 26px; font-weight: 800; }
+        .header-section p { font-size: 14px; color: var(--color-text-secondary); margin-top: 4px; }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1.5px solid var(--color-border);
+            margin-bottom: 24px;
+        }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--color-text-secondary);
+            padding: 12px 18px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            border-radius: var(--radius) var(--radius) 0 0;
+            transition: var(--transition);
+        }
+        .tab-btn.active {
+            color: var(--color-primary);
+            border-bottom: 2px solid var(--color-primary);
+        }
+
+        .panel-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        .panel-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-card);
+        }
+        .panel-title {
+            font-size: 16px;
+            font-weight: 800;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Material List cards */
+        .aggregate-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 20px;
+        }
+        .material-card {
+            border: 1.5px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            background: var(--color-surface);
+            padding: 20px;
+            transition: var(--transition);
+        }
+        .material-card:hover {
+            border-color: var(--color-primary);
+            box-shadow: var(--shadow-elevated);
+        }
+        .material-header {
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--color-primary);
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .material-meta {
+            font-size: 13px;
+            color: var(--color-text-secondary);
+            line-height: 1.7;
+            margin-bottom: 12px;
+        }
+
+        .relation-item {
+            background: var(--color-surface-alt);
+            border-radius: var(--radius);
+            padding: 10px 12px;
+            font-size: 12px;
+            margin-top: 8px;
+            border: 1px solid var(--color-border);
+        }
+
+        .tag {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: var(--radius-pill);
+            text-transform: uppercase;
+        }
+        .tag.catalyst { background: var(--color-primary-bg); color: var(--color-primary); }
+        .tag.adsorbate { background: var(--color-success-bg); color: var(--color-success); }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 24px;
+            color: var(--color-text-secondary);
+        }
+
+        .toast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            background: var(--color-primary);
+            color: white;
+            padding: 12px 24px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            box-shadow: var(--shadow-elevated);
+            z-index: 1000;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <div id="topnav-mount"></div>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      TopNav.init({ currentPage: 'mechanism', mountId: 'topnav-mount' });
-    });
-  </script>
+    <div id="topnav-mount"></div>
+    <div class="shell">
+        <div class="header-section">
+            <div>
+                <h1>机理与材料知识舱</h1>
+                <p>汇聚跨文献提取的电催化剂结构特征、吸附物种类以及同义词别名。助力揭示微观反应机理规律。</p>
+            </div>
+            <div>
+                <button class="btn ghost" onclick="loadAggregationData()">🔄 刷新聚合大盘</button>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('catalysts')">催化材料聚合 (Catalysts)</button>
+            <button class="tab-btn" onclick="switchTab('adsorbates')">吸附中间体聚合 (Adsorbates)</button>
+            <button class="tab-btn" onclick="switchTab('aliases')">同义词与可能别名 (Aliases)</button>
+        </div>
+
+        <!-- Tab 1: Catalysts -->
+        <div id="tab-catalysts" class="tab-pane">
+            <div class="panel-card">
+                <div class="panel-title">催化剂材料微观结构归纳</div>
+                <div class="aggregate-grid" id="catalystsBox">
+                    <div class="empty-state">正在拉取大盘聚合数据...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: Adsorbates -->
+        <div id="tab-adsorbates" class="tab-pane" style="display:none;">
+            <div class="panel-card">
+                <div class="panel-title">吸附物中间体反应能级聚合</div>
+                <div class="aggregate-grid" id="adsorbatesBox">
+                    <div class="empty-state">无吸附中间体聚合数据。</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Aliases -->
+        <div id="tab-aliases" class="tab-pane" style="display:none;">
+            <div class="panel-card">
+                <div class="panel-title">系统检测到的学术名称变体 / 可能别名</div>
+                <div class="aggregate-grid" id="aliasesBox">
+                    <div class="empty-state">无别名检测。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const API_BASE = "/api/papers";
+        const state = {
+            activeTab: 'catalysts',
+            aggregateData: null
+        };
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        async function fetchJSON(url, options) {
+            const resp = await fetch(url, options);
+            if (!resp.ok) {
+                throw new Error("HTTP error " + resp.status);
+            }
+            return await resp.json();
+        }
+
+        function switchTab(tab) {
+            state.activeTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tab).style.display = 'block';
+        }
+
+        async function loadAggregationData() {
+            try {
+                const data = await fetchJSON(`${API_BASE}/aggregate`);
+                state.aggregateData = data;
+                renderAggregation();
+            } catch (e) {
+                showToast("加载聚合大盘失败：" + e.message);
+            }
+        }
+
+        function renderAggregation() {
+            const data = state.aggregateData;
+            if (!data) return;
+
+            // 1. Render Catalysts
+            const catBox = document.getElementById('catalystsBox');
+            const catalysts = data.catalyst_groups || {};
+            if (Object.keys(catalysts).length === 0) {
+                catBox.innerHTML = `<div class="empty-state">库中尚无催化材料数据。请在入库中心导入文献后由 AI 重新抽提。</div>`;
+            } else {
+                catBox.innerHTML = Object.entries(catalysts).map(([key, items]) => {
+                    const canonicalName = items[0].name || key;
+                    const count = items.length;
+                    return `
+                        <div class="material-card">
+                            <div class="material-header">
+                                <span>${canonicalName}</span>
+                                <span class="tag catalyst">聚合数 ${count}</span>
+                            </div>
+                            <div class="material-meta">
+                                <strong>载体撑体 (Support)：</strong>${items[0].support || '-'}<br>
+                                <strong>合成方法 (Synthesis)：</strong>${items[0].synthesis_method ? items[0].synthesis_method.substring(0, 100) + '...' : '-'}<br>
+                                <strong>配位结构 (Coordination)：</strong>${items[0].coordination || '-'}<br>
+                                <strong>活性金属 (Metal Centers)：</strong>${JSON.stringify(items[0].metal_centers || [])}
+                            </div>
+                            <div style="font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:6px;">出处关联文献：</div>
+                            ${items.slice(0, 3).map(item => `
+                                <div class="relation-item">
+                                    关联库：${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${item.paper_id}" style="color:var(--color-primary); text-decoration:none;">文献链接 🔗</a>` : '未知'}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // 2. Render Adsorbates
+            const adsBox = document.getElementById('adsorbatesBox');
+            const adsorbates = data.adsorbate_groups || {};
+            if (Object.keys(adsorbates).length === 0) {
+                adsBox.innerHTML = `<div class="empty-state">库中尚无吸附分子中间体数据。</div>`;
+            } else {
+                adsBox.innerHTML = Object.entries(adsorbates).map(([key, items]) => {
+                    const canonicalName = items[0].adsorbate || key;
+                    const count = items.length;
+                    return `
+                        <div class="material-card">
+                            <div class="material-header">
+                                <span style="font-family:var(--font-mono); font-weight:700;">${canonicalName}</span>
+                                <span class="tag adsorbate">相关能级数 ${count}</span>
+                            </div>
+                            <div class="material-meta">
+                                <strong>热力学属性 (Property)：</strong>${items[0].property_type || '-'}<br>
+                                <strong>主要反应步骤 (Reaction Step)：</strong>${items[0].reaction_step || '-'}
+                            </div>
+                            <div style="font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:6px;">能量计算抽提：</div>
+                            ${items.slice(0, 3).map(item => `
+                                <div class="relation-item">
+                                    <strong>能量值：</strong>${item.value !== null ? item.value.toFixed(4) : '-'} ${item.unit || 'eV'} <br>
+                                    <strong>置信度：</strong>${item.confidence ? `${(item.confidence*100).toFixed(0)}%` : '-'} (段落: ${item.source_section || '-'})<br>
+                                    ${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${item.paper_id}" style="color:var(--color-primary); text-decoration:none;">查看对应文献详情 →</a>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // 3. Render Aliases
+            const aliBox = document.getElementById('aliasesBox');
+            const aliases = data.possible_name_aliases || [];
+            if (!aliases.length) {
+                aliBox.innerHTML = `<div class="empty-state">未检测到任何命名异名。名称高度规整。</div>`;
+            } else {
+                aliBox.innerHTML = aliases.map(alias => {
+                    const cls = alias.type === 'catalyst' ? 'catalyst' : 'adsorbate';
+                    const typeTxt = alias.type === 'catalyst' ? '催化剂' : '吸附分子';
+                    return `
+                        <div class="material-card">
+                            <div class="material-header">
+                                <span>变体：${alias.variants.join(' ↔ ')}</span>
+                                <span class="tag ${cls}">${typeTxt}</span>
+                            </div>
+                            <div class="material-meta">
+                                <strong>系统聚合 Key：</strong><code style="font-family:var(--font-mono);">${alias.canonical_key}</code><br>
+                                <strong>涉及文献数 (Paper count)：</strong>${alias.paper_count} 篇文献
+                            </div>
+                            <div style="font-size:12px; color:var(--color-text-secondary);">
+                                💡 <strong>提示：</strong>变体可能是由于排版、带电荷状态或简写不同造成的同义词，系统已自动在此合并计算。
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            TopNav.init({ currentPage: 'mechanism', mountId: 'topnav-mount' });
+            loadAggregationData();
+        });
+    </script>
 </body>
 </html>

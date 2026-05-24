@@ -1,40 +1,452 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>正在跳转到内部 AI 整理归纳</title>
-  <!-- Shared Resources -->
-  <link rel="stylesheet" href="../../shared/fonts.css">
-  <link rel="stylesheet" href="../../shared/tokens.css">
-  <link rel="stylesheet" href="../../shared/components.css">
-  <link rel="stylesheet" href="../../shared/topnav.css">
-  <script src="../../shared/topnav.js"></script>
-  <script>ThemeManager.init();</script>
-  <script>
-    (() => {
-      const params = new URLSearchParams(window.location.search);
-      const target = new URL('/pages/literature_library/index.html', window.location.origin);
-      target.searchParams.set('tab', 'writer');
-      const paperId = params.get('paper_id');
-      if (paperId) target.searchParams.set('paper_id', paperId);
-      window.location.replace(target.toString());
-    })();
-  </script>
-  <style>
-    body {
-      background: var(--color-bg);
-      color: var(--color-text);
-      font-family: var(--font-body);
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Writing Studio - Literature AI</title>
+    <link rel="stylesheet" href="../../shared/fonts.css">
+    <link rel="stylesheet" href="../../shared/tokens.css">
+    <link rel="stylesheet" href="../../shared/components.css">
+    <link rel="stylesheet" href="../../shared/topnav.css">
+    <script src="../../shared/topnav.js"></script>
+    <script>ThemeManager.init();</script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            color: var(--color-text);
+            background: var(--color-bg);
+            min-height: 100vh;
+        }
+        .shell {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 32px 24px;
+            padding-top: calc(var(--nav-height) + 32px);
+        }
+        .header-section {
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-section h1 { font-size: 26px; font-weight: 800; }
+        .header-section p { font-size: 14px; color: var(--color-text-secondary); margin-top: 4px; }
+
+        .layout-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 1024px) {
+            .layout-grid { grid-template-columns: 1fr; }
+        }
+
+        .panel-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            box-shadow: var(--shadow-card);
+            margin-bottom: 24px;
+        }
+        .panel-title {
+            font-size: 15px;
+            font-weight: 800;
+            margin-bottom: 16px;
+            color: var(--color-text);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Sidebar checklist */
+        .paper-checklist {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 580px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .checklist-item {
+            padding: 10px 12px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            background: var(--color-surface-alt);
+            display: flex;
+            gap: 10px;
+            cursor: pointer;
+            align-items: flex-start;
+        }
+        .checklist-item input {
+            margin-top: 3px;
+        }
+        .checklist-item-title {
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.4;
+            color: var(--color-text);
+        }
+
+        /* Tabs and Workspace */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1.5px solid var(--color-border);
+            margin-bottom: 20px;
+            padding-bottom: 4px;
+        }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--color-text-secondary);
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            border-radius: var(--radius) var(--radius) 0 0;
+            transition: var(--transition);
+        }
+        .tab-btn.active {
+            color: var(--color-primary);
+            border-bottom: 2px solid var(--color-primary);
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+            margin-bottom: 6px;
+        }
+        .form-control {
+            width: 100%;
+            height: 40px;
+            border-radius: var(--radius);
+            border: 1px solid var(--color-border-strong);
+            background: var(--color-surface);
+            color: var(--color-text);
+            padding: 0 10px;
+            font-size: 13px;
+            font-family: var(--font-body);
+            outline: none;
+        }
+        .form-control:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px var(--color-primary-bg);
+        }
+        textarea.form-control {
+            height: 100px;
+            padding: 10px;
+            resize: vertical;
+        }
+
+        .prewrap { white-space: pre-wrap; line-height: 1.8; font-size: 14px; }
+        .mono {
+            white-space: pre-wrap;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.7;
+            background: var(--color-surface-alt);
+            border-radius: var(--radius);
+            padding: 16px;
+            overflow: auto;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 24px;
+            color: var(--color-text-secondary);
+        }
+
+        .toast, .progress-box {
+            position: fixed;
+            right: 24px;
+            z-index: 3000;
+            color: #fff;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-elevated);
+        }
+        .toast {
+            top: 24px;
+            padding: 12px 24px;
+            font-size: 14px;
+            background: var(--color-primary);
+            display: none;
+        }
+        .progress-box {
+            top: 80px;
+            padding: 12px 24px;
+            font-size: 14px;
+            background: var(--color-success);
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <div id="topnav-mount"></div>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      TopNav.init({ currentPage: 'ai-writer', mountId: 'topnav-mount' });
-    });
-  </script>
+    <div id="topnav-mount"></div>
+    <div class="shell">
+        <div class="header-section">
+            <div>
+                <h1>AI Writing Studio 写作空间</h1>
+                <p>分类感知 RAG 检索模型。勾选左侧文献作为上下文“证据包”，由 AI 高效完成大纲梳理与引言引证撰写。</p>
+            </div>
+            <div>
+                <button class="btn green" onclick="copyMarkdownText()">📋 一键复制 Markdown 成果</button>
+            </div>
+        </div>
+
+        <div class="layout-grid">
+            <!-- Left Side: Paper Checklist -->
+            <div class="side-col">
+                <div class="panel-card">
+                    <div class="panel-title">
+                        <span>选择证据上下文</span>
+                        <span id="selectedCount" style="font-size:12px; color:var(--color-primary);">已选 0 篇</span>
+                    </div>
+                    <div class="paper-checklist" id="paperChecklist">
+                        <div class="empty-state" style="padding:20px 0;">同步文献列表中...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: AI writing workspace -->
+            <div class="main-col">
+                <div class="panel-card">
+                    <div class="panel-title">写作引导配置</div>
+                    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:16px;">
+                        <div class="form-group">
+                            <label for="writingTopic">学术写作主题 / 核心论点</label>
+                            <input type="text" id="writingTopic" class="form-control" placeholder="如：lithium sulfur battery CeO2 catalyst mechanism analysis">
+                        </div>
+                        <div class="form-group">
+                            <label for="writingLimit">最大引用证据条数</label>
+                            <input type="number" id="writingLimit" class="form-control" value="5" min="1" max="20">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="userNotes">额外指示说明 (Notes)</label>
+                        <textarea id="userNotes" class="form-control" placeholder="例：请重点整理 DFT 结果，突显其在降低反应自由能垒上的作用，阐明催化剂配位构型和吸附物分子间的电荷转移机理。"></textarea>
+                    </div>
+                    <button class="btn primary" onclick="generateAcademicDraft()">✍️ 一键调用 AI 撰写学术草稿</button>
+                </div>
+
+                <div class="panel-card">
+                    <div class="tabs">
+                        <button class="tab-btn active" onclick="switchWriteTab('outline')">大纲 (Outline)</button>
+                        <button class="tab-btn" onclick="switchWriteTab('intro')">引言 (Introduction)</button>
+                        <button class="tab-btn" onclick="switchWriteTab('dft')">DFT结果整理</button>
+                        <button class="tab-btn" onclick="switchWriteTab('discussion')">讨论 (Discussion)</button>
+                        <button class="tab-btn" onclick="switchWriteTab('storyline')">图文叙事 (Storyline)</button>
+                        <button class="tab-btn" onclick="switchWriteTab('guard')">引用护卫 (Citation Guard)</button>
+                    </div>
+
+                    <!-- Output Screens -->
+                    <div id="tab-outline" class="tab-pane prewrap">
+                        <div class="empty-state">等待配置写作任务并生成大纲...</div>
+                    </div>
+                    <div id="tab-intro" class="tab-pane prewrap" style="display:none;">
+                        <div class="empty-state">等待配置并生成引言部分...</div>
+                    </div>
+                    <div id="tab-dft" class="tab-pane prewrap" style="display:none;">
+                        <div class="empty-state">等待配置并生成 DFT 报告数据...</div>
+                    </div>
+                    <div id="tab-discussion" class="tab-pane prewrap" style="display:none;">
+                        <div class="empty-state">等待配置并生成讨论段落...</div>
+                    </div>
+                    <div id="tab-storyline" class="tab-pane prewrap" style="display:none;">
+                        <div class="empty-state">等待配置并生成多图画廊关联的 Storyline...</div>
+                    </div>
+                    <div id="tab-guard" class="tab-pane" style="display:none;">
+                        <div class="mono" id="guardLog">无检测事件。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+    <div id="progressBox" class="progress-box"></div>
+
+    <script>
+        const API_BASE = "/api/papers";
+        const WRITER_API = "/api/writer";
+        const state = {
+            activeTab: 'outline',
+            papers: [],
+            selectedIds: [],
+            generatedData: null
+        };
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        function showProgress(msg) {
+            const box = document.getElementById('progressBox');
+            box.textContent = msg;
+            box.style.display = 'block';
+        }
+        function hideProgress() {
+            document.getElementById('progressBox').style.display = 'none';
+        }
+
+        async function fetchJSON(url, options) {
+            const resp = await fetch(url, options);
+            const text = await resp.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (_) {}
+            if (!resp.ok) {
+                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
+                throw new Error(detail);
+            }
+            return data;
+        }
+
+        async function loadPapersChecklist() {
+            try {
+                const papers = await fetchJSON(`${API_BASE}?limit=200`);
+                state.papers = papers || [];
+                
+                const checklist = document.getElementById('paperChecklist');
+                if (!papers.length) {
+                    checklist.innerHTML = `<div class="empty-state" style="padding:20px 0;">文献库无文献。去入库中心导入文献吧！</div>`;
+                    return;
+                }
+
+                checklist.innerHTML = papers.map(p => `
+                    <label class="checklist-item" id="chk-item-${p.id}">
+                        <input type="checkbox" value="${p.id}" onchange="toggleSelectPaper('${p.id}')">
+                        <div class="checklist-item-title">${p.title || '未命名文献'}</div>
+                    </label>
+                `).join('');
+            } catch (e) {
+                showToast("加载文献列表失败：" + e.message);
+            }
+        }
+
+        function toggleSelectPaper(id) {
+            const idx = state.selectedIds.indexOf(id);
+            const card = document.getElementById(`chk-item-${id}`);
+            if (idx === -1) {
+                state.selectedIds.push(id);
+                if (card) card.style.borderColor = 'var(--color-primary)';
+            } else {
+                state.selectedIds.splice(idx, 1);
+                if (card) card.style.borderColor = 'var(--color-border)';
+            }
+            document.getElementById('selectedCount').textContent = `已选 ${state.selectedIds.length} 篇`;
+        }
+
+        function switchWriteTab(tab) {
+            state.activeTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tab).style.display = 'block';
+        }
+
+        async function generateAcademicDraft() {
+            const topic = document.getElementById('writingTopic').value.trim();
+            if (!topic) {
+                showToast("请输入学术写作主题！");
+                return;
+            }
+            if (state.selectedIds.length === 0) {
+                showToast("请至少从左侧勾选一篇文献作为上下文证据！");
+                return;
+            }
+            const limit = document.getElementById('writingLimit').value || 5;
+            const notes = document.getElementById('userNotes').value.trim();
+
+            showProgress("内部 AI 正在进行深度分类感知 RAG 能量计算检索与写作，请耐心等候...");
+            try {
+                const data = await fetchJSON(`${WRITER_API}/draft`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        topic: topic,
+                        paper_ids: state.selectedIds,
+                        user_notes: notes || null,
+                        sections: ["outline", "introduction", "dft_results", "discussion", "figure_storyline"],
+                        limit_per_type: Number(limit)
+                    })
+                });
+                state.generatedData = data;
+                showToast("写作归纳生成成功！已更新当前视图大盘。");
+                renderDraftOutput();
+            } catch (e) {
+                showToast("生成学术草案失败：" + e.message);
+            } finally {
+                hideProgress();
+            }
+        }
+
+        function renderDraftOutput() {
+            const d = state.generatedData;
+            if (!d) return;
+
+            document.getElementById('tab-outline').innerHTML = `<h3>Generated Outline</h3>\n${(d.outline || []).join('\n')}`;
+            document.getElementById('tab-intro').innerHTML = `<h3>Generated Introduction</h3>\n${d.introduction || '暂无内容。'}`;
+            document.getElementById('tab-dft').innerHTML = `<h3>Generated DFT Results Summary</h3>\n${d.dft_results || '暂无内容。'}`;
+            document.getElementById('tab-discussion').innerHTML = `<h3>Generated Discussion</h3>\n${d.discussion || '暂无内容。'}`;
+            document.getElementById('tab-storyline').innerHTML = `<h3>Generated Figure Storyline</h3>\n${(d.figure_storyline || []).join('\n')}`;
+            
+            document.getElementById('guardLog').textContent = JSON.stringify({
+                backend_used: d.backend_used,
+                llm_status: d.llm_status,
+                llm_error: d.llm_error,
+                guard_actions: d.guard_actions,
+                citation_guard: d.citation_guard
+            }, null, 2);
+        }
+
+        function copyMarkdownText() {
+            const d = state.generatedData;
+            if (!d) {
+                showToast("请先生成学术草稿后再导出！");
+                return;
+            }
+            const md = `
+# 学术研究报告：${document.getElementById('writingTopic').value}
+
+## 一、研究大纲 (Outline)
+${(d.outline || []).join('\n')}
+
+## 二、引言 (Introduction)
+${d.introduction || ''}
+
+## 三、DFT 结果梳理 (DFT Calculation Results)
+${d.dft_results || ''}
+
+## 四、讨论 (Discussion)
+${d.discussion || ''}
+
+## 五、图表叙事 (Figure Storyline)
+${(d.figure_storyline || []).join('\n')}
+            `;
+            
+            navigator.clipboard.writeText(md.trim()).then(() => {
+                showToast("已成功将完整 Markdown 报告复制至您的剪贴板！");
+            }).catch(() => {
+                showToast("复制失败，请尝试在详情页中手动选取。");
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            TopNav.init({ currentPage: 'ai-writer', mountId: 'topnav-mount' });
+            loadPapersChecklist();
+        });
+    </script>
 </body>
 </html>

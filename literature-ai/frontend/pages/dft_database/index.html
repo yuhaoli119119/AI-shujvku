@@ -1,33 +1,366 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>正在跳转到聚合视图</title>
-  <!-- Shared Resources -->
-  <link rel="stylesheet" href="../../shared/fonts.css">
-  <link rel="stylesheet" href="../../shared/tokens.css">
-  <link rel="stylesheet" href="../../shared/components.css">
-  <link rel="stylesheet" href="../../shared/topnav.css">
-  <script src="../../shared/topnav.js"></script>
-  <script>ThemeManager.init();</script>
-  <script>
-    window.location.replace('/pages/literature_library/index.html?tab=aggregate');
-  </script>
-  <style>
-    body {
-      background: var(--color-bg);
-      color: var(--color-text);
-      font-family: var(--font-body);
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DFT 数据库 - Literature AI</title>
+    <link rel="stylesheet" href="../../shared/fonts.css">
+    <link rel="stylesheet" href="../../shared/tokens.css">
+    <link rel="stylesheet" href="../../shared/components.css">
+    <link rel="stylesheet" href="../../shared/topnav.css">
+    <script src="../../shared/topnav.js"></script>
+    <script>ThemeManager.init();</script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            color: var(--color-text);
+            background: var(--color-bg);
+            min-height: 100vh;
+        }
+        .shell {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 32px 24px;
+            padding-top: calc(var(--nav-height) + 32px);
+        }
+        .header-section {
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .header-section h1 { font-size: 26px; font-weight: 800; }
+        .header-section p { font-size: 14px; color: var(--color-text-secondary); margin-top: 4px; }
+
+        /* Filter Panel */
+        .filter-panel {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            box-shadow: var(--shadow-card);
+            margin-bottom: 24px;
+        }
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .form-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+        }
+        .form-control {
+            height: 40px;
+            border-radius: var(--radius);
+            border: 1px solid var(--color-border-strong);
+            background: var(--color-surface);
+            color: var(--color-text);
+            padding: 0 10px;
+            font-size: 13px;
+            font-family: var(--font-body);
+            outline: none;
+            transition: var(--transition);
+        }
+        .form-control:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px var(--color-primary-bg);
+        }
+
+        /* Stats Banner */
+        .stats-banner {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+        .stat-box {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            text-align: center;
+            box-shadow: var(--shadow-card);
+        }
+        .stat-box .lbl { font-size: 11px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; }
+        .stat-box .val { font-size: 20px; font-weight: 800; color: var(--color-text); margin-top: 4px; }
+
+        /* Data Panel */
+        .data-panel {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            box-shadow: var(--shadow-card);
+        }
+        .panel-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--color-border);
+            text-align: left;
+        }
+        th {
+            background: var(--color-surface-alt);
+            font-weight: 700;
+            color: var(--color-text-secondary);
+        }
+        tr:hover td {
+            background: var(--color-surface-alt);
+        }
+
+        .confidence-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: var(--radius-pill);
+        }
+        .confidence-badge.high { background: var(--color-success-bg); color: var(--color-success); }
+        .confidence-badge.medium { background: var(--color-warning-bg); color: var(--color-warning); }
+        .confidence-badge.low { background: var(--color-danger-bg); color: var(--color-danger); }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 24px;
+            color: var(--color-text-secondary);
+        }
+
+        .toast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            background: var(--color-primary);
+            color: white;
+            padding: 12px 24px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            box-shadow: var(--shadow-elevated);
+            z-index: 1000;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <div id="topnav-mount"></div>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      TopNav.init({ currentPage: 'dft-database', mountId: 'topnav-mount' });
-    });
-  </script>
+    <div id="topnav-mount"></div>
+    <div class="shell">
+        <div class="header-section">
+            <div>
+                <h1>DFT 科学数据舱</h1>
+                <p>提取自当前文献库的所有吸附能及电子结构 DFT 计算结果。支持多维对比、阈值提取和数据分析。</p>
+            </div>
+            <div>
+                <button class="btn green" onclick="exportCSV()">📥 导出 CSV 数据表</button>
+            </div>
+        </div>
+
+        <!-- Filters Grid -->
+        <div class="filter-panel">
+            <div class="filter-grid">
+                <div class="form-group">
+                    <label for="propertyType">物性参数类型</label>
+                    <select id="propertyType" class="form-control" onchange="queryDFT()">
+                        <option value="adsorption_energy" selected>吸附能 (adsorption_energy)</option>
+                        <option value="free_energy">自由能 (free_energy)</option>
+                        <option value="d_band_center">d带中心 (d_band_center)</option>
+                        <option value="charge_transfer">电荷转移 (charge_transfer)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="adsorbate">吸附物分子式</label>
+                    <input type="text" id="adsorbate" class="form-control" placeholder="如：Li2S4, Li2S8, H2O" oninput="queryDFT()">
+                </div>
+                <div class="form-group">
+                    <label for="catalystType">催化剂原子类型</label>
+                    <select id="catalystType" class="form-control" onchange="queryDFT()">
+                        <option value="" selected>全部类型</option>
+                        <option value="single_atom">单原子 (single_atom)</option>
+                        <option value="dual_atom">双原子 (dual_atom)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="minConfidence">置信度下限</label>
+                    <input type="number" id="minConfidence" class="form-control" value="0.30" min="0.00" max="1.00" step="0.05" onchange="queryDFT()">
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Dashboard -->
+        <div class="stats-banner" id="statsBanner" style="display:none;">
+            <div class="stat-box">
+                <div class="lbl">符合条件条目</div>
+                <div class="val" id="statCount">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="lbl">最小值 (Min)</div>
+                <div class="val" id="statMin">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="lbl">最大值 (Max)</div>
+                <div class="val" id="statMax">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="lbl">平均数 (Mean)</div>
+                <div class="val" id="statMean">-</div>
+            </div>
+        </div>
+
+        <!-- Table Display -->
+        <div class="data-panel">
+            <div class="panel-actions">
+                <span id="resultSummary" style="font-weight: 700; font-size:14px; color:var(--color-text);">检索到 0 个有效计算结果</span>
+                <button class="btn ghost small" onclick="queryDFT()">🔄 刷新数据</button>
+            </div>
+            <div class="table-container">
+                <table id="dftTable">
+                    <thead>
+                        <tr>
+                            <th>催化剂样本</th>
+                            <th>吸附分子</th>
+                            <th>计算物性</th>
+                            <th>能量值 (eV)</th>
+                            <th>反应步骤 / 段落</th>
+                            <th>置信度</th>
+                            <th>来源文献 (DOI)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dftList">
+                        <tr>
+                            <td colspan="7" class="empty-state">正在查询数据...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const API_BASE = "/api/papers";
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        async function fetchJSON(url, options) {
+            const resp = await fetch(url, options);
+            if (!resp.ok) {
+                throw new Error("HTTP error " + resp.status);
+            }
+            return await resp.json();
+        }
+
+        async function queryDFT() {
+            const prop = document.getElementById('propertyType').value;
+            const adsorbate = document.getElementById('adsorbate').value.trim();
+            const catType = document.getElementById('catalystType').value;
+            const minConf = document.getElementById('minConfidence').value || 0.3;
+
+            let url = `${API_BASE}/compare?property_type=${encodeURIComponent(prop)}&min_confidence=${minConf}&limit=300`;
+            if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
+            if (catType) url += `&catalyst_type=${encodeURIComponent(catType)}`;
+
+            const list = document.getElementById('dftList');
+            list.innerHTML = `<tr><td colspan="7" class="empty-state">查询中，正在检索结构化 SQL 计算列...</td></tr>`;
+            
+            try {
+                const data = await fetchJSON(url);
+                const items = data.items || [];
+                
+                // Update stats
+                const banner = document.getElementById('statsBanner');
+                if (data.stats && data.stats.count) {
+                    banner.style.display = 'grid';
+                    document.getElementById('statCount').textContent = data.stats.count;
+                    document.getElementById('statMin').textContent = `${data.stats.min} ${data.stats.unit || 'eV'}`;
+                    document.getElementById('statMax').textContent = `${data.stats.max} ${data.stats.unit || 'eV'}`;
+                    document.getElementById('statMean').textContent = `${data.stats.mean} ${data.stats.unit || 'eV'}`;
+                } else {
+                    banner.style.display = 'none';
+                }
+
+                document.getElementById('resultSummary').textContent = `检索到 ${items.length} 个有效计算结果`;
+
+                if (!items.length) {
+                    list.innerHTML = `<tr><td colspan="7" class="empty-state">当前过滤条件下无匹配的 DFT 计算结果。可降低置信度下限或清空吸附物分子。</td></tr>`;
+                    return;
+                }
+
+                list.innerHTML = items.map(item => {
+                    const catName = (item.catalysts && item.catalysts[0]) ? item.catalysts[0].name : '-';
+                    const confVal = item.confidence || 0;
+                    const confCls = confVal >= 0.8 ? 'high' : confVal >= 0.5 ? 'medium' : 'low';
+                    const confTxt = confVal >= 0.8 ? '高置信' : confVal >= 0.5 ? '中置信' : '低置信';
+                    return `
+                        <tr>
+                            <td style="font-weight: 700; color: var(--color-primary);">${catName}</td>
+                            <td style="font-family:var(--font-mono); font-weight:600;">${item.adsorbate || '-'}</td>
+                            <td style="color:var(--color-text-secondary); font-size:12px;">${item.property_type || '-'}</td>
+                            <td style="font-weight: 800; font-family:var(--font-mono);">${item.value !== null ? item.value.toFixed(4) : '-'} ${item.unit || 'eV'}</td>
+                            <td>
+                                <div style="font-weight:600; font-size:12px;">${item.reaction_step || '-'}</div>
+                                <div style="color:var(--color-text-muted); font-size:11px;">位置：${item.source_section || '-'}</div>
+                            </td>
+                            <td><span class="confidence-badge ${confCls}">${confTxt} (${(confVal*100).toFixed(0)}%)</span></td>
+                            <td>
+                                <a href="../literature_library/index.html?paper_id=${item.paper_id}" style="color: var(--color-text); text-decoration:none; font-weight:500;">
+                                    ${item.title ? item.title.substring(0, 36) + '...' : '文献详情'}
+                                </a>
+                                <div style="font-family:var(--font-mono); font-size:11px; color:var(--color-text-muted); margin-top:2px;">${item.doi || '无DOI'}</div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                list.innerHTML = `<tr><td colspan="7" class="empty-state" style="color:var(--color-danger);">查询失败：${e.message}</td></tr>`;
+            }
+        }
+
+        function exportCSV() {
+            const prop = document.getElementById('propertyType').value;
+            const adsorbate = document.getElementById('adsorbate').value.trim();
+            
+            let url = `/api/papers/export/csv?property_type=${encodeURIComponent(prop)}`;
+            if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
+            
+            // Redirect window to download
+            window.location.href = url;
+            showToast("正在导出数据表，已发起后台下载...");
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            TopNav.init({ currentPage: 'dft-database', mountId: 'topnav-mount' });
+            queryDFT();
+        });
+    </script>
 </body>
 </html>

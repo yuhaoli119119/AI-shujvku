@@ -131,13 +131,13 @@ class ThemeManager {
 class TopNav {
   /** Navigation items configuration */
   static NAV_ITEMS = [
+    { id: 'dashboard', label: '总览', href: '../dashboard/index.html' },
+    { id: 'ingestion', label: '入库中心', href: '../ingestion/index.html' },
     { id: 'literature', label: '文献库', href: '../literature_library/index.html' },
     { id: 'paper-detail', label: '论文详情', href: '../paper_detail/index.html' },
     { id: 'dft-database', label: 'DFT 数据库', href: '../dft_database/index.html' },
     { id: 'mechanism', label: '机理知识', href: '../mechanism_knowledge/index.html' },
-    { id: 'writing-cards', label: '写作卡片', href: '../writing_cards/index.html' },
-    { id: 'ai-writer', label: 'AI Writer', href: '../ai_writer/index.html' },
-    { id: 'external', label: '外部审稿', href: '../external_analysis_workbench/index.html' },
+    { id: 'ai-writer', label: 'AI 写作', href: '../ai_writer/index.html' },
     { id: 'settings', label: '设置', href: '../settings/index.html' },
   ];
 

@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>入库中心 - Literature AI</title>
+    <link rel="stylesheet" href="../../shared/fonts.css">
+    <link rel="stylesheet" href="../../shared/tokens.css">
+    <link rel="stylesheet" href="../../shared/components.css">
+    <link rel="stylesheet" href="../../shared/topnav.css">
+    <script src="../../shared/topnav.js"></script>
+    <script>ThemeManager.init();</script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            color: var(--color-text);
+            background: var(--color-bg);
+            min-height: 100vh;
+        }
+        .shell {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 32px 24px;
+            padding-top: calc(var(--nav-height) + 32px);
+        }
+        .header-section {
+            margin-bottom: 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-section h1 {
+            font-size: 28px;
+            font-weight: 800;
+        }
+        .header-section p {
+            color: var(--color-text-secondary);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .workspace-grid {
+            display: grid;
+            grid-template-columns: 3fr 2fr;
+            gap: 24px;
+        }
+        @media (max-width: 1024px) {
+            .workspace-grid { grid-template-columns: 1fr; }
+        }
+
+        .panel-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-card);
+            margin-bottom: 24px;
+        }
+        .panel-title {
+            font-size: 16px;
+            font-weight: 800;
+            margin-bottom: 18px;
+            color: var(--color-text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-title svg {
+            width: 18px;
+            height: 18px;
+            fill: var(--color-primary);
+        }
+
+        /* Ingestion Tabs */
+        .ingest-tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1.5px solid var(--color-border);
+            margin-bottom: 20px;
+            padding-bottom: 4px;
+        }
+        .ingest-tab {
+            background: transparent;
+            border: none;
+            color: var(--color-text-secondary);
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            border-radius: var(--radius) var(--radius) 0 0;
+            transition: var(--transition);
+        }
+        .ingest-tab.active {
+            color: var(--color-primary);
+            border-bottom: 2px solid var(--color-primary);
+        }
+
+        /* Drag & Drop PDF */
+        .dropzone {
+            border: 2px dashed var(--color-border-strong);
+            border-radius: var(--radius-lg);
+            padding: 48px 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            background: var(--color-surface-alt);
+        }
+        .dropzone:hover {
+            border-color: var(--color-primary);
+            background: var(--color-primary-bg);
+        }
+        .dropzone svg {
+            width: 48px;
+            height: 48px;
+            fill: var(--color-text-secondary);
+            margin-bottom: 14px;
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+            margin-bottom: 6px;
+        }
+        .form-control {
+            width: 100%;
+            height: 44px;
+            padding: 0 14px;
+            border-radius: var(--radius);
+            border: 1px solid var(--color-border-strong);
+            background: var(--color-surface);
+            color: var(--color-text);
+            outline: none;
+            font-family: var(--font-body);
+            font-size: 14px;
+        }
+        .form-control:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 4px var(--color-primary-bg);
+        }
+
+        /* Job Center / Job List */
+        .job-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 520px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .job-item {
+            padding: 16px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            background: var(--color-surface-alt);
+            transition: var(--transition);
+        }
+        .job-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .job-status {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: var(--radius-pill);
+            text-transform: uppercase;
+        }
+        .job-status.queued { background: var(--color-primary-bg); color: var(--color-primary); }
+        .job-status.running { background: var(--color-warning-bg); color: var(--color-warning); }
+        .job-status.completed { background: var(--color-success-bg); color: var(--color-success); }
+        .job-status.failed { background: var(--color-danger-bg); color: var(--color-danger); }
+        
+        .job-meta {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            line-height: 1.6;
+        }
+        .job-progress {
+            margin-top: 10px;
+            background: var(--color-surface);
+            border: 1.5px solid var(--color-border);
+            border-radius: var(--radius-sm);
+            padding: 8px 12px;
+            font-size: 12px;
+            font-family: var(--font-mono);
+        }
+
+        /* Search List */
+        .search-results {
+            margin-top: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .search-item {
+            padding: 14px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            background: var(--color-surface);
+        }
+
+        .toast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            background: var(--color-primary);
+            color: white;
+            padding: 12px 24px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            box-shadow: var(--shadow-elevated);
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="topnav-mount"></div>
+    <div class="shell">
+        <div class="header-section">
+            <div>
+                <h1>Ingestion Center 入库中心</h1>
+                <p>在此处快速导入外部科研文献。支持 PDF 上传、DOI 录入、在线数据检索及 AI 批量后台收录工作流。</p>
+            </div>
+            <div>
+                <select id="librarySelect" class="library-select btn" style="height:44px; padding:0 12px;" onchange="switchLibrary(this.value)">
+                    <option value="">加载中...</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="workspace-grid">
+            <!-- Left Side: Ingesting Methods -->
+            <div class="main-col">
+                <div class="panel-card">
+                    <div class="ingest-tabs">
+                        <button class="ingest-tab active" onclick="switchIngestTab('pdf')">本地上传 PDF</button>
+                        <button class="ingest-tab" onclick="switchIngestTab('doi')">DOI / URL 收录</button>
+                        <button class="ingest-tab" onclick="switchIngestTab('online')">在线文献检索</button>
+                        <button class="ingest-tab" onclick="switchIngestTab('ai')">AI 自动收录</button>
+                    </div>
+
+                    <!-- Method 1: PDF Upload -->
+                    <div id="tab-pdf" class="tab-content">
+                        <div class="dropzone" onclick="document.getElementById('pdfInput').click()">
+                            <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                            <h3>拖拽 PDF 文件至此或直接点击上传</h3>
+                            <p style="margin-top:6px; font-size:13px; color:var(--color-text-muted);">文件大小不超过 50MB。上传后系统将自动完成文本段落与 DFT 数据解析。</p>
+                            <input id="pdfInput" type="file" accept=".pdf" style="display:none;" onchange="handlePDFUpload(this)">
+                        </div>
+                    </div>
+
+                    <!-- Method 2: DOI Input -->
+                    <div id="tab-doi" class="tab-content" style="display:none;">
+                        <div class="form-group">
+                            <label for="doiInput">DOI 或学术文献 URL</label>
+                            <input type="text" id="doiInput" class="form-control" placeholder="例如：10.1016/j.ensm.2023.102875 或 https://arxiv.org/abs/2304.12345">
+                        </div>
+                        <button class="btn primary" onclick="submitDOI()">📥 一键下载并收录</button>
+                    </div>
+
+                    <!-- Method 3: Online Search -->
+                    <div id="tab-online" class="tab-content" style="display:none;">
+                        <div style="display:flex; gap:10px; margin-bottom:16px;">
+                            <input type="text" id="searchQuery" class="form-control" style="flex:1;" placeholder="输入检索文献关键词、DOI、期刊或标题">
+                            <input type="number" id="searchLimit" class="form-control" style="width:100px;" value="10" min="1" max="100" title="检索上限">
+                            <button class="btn blue" onclick="runOnlineSearch()">🔍 搜索</button>
+                        </div>
+                        <div class="search-results" id="searchResults">
+                            <div class="empty-state" style="padding:10px 0;">输入关键词后点击搜索，我们将从 OpenAlex / arXiv 自动去重获取文献。</div>
+                        </div>
+                    </div>
+
+                    <!-- Method 4: AI Ingestion Workflow -->
+                    <div id="tab-ai" class="tab-content" style="display:none;">
+                        <div class="form-group">
+                            <label for="aiQuery">AI 文献扩展查询提示词</label>
+                            <input type="text" id="aiQuery" class="form-control" placeholder="例如：lithium sulfur battery CeO2 catalyst energy mechanism">
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+                            <div class="form-group">
+                                <label for="aiMaxResults">AI 检索并去重上限 (Max Results)</label>
+                                <input type="number" id="aiMaxResults" class="form-control" value="20" min="1" max="100">
+                            </div>
+                            <div class="form-group">
+                                <label for="aiMaxDownloads">最大后台下载文献数 (Max Downloads)</label>
+                                <input type="number" id="aiMaxDownloads" class="form-control" value="5" min="1" max="100">
+                            </div>
+                        </div>
+                        <button class="btn purple" onclick="triggerAIWorkflow()">🚀 触发后台自动化收录链</button>
+                        <p style="margin-top:10px; font-size:12px; color:var(--color-text-secondary);">
+                            AI 工作流将在后台并行执行：在线扩展查询 → 获取精准元数据 → 自动绕过限制下载 PDF → 解析结构化正文 → 自动写回库，无需停留在本页。
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: Job Center / Task Queue -->
+            <div class="side-col">
+                <div class="panel-card">
+                    <div class="panel-title">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2zm0 8H7v-2h10v2z"/></svg>
+                        任务中心 (Job Center)
+                    </div>
+                    <div class="job-list" id="jobQueue">
+                        <!-- Dynamically filled -->
+                        <div class="empty-state">当前没有运行中的后台收录任务。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const API_BASE = "/api/papers";
+        const LIB_API = "/api/libraries";
+        const state = {
+            activeTab: 'pdf',
+            jobs: [] // Stored local list of job IDs we are tracking
+        };
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        async function fetchJSON(url, options) {
+            const resp = await fetch(url, options);
+            const text = await resp.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (_) {}
+            if (!resp.ok) {
+                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
+                throw new Error(detail);
+            }
+            return data;
+        }
+
+        async function loadLibraries() {
+            try {
+                const libs = await fetchJSON(LIB_API);
+                const active = libs.find(l => l.is_active);
+                
+                const select = document.getElementById('librarySelect');
+                select.innerHTML = libs.map(l => 
+                    `<option value="${l.name}" ${l.is_active ? 'selected' : ''}>${l.name}${l.is_active ? ' (当前)' : ''}</option>`
+                ).join('');
+
+                if (active) {
+                    state.currentLibrary = active.name;
+                }
+            } catch (e) {
+                showToast("加载库列表失败：" + e.message);
+            }
+        }
+
+        async function switchLibrary(name) {
+            if (!name) return;
+            try {
+                await fetchJSON(`${LIB_API}/${encodeURIComponent(name)}/activate`, { method: "POST" });
+                showToast("切换库成功：" + name);
+                state.currentLibrary = name;
+                await loadLibraries();
+            } catch (e) {
+                showToast("切换库失败：" + e.message);
+            }
+        }
+
+        function switchIngestTab(tab) {
+            state.activeTab = tab;
+            document.querySelectorAll('.ingest-tab').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tab).style.display = 'block';
+        }
+
+        // 1. PDF Upload
+        async function handlePDFUpload(input) {
+            if (!input.files || !input.files.length) return;
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("library_name", state.currentLibrary || "");
+            
+            showToast("正在上传并提取 PDF，请稍候...");
+            try {
+                const data = await fetchJSON(`${API_BASE}/ingest/upload`, {
+                    method: "POST",
+                    body: formData
+                });
+                showToast("PDF 上传成功，文献已收录！标题：" + (data.title || file.name));
+            } catch (e) {
+                showToast("上传解析失败：" + e.message);
+            } finally {
+                input.value = "";
+            }
+        }
+
+        // 2. DOI Submit
+        async function submitDOI() {
+            const val = document.getElementById('doiInput').value.trim();
+            if (!val) {
+                showToast("请输入 DOI 或 URL！");
+                return;
+            }
+            showToast("正在后台下载收录，请勿关闭页面...");
+            try {
+                const data = await fetchJSON(`${API_BASE}/discovery/download`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        identifier: val,
+                        providers: [],
+                        library_name: state.currentLibrary || ""
+                    })
+                });
+                if (data.status === 'already_exists') {
+                    showToast("该文献已在文献库中！标题：" + data.title);
+                } else if (data.status === 'metadata_only') {
+                    showToast("下载 PDF 限制，已按元数据先收录。标题：" + data.title);
+                } else {
+                    showToast("收录下载成功！标题：" + data.title);
+                }
+                document.getElementById('doiInput').value = "";
+            } catch (e) {
+                showToast("下载收录失败：" + e.message);
+            }
+        }
+
+        // 3. Online Search
+        async function runOnlineSearch() {
+            const q = document.getElementById('searchQuery').value.trim();
+            if (!q) {
+                showToast("请输入搜索关键词！");
+                return;
+            }
+            const limit = document.getElementById('searchLimit').value || 10;
+            const container = document.getElementById('searchResults');
+            container.innerHTML = `<div class="empty-state">正在拉取 OpenAlex / arXiv 等公开数据库文献...</div>`;
+            try {
+                const data = await fetchJSON(`${API_BASE}/discovery/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+                const items = data.items || [];
+                if (!items.length) {
+                    container.innerHTML = `<div class="empty-state">无搜索结果。请更换检索词。</div>`;
+                    return;
+                }
+                container.innerHTML = items.map(item => {
+                    const identifier = item.identifier || item.doi || item.url || "";
+                    const authors = (item.authors || []).slice(0, 4).join(', ') || '-';
+                    return `
+                        <div class="search-item">
+                            <h4 style="font-size:14px; font-weight:700; color:var(--color-text);">${item.title || '无标题'}</h4>
+                            <p style="font-size:12px; color:var(--color-text-secondary); margin-top:4px;">
+                                ${item.year || '-'} | ${item.journal || '-'} | ${authors}
+                            </p>
+                            <div style="margin-top:10px; display:flex; justify-content:flex-end;">
+                                <button class="btn green small" onclick="ingestSearchResult('${identifier.replace(/'/g, "\\'")}')">📥 收录此文献</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state" style="color:var(--color-danger);">检索失败：${e.message}</div>`;
+            }
+        }
+
+        async function ingestSearchResult(identifier) {
+            if (!identifier) return;
+            showToast("正在收录文献，下载 PDF...");
+            try {
+                const data = await fetchJSON(`${API_BASE}/discovery/download`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        identifier: identifier,
+                        providers: [],
+                        library_name: state.currentLibrary || ""
+                    })
+                });
+                showToast("成功收录文献！标题：" + (data.title || "学术文献"));
+            } catch (e) {
+                showToast("收录失败：" + e.message);
+            }
+        }
+
+        // 4. AI Ingestion Workflow
+        async function triggerAIWorkflow() {
+            const q = document.getElementById('aiQuery').value.trim();
+            if (!q) {
+                showToast("请输入 AI 自动检索式！");
+                return;
+            }
+            const maxResults = document.getElementById('aiMaxResults').value || 20;
+            const maxDownloads = document.getElementById('aiMaxDownloads').value || 5;
+            
+            showToast("正在派发 AI 收录工作流，系统已转入后台...");
+            try {
+                const job = await fetchJSON(`${API_BASE}/ai_workflow/jobs`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        query: q,
+                        library_name: state.currentLibrary || "",
+                        model: "deepseek-chat",
+                        max_results: Number(maxResults),
+                        max_downloads: Number(maxDownloads),
+                        providers: [],
+                        skip_existing: true
+                    })
+                });
+                showToast("任务已派发，任务 ID：" + job.job_id);
+                trackJob(job.job_id);
+                document.getElementById('aiQuery').value = "";
+            } catch (e) {
+                showToast("工作流派发失败：" + e.message);
+            }
+        }
+
+        // Job Tracker
+        function trackJob(jobId) {
+            if (!state.jobs.includes(jobId)) {
+                state.jobs.unshift(jobId);
+                // Save to localStorage
+                localStorage.setItem("litai-ingest-jobs", JSON.stringify(state.jobs));
+            }
+            renderJobsList();
+        }
+
+        async function pollJobs() {
+            const completedStatuses = ['completed', 'failed'];
+            let changed = false;
+            for (let i = 0; i < state.jobs.length; i++) {
+                const id = state.jobs[i];
+                try {
+                    const job = await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(id)}`);
+                    // Cache the job status to DOM
+                    const el = document.getElementById(`job-card-${id}`);
+                    if (el) {
+                        const statusEl = el.querySelector('.job-status');
+                        statusEl.className = `job-status ${job.status}`;
+                        statusEl.textContent = job.status === 'queued' ? '排队中' : job.status === 'running' ? '运行中' : job.status === 'completed' ? '已完成' : '失败';
+                        
+                        const progressEl = el.querySelector('.job-progress');
+                        progressEl.textContent = JSON.stringify(job.progress || {}, null, 2);
+                        
+                        if (job.status === 'failed') {
+                            const errorEl = el.querySelector('.job-error');
+                            errorEl.style.display = 'block';
+                            errorEl.textContent = `失败原因：${job.error || '未知原因'}`;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Poll failed for job " + id, e);
+                }
+            }
+        }
+
+        function renderJobsList() {
+            const container = document.getElementById('jobQueue');
+            if (!state.jobs.length) {
+                container.innerHTML = `<div class="empty-state">当前没有运行中的后台收录任务。</div>`;
+                return;
+            }
+            
+            container.innerHTML = state.jobs.map(id => `
+                <div class="job-item" id="job-card-${id}">
+                    <div class="job-item-header">
+                        <strong style="font-size: 13px; font-family:var(--font-mono); color:var(--color-text);">任务 #${id.substring(0, 8)}</strong>
+                        <span class="job-status queued">同步中...</span>
+                    </div>
+                    <div class="job-meta">
+                        类型：Celery Workflow Ingestion<br>
+                        时间：${new Date().toLocaleTimeString()}
+                    </div>
+                    <div class="job-error subtle" style="color:var(--color-danger); margin-top:8px; display:none; font-size:12px;"></div>
+                    <div class="job-progress">
+                        { "status": "pending" }
+                    </div>
+                    <div style="margin-top:10px; display:flex; justify-content:flex-end; gap:8px;">
+                        <button class="btn ghost small" onclick="removeJobFromList('${id}')">移除记录</button>
+                    </div>
+                </div>
+            `).join('');
+            pollJobs();
+        }
+
+        function removeJobFromList(id) {
+            state.jobs = state.jobs.filter(j => j !== id);
+            localStorage.setItem("litai-ingest-jobs", JSON.stringify(state.jobs));
+            renderJobsList();
+        }
+
+        // Restore jobs from localStorage
+        function restoreJobs() {
+            const saved = localStorage.getItem("litai-ingest-jobs");
+            if (saved) {
+                try {
+                    state.jobs = JSON.parse(saved) || [];
+                } catch (_) {}
+            }
+            renderJobsList();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            TopNav.init({ currentPage: 'ingestion', mountId: 'topnav-mount' });
+            loadLibraries();
+            restoreJobs();
+            
+            // Start polling timer
+            setInterval(pollJobs, 3000);
+        });
+    </script>
+</body>
+</html>
