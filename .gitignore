@@ -20,6 +20,9 @@ node_modules/
 *.sqlite
 *.sqlite3
 *.db
+*#U*
+D#Uf03a*
+literature-ai/backend/D*/
 config.json
 
 # Literature AI storage and data directories (untracked)
@@ -28,6 +31,9 @@ literature-ai/data/
 literature-ai/backend/data/
 literature-ai/backend/tests/data/
 literature-ai/storage/docling_cache/
+**/storage/
+**/data/
+**/docling_cache/
 
 # Document parsing and metadata files (exclude intermediates)
 *.pdf

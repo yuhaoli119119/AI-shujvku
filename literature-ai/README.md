@@ -98,6 +98,8 @@ literature-ai/
 docker compose up --build
 ```
 
+`docker-compose.yml` uses development-only default credentials for PostgreSQL and MinIO. Keep them only for local/dev use and override them before any shared deployment.
+
 3. Check health:
 
 ```bash
@@ -119,6 +121,12 @@ curl -X POST http://localhost:8000/api/papers/ingest/upload \
   -F "file=@sample.pdf"
 ```
 
+### Local security boundaries
+
+- `POST /api/settings` is now limited to local requests by default. Set `LITAI_SETTINGS_ADMIN_TOKEN` and send it as `X-Settings-Token` or `Authorization: Bearer ...` if you need non-local administration.
+- `GET /api/libraries/browse` remains whitelist-only. Allowed roots come from `LITAI_BROWSE_ROOTS` plus the local home directory.
+- MCP keys should be scoped to the minimum required capabilities. Use separate contributor and reviewer keys instead of a single broad key.
+
 ## MCP quick start
 
 1. Configure MCP keys in `.env`:
@@ -126,8 +134,11 @@ curl -X POST http://localhost:8000/api/papers/ingest/upload \
 ```env
 LITAI_MCP_ENABLED=true
 LITAI_MCP_SERVER_NAME=Literature AI MCP
+# Minimum-privilege example: contributor key cannot review corrections.
 LITAI_MCP_API_KEYS=claude|Claude Desktop|litmcp_claude|read_papers,append_notes,propose_corrections,request_parse;admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections
 ```
+
+Default policy: keep MCP disabled unless a trusted local/dev workflow explicitly needs it, and only then enable the smallest capability set required for that client.
 
 2. Start the backend:
 

@@ -1891,8 +1891,15 @@
 
         function closeCreateLibraryDialog() { $("createLibDialog").style.display = "none"; }
 
-        function setCreateDefaultLocation() {
-            const path = "/host/users/28128";
+        async function setCreateDefaultLocation() {
+            let path = "";
+            try {
+                const roots = await fetchJSON(`${LIB_API}/browse-roots`);
+                path = roots?.[0]?.path || "";
+            } catch (error) {
+                console.warn("Failed to load browse roots", error);
+            }
+            if (!path) return;
             $("createLibSelectedPath").style.display = "block";
             $("createLibSelectedPath").textContent = path;
             window._selectedPath_createLib = path;

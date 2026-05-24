@@ -17,6 +17,9 @@ venv/
 *.sqlite
 *.sqlite3
 *.db
+*#U*
+D#Uf03a*
+backend/D*/
 
 # Literature AI storage and data directories
 storage/
@@ -24,6 +27,9 @@ data/
 backend/data/
 backend/tests/data/
 storage/docling_cache/
+**/storage/
+**/data/
+**/docling_cache/
 
 # Document parsing and metadata files
 *.pdf

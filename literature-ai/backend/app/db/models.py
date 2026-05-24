@@ -287,6 +287,30 @@ class ParseJob(Base):
     )
 
 
+class WorkflowJob(Base):
+    __tablename__ = "workflow_jobs"
+
+    job_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    type: Mapped[str] = mapped_column(sa.String(64), index=True)
+    status: Mapped[str] = mapped_column(sa.String(32), default="queued", index=True)
+    progress: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    result: Mapped[dict | list | str | None] = mapped_column(json_type(), nullable=True)
+    error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    library_name: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+        default="\u9ed8\u8ba4\u6587\u732e\u5e93",
+        server_default="\u9ed8\u8ba4\u6587\u732e\u5e93",
+        index=True,
+    )
+    payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    runtime_context: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 

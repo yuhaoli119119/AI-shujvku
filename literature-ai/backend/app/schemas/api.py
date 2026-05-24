@@ -18,6 +18,7 @@ class IngestFromPathRequest(BaseModel):
     year: int | None = None
     journal: str | None = None
     abstract: str | None = None
+    library_name: str | None = None
 
 
 class RAGWriteRequest(BaseModel):
@@ -455,6 +456,7 @@ class IngestFromPathRequest(BaseModel):
     year: int | None = None
     journal: str | None = None
     abstract: str | None = None
+    library_name: str | None = None
 
 class IngestResponse(BaseModel):
     paper_id: UUID

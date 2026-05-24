@@ -6,6 +6,7 @@ from app.db.models import Paper
 from app.db.session import session_scope
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
+from app.services.workflow_jobs import run_workflow_job_by_id
 from app.workers.celery_app import celery_app
 
 
@@ -31,3 +32,8 @@ def rerun_stage2_task(paper_id: str) -> dict[str, int | str]:
             "status": "completed",
             **summary,
         }
+
+
+@celery_app.task(name="papers.run_workflow_job")
+def run_workflow_job_task(job_id: str) -> None:
+    run_workflow_job_by_id(job_id)

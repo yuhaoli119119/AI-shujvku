@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     mcp_enabled: bool = True
     mcp_api_keys: str = ""
     mcp_server_name: str = "Literature AI MCP"
+    settings_admin_token: str | None = None
+    browse_roots: str = "/host/users,/data,/legacy"
 
     model_config = SettingsConfigDict(
         env_file=".env",

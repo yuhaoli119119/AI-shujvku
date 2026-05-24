@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -175,6 +175,26 @@ _MANAGED_KEYS = [
     "mcp_api_keys",
 ]
 
+_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _enforce_settings_write_access(request: Request) -> None:
+    settings = __import__("app.config", fromlist=["get_settings"]).get_settings()
+    provided_token = request.headers.get("X-Settings-Token") or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    configured_token = (settings.settings_admin_token or "").strip()
+    client_host = (request.client.host if request.client else "") or ""
+
+    if configured_token:
+        if provided_token != configured_token:
+            raise HTTPException(status_code=403, detail="Invalid settings admin token")
+        return
+
+    if client_host not in _LOCAL_HOSTS:
+        raise HTTPException(
+            status_code=403,
+            detail="Settings writes are limited to local requests unless LITAI_SETTINGS_ADMIN_TOKEN is configured.",
+        )
+
 
 @router.get("")
 async def get_settings_api() -> dict[str, Any]:
@@ -196,9 +216,11 @@ async def get_settings_api() -> dict[str, Any]:
 
 
 @router.post("")
-async def update_settings_api(request: SettingsUpdateRequest) -> dict[str, Any]:
+async def update_settings_api(request: SettingsUpdateRequest, raw_request: Request) -> dict[str, Any]:
     """Update settings. Only managed keys are accepted."""
     from app.config import get_settings
+
+    _enforce_settings_write_access(raw_request)
 
     kv_pairs: dict[str, str | None] = {}
     for item in request.settings:
@@ -263,6 +285,7 @@ async def get_services_status() -> dict[str, Any]:
     mcp_status = {
         "enabled": settings.mcp_enabled,
         "has_keys": bool(persisted.get("mcp_api_keys") or settings.mcp_api_keys),
+        "default_policy": "disabled unless explicitly enabled for trusted local/dev use" if not settings.mcp_enabled else "enabled",
     }
 
     return {
