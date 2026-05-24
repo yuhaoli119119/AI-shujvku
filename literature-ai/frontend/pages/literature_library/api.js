@@ -79,7 +79,9 @@ async function loadLibraries() {
             "</option>";
         }).join("");
         const active = (libraries || []).find(function(item) { return item.is_active; });
-        $("libStatus").textContent = active ? (active.root_path + " | " + active.paper_count + " 篇") : "";
+        state.currentLibrary = active || null;
+        state.currentLibraryTotal = active ? Number(active.paper_count || 0) : 0;
+        $("libStatus").textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
     } catch (error) {
         console.error("loadLibraries failed", error);
     }

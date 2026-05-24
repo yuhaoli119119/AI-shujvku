@@ -16,6 +16,8 @@ const VIEWPORTS = [
   { width: 1024, height: 768 },
 ];
 
+const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:8000';
+
 const LIBRARIES = [
   {
     name: 'Default Library',
@@ -330,7 +332,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         test(`renders correctly at ${viewport.width}x${viewport.height}`, async ({ page }) => {
           await page.setViewportSize(viewport);
 
-          const url = `http://localhost:8000${pageInfo.path}`;
+          const url = `${BASE_URL}${pageInfo.path}`;
           const response = await page.goto(url);
 
           expect(response.status()).toBe(200);
@@ -342,7 +344,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       test('core interactions and buttons work', async ({ page }) => {
         await page.setViewportSize({ width: 1280, height: 800 });
-        const url = `http://localhost:8000${pageInfo.path}`;
+        const url = `${BASE_URL}${pageInfo.path}`;
         await page.goto(url);
         await page.waitForTimeout(1000);
 
@@ -355,8 +357,15 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await page.click('button[onclick="switchIngestTab(\'online\')"]');
           await expect(page.locator('#tab-online')).toBeVisible();
         } else if (pageInfo.name === 'Literature Library') {
-          await page.click('button[data-tab="writer"]');
-          await expect(page.locator('#tab-writer')).toBeVisible();
+          await page.click('#addLiteratureBtn');
+          await expect(page.locator('#addLiteratureMenu')).toBeVisible();
+          await page.click('#addLiteratureMenu [data-add-mode="ai"]');
+          await expect(page.locator('#addLiteratureDialog')).toBeVisible();
+          await page.click('#addLiteratureDialog button:has-text("关闭")');
+
+          await page.click('.paper-card');
+          await page.click('button[data-tab="writing"]');
+          await expect(page.locator('#tab-writing')).toBeVisible();
 
           await page.click('button[data-tab="review"]');
           await expect(page.locator('#tab-review')).toBeVisible();

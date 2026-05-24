@@ -52,32 +52,41 @@ function mergeDiscoveryResults(items) {
     return { added: added, duplicate: duplicate, total: state.discoveryCache.length };
 }
 
+function acquisitionResultEl() {
+    return $("acquisitionResult");
+}
+
+function setAcquisitionResult(html) {
+    const el = acquisitionResultEl();
+    if (el) el.innerHTML = html;
+}
+
 async function searchOnline() {
-    const query = $("searchInput").value.trim();
+    const query = (($("onlineSearchQuery") && $("onlineSearchQuery").value) || $("searchInput").value || "").trim();
     if (!query) {
         showToast("请先输入检索关键词。", "error");
         return;
     }
-    switchTab("ai-search");
-    $("aiSearchQuery").value = query;
-    $("aiSearchResult").innerHTML = '<div class="workspace-empty">正在从 OpenAlex / arXiv 检索，最多拉取 100 篇...</div>';
+    openAddLiteraturePanel("online");
+    $("onlineSearchQuery").value = query;
+    setAcquisitionResult('<div class="workspace-empty small-empty">正在从 OpenAlex / arXiv 检索，最多拉取 100 篇...</div>');
     try {
-        const limit = clampSearchLimit($("aiSearchMaxResults").value);
+        const limit = clampSearchLimit($("onlineSearchMaxResults").value);
         const data = await fetchJSON(API_BASE + "/discovery/search?q=" + encodeURIComponent(query) + "&limit=" + limit);
         const stats = mergeDiscoveryResults(data.items || []);
         renderDiscoveryResults({ items: state.discoveryCache }, stats, "在线检索结果");
     } catch (error) {
-        $("aiSearchResult").innerHTML = '<div class="workspace-empty">在线检索失败：' + esc(error.message) + "</div>";
+        setAcquisitionResult('<div class="workspace-empty small-empty">在线检索失败：' + esc(error.message) + "</div>");
     }
 }
 
 function renderDiscoveryResults(data, stats, title, prefixHtml) {
     const items = data && data.items ? data.items : [];
     if (!items.length) {
-        $("aiSearchResult").innerHTML = '<div class="workspace-empty">没有找到在线结果。</div>';
+        setAcquisitionResult('<div class="workspace-empty small-empty">没有找到在线结果。</div>');
         return;
     }
-    $("aiSearchResult").innerHTML =
+    setAcquisitionResult(
         (prefixHtml || "") +
         '<div class="writer-block"><h3>' + esc(title || "检索结果") + '（累计去重后 ' + items.length + ' 篇）</h3><div class="subtle">本页会合并后续检索结果：新增 ' + esc(stats && stats.added != null ? stats.added : "-") + ' 篇，过滤重复 ' + esc(stats && stats.duplicate != null ? stats.duplicate : "-") + ' 篇。点击“下载并收录”时，下载失败也会按元数据入库，之后可人工补 PDF。</div></div>' +
         items.map(function(item) {
@@ -92,7 +101,7 @@ function renderDiscoveryResults(data, stats, title, prefixHtml) {
                     "</div>" +
                 "</div>"
             );
-        }).join("");
+        }).join(""));
 }
 
 function getAIQueryRewriteModel() {
@@ -118,9 +127,9 @@ async function runAISearch() {
         showToast("请输入 AI 搜索查询。", "error");
         return;
     }
-    switchTab("ai-search");
+    openAddLiteraturePanel("ai");
     $("aiSearchQuery").value = query;
-    $("aiSearchResult").innerHTML = '<div class="workspace-empty">AI 正在扩展查询并筛选文献...</div>';
+    setAcquisitionResult('<div class="workspace-empty small-empty">AI 正在扩展查询并筛选文献...</div>');
     try {
         const data = await fetchJSON(API_BASE + "/ai_search", {
             method: "POST",
@@ -135,14 +144,14 @@ async function runAISearch() {
         });
         const papers = data && data.papers ? data.papers : [];
         if (!papers.length) {
-            $("aiSearchResult").innerHTML = '<div class="workspace-empty">AI 没有返回结果。</div>';
+            setAcquisitionResult('<div class="workspace-empty small-empty">AI 没有返回结果。</div>');
             return;
         }
         const stats = mergeDiscoveryResults(papers);
         const prefix = '<div class="writer-block"><h3>AI 自动搜索结果</h3><div class="subtle">模型状态：' + esc(data.llm_status || "unknown") + " | 注释状态：" + esc(data.result_annotation_status || "-") + '</div><div class="mono" style="margin-top:12px;">' + esc(data.prompt_used || "") + "</div></div>";
         renderDiscoveryResults({ items: state.discoveryCache }, stats, "AI 自动搜索结果", prefix);
     } catch (error) {
-        $("aiSearchResult").innerHTML = '<div class="workspace-empty">AI 搜索失败：' + esc(error.message) + "</div>";
+        setAcquisitionResult('<div class="workspace-empty small-empty">AI 搜索失败：' + esc(error.message) + "</div>");
     }
 }
 
@@ -152,7 +161,7 @@ async function runAIWorkflow() {
         showToast("请输入 AI 搜索查询。", "error");
         return;
     }
-    switchTab("ai-search");
+    openAddLiteraturePanel("ai");
     showProgress("AI 工作流已转入后台，不会卡住页面...");
     try {
         const job = await fetchJSON(API_BASE + "/ai_workflow/jobs", {
@@ -173,7 +182,7 @@ async function runAIWorkflow() {
         pollAIWorkflowJob(job.job_id);
         showToast("AI 工作流已进入后台任务。", "success");
     } catch (error) {
-        $("aiSearchResult").innerHTML = '<div class="workspace-empty">AI 工作流失败：' + esc(error.message) + "</div>";
+        setAcquisitionResult('<div class="workspace-empty small-empty">AI 工作流失败：' + esc(error.message) + "</div>");
         showToast("AI 工作流失败：" + error.message, "error");
     }
     hideProgress();
@@ -194,13 +203,16 @@ async function pollAIWorkflowJob(jobId) {
             showToast("AI 工作流失败：" + (job.error || ""), "error");
         }
     } catch (error) {
-        $("aiSearchResult").insertAdjacentHTML("afterbegin", '<div class="section-card"><h3>任务轮询失败</h3><div class="subtle">' + esc(error.message) + "</div></div>");
+        const el = acquisitionResultEl();
+        if (el) {
+            el.insertAdjacentHTML("afterbegin", '<div class="section-card"><h3>任务轮询失败</h3><div class="subtle">' + esc(error.message) + "</div></div>");
+        }
     }
 }
 
 function renderAIWorkflowJob(job) {
     const result = job.result || {};
-    $("aiSearchResult").innerHTML =
+    setAcquisitionResult(
         '<div class="writer-block"><h3>AI 后台检索 / 收录任务</h3>' +
         '<div class="subtle">任务：' + esc(job.job_id || "-") + " | 状态：" + esc(job.status || "-") + " | 库：" + esc(job.library_name || getCurrentLibraryName() || "-") + "</div>" +
         '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div>" +
@@ -212,7 +224,7 @@ function renderAIWorkflowJob(job) {
         }) +
         renderWorkflowList("失败项", result.failed || [], function(item) {
             return '<div class="subtle">代码：' + esc(item.code || "-") + " | 原因：" + esc(item.reason || "-") + "</div>";
-        });
+        }));
 }
 
 function renderWorkflowList(title, items, formatter) {
@@ -288,7 +300,7 @@ async function rerunExtraction() {
     try {
         const data = await fetchJSON(API_BASE + "/" + state.selectedPaperId + "/extract", { method: "POST" });
         showToast("重新解析完成。", "success");
-        $("detailContent").insertAdjacentHTML("afterbegin",
+        $("summaryContent").insertAdjacentHTML("afterbegin",
             '<div class="section-card"><h3>最近一次重解析结果</h3><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
         );
         await loadPaperDetail(state.selectedPaperId);

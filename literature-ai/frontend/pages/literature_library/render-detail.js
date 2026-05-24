@@ -1,4 +1,5 @@
 function renderWorkspaceHeader(paper) {
+    const counts = paper.counts || {};
     $("paperTitle").textContent = paper.title || "未命名文献";
     $("paperMeta").textContent = [
         paper.year || "-",
@@ -9,11 +10,11 @@ function renderWorkspaceHeader(paper) {
     $("paperHeaderBadges").innerHTML =
         (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + "</span>" : "") +
         paperStatusChip(paper) +
-        badge(paper.counts && paper.counts.sections) +
-        badge(paper.counts && paper.counts.figures) +
-        badge(paper.counts && paper.counts.dft_results) +
-        badge(paper.counts && paper.counts.mechanism_claims) +
-        badge(paper.counts && paper.counts.writing_cards);
+        badge(counts.sections) +
+        badge(counts.figures) +
+        badge(counts.dft_results) +
+        badge(counts.mechanism_claims) +
+        badge(counts.writing_cards);
     $("writerTopic").value = paper.title || "";
 }
 
@@ -33,14 +34,15 @@ function renderJSONCards(title, items) {
 }
 
 function renderDetail(detail) {
+    const counts = detail.counts || {};
     const summaryCards =
         '<div class="cards">' +
-            '<div class="stat-card"><h3>章节</h3><div class="value">' + (detail.counts.sections || 0) + "</div></div>" +
-            '<div class="stat-card"><h3>表格</h3><div class="value">' + (detail.counts.tables || 0) + "</div></div>" +
-            '<div class="stat-card"><h3>图片</h3><div class="value">' + (detail.counts.figures || 0) + "</div></div>" +
-            '<div class="stat-card"><h3>DFT 结果</h3><div class="value">' + (detail.counts.dft_results || 0) + "</div></div>" +
-            '<div class="stat-card"><h3>机理</h3><div class="value">' + (detail.counts.mechanism_claims || 0) + "</div></div>" +
-            '<div class="stat-card"><h3>写作卡</h3><div class="value">' + (detail.counts.writing_cards || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>章节</h3><div class="value">' + (counts.sections || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>表格</h3><div class="value">' + (counts.tables || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>图片</h3><div class="value">' + (counts.figures || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>DFT 结果</h3><div class="value">' + (counts.dft_results || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>机理</h3><div class="value">' + (counts.mechanism_claims || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>写作卡</h3><div class="value">' + (counts.writing_cards || 0) + "</div></div>" +
         "</div>";
 
     const baseInfo =
@@ -138,27 +140,37 @@ function renderDetail(detail) {
         );
     });
 
-    $("detailContent").innerHTML =
+    $("summaryContent").innerHTML =
         summaryCards +
         baseInfo +
         abstractCard +
-        comprehensiveCard +
+        comprehensiveCard;
+    $("sectionsContent").innerHTML =
+        sectionCards +
+        referenceCards +
+        renderJSONCards("出向关系", detail.outgoing_relationships || []) +
+        renderJSONCards("入向关系", detail.incoming_relationships || []);
+    $("figuresContent").innerHTML =
+        figureCards +
+        renderJSONCards("表格", detail.tables || []);
+    $("dftContent").innerHTML =
         renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
         renderJSONCards("催化剂样本", detail.catalyst_samples_items || []) +
         renderJSONCards("DFT 结果", detail.dft_results_items || []) +
         renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
-        renderJSONCards("机理声明", detail.mechanism_claims_items || []) +
-        renderJSONCards("写作卡片", detail.writing_cards_items || []) +
-        sectionCards +
-        figureCards +
-        referenceCards +
-        renderJSONCards("出向关系", detail.outgoing_relationships || []) +
-        renderJSONCards("入向关系", detail.incoming_relationships || []);
+        renderJSONCards("机理声明", detail.mechanism_claims_items || []);
+    $("writingContent").innerHTML =
+        renderJSONCards("写作卡片", detail.writing_cards_items || []);
+    $("aggregateResult").innerHTML = "";
 }
 
 function renderDetailSkeleton() {
-    const detailContainer = $("detailContent");
+    const detailContainer = $("summaryContent");
     if (!detailContainer) return;
+    ["sectionsContent", "figuresContent", "dftContent", "writingContent", "writerResult", "externalRuns", "aggregateResult"].forEach(function(id) {
+        const el = $(id);
+        if (el) el.innerHTML = "";
+    });
     detailContainer.innerHTML = 
         '<div class="skeleton-detail">' +
             '<div class="skeleton-row">' +

@@ -56,9 +56,22 @@ function applyQueryParams() {
     const tab = params.get("tab");
     if (paperId) state.selectedPaperId = paperId;
     if (params.get("review_paper_id")) state.currentTab = "review";
-    if (tab && ["detail", "writer", "review", "ai-search", "aggregate"].includes(tab)) {
+    const tabMap = {
+        detail: "summary",
+        writer: "writing",
+        aggregate: "dft",
+        summary: "summary",
+        sections: "sections",
+        figures: "figures",
+        dft: "dft",
+        writing: "writing",
+        review: "review"
+    };
+    if (tab === "ai-search") {
+        state.openAddOnLoad = "ai";
+    } else if (tab && tabMap[tab]) {
         state.hasExplicitTab = true;
-        state.currentTab = tab;
+        state.currentTab = tabMap[tab];
     }
 }
 
@@ -72,6 +85,9 @@ function syncQueryParams() {
 }
 
 function switchTab(tab) {
+    if (!["summary", "sections", "figures", "dft", "writing", "review"].includes(tab)) {
+        tab = "summary";
+    }
     state.currentTab = tab;
     document.querySelectorAll(".tab-btn").forEach(function(btn) {
         btn.classList.toggle("active", btn.getAttribute("data-tab") === tab);
@@ -82,14 +98,10 @@ function switchTab(tab) {
     document.querySelectorAll(".tab-panel").forEach(function(panel) {
         panel.classList.toggle("active", panel.id === "tab-" + tab);
     });
-    if (!state.selectedPaperId) {
-        renderTabLanding(tab);
-    }
     syncQueryParams();
-    if (tab === "writer") ensureWriterStatus();
+    if (tab === "writing") ensureWriterStatus();
     if (tab === "review" && state.selectedPaperId) loadExternalRuns();
     if (tab === "review" && !state.selectedPaperId) loadAgentGuide();
-    if (tab === "aggregate") loadAggregate();
 }
 
 function showEmptyWorkspace() {
@@ -102,49 +114,102 @@ function showWorkspace() {
     $("workspaceBody").style.display = "block";
 }
 
-function renderTabLanding(tab) {
-    const landing = {
-        detail: {
-            title: "论文详情",
-            meta: "先从左侧选择一篇文献，再查看结构化提取结果。",
-        },
-        writer: {
-            title: "内部 AI 整理",
-            meta: "这里用于让站内 AI 对单篇文献做归纳、补充和写作整理。",
-        },
-        review: {
-            title: "外部 / IDE AI",
-            meta: "这里用于导入外部 AI 审核结果，或查看 IDE / MCP 接入指南。",
-        },
-        "ai-search": {
-            title: "AI 检索入库",
-            meta: "这里可以直接做在线检索、AI 扩展检索，以及后台批量收录。",
-        },
-        aggregate: {
-            title: "聚合视图",
-            meta: "这里查看跨文献的 DFT、催化剂和别名聚合结果。",
-        },
-    };
-    const current = landing[tab] || landing.detail;
-    $("paperTitle").textContent = current.title;
-    $("paperMeta").textContent = current.meta;
-    $("paperHeaderBadges").innerHTML = "";
-    if (tab === "detail") {
-        $("detailContent").innerHTML = '<div class="workspace-empty">先在左侧选择一篇文献，再查看论文详情。</div>';
+function renderLibraryEmptyState() {
+    $("workspaceEmpty").innerHTML =
+        '<div class="empty-state-card">' +
+            '<h2>当前库还没有文献</h2>' +
+            '<p>上传 PDF、输入 DOI / URL，或使用 AI 自动搜文献来建立你的第一个文献库。</p>' +
+            '<div class="empty-actions">' +
+                '<button class="btn primary" onclick="openAddLiteraturePanel(\'pdf\')">添加文献</button>' +
+                '<button class="btn ghost" onclick="openAddLiteraturePanel(\'ai\')">AI 搜文献</button>' +
+            '</div>' +
+        '</div>';
+    showEmptyWorkspace();
+}
+
+function renderNoSelectionState() {
+    $("workspaceEmpty").innerHTML =
+        '<div class="empty-state-card">' +
+            '<h2>选择一篇文献查看详情</h2>' +
+            '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、DFT 数据、写作卡和 AI 审核。</p>' +
+        '</div>';
+    showEmptyWorkspace();
+}
+
+function toggleDropdown(menuId, event) {
+    if (event) event.stopPropagation();
+    document.querySelectorAll(".dropdown-menu.open").forEach(function(menu) {
+        if (menu.id !== menuId) menu.classList.remove("open");
+    });
+    const menu = $(menuId);
+    if (menu) menu.classList.toggle("open");
+}
+
+function toggleAddLiteratureMenu(event) {
+    toggleDropdown("addLiteratureMenu", event);
+}
+
+function togglePaperMoreMenu(event) {
+    toggleDropdown("paperMoreMenu", event);
+}
+
+function closeDropdowns() {
+    document.querySelectorAll(".dropdown-menu.open").forEach(function(menu) {
+        menu.classList.remove("open");
+    });
+}
+
+function openAddLiteraturePanel(mode) {
+    closeDropdowns();
+    $("addLiteratureDialog").style.display = "flex";
+    switchAcquisitionMode(mode || "pdf");
+}
+
+function closeAddLiteraturePanel() {
+    $("addLiteratureDialog").style.display = "none";
+}
+
+function switchAcquisitionMode(mode) {
+    const safeMode = ["pdf", "doi", "online", "ai", "folder"].includes(mode) ? mode : "pdf";
+    document.querySelectorAll(".ingest-tab").forEach(function(btn) {
+        btn.classList.toggle("active", btn.getAttribute("data-ingest-mode") === safeMode);
+    });
+    document.querySelectorAll(".acq-panel").forEach(function(panel) {
+        panel.style.display = panel.id === "acq-" + safeMode ? "block" : "none";
+    });
+    const searchValue = $("searchInput") ? $("searchInput").value.trim() : "";
+    if (safeMode === "online" && searchValue && !$("onlineSearchQuery").value.trim()) {
+        $("onlineSearchQuery").value = searchValue;
     }
-    if (tab === "writer") {
-        $("writerResult").innerHTML = '<div class="workspace-empty">先选择一篇文献，然后让内部 AI 对该文献继续整理和补充。</div>';
+    if (safeMode === "ai" && searchValue && !$("aiSearchQuery").value.trim()) {
+        $("aiSearchQuery").value = searchValue;
     }
-    if (tab === "review") {
-        $("externalRuns").innerHTML = '<div class="workspace-empty">先选择一篇文献以导入审核结果；也可以先点上方按钮查看 IDE / MCP 接入指南。</div>';
+}
+
+function addToEvidencePack() {
+    closeDropdowns();
+    switchTab("writing");
+    showToast("已切到写作卡与整理区，可基于当前文献生成证据整理。", "info");
+}
+
+function openAggregateView() {
+    closeDropdowns();
+    switchTab("dft");
+    loadAggregate();
+}
+
+async function showFolderImportGuide() {
+    setAcquisitionResult('<div class="workspace-empty small-empty">正在读取 MCP 批量导入指南...</div>');
+    try {
+        const guide = await fetchJSON("/api/system/agent-guide");
+        setAcquisitionResult(
+            '<div class="section-card"><h3>本地文件夹批量导入指南</h3>' +
+            '<div class="subtle">批量扫描文件夹由 MCP 工具 <strong>scan_local_pdfs</strong> 和 <strong>ingest_pdf_batch</strong> 执行；网页端请先前往 Ingestion Center 处理常规上传。</div>' +
+            '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(guide, null, 2)) + "</div></div>"
+        );
+    } catch (error) {
+        setAcquisitionResult('<div class="workspace-empty small-empty">指南读取失败：' + esc(error.message) + "</div>");
     }
-    if (tab === "ai-search" && !$("aiSearchResult").innerHTML.trim()) {
-        $("aiSearchResult").innerHTML = '<div class="workspace-empty">输入关键词后即可开始在线检索或 AI 检索入库。</div>';
-    }
-    if (tab === "aggregate" && !$("aggregateResult").innerHTML.trim()) {
-        $("aggregateResult").innerHTML = '<div class="workspace-empty">点击“刷新聚合”即可查看跨文献聚合结果。</div>';
-    }
-    showWorkspace();
 }
 
 function initSplitDrag() {
@@ -215,15 +280,42 @@ function initProtocolWarning() {
     }
 }
 
+function initActionMenus() {
+    document.querySelectorAll("[data-add-mode]").forEach(function(button) {
+        button.addEventListener("click", function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            openAddLiteraturePanel(button.getAttribute("data-add-mode"));
+        });
+    });
+}
+
+Object.assign(window, {
+    openAddLiteraturePanel: openAddLiteraturePanel,
+    closeAddLiteraturePanel: closeAddLiteraturePanel,
+    switchAcquisitionMode: switchAcquisitionMode,
+    toggleAddLiteratureMenu: toggleAddLiteratureMenu,
+    togglePaperMoreMenu: togglePaperMoreMenu,
+    addToEvidencePack: addToEvidencePack,
+    openAggregateView: openAggregateView,
+    showFolderImportGuide: showFolderImportGuide,
+    switchTab: switchTab
+});
+
 window.addEventListener("beforeunload", disconnectSSE);
+document.addEventListener("click", closeDropdowns);
 $("searchInput").addEventListener("keydown", function(event) { if (event.key === "Enter") searchLocal(); });
 
 applyQueryParams();
 initProtocolWarning();
 initSplitDrag();
+initActionMenus();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
 Promise.all([loadLibraries(), loadWriterSettings()]).then(function() {
     fetchPapers();
     initSSE();
     switchTab(state.currentTab);
+    if (state.openAddOnLoad) {
+        openAddLiteraturePanel(state.openAddOnLoad);
+    }
 });

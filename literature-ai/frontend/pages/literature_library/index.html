@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>文献库工作台</title>
+    <title>文献库 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
@@ -27,21 +27,25 @@
                 <select id="librarySelect" class="library-select" onchange="activateLibraryByName(this.value)">
                     <option value="">加载中...</option>
                 </select>
-                <button class="btn primary" onclick="openCreateLibraryDialog()">新建库</button>
+                <button class="btn ghost" onclick="openCreateLibraryDialog()">新建库</button>
                 <button class="btn ghost" onclick="openImportLibraryDialog()">导入已有库</button>
                 <button class="btn danger" onclick="removeCurrentLibrary()">移除库</button>
                 <span id="libStatus" class="status-line subtle"></span>
-                <span id="globalSummary" class="subtle" style="margin-left:8px;"></span>
             </div>
             <div class="toolbar-row">
-                <input id="searchInput" class="search-input" type="text" placeholder="按标题、DOI、期刊、摘要、作者、章节等关键词检索">
-                <button class="btn blue" onclick="searchLocal()">搜索本地</button>
-                <button class="btn green" onclick="searchOnline()">在线检索</button>
-                <button class="btn purple" onclick="runAISearch()">AI 自动搜索</button>
-                <input id="doiInput" class="medium-input" type="text" placeholder="输入 DOI 或 URL">
-                <button class="btn purple" onclick="downloadByDOI()">下载并收录</button>
-                <input id="pdfUpload" type="file" accept=".pdf" style="display:none" onchange="uploadPDF(this)">
-                <button class="btn ghost" onclick="document.getElementById('pdfUpload').click()">上传 PDF</button>
+                <input id="searchInput" class="search-input" type="text" placeholder="搜索标题、DOI、作者、摘要、关键词">
+                <button class="btn ghost" onclick="searchLocal()">搜索</button>
+                <div class="dropdown" id="addLiteratureDropdown">
+                    <button id="addLiteratureBtn" class="btn primary" type="button" onclick="toggleAddLiteratureMenu(event)">添加文献 ▼</button>
+                    <div id="addLiteratureMenu" class="dropdown-menu">
+                        <button type="button" data-add-mode="pdf" onclick="openAddLiteraturePanel('pdf')">上传 PDF</button>
+                        <button type="button" data-add-mode="doi" onclick="openAddLiteraturePanel('doi')">DOI / URL 下载</button>
+                        <button type="button" data-add-mode="online" onclick="openAddLiteraturePanel('online')">在线检索</button>
+                        <button type="button" data-add-mode="ai" onclick="openAddLiteraturePanel('ai')">AI 自动搜文献</button>
+                        <button type="button" data-add-mode="folder" onclick="openAddLiteraturePanel('folder')">导入本地文件夹</button>
+                    </div>
+                </div>
+                <button class="btn ghost" onclick="refreshCurrentPage()">刷新</button>
             </div>
             <div class="toolbar-row">
                 <input id="filterYear" class="small-input" type="number" placeholder="年份">
@@ -64,11 +68,12 @@
                     <option value="true">有写作卡</option>
                     <option value="false">无写作卡</option>
                 </select>
-                <button class="btn ghost" onclick="clearFilters()">清空</button>
-                <button class="btn ghost" onclick="refreshCurrentPage()">刷新</button>
-                <button class="btn ghost" id="prevBtn" onclick="prevPage()" disabled>上一页</button>
-                <span id="pageInfo" class="toolbar-label">第 1 页</span>
-                <button class="btn ghost" id="nextBtn" onclick="nextPage()">下一页</button>
+                <button class="btn ghost" onclick="clearFilters()">清空筛选</button>
+                <div class="pager">
+                    <button class="btn ghost small" id="prevBtn" onclick="prevPage()" disabled>上一页</button>
+                    <span id="pageInfo" class="toolbar-label">第 1 页</span>
+                    <button class="btn ghost small" id="nextBtn" onclick="nextPage()">下一页</button>
+                </div>
             </div>
         </div>
 
@@ -79,7 +84,7 @@
                     <span id="paperListMeta" class="subtle">0 篇</span>
                 </div>
                 <div id="paperList" class="paper-list">
-                    <div class="workspace-empty">正在加载文献列表...</div>
+                    <div class="list-empty">正在加载文献列表...</div>
                 </div>
             </aside>
 
@@ -87,8 +92,10 @@
 
             <main class="workspace">
                 <div id="workspaceEmpty" class="workspace-empty">
-                    先在左侧选择一篇文献。<br>
-                    选中后可以查看解析详情、触发内部 AI 整理归纳、导入外部 AI 审核结果，以及发起 AI 自动搜文献。
+                    <div>
+                        <h2>选择一篇文献查看详情</h2>
+                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、DFT 数据、写作卡和 AI 审核。</p>
+                    </div>
                 </div>
 
                 <div id="workspaceBody" style="display:none;">
@@ -97,37 +104,59 @@
                             <div id="paperTitle" class="workspace-title"></div>
                             <div id="paperMeta" class="workspace-meta"></div>
                         </div>
+                        <div class="paper-actionbar">
+                            <button class="btn primary small" onclick="openPaperDetailPage()">打开详情</button>
+                            <button class="btn ghost small" onclick="rerunExtraction()">重新解析</button>
+                            <div class="dropdown" id="paperMoreDropdown">
+                                <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
+                                <div id="paperMoreMenu" class="dropdown-menu right">
+                                    <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
+                                    <button type="button" onclick="runInternalAIParse()">内部 AI 解析</button>
+                                    <button type="button" onclick="switchTab('review')">外部 AI 审核</button>
+                                    <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
+                                    <button type="button" onclick="openAggregateView()">查看聚合视图</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div id="paperHeaderBadges" class="badge-row"></div>
 
-                    <div class="workspace-actions">
-                        <button class="btn ghost small" onclick="openPaperDetailPage()">独立打开详情页</button>
-                        <button class="btn ghost small" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
-                        <button class="btn blue small" onclick="rerunExtraction()">重新解析当前文献</button>
-                        <button class="btn purple small" onclick="runInternalAIParse()">内部 AI 解析</button>
-                    </div>
-
                     <div class="tabs">
-                        <button class="tab-btn active" data-tab="detail" onclick="switchTab('detail')">论文详情</button>
-                        <button class="tab-btn" data-tab="writer" onclick="switchTab('writer')">内部 AI 整理归纳</button>
-                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">外部 AI 审核</button>
-                        <button class="tab-btn" data-tab="ai-search" onclick="switchTab('ai-search')">AI 自动搜文献</button>
-                        <button class="tab-btn" data-tab="aggregate" onclick="switchTab('aggregate')">聚合视图</button>
+                        <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
+                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">章节</button>
+                        <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
+                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">DFT 数据</button>
+                        <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
+                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI 审核</button>
                     </div>
 
-                    <section id="tab-detail" class="tab-panel active">
-                        <div id="detailContent"></div>
+                    <section id="tab-summary" class="tab-panel active">
+                        <div id="summaryContent"></div>
                     </section>
 
-                    <section id="tab-writer" class="tab-panel">
-                        <div class="writer-block">
-                            <h3>内部 AI 写作 / 归纳</h3>
+                    <section id="tab-sections" class="tab-panel">
+                        <div id="sectionsContent"></div>
+                    </section>
+
+                    <section id="tab-figures" class="tab-panel">
+                        <div id="figuresContent"></div>
+                    </section>
+
+                    <section id="tab-dft" class="tab-panel">
+                        <div id="dftContent"></div>
+                        <div id="aggregateResult"></div>
+                    </section>
+
+                    <section id="tab-writing" class="tab-panel">
+                        <div id="writingContent"></div>
+                        <div class="writer-block compact-writer">
+                            <h3>生成整理结果</h3>
                             <div id="writerStatusBox" class="subtle" style="margin-bottom:12px;">加载写作器状态...</div>
                             <div class="writer-toolbar">
                                 <input id="writerTopic" class="search-input" type="text" placeholder="写作主题">
                                 <input id="writerLimit" class="small-input" type="number" min="1" max="20" value="5" placeholder="证据数">
-                                <button class="btn blue" onclick="generateWriterDraft()">生成整理结果</button>
+                                <button class="btn ghost" onclick="generateWriterDraft()">生成</button>
                             </div>
                             <textarea id="writerNotes" placeholder="给内部 AI 的补充要求，例如：重点整理机理链条、列出关键 DFT 结果、突出存在争议的数据。"></textarea>
                         </div>
@@ -136,48 +165,87 @@
 
                     <section id="tab-review" class="tab-panel">
                         <div class="writer-block">
-                            <h3>外部 AI 审核导入</h3>
+                            <h3>AI 审核</h3>
                             <div class="external-toolbar">
                                 <input id="externalSource" class="medium-input" type="text" value="manual" placeholder="source">
                                 <input id="externalSourceLabel" class="medium-input" type="text" value="外部AI复核" placeholder="source label">
-                                <button class="btn purple" onclick="runInternalAIParse()">用内部 AI 先跑一版</button>
+                                <button class="btn ghost" onclick="runInternalAIParse()">内部 AI 解析</button>
                                 <button class="btn ghost" onclick="loadAgentGuide()">显示 IDE / MCP 指南</button>
                             </div>
                             <textarea id="externalRawText" placeholder="把外部 AI 返回的 JSON 或文本粘贴到这里，然后导入。"></textarea>
                             <div class="modal-actions" style="margin-top:12px;">
-                                <button class="btn blue" onclick="importExternalAnalysis()">导入审核结果</button>
+                                <button class="btn primary" onclick="importExternalAnalysis()">导入审核结果</button>
                                 <button class="btn ghost" onclick="loadExternalRuns()">刷新审核记录</button>
                             </div>
                         </div>
                         <div id="externalRuns"></div>
                     </section>
-
-                    <section id="tab-ai-search" class="tab-panel">
-                        <div class="writer-block">
-                            <h3>AI 自动搜索与一键收录</h3>
-                            <div class="search-toolbar">
-                                <input id="aiSearchQuery" class="search-input" type="text" placeholder="例如：lithium sulfur battery CeO2 catalyst mechanism">
-                                <input id="aiSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="单次最多检索 100 篇">
-                                <input id="aiWorkflowMaxDownloads" class="small-input" type="number" value="100" min="1" max="100" title="单次最多收录 100 篇，下载失败会保留元数据">
-                                <button class="btn purple" onclick="runAISearch()">AI 自动搜索</button>
-                                <button class="btn green" onclick="runAIWorkflow()">AI 搜索并收录</button>
-                            </div>
-                            <div class="subtle">`AI 自动搜索` 先让模型帮你扩展检索；`AI 搜索并收录` 会在同一条链里完成搜索、下载和入库。</div>
-                        </div>
-                        <div id="aiSearchResult"></div>
-                    </section>
-
-                    <section id="tab-aggregate" class="tab-panel">
-                        <div class="writer-block">
-                            <h3>跨文献聚合视图</h3>
-                            <div class="modal-actions" style="margin-top:0; margin-bottom:12px; justify-content:flex-start;">
-                                <button class="btn ghost" onclick="loadAggregate()">刷新聚合</button>
-                            </div>
-                            <div id="aggregateResult"></div>
-                        </div>
-                    </section>
                 </div>
             </main>
+        </div>
+    </div>
+
+    <input id="pdfUpload" type="file" accept=".pdf" style="display:none" onchange="uploadPDF(this)">
+
+    <div id="addLiteratureDialog" class="modal-overlay">
+        <div class="modal add-modal">
+            <div class="modal-title-row">
+                <h3>添加文献</h3>
+                <button class="btn ghost small" onclick="closeAddLiteraturePanel()">关闭</button>
+            </div>
+            <div class="ingest-tabs">
+                <button class="ingest-tab active" data-ingest-mode="pdf" onclick="switchAcquisitionMode('pdf')">上传 PDF</button>
+                <button class="ingest-tab" data-ingest-mode="doi" onclick="switchAcquisitionMode('doi')">DOI / URL 下载</button>
+                <button class="ingest-tab" data-ingest-mode="online" onclick="switchAcquisitionMode('online')">在线检索</button>
+                <button class="ingest-tab" data-ingest-mode="ai" onclick="switchAcquisitionMode('ai')">AI 自动搜文献</button>
+                <button class="ingest-tab" data-ingest-mode="folder" onclick="switchAcquisitionMode('folder')">本地文件夹</button>
+            </div>
+
+            <div id="acq-pdf" class="acq-panel">
+                <p class="subtle">选择一个 PDF 后会直接上传到当前库并进入后台解析。</p>
+                <button class="btn primary" onclick="document.getElementById('pdfUpload').click()">选择 PDF</button>
+            </div>
+
+            <div id="acq-doi" class="acq-panel" style="display:none;">
+                <label for="doiInput">DOI 或文献 URL</label>
+                <div class="inline-form">
+                    <input id="doiInput" class="search-input" type="text" placeholder="10.1016/j.ensm.2023.102875 或 https://arxiv.org/abs/...">
+                    <button class="btn primary" onclick="downloadByDOI()">下载并收录</button>
+                </div>
+            </div>
+
+            <div id="acq-online" class="acq-panel" style="display:none;">
+                <label for="onlineSearchQuery">在线检索关键词</label>
+                <div class="inline-form">
+                    <input id="onlineSearchQuery" class="search-input" type="text" placeholder="输入标题、关键词、作者或 DOI">
+                    <input id="onlineSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="单次最多检索 100 篇">
+                    <button class="btn primary" onclick="searchOnline()">检索</button>
+                </div>
+            </div>
+
+            <div id="acq-ai" class="acq-panel" style="display:none;">
+                <label for="aiSearchQuery">AI 文献检索提示词</label>
+                <div class="inline-form">
+                    <input id="aiSearchQuery" class="search-input" type="text" placeholder="例如：lithium sulfur battery CeO2 catalyst mechanism">
+                    <input id="aiSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="单次最多检索 100 篇">
+                    <input id="aiWorkflowMaxDownloads" class="small-input" type="number" value="100" min="1" max="100" title="单次最多收录 100 篇">
+                    <button class="btn primary" onclick="runAISearch()">AI 搜索</button>
+                    <button class="btn ghost" onclick="runAIWorkflow()">搜索并收录</button>
+                </div>
+            </div>
+
+            <div id="acq-folder" class="acq-panel" style="display:none;">
+                <div class="section-card no-margin">
+                    <h3>导入本地文件夹</h3>
+                    <div class="subtle">批量扫描本地 PDF 目前由 Ingestion Center / MCP 工具承接。这里保留清晰入口，避免文献库页面重复堆叠批量导入控件。</div>
+                    <div class="modal-actions" style="justify-content:flex-start;">
+                        <button class="btn primary" onclick="window.location.href='../ingestion/index.html'">前往 Ingestion Center</button>
+                        <button class="btn ghost" onclick="showFolderImportGuide()">查看 MCP 指南</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="acquisitionResult" class="acquisition-result"></div>
         </div>
     </div>
 

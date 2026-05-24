@@ -1,11 +1,13 @@
 function renderPaperList() {
     const container = $("paperList");
     $("paperListMeta").textContent = state.papers.length + " 篇";
-    $("globalSummary").textContent = "当前页 " + state.papers.length + " 篇文献，右侧支持内部 AI、外部 AI 审核与 AI 自动搜索。";
     if (!state.papers.length) {
-        container.innerHTML = '<div class="workspace-empty">当前条件下没有文献。</div>';
-        if (state.currentTab === "detail") showEmptyWorkspace();
-        else renderTabLanding(state.currentTab);
+        container.innerHTML = '<div class="list-empty">当前条件下没有文献</div>';
+        if (state.currentLibraryTotal === 0) {
+            renderLibraryEmptyState();
+        } else {
+            renderNoSelectionState();
+        }
         return;
     }
     container.innerHTML = state.papers.map(function(paper) {
@@ -45,21 +47,26 @@ async function fetchPapers() {
         renderPaperListSkeleton();
         const papers = await fetchJSON(API_BASE + "?" + getFilters().toString());
         state.papers = papers || [];
-        if (!state.selectedPaperId || !state.papers.some(function(item) { return item.id === state.selectedPaperId; })) {
-            state.selectedPaperId = state.papers[0] ? state.papers[0].id : null;
+        if (state.papers.length) {
+            state.currentLibraryTotal = Math.max(state.currentLibraryTotal || 0, state.currentOffset + state.papers.length);
         }
-        if (!state.selectedPaperId && !state.hasExplicitTab && state.currentTab === "detail") {
-            state.currentTab = "ai-search";
+        if (!state.selectedPaperId || !state.papers.some(function(item) { return item.id === state.selectedPaperId; })) {
+            state.selectedPaperId = null;
+            state.selectedPaper = null;
         }
         renderPaperList();
         updatePagination();
         if (state.selectedPaperId) {
             await loadPaperDetail(state.selectedPaperId);
         } else {
-            switchTab(state.currentTab);
+            if (state.currentLibraryTotal === 0 && !state.papers.length) {
+                renderLibraryEmptyState();
+            } else {
+                renderNoSelectionState();
+            }
         }
     } catch (error) {
-        $("paperList").innerHTML = '<div class="workspace-empty">列表加载失败：' + esc(error.message) + "</div>";
+        $("paperList").innerHTML = '<div class="list-empty">列表加载失败：' + esc(error.message) + "</div>";
         showToast("列表加载失败：" + error.message, "error");
     }
 }
