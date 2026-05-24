@@ -35,3 +35,7 @@ storage/docling_cache/
 *.pdf
 *.docling.json
 *.tei.xml
+
+# Frontend test artifacts
+frontend/test-results/
+frontend/playwright-report/
