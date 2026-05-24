@@ -1,0 +1,12 @@
+/* ============================================================
+   fonts.css — Google Fonts @import for all 6 themes
+   ============================================================
+   Material:     Inter, Roboto, Fira Code
+   Expressive:   IBM Plex Mono
+   Gradient:     Montserrat, Space Grotesk, JetBrains Mono
+   Impeccable:   Chakra Petch, JetBrains Mono
+   Neumorphism:  Space Mono, JetBrains Mono
+   Refined:      Playfair Display, JetBrains Mono
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Fira+Code:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Montserrat:wght@400;500;600&family=Playfair+Display:wght@400;500;700&family=Roboto:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap');

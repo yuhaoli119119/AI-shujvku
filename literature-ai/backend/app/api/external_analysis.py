@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.config import Settings, get_settings
+from app.db.session import get_db_session
+from app.schemas.api import InternalAIParseRequest, InternalAIParseResponse
+from app.schemas.external_analysis import (
+    ExternalAnalysisCandidateResponse,
+    ExternalAnalysisImportRequest,
+    ExternalAnalysisMaterializeRequest,
+    ExternalAnalysisRunResponse,
+)
+from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.external_analysis_service import ExternalAnalysisNormalizedModel
+from app.services.external_analysis_service import (
+    _truncate,
+    build_internal_ai_review_blob as _build_internal_ai_review_blob,
+    sanitize_internal_corrections as _sanitize_internal_corrections,
+)
+from app.services.paper_query import PaperQueryService
+from app.services.review_service import ReviewService
+
+router = APIRouter()
+
+
+def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRunResponse:
+    base = ExternalAnalysisRunResponse.model_validate(run).model_dump(exclude={"candidates"})
+    candidates = service.list_candidates(run.id)
+    return ExternalAnalysisRunResponse(
+        **base,
+        candidates=[ExternalAnalysisCandidateResponse.model_validate(item) for item in candidates],
+    )
+
+
+@router.post("/import", response_model=ExternalAnalysisRunResponse)
+async def import_external_analysis(
+    payload: ExternalAnalysisImportRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> ExternalAnalysisRunResponse:
+    try:
+        service = ExternalAnalysisService(session=session, settings=settings)
+        run = service.import_run(
+            paper_id=payload.paper_id,
+            source=payload.source,
+            source_label=payload.source_label,
+            raw_text=payload.raw_text,
+            raw_payload=payload.raw_payload,
+        )
+        session.commit()
+        return _serialize_run(service, run)
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/runs", response_model=list[ExternalAnalysisRunResponse])
+async def list_external_analysis_runs(
+    paper_id: UUID | None = None,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> list[ExternalAnalysisRunResponse]:
+    service = ExternalAnalysisService(session=session, settings=settings)
+    runs = service.list_runs(paper_id=paper_id)
+    return [_serialize_run(service, run) for run in runs]
+
+
+@router.get("/runs/{run_id}", response_model=ExternalAnalysisRunResponse)
+async def get_external_analysis_run(
+    run_id: UUID,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> ExternalAnalysisRunResponse:
+    service = ExternalAnalysisService(session=session, settings=settings)
+    try:
+        run = service.get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _serialize_run(service, run)
+
+
+@router.post("/runs/{run_id}/materialize")
+async def materialize_external_analysis_run(
+    run_id: UUID,
+    payload: ExternalAnalysisMaterializeRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    service = ExternalAnalysisService(session=session, settings=settings)
+    try:
+        result = service.materialize_candidates(
+            run_id=run_id,
+            candidate_ids=payload.candidate_ids,
+            created_by=payload.created_by,
+        )
+        session.commit()
+        return {
+            "run_id": str(run_id),
+            "created_notes": result.created_notes,
+            "created_corrections": result.created_corrections,
+            "created_relationships": result.created_relationships,
+            "skipped_candidates": result.skipped_candidates,
+        }
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/papers/{paper_id}/internal-parse", response_model=InternalAIParseResponse)
+async def internal_ai_parse_paper(
+    paper_id: UUID,
+    payload: InternalAIParseRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> InternalAIParseResponse:
+    service = ExternalAnalysisService(session=session, settings=settings)
+    detail = PaperQueryService(session).get_paper_detail(paper_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if not service.llm.is_configured():
+        raise HTTPException(status_code=400, detail="Internal AI is not configured")
+
+    review_blob = _build_internal_ai_review_blob(detail)
+    system_prompt = (
+        "You are an internal scientific curation agent for a literature database. "
+        "Review the provided parsed-paper bundle and return only high-confidence structured output. "
+        "Use review_notes for useful summaries or caveats, correction_proposals for concrete field fixes, "
+        "and supporting_papers only when an existing linked paper can be inferred from DOI/title clues already present. "
+        "Do not invent evidence, identifiers, values, or target paths. Prefer leaving arrays empty over guessing. "
+        "For top-level paper fields, only use these correction field_name values: doi, title, year, journal, authors, abstract, oa_status, license. "
+        "For those top-level fields, set target_path exactly equal to field_name. "
+        "For structured corrections, only use field_name values from dft_results, mechanism_claims, electrochemical_performance, catalyst_samples, dft_settings, writing_cards, "
+        "and set target_path strictly as <collection>:<row_id>:<field> using row ids that already exist in the provided bundle."
+    )
+    user_prompt = (
+        "Analyze this parsed literature record and extraction output. "
+        "Identify any clear normalization notes, corrections, and supporting-paper relationships.\n\n"
+        f"{review_blob}"
+    )
+
+    normalized = service.llm.structured_extract(system_prompt, user_prompt, ExternalAnalysisNormalizedModel)
+    if normalized is None:
+        raise HTTPException(status_code=502, detail="Internal AI failed to produce structured output")
+    normalized = _sanitize_internal_corrections(normalized)
+
+    run = service.import_run(
+        paper_id=paper_id,
+        source="internal_ai",
+        source_label=payload.source_label,
+        raw_text=None,
+        raw_payload=normalized.model_dump(mode="json"),
+    )
+    created_notes = 0
+    created_corrections = 0
+    created_relationships = 0
+    skipped_candidates = 0
+    auto_applied_corrections = 0
+
+    if payload.auto_apply:
+        materialized = service.materialize_candidates(
+            run_id=run.id,
+            candidate_ids=None,
+            created_by="internal_ai",
+        )
+        created_notes = materialized.created_notes
+        created_corrections = materialized.created_corrections
+        created_relationships = materialized.created_relationships
+        skipped_candidates = materialized.skipped_candidates
+        if materialized.created_corrections:
+            reviewer = ReviewService(session)
+            correction_candidate_ids = [
+                item.materialized_target_id
+                for item in service.list_candidates(run.id)
+                if item.materialized_target_type == "paper_correction" and item.materialized_target_id
+            ]
+            for correction_id in correction_candidate_ids:
+                try:
+                    reviewer.approve_correction(UUID(str(correction_id)), reviewer="internal_ai")
+                    auto_applied_corrections += 1
+                except ValueError:
+                    continue
+
+    session.commit()
+    return InternalAIParseResponse(
+        run_id=run.id,
+        mapping_status=run.mapping_status,
+        created_notes=created_notes,
+        created_corrections=created_corrections,
+        created_relationships=created_relationships,
+        auto_applied_corrections=auto_applied_corrections,
+        skipped_candidates=skipped_candidates,
+        llm_status="ok",
+        llm_error=None,
+    )

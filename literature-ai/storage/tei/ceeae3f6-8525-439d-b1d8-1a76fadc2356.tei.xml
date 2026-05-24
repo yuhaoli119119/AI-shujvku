@@ -1,0 +1,2407 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Bilayer artificial interface engineering enables dendrite-free and low-temperature stable lithium metal batteries</title>
+				<funder ref="#_X6YeA4t">
+					<orgName type="full">National Key Research and Development Program of China</orgName>
+				</funder>
+				<funder ref="#_H5ZgVqG #_q9J287Q">
+					<orgName type="full">Leading Edge Technology of Jiangsu Province</orgName>
+				</funder>
+				<funder>
+					<orgName type="full">Priority Academic Program Development of Jiangsu Higher Education Institutions</orgName>
+					<orgName type="abbreviated">PAPD</orgName>
+				</funder>
+			</titleStmt>
+			<publicationStmt>
+				<publisher>Elsevier BV</publisher>
+				<availability  status="unknown">
+					<licence/>
+				</availability>
+				<date type="published" when="2025-12">2025-12</date>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<author>
+							<persName><forename type="first">Yahui</forename><forename type="middle">H</forename><surname>Li</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Kai</forename><surname>Yang</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Zengjie</forename><forename type="middle">J</forename><surname>Fan</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Chong</forename><surname>Xu</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><roleName>Prof</roleName><forename type="first">Zhemin</forename><forename type="middle">M H</forename><surname>Li</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Hui</forename><surname>Dou</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author role="corresp">
+							<persName><forename type="first">Xiaogang</forename><surname>Zhang</surname></persName>
+							<email>azhangxg@nuaa.edu.cn</email>
+							<idno type="ORCID">0000-0003-4464-672X</idno>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+							<affiliation key="aff0">
+								<note type="raw_affiliation">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies , College of Materials Science and Technology , Nanjing University of Aeronautics and Astronautics , Nanjing , 210016 , China</note>
+								<orgName type="department">College of Materials Science and Technology</orgName>
+								<orgName type="laboratory">Jiangsu Key Laboratory of Electrochemical Energy Storage Technologies</orgName>
+								<orgName type="institution" key="instit1">Bilayer Artificial Interface Engineering Enables Dendrite-Free and Low-Temperature Stable Lithium Metal Batteries</orgName>
+								<orgName type="institution" key="instit2">Nanjing University of Aeronautics and Astronautics</orgName>
+								<address>
+									<postCode>210016</postCode>
+									<settlement>Nanjing</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<title level="a" type="main">Bilayer artificial interface engineering enables dendrite-free and low-temperature stable lithium metal batteries</title>
+					</analytic>
+					<monogr>
+						<title level="j" type="main">Energy Storage Materials</title>
+						<title level="j" type="abbrev">Energy Storage Materials</title>
+						<idno type="ISSN">2405-8297</idno>
+						<imprint>
+							<publisher>Elsevier BV</publisher>
+							<biblScope unit="volume">83</biblScope>
+							<biblScope unit="page">104664</biblScope>
+							<date type="published" when="2025-12" />
+						</imprint>
+					</monogr>
+					<idno type="MD5">42D8E9C534DADBE5D4B8B0E5E6B35E7B</idno>
+					<idno type="DOI">10.1016/j.ensm.2025.104664</idno>
+					<note type="submission">Received date: 8 July 2025 Revised date: 28 September 2025 Accepted date: 6 October 2025</note>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.1" ident="GROBID" when="2026-05-21T22:45+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<textClass>
+				<keywords>
+					<term>Energy Storage Materials Lithium Metal Batteries</term>
+					<term>3D current collector</term>
+					<term>Bilayer artificial interface</term>
+					<term>Dendrite-free anode</term>
+					<term>Low-temperature</term>
+				</keywords>
+			</textClass>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>This is a PDF file of an article that has undergone enhancements after acceptance, such as the addition of a cover page and metadata, and formatting for readability, but it is not yet the definitive version of record. This version will undergo additional copyediting, typesetting and review before it is published in its final form, but we are providing this version to give early visibility of the article. Please note that, during the production process, errors may be discovered which could affect the content, and all legal disclaimers that apply to the journal pertain.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<facsimile>
+		<surface n="1" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="2" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="3" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="4" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="5" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="6" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="7" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="8" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="9" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="10" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="11" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="12" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="13" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="14" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="15" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="16" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="17" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="18" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="19" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="20" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="21" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="22" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="23" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="24" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="25" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="26" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="27" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="28" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="29" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="30" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="31" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="32" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+		<surface n="33" ulx="0.0" uly="0.0" lrx="595.0" lry="842.0"/>
+	</facsimile>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="1.">Introduction</head><p>Lithium metal batteries (LMBs) have emerged as a transformative energy storage technology, leveraging the unparalleled theoretical capacity (3860 mAh g -1 ) and ultralow electrochemical potential (-3.04 V vs. SHE) of lithium metal anodes (LMA) <ref type="bibr" target="#b0">[1]</ref><ref type="bibr" target="#b1">[2]</ref><ref type="bibr" target="#b2">[3]</ref>.</p><p>However, the uncontrollable growth of Li dendrites and drastic volume fluctuations during cycling remain formidable barriers to practical applications. These issues lead to rapid capacity decay, electrolyte depletion, and catastrophic safety hazards.</p><p>Achieving dendrite-free Li deposition is essential for ensuring the safe operation and long-term cycling stability of LMBs. The root cause of the unlimited volume expansion lies in the host-free planar deposition of Li metal <ref type="bibr" target="#b3">[4,</ref><ref type="bibr" target="#b4">5]</ref>. In LMB systems, planar electrodes tend to generate sharp protrusions during the initial stages of deposition, which locally intensify Li + flux. The uneven distribution of Li + flux directly triggers the formation of Li dendrites. To address this problem, the rational design of Li metal hosts that provide ample accommodation space and promote uniform Li + flux distribution has emerged as a promising strategy <ref type="bibr" target="#b5">[6,</ref><ref type="bibr" target="#b6">7]</ref>. Three-dimensional (3D) current collectors with high surface area not only reduce local current density to homogenize Li deposition but also mitigate volume expansion induced by Li metal. To date, commonly reported 3D current collectors, including metallic foams <ref type="bibr" target="#b7">[8]</ref><ref type="bibr" target="#b8">[9]</ref><ref type="bibr" target="#b9">[10]</ref>, carbon nanotubes <ref type="bibr" target="#b10">[11]</ref><ref type="bibr" target="#b11">[12]</ref><ref type="bibr" target="#b12">[13]</ref>, carbon fibers <ref type="bibr" target="#b13">[14]</ref><ref type="bibr" target="#b14">[15]</ref><ref type="bibr" target="#b15">[16]</ref>, and 3D MXene-based architectures <ref type="bibr" target="#b16">[17]</ref><ref type="bibr" target="#b17">[18]</ref><ref type="bibr" target="#b18">[19]</ref>, have been extensively explored to promote uniform Li deposition.</p><p>Carbon-based hosts are regarded as highly promising candidates for dendrite-free LMA due to their chemical stability, excellent electronic conductivity, and lightweight properties <ref type="bibr" target="#b19">[20]</ref><ref type="bibr" target="#b20">[21]</ref><ref type="bibr" target="#b21">[22]</ref>. For example, Cui et al. reported a layered Li-rGO electrode fabricated by infusing molten Li into the nanoscale gaps of lithiophilic reduced graphene oxide (rGO) <ref type="bibr" target="#b22">[23]</ref>. The periodic stacking of nanosized Li and rGO layers provides a robust scaffold for Li plating and stripping, effectively mitigating volume fluctuations during cycling. Similar to this strategy, previous studies have typically employed molten Li infusion to prepare composite Li anodes, which inevitably leads to safety concerns, interfacial inhomogeneity, and imprecise control of the Li content <ref type="bibr" target="#b23">[24]</ref><ref type="bibr" target="#b24">[25]</ref><ref type="bibr" target="#b25">[26]</ref>. In addition, most carbon materials exhibit relatively weak interactions with Li, resulting in high nucleation overpotentials <ref type="bibr" target="#b26">[27,</ref><ref type="bibr" target="#b27">28]</ref>. As a result, Li tends to deposit laterally along the top surface rather than penetrating vertically into the porous structure. This inefficient space utilization exacerbates dendrite formation and significantly limits the advantages of 3D frameworks.</p><p>Recent studies have demonstrated that rationally designing the conductivity and lithiophilicity gradients of 3D current collectors can effectively address the challenge of Li growth concentrated at the top surface <ref type="bibr" target="#b28">[29,</ref><ref type="bibr" target="#b29">30]</ref>. For instance, <ref type="bibr">Wu et al. applied</ref> ZnO and Au coatings on the top and bottom surfaces of copper foam, respectively <ref type="bibr" target="#b7">[8]</ref>.</p><p>This hierarchical structure enabled a gradual enhancement of lithiophilicity and conductivity from top to bottom, providing sufficient driving force for the downward migration of Li⁺. Consequently, Li was synchronously deposited throughout the entire 3D space. In addition, Oyakhire and co-workers systematically investigated Cu current collectors modified with nanofilms of different resistivities to explore the correlation between substrate electrical properties and Li deposition behavior <ref type="bibr" target="#b30">[31]</ref>. They found that high-resistivity surfaces favored the formation of larger Li nuclei, which effectively reduced the specific surface area of the deposits, thereby mitigating electrolyte consumption and suppressing subsequent dead Li accumulation. However, rationally designing artificial coatings to induce bottom-up Li deposition within 3D hosts remains a significant challenge.</p><p>Herein, we propose a bilayer artificial interface engineering strategy by sequentially depositing ZnO and Li2O layers via ALD on carbon paper (CP), denoted as CP/ZnO/Li2O (The optimized sample is referred to as CP/Z6L1), and further fabricating composite Li anodes by cold-pressing with 50 µm Li foil. The underlying ZnO-derived LiZn/Li2O domains act as mixed ionic/electronic conductors, which provide lowenergy nucleation sites and facilitate the rapid lateral electron transport, guiding the growth of Li metal along the Li (110) crystal plane parallel to the substrate <ref type="bibr" target="#b31">[32]</ref>. Moreover, Li2O functions as an electron-insulating yet ion-conductive mediator, effectively suppressing electron tunneling at the LiZn/Li2O and Li2O interface while enhancing Li + transport <ref type="bibr" target="#b32">[33,</ref><ref type="bibr" target="#b33">34]</ref>. Density functional theory (DFT) calculations confirm that the terminal oxygen groups of Li2O act as electron donors, exhibiting nucleophilic characteristics that promote the preferential reduction of TFSI -anions to form a LiFrich SEI layer <ref type="bibr" target="#b2">[3]</ref>. The constructed vertical-gradient bilayer artificial interface guides bottom-up Li growth, fully exploiting the internal voids of the 3D scaffold and suppressing dendrite formation. This synergistic design enhances the utilization efficiency of the entire 3D framework for Li deposition, thereby alleviating volume fluctuations of the anode. As a result, the optimized CP/Z6L1@Li symmetric cell demonstrates an ultralong cycling life of 2900 hours with an overpotential below 10 mV. Even at a high current density of 8 mA cm -2 , the overpotential remains as low as 40 mV, significantly lower than the 78 mV observed for CP. Additionally, when paired with a high-loading LiCoO2 cathode, the full cell maintains a capacity retention of 83.1%</p><p>after 200 cycles at -20 °C, maintaining stable cycling for nearly 4000 hours. Moreover, the Li@CP/Z6L1||LFP full cell exhibited excellent cycling stability, retaining 96.4% of its capacity after 500 cycles at 1 C, corresponding to an average capacity loss of only 0.0072% per cycle.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head n="2.">Results and discussion</head><p>During the ALD process, diethylzinc and H2O precursors were sequentially introduced onto the carbon paper (CP) surface to deposit a ZnO layer, followed by Li tert-butoxide treatment to form an overlying Li2O coating (Fig. <ref type="figure" target="#fig_0">1a</ref>). The synergistic lithiophilic nature of ZnO and Li2O collectively facilitates uniform Li nucleation and deposition. To quantitatively assess lithiophilicity, density functional theory (DFT) calculations were performed to determine the adsorption energies of Li atoms on various surfaces. The calculated adsorption energies for Li (110), ZnO (101), and Li2O (111) surfaces were -3.731, -5.364, and -4.023 eV, respectively, in comparison to -1.400 eV on pristine carbon paper (Fig. <ref type="figure" target="#fig_0">1b</ref>). The more negative adsorption energies on ZnO and Li2O indicate significantly enhanced Li affinity, suggesting preferential Li + nucleation on these modified surfaces. Furthermore, differential charge density analysis revealed substantial electron accumulation at the Li/ZnO and Li/Li2O interfaces (Fig. <ref type="figure" target="#fig_0">S1</ref>), indicating strong interfacial electronic interactions that contribute to the stabilization of Li deposition. To systematically tailor the coating composition and structure, the thickness of the Li2O layer was precisely adjusted by controlling the number of atomic layer deposition (ALD) cycles, yielding a series of 3D current collectors designated as CP/Z6, CP/Z6L0.5, CP/Z6L1, and CP/Z6L2. Scanning electron microscopy (SEM) revealed conformal coating coverage on carbon fibers, with surface morphology evolving from nanoparticles to nanosheets as the Li2O thickness increased (Fig. <ref type="figure" target="#fig_1">2a,</ref><ref type="figure">d</ref> and Fig. <ref type="figure" target="#fig_1">S2</ref>).</p><p>Digital images revealed a consistent color transition from gray-black to blue, confirming homogeneous surface modification. Energy-dispersive X-ray spectroscopy (EDS) mapping confirmed uniform Zn and Li distribution across both the surface and cross-sectional regions of the carbon paper (Fig. <ref type="figure" target="#fig_1">2b,</ref><ref type="figure">c</ref> and Fig. <ref type="figure" target="#fig_6">S3</ref>). X-ray diffraction (XRD) patterns exhibited three distinct peaks in the 30-40° range (Fig. <ref type="figure" target="#fig_1">2e</ref>), indexed to the hexagonal ZnO phase (JCPDS No. 36-1451), while the absence of Li2O diffraction peaks suggests its amorphous or ultrathin character. X-ray photoelectron spectroscopy (XPS) analysis further confirmed the coating composition (Fig. <ref type="figure" target="#fig_1">2g</ref>, h and Fig. <ref type="figure">S4</ref>). The Zn 2p spectrum showed peaks at 1044.08 eV and 1021.03 eV, corresponding to Zn 2p 1/2   and Zn 2p 3/2 , respectively, with a 23.1 eV energy separation characteristic of Zn 2+ . The O 1s spectrum was deconvoluted into two components at 530.0 eV and 531.1 eV, attributed to lattice oxygen (Zn-O/Li-O) and surface-adsorbed oxygen species, respectively. These results confirm the successful deposition of ZnO and Li2O nanoparticles on carbon fibers via ALD. Four-point probe measurements showed a slight reduction in electronic conductivity from 1.3  10 4 S m -1 for pristine CP to 1.23  10 4 S m -1 after 200 ALD cycles, highlighting the electron-insulating nature of Li2O (Fig. <ref type="figure" target="#fig_1">2f</ref>). Ionic conductivity measurements revealed that the ZnO coating slightly decreased the ionic conductivity of CP, whereas the Li2O coating significantly enhanced it (Fig. <ref type="figure" target="#fig_1">2i</ref> and Fig. <ref type="figure" target="#fig_3">S5</ref>). These results demonstrate that Li2O serves as an effective ionic conductor while maintaining electronic insulation, thereby contributing to the vertical conductivity gradient across the bilayer interface. plane and promoting dendrite-free, planar deposition parallel to the substrate <ref type="bibr" target="#b31">[32]</ref>.</p><p>Although Li2O forms during ZnO reduction, no Li2O diffraction peaks were observed, indicating that the formed phase is amorphous or low cr ystallinity <ref type="bibr" target="#b23">[24]</ref>.</p><p>To predict the synergistic effect of the ZnO/Li2O bilayer, COMSOL simulations were performed to compare Li deposition behavior on CP/Z6 and CP/Z6L1 electrodes (Fig. <ref type="figure" target="#fig_6">3b,</ref><ref type="figure">c</ref>). In the CP/Z6 system, Li nucleation and growth were strongly localized, with lithiophilic sites driving protrusion formation and producing pronounced heterogeneity in the Li⁺ concentration field, including depletion at protrusion tips and accumulation in recessed regions. Such gradients are expected to aggravate morphological instability at the electrode/electrolyte interface. In contrast, the ZnO/Li2O bilayer markedly homogenized the Li⁺ flux: the Li2O top layer facilitated uniform redistribution of Li⁺, while the ZnO-derived LiZn/Li2O domains at the bottom provided stable sites for ionelectron recombination. This vertically graded architecture transformed Li⁺ transport from a surface-diffusion dominated two-dimensional process to a bulk-diffusion dominated three-dimensional process, thereby promoting spatially uniform Li nucleation and the subsequent growth of a dense and smooth Li layer.</p><p>Li deposition morphology and thickness evolution under ZnO/Li2O coatings were systematically studied by plating Li onto 3D frameworks at different areal capacities (Fig. <ref type="figure" target="#fig_6">3d</ref>-g and Fig. <ref type="figure" target="#fig_4">S6</ref>). At 3 mAh cm -2 , bare Li formed coral-like dendrites, while Li on CP accumulated unevenly on the surface. In contrast, CP/Z6L1 enabled ultrathin, uniform Li layers with visible carbon fibers, indicating favorable nucleation. Even at 10 mAh cm -2 , CP/Z6L1 maintained dendrite-free, compact Li, minimizing electrolyte contact and parasitic reactions, whereas Li on CP formed loose dendrites and isolated islands, causing inactive Li accumulation. Cross-sectional SEM showed that depositing 10 mAh cm -2 of Li on a planar Li substrate increased the thickness by ~140 µm, which is already comparable to the compressed CP thickness. Moreover, Li preferentially deposited on the top surface of lithiophobic CP, increasing the thickness from ~170 µm to ~230 µm. For lithiophilic CP/Z6L1, thickness remained almost unchanged, demonstrating that the ZnO/Li2O coating guided bottom-up deposition and efficient utilization of the 3D scaffold, reducing volume fluctuations during cycling. Nucleationsize distributions were analyzed at a fixed current density of 0.5 mA cm -2 with a deposition capacity of 5 mAh cm -2 for Li, bare CP, and CP/Z6L1 electrodes (Fig. <ref type="figure">S8</ref>).</p><p>The SEM images and statistical histograms show that Li nuclei formed on CP/Z6L1 are significantly larger than those on Li and bare CP. This is attributed to the higher interfacial resistance of the Li2O layer, which reduces the density of nucleation sites and promotes radial diffusion. The formation of larger nuclei decreases the effective surface area, thereby limiting electrolyte consumption and mitigating dead-Li accumulation.  -2 , (e) 5 mAh cm -2 , (f) 10 mAh cm -2 at 0.5 mA cm -2 . SEM cross-section images of CP/Z6L1 anodes after Li deposition with (g) 10 mAh cm -2 at 0.5 mA cm -2 .</p><p>The reversibility of Li plating/stripping in 3D current collectors was evaluated via half-cell Coulombic efficiency (CE) and average CE (ACE), with the latter calculated using the Aurbach method to optimize Li2O coating thickness. CP/Z6L1 exhibited the highest ACE of 98.0% and ultralow nucleation overpotential of 14 mV, significantly outperforming bare CP (45 mV), indicating enhanced lithiophilicity and uniform Li nucleation (Fig. <ref type="figure">S9,</ref><ref type="figure" target="#fig_0">10</ref>). Li@CP/Z6L1 symmetric cells maintained low overpotentials (~10 mV) over extended cycling exceeding 2400 h at 0.5 mA cm -2 /0.5 mAh cm -2 , whereas Li and Li@CP cells failed after 310 h and 1000 h due to severe voltage fluctuations (Fig. <ref type="figure">4a</ref>). The superior rate performance of Li@CP/Z6L1 was further demonstrated under 0.5-8 mA cm -2 , with overpotentials increasing moderately from ~10 mV to 40 mV, compared to 75 mV for Li@CP, reflecting a highly ion-conductive SEI and efficient Li⁺ transport (Fig. <ref type="figure">4b,</ref><ref type="figure">c</ref>). Electrochemical impedance spectroscopy confirmed consistently lower SEI (RSEI) and charge-transfer (Rct) resistances for Li@CP/Z6L1, indicating the formation of a thinner, more stable interphase during cycling (Fig. <ref type="figure" target="#fig_0">S11</ref>).</p><p>Low-temperature electrochemical performance of Li deposition was evaluated using half cells and symmetric cells. At -20 °C, CP/Z6L1 electrodes exhibited higher CE and superior cycling stability compared to bare CP. Specifically, CP electrodes failed after ~90 cycles, whereas CP/Z6L1 maintained stable cycling for up to 165 cycles (Fig. <ref type="figure">4d</ref>).</p><p>The Li@CP/Z6L1 electrodes also showed markedly lower overpotentials than Li and Li@CP electrodes, indicating enhanced interfacial kinetics (Fig. <ref type="figure">4e</ref>). Control experiments with single-layer ZnO (CP/Z6) and Li2O (CP/L1) coatings revealed that the bilayer CP/Z6L1 consistently achieved lower polarization and more stable cycling under both room temperature and -20 °C conditions (Fig. <ref type="figure">4f</ref> and Fig. <ref type="figure" target="#fig_1">S12</ref>), demonstrating the synergistic effect of the ZnO/Li2O bilayer in promoting uniform Li deposition and interfacial stability. These electrochemical results are consistent with the predictions of COMSOL simulations.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Fig. 4. (a)</head><p>The voltage profiles of Li, Li@CP, and Li@CP/Z6L1 symmetrical cells at a current density and areal capacity of 0.5 mA cm -2 and 0.5 mAh cm -2 . The insets show the high-resolution voltage profiles at specific times. (b) Rate performances at the current densities from 0.5 to 8 mA cm -2 with 1 mAh cm -2 . (c) Variation of the Li plating/ stripping overpotential on various current densities using Li, Li@CP, and Li@CP/Z6L1. (d) CEs of Li plating/stripping using bare CP, and CP/Z6L1 at a current density and areal capacity of 0.5 mA cm -2 and 0.5 mAh cm -2 at -20 °C. (e, f) The voltage profiles of symmetrical cells at a current density and areal capacity of 0.1 mA cm -2 and 0.1mAh cm -2 at -20 °C.</p><p>To investigate the evolution of SEI composition, XPS depth profiling was performed on cycled electrodes (Fig. <ref type="figure" target="#fig_5">S14-S17</ref>). As shown in Fig. <ref type="figure" target="#fig_3">5a,</ref><ref type="figure">d</ref>, the C 1s spectra consisted of C-C (284.8 eV), C-O (286.4 eV), C=O (288.5 eV), Li2CO3 (290.2 eV), C-F2 (290.9 eV), and C-F (292.9 eV), originating from electrolyte decomposition. After 60 s of Ar + sputtering, carbonaceous species were significantly reduced on the CP/Z6L1 surface, with residual CO3 2-peaks remaining, whereas stronger organic signals persisted on CP/Z6 and bare Li. High-resolution F 1s spectra (Fig. <ref type="figure" target="#fig_3">5b,</ref><ref type="figure">e</ref>) revealed the coexistence of organic C-F (688.8 eV) and inorganic LiF (685.2 eV). A pronounced LiF signal was observed on CP/Z6L1, which further increased after sputtering, while C-F components disappeared. In contrast, CP/Z6 contained less LiF and retained noticeable C-F signals.</p><p>Quantitative analysis confirmed that the CP/Z6L1 electrode contained the highest fraction of inorganic species, dominated by LiF and Li2CO3, whereas CP/Z6 and bare Li exhibited higher proportions of organic species (Fig. <ref type="figure" target="#fig_3">5c,</ref><ref type="figure">f</ref>). These results indicate that the bilayer ZnO/Li2O interface promotes more complete decomposition of TFSI⁻ and facilitates the formation of a LiF-rich SEI, consistent with improved interfacial stability and Li⁺ transport. In addition, SEM observations after 30 plating/stripping cycles at 5 mAh cm⁻² revealed that bare CP was fully covered by a dense Li layer with filament-like deposits and thick residual Li after stripping. In contrast, CP/Z6L1 exhibited uniform, dendrite-free deposition, with Li preferentially filling the internal scaffold and leaving minimal residual Li after stripping, thus exposing the 3D framework (Fig. <ref type="figure" target="#fig_0">S18</ref>).</p><p>In ether-based electrolytes, the low LUMO energy of LiTFSI (-1.61 eV) favors its preferential reduction and contributes to the formation of LiF-rich SEI. To further elucidate the interfacial mechanism, DFT calculations were carried out <ref type="bibr" target="#b34">[35]</ref>. The adsorption energy of TFSI⁻ on bare Li (-2.8 eV) was significantly less negative than those on Li2O (111) (-3.565 eV) and LiZn (111) (-5.185 eV), indicating stronger binding of TFSI⁻ at the coated interfaces (Fig. <ref type="figure" target="#fig_3">5g</ref>). Differential charge density analyses revealed charge transfers of 1.04 electrons from Li2O to TFSI⁻ (Fig. <ref type="figure" target="#fig_3">5h</ref>), consistent with electrostatic potential mapping that identified terminal O-Li groups in Li2O as electronrich sites with strong nucleophilicity (Fig. <ref type="figure" target="#fig_3">5i</ref>). These regions readily interact with the positively polarized S=O and C-F bonds in TFSI⁻, thereby promoting its stepwise decomposition into LiF <ref type="bibr" target="#b2">[3,</ref><ref type="bibr" target="#b35">36]</ref>. In this dual-layer artificial interface, the Li2O top layer acts as an ionic conductor and electronic insulator, blocking electron penetration while permitting Li⁺ transport, whereas the underlying LiZn layer provides mixed ionic/electronic conductivity that facilitates Li⁺/electron recombination (Fig. <ref type="figure" target="#fig_3">5j</ref>). This vertical conductivity gradient not only guides bottom-up Li deposition and enables uniform, dendrite-free growth, but also promotes selective decomposition of TFSI⁻ into LiF, as further supported by XPS analysis. In-situ electrochemical impedance spectroscopy (EIS), combined with distribution of relaxation times (DRT) analysis, was utilized to track the dynamic evolution of Li@CP/Z6L1||LCO full cells during the initial charge/discharge cycles (Fig. <ref type="figure" target="#fig_4">6a,</ref> and<ref type="figure">d</ref>).</p><p>DRT deconvolution resolved five characteristic relaxation times (τ1, τ2, τ3, τ4, and τ5,) corresponding to ohmic resistance (Rb), ion transport through anode and cathode interfaces resistances (RSEI and RCEI), anode charge transfer resistance (Rct-A), cathode charge transfer resistance (Rct-C), and diffusion resistance (RD). The impedance values presented in Fig. <ref type="figure" target="#fig_4">6c</ref> and 6f were obtained by integrating the areas under the DRT curves shown in Fig. <ref type="figure" target="#fig_4">6b</ref> and<ref type="figure" target="#fig_4">6e</ref>. Compared to the Li||LCO, both Li@CP||LCO and Li@CP/Z6L1||LCO exhibited significantly lower impedance values across all frequency regions. Impedance integration analysis (Fig. <ref type="figure" target="#fig_0">S19</ref> and<ref type="figure" target="#fig_1">S20</ref>) revealed negligible changes in Rb and RSEI with varying states of charge (SOC), confirming the exceptional stability of the SEI layer derived from the Li@CP/Z6L1 interface. The fast ion-conductive SEI facilitates uniform Li nucleation across the entire 3D scaffold surface. The charge transfer process at the anode interface is the rate-limiting step of the entire electrochemical reaction. Notably, as Li deposition proceeded during charging, the intensity of the Rct-A decreased, and two distinct semicircles progressively merged into a single peak. This indicates the completion of the electrochemical reaction and the successful construction of the 3D Licarbon composite anode. During discharge, the intensity and evolution trend of the Rct-A in the Li@CP/Z6L1 exhibit a reversible behavior compared to that during charging, indicating excellent reversibility of the Li plating/stripping process at the Li@CP/Z6L1 anode. In contrast, a sharp impedance increase was readily apparent in the bare Li cell, which can be attributed to the accumulation of electrically isolated dead Li, ultimately resulting in interfacial contact loss. These findings highlight the essential role of the lithiophilic artificial interface in enhancing charge transfer kinetics and modulating SEI behavior.</p><p>The reduced activation energy for charge transfer further corroborates this conclusion, reflecting faster reaction kinetics at the electrode (Fig. <ref type="figure" target="#fig_4">6g</ref> and Fig. <ref type="figure" target="#fig_1">S21</ref>). Specifically, the activation energy for Li⁺ transport through the SEI on the Li@CP/Z6L1 electrode (6.32 kJ•mol -1 ) is substantially lower than that of bare Li (12.21 kJ•mol -1 ) and Li@CP (14.50 kJ•mol -1 ) (Fig. <ref type="figure" target="#fig_4">6h</ref>), aligning with the presence of a LiF-rich, ionically conductive SEI layer observed in the XPS analysis. Furthermore, Tafel analysis demonstrates a significantly enhanced exchange current density for Li@CP/Z6L1 (0.7 mA cm -2 ) compared to CP (0.44 mA cm -2 ), reinforcing the improved interfacial dynamics and superior Li deposition behavior (Fig. <ref type="figure" target="#fig_4">6i</ref>). The energy storage capability of the Li@CP/Z6L1 anode was further evaluated in full-cell configurations with both medium-loading and high-loading LCO cathodes.</p><p>Cyclic voltammetry (CV) scans during the first 10 cycles revealed that the Li@CP/Z6L1||LCO full cell exhibited a smaller redox potential difference (117 mV) and a lower charging voltage (3.98 V), indicating enhanced Li⁺ transport kinetics and more reversible redox reactions (Fig. <ref type="figure" target="#fig_5">7a</ref> and Fig. <ref type="figure" target="#fig_1">S22</ref>). When paired with a mediumloading LCO cathode (8.23 mg cm -2 ), the Li@CP/Z6L1 anode demonstrated superior cycling stability, retaining 70.1% of its initial capacity after 400 cycles, compared to only 34% for the Li||LCO (Fig. <ref type="figure" target="#fig_5">7b</ref> and Fig. <ref type="figure" target="#fig_6">S23</ref>). The Li@CP/Z6L1 anode delivered 178.3, 159.5, and 136.7 mAh g -1 at 1, 3, and 5 C, respectively, whereas the Li||LCO cell suffered severe capacity decay (83.8 mAh g -1 at 5 C) (Fig. <ref type="figure" target="#fig_5">7c</ref> and Fig. <ref type="figure" target="#fig_1">S24</ref>). The longterm cycling performance was further examined at -20 °C. The Li@CP/Z6L1||LCO full cell delivered an initial discharge capacity of 178.3 mAh g -1 and retained 83.1% of its capacity after 200 cycles (~4000 h), significantly outperforming the bare Li cell (Fig. <ref type="figure" target="#fig_5">7d</ref>, e and Fig. <ref type="figure" target="#fig_3">S25</ref>). The dQ/dV analysis (Fig. <ref type="figure" target="#fig_3">S25c</ref>) revealed a pair of redox peaks in the 4.1-4.3 V region, consistent with the oscillations observed in GCD curves, which originate from the intrinsic order-disorder phase transition of LiCoO2 near Li0.5CoO2 (x ≈ 0.5) <ref type="bibr" target="#b36">[37]</ref><ref type="bibr" target="#b37">[38]</ref><ref type="bibr" target="#b38">[39]</ref>. These features confirm that the voltage fluctuations are a manifestation of structural transitions intrinsic to LCO rather than instability of the bilayer interface. Against state-of-the-art low-temperature Li||LCO full cells, the CP/Z6L1 anode delivers superior discharge capacity and capacity retention, highlighting its competitiveness under harsh conditions (Fig. <ref type="figure" target="#fig_5">7f</ref> and<ref type="figure">Table 4</ref>). Furthermore, a Li@CP/Z6L1||LFP pouch cell successfully powered an LED even at -20 °C (Fig. <ref type="figure" target="#fig_5">7g</ref>), confirming the practical applicability of this design in lowtemperature environments.</p><p>To probe more practical conditions, full cells with higher-loading LCO cathodes (10.89 mg cm -2 , 1.94 mAh cm -2 ) were cycled at 2 C (Fig. <ref type="figure" target="#fig_5">7h</ref> and Fig. <ref type="figure" target="#fig_4">S26</ref>). Under these stringent conditions, bare Li and bare CP electrodes exhibited rapid capacity fading, while the CP/Z6 electrode showed moderate improvement. In contrast, CP/Z6L1 retained 111.6 mAh g -1 after 75 cycles (85.6% retention), underscoring its superior robustness at high loading and current density. Compared with reported Li||LCO full cells, the CP/Z6L1 electrode operates at higher areal capacities and current densities with markedly improved capacity retention, demonstrating its practical advantage (Fig. <ref type="figure" target="#fig_5">7i</ref> and Table <ref type="table">5</ref>). The versatility of the bilayer coating was further validated in Li@CP/Z6L1||LFP full cells, which delivered an initial discharge capacity of 137.5 mAh g -1 at 1 C and maintained 96.4% capacity after 500 cycles, with an average CE of 99.94% (Fig. <ref type="figure" target="#fig_5">S27</ref>). Benchmarking against recently reported Li||LFP full cells (Fig. <ref type="figure" target="#fig_1">S28</ref> and Table <ref type="table">6</ref>) demonstrates that the bilayer-coated electrodes exhibit superior cycle life and capacity retention. In addition, the superiority of the Li@CP/Z6L1||LFP full cell was also verified in carbonate-based electrolytes (Fig. <ref type="figure" target="#fig_1">S29</ref>). Overall, these results highlight the critical role of the ZnO/Li2O bilayer in stabilizing interfacial reactions and guiding bottom-up Li deposition, enabling high-rate capability, excellent durability under high-loading conditions, and outstanding low-temperature performance that surpasses state-of-the-art reports.  </p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head>Fig. 1 .</head><label>1</label><figDesc>Fig. 1. (a) Schematic illustration of the preparation process of CP/ZnO/Li2O current</figDesc><graphic coords="9,77.85,99.01,415.37,323.71" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Fig. 2 .</head><label>2</label><figDesc>Fig. 2. SEM images and digital photos (inset) of (a) CP and (d) CP/Z6L1 samples. (b)</figDesc><graphic coords="11,77.85,68.55,415.37,321.81" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Fig. 3 .</head><label>3</label><figDesc>Fig. 3. (a) First discharge-charge curves of Li||CP/Z6L1 and corresponding in situ XRD</figDesc><graphic coords="14,77.85,163.14,415.37,383.02" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head>Fig. 5 .</head><label>5</label><figDesc>Fig. 5. (a) C1s, and (b) F1s high-resolution XPS depth spectra of Li@CP/Z6 symmetric</figDesc><graphic coords="19,77.85,73.55,415.37,468.58" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Fig. 6</head><label>6</label><figDesc>Fig. 6 (a, d) Nyquist plots of Li@CP/Z6L1||LCO cells at 0.1 C during the 1st cycle of</figDesc><graphic coords="22,77.85,67.20,415.37,371.42" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head>Fig. 7 .</head><label>7</label><figDesc>Fig. 7. (a) CV curves of the first 10 cycles for Li@CP/Z6L1||LCO full cells at a</figDesc><graphic coords="25,77.85,70.35,415.37,334.56" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_6"><head>3 .</head><label>3</label><figDesc>ConclusionsIn summary, ZnO/Li2O bilayer artificial interface on 3D carbon paper forms a vertically graded artificial interface that synergistically regulates Li nucleation and growth. The underlying ZnO-derived LiZn/Li2O domains provide mixed ionicelectronic conductivity and stable nucleation sites, promoting directional Li deposition, while the high-resistance Li2O top layer reduces the nucleation site density and facilitates radial Li diffusion. The formation of larger Li nuclei decreases the effective surface area, mitigating electrolyte consumption and dead-Li accumulation. The vertical conductivity gradient of the bilayer interface acts synergistically to guide uniform bottom-up Li deposition, resulting in a dense, planar Li layer. Additionally, the Li2O layer induces complete decomposition of TFSI⁻, forming a LiF-rich SEI that stabilizes the interface and enhances Li⁺ transport. As a result, the Li@CP/Z6L1 symmetric cell achieves ultrastable cycling over 2900 h with minimal polarization. Full cells exhibit excellent performance under low-temperature and long-term cycling, with the Li@CP/Z6L1||LCO cell retaining 83.1% capacity at -20 °C after 200 cycles, and the Li@CP/Z6L1||LFP cell maintaining 96.4% capacity over 500 cycles. This scalable bilayer design provides a practical strategy for constructing functional artificial interphases and offers guidance for the development of high-performance lithium metal anodes.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="16,77.85,192.14,415.37,340.61" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0"><head></head><label></label><figDesc></figDesc><graphic coords="33,77.85,87.02,415.26,160.78" type="bitmap" /></figure>
+		</body>
+		<back>
+
+			<div type="acknowledgement">
+<div><head>Acknowledgements</head><p>This work was supported by the <rs type="funder">National Key Research and Development Program of China</rs> (<rs type="grantNumber">2022YFE0109400</rs>), <rs type="funder">Leading Edge Technology of Jiangsu Province</rs> (<rs type="grantNumber">BK20220009</rs>, <rs type="grantNumber">BK20232022</rs>), <rs type="funder">Priority Academic Program Development of Jiangsu Higher Education Institutions (PAPD)</rs>, and <rs type="institution">Center for Microscopy and Analysis at Nanjing University of Aeronautics and Astronautics</rs>.</p></div>
+			</div>
+			<listOrg type="funding">
+				<org type="funding" xml:id="_X6YeA4t">
+					<idno type="grant-number">2022YFE0109400</idno>
+				</org>
+				<org type="funding" xml:id="_H5ZgVqG">
+					<idno type="grant-number">BK20220009</idno>
+				</org>
+				<org type="funding" xml:id="_q9J287Q">
+					<idno type="grant-number">BK20232022</idno>
+				</org>
+			</listOrg>
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Experimental section</head><p>Experimental details can be found in the Supporting Information.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Conflicts of interest</head><p>The authors declare no competing conflict of interest.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Appendix A. Supplementary material</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Supplementary material to this article can be found online at…</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Declaration of interests</head><p>☒ The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<analytic>
+		<title level="a" type="main">How lithium dendrites form in liquid batteries</title>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Xiao</surname></persName>
+		</author>
+		<idno type="DOI">10.1126/science.aay8672</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Science</title>
+		<title level="j" type="abbrev">Science</title>
+		<idno type="ISSN">0036-8075</idno>
+		<idno type="ISSNe">1095-9203</idno>
+		<imprint>
+			<biblScope unit="volume">366</biblScope>
+			<biblScope unit="issue">6464</biblScope>
+			<biblScope unit="page" from="426" to="427" />
+			<date type="published" when="2019-10-25">2019</date>
+			<publisher>American Association for the Advancement of Science (AAAS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">J. Xiao. How lithium dendrites form in liquid batteries, Science, 366 (2019) 426- 427.</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">Pathways for practical high-energy long-cycling lithium metal batteries</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Bao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Cui</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">E</forename><forename type="middle">J</forename><surname>Dufek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><forename type="middle">B</forename><surname>Goodenough</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><surname>Khalifah</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Q</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">B</forename><forename type="middle">Y</forename><surname>Liaw</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">A</forename><surname>Manthiram</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><forename type="middle">S</forename><surname>Meng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">V</forename><forename type="middle">R</forename><surname>Subramanian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">M</forename><forename type="middle">F</forename><surname>Toney</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">V</forename><forename type="middle">V</forename><surname>Viswanathan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">M</forename><forename type="middle">S</forename><surname>Whittingham</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">W</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X.-Q</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J.-G</forename><surname>Zhang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Energy</title>
+		<imprint>
+			<biblScope unit="volume">4</biblScope>
+			<biblScope unit="page" from="180" to="186" />
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">J. Liu, Z. Bao, Y. Cui, E. J. Dufek, J. B. Goodenough, P. Khalifah, Q. Li, B. Y. Liaw, P. Liu, A. Manthiram, Y. S. Meng, V. R. Subramanian, M. F. Toney, V. V. Viswanathan, M. S. Whittingham, J. Xiao, W. Xu, J. Yang, X.-Q. Yang, J.-G. Zhang. Pathways for practical high-energy long-cycling lithium metal batteries, Nat. Energy, 4 (2019) 180-186.</note>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Molecular‐Layer‐Deposited Zincone Films Induce the Formation of LiF‐Rich Interphase for Lithium Metal Anodes</title>
+		<author>
+			<persName><forename type="first">Shaozhong</forename><surname>Chang</surname></persName>
+			<idno type="ORCID">0000-0002-6156-530X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jiabin</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zihan</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lin</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xin</forename><surname>Jin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuejin</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chaoquan</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huigang</forename><surname>Zhang</surname></persName>
+			<idno type="ORCID">0000-0002-4722-5384</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Ai‐dong</forename><surname>Li</surname></persName>
+			<idno type="ORCID">0000-0003-3628-0393</idno>
+		</author>
+		<idno type="DOI">10.1002/aenm.202204002</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Energy Materials</title>
+		<title level="j" type="abbrev">Advanced Energy Materials</title>
+		<idno type="ISSN">1614-6832</idno>
+		<idno type="ISSNe">1614-6840</idno>
+		<imprint>
+			<biblScope unit="volume">13</biblScope>
+			<biblScope unit="issue">12</biblScope>
+			<biblScope unit="page">2204002</biblScope>
+			<date type="published" when="2023-01-31">2023</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">S. Chang, J. Fang, K. Liu, Z. Shen, L. Zhu, X. Jin, X. Zhang, C. Hu, H. Zhang, A. d. Li. Molecular-layer-deposited zincone films induce the formation of LiF-rich interphase for lithium metal anodes, Adv. Energy Mater., 13 (2023) 2204002.</note>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Dendrites in Lithium Metal Anodes: Suppression, Regulation, and Elimination</title>
+		<author>
+			<persName><forename type="first">Xinyue</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aoxuan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xingjiang</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiayan</forename><surname>Luo</surname></persName>
+			<idno type="ORCID">0000-0002-4619-6040</idno>
+		</author>
+		<idno type="DOI">10.1021/acs.accounts.9b00437</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Accounts of Chemical Research</title>
+		<title level="j" type="abbrev">Acc. Chem. Res.</title>
+		<idno type="ISSN">0001-4842</idno>
+		<idno type="ISSNe">1520-4898</idno>
+		<imprint>
+			<biblScope unit="volume">52</biblScope>
+			<biblScope unit="issue">11</biblScope>
+			<biblScope unit="page" from="3223" to="3232" />
+			<date type="published" when="2019-10-28">2019</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">X. Zhang, A. Wang, X. Liu, J. Luo. Dendrites in lithium metal anodes: suppression, regulation, and elimination, Acc. Chem. Res., 52 (2019) 3223-3232.</note>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title level="a" type="main">Reviving the lithium metal anode for high-energy batteries</title>
+		<author>
+			<persName><forename type="first">D</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Cui</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Nanotechnol</title>
+		<imprint>
+			<biblScope unit="volume">12</biblScope>
+			<biblScope unit="page" from="194" to="206" />
+			<date type="published" when="2017">2017</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">D. Lin, Y. Liu, Y. Cui. Reviving the lithium metal anode for high-energy batteries, Nat. Nanotechnol., 12 (2017) 194-206.</note>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">Regulating Lithium Nucleation at the Electrolyte/Electrode Interface in Lithium Metal Batteries</title>
+		<author>
+			<persName><forename type="first">Liang</forename><surname>Lin</surname></persName>
+			<idno type="ORCID">0000-0003-2868-9199</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Hongfei</forename><surname>Zheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qing</forename><surname>Luo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jie</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Laisen</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qingshui</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dong‐liang</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Lu</surname></persName>
+			<idno type="ORCID">0000-0003-0858-8577</idno>
+		</author>
+		<idno type="DOI">10.1002/adfm.202315201</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Functional Materials</title>
+		<title level="j" type="abbrev">Adv Funct Materials</title>
+		<idno type="ISSN">1616-301X</idno>
+		<idno type="ISSNe">1616-3028</idno>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="issue">24</biblScope>
+			<biblScope unit="page">2315201</biblScope>
+			<date type="published" when="2024-01-23">2024</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">L. Lin, H. Zheng, Q. Luo, J. Lin, L. Wang, Q. Xie, D. L. Peng, J. Lu. Regulating lithium nucleation at the electrolyte/electrode interface in lithium metal batteries, Adv. Funct. Mater., 34 (2024) 2315201.</note>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">3D-hosted lithium metal anodes</title>
+		<author>
+			<persName><forename type="first">Xin</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kai</forename><surname>Zhang</surname></persName>
+			<idno type="ORCID">0000-0001-8038-745X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiqiang</forename><surname>Zhu</surname></persName>
+			<idno type="ORCID">0000-0003-3925-1969</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zhangfa</forename><surname>Tong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiao</forename><surname>Liang</surname></persName>
+			<idno type="ORCID">0000-0003-4074-340X</idno>
+		</author>
+		<idno type="DOI">10.1039/d3cs00495c</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemical Society Reviews</title>
+		<title level="j" type="abbrev">Chem. Soc. Rev.</title>
+		<idno type="ISSN">0306-0012</idno>
+		<idno type="ISSNe">1460-4744</idno>
+		<imprint>
+			<biblScope unit="volume">53</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="9" to="24" />
+			<date type="published" when="2024">2024</date>
+			<publisher>Royal Society of Chemistry (RSC)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">X. He, K. Zhang, Z. Zhu, Z. Tong, X. Liang. 3D-hosted lithium metal anodes, Chem. Soc. Rev., 53 (2024) 9-24.</note>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Advanced hierarchical lithiophilic scaffold design to facilitate synchronous deposition for dendrite-free lithium metal batteries</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">K</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">B</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Dou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">C</forename><surname>Wu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Adv. Funct. Mater</title>
+		<imprint>
+			<biblScope unit="page">2417296</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">J. Jiang, D. Wang, H. Liu, K. Wu, X. Yang, Y. Shi, B. Zhao, Y. Jiang, X. Sun, J. Zhang, S. Dou, C. Wu. Advanced hierarchical lithiophilic scaffold design to facilitate synchronous deposition for dendrite-free lithium metal batteries, Adv. Funct. Mater., (2024) 2417296.</note>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Achieving stable lithium metal anode via constructing lithiophilicity gradient and regulating Li3N-rich SEI</title>
+		<author>
+			<persName><forename type="first">X</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Xue</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><surname>Bresser</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">M</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Passerini</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nano Energy</title>
+		<imprint>
+			<biblScope unit="volume">133</biblScope>
+			<biblScope unit="page">110439</biblScope>
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">X. Wang, Z. Chen, X. Xue, J. Wang, Y. Wang, D. Bresser, X. Liu, M. Chen, S. Passerini. Achieving stable lithium metal anode via constructing lithiophilicity gradient and regulating Li3N-rich SEI, Nano Energy, 133 (2025) 110439.</note>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">3D Porous Cu-Composites for Stable Li-Metal Battery Anodes</title>
+		<author>
+			<persName><forename type="first">Sul</forename><forename type="middle">Ki</forename><surname>Park</surname></persName>
+			<idno type="ORCID">0009-0009-1569-2517</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Davor</forename><surname>Copic</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tommy</forename><forename type="middle">Zijian</forename><surname>Zhao</surname></persName>
+			<idno type="ORCID">0000-0001-5937-9279</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Agnieszka</forename><surname>Rutkowska</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Wen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kate</forename><surname>Sanders</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ruhan</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hyun-Kyung</forename><surname>Kim</surname></persName>
+			<idno type="ORCID">0000-0002-7897-5065</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Michael</forename><surname>De Volder</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/acsnano.3c02223</idno>
+	</analytic>
+	<monogr>
+		<title level="j">ACS Nano</title>
+		<title level="j" type="abbrev">ACS Nano</title>
+		<idno type="ISSN">1936-0851</idno>
+		<idno type="ISSNe">1936-086X</idno>
+		<imprint>
+			<biblScope unit="volume">17</biblScope>
+			<biblScope unit="issue">15</biblScope>
+			<biblScope unit="page" from="14658" to="14666" />
+			<date type="published" when="2023-07-25">2023</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">S. K. Park, D. Copic, T. Z. Zhao, A. Rutkowska, B. Wen, K. Sanders, R. He, H. K. Kim, M. De Volder. 3D porous Cu-composites for stable Li-metal battery anodes, ACS Nano, 17 (2023) 14658-14666.</note>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<analytic>
+		<title level="a" type="main">A Thin‐Layer, Li&lt;sup&gt;+&lt;/sup&gt; Compensation, Moisture‐Tolerant Interfacial Modification of Cu Substrate Toward the Anode‐Less, Energy/Power Dense Li Metallic Batteries</title>
+		<author>
+			<persName><forename type="first">Helin</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yucheng</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiurong</forename><surname>Jia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ahu</forename><surname>Shao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Min</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiqiao</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Cheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoyu</forename><surname>Tang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shaowen</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yue</forename><surname>Ma</surname></persName>
+			<idno type="ORCID">0000-0002-1005-9386</idno>
+		</author>
+		<idno type="DOI">10.1002/adfm.202314186</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Functional Materials</title>
+		<title level="j" type="abbrev">Adv Funct Materials</title>
+		<idno type="ISSN">1616-301X</idno>
+		<idno type="ISSNe">1616-3028</idno>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="issue">22</biblScope>
+			<biblScope unit="page">2314186</biblScope>
+			<date type="published" when="2024-02-07">2024</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">H. Wang, Y. Yuan, Q. Jia, A. Shao, M. Zhang, Z. Wang, L. Cheng, X. Tang, S. Li, Y. Ma. A thin-layer, Li + compensation, moisture-tolerant interfacial modification of Cu substrate toward the anode-less, energy/power dense Li metallic batteries, Adv. Funct. Mater., 34 (2024) 2314186.</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">A large-area lithium metal–carbon nanotube film for precise contact prelithiation in lithium-ion batteries</title>
+		<author>
+			<persName><forename type="first">Chao</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0002-8369-927X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Fangzhou</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wang</forename><surname>Wan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shihe</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yongyi</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunhui</forename><surname>Huang</surname></persName>
+			<idno type="ORCID">0000-0003-1687-1938</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Ju</forename><surname>Li</surname></persName>
+			<idno type="ORCID">0000-0002-7841-8058</idno>
+		</author>
+		<idno type="DOI">10.1039/d3ee01725g</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Energy &amp; Environmental Science</title>
+		<title level="j" type="abbrev">Energy Environ. Sci.</title>
+		<idno type="ISSN">1754-5692</idno>
+		<idno type="ISSNe">1754-5706</idno>
+		<imprint>
+			<biblScope unit="volume">16</biblScope>
+			<biblScope unit="issue">10</biblScope>
+			<biblScope unit="page" from="4660" to="4669" />
+			<date type="published" when="2023">2023</date>
+			<publisher>Royal Society of Chemistry (RSC)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">C. Wang, F. Yang, W. Wan, S. Wang, Y. Zhang, Y. Huang, J. Li. A large-area lithium metal-carbon nanotube film for precise contact prelithiation in lithium-ion batteries, Energy Environ. Sci., 16 (2023) 4660-4669.</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<analytic>
+		<title level="a" type="main">A 3D hydroxylated MXene/carbon nanotubes composite as a scaffold for dendrite-free sodium-metal electrodes</title>
+		<author>
+			<persName><forename type="first">X</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Jin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><surname>Miao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Hou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">K</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Yan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Chen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Angew. Chem. Int. Ed</title>
+		<imprint>
+			<biblScope unit="volume">59</biblScope>
+			<biblScope unit="page" from="16705" to="16711" />
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">X. He, S. Jin, L. Miao, Y. Cai, Y. Hou, H. Li, K. Zhang, Z. Yan, J. Chen. A 3D hydroxylated MXene/carbon nanotubes composite as a scaffold for dendrite-free sodium-metal electrodes, Angew. Chem. Int. Ed., 59 (2020) 16705-16711.</note>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<analytic>
+		<title level="a" type="main">Anchoring Sn Nanoparticles in Necklace‐Like B,N,F‐Doped Carbon Fibers Enables Anode‐Less 5V‐Class Li‐Metal Batteries</title>
+		<author>
+			<persName><forename type="first">Yuan</forename><surname>Tian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhihao</forename><surname>Pei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Deyan</forename><surname>Luan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiong</forename><forename type="middle">Wen (david)</forename><surname>Lou</surname></persName>
+			<idno type="ORCID">0000-0002-5557-4437</idno>
+		</author>
+		<idno type="DOI">10.1002/anie.202423454</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Angewandte Chemie International Edition</title>
+		<title level="j" type="abbrev">Angew Chem Int Ed</title>
+		<idno type="ISSN">1433-7851</idno>
+		<idno type="ISSNe">1521-3773</idno>
+		<imprint>
+			<biblScope unit="volume">64</biblScope>
+			<biblScope unit="issue">13</biblScope>
+			<biblScope unit="page">202423454</biblScope>
+			<date type="published" when="2025-01-16">2025</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Y. Tian, Z. Pei, D. Luan, X. W. Lou. Anchoring Sn nanoparticles in necklace-like B,N,F-doped carbon fibers enables anode-less 5V-class Li-metal batteries, Angew. Chem. Int. Ed., 64 (2025) e202423454.</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Ultra-high lithium reversibility achieved by partially pyrolyzed polymeric copper phthalocyanines for superior anode-free lithium metal batteries</title>
+		<author>
+			<persName><forename type="first">M</forename><surname>Bae</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Chang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Choi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><forename type="middle">J</forename><surname>Hwang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><forename type="middle">S</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><forename type="middle">S</forename><surname>Park</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Piao</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Energy Storage Mater</title>
+		<imprint>
+			<biblScope unit="volume">75</biblScope>
+			<biblScope unit="page">104058</biblScope>
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">M. Bae, Y. Kim, Y. Kim, Y. Chang, J. Choi, S. J. Hwang, J. S. Kim, H. S. Park, J. Lee, Y. Piao. Ultra-high lithium reversibility achieved by partially pyrolyzed polymeric copper phthalocyanines for superior anode-free lithium metal batteries, Energy Storage Mater., 75 (2025) 104058.</note>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Direct observation of the formation and stabilization of metallic nanoparticles on carbon supports</title>
+		<author>
+			<persName><forename type="first">Zhennan</forename><surname>Huang</surname></persName>
+			<idno type="ORCID">0000-0002-8431-0270</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yonggang</forename><surname>Yao</surname></persName>
+			<idno type="ORCID">0000-0002-9191-2982</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zhenqian</forename><surname>Pang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yifei</forename><surname>Yuan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tangyuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kun</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaobing</forename><surname>Hu</surname></persName>
+			<idno type="ORCID">0000-0002-9233-8118</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Cheng</surname></persName>
+			<idno type="ORCID">0000-0002-1899-1709</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Wentao</forename><surname>Yao</surname></persName>
+			<idno type="ORCID">0000-0003-1653-769X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yuzi</forename><surname>Liu</surname></persName>
+			<idno type="ORCID">0000-0002-8733-1683</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Anmin</forename><surname>Nie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Soroosh</forename><surname>Sharifi-Asl</surname></persName>
+			<idno type="ORCID">0000-0003-0441-9231</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Meng</forename><surname>Cheng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Boao</forename><surname>Song</surname></persName>
+			<idno type="ORCID">0000-0003-3124-3235</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Khalil</forename><surname>Amine</surname></persName>
+			<idno type="ORCID">0000-0001-9206-3719</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Lu</surname></persName>
+			<idno type="ORCID">0000-0003-0858-8577</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Teng</forename><surname>Li</surname></persName>
+			<idno type="ORCID">0000-0001-6252-561X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Liangbing</forename><surname>Hu</surname></persName>
+			<idno type="ORCID">0000-0002-9456-9315</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Reza</forename><surname>Shahbazian-Yassar</surname></persName>
+			<idno type="ORCID">0000-0002-7744-4780</idno>
+		</author>
+		<idno type="DOI">10.1038/s41467-020-20084-5</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Communications</title>
+		<title level="j" type="abbrev">Nat Commun</title>
+		<idno type="ISSNe">2041-1723</idno>
+		<imprint>
+			<biblScope unit="volume">11</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">6373</biblScope>
+			<date type="published" when="2020-12-11">2020</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Z. Huang, Y. Yao, Z. Pang, Y. Yuan, T. Li, K. He, X. Hu, J. Cheng, W. Yao, Y. Liu, A. Nie, S. Sharifi-Asl, M. Cheng, B. Song, K. Amine, J. Lu, T. Li, L. Hu, R. Shahbazian-Yassar. Direct observation of the formation and stabilization of metallic nanoparticles on carbon supports, Nat. Commun., 11 (2020) 6373.</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">A Dual‐Protective MXene/COF Artificial Interface for Dendrite‐Free and Stable Lithium Metal Anodes</title>
+		<author>
+			<persName><forename type="first">Xinsheng</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ziheng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Daiqian</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinri</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yue</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liping</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuanfu</forename><surname>Chen</surname></persName>
+			<idno type="ORCID">0000-0002-6561-1684</idno>
+		</author>
+		<idno type="DOI">10.1002/adfm.202505390</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Functional Materials</title>
+		<title level="j" type="abbrev">Adv Funct Materials</title>
+		<idno type="ISSN">1616-301X</idno>
+		<idno type="ISSNe">1616-3028</idno>
+		<imprint>
+			<biblScope unit="volume">35</biblScope>
+			<biblScope unit="issue">42</biblScope>
+			<biblScope unit="page">2505390</biblScope>
+			<date type="published" when="2025-05-06">2025</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">X. Li, Z. Zhang, D. Chen, F. Ma, J. Huang, Y. Wang, L. Wang, Y. Wu, Y. Chen. A dual-protective MXene/COF artificial interface for dendrite-free and stable lithium metal anodes, Adv. Funct. Mater., (2025) 2505390.</note>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">A Dielectric MXene‐Induced Self‐Built Electric Field in Polymer Electrolyte Triggering Fast Lithium‐Ion Transport and High‐Voltage Cycling Stability</title>
+		<author>
+			<persName><forename type="first">Baolin</forename><surname>Zhang</surname></persName>
+			<idno type="ORCID">0000-0002-0419-9104</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yufeng</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yangyang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengguang</forename><surname>Qi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mianrui</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenwu</forename><surname>Zou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guoxing</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weifeng</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuqing</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenhui</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Huiyu</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiming</forename><surname>Cui</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chuanfang</forename><forename type="middle">(john)</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhenxing</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Li</forename><surname>Du</surname></persName>
+			<idno type="ORCID">0000-0003-2394-0727</idno>
+		</author>
+		<idno type="DOI">10.1002/anie.202403949</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Angewandte Chemie International Edition</title>
+		<title level="j" type="abbrev">Angew Chem Int Ed</title>
+		<idno type="ISSN">1433-7851</idno>
+		<idno type="ISSNe">1521-3773</idno>
+		<imprint>
+			<biblScope unit="volume">63</biblScope>
+			<biblScope unit="issue">25</biblScope>
+			<biblScope unit="page">202403949</biblScope>
+			<date type="published" when="2024-05-13">2024</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">B. Zhang, Y. Su, Y. Chen, S. Qi, M. Li, W. Zou, G. Jiang, W. Zhang, Y. Gao, C. Pan, H. Song, Z. Cui, C. J. Zhang, Z. Liang, L. Du. A dielectric MXene-induced self-built electric field in polymer electrolyte triggering fast lithium-ion transport and high-voltage cycling stability, Angew. Chem. Int. Ed. Engl., 63 (2024) e202403949.</note>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">Super-stretchable and high-energy micro-pseudocapacitors based on MXene embedded Ag nanoparticles</title>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Cao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><forename type="middle">B</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">K</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Q</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Xing</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Ru</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><forename type="middle">G</forename><surname>Meng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Shu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">N</forename><surname>Shpigel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><forename type="middle">F</forename><surname>Chen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Adv. Mater</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page">2401271</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Z. Cao, Y. B. Zhu, K. Chen, Q. Wang, Y. Li, X. Xing, J. Ru, L. G. Meng, J. Shu, N. Shpigel, L. F. Chen. Super-stretchable and high-energy micro-pseudocapacitors based on MXene embedded Ag nanoparticles, Adv. Mater., 36 (2024) 2401271.</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">A 3D Hierarchical Host with Gradient‐Distributed Dielectric Properties toward Dendrite‐free Lithium Metal Anode</title>
+		<author>
+			<persName><forename type="first">Yueying</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Meng</forename><surname>Yao</surname></persName>
+			<idno type="ORCID">0000-0001-7645-0196</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Tuan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hao</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yun</forename><surname>Zhang</surname></persName>
+		</author>
+		<idno type="DOI">10.1002/anie.202403399</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Angewandte Chemie International Edition</title>
+		<title level="j" type="abbrev">Angew Chem Int Ed</title>
+		<idno type="ISSN">1433-7851</idno>
+		<idno type="ISSNe">1521-3773</idno>
+		<imprint>
+			<biblScope unit="volume">63</biblScope>
+			<biblScope unit="issue">22</biblScope>
+			<biblScope unit="page">202403399</biblScope>
+			<date type="published" when="2024-04-03">2024</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Y. Zhang, M. Yao, T. Wang, H. Wu, Y. Zhang. A 3D hierarchical host with gradient- distributed dielectric properties toward dendrite-free lithium metal anode, Angew. Chem. Int. Ed., 63 (2024) e202403399.</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Ultrauniform Plating of Lithium on 10‐nm‐Scale Ordered Carbon Grids for Long Lifespan Lithium Metal Batteries</title>
+		<author>
+			<persName><forename type="first">Chuanren</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kun</forename><surname>Ni</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinze</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weibin</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengyuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ming‐sheng</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiulin</forename><surname>Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanwu</forename><surname>Zhu</surname></persName>
+			<idno type="ORCID">0000-0003-1106-5718</idno>
+		</author>
+		<idno type="DOI">10.1002/adma.202401965</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Materials</title>
+		<title level="j" type="abbrev">Advanced Materials</title>
+		<idno type="ISSN">0935-9648</idno>
+		<idno type="ISSNe">1521-4095</idno>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="issue">31</biblScope>
+			<biblScope unit="page">2401965</biblScope>
+			<date type="published" when="2024-04-24">2024</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">C. Ye, K. Ni, J. Wang, W. Ye, S. Li, M. S. Wang, X. Fan, Y. Zhu. Ultrauniform plating of lithium on 10-nm-scale ordered carbon grids for long lifespan lithium metal bcatteries, Adv. Mater., (2024) 2401965.</note>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<analytic>
+		<title level="a" type="main">Anchoring Active Li Metal in Oriented Channel by In Situ Formed Nucleation Sites Enabling Durable Lithium‐Metal Batteries</title>
+		<author>
+			<persName><forename type="first">Huai‐yu</forename><surname>Peng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yan‐song</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xu‐yang</forename><surname>Wei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yun‐nuo</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiongyi</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuang‐jie</forename><surname>Tan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu‐guo</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei‐fei</forename><surname>Cao</surname></persName>
+			<idno type="ORCID">0000-0002-4290-2032</idno>
+		</author>
+		<idno type="DOI">10.1002/adma.202313034</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Materials</title>
+		<title level="j" type="abbrev">Advanced Materials</title>
+		<idno type="ISSN">0935-9648</idno>
+		<idno type="ISSNe">1521-4095</idno>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="issue">24</biblScope>
+			<biblScope unit="page">2313034</biblScope>
+			<date type="published" when="2024-03-19">2024</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">H. Y. Peng, Y. S. Xu, X. Y. Wei, Y. N. Li, X. Liang, J. Wang, S. J. Tan, Y. G. Guo, F. F. Cao. Anchoring active Li metal in oriented channel by in situ formed nucleation sites enabling durable lithium-metal batteries, Adv. Mater., 36 (2024) 2313034.</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Layered reduced graphene oxide with nanoscale interlayer gaps as a stable host for lithium metal anodes</title>
+		<author>
+			<persName><forename type="first">D</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H.-W</forename><surname>Lee</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">K</forename><surname>Yan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Cui</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Nanotechnol</title>
+		<imprint>
+			<biblScope unit="volume">11</biblScope>
+			<biblScope unit="page" from="626" to="632" />
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">D. Lin, Y. Liu, Z. Liang, H.-W. Lee, J. Sun, H. Wang, K. Yan, J. Xie, Y. Cui. Layered reduced graphene oxide with nanoscale interlayer gaps as a stable host for lithium metal anodes, Nat. Nanotechnol., 11 (2016) 626-632.</note>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">LiZn/Li&lt;sub&gt;2&lt;/sub&gt;O Induced Chemical Confinement Enabling Dendrite‐Free Li‐Metal Anode (Adv. Funct. Mater. 19/2024)</title>
+		<author>
+			<persName><forename type="first">Huaming</forename><surname>Qian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiangyang</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qinchuan</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wen</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhu</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhengdong</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanyan</forename><surname>Cao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jingjing</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenbin</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kaihua</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kun</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Yan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiujun</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xifei</forename><surname>Li</surname></persName>
+		</author>
+		<idno type="DOI">10.1002/adfm.202470108</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Functional Materials</title>
+		<title level="j" type="abbrev">Adv Funct Materials</title>
+		<idno type="ISSN">1616-301X</idno>
+		<idno type="ISSNe">1616-3028</idno>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="issue">19</biblScope>
+			<biblScope unit="page">2310143</biblScope>
+			<date type="published" when="2023">2023</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">H. Qian, X. Li, Q. Chen, W. Liu, Z. Zhao, Z. Ma, Y. Cao, J. Wang, W. Li, K. Xu, K. Zhang, W. Yan, J. Zhang, X. Li. LiZn/Li2O induced chemical confinement enabling dendrite-free Li-metal anode, Adv. Funct. Mater., 34 (2023) 2310143.</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Large-area dendrite-free ultrathin Li-rich 3D Li-Sn alloy/graphene foil for high-performance all-solid-state lithium-sulfur batteries</title>
+		<author>
+			<persName><forename type="first">Cong</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haodong</forename><surname>Shi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hantao</forename><surname>Cui</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shengwei</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuejiao</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuxin</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yunna</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanfeng</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Liqiang</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chunzhong</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yan</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhong-Shuai</forename><surname>Wu</surname></persName>
+			<idno type="ORCID">0000-0003-1851-4803</idno>
+		</author>
+		<idno type="DOI">10.1016/j.ensm.2024.103987</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Energy Storage Materials</title>
+		<title level="j" type="abbrev">Energy Storage Materials</title>
+		<idno type="ISSN">2405-8297</idno>
+		<imprint>
+			<biblScope unit="volume">75</biblScope>
+			<biblScope unit="page">103987</biblScope>
+			<date type="published" when="2024">2024</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">C. Dong, H. Shi, H. Cui, S. Yu, Y. Li, Y. Ma, Y. Guo, Y. Dong, L. Zhang, C. Li, Y. Yu, Z.-S. Wu. Large-area dendrite-free ultrathin Li-rich 3D Li-Sn alloy/graphene foil for high-performance all-solid-state lithium-sulfur batteries, Energy Storage Mater., 75 (2024) 103987.</note>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Hierarchical Li electrochemistry using alloy-type anode for high-energy-density Li metal batteries</title>
+		<author>
+			<persName><forename type="first">Jiaqi</forename><surname>Cao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuansheng</forename><surname>Shi</surname></persName>
+			<idno type="ORCID">0000-0003-3235-6995</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Aosong</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guangyuan</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Muhtar</forename><surname>Dilxat</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yongfei</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mohang</forename><surname>Cai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guoyu</forename><surname>Qian</surname></persName>
+			<idno type="ORCID">0000-0001-5679-9710</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Xueyi</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fangyan</forename><surname>Xie</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Sun</surname></persName>
+			<idno type="ORCID">0009-0008-7295-7334</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Xia</forename><surname>Lu</surname></persName>
+			<idno type="ORCID">0000-0003-3504-9069</idno>
+		</author>
+		<idno type="DOI">10.1038/s41467-024-45613-4</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Communications</title>
+		<title level="j" type="abbrev">Nat Commun</title>
+		<idno type="ISSNe">2041-1723</idno>
+		<imprint>
+			<biblScope unit="volume">15</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">1354</biblScope>
+			<date type="published" when="2024-02-14">2024</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">J. Cao, Y. Shi, A. Gao, G. Du, M. Dilxat, Y. Zhang, M. Cai, G. Qian, X. Lu, F. Xie, Y. Sun, X. Lu. Hierarchical Li electrochemistry using alloy-type anode for high- energy-density Li metal batteries, Nat. Commun., 15 (2024) 1354.</note>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Long-life sodium-sulfur batteries enabled by super-sodiophilic seeds</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">A</forename><surname>Bhargav</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">A</forename><surname>Manthiram</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Energy Environ. Sci</title>
+		<imprint>
+			<biblScope unit="volume">17</biblScope>
+			<biblScope unit="page">7416</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">J. He, A. Bhargav, A. Manthiram. Long-life sodium-sulfur batteries enabled by super-sodiophilic seeds, Energy Environ. Sci., 17 (2024) 7416.</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">Ultra-sleek high entropy alloy tights: realizing superior cyclability for anode-free battery</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Qian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">C</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">I</forename><surname>Manke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Liao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">R</forename><surname>Chen</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Adv. Mater</title>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="page">2308257</biblScope>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">J. Wang, Y. Wang, X. Lu, J. Qian, C. Yang, I. Manke, H. Song, J. Liao, S. Wang, R. Chen. Ultra-sleek high entropy alloy tights: realizing superior cyclability for anode-free battery, Adv. Mater., 36 (2023) 2308257.</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<analytic>
+		<title level="a" type="main">Conductivity and lithiophilicity gradients guide lithium deposition to mitigate short circuits</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Pu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">K</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">T</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">C</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><forename type="middle">V</forename><surname>Braun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Zhang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Commun</title>
+		<imprint>
+			<biblScope unit="volume">10</biblScope>
+			<biblScope unit="page">1896</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">J. Pu, J. Li, K. Zhang, T. Zhang, C. Li, H. Ma, J. Zhu, P. V. Braun, J. Lu, H. Zhang. Conductivity and lithiophilicity gradients guide lithium deposition to mitigate short circuits, Nat. Commun., 10 (2019) 1896.</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Bidirectional Lithiophilic Gradients Modification of Ultralight 3D Carbon Nanofiber Host for Stable Lithium Metal Anode</title>
+		<author>
+			<persName><forename type="first">Tong</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sichen</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Likun</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lihan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xianying</forename><surname>Qin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhijia</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yan‐bing</forename><surname>He</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Lv</surname></persName>
+			<idno type="ORCID">0000-0003-0874-3477</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Feiyu</forename><surname>Kang</surname></persName>
+		</author>
+		<idno type="DOI">10.1002/smll.202203273</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Small</title>
+		<title level="j" type="abbrev">Small</title>
+		<idno type="ISSN">1613-6810</idno>
+		<idno type="ISSNe">1613-6829</idno>
+		<imprint>
+			<biblScope unit="volume">18</biblScope>
+			<biblScope unit="issue">33</biblScope>
+			<biblScope unit="page">2203273</biblScope>
+			<date type="published" when="2022-07-24">2022</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">T. Li, S. Gu, L. Chen, L. Zhang, X. Qin, Z. Huang, Y. B. He, W. Lv, F. Kang. Bidirectional lithiophilic gradients modification of ultralight 3D carbon nanofiber host for stable lithium metal anode, Small, 18 (2022) 2203273.</note>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<analytic>
+		<title level="a" type="main">Electrical resistance of the current collector controls lithium morphology</title>
+		<author>
+			<persName><forename type="first">Solomon</forename><forename type="middle">T</forename><surname>Oyakhire</surname></persName>
+			<idno type="ORCID">0000-0002-3189-5949</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Wenbo</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><surname>Shin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rong</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><forename type="middle">T</forename><surname>Boyle</surname></persName>
+			<idno type="ORCID">0000-0002-0452-275X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zhiao</forename><surname>Yu</surname></persName>
+			<idno type="ORCID">0000-0001-8746-1640</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yusheng</forename><surname>Ye</surname></persName>
+			<idno type="ORCID">0000-0001-9832-2478</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yufei</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><forename type="middle">A</forename><surname>Raiford</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><surname>Huang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Joel</forename><forename type="middle">R</forename><surname>Schneider</surname></persName>
+			<idno type="ORCID">0000-0002-3342-2846</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yi</forename><surname>Cui</surname></persName>
+			<idno type="ORCID">0000-0002-6103-6352</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Stacey</forename><forename type="middle">F</forename><surname>Bent</surname></persName>
+			<idno type="ORCID">0000-0002-1084-5336</idno>
+		</author>
+		<idno type="DOI">10.1038/s41467-022-31507-w</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Communications</title>
+		<title level="j" type="abbrev">Nat Commun</title>
+		<idno type="ISSNe">2041-1723</idno>
+		<imprint>
+			<biblScope unit="volume">13</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">3986</biblScope>
+			<date type="published" when="2022-07-09">2022</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">S. T. Oyakhire, W. Zhang, A. Shin, R. Xu, D. T. Boyle, Z. Yu, Y. Ye, Y. Yang, J. A. Raiford, W. Huang, J. R. Schneider, Y. Cui, S. F. Bent. Electrical resistance of the current collector controls lithium morphology, Nat. Commun., 13 (2022) 3986.</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Directing (110) oriented lithium deposition through high flux solid electrolyte interphase for dendritefree lithium metal batteries</title>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">M</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Ding</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">C</forename><surname>Xiao</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Angew. Chem. Int. Ed</title>
+		<imprint>
+			<biblScope unit="volume">62</biblScope>
+			<biblScope unit="page">202309622</biblScope>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Z. Sun, Y. Wang, S. Shen, X. Li, X. Hu, M. Hu, Y. Su, S. Ding, C. Xiao. Directing (110) oriented lithium deposition through high flux solid electrolyte interphase for dendrite -free lithium metal batteries, Angew. Chem. Int. Ed., 62 (2023) e202309622.</note>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">)ZrF(6)-based electrolytes for durable lithium metal batteries</title>
+		<author>
+			<persName><forename type="first">Q</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">T</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Ju</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">G</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><surname>Ye</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">G</forename><forename type="middle">I N</forename><surname>Waterhouse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Lai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">G</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">K</forename><surname>Yan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">X</forename><surname>Tao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Qiu</surname></persName>
+		</author>
+		<author>
+			<persName><surname>Li</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nature</title>
+		<imprint>
+			<biblScope unit="volume">637</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page" from="339" to="346" />
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Q. Xu, T. Li, Z. Ju, G. Chen, D. Ye, G. I. N. Waterhouse, Y. Lu, X. Lai, G. Zhou, L. Guo, K. Yan, X. Tao, H. Li, Y. Qiu. Li(2)ZrF(6)-based electrolytes for durable lithium metal batteries, Nature, 637 (2025) 339-346.</note>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<analytic>
+		<title level="a" type="main">Tuning the Interfacial Electronic Conductivity by Artificial Electron Tunneling Barriers for Practical Lithium Metal Batteries</title>
+		<author>
+			<persName><forename type="first">Zeyu</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weidong</forename><surname>Zhang</surname></persName>
+			<idno type="ORCID">0000-0001-9556-3735</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Siyuan</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shulan</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xinyang</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fang</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yingying</forename><surname>Lu</surname></persName>
+			<idno type="ORCID">0000-0001-9713-8441</idno>
+		</author>
+		<idno type="DOI">10.1021/acs.nanolett.0c02371</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nano Letters</title>
+		<title level="j" type="abbrev">Nano Lett.</title>
+		<idno type="ISSN">1530-6984</idno>
+		<idno type="ISSNe">1530-6992</idno>
+		<imprint>
+			<biblScope unit="volume">20</biblScope>
+			<biblScope unit="issue">9</biblScope>
+			<biblScope unit="page" from="6606" to="6613" />
+			<date type="published" when="2020-08-05">2020</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Z. Shen, W. Zhang, S. Li, S. Mao, X. Wang, F. Chen, Y. Lu. Tuning the interfacial electronic conductivity by artificial electron tunneling barriers for practical lithium metal batteries, Nano Letters, 20 (2020) 6606-6613.</note>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">LiF-rich alloy-doped SEI enabling tltra-stable and high-rate Li metal anode</title>
+		<author>
+			<persName><forename type="first">H</forename><surname>Zhuang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">T</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">F</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">M</forename><surname>Xu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">W</forename><surname>Dai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Jiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><surname>Jiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Q</forename><surname>Gao</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Angew. Chem. Int. Ed</title>
+		<imprint>
+			<biblScope unit="volume">63</biblScope>
+			<biblScope unit="page">202407315</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">H. Zhuang, H. Xiao, T. Zhang, F. Zhang, P. Han, M. Xu, W. Dai, J. Jiao, L. Jiang, Q. Gao. LiF-rich alloy-doped SEI enabling tltra-stable and high-rate Li metal anode, Angew. Chem. Int. Ed., 63 (2024) e202407315.</note>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Strong Dipole Moments and Increased Charge Transfer in Polymer‐Based Solid Electrolyte Enable Wide‐Temperature Solid‐State Lithium Metal Batteries</title>
+		<author>
+			<persName><forename type="first">Weizhong</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yuxuan</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lin</forename><surname>Dai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shen</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhaoyu</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kun</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Biao</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zengsheng</forename><surname>Ma</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Min</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jun</forename><surname>Liu</surname></persName>
+			<idno type="ORCID">0000-0002-7078-8046</idno>
+		</author>
+		<idno type="DOI">10.1002/anie.202513604</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Angewandte Chemie International Edition</title>
+		<title level="j" type="abbrev">Angew Chem Int Ed</title>
+		<idno type="ISSN">1433-7851</idno>
+		<idno type="ISSNe">1521-3773</idno>
+		<imprint>
+			<biblScope unit="volume">64</biblScope>
+			<biblScope unit="issue">42</biblScope>
+			<biblScope unit="page">202513604</biblScope>
+			<date type="published" when="2025-08-27">2025</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">W. Liang, Y. Liu, L. Dai, S. Li, Z. Sun, K. Zhao, B. Zhang, Z. Ma, M. Zhu, J. Liu. Strong dipole moments and increased charge transfer in polymer-based solid electrolyte enable wide-temperature solid-state lithium metal batteries, Angew. Chem. Int. Ed., (2025) e202513604.</note>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">Approaching the capacity limit of lithium cobalt oxide in lithium ion batteries via lanthanum and aluminium doping</title>
+		<author>
+			<persName><forename type="first">Qi</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xin</forename><surname>Su</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Lei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yan</forename><surname>Qin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianguo</forename><surname>Wen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fangmin</forename><surname>Guo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yimin</forename><forename type="middle">A</forename><surname>Wu</surname></persName>
+			<idno type="ORCID">0000-0002-3807-8431</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yangchun</forename><surname>Rong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ronghui</forename><surname>Kou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xianghui</forename><surname>Xiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Frederic</forename><surname>Aguesse</surname></persName>
+			<idno type="ORCID">0000-0002-5675-0711</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Javier</forename><surname>Bareño</surname></persName>
+			<idno type="ORCID">0000-0003-1230-9278</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yang</forename><surname>Ren</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenquan</forename><surname>Lu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yangxing</forename><surname>Li</surname></persName>
+		</author>
+		<idno type="DOI">10.1038/s41560-018-0180-6</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Energy</title>
+		<title level="j" type="abbrev">Nat Energy</title>
+		<idno type="ISSNe">2058-7546</idno>
+		<imprint>
+			<biblScope unit="volume">3</biblScope>
+			<biblScope unit="issue">11</biblScope>
+			<biblScope unit="page" from="936" to="943" />
+			<date type="published" when="2018-06-11">2018</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Q. Liu, X. Su, D. Lei, Y. Qin, J. Wen, F. Guo, Y. A. Wu, Y. Rong, R. Kou, X. Xiao, F. Aguesse, J. Bareño, Y. Ren, W. Lu, Y. Li. Approaching the capacity limit of lithium cobalt oxide in lithium ion batteries via lanthanum and aluminium doping, Nat. Energy, 3 (2018) 936-943.</note>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<analytic>
+		<title level="a" type="main">Unveiling the Evolution of LiCoO&lt;sub&gt;2&lt;/sub&gt; beyond 4.6 V</title>
+		<author>
+			<persName><forename type="first">Zixin</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guifan</forename><surname>Zeng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianhua</forename><surname>Yin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chao-Lung</forename><surname>Chiang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qinghua</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baodan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianken</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yawen</forename><surname>Yan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yonglin</forename><surname>Tang</surname></persName>
+			<idno type="ORCID">0000-0002-8615-3299</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Haitang</forename><surname>Zhang</surname></persName>
+			<idno type="ORCID">0000-0002-8220-3180</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Shiyuan</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qingsong</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0001-5879-8009</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoxiao</forename><surname>Kuai</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yan-Gu</forename><surname>Lin</surname></persName>
+			<idno type="ORCID">0000-0002-4210-7709</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Lin</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Qiao</surname></persName>
+			<idno type="ORCID">0000-0002-2191-3875</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Shi-Gang</forename><surname>Sun</surname></persName>
+			<idno type="ORCID">0000-0003-2327-4090</idno>
+		</author>
+		<idno type="DOI">10.1021/acsenergylett.3c01954</idno>
+	</analytic>
+	<monogr>
+		<title level="j">ACS Energy Letters</title>
+		<title level="j" type="abbrev">ACS Energy Lett.</title>
+		<idno type="ISSN">2380-8195</idno>
+		<imprint>
+			<biblScope unit="volume">8</biblScope>
+			<biblScope unit="issue">11</biblScope>
+			<biblScope unit="page" from="4806" to="4817" />
+			<date type="published" when="2023-10-23">2023</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Z. Wu, G. Zeng, J. Yin, C.-L. Chiang, Q. Zhang, B. Zhang, J. Chen, Y. Yan, Y. Tang, H. Zhang, S. Zhou, Q. Wang, X. Kuai, Y.-G. Lin, L. Gu, Y. Qiao, S.-G. Sun. Unveiling the evolution of LiCoO2 beyond 4.6 V, ACS Energy Lett., 8 (2023) 4806- 4817.</note>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<analytic>
+		<title level="a" type="main">Achieving High-Performance Defect-Free LiCoO&lt;sub&gt;2&lt;/sub&gt; Cathode via a Dopant-Free Approach</title>
+		<author>
+			<persName><forename type="first">Sichen</forename><surname>Jiao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ting</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuhang</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chengzhen</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongyi</forename><surname>Pan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Weiguang</forename><surname>Lin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiqian</forename><surname>Yu</surname></persName>
+			<idno type="ORCID">0000-0001-8513-518X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Lin</forename><surname>Gu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xuejie</forename><surname>Huang</surname></persName>
+			<idno type="ORCID">0000-0001-5900-678X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Liquan</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hong</forename><surname>Li</surname></persName>
+			<idno type="ORCID">0000-0002-8659-086X</idno>
+		</author>
+		<idno type="DOI">10.1021/jacs.5c05162</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of the American Chemical Society</title>
+		<title level="j" type="abbrev">J. Am. Chem. Soc.</title>
+		<idno type="ISSN">0002-7863</idno>
+		<idno type="ISSNe">1520-5126</idno>
+		<imprint>
+			<biblScope unit="volume">147</biblScope>
+			<biblScope unit="issue">26</biblScope>
+			<biblScope unit="page" from="22839" to="22850" />
+			<date type="published" when="2025-06-17">2025</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">S. Jiao, Y. Li, T. Lin, S. Feng, C. Zhang, H. Pan, W. Lin, X. Yu, L. Gu, X. Huang, L. Chen, H. Li. Achieving high-performance defect-free LiCoO2 Cathode via a dopant-free approach, J. Am. Chem. Soc., 147 (2025) 22839-22850.</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

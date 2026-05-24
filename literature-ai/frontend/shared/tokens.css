@@ -1,0 +1,393 @@
+/* ============================================================
+   tokens.css — Design Tokens: Global Fixed + 6 Themes × 3 Modes
+   ============================================================
+   Architecture:
+     :root                          ← Global fixed tokens + Material Light default
+       └─ [data-theme="expressive"] ← Expressive Light tokens
+       └─ [data-theme="gradient"]   ← Gradient Light tokens
+       └─ [data-theme="impeccable"] ← Impeccable Light tokens
+       └─ [data-theme="neumorphism"]← Neumorphism Light tokens
+       └─ [data-theme="refined"]    ← Refined Light tokens
+            └─ [data-mode="dark"]   ← Dark mode overrides (cross-theme unified)
+                 └─ [data-mode="dark"][data-theme="neumorphism"] ← Dark Flat fallback
+            └─ [data-mode="eyecare"]← Eye-care overrides (cross-theme unified warm)
+                 └─ [data-mode="eyecare"][data-theme="neumorphism"] ← Warm shadow adaptation
+   ============================================================ */
+
+
+/* ============================================================
+   1. GLOBAL FIXED TOKENS + Material Light DEFAULT
+   ============================================================ */
+:root {
+  /* ---- Semantic Colors (global, theme-independent) ---- */
+  --color-success: #16A34A;
+  --color-success-bg: rgba(22,163,74,0.10);
+  --color-warning: #D97706;
+  --color-warning-bg: rgba(217,119,6,0.12);
+  --color-danger: #DC2626;
+  --color-danger-bg: rgba(220,38,38,0.12);
+
+  /* ---- Layout Tokens (global fixed) ---- */
+  --nav-height: 56px;
+  --sidebar-width: 320px;
+  --transition: 0.2s ease;
+  --z-nav: 100;
+  --z-modal: 1000;
+  --z-tooltip: 1100;
+
+  /* ---- Spacing Tokens (global fixed) ---- */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-base: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --card-padding: 1.25rem;
+
+  /* ---- Font Size Tokens (global fixed) ---- */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+
+  /* ---- Radius Tokens (global fixed) ---- */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* ============================================================
+     Material Light — Default Theme Tokens
+     ============================================================ */
+  --color-primary: #6442D6;
+  --color-primary-hover: #7c5ce0;
+  --color-primary-bg: rgba(100, 66, 214, 0.12);
+  --color-secondary: #C8B3FD;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #F8F9FA;
+  --color-bg: #F5F6FA;
+  --color-bg-nav: #FFFFFF;
+  --color-text: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-border: rgba(0,0,0,0.08);
+  --color-border-strong: rgba(0,0,0,0.15);
+
+  /* Font Tokens */
+  --font-body: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-display: "Roboto", "Inter", sans-serif;
+  --font-mono: "Fira Code", "Consolas", monospace;
+  --font-weight-btn: 500;
+
+  /* Shadow Tokens */
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-elevated: 0 4px 12px rgba(0,0,0,0.10);
+  --shadow-inset: inset 2px 2px 4px rgba(0,0,0,0.06), inset -2px -2px 4px rgba(255,255,255,0.06);
+
+  /* Input Tokens */
+  --input-border: 1px solid var(--color-border-strong);
+  --input-focus: 2px solid var(--color-primary);
+}
+
+
+/* ============================================================
+   2. EXPRESSIVE LIGHT
+   ============================================================ */
+[data-theme="expressive"] {
+  --color-primary: #db2777;
+  --color-primary-hover: #be1d66;
+  --color-primary-bg: rgba(219,39,119,0.10);
+  --color-secondary: #2563eb;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #FEF7FB;
+  --color-bg: #F9FAFB;
+  --color-bg-nav: #FFFFFF;
+  --color-text: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-border: rgba(0,0,0,0.06);
+  --color-border-strong: rgba(0,0,0,0.12);
+
+  --font-body: "IBM Plex Mono", "Consolas", "Microsoft YaHei", monospace;
+  --font-display: "IBM Plex Mono", monospace;
+  --font-mono: "IBM Plex Mono", monospace;
+  --font-weight-btn: 700;
+  --font-size-2xl: 2.5rem;
+
+  --shadow-card: 0 2px 8px rgba(219,39,119,0.08);
+  --shadow-elevated: 0 8px 24px rgba(219,39,119,0.12);
+  --shadow-inset: inset 2px 2px 4px rgba(219,39,119,0.06), inset -2px -2px 4px rgba(255,255,255,0.06);
+
+  --input-border: 1px solid var(--color-border-strong);
+  --input-focus: 2px solid var(--color-primary);
+
+  --radius: 8px;
+  --radius-lg: 8px;
+}
+
+
+/* ============================================================
+   3. GRADIENT LIGHT
+   ============================================================ */
+[data-theme="gradient"] {
+  --color-primary: #990FFA;
+  --color-primary-hover: #7d0dd4;
+  --color-primary-bg: rgba(153,15,250,0.08);
+  --color-secondary: #E60076;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #FAF5FF;
+  --color-bg: #F5F3FF;
+  --color-bg-nav: #FFFFFF;
+  --color-text: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-border: rgba(0,0,0,0.06);
+  --color-border-strong: rgba(153,15,250,0.20);
+
+  --font-body: "Montserrat", "Segoe UI", "PingFang SC", sans-serif;
+  --font-display: "Space Grotesk", "Montserrat", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+  --font-weight-btn: 600;
+
+  --shadow-card: 0 4px 16px rgba(153,15,250,0.10);
+  --shadow-elevated: 0 8px 32px rgba(153,15,250,0.15);
+  --shadow-inset: inset 2px 2px 4px rgba(153,15,250,0.08), inset -2px -2px 4px rgba(255,255,255,0.06);
+
+  --input-border: 1px solid var(--color-border-strong);
+  --input-focus: 2px solid var(--color-primary);
+
+  --radius: 8px;
+  --radius-lg: 12px;
+}
+
+
+/* ============================================================
+   4. IMPECCABLE LIGHT
+   ============================================================ */
+[data-theme="impeccable"] {
+  --color-primary: #CC8800;
+  --color-primary-hover: #A66E00;
+  --color-primary-bg: rgba(204,136,0,0.10);
+  --color-secondary: #C55221;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #FFFBF0;
+  --color-bg: #FEF9F0;
+  --color-bg-nav: #FFFFFF;
+  --color-text: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-border: rgba(0,0,0,0.08);
+  --color-border-strong: rgba(204,136,0,0.25);
+
+  --font-body: "Chakra Petch", "Segoe UI", sans-serif;
+  --font-display: "Chakra Petch", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+  --font-weight-btn: 600;
+
+  --shadow-card: 3px 3px 0 rgba(204,136,0,0.15);
+  --shadow-elevated: 5px 5px 0 rgba(197,82,33,0.15);
+  --shadow-inset: inset 3px 3px 0 rgba(204,136,0,0.10), inset -3px -3px 0 rgba(255,255,255,0.10);
+
+  --input-border: 1px solid var(--color-border-strong);
+  --input-focus: 2px solid var(--color-primary);
+
+  --radius: 8px;
+  --radius-lg: 8px;
+}
+
+
+/* ============================================================
+   5. NEUMORPHISM LIGHT
+   ============================================================ */
+[data-theme="neumorphism"] {
+  --color-primary: #006666;
+  --color-primary-hover: #004d4d;
+  --color-primary-bg: rgba(0,102,102,0.08);
+  --color-secondary: #F1F2F5;
+  --color-surface: #E7E5E4;
+  --color-surface-alt: #E0DEDD;
+  --color-bg: #E7E5E4;
+  --color-bg-nav: #E7E5E4;
+  --color-text: #1E2938;
+  --color-text-secondary: #5A6577;
+  --color-text-muted: #8B95A5;
+  --color-border: rgba(0,0,0,0.0);
+  --color-border-strong: rgba(0,0,0,0.0);
+
+  --font-body: "Space Mono", "Consolas", "Microsoft YaHei", monospace;
+  --font-display: "Space Mono", monospace;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-weight-btn: 700;
+
+  --shadow-card: 6px 6px 12px rgba(0,0,0,0.15), -6px -6px 12px rgba(255,255,255,0.7);
+  --shadow-elevated: 8px 8px 16px rgba(0,0,0,0.18), -8px -8px 16px rgba(255,255,255,0.8);
+  --shadow-inset: inset 4px 4px 8px rgba(0,0,0,0.15), inset -4px -4px 8px rgba(255,255,255,0.7);
+
+  --input-border: none;
+  --input-focus: none;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+}
+
+
+/* ============================================================
+   6. REFINED LIGHT
+   ============================================================ */
+[data-theme="refined"] {
+  --color-primary: #3B82F6;
+  --color-primary-hover: #2563EB;
+  --color-primary-bg: rgba(59,130,246,0.06);
+  --color-secondary: #8B5CF6;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #FAFBFF;
+  --color-bg: #F8FAFF;
+  --color-bg-nav: #FFFFFF;
+  --color-text: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-border: rgba(0,0,0,0.05);
+  --color-border-strong: rgba(59,130,246,0.18);
+
+  --font-body: "Playfair Display", "Georgia", "SimSun", serif;
+  --font-display: "Playfair Display", serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+  --font-weight-btn: 500;
+
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-elevated: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-inset: inset 1px 1px 2px rgba(0,0,0,0.03), inset -1px -1px 2px rgba(255,255,255,0.03);
+
+  --input-border: 1px solid var(--color-border-strong);
+  --input-focus: 2px solid var(--color-primary);
+
+  --radius-sm: 4px;
+  --radius: 4px;
+  --radius-lg: 4px;
+}
+
+
+/* ============================================================
+   7. DARK MODE OVERRIDES (cross-theme unified)
+   ============================================================ */
+[data-mode="dark"] {
+  --color-surface: #161822;
+  --color-surface-alt: #1E2030;
+  --color-bg: #0f1117;
+  --color-bg-nav: #161822;
+  --color-text: #e8eaed;
+  --color-text-secondary: #9aa0a6;
+  --color-text-muted: #6B7280;
+  --color-border: rgba(255,255,255,0.06);
+  --color-border-strong: rgba(255,255,255,0.12);
+
+  /* Dark-mode shadows: slightly more visible on dark surfaces */
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.30);
+  --shadow-elevated: 0 4px 12px rgba(0,0,0,0.40);
+  --shadow-inset: inset 2px 2px 4px rgba(0,0,0,0.30), inset -2px -2px 4px rgba(255,255,255,0.04);
+}
+
+/* Neumorphism Dark: degrade to Flat + subtle inset shadow */
+[data-mode="dark"][data-theme="neumorphism"] {
+  --color-surface: #2A2A35;
+  --color-surface-alt: #24242F;
+  --color-bg: #22222D;
+  --color-bg-nav: #2A2A35;
+  --color-text: #e8eaed;
+  --color-text-secondary: #9aa0a6;
+  --color-text-muted: #6B7280;
+  --color-border: rgba(255,255,255,0.06);
+  --color-border-strong: rgba(255,255,255,0.10);
+  --shadow-card: inset 2px 2px 4px rgba(0,0,0,0.3), inset -2px -2px 4px rgba(255,255,255,0.04);
+  --shadow-elevated: inset 3px 3px 6px rgba(0,0,0,0.35), inset -3px -3px 6px rgba(255,255,255,0.05);
+  --shadow-inset: inset 4px 4px 8px rgba(0,0,0,0.4), inset -4px -4px 8px rgba(255,255,255,0.04);
+}
+
+
+/* ============================================================
+   8. EYE-CARE MODE OVERRIDES (cross-theme unified warm)
+   ============================================================ */
+[data-mode="eyecare"] {
+  --color-surface: #F5F0E8;
+  --color-surface-alt: #EDE7DC;
+  --color-bg: #EDE6D6;
+  --color-bg-nav: #F5F0E8;
+  --color-text: #3D3A35;
+  --color-text-secondary: #7A756D;
+  --color-text-muted: #8B8175;
+  --color-border: rgba(0,0,0,0.08);
+  --color-border-strong: rgba(0,0,0,0.15);
+
+  /* Eye-care shadows: warm-toned, slightly softer */
+  --shadow-card: 0 1px 3px rgba(61,53,41,0.10);
+  --shadow-elevated: 0 4px 12px rgba(61,53,41,0.12);
+  --shadow-inset: inset 2px 2px 4px rgba(61,53,41,0.08), inset -2px -2px 4px rgba(255,250,240,0.06);
+}
+
+/* Neumorphism Eye-care: retain extrusion with warm shadows */
+[data-mode="eyecare"][data-theme="neumorphism"] {
+  --color-surface: #E8E0D4;
+  --color-surface-alt: #E0D8CC;
+  --color-bg: #E8E0D4;
+  --color-bg-nav: #E8E0D4;
+  --color-text: #3D3A35;
+  --color-text-secondary: #7A756D;
+  --color-text-muted: #8B8175;
+  --color-border: rgba(0,0,0,0.0);
+  --color-border-strong: rgba(0,0,0,0.0);
+  --shadow-card: 6px 6px 12px rgba(61,53,41,0.15), -6px -6px 12px rgba(255,250,240,0.7);
+  --shadow-elevated: 8px 8px 16px rgba(61,53,41,0.2), -8px -8px 16px rgba(255,250,240,0.8);
+  --shadow-inset: inset 4px 4px 8px rgba(61,53,41,0.15), inset -4px -4px 8px rgba(255,250,240,0.7);
+}
+
+
+/* ============================================================
+   9. THEME-SPECIFIC SPECIAL OVERRIDES
+   ============================================================ */
+
+/* Gradient: primary button uses gradient */
+[data-theme="gradient"] .btn-primary {
+  background: linear-gradient(135deg, #990FFA, #E60076);
+}
+[data-theme="gradient"] .btn-primary:hover {
+  background: linear-gradient(135deg, #7d0dd4, #c00060);
+}
+
+/* Impeccable: detail header left accent border */
+[data-theme="impeccable"] .detail-header {
+  border-left: 4px solid var(--color-primary);
+}
+
+/* Expressive: uppercase + letter-spacing on primary buttons */
+[data-theme="expressive"] .btn-primary {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Expressive: brand letter-spacing */
+[data-theme="expressive"] .topnav-brand {
+  letter-spacing: -0.5px;
+}
+
+/* Gradient: brand text gradient */
+[data-theme="gradient"] .topnav-brand {
+  background: linear-gradient(135deg, #990FFA, #E60076);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Gradient: detail header gradient bg */
+[data-theme="gradient"] .detail-header {
+  background: linear-gradient(135deg, rgba(153,15,250,0.05), rgba(230,0,118,0.05));
+}
+
+
+/* ============================================================
+   10. BODY TRANSITION
+   ============================================================ */
+body {
+  transition: background 0.3s ease, color 0.3s ease;
+}

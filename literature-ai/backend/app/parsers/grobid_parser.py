@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import httpx
+from lxml import etree
+
+
+NS = {"tei": "http://www.tei-c.org/ns/1.0"}
+
+
+@dataclass
+class GrobidParseResult:
+    metadata: dict[str, Any]
+    abstract: str
+    sections: list[dict[str, Any]]
+    references: list[dict[str, Any]]
+    tei_xml: str
+
+
+class GrobidParser:
+    def __init__(self, base_url: str, timeout: float = 180.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    async def parse_pdf(self, pdf_path: Path) -> GrobidParseResult:
+        endpoint = f"{self.base_url}/api/processFulltextDocument"
+        data = {
+            "includeRawCitations": "1",
+            "includeRawAffiliations": "1",
+            "consolidateHeader": "1",
+            "consolidateCitations": "1",
+            "segmentSentences": "0",
+            "teiCoordinates": "head,ref,biblStruct,figure,formula",
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            with pdf_path.open("rb") as handle:
+                response = await client.post(
+                    endpoint,
+                    data=data,
+                    files={"input": (pdf_path.name, handle, "application/pdf")},
+                )
+            response.raise_for_status()
+        tei_xml = response.text
+        return self._parse_tei(tei_xml)
+
+    def _parse_tei(self, tei_xml: str) -> GrobidParseResult:
+        root = etree.fromstring(tei_xml.encode("utf-8"))
+
+        title = self._join_text(root.xpath("//tei:titleStmt/tei:title/text()", namespaces=NS))
+        abstract = self._join_text(
+            root.xpath("//tei:profileDesc/tei:abstract//text()", namespaces=NS)
+        ).strip()
+        doi = self._join_text(
+            root.xpath("//tei:idno[@type='DOI']/text()", namespaces=NS)
+        ).strip()
+        year = self._safe_year(
+            self._join_text(root.xpath("//tei:date[@type='published']/@when", namespaces=NS))
+        )
+        journal = self._join_text(
+            root.xpath("//tei:monogr/tei:title[@level='j']//text()", namespaces=NS)
+        ).strip()
+        authors = [
+            self._join_text(author.xpath(".//tei:persName//text()", namespaces=NS)).strip()
+            for author in root.xpath("//tei:titleStmt/tei:author", namespaces=NS)
+        ]
+
+        sections: list[dict[str, Any]] = []
+        body_divs = root.xpath("//tei:text/tei:body/tei:div", namespaces=NS)
+        for index, div in enumerate(body_divs, start=1):
+            head = self._join_text(div.xpath("./tei:head//text()", namespaces=NS)).strip()
+            text = self._join_text(div.xpath(".//tei:p//text()", namespaces=NS)).strip()
+            if not text:
+                continue
+            sections.append(
+                {
+                    "section_title": head or f"Section {index}",
+                    "section_type": self._infer_section_type(head),
+                    "text": text,
+                    "page_start": None,
+                    "page_end": None,
+                }
+            )
+
+        references = []
+        for ref in root.xpath("//tei:listBibl/tei:biblStruct", namespaces=NS):
+            references.append(
+                {
+                    "title": self._join_text(ref.xpath(".//tei:title//text()", namespaces=NS)).strip(),
+                    "doi": self._join_text(ref.xpath(".//tei:idno[@type='DOI']/text()", namespaces=NS)).strip(),
+                    "raw_text": self._join_text(ref.xpath(".//text()", namespaces=NS)).strip(),
+                }
+            )
+
+        metadata = {
+            "doi": doi or None,
+            "title": title or None,
+            "year": year,
+            "journal": journal or None,
+            "authors": [author for author in authors if author],
+        }
+        return GrobidParseResult(
+            metadata=metadata,
+            abstract=abstract,
+            sections=sections,
+            references=references,
+            tei_xml=tei_xml,
+        )
+
+    @staticmethod
+    def _join_text(parts: list[str]) -> str:
+        return " ".join(part.strip() for part in parts if part and part.strip())
+
+    @staticmethod
+    def _safe_year(raw: str) -> int | None:
+        if not raw:
+            return None
+        import re
+        match = re.search(r"\b(19|20)\d{2}\b", raw)
+        if match:
+            return int(match.group(0))
+        return None
+
+    @staticmethod
+    def _infer_section_type(title: str) -> str:
+        normalized = (title or "").strip().lower()
+        mapping = {
+            "introduction": "introduction",
+            "experimental": "methods",
+            "methods": "methods",
+            "results": "results",
+            "discussion": "discussion",
+            "conclusion": "conclusion",
+            "computational": "computational",
+        }
+        for key, value in mapping.items():
+            if key in normalized:
+                return value
+        return "body"

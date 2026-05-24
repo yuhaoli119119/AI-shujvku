@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>正在跳转到论文详情</title>
+  <!-- Shared Resources -->
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <script>
+    (() => {
+      const params = new URLSearchParams(window.location.search);
+      const target = new URL('/pages/literature_library/index.html', window.location.origin);
+      target.searchParams.set('tab', 'detail');
+      const paperId = params.get('id') || params.get('paper_id');
+      if (paperId) target.searchParams.set('paper_id', paperId);
+      window.location.replace(target.toString());
+    })();
+  </script>
+  <style>
+    body {
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-body);
+    }
+  </style>
+</head>
+<body>
+  <div id="topnav-mount"></div>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      TopNav.init({ currentPage: 'paper-detail', mountId: 'topnav-mount' });
+    });
+  </script>
+</body>
+</html>

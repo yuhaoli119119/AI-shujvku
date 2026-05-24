@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "active_library": "默认文献库",
+  "libraries": [
+    {
+      "name": "默认文献库",
+      "root_path": "D:\\Desktop\\代码开发\\AI检索数据库\\literature-ai\\backend\\data\\libraries\\default",
+      "description": "默认文献库",
+      "created_at": "2026-05-24T01:36:27.711489"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+name: dft_results_extraction
+version: 0.2
+stage: mvp
+
+description: >
+  Rule-based DFT results extraction for Li-S battery catalyst papers.
+  No LLM dependency — uses regex patterns + keyword matching + heuristics.
+
+input:
+  type: UnifiedPaperDocument
+  fields:
+    - abstract: str
+    - sections: list[UnifiedSection]
+    - tables: list[UnifiedTable]
+    - figures: list[UnifiedFigure]
+
+output:
+  type: list[DFTResultItem]
+  item_schema:
+    category: str
+    adsorbate: str | null
+    value: float | null
+    unit: str | null
+    evidence_text: str
+    source_location:
+      section: str | null
+      page: int | null
+      figure: str | null
+      table: str | null
+    confidence: float
+
+categories:
+  - adsorption_energy
+  - gibbs_free_energy_change
+  - reaction_barrier
+  - li2s_decomposition_barrier
+  - li2s_nucleation_barrier
+  - bader_charge
+  - charge_transfer
+  - d_band_center
+  - dos_claim
+  - charge_density_difference_claim
+
+adsorbate_mapping:
+  s8: S8
+  li2s8: Li2S8
+  li2s6: Li2S6
+  li2s4: Li2S4
+  li2s2: Li2S2
+  li2s: Li2S
+  sulfur: S8
+  polysulfide: LiPS(generic)
+  lips: LiPS(generic)
+
+strategy:
+  - keyword_pre_screening: false
+  - regex_extraction: true
+  - table_scanning: true
+  - figure_caption_scanning: true
+  - deduplication: true

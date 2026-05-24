@@ -1,0 +1,55 @@
+name: mechanism_claims_extraction
+version: 0.2
+stage: mvp
+
+description: >
+  Rule-based mechanism claim extraction for Li-S battery catalyst papers.
+  No LLM dependency — two-phase strategy: keyword screening → regex refinement.
+  Every claim is bound to an evidence text fragment.
+
+input:
+  type: UnifiedPaperDocument
+  fields:
+    - abstract: str
+    - sections: list[UnifiedSection]
+    - tables: list[UnifiedTable]
+    - figures: list[UnifiedFigure]
+
+output:
+  type: list[MechanismClaim]
+  item_schema:
+    mechanism_type: str       # see mechanism_types below
+    claim_text: str            # summary of the claim
+    evidence_text: str         # verbatim source text (~250-500 chars)
+    direction: str | null      # "promote" / "inhibit" / "neutral"
+    key_species: list[str]     # e.g. ["Li2S4", "Co-N-C"]
+    source_location:
+      section: str | null
+      page: int | null
+      figure: str | null
+      table: str | null
+    confidence: float          # 0.0 ~ 1.0
+
+mechanism_types:
+  - polysulfide_adsorption
+  - lips_conversion
+  - li2s_nucleation
+  - li2s_decomposition
+  - bidirectional_sulfur_redox
+  - orbital_hybridization
+  - conductivity_enhancement
+  - shuttle_suppression
+
+strategy:
+  phases:
+    - name: keyword_screening
+      description: Fast text filtering by mechanism-specific keywords
+    - name: regex_refinement
+      description: Pattern matching within candidate segments for precise extraction
+  additional_sources:
+    - figure_captions
+    - table_content
+  post_processing:
+    - direction_inference   # promote/inhibit/neutral from context
+    - key_species_extraction # chemical species from text
+    - deduplication         # same type + similar evidence → keep highest confidence

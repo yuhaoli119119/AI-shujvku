@@ -1,0 +1,388 @@
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import datetime
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+def utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class VectorType(sa.types.UserDefinedType):
+    cache_ok = True
+
+    def __init__(self, dimension: int) -> None:
+        self.dimension = dimension
+
+    def get_col_spec(self, **_: object) -> str:
+        return f"vector({self.dimension})"
+
+    def bind_processor(self, dialect):
+        def process(value):
+            if value is None:
+                return None
+            if dialect.name == "postgresql":
+                return "[" + ",".join(f"{float(item):.8f}" for item in value) + "]"
+            return json.dumps([float(item) for item in value])
+
+        return process
+
+    def result_processor(self, dialect, coltype):
+        def process(value):
+            if value is None:
+                return None
+            if isinstance(value, list):
+                return value
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped.startswith("["):
+                    return [float(item) for item in stripped.strip("[]").split(",") if item]
+                return json.loads(stripped)
+            return value
+
+        return process
+
+
+def json_type():
+    return JSONB().with_variant(sa.JSON(), "sqlite")
+
+
+class Paper(Base):
+    __tablename__ = "papers"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    library_name: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+        default="\u9ed8\u8ba4\u6587\u732e\u5e93",
+        server_default="\u9ed8\u8ba4\u6587\u732e\u5e93",
+        index=True,
+    )
+    doi: Mapped[str | None] = mapped_column(sa.String(512), unique=True, nullable=True)
+    title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    journal: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    authors: Mapped[list] = mapped_column(json_type(), default=list)
+    abstract: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    pdf_path: Mapped[str] = mapped_column(sa.Text)
+    source_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    oa_status: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    license: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    tei_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    docling_json_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    markdown_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    serial_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    comprehensive_analysis: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    paper_type: Mapped[str | None] = mapped_column(sa.String(20), nullable=True, index=True)
+    type_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True, index=True)
+    classification_source: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class PaperSection(Base):
+    __tablename__ = "paper_sections"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    section_title: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    section_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    text: Mapped[str] = mapped_column(sa.Text)
+    page_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(VectorType(64), nullable=True)
+
+
+class PaperTable(Base):
+    __tablename__ = "paper_tables"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    caption: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    markdown_content: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    page: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    extraction_source: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    prov: Mapped[list | None] = mapped_column(json_type(), nullable=True)
+
+
+class PaperFigure(Base):
+    __tablename__ = "paper_figures"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    caption: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    image_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    page: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    figure_role: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    role_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    content_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    key_elements: Mapped[list | None] = mapped_column(json_type(), nullable=True)
+    prov: Mapped[list | None] = mapped_column(json_type(), nullable=True)
+
+
+class CatalystSample(Base):
+    __tablename__ = "catalyst_samples"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    catalyst_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    metal_centers: Mapped[list] = mapped_column(json_type(), default=list)
+    coordination: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    support: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    synthesis_method: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    evidence_strength: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+
+
+class DFTSetting(Base):
+    __tablename__ = "dft_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    software: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    functional: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    dispersion_correction: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    pseudopotential: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    cutoff_energy_ev: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    k_points: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    convergence_settings: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    vacuum_thickness_a: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    raw_json: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+
+
+class DFTResult(Base):
+    __tablename__ = "dft_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    catalyst_sample_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("catalyst_samples.id", ondelete="SET NULL"), nullable=True)
+    adsorbate: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    property_type: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    value: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    reaction_step: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    source_section: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    source_figure: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+
+
+class MechanismClaim(Base):
+    __tablename__ = "mechanism_claims"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    catalyst_sample_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("catalyst_samples.id", ondelete="SET NULL"), nullable=True)
+    claim_type: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    claim_text: Mapped[str] = mapped_column(sa.Text)
+    evidence_types: Mapped[list] = mapped_column(json_type(), default=list)
+    confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+
+class ElectrochemicalPerformance(Base):
+    __tablename__ = "electrochemical_performance"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    catalyst_sample_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("catalyst_samples.id", ondelete="SET NULL"), nullable=True)
+    sulfur_loading_mg_cm2: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    sulfur_content_wt_percent: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    electrolyte_sulfur_ratio: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    capacity_value: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    cycle_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    rate: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    decay_per_cycle: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+
+class WritingCard(Base):
+    __tablename__ = "writing_cards"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    paper_type: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    research_gap: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    proposed_solution: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    core_hypothesis: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    evidence_chain: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    section_strategy: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    figure_logic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    abstract_logic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    introduction_logic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    discussion_logic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(VectorType(64), nullable=True)
+
+
+class EvidenceSpan(Base):
+    __tablename__ = "evidence_spans"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    object_type: Mapped[str] = mapped_column(sa.String(64))
+    object_id: Mapped[str] = mapped_column(sa.String(64))
+    text: Mapped[str] = mapped_column(sa.Text)
+    page: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    section: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    figure: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    table: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+
+
+class PaperNote(Base):
+    __tablename__ = "paper_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(sa.String(64))
+    content: Mapped[str] = mapped_column(sa.Text)
+    field_name: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    page: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    section_title: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    quoted_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class PaperCorrection(Base):
+    __tablename__ = "paper_corrections"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(sa.String(64))
+    field_name: Mapped[str] = mapped_column(sa.String(128))
+    target_path: Mapped[str] = mapped_column(sa.String(255))
+    operation: Mapped[str] = mapped_column(sa.String(32), default="replace")
+    proposed_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(json_type(), nullable=True)
+    reason: Mapped[str] = mapped_column(sa.Text)
+    evidence_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(32), default="pending")
+    reviewed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class ParseJob(Base):
+    __tablename__ = "parse_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    identifier: Mapped[str] = mapped_column(sa.String(512), index=True)
+    providers: Mapped[list] = mapped_column(json_type(), default=list)
+    requested_by: Mapped[str] = mapped_column(sa.String(64))
+    status: Mapped[str] = mapped_column(sa.String(32), default="pending")
+    paper_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    error_message: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    action: Mapped[str] = mapped_column(sa.String(64))
+    source: Mapped[str] = mapped_column(sa.String(64))
+    target_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    payload: Mapped[dict | list | str | None] = mapped_column(json_type(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class PaperRelationship(Base):
+    __tablename__ = "paper_relationships"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    source_paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    target_paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    relationship_type: Mapped[str] = mapped_column(sa.String(64))
+    note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(sa.String(64), default="system")
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class ExternalAnalysisRun(Base):
+    __tablename__ = "external_analysis_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(sa.String(64))
+    source_label: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    raw_payload: Mapped[dict | list | str | None] = mapped_column(json_type(), nullable=True)
+    normalized_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
+    mapping_status: Mapped[str] = mapped_column(sa.String(32), default="pending")
+    mapping_error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class ExternalAnalysisCandidate(Base):
+    __tablename__ = "external_analysis_candidates"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("external_analysis_runs.id", ondelete="CASCADE"), index=True
+    )
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    candidate_type: Mapped[str] = mapped_column(sa.String(32))
+    normalized_payload: Mapped[dict | list | str | None] = mapped_column(json_type(), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    mapping_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    evidence_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(32), default="pending")
+    materialized_target_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    materialized_target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class ReferenceEntry(Base):
+    __tablename__ = "reference_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    authors: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    journal: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    doi: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    volume: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    pages: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    reference_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    citation_context: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    linked_paper_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class FigureDataPoint(Base):
+    __tablename__ = "figure_data_points"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    figure_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("paper_figures.id", ondelete="CASCADE"), index=True)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    metric_name: Mapped[str] = mapped_column(sa.String(255))
+    metric_value: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    conditions: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    sample_label: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    confidence: Mapped[float] = mapped_column(sa.Float, default=1.0)
+    raw_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)

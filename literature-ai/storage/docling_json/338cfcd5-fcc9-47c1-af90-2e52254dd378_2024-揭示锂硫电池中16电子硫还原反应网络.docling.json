@@ -1,0 +1,1401 @@
+{
+  "schema_name": "DoclingDocument",
+  "version": "1.10.0",
+  "name": "338cfcd5-fcc9-47c1-af90-2e52254dd378_2024-揭示锂硫电池中16电子硫还原反应网络",
+  "origin": {
+    "mimetype": "application/pdf",
+    "binary_hash": 6685498667381133736,
+    "filename": "338cfcd5-fcc9-47c1-af90-2e52254dd378_2024-揭示锂硫电池中16电子硫还原反应网络.pdf"
+  },
+  "furniture": {
+    "self_ref": "#/furniture",
+    "children": [],
+    "content_layer": "furniture",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "body": {
+    "self_ref": "#/body",
+    "children": [
+      {
+        "$ref": "#/texts/0"
+      },
+      {
+        "$ref": "#/texts/1"
+      },
+      {
+        "$ref": "#/texts/2"
+      },
+      {
+        "$ref": "#/groups/0"
+      },
+      {
+        "$ref": "#/texts/6"
+      },
+      {
+        "$ref": "#/groups/1"
+      },
+      {
+        "$ref": "#/texts/10"
+      },
+      {
+        "$ref": "#/texts/11"
+      },
+      {
+        "$ref": "#/texts/12"
+      },
+      {
+        "$ref": "#/texts/13"
+      },
+      {
+        "$ref": "#/texts/14"
+      },
+      {
+        "$ref": "#/texts/15"
+      },
+      {
+        "$ref": "#/groups/2"
+      },
+      {
+        "$ref": "#/pictures/0"
+      },
+      {
+        "$ref": "#/pictures/1"
+      },
+      {
+        "$ref": "#/pictures/2"
+      },
+      {
+        "$ref": "#/texts/17"
+      },
+      {
+        "$ref": "#/texts/18"
+      },
+      {
+        "$ref": "#/pictures/3"
+      },
+      {
+        "$ref": "#/texts/20"
+      },
+      {
+        "$ref": "#/texts/21"
+      },
+      {
+        "$ref": "#/texts/22"
+      },
+      {
+        "$ref": "#/texts/23"
+      },
+      {
+        "$ref": "#/texts/24"
+      },
+      {
+        "$ref": "#/texts/25"
+      },
+      {
+        "$ref": "#/texts/26"
+      },
+      {
+        "$ref": "#/texts/27"
+      },
+      {
+        "$ref": "#/texts/28"
+      },
+      {
+        "$ref": "#/groups/3"
+      },
+      {
+        "$ref": "#/texts/35"
+      },
+      {
+        "$ref": "#/texts/36"
+      },
+      {
+        "$ref": "#/texts/37"
+      }
+    ],
+    "content_layer": "body",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "groups": [
+    {
+      "self_ref": "#/groups/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/3"
+        },
+        {
+          "$ref": "#/texts/4"
+        },
+        {
+          "$ref": "#/texts/5"
+        }
+      ],
+      "content_layer": "body",
+      "name": "group",
+      "label": "key_value_area"
+    },
+    {
+      "self_ref": "#/groups/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/7"
+        },
+        {
+          "$ref": "#/texts/8"
+        },
+        {
+          "$ref": "#/texts/9"
+        }
+      ],
+      "content_layer": "body",
+      "name": "group",
+      "label": "key_value_area"
+    },
+    {
+      "self_ref": "#/groups/2",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/16"
+        }
+      ],
+      "content_layer": "body",
+      "name": "group",
+      "label": "key_value_area"
+    },
+    {
+      "self_ref": "#/groups/3",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/29"
+        },
+        {
+          "$ref": "#/texts/30"
+        },
+        {
+          "$ref": "#/texts/31"
+        },
+        {
+          "$ref": "#/texts/32"
+        },
+        {
+          "$ref": "#/texts/33"
+        },
+        {
+          "$ref": "#/texts/34"
+        }
+      ],
+      "content_layer": "body",
+      "name": "list",
+      "label": "list"
+    }
+  ],
+  "texts": [
+    {
+      "self_ref": "#/texts/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 120.586,
+            "t": 738.799,
+            "r": 301.5,
+            "b": 729.382,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            34
+          ]
+        }
+      ],
+      "orig": "2024 年 第 69 卷 第 13 期 : 1663 ~ 1665",
+      "text": "2024 年 第 69 卷 第 13 期 : 1663 ~ 1665"
+    },
+    {
+      "self_ref": "#/texts/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 60.491,
+            "t": 718.86,
+            "r": 79.996,
+            "b": 713.653,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "亮点述评",
+      "text": "亮点述评"
+    },
+    {
+      "self_ref": "#/texts/2",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 670.567,
+            "r": 233.902,
+            "b": 648.405,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            20
+          ]
+        }
+      ],
+      "orig": "揭示锂硫电池中 16 电子硫还原反应网络",
+      "text": "揭示锂硫电池中 16 电子硫还原反应网络",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/3",
+      "parent": {
+        "$ref": "#/groups/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 636.214,
+            "r": 136.789,
+            "b": 622.336,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            11
+          ]
+        }
+      ],
+      "orig": "赵硕卿 , 郭少军 *",
+      "text": "赵硕卿 , 郭少军 *"
+    },
+    {
+      "self_ref": "#/texts/4",
+      "parent": {
+        "$ref": "#/groups/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 613.265,
+            "r": 205.189,
+            "b": 604.72,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            25
+          ]
+        }
+      ],
+      "orig": "北京大学材料科学与工程学院 , 北京 100871",
+      "text": "北京大学材料科学与工程学院 , 北京 100871"
+    },
+    {
+      "self_ref": "#/texts/5",
+      "parent": {
+        "$ref": "#/groups/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 600.453,
+            "r": 175.63,
+            "b": 591.908,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            32
+          ]
+        }
+      ],
+      "orig": "* 联系人 , E-mail: guosj@pku.edu.cn",
+      "text": "* 联系人 , E-mail: guosj@pku.edu.cn"
+    },
+    {
+      "self_ref": "#/texts/6",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 562.441,
+            "r": 539.079,
+            "b": 529.252,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            94
+          ]
+        }
+      ],
+      "orig": "Revealing the 16-electron sulfur reduction reaction network in lithium sulfur (Li-S) batteries",
+      "text": "Revealing the 16-electron sulfur reduction reaction network in lithium sulfur (Li-S) batteries",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/7",
+      "parent": {
+        "$ref": "#/groups/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 521.163,
+            "r": 213.139,
+            "b": 507.316,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            29
+          ]
+        }
+      ],
+      "orig": "Shuoqing Zhao & Shaojun Guo *",
+      "text": "Shuoqing Zhao & Shaojun Guo *"
+    },
+    {
+      "self_ref": "#/texts/8",
+      "parent": {
+        "$ref": "#/groups/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 500.508,
+            "r": 343.388,
+            "b": 483.924,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            134
+          ]
+        }
+      ],
+      "orig": "School of Materials Science and Engineering, Peking University, Beijing 100871, China * Corresponding author, E-mail: guosj@pku.edu.cn",
+      "text": "School of Materials Science and Engineering, Peking University, Beijing 100871, China * Corresponding author, E-mail: guosj@pku.edu.cn"
+    },
+    {
+      "self_ref": "#/texts/9",
+      "parent": {
+        "$ref": "#/groups/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 475.96,
+            "r": 144.77,
+            "b": 469.014,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            25
+          ]
+        }
+      ],
+      "orig": "doi: 10.1360/TB-2024-0179",
+      "text": "doi: 10.1360/TB-2024-0179"
+    },
+    {
+      "self_ref": "#/texts/10",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.859,
+            "t": 448.404,
+            "r": 282.638,
+            "b": 326.261,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            352
+          ]
+        }
+      ],
+      "orig": "锂硫电池因其高理论比容量 (1672 mAh g -1 ) 和能量密度 (2600 Wh kg -1 ) 、 低成本且环保等特性 , 被认为是最具有应用 潜力的电化学能源存储装置之一 [1,2] . 基于锂多硫化物的硫还 原反应 (sulfur reduction reaction, SRR) 网络涉及复杂的从 S 8 分 子到 Li 2S 的 16 电子多步转化过程 , 并伴随着可溶性锂多硫化 物中间体 (lithium polysulfide intermediates, LiPS) 的生成和溶 解 . 其中高阶多硫化物向不可溶 Li 2S2/Li2S 的转化最为困难 , 产生的 LiPS 在电解液中大量累积并在正 / 负极之间穿梭 , 导致 硫活性材料的不可逆损失和容量迅速衰减 [3] .",
+      "text": "锂硫电池因其高理论比容量 (1672 mAh g -1 ) 和能量密度 (2600 Wh kg -1 ) 、 低成本且环保等特性 , 被认为是最具有应用 潜力的电化学能源存储装置之一 [1,2] . 基于锂多硫化物的硫还 原反应 (sulfur reduction reaction, SRR) 网络涉及复杂的从 S 8 分 子到 Li 2S 的 16 电子多步转化过程 , 并伴随着可溶性锂多硫化 物中间体 (lithium polysulfide intermediates, LiPS) 的生成和溶 解 . 其中高阶多硫化物向不可溶 Li 2S2/Li2S 的转化最为困难 , 产生的 LiPS 在电解液中大量累积并在正 / 负极之间穿梭 , 导致 硫活性材料的不可逆损失和容量迅速衰减 [3] ."
+    },
+    {
+      "self_ref": "#/texts/11",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.859,
+            "t": 321.992,
+            "r": 282.638,
+            "b": 159.471,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            363
+          ]
+        }
+      ],
+      "orig": "电催化过程有助于提高多硫化物的转化动力学 , 减少中 间产物的累积 , 抑制穿梭效应并改善电池性能 [4] . 然而 , 这些 电催化剂在改变 SRR 机制中的作用仍然未知 . 全面理解 SRR 网络和电催化机制对于合理设计针对特定反应步骤的电催 化剂至关重要 , 从而在根本上解决锂硫电池中的多硫化物穿 梭问题 . 但是 , 目前针对 SRR 机制研究具有很大的挑战性 , 这 主要归因于在相同电位下存在多种电化学反应路径和非电 化学副反应 ( 例如 LiPS 歧化 ) 的复杂卷积 [5] . 发展先进的原位 表征技术可以有效观测这些在原位 / 非原位条件下产生的多 硫化物 , 以此来揭示其电化学特征 . 然而 , 现阶段研究并未考 虑整个 SRR 网络平衡 , 缺乏对不同电位下诸如锂多硫化物浓 度变化等特征的阐述 .",
+      "text": "电催化过程有助于提高多硫化物的转化动力学 , 减少中 间产物的累积 , 抑制穿梭效应并改善电池性能 [4] . 然而 , 这些 电催化剂在改变 SRR 机制中的作用仍然未知 . 全面理解 SRR 网络和电催化机制对于合理设计针对特定反应步骤的电催 化剂至关重要 , 从而在根本上解决锂硫电池中的多硫化物穿 梭问题 . 但是 , 目前针对 SRR 机制研究具有很大的挑战性 , 这 主要归因于在相同电位下存在多种电化学反应路径和非电 化学副反应 ( 例如 LiPS 歧化 ) 的复杂卷积 [5] . 发展先进的原位 表征技术可以有效观测这些在原位 / 非原位条件下产生的多 硫化物 , 以此来揭示其电化学特征 . 然而 , 现阶段研究并未考 虑整个 SRR 网络平衡 , 缺乏对不同电位下诸如锂多硫化物浓 度变化等特征的阐述 ."
+    },
+    {
+      "self_ref": "#/texts/12",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.859,
+            "t": 155.202,
+            "r": 287.159,
+            "b": 76.07500000000005,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            247
+          ]
+        }
+      ],
+      "orig": "近日 , 美国加利福尼亚大学洛杉矶分校段镶锋与 Philippe Sautet 研究团队以氮 、 硫共掺杂的多孔石墨烯 (N,S-HGF) 和 未经掺杂的多孔石墨烯 (HGF) 作为研究模型 , 探究电催化剂 在 SRR 网络和转化动力学中的作用机制 [6] . 结合循环伏安法 (cyclic voltammetry, CV) 、 原位拉曼光谱 ( in situ Raman spectra) 和密度泛函理论 (density functional theory, DFT) 计算 , 他们",
+      "text": "近日 , 美国加利福尼亚大学洛杉矶分校段镶锋与 Philippe Sautet 研究团队以氮 、 硫共掺杂的多孔石墨烯 (N,S-HGF) 和 未经掺杂的多孔石墨烯 (HGF) 作为研究模型 , 探究电催化剂 在 SRR 网络和转化动力学中的作用机制 [6] . 结合循环伏安法 (cyclic voltammetry, CV) 、 原位拉曼光谱 ( in situ Raman spectra) 和密度泛函理论 (density functional theory, DFT) 计算 , 他们"
+    },
+    {
+      "self_ref": "#/texts/13",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 308.125,
+            "t": 447.056,
+            "r": 536.906,
+            "b": 340.681,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            277
+          ]
+        }
+      ],
+      "orig": "建立了详细的 SRR 网络并阐明了关键中间产物 Li 2S4 前后的 主要反应路径 , 发现了相关中间产物 (S 8 、 Li 2S8 、 Li 2S6 、 Li2S4 和 Li 2 S), 并确定了 Li 2S8 和 Li 2S4 之间的非电化学归中 / 歧 化反应是 Li 2S6 形成 / 消耗的主要途径 . N,S-HGF 催化剂有助于 加速 LiPS 转化 , 在更高电位下更快地耗尽可溶性 LiPS, 从而 抑制穿梭效应并提高输出电位 . 研究结果表明 , 电催化过程 能够有效解决锂硫电池中的技术瓶颈 . 该研究成果发表在 Nature .",
+      "text": "建立了详细的 SRR 网络并阐明了关键中间产物 Li 2S4 前后的 主要反应路径 , 发现了相关中间产物 (S 8 、 Li 2S8 、 Li 2S6 、 Li2S4 和 Li 2 S), 并确定了 Li 2S8 和 Li 2S4 之间的非电化学归中 / 歧 化反应是 Li 2S6 形成 / 消耗的主要途径 . N,S-HGF 催化剂有助于 加速 LiPS 转化 , 在更高电位下更快地耗尽可溶性 LiPS, 从而 抑制穿梭效应并提高输出电位 . 研究结果表明 , 电催化过程 能够有效解决锂硫电池中的技术瓶颈 . 该研究成果发表在 Nature ."
+    },
+    {
+      "self_ref": "#/texts/14",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 308.127,
+            "t": 335.882,
+            "r": 541.434,
+            "b": 228.976,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            289
+          ]
+        }
+      ],
+      "orig": "该工作首先通过 CV 来揭示电催化剂的作用及其对 SRR 动力学的影响 . N,S-HGF 电极的 CV 曲线在负扫过程中存在两 个还原峰 , 分别位于 2.2~2.5 以及 1.9~2.1 V 区间内 . 在整个 16 电子转化反应过程中 , 通过计算 CV 曲线积分面积可以得到 电荷数并转换为电子迁移数 . 在第二个还原峰处 (2.1 1 V), 电 荷转移比约为 1:3, 说明 Li 2S4 是介于这两个还原峰的主要中间 体 . 而在两个还原峰之间 , 还存在一个非零平台 (2.1 1~2.25 V), 提供 1 个电子转移的容量贡献 ( 图 1(a), (b)).",
+      "text": "该工作首先通过 CV 来揭示电催化剂的作用及其对 SRR 动力学的影响 . N,S-HGF 电极的 CV 曲线在负扫过程中存在两 个还原峰 , 分别位于 2.2~2.5 以及 1.9~2.1 V 区间内 . 在整个 16 电子转化反应过程中 , 通过计算 CV 曲线积分面积可以得到 电荷数并转换为电子迁移数 . 在第二个还原峰处 (2.1 1 V), 电 荷转移比约为 1:3, 说明 Li 2S4 是介于这两个还原峰的主要中间 体 . 而在两个还原峰之间 , 还存在一个非零平台 (2.1 1~2.25 V), 提供 1 个电子转移的容量贡献 ( 图 1(a), (b))."
+    },
+    {
+      "self_ref": "#/texts/15",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 308.126,
+            "t": 224.70600000000002,
+            "r": 541.394,
+            "b": 75.49800000000005,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            476
+          ]
+        }
+      ],
+      "orig": "为了进一步研究这个非零平台的起源 , 作者利用 DFT 计 算出 S 8 到 Li 2S8 的输出电位为 2.41 V, 随后 Li 2S8 的转化存在多 种分支 , 其中形成两个 Li 2S4 是能量最低的反应路径 ( 输出电 位为 2.24 V). Li2S8 + Li2S4 → 2Li2S6 是唯一的放热反应 , 而 Li2S8 同 Li 2S6 或者 Li 2S4 同 Li 2S6 均为吸热反应 , 表明 Li 2S8 + Li2S4 → 2Li2S6 的归中 ( 放热 ) 反应是唯一能够同电化学反应 网络相当的基本化学步骤 . 大约有 1/3 的 Li 2S8 被电化学还原为 Li2S4(2/3 个电子转移 ), 而剩余部分则与 Li 2S4 发生归中反应 , 在 2.25 V 产生高浓度的 Li 2 S6( 图 1(c)). 值得注意的是 , 在高于 平衡电位时 ( 大于 2.24 V, 约为 2.35 V), Li2S8 被继续还原成 Li2 S4. 在较低电位下 , Li2S8 被大量消耗 , 使得 Li 2S6 发生歧化",
+      "text": "为了进一步研究这个非零平台的起源 , 作者利用 DFT 计 算出 S 8 到 Li 2S8 的输出电位为 2.41 V, 随后 Li 2S8 的转化存在多 种分支 , 其中形成两个 Li 2S4 是能量最低的反应路径 ( 输出电 位为 2.24 V). Li2S8 + Li2S4 → 2Li2S6 是唯一的放热反应 , 而 Li2S8 同 Li 2S6 或者 Li 2S4 同 Li 2S6 均为吸热反应 , 表明 Li 2S8 + Li2S4 → 2Li2S6 的归中 ( 放热 ) 反应是唯一能够同电化学反应 网络相当的基本化学步骤 . 大约有 1/3 的 Li 2S8 被电化学还原为 Li2S4(2/3 个电子转移 ), 而剩余部分则与 Li 2S4 发生归中反应 , 在 2.25 V 产生高浓度的 Li 2 S6( 图 1(c)). 值得注意的是 , 在高于 平衡电位时 ( 大于 2.24 V, 约为 2.35 V), Li2S8 被继续还原成 Li2 S4. 在较低电位下 , Li2S8 被大量消耗 , 使得 Li 2S6 发生歧化"
+    },
+    {
+      "self_ref": "#/texts/16",
+      "parent": {
+        "$ref": "#/groups/2"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "page_footer",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 421.169,
+            "t": 55.075000000000045,
+            "r": 541.386,
+            "b": 48.613000000000056,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            33
+          ]
+        }
+      ],
+      "orig": "www.scichina.com csb.scichina.com",
+      "text": "www.scichina.com csb.scichina.com"
+    },
+    {
+      "self_ref": "#/texts/17",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_footer",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 53.858,
+            "t": 55.936000000000035,
+            "r": 108.435,
+            "b": 48.17700000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            16
+          ]
+        }
+      ],
+      "orig": "© 2024 《中国科学》杂志社",
+      "text": "© 2024 《中国科学》杂志社"
+    },
+    {
+      "self_ref": "#/texts/18",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 120.586,
+            "t": 738.799,
+            "r": 260.185,
+            "b": 729.382,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            24
+          ]
+        }
+      ],
+      "orig": "2024 年 5 月 第 69 卷 第 13 期",
+      "text": "2024 年 5 月 第 69 卷 第 13 期"
+    },
+    {
+      "self_ref": "#/texts/19",
+      "parent": {
+        "$ref": "#/pictures/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 53.858,
+            "t": 379.316,
+            "r": 541.389,
+            "b": 333.614,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            304
+          ]
+        }
+      ],
+      "orig": "图 1 ( 网络版彩色 ) 硫还原反应网络和电荷分析 [6] . 实验 (a) 和模拟 (b) 所得到的 CV 曲线 . (c) 主要多硫化物随电压变化的浓度曲线 . (d) DFT 计算 得到的硫还原反应机制 . CV 曲线 (e) 和原位拉曼测试结果 (f). (g) 实验 ( 左 ) 和理论 ( 右 ) 计算所得到的随电压变化的浓度曲线比较结果 . N,S-HGF (h) 与 HGF (k) 的 CV 曲线 . 原位拉曼揭示 N,S-HGF (i) 与 HGF (l) 中多硫化物随电压变化的浓度曲线 . 理论计算所得的 N,S-HGF (j) 与 HGF (m) 中多硫化 物随电压变化的浓度曲线",
+      "text": "图 1 ( 网络版彩色 ) 硫还原反应网络和电荷分析 [6] . 实验 (a) 和模拟 (b) 所得到的 CV 曲线 . (c) 主要多硫化物随电压变化的浓度曲线 . (d) DFT 计算 得到的硫还原反应机制 . CV 曲线 (e) 和原位拉曼测试结果 (f). (g) 实验 ( 左 ) 和理论 ( 右 ) 计算所得到的随电压变化的浓度曲线比较结果 . N,S-HGF (h) 与 HGF (k) 的 CV 曲线 . 原位拉曼揭示 N,S-HGF (i) 与 HGF (l) 中多硫化物随电压变化的浓度曲线 . 理论计算所得的 N,S-HGF (j) 与 HGF (m) 中多硫化 物随电压变化的浓度曲线"
+    },
+    {
+      "self_ref": "#/texts/20",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 53.859,
+            "t": 333.735,
+            "r": 541.436,
+            "b": 286.066,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            689
+          ]
+        }
+      ],
+      "orig": "Figure 1 (Color online) The sulfur reduction reaction network and charge analysis [6] . Experimental (a) and simulated (b) CV curves. (c) Simulated voltage-dependent concentrations of the major species. (d) The dominant reaction mechanism suggested by DFT energetics. CV profiles (e) and in situ Raman spectra (f). (g) Comparison between voltage-dependent experimental (left) and simulated (right) concentrations. Experimental CV curves for N, S-HGF (h) and HGF (k). Voltage-dependent concentrations for each polysulfide species in N,S-HGF (i) and HGF (l) derived from in situ Raman spectra. Simulated voltage-dependent concentration for each polysulfide species in N,S-HGF (j) and HGF (m)",
+      "text": "Figure 1 (Color online) The sulfur reduction reaction network and charge analysis [6] . Experimental (a) and simulated (b) CV curves. (c) Simulated voltage-dependent concentrations of the major species. (d) The dominant reaction mechanism suggested by DFT energetics. CV profiles (e) and in situ Raman spectra (f). (g) Comparison between voltage-dependent experimental (left) and simulated (right) concentrations. Experimental CV curves for N, S-HGF (h) and HGF (k). Voltage-dependent concentrations for each polysulfide species in N,S-HGF (i) and HGF (l) derived from in situ Raman spectra. Simulated voltage-dependent concentration for each polysulfide species in N,S-HGF (j) and HGF (m)"
+    },
+    {
+      "self_ref": "#/texts/21",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 53.858,
+            "t": 265.4680000000001,
+            "r": 287.134,
+            "b": 200.23199999999997,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            189
+          ]
+        }
+      ],
+      "orig": "反应生成 Li 2S8 和 Li 2 S4, 而 Li 2S 会继续被电化学还原成 Li 2 S4, 形成放电平台 . 当放电电位低于 1.97 V 时 , 低阶多硫化物的转 化反应无法发生 , 因此 Li 2S4 歧化反应是该电位下唯一可行的 反应路径 ( 图 1(d)). 当电位进一步降低时 , Li2S4 最终转化为 Li2S 并涉及额外 12 电子的电化学还原过程 .",
+      "text": "反应生成 Li 2S8 和 Li 2 S4, 而 Li 2S 会继续被电化学还原成 Li 2 S4, 形成放电平台 . 当放电电位低于 1.97 V 时 , 低阶多硫化物的转 化反应无法发生 , 因此 Li 2S4 歧化反应是该电位下唯一可行的 反应路径 ( 图 1(d)). 当电位进一步降低时 , Li2S4 最终转化为 Li2S 并涉及额外 12 电子的电化学还原过程 ."
+    },
+    {
+      "self_ref": "#/texts/22",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 53.858,
+            "t": 195.96299999999997,
+            "r": 282.638,
+            "b": 74.59100000000001,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            377
+          ]
+        }
+      ],
+      "orig": "作者随后利用原位拉曼进一步揭示电化学反应过程中 的关键中间产物 . 结果显示 , 在放电过程中 S 8 的特征峰 (469 cm -1 ) 信号强度逐渐减弱并在 2.36 V 处消失 , 而 Li 2S8 和 Li2S6 的特征峰 (508 和 399 cm -1 ) 信号在 2.44 V 时开始出现 ( 图 1 (e), (f)). 当放电到 2.32 V 时 , Li2S8 的信号强度达到最大 , 并伴 随着出现 Li 2S4 的特征峰 (508 cm -1 ) 信号 . 当放电到 2.18 V 时 , Li2S8 的信号基本消失 , Li2S4 的信号强度达到最大 . 随着电位 不断降低 , Li2S4 和归中反应所生成的 Li 2S6 成为主要的多硫化 物组分 , 两者信号强度在 2.00 V 左右消失 , 表明 Li 2S4 已转化为",
+      "text": "作者随后利用原位拉曼进一步揭示电化学反应过程中 的关键中间产物 . 结果显示 , 在放电过程中 S 8 的特征峰 (469 cm -1 ) 信号强度逐渐减弱并在 2.36 V 处消失 , 而 Li 2S8 和 Li2S6 的特征峰 (508 和 399 cm -1 ) 信号在 2.44 V 时开始出现 ( 图 1 (e), (f)). 当放电到 2.32 V 时 , Li2S8 的信号强度达到最大 , 并伴 随着出现 Li 2S4 的特征峰 (508 cm -1 ) 信号 . 当放电到 2.18 V 时 , Li2S8 的信号基本消失 , Li2S4 的信号强度达到最大 . 随着电位 不断降低 , Li2S4 和归中反应所生成的 Li 2S6 成为主要的多硫化 物组分 , 两者信号强度在 2.00 V 左右消失 , 表明 Li 2S4 已转化为"
+    },
+    {
+      "self_ref": "#/texts/23",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 308.126,
+            "t": 265.4680000000001,
+            "r": 541.409,
+            "b": 144.673,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            381
+          ]
+        }
+      ],
+      "orig": "Li2S x ( x = 1, 2, 3). 通过峰面积所得到的每种 LiPS 电压 -浓度变 化曲线和 DFT 计算结果相比较可知 , 随着电位的不断降低 , S8 、 Li 2S8 、 Li 2S6 和 Li 2S4 的浓度变化顺序相似 ( 图 1(g)). 其中 Li2S6 出现的电位与 Li 2S8 相近 , 而消失的电位与 Li 2S4 相近 , 表 明这 3 种物质在归中 / 歧化反应中达到动态平衡 . 该工作证实 SRR 遵循着 S 8 → Li2S8 → 2Li2S4 (Li 2S8 + Li2S4 ⇄ 2Li2S6) → 8Li2S 的多步转化过程 , 其中 Li 2 S8:Li 2 S6:Li 2S4 最大浓度点的相 对浓度比为 1.7:5.5:0.4, 证明 Li 2S6 是放电过程中的主要产物 , 也是造成穿梭效应的主要因素 .",
+      "text": "Li2S x ( x = 1, 2, 3). 通过峰面积所得到的每种 LiPS 电压 -浓度变 化曲线和 DFT 计算结果相比较可知 , 随着电位的不断降低 , S8 、 Li 2S8 、 Li 2S6 和 Li 2S4 的浓度变化顺序相似 ( 图 1(g)). 其中 Li2S6 出现的电位与 Li 2S8 相近 , 而消失的电位与 Li 2S4 相近 , 表 明这 3 种物质在归中 / 歧化反应中达到动态平衡 . 该工作证实 SRR 遵循着 S 8 → Li2S8 → 2Li2S4 (Li 2S8 + Li2S4 ⇄ 2Li2S6) → 8Li2S 的多步转化过程 , 其中 Li 2 S8:Li 2 S6:Li 2S4 最大浓度点的相 对浓度比为 1.7:5.5:0.4, 证明 Li 2S6 是放电过程中的主要产物 , 也是造成穿梭效应的主要因素 ."
+    },
+    {
+      "self_ref": "#/texts/24",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 308.126,
+            "t": 140.404,
+            "r": 523.369,
+            "b": 75.168,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            196
+          ]
+        }
+      ],
+      "orig": "原位拉曼结果同样证实 , HGF 同 N,S-HGF 相比虽然具有 类似的转化路径 (Li 2S8 → Li2S6 → Li2 S4), 但每种组分的电位 区间不同 ( 图 1(h)~(m)). 虽然高电位条件下两种催化剂的差异 较小 , 但是 HGF 中 Li 2S6 转化更为敏感且出现明显电位滞后 ( 平均峰值为 2.19 V, 相较于 N,S-HGF 中的 2.27 V), 并且接近",
+      "text": "原位拉曼结果同样证实 , HGF 同 N,S-HGF 相比虽然具有 类似的转化路径 (Li 2S8 → Li2S6 → Li2 S4), 但每种组分的电位 区间不同 ( 图 1(h)~(m)). 虽然高电位条件下两种催化剂的差异 较小 , 但是 HGF 中 Li 2S6 转化更为敏感且出现明显电位滞后 ( 平均峰值为 2.19 V, 相较于 N,S-HGF 中的 2.27 V), 并且接近"
+    },
+    {
+      "self_ref": "#/texts/25",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_footer",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 53.858,
+            "t": 54.63499999999999,
+            "r": 71.791,
+            "b": 46.849000000000046,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1664",
+      "text": "1664"
+    },
+    {
+      "self_ref": "#/texts/26",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 494.646,
+            "t": 735.188,
+            "r": 514.151,
+            "b": 729.981,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "亮点述评",
+      "text": "亮点述评"
+    },
+    {
+      "self_ref": "#/texts/27",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 53.858,
+            "t": 706.256,
+            "r": 287.166,
+            "b": 474.286,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            722
+          ]
+        }
+      ],
+      "orig": "20% 的 Li 2S6 峰值浓度保持在 1.8 V( 相较于 N,S-HGF 中的 3%). 同样 , Li2S4 转化过程也出现类似的滞后现象 ( 平均峰值为 2.12 V, 相较于 N,S-HGF 中的 2.14 V), 并且在 1.8 V 仍有超过 30% 的 Li 2S4 峰值浓度 ( 相较于 N,S-HGF 中的 17%). 而 HGF 中 Li2S6 和 Li 2S4 转化滞后使得放电电位更低 , 穿梭效应加剧 . Li2S6 到低阶多硫化物的电化学还原在 1.97 V 以上难以发生 , 因此依赖 Li 2S6 → Li2S8 + Li2S4 的歧化反应 , 而该反应需要快 速消耗 Li 2S4 才能进行 . 但是 , Li2S4 较慢的转化动力学严重限 制 Li 2S6 的消耗 , 进而加剧穿梭效应 . 因此 , 作者指出 , 电催化 剂的优势主要体现在 HGF 和 N,S-HGF 中 SRR 转化动力学的差 异上 . N,S-HGF 中不同的催化剂位点和掺杂类型使得 Li 2S4 → Li2S 的转化存在 12 种不同的反应路径 , 其中 4 电子 (Li 2S4 + 4Li + + 4e -→ Li2S2 + 2Li2S) 和 2 电子 (2Li 2S2 + 2Li + + 2e -→ 2Li2S) 转化路径或者 6 电子 (Li 2S4 + 6Li + + 6e -→ 4Li2S) 转化路 径可产生最高的输出电位 . 而在这两种反应路径中 , 氮 、 硫 共掺杂位点输出电位较高 (2.1 1 V, 相较于非掺杂位点 2.03 V), 体现出 N,S-HGF 优异的电化学性能 . 该工作强调改善锂硫电",
+      "text": "20% 的 Li 2S6 峰值浓度保持在 1.8 V( 相较于 N,S-HGF 中的 3%). 同样 , Li2S4 转化过程也出现类似的滞后现象 ( 平均峰值为 2.12 V, 相较于 N,S-HGF 中的 2.14 V), 并且在 1.8 V 仍有超过 30% 的 Li 2S4 峰值浓度 ( 相较于 N,S-HGF 中的 17%). 而 HGF 中 Li2S6 和 Li 2S4 转化滞后使得放电电位更低 , 穿梭效应加剧 . Li2S6 到低阶多硫化物的电化学还原在 1.97 V 以上难以发生 , 因此依赖 Li 2S6 → Li2S8 + Li2S4 的歧化反应 , 而该反应需要快 速消耗 Li 2S4 才能进行 . 但是 , Li2S4 较慢的转化动力学严重限 制 Li 2S6 的消耗 , 进而加剧穿梭效应 . 因此 , 作者指出 , 电催化 剂的优势主要体现在 HGF 和 N,S-HGF 中 SRR 转化动力学的差 异上 . N,S-HGF 中不同的催化剂位点和掺杂类型使得 Li 2S4 → Li2S 的转化存在 12 种不同的反应路径 , 其中 4 电子 (Li 2S4 + 4Li + + 4e -→ Li2S2 + 2Li2S) 和 2 电子 (2Li 2S2 + 2Li + + 2e -→ 2Li2S) 转化路径或者 6 电子 (Li 2S4 + 6Li + + 6e -→ 4Li2S) 转化路 径可产生最高的输出电位 . 而在这两种反应路径中 , 氮 、 硫 共掺杂位点输出电位较高 (2.1 1 V, 相较于非掺杂位点 2.03 V), 体现出 N,S-HGF 优异的电化学性能 . 该工作强调改善锂硫电"
+    },
+    {
+      "self_ref": "#/texts/28",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 53.858,
+            "t": 450.299,
+            "r": 75.856,
+            "b": 438.114,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "参考文献",
+      "text": "参考文献",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/29",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 57.883,
+            "t": 426.638,
+            "r": 541.402,
+            "b": 407.163,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            151
+          ]
+        }
+      ],
+      "orig": "1 Pang Q, Liang X, Kwok C Y, et al. Advances in lithium-sulfur batteries based on multifunctional cathodes and electrolytes. Nat Energy, 2016, 1: 16132",
+      "text": "1 Pang Q, Liang X, Kwok C Y, et al. Advances in lithium-sulfur batteries based on multifunctional cathodes and electrolytes. Nat Energy, 2016, 1: 16132",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/30",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 57.883,
+            "t": 401.58,
+            "r": 541.295,
+            "b": 394.633,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            141
+          ]
+        }
+      ],
+      "orig": "2 Ji X, Lee K T, Nazar L F. A highly ordered nanostructured carbon-sulphur cathode for lithium-sulphur batteries. Nat Mater, 2009, 8: 500-506",
+      "text": "2 Ji X, Lee K T, Nazar L F. A highly ordered nanostructured carbon-sulphur cathode for lithium-sulphur batteries. Nat Mater, 2009, 8: 500-506",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/31",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 57.883,
+            "t": 389.051,
+            "r": 539.266,
+            "b": 382.105,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            140
+          ]
+        }
+      ],
+      "orig": "3 Yin Y, Xin S, Guo Y, et al. Lithium-sulfur batteries: Electrochemistry, materials, and prospects. Angew Chem Int Ed, 2013, 52: 13186-13200",
+      "text": "3 Yin Y, Xin S, Guo Y, et al. Lithium-sulfur batteries: Electrochemistry, materials, and prospects. Angew Chem Int Ed, 2013, 52: 13186-13200",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/32",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 57.883,
+            "t": 376.465,
+            "r": 519.178,
+            "b": 369.518,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            136
+          ]
+        }
+      ],
+      "orig": "4 Wang L, Hua W, Wan X, et al. Design rules of a sulfur redox electrocatalyst for lithium-sulfur batteries. Adv Mater, 2022, 34: 2110279",
+      "text": "4 Wang L, Hua W, Wan X, et al. Design rules of a sulfur redox electrocatalyst for lithium-sulfur batteries. Adv Mater, 2022, 34: 2110279",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/33",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 57.883,
+            "t": 363.936,
+            "r": 541.446,
+            "b": 344.46,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            214
+          ]
+        }
+      ],
+      "orig": "5 Zhou T, Lv W, Li J, et al. Twinborn TiO2-TiN heterostructures enabling smooth trapping-diffusion-conversion of polysulfides towards ultralong life lithium-sulfur batteries. Energy Environ Sci, 2017, 10: 1694-1703",
+      "text": "5 Zhou T, Lv W, Li J, et al. Twinborn TiO2-TiN heterostructures enabling smooth trapping-diffusion-conversion of polysulfides towards ultralong life lithium-sulfur batteries. Energy Environ Sci, 2017, 10: 1694-1703",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/34",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 57.884,
+            "t": 338.877,
+            "r": 501.352,
+            "b": 331.93,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            133
+          ]
+        }
+      ],
+      "orig": "6 Liu R, Wei Z, Peng L, et al. Establishing reaction networks in the 16-electron sulfur reduction reaction. Nature, 2024, 626: 98-104",
+      "text": "6 Liu R, Wei Z, Peng L, et al. Establishing reaction networks in the 16-electron sulfur reduction reaction. Nature, 2024, 626: 98-104",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/35",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 308.125,
+            "t": 706.254,
+            "r": 527.882,
+            "b": 668.855,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            82
+          ]
+        }
+      ],
+      "orig": "池性能的关键电催化策略在于加速多硫化物的转化 , 这不仅 可以产生更高的输出电位 , 还可以缩小 LiPS 可能出现的电位 区间 , 有效抑制多硫化物的穿梭效应 .",
+      "text": "池性能的关键电催化策略在于加速多硫化物的转化 , 这不仅 可以产生更高的输出电位 , 还可以缩小 LiPS 可能出现的电位 区间 , 有效抑制多硫化物的穿梭效应 ."
+    },
+    {
+      "self_ref": "#/texts/36",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 308.125,
+            "t": 664.528,
+            "r": 536.906,
+            "b": 474.286,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            460
+          ]
+        }
+      ],
+      "orig": "总之 , 该工作成功建立了基于锂硫电池 16 电子的 SRR 网 络 , 并证实 Li 2S4 是区分前后两段反应的关键中间产物 . 研究 显示 , Li2S8 和 Li 2S4 是主要的中间产物 , 其中 Li 2S4 控制整个 SRR 过程 , 尤其是转化动力学较差的第二反应阶段 . Li2S6 虽 然由 Li 2S8 和 Li 2S4 的归中反应产生并不直接参与电化学反应 , 但其自身在电解液中的高溶解度和不断累积会加速穿梭效 应 . 研究发现 , 具有电催化作用的 N,S-HGF 电极可以加速高阶 多硫化物的转化 , 从而在较高电位下快速消耗可溶性的 LiPS 来抑制穿梭效应并提高输出电位 . 作者指出 , 设计具有较强 Li2S8 和 Li 2S4 吸附能力的电催化剂可以有效减少 Li 2S6 的产生 . 该研究揭示了 SRR 网络并为锂硫电池电催化剂的设计提供了 研究范式 , 在抑制多硫化物的穿梭效应 , 提升锂硫电池的循 环寿命和能量密度 , 推进锂硫电池的商业化进程中起到至关 重要的作用 .",
+      "text": "总之 , 该工作成功建立了基于锂硫电池 16 电子的 SRR 网 络 , 并证实 Li 2S4 是区分前后两段反应的关键中间产物 . 研究 显示 , Li2S8 和 Li 2S4 是主要的中间产物 , 其中 Li 2S4 控制整个 SRR 过程 , 尤其是转化动力学较差的第二反应阶段 . Li2S6 虽 然由 Li 2S8 和 Li 2S4 的归中反应产生并不直接参与电化学反应 , 但其自身在电解液中的高溶解度和不断累积会加速穿梭效 应 . 研究发现 , 具有电催化作用的 N,S-HGF 电极可以加速高阶 多硫化物的转化 , 从而在较高电位下快速消耗可溶性的 LiPS 来抑制穿梭效应并提高输出电位 . 作者指出 , 设计具有较强 Li2S8 和 Li 2S4 吸附能力的电催化剂可以有效减少 Li 2S6 的产生 . 该研究揭示了 SRR 网络并为锂硫电池电催化剂的设计提供了 研究范式 , 在抑制多硫化物的穿梭效应 , 提升锂硫电池的循 环寿命和能量密度 , 推进锂硫电池的商业化进程中起到至关 重要的作用 ."
+    },
+    {
+      "self_ref": "#/texts/37",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_footer",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 523.502,
+            "t": 55.428999999999974,
+            "r": 541.434,
+            "b": 47.64300000000003,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1665",
+      "text": "1665"
+    }
+  ],
+  "pictures": [
+    {
+      "self_ref": "#/pictures/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 427.2786560058594,
+            "t": 737.4997329711914,
+            "r": 449.8256530761719,
+            "b": 714.0994415283203,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    },
+    {
+      "self_ref": "#/pictures/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 453.48443603515625,
+            "t": 736.3893699645996,
+            "r": 537.059814453125,
+            "b": 715.3122100830078,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    },
+    {
+      "self_ref": "#/pictures/2",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 467.71881103515625,
+            "t": 708.9992904663086,
+            "r": 536.4673461914062,
+            "b": 685.5467376708984,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    },
+    {
+      "self_ref": "#/pictures/3",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/19"
+        }
+      ],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 55.3787956237793,
+            "t": 710.5884780883789,
+            "r": 535.67529296875,
+            "b": 387.0411071777344,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [
+        {
+          "$ref": "#/texts/19"
+        }
+      ],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    }
+  ],
+  "tables": [],
+  "key_value_items": [],
+  "form_items": [],
+  "pages": {
+    "1": {
+      "size": {
+        "width": 595.2760009765625,
+        "height": 793.7009887695312
+      },
+      "page_no": 1
+    },
+    "2": {
+      "size": {
+        "width": 595.2760009765625,
+        "height": 793.7009887695312
+      },
+      "page_no": 2
+    },
+    "3": {
+      "size": {
+        "width": 595.2760009765625,
+        "height": 793.7009887695312
+      },
+      "page_no": 3
+    }
+  }
+}

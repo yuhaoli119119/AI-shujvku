@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from fastapi import Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from app.config import get_settings
+from app.mcp.context import MCPAuthInfo, get_mcp_auth, reset_mcp_auth, set_mcp_auth
+
+
+@dataclass(frozen=True)
+class MCPKeyConfig:
+    source_prefix: str
+    display_name: str
+    raw_key: str
+    capabilities: frozenset[str]
+
+
+def parse_mcp_api_keys(raw: str) -> dict[str, MCPKeyConfig]:
+    configs: dict[str, MCPKeyConfig] = {}
+    for item in [part.strip() for part in raw.split(";") if part.strip()]:
+        parts = [part.strip() for part in item.split("|")]
+        if len(parts) != 4:
+            continue
+        source_prefix, display_name, api_key, capability_blob = parts
+        capabilities = frozenset(
+            capability.strip() for capability in capability_blob.split(",") if capability.strip()
+        )
+        configs[api_key] = MCPKeyConfig(
+            source_prefix=source_prefix,
+            display_name=display_name,
+            raw_key=api_key,
+            capabilities=capabilities,
+        )
+    return configs
+
+
+def authenticate_mcp_request(request: Request) -> MCPAuthInfo:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing MCP API key")
+
+    raw_key = auth_header.removeprefix("Bearer ").strip()
+    config = parse_mcp_api_keys(get_settings().mcp_api_keys).get(raw_key)
+    if not config:
+        raise HTTPException(status_code=401, detail="Invalid MCP API key")
+
+    return MCPAuthInfo(
+        source_prefix=config.source_prefix,
+        display_name=config.display_name,
+        capabilities=config.capabilities,
+        raw_key=config.raw_key,
+    )
+
+
+async def enforce_mcp_auth(request: Request, call_next):
+    if not request.url.path.startswith("/mcp"):
+        return await call_next(request)
+
+    try:
+        auth = authenticate_mcp_request(request)
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    token = set_mcp_auth(auth)
+    try:
+        return await call_next(request)
+    finally:
+        reset_mcp_auth(token)
+
+
+def require_mcp_capability(capability: str) -> MCPAuthInfo:
+    auth = get_mcp_auth()
+    if auth is None:
+        raise PermissionError("MCP authentication context is missing")
+    if capability not in auth.capabilities:
+        raise PermissionError(f"MCP key does not have capability: {capability}")
+    return auth
+
+
+def get_request_mcp_auth(request: Request) -> MCPAuthInfo:
+    return authenticate_mcp_request(request)
+
+
+def require_request_mcp_capability(capability: str):
+    def dependency(auth: MCPAuthInfo = Depends(get_request_mcp_auth)) -> MCPAuthInfo:
+        if capability not in auth.capabilities:
+            raise HTTPException(status_code=403, detail=f"Missing capability: {capability}")
+        return auth
+
+    return dependency

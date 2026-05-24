@@ -1,0 +1,2571 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xml:space="preserve" xmlns="http://www.tei-c.org/ns/1.0" 
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.tei-c.org/ns/1.0 https://raw.githubusercontent.com/kermitt2/grobid/master/grobid-home/schemas/xsd/Grobid.xsd"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+	<teiHeader xml:lang="en">
+		<fileDesc>
+			<titleStmt>
+				<title level="a" type="main">Structural insights and predictive screening of ion transport in Li-rich alloys via neuroevolution potentials</title>
+				<funder ref="#_SbJvApq #_smYvjRD">
+					<orgName type="full">Hebei Province Yan Zhao Huang Jin Tai Talent Program (Postdoctoral Platform</orgName>
+				</funder>
+				<funder ref="#_dGBTDVK #_9AqaRas">
+					<orgName type="full">Natural Science Foundation of Hebei Province</orgName>
+				</funder>
+				<funder ref="#_YS2PXre">
+					<orgName type="full">Central Guiding Local Science and Technology Development Fund Projects</orgName>
+				</funder>
+				<funder ref="#_PrKgEVF #_DkZ52HN #_ApussCv">
+					<orgName type="full">Natural Science Foundation of China</orgName>
+				</funder>
+				<funder ref="#_evrAQh2">
+					<orgName type="full">Innovation Capability Improvement Project of Hebei province</orgName>
+				</funder>
+				<funder ref="#_Nt7s5pS #_6YvvU9S">
+					<orgName type="full">unknown</orgName>
+				</funder>
+				<funder ref="#_dpzf7ch">
+					<orgName type="full">Science and Technology Project of Hebei Education Department</orgName>
+				</funder>
+			</titleStmt>
+			<publicationStmt>
+				<publisher>Springer Science and Business Media LLC</publisher>
+				<availability  status="unknown">
+					<licence/>
+				</availability>
+				<date type="published" when="2026-02-19">2026-02-19</date>
+			</publicationStmt>
+			<sourceDesc>
+				<biblStruct>
+					<analytic>
+						<author>
+							<persName><forename type="first">Di</forename><surname>Jin</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation"><label>1</label> State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics , School of Science , Yanshan University , Qinhuangdao , China.</note>
+								<orgName type="department">School of Science</orgName>
+								<orgName type="laboratory">State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics</orgName>
+								<orgName type="institution">Yanshan University</orgName>
+								<address>
+									<settlement>Qinhuangdao</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Shicong</forename><surname>Ding</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation"><label>1</label> State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics , School of Science , Yanshan University , Qinhuangdao , China.</note>
+								<orgName type="department">School of Science</orgName>
+								<orgName type="laboratory">State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics</orgName>
+								<orgName type="institution">Yanshan University</orgName>
+								<address>
+									<settlement>Qinhuangdao</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Hailong</forename><surname>Qiu</surname></persName>
+							<affiliation key="aff1">
+								<note type="raw_affiliation"><label>2</label> Clean Nano Energy Center , State Key Laboratory of Metastable Materials Science and Technology , School of Materials Science and Engineering , Yanshan University , Qinhuangdao , China.</note>
+								<orgName type="department">School of Materials Science and Engineering</orgName>
+								<orgName type="laboratory">State Key Laboratory of Metastable Materials Science and Technology</orgName>
+								<orgName type="institution" key="instit1">Clean Nano Energy Center</orgName>
+								<orgName type="institution" key="instit2">Yanshan University</orgName>
+								<address>
+									<settlement>Qinhuangdao</settlement>
+									<region>China</region>
+								</address>
+							</affiliation>
+						</author>
+						<author role="corresp">
+							<persName><forename type="first">Yang</forename><surname>Li</surname></persName>
+							<email>yanggc@ysu.edu.cn</email>
+							<affiliation key="aff0">
+								<note type="raw_affiliation"><label>1</label> State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics , School of Science , Yanshan University , Qinhuangdao , China.</note>
+								<orgName type="department">School of Science</orgName>
+								<orgName type="laboratory">State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics</orgName>
+								<orgName type="institution">Yanshan University</orgName>
+								<address>
+									<settlement>Qinhuangdao</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Xinyang</forename><surname>Li</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation"><label>1</label> State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics , School of Science , Yanshan University , Qinhuangdao , China.</note>
+								<orgName type="department">School of Science</orgName>
+								<orgName type="laboratory">State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics</orgName>
+								<orgName type="institution">Yanshan University</orgName>
+								<address>
+									<settlement>Qinhuangdao</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<author>
+							<persName><forename type="first">Guochun</forename><surname>Yang</surname></persName>
+							<affiliation key="aff0">
+								<note type="raw_affiliation"><label>1</label> State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics , School of Science , Yanshan University , Qinhuangdao , China.</note>
+								<orgName type="department">School of Science</orgName>
+								<orgName type="laboratory">State Key Laboratory of Metastable Materials Science &amp; Technology and Hebei Key Laboratory of Microstructural Material Physics</orgName>
+								<orgName type="institution">Yanshan University</orgName>
+								<address>
+									<settlement>Qinhuangdao</settlement>
+									<country key="CN">China</country>
+								</address>
+							</affiliation>
+						</author>
+						<title level="a" type="main">Structural insights and predictive screening of ion transport in Li-rich alloys via neuroevolution potentials</title>
+					</analytic>
+					<monogr>
+						<title level="j" type="main">npj Computational Materials</title>
+						<title level="j" type="abbrev">npj Comput Mater</title>
+						<idno type="eISSN">2057-3960</idno>
+						<imprint>
+							<publisher>Springer Science and Business Media LLC</publisher>
+							<biblScope unit="volume">12</biblScope>
+							<biblScope unit="issue">1</biblScope>
+							<date type="published" when="2026-02-19" />
+						</imprint>
+					</monogr>
+					<idno type="MD5">8B1882E897E7E4363F6CA3724F848F69</idno>
+					<idno type="DOI">10.1038/s41524-026-02012-1</idno>
+					<note type="submission">Received: 28 September 2025; Accepted: 8 February 2026;</note>
+				</biblStruct>
+			</sourceDesc>
+		</fileDesc>
+		<encodingDesc>
+			<appInfo>
+				<application version="0.8.1" ident="GROBID" when="2026-05-21T21:47+0000">
+					<desc>GROBID - A machine learning software for extracting information from scholarly documents</desc>
+					<ref target="https://github.com/kermitt2/grobid"/>
+				</application>
+			</appInfo>
+		</encodingDesc>
+		<profileDesc>
+			<abstract>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Fast and efficient lithium-ion transport is crucial for high-performance rechargeable batteries but remains poorly understood in complex alloy anodes due to the coexistence of multiple competing diffusion mechanisms. A key challenge is disentangling how defect type, local coordination, and structural connectivity collectively govern migration barriers, which has so far limited the development of generalizable design rules. Here, we develop neuroevolution potentials (NEPs), a machine-learning framework trained to near-density functional theory (DFT) accuracy, providing both reliability and transferability for large-scale simulations of Li diffusion in Li-In and Li-Sn alloys. Using NEPs, we identify three primary factors controlling Li mobility: the dominant defect carrier (Li vacancy, Li interstitial, or metal vacancy), the connectivity of low-barrier diffusion pathways, and the local atomic environment, with migration distance and charge redistribution as the most critical determinants of diffusion barriers. Li diffusion shows strong structural inheritance across intermetallics, where the crystal backbone dictates long-range connectivity and chemical composition fine-tunes local behavior. The favorable diffusion structural frameworks revealed by NEPs can be extended to other Lirich intermetallics, enabling predictive screening of fast-diffusing phases. This work establishes a predictive framework for designing next-generation alloy anodes with high ionic conductivity.</p></div>
+			</abstract>
+		</profileDesc>
+	</teiHeader>
+	<facsimile>
+		<surface n="1" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="2" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="3" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="4" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="5" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="6" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="7" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="8" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="9" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="10" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+		<surface n="11" ulx="0.0" uly="0.0" lrx="595.276" lry="790.866"/>
+	</facsimile>
+	<text xml:lang="en">
+		<body>
+<div xmlns="http://www.tei-c.org/ns/1.0"><p>Rechargeable lithium-ion batteries (LIBs) are indispensable to portable electronics, electric vehicles, and grid-scale energy storage, forming a cornerstone of the global transition toward sustainable energy <ref type="bibr" target="#b0">1,</ref><ref type="bibr" target="#b1">2</ref> . Achieving higher energy density, faster charging, and longer cycle life critically depends on the mobility of lithium ions within electrode materials. Beyond thermodynamics and interfacial chemistry, lithium diffusion represents a fundamental rate-limiting factor governing power performance and overall device efficiency <ref type="bibr" target="#b2">3,</ref><ref type="bibr" target="#b3">4</ref> . Elucidating the atomistic mechanisms of Li migration is therefore essential for optimizing electrode design and extending the frontiers of energy storage technologies <ref type="bibr" target="#b4">5,</ref><ref type="bibr" target="#b5">6</ref> .</p><p>Extensive studies have characterized lithium diffusion across various electrode classes, including from intercalation-type oxides, alloying-based materials, and conversion-based systems <ref type="bibr" target="#b6">[7]</ref><ref type="bibr" target="#b7">[8]</ref><ref type="bibr" target="#b8">[9]</ref><ref type="bibr" target="#b9">[10]</ref> . These investigations collectively reveal that Li kinetics are highly sensitive to the local chemical and structural environment, which depends on factors, such as composition <ref type="bibr" target="#b10">11</ref> , phase <ref type="bibr" target="#b11">12</ref> , and lithiation state <ref type="bibr" target="#b12">13</ref> . Consequently, developing a systematic methodology that links local chemical and structural environments to diffusion pathways and migration barriers across different material classes is valuable for identifying the key factors governing Li transport and guiding electrode design. For intercalation-type oxide electrodes and oxide-type solid-state electrolytes, previous studies have established that parameters, such as the valence of the transition-metal cation, the inter-cation distances, local coordination geometry, and polyhedral connectivity can affect lithium-ion mobility <ref type="bibr" target="#b13">[14]</ref><ref type="bibr" target="#b14">[15]</ref><ref type="bibr" target="#b15">[16]</ref> . In contrast, analogous studies in alloy-based systems remain relatively limited, leaving a gap in transferable insights across material classes. Advancing understanding in this area would enable more predictive tuning of ion transport behavior and support the rational design of high-performance alloy electrodes.</p><p>Atomistic simulations provide indispensable insight into lithium transport at the microscopic level <ref type="bibr" target="#b16">17,</ref><ref type="bibr" target="#b17">18</ref> . The nudged elastic band (NEB) method can determine migration barriers along predefined paths, while heuristic approaches, such as bond-valence and Ewald-energy analyses can map plausible routes but cannot quantify conductivity <ref type="bibr" target="#b18">19,</ref><ref type="bibr" target="#b19">20</ref> . Molecular dynamics (MD) simulations capture finite-temperature diffusion and mechanistic diversity, yet ab initio MD (AIMD) is computationally prohibitive for exploring alloy phase diagrams, metastabilities, and long timescales <ref type="bibr" target="#b20">21</ref> . Recent advances in machine-learning potentials (MLPs) offer a promising route forward, delivering near-density functional theory (DFT) accuracy at orders-of-magnitude lower cost <ref type="bibr" target="#b21">22,</ref><ref type="bibr" target="#b22">23</ref> . MLPs have already been applied to Li diffusion <ref type="bibr" target="#b23">[24]</ref><ref type="bibr" target="#b24">[25]</ref><ref type="bibr" target="#b25">[26]</ref> , phase stability <ref type="bibr" target="#b26">[27]</ref><ref type="bibr" target="#b27">[28]</ref><ref type="bibr" target="#b28">[29]</ref> , nucleation <ref type="bibr" target="#b29">30</ref> , and lithiation kinetics <ref type="bibr" target="#b30">[31]</ref><ref type="bibr" target="#b31">[32]</ref><ref type="bibr" target="#b32">[33]</ref> , and, in combination with data-driven models, they present new opportunities for constructing transferable structure-performance descriptors <ref type="bibr" target="#b33">34,</ref><ref type="bibr" target="#b34">35</ref> . Nevertheless, a unified, quantitatively validated framework that connects carrier type (Li vacancies, Li interstitials, or metal vacancies), local coordination/electronic responses, and migration barriers across complex alloy phases remains to be established <ref type="bibr" target="#b35">36,</ref><ref type="bibr" target="#b36">37</ref> .</p><p>Alloy anodes represent a compelling strategy to overcome the limitations of lithium metal, allowing Li ions to diffuse into host structures and form stable alloy phases that mitigate dendrite formation and interfacial degradation <ref type="bibr" target="#b37">38</ref> . Among them, Li-In and Li-Sn alloys serve as ideal model systems due to their rich phase diagrams encompassing multiple stable and low-energy metastable compounds, diverse structural configurations, and pronounced phase transformations during (de)lithiation <ref type="bibr" target="#b38">39,</ref><ref type="bibr" target="#b39">40</ref> . These characteristics enable systematic interrogation of how atomic-scale environments influence Li kinetics. Their practical relevance is reinforced by favorable interfacial stability in solid-state batteries and high-rate performance in specific phases. Spanning broad structural diversity within two chemically related binaries, Li-In and Li-Sn provide the necessary scope to extract transferable mechanistic rules while maintaining interpretability.</p><p>In this work, we develop neuroevolution potentials (NEPs) for Li-In and Li-Sn alloys through a workflow that integrates large-scale structural searches and molecular-dynamics-driven data generation. Using this framework, we (i) map phase stability and uncover previously unreported lowenergy structures, and (ii) elucidate the atomic-scale mechanisms of Li diffusion, identifying vacancy-and interstitial-mediated pathways and quantifying how network connectivity governs long-range mobility. Our analysis reveals that the topology of low-energy diffusion channels, rather than individual migration barriers, dominates Li transport, and that crystal framework and local coordination determine ionic mobility, with chemical composition serving a secondary fine-tuning role. Favorable diffusion pathways exhibit strong structural inheritance across Li-rich intermetallics, providing a mechanistic basis for rational design of fast-diffusing alloy anodes. Collectively, this work establishes a unified grounded framework for understanding and predicting Li transport in complex alloys, supporting the design of next-generation electrodes with high ionic conductivity.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Results</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Machine-Learning Potential Development</head><p>MLPs for Li-In and Li-Sn alloys are developed using the NEP framework (parameters in Table <ref type="table">S1</ref>) implemented in GPUMD <ref type="bibr" target="#b40">41,</ref><ref type="bibr" target="#b41">42</ref> . In this framework, the total energy of the system, U, is expressed as a sum of atomic site energies U i , which depend on the local environment of each atom within a finite cutoff radius. By construction, this approach allows efficient scaling to larger systems while preserving DFT-level accuracy, where the reliability of predictions depends critically on the comprehensiveness and representativeness of the training dataset. The initial training datasets are generated by combining two complementary strategies (Fig. <ref type="figure" target="#fig_1">1a</ref>). First, equilibrium AIMD simulations are performed at temperatures from 300 to 1800 K on known structures obtained from the Materials Project and OQMD databases <ref type="bibr" target="#b42">43,</ref><ref type="bibr" target="#b43">44</ref> , with snapshots sampled at regular time intervals to capture thermally accessible atomic configurations. Second, isotropic structural perturbations are introduced by scaling lattice parameters by factors of 0.8-1.2, thereby sampling non-equilibrium configurations to enhance coverage of the potential energy landscape. Principal component analysis (PCA) <ref type="bibr" target="#b44">45</ref> is used to evaluate the diversity and structural distribution of the constructed dataset. As shown in Fig. <ref type="figure" target="#fig_1">1a</ref>, projection onto a two-dimensional PCA space reveals that local atomic environments for each composition are well represented; however, the sampled configurations occupy a relatively narrow region of the potential energy landscape. This indicates that, although the initial dataset captures key structural variations, additional sampling is required to achieve broader and more robust coverage of the configurational space.</p><p>To further enhance structural diversity, especially for configurations relevant to Li diffusion and phase transformations, the NEP model is integrated with CALYPSO for random structure prediction in an iterative workflow <ref type="bibr" target="#b45">46</ref> . This integration leverages the excellent balance of NEP between DFT-level accuracy and computational efficiency <ref type="bibr" target="#b22">23,</ref><ref type="bibr" target="#b46">47,</ref><ref type="bibr" target="#b47">48</ref> . A diverse structural dataset is generated using CALYPSO, whose efficient global search capabilities enhance the coverage and robustness of the NEP training process <ref type="bibr" target="#b27">28,</ref><ref type="bibr" target="#b48">49</ref> . The initial dataset shown in the left panel of Fig. <ref type="figure" target="#fig_1">1a</ref> is used as the training set to construct the NEP model, which is subsequently employed for structural relaxations in the first generation of CALYPSO exploration. In each cycle, 2500 candidate structures are generated, and the most distinct ones are selected using farthest-point sampling, a strategy that maximizes geometric diversity while minimizing redundancy <ref type="bibr" target="#b41">42</ref> . These selected structures are subsequently evaluated by DFT calculation to obtain energies, forces, and virials, which are added to the training set before retraining the NEP model (the right panel of Fig. <ref type="figure" target="#fig_1">1a</ref>). This process is repeated until the model accurately predicted all candidate structures, resulting in final datasets of 2612 Li-In and 3106 Li-Sn structures. PCA analysis confirms a significant increase in configurational coverage compared with the initial datasets.</p><p>Validation of the NEP models is performed against DFT calculations. To evaluate the performance of the final NEP model, we first check its ability to reproduce DFT results. Figure <ref type="figure" target="#fig_1">1b</ref> and S1 shows good agreement between NEP and DFT results for energies, forces, and virials across a wide range of compositions and structures. For Li-In (Li-Sn) alloys, the root-mean-square errors (RMSEs) for energies, forces, and virial tensors in the training set are 11 (16) meV/atom, 64 (67) meV/Å, and 45 (71) meV/atom, respectively. For an independent test set of 2000 randomly generated Li-In (Li-Sn) structures, the RMSE are 7 (8) meV/atom, 46 (64) meV/Å, and 42 (46) meV/atom. Furthermore, NEP-MD simulations reproduce AIMD atomic trajectories, radial distribution functions (RDF), phonon spectra, energy-volume relations, and lattice parameters (deviations ≤0.9%), confirming that NEP reliably captures both local bonding and long-range structural correlations (Fig. <ref type="figure" target="#fig_2">S2</ref> and Table <ref type="table">S2</ref>). Collectively, these results demonstrate that the developed NEP models are accurate, transferable, and suitable for largescale MD simulations aimed at systematically exploring Li diffusion pathways, migration mechanisms, and kinetics in complex Li-In and Li-Sn alloys.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Phase Stability and Structural Evolution of Li-In and Li-Sn Alloys</head><p>The phase diagrams of the Li-In and Li-Sn alloy systems are revisited through large-scale structure searches using both CALYPSO and USPEX <ref type="bibr" target="#b49">50</ref> , with candidate energetics efficiently screened by the NEP model. The formation energy of each compound is defined as the energy difference between the alloy and the corresponding amounts of elemental solid Li and M (M = In or Sn), normalized per atom. Figure <ref type="figure" target="#fig_2">2a</ref>, b present a comparison of formation energies for low-energy structures in the Li-In and Li-Sn systems as predicted by NEP and DFT, with RMSEs of 0.017 and 0.023 eV/atom, respectively. To account for these small deviations, a threshold of 0.050 eV/ atom above the convex hull is adopted. All NEP-predicted structures within this range are re-optimized using DFT, following established practices in MLP-based structure prediction <ref type="bibr" target="#b27">28,</ref><ref type="bibr" target="#b50">51</ref> . For high-symmetry structures within 0.010 eV/atom of the hull, zero-point energy (ZPE) corrections are additionally incorporated to their important influence on structural stability of competing low-energy phases containing light elements. Structures lying further from the convex hull are excluded from refinement, as their energies are sufficiently high to rule them out as ground-state candidates. In total, 1172 Li-In and 1077 Li-Sn structures are examined. As shown in Fig. <ref type="figure" target="#fig_2">2c</ref> and S3a, the NEP model reliably reproduces the DFT convex-hull landscapes, with only minor deviations in equilibrium phases and formation energies.</p><p>A key outcome of our structure searches is the prediction of several previously unreported stable and low-energy metastable phases in the Li-In and Li-Sn systems, which extend the known compositional and structural landscape of these alloys. As shown in Fig. <ref type="figure" target="#fig_2">2e</ref> and Figure <ref type="figure" target="#fig_4">S3b-g</ref>, our calculations capture the majority of experimentally reported equilibrium phases <ref type="bibr" target="#b51">52,</ref><ref type="bibr" target="#b52">53</ref> , validating the reliability of the NEP model. Two unreported stable compounds are disclosed in the Li-In system, Li 7 In 4 (C2/m), and Li 17 In 15 (Pmm2). In addition, several low-lying metastable structures with energies within 10 meV/atom above the convex hull are identified (Figs.  <ref type="figure">-S8</ref>). Although the degree of charge transfer slightly decreases under Li-rich conditions, the interaction remains predominantly ionic.</p><p>The volume evolution of In and Sn alloys during lithiation is shown in Fig. <ref type="figure">S9</ref>. Upon full lithiation, Sn and In expand by ~250% (Li 22 Sn 5 ) and ~260% (Li 13 In 3 ), respectively, consistent with previous theoretical and in situ TEM results <ref type="bibr" target="#b53">54,</ref><ref type="bibr" target="#b54">55</ref> . Predicted expansions at intermediate lithiation stage also fall within this range, indicating that the calculated volume changes are broadly consistent with experimental observations. The predicted electrochemical properties reflect these structural configurations and the relative stability of the alloys. Using the convex hull data, the average voltages of the Li-In and Li-Sn systems are evaluated, including the two previously unknown stable phases (Fig. <ref type="figure" target="#fig_2">2d</ref> and<ref type="figure" target="#fig_1">S10</ref>). The resulting voltage plateaus closely match those of experimentally reported compounds <ref type="bibr" target="#b55">56</ref> . For instance, Li 17 In 15 exhibits a voltage plateau of 0.47 V, comparable to LiIn (0.48 V) and Li 5 In 4 (0.46 V), suggesting it may form during electrochemical cycling. The Li-In system generally exhibits lower average voltages than Li-Sn, mainly due to the more negative formation energies of Li-Sn phases indicate greater energy release during alloying, leading to higher thermodynamic stability and higher average voltage. </p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Atomic-Scale Mechanisms and Diffusion Pathways of Li in Li-In and Li-Sn Alloys</head><p>Understanding the atomic-scale mechanisms governing Li-ion transport in Li-In and Li-Sn alloys is crucial for elucidating their electrochemical behavior and optimizing battery performance. Li diffusion in these systems primarily occurs via interstitial and vacancy-mediated migration, each associated with distinct dominant carriers. To clarify their contributions, we performed NEP-MD simulations under three representative conditions-M (In/Sn) vacancies, Li vacancies, and Li interstitials-using a uniform 1% defect concentration. To validate the reliability of the NEP, we compared the Li self-diffusion coefficients and activation energies obtained from pulsed field gradient nuclear magnetic resonance spectroscopy (PFG-NMR) measurements <ref type="bibr" target="#b56">57</ref> of LiIn with those predicted by the NEP (Fig. <ref type="figure" target="#fig_4">3a</ref> and<ref type="figure" target="#fig_1">S11</ref>). The calculated Li-vacancy diffusion coefficient (6.0 ± 0.2 × 10 -7 cm 2 /s) and activation energy (0.05 ± 0.002 eV) at 300 K are in good agreement with the experimental values (5.5 ± 1.0 × 10 -7 cm 2 /s and 0.068 ± 0.037 eV). Besides, incorporating the uncertainty does not alter the mechanistic interpretation: Li vacancies consistently remain the dominant carriers of LiIn, and the relative ranking of diffusion performance among the materials is preserved. For stable Li-In structures, Fig. <ref type="figure" target="#fig_2">S12</ref> identifies the dominant charge carriers by comparing the MSD values at 300 K and presents the temperature-dependent diffusion coefficients and activation energies, with the maximum diffusion coefficients and corresponding dominant carriers at 300 K shown in Fig. <ref type="figure" target="#fig_4">3b</ref>. For LiIn 3 and Li 17 In 15 , since the MSD could not be fitted linearly at 300 K, we estimated their diffusion coefficients using hightemperature extrapolation <ref type="bibr" target="#b57">58</ref> . In LiIn 3 and LiIn, different carriers govern Li diffusion, and their nature strongly influences the diffusion behavior (Fig. <ref type="figure" target="#fig_4">3c,</ref><ref type="figure">d</ref>). This carrier dependence is directly linked to the connectivity of the Li sublattice network (Fig. <ref type="figure" target="#fig_4">3e</ref>). For Li x In with x &lt; 1, interstitial Li dominates due to isolated Li atoms with In nearest neighbors (3.24 Å) and Li-Li distances of 4.58 Å; for x &gt; 1, Li vacancies dominate as Li atom form a continuous 3D network. Li 17 In 15 is an exception, where interstitial Li remains dominant despite x &gt; 1 (Fig. <ref type="figure" target="#fig_4">S13</ref>). These transitions agree with Galvanostatic Intermittent Titration Technique experiments and electrochemical impedance spectroscopy <ref type="bibr" target="#b58">59</ref> . We also note that, for Li 3 In 2 , experimental studies support vacancy-mediated diffusion <ref type="bibr" target="#b58">59</ref> , whereas previous NEB calculations reported slightly higher barriers for vacancy diffusion than for interstitial diffusion <ref type="bibr" target="#b59">60</ref> . Our NEP-MD results, in agreement with experimental observations, demonstrate that vacancy-mediated Li species can indeed undergo long-range diffusion (Fig. <ref type="figure" target="#fig_5">S14</ref>). This agreement may arise from the ability of NEP-MD to sample spontaneous diffusion events and to capture extended migration trajectories beyond the constraints of predefined NEB pathways. Among the studied phases, LiIn (Fm 3m) and Li 5 In 4 exhibit diffusion coefficients on the order of 10   As Li content increases, a continuous Li network enables vacancy diffusion, while structural diversity introduces path-dependent barrier variations (0.03-0.25 eV). Path II (isolated LiIn 4 tetrahedron → LiIn 6 octahedron → LiIn 4 tetrahedron) exhibits the lowest barrier (0.04 eV in LiIn and 0.03 eV in Li 5 In 4 ) and 3-D and 2-D connectivity, enabling long-range migration. Higher-barrier Path III (LiIn 7 coplanar polyhedron → LiIn 3 triangle →LiIn 4 tetrahedron), such as 0.24 eV in Li 5 In 4 and 0.25 eV in Li 3 In 2 , provide connectivity, but restricting diffusion due to high barrier. In Li 5 In 4 , Li migration occurs primarily along Path II with 2-D connectivity. In Li 3 In 2 , diffusion relies on Path III, reducing the diffusion coefficient from 6.3 × 10 -7 cm 2 /s in Li 5 In 4 to 1.6 × 10 -8 cm 2 /s. This trend aligns with experimental voltage curves: around x ≈ 1.25, the lithiation profile of Li-In alloys shifts from a smooth plateau to pronounced fluctuations, reflecting decreased interface stability and a transition toward Li metal deposition <ref type="bibr" target="#b58">59</ref> . In Li 3 In, only Path IX (shared edge LiIn 4 → LiIn 6 , ΔE = 0.24 eV) remains, further reducing the diffusion coefficient to 2.9 × 10 -8 cm 2 /s. Other lowbarrier paths, such as Path V (0.07 eV), exist in isolation and contribute only to local hopping, with negligible effect on overall diffusion (Fig. <ref type="figure" target="#fig_1">S18</ref>).</p><p>Taken together, these results demonstrate that Li-In diffusion is determined not only by the energy barriers of individual paths but, more critically, by the connectivity of low-energy paths. Figure <ref type="figure" target="#fig_5">4d</ref> illustrates vacancy-mediated hopping in the potential energy landscape. When lowbarrier pathways are well-connected, Li atoms can diffuse along these continuous paths, markedly enhancing long-range diffusion. In contrast, when low-barrier paths are isolated or the potential energy landscape is rugged, Li ions become trapped in local minima, significantly limiting overall mobility.</p><p>Compared to Li-In, Li-Sn exhibits both similarities and distinct differences in diffusion mechanisms (Figs. <ref type="figure" target="#fig_2">S19-S20</ref>). At low Li content, interstitial Li dominates in both systems; as Li content increases, diffusion gradually shifts to vacancy mediation. However, in high-Li phases of Li-Sn (e.g., Li 7 Sn 2 ), diffusion reverts to interstitial dominance, a feature not observed in Li-In compounds. Calculations show that in Li 7 Sn 2 , the diffusion coefficient reaches 8.4 × 10 -7 cm 2 /s-the highest among stable Li-Sn phases. NEB and trajectory analysis (Fig. <ref type="figure" target="#fig_5">4e</ref>) reveal that this is due to dense Li chains: the introduction of interstitial Li induces cooperative migration of multiple Li atoms along the chain through Coulombic interactions, forming a low-energy collective hopping mechanism that significantly enhances ionic mobility.</p><p>Under different carrier conditions, metastable phases of Li-In and Li-Sn further corroborate these mechanisms (Figs. <ref type="figure" target="#fig_2">S20-S21</ref>). Specifically, Li 13 In 5 (Pm) is vacancy-mediated, Li 7 In 2 , Li 22 Sn 5 , and Li 15 Sn 4 are interstitial-mediated, and all exhibit diffusion coefficients on the order of 10 - 7 cm 2 /s, demonstrating high ionic conductivity. No vacancy-mediated phases in the Li-Sn system achieve such high diffusion coefficients. From the perspective of local diffusion configurations, no ultra-low-barrier pathway analogous to Path II in LiIn and Li 5 In 4 is observed in Li-Sn (Fig. <ref type="figure" target="#fig_5">4b</ref>). In contrast, Path IV and Path VIII in Li-Sn closely resemble the corresponding paths in the Li-In system and exhibit comparable migration barriers, indicating that these diffusion modes are only weakly dependent on the chemical identity of the M atom. For structurally analogous pairs (Li 7 Sn 2 vs. Li 7 In 2 , Li 5 Sn 2 vs. Li 5 In 2 ), Li-In systems consistently show slightly higher diffusion coefficients, reflecting weaker Li-In interactions compared to Li-Sn, as revealed by the crystal orbital Hamilton population (COHP) analysis <ref type="bibr" target="#b60">61</ref> (Fig. <ref type="figure" target="#fig_5">4f</ref>). Nevertheless, the overall Li diffusion behavior (Fig. <ref type="figure" target="#fig_2">S22</ref>) remains highly similar across the two systems, highlighting the critical role of crystal structure in dictating diffusion properties. In addition, Cmmm-Li 7 Sn 2 exhibits a collective hopping mechanism, with a calculated migration barrier lower than that of the previously reported knock-off mechanism (Fig. <ref type="figure" target="#fig_4">S23</ref>) <ref type="bibr" target="#b59">60</ref> , thereby identifying a lower-barrier diffusion pathway that may be operative in other Li-rich alloys. This result further confirms the capability of NEP-MD simulations to explore a wide range of Li diffusion pathways, enabling the discovery of previously unrecognized diffusion behaviors.</p><p>To assess the generality of favorable diffusion frameworks, we selected Li-rich intermetallics with similar Li content from Materials Project and OQMD: LiIn-type (LiGa, Li 2 SbAu, Li 2 AgBi, Li 2 AuBi), Li 7 Sn 2 -type (Li 7 Ge 2 , Li 7 Si 2 ), Li 15 Sn 4 -type (Li 15 Ge 4 , Li 15 Si 4 ), and Li 22 Sn 5 -type (Li 22 Ge 5 , Li 22 Si 5 ) (Fig. <ref type="figure" target="#fig_5">S24</ref>). NEP potentials were first validated with DFT (Fig. <ref type="figure" target="#fig_7">S25</ref>), and machine-learning accelerated MD simulations showed diffusion coefficients around 10 -7 cm 2 /s, consistent with Li-In and Li-Sn structures. This demonstrates strong structural inheritance and generalizability: connectivity and local coordination primarily determine Li mobility, while chemical composition fine-tunes performance.</p><p>Building on this mechanistic insight, we used a Gradient Boosting Regressor (GBR) model to quantify factors controlling local Li diffusion, incorporating descriptors, such as migration distance (d), charge redistribution between initial and transition states (|e |), Li-In bond length (L ave ), coordination number (N), polyhedral volume (V), and energy change (ΔE IS- FS ), defined as the difference in energy between the initial and final states along the Li migration pathway. Minimal descriptor correlation (Pearson &lt; 0.75, Fig. <ref type="figure" target="#fig_7">5a</ref>) ensures distinct contributions. GBR predictions closely match DFT barriers (validation/test RMSE = 0.04/0.06 eV, R 2 = 0.77/0.85, Fig. <ref type="figure" target="#fig_7">5b</ref>), outperforming random forest regression (RFR) <ref type="bibr" target="#b61">62</ref> (Fig. <ref type="figure" target="#fig_7">5c</ref>). Feature importance analysis identifies migration distance and charge redistribution as dominant factors, and the scatter reflects that the overall trend: longer distances and larger charge redistribution correlate with higher barriers (Fig. <ref type="figure" target="#fig_7">5d,</ref><ref type="figure" target="#fig_2">S26</ref>). For example, in LiIn 3 , PATH I exhibits a large charge reorganization (|e | = 0.102 e -), leading to a high migration barrier (2.27 eV), whereas PATH II in Li 5 In 4 shows smaller charge redistribution (|e | = 0.002 e -), resulting in a low barrier of only 0.03 eV (Fig. <ref type="figure" target="#fig_2">S27</ref>). Similarly, for the same local configuration but different compositions (e.g., PATH III in Li 5 In 4 and Li 3 In 2 ), the degree of charge reorganization remains comparable, indicating that the local atomic environment, rather than the overall stoichiometry, primarily governs the charge redistribution and thus the migration barrier. Furthermore, variations in tetrahedral connectivity and jump distances lead to different barriers even for structurally similar LiIn 4 -LiIn 6 -LiIn 4 diffusion processes (Fig. <ref type="figure" target="#fig_5">4e</ref>). Identical local diffusion pathways across compositions exhibit comparable structural and electronic characteristics, resulting in similar migration barriers (Fig. <ref type="figure" target="#fig_7">5f</ref>), confirming the generality of high-diffusion configuration and enabling extrapolation to other Li-rich intermetallics.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Discussion</head><p>Our analysis demonstrates that Li-ion transport in Li-In and Li-Sn alloys is governed by three interrelated factors: the Li content, the local atomic environment, and the connectivity of low-energy migration pathways. The connectivity of the Li sublattice network determines the dominant diffusion mechanism: isolated Li sites promote interstitial-mediated diffusion, whereas continuous Li networks favor vacancy-mediated diffusion. Local atomic environments, including Li-Li distances and charge redistribution along hopping paths, modulate migration barriers for individual steps. For instance, in Li 5 In 4 , diffusion along well-connected 2-D pathways results in high Li mobility (D ≈ 6.3 × 10 -7 cm 2 /s), whereas in Li 3 In 2 , reliance on higherbarrier, less-connected paths reduces the diffusion coefficient by more than an order of magnitude. These results clarify that effective long-range Li mobility arises from the interplay between local barriers and the connectivity of accessible low-energy pathways.</p><p>Chemical composition (Li-In vs. Li-Sn) fine-tunes local migration barriers without fundamentally altering the dominant diffusion mechanism, which is determined by Li network connectivity. COHP analyses indicate that Li-Sn interactions are slightly stronger than Li-In, leading to marginally higher local barriers, consistent with the modest differences in diffusion coefficients between analogous phases. In high-Li phases of Li-Sn (e.g., Li 7 Sn 2 ), dense Li chains induce cooperative multi-ion hopping, enabling interstitial-dominated diffusion even at high Li content and maximizing ionic mobility.</p><p>To test the generality of these insights, we examined chemically related Li-rich intermetallics with comparable Li content, including LiIn-type (LiGa, Li 2 SbAu, Li 2 AgBi, L i2 AuBi), Li 7  Overall, our study establishes three central principles governing Li transport in complex alloy anodes: (i) the connectivity of the Li sublattice network determines the dominant carrier type, (ii) the local atomic environment sets migration barriers for individual hopping steps, and (iii) continuous networks of favorable migration paths enable high long-range mobility. By identifying structural configurations that consistently support fast Li diffusion, this framework provides a mechanistic basis for screening Li-rich intermetallics, facilitating the rational design of next-generation alloy electrodes with enhanced ionic conductivity.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Methods</head></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>DFT Calculation</head><p>In this study, DFT calculations are performed using the Vienna Ab initio Simulation Package (VASP) to obtain energies, atomic forces, and virial tensors required for training NEPs <ref type="bibr" target="#b62">63</ref> . The projector augmented-wave (PAW) method is employed in conjunction with the Perdew-Burke-Ernzerhof (PBE) exchange-correlation functional within the generalized gradient approximation (GGA) <ref type="bibr" target="#b63">64</ref> . A plane-wave energy cutoff of 500 eV is used. The Brillouin zone is sampled using a Monkhorst-Pack k-point grid with a spacing of 0.168 Å -1 . The energy convergence criterion for static calculations is set to 10 -5 eV, and the force convergence threshold is 0.01 eV/Å to ensure high accuracy in energy, forces, and structural details. Phonon calculations are carried out using the finite displacement method <ref type="bibr" target="#b64">65</ref> , implemented in the PHONOPY code <ref type="bibr" target="#b65">66</ref> . COHP <ref type="bibr" target="#b60">61</ref> calculations are performed with the LOBSTER software package. The PHONOPY package is also used to calculate ZPE corrections. The climbing-image nudged elastic band (CI-NEB) method is employed to investigate the influence of different local chemical environments on Li diffusion pathways and energy barriers <ref type="bibr" target="#b18">19</ref> .</p><p>For the resulting stable structures, the average voltage is computed from the total DFT energies using the following formula:</p><formula xml:id="formula_0">V x 1 ; x 2 À Á ¼ À E Li x 1 M À E Li x 2 M À ðx 1 À x 2 ÞEðLiÞ ðx 1 À x 2 Þ<label>ð1Þ</label></formula><p>AIMD Calculations AIMD simulations in the canonical ensemble (NVT) are performed using a Nosé-Hoover thermostat to control temperature, ranging from 300 to 1800 K and are used to generate the initial training dataset. The minimal supercell approach is adopted to ensure that the lattice vectors exceeded 8 Å in all directions. A time step of 1 fs is used, with simulation durations of at least 5 ps. For AIMD simulations, only the Γ-point is used for Brillouin zone sampling.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>NEP-Based Structure Search</head><p>During the CALYPSO-NEP structural exploration to generate dataset, we performed variable-stoichiometry searches within Li x M y (M = In or Sn; x = 1-20; y = 1-20) and the total number of atoms capped at 40 per unit cell.</p><p>In each iteration, 2500 low-energy structures were generated and then reduced by farthest-point sampling to retain only representative ones. This iterative process was repeated until the NEP model achieved full consistency with DFT energies and forces. After obtaining a high-accuracy NEP, both CALYPSO <ref type="bibr" target="#b45">46</ref> and USPEX 67 were employed to explore stable and metastable phases in the Li-In and Li-Sn systems. For fixed-stoichiometry searches in CALYPSO, the simulation cell size was set to 1-4 formula units. After the first generation, 50% of the low-energy structures were selected to construct the next generation via the particle-swarm optimization (PSO) algorithm. In most cases, the structural search was terminated after approximately 4000-5000 structures had been generated.</p><p>The USPEX code combined with the NEP is used to predict stable phases in the Li-In and Li-Sn alloy systems. A variable-composition search is first performed, where the first generation consisted of 60 structures, and the number of atoms per primitive cell is limited to between 2 and 36. For the generation of subsequent structures (each generation containing 200 structures), 40% of the lowest-energy structures from the previous generation are optimized using variation operators-including heredity, softmutation, transmutation, and lattice mutation-while the remaining 60% are randomly generated. This process is repeated for 101 generations.</p><p>Based on the convex hull results from the variable-composition search, a fixed-composition search is then conducted on more than 60 low-energy Li-In/Sn stoichiometries. Each generation consisted of 60 structures, and the search is repeated for 50 generations. In each generation, 50% of the structures are randomly generated and the remaining 50% are produced through variation operators applied to existing low-energy configurations.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Large-Scale Molecular Dynamic (MD) Simulations</head><p>To ensure that the NEP potential accurately describes Li diffusion in the predicted phases, MD simulations are performed, with a heating phase (from 0 to 650 K, lasting 1 ns) followed by equilibration phase (lasting 1 ns). During the simulation, structures are continuously collected, and configurations with the largest energy and force deviations are added to the training dataset.</p><p>The diffusion coefficient calculation are carried out using the NEPbased Large-scale Atomic/Molecular Massively Parallel Simulator (LAMMPS) software package <ref type="bibr" target="#b67">68</ref> . The lattice constants of the structures used for ion diffusion coefficient calculations is exceeding 30 Å. The defective structures are generated using the Atomsk tool by randomly adding or removing approximately 1% of the atoms in the atomic structure <ref type="bibr" target="#b68">69</ref> . The simulations are conducted in the temperature range from 300 to 500 K, with a 50 K interval. For each temperature, the system is heated for 1 ns and equilibrated for 5 ns under the NPT ensemble with a time step of 1 fs. The simulation results are visualized and analyzed using the Open Visualization Tool (OVITO) and Visual Molecular Dynamics (VMD) software <ref type="bibr" target="#b69">70,</ref><ref type="bibr" target="#b70">71</ref> . The diffusion coefficient of Li atom is calculated through the MSD over time intervals.</p><formula xml:id="formula_1">D ¼ 1 2NdΔt X N i¼1 jr i r þ Δt ð ÞÀr i ðtÞj 2 t<label>ð2Þ</label></formula><p>where N is the total number of diffusing ions, d = 3 represents the dimension of the diffusion system, r i (t) is the displacement of the i-th ion at time t, and &lt;..&gt; denotes the time average. The initial ballistic regime is excluded from our analysis. Only the time interval, where the MSD exhibits a clear linear dependence on time, is selected for extracting diffusion coefficients. The activation energy (E a ) for ion diffusion is calculated using the Arrhenius equation.</p><formula xml:id="formula_2">σ ¼ σ 0 × exp ÀE a k B T<label>ð3Þ</label></formula><p>where σ 0 is the pre-exponential factor of the conductivity, k B is the Boltzmann constant, and T is the temperature.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Gradient Boosting Regression (GBR)</head><p>In this study, GBR model is employed to analyze the key factors influencing local Li diffusion. GBR is more suitable for a small database and exhibits good performance in many applications <ref type="bibr" target="#b71">[72]</ref><ref type="bibr" target="#b72">[73]</ref><ref type="bibr" target="#b73">[74]</ref> . The model is implemented using the Python package scikit-learn with tuned hyperparameters. A DFT calculated dataset of 90 points from Li-In and Li-Sn compositions is used to generate the training, testing and validation data by a random split of data.</p><p>The feature importance and predictive accuracy (RMSE and R 2 ) are evaluated.</p></div><figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_0"><head></head><label></label><figDesc>S4 and S5), includingLi 13 In 5 (Pm, 6 meV/atom),Li 11 In 4 (P 3m1, 2 meV/ atom), andLi 19 In 5 (Pmmm, 7 meV/atom), as well as Li 7 Sn 6 (C2/m, 7 meV/ atom) and Li 3 Sn 2 (Cmcm, 9 meV/atom). All of these phases are dynamically stable (Fig.S6), suggesting their potential synthesizability. Collectively, these predicted stable and metastable phases expand the known phase diagrams ofLi-In and Li-Sn alloys and provide guidance for future experimental exploration. The compositional evolution of the M (In/Sn) sublattice provides mechanistic insight into bonding characteristics across the Li-In and Li-Sn alloy systems. With increasing Li concentration, the In sublattice evolves from three-dimensional (3-D) frameworks and two-dimensional (2-D) layers to one-dimensional chains, disconnected layers, or dimers, eventually forms isolated atoms. In compounds, such as Li 3 In 2 , Li 5 In 4 , and LiIn, the In sublattice adopts six-membered ring networks. According to the Zintl-Klemm concept and the 8-N rule, when the Li:In ratio approaches 1:1, In exhibits bonding behavior similar to group-IV elements. Likewise, when the Li:Sn ratio is near 1:1, Sn adopts bonding characteristics analogous to Sb, forming four-membered ring frameworks. Bader charge, electron localization, and density-of-states analyses indicate that Li consistently donates electrons to In or Sn in both alloy systems (Figs. S7</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_1"><head>Fig. 1 |</head><label>1</label><figDesc>Fig. 1 | Development and validation of the neuroevolution potentials (NEP) model for Li-In systems. a Workflow for developing the NEP model for Li-In systems, along with the principal component analysis (PCA) of the initial and structure-search-generated datasets. PC1 and PC2 represent the first and second</figDesc><graphic coords="3,60.49,49.72,479.96,373.55" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_2"><head>Fig. 2 |</head><label>2</label><figDesc>Fig. 2 | Thermodynamic stability and electrochemical properties of Li-In compounds. a, b Comparison of formation energies between NEP and DFT for low-lying structures uncovered by structure searches in Li-In and Li-Sn systems. c Formation energies of Li-In compounds relative to elemental solid Li and In. d Calculated average voltages versus lithium for the stable Li-In structures, compared with experimental data 56 . Here, x denotes the Li content in Li x In 1-x . e Thermodynamically stable Li-In compounds with Li and In atoms in green and mauve, respectively.</figDesc><graphic coords="4,90.48,49.72,419.98,523.67" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_3"><head></head><label></label><figDesc>-7 cm 2 /s at room temperature, demonstrating excellent ionic mobility. No diffusion dominated by In vacancies is observed in any Li-In configuration. Under Li-vacancy-mediated conditions, In atoms primarily vibrate around their equilibrium positions due to the high migration barriers and do not occupy Li sublattices, thus posing no hinderance to Li diffusion. Sn atoms in the Li-Sn system exhibit analogous behavior (Figs. S15-S17). In structures dominated by interstitial Li, In and Sn atoms can exhibit cooperative motion with Li (such as LiIn 3 ), contributing to overall diffusion. Local lattice rearrangements and diffusion pathway reconstruction underlie these transitions. To elucidate the microscopic origin, we combined NEB calculations with NEP-MD trajectory analysis to quantify diffusion characteristics at the atomic scale. At low Li content (LiIn 3 ), vacancy-mediated diffusion follows LiIn 10 tetrakaidecahedron → LiIn 4 planar quadrilateral → LiIn 10 tetrakaidecahedron (Path I, Fig. 4a and S18), with an energy barrier (ΔE) of 2.27 eV. In contrast, interstitial Li migrates via a knock-off mechanism, cooperatively moving with neighboring In atoms to hop from LiIn 4 to LiIn 7 polyhedra, with ΔE = 0.005 eV, making interstitial Li the most efficient diffusion carrier in this configuration (Fig. 4c).</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_4"><head>Fig. 3 |</head><label>3</label><figDesc>Fig. 3 | Lithium-ion transport mechanisms in Li-In alloys. a Self-diffusivity (D) of Li + in LiIn (Fm 3m) with 1% Li defects as a function of temperature, obtained from NEP-MD simulations and compared with experimental self-diffusion data measured using pulsed field gradient nuclear magnetic resonance spectroscopy (PFG-NMR) 57 . b Li diffusion coefficients and dominant carriers in stable Li-In structures at 300 K. c, d Mean Square Displacement (MSD) profiles and Li-atom trajectories (green line) at 300 K are shown for LiIn 3 and LiIn with 1% Li vacancy and 1% Li interstitial atoms. e Mechanistic transition of Li diffusion in stable Li-In alloys from vacancy-to interstitial-dominated transition with increasing Li concentration, correlated with Li sublattice network connectivity.</figDesc><graphic coords="5,60.49,49.72,479.96,382.17" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_5"><head>Fig. 4 |</head><label>4</label><figDesc>Fig. 4 | Diffusion pathways, energy barriers (ΔE), and bonding interactions in Li-In and Li-Sn alloys. a, b Selected local vacancy diffusion pathways in the stable phases of the Li-In and Li-Sn systems, with Li atoms in green, In atoms in mauve, Sn atoms in purple, and transition-state Li positions in blue. c Interstitial diffusion pathways and energy barriers (ΔE) in LiIn 3 . d Schematic illustrations of vacancy defect migration pathways in the potential energy landscape for the connected lowbarrier pathway and the Rugged energy landscape. The energy difference between a local minimum and nearby saddle point determines the barrier for Li-ion migration. e Interstitial diffusion pathways and energy barriers in Li 7 Sn 2 . f Crystal Orbital Hamilton Population (COHP) diagrams of the interactions between In/Sn atoms and their nearest-neighbor Li atoms, where E f is the fermi energy. The integrated COHP (ICOHP), which reflects the bond strength (the more negative the value, the stronger the bond), is also calculated for Li 7 In 2 and Li 7 Sn 2 . g Temperature dependence of the Li-ion diffusion coefficient in the candidate structures, used to evaluate the generality of favorable diffusion frameworks.</figDesc><graphic coords="6,60.49,49.72,479.96,579.80" type="bitmap" /></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_6"><head></head><label></label><figDesc>Sn 2 -type (Li 7 Ge 2 , Li 7 Si 2 ), Li 15 Sn 4type (Li 15 Ge 4 , Li 15 Si 4 ), and Li 22 Sn 5 -type (Li 22 Ge 5 , Li 22 Si 5 ) frameworks. NEP-driven MD simulations predict diffusion coefficients on the order of 10 -7 cm 2 /s, consistent with Li-In and Li-Sn systems. This similarity is not coincidental. These compounds share analogous local environments and Li sublattice connectivity that facilitate low-energy hopping, confirming that the key factors controlling Li mobility, including carrier type, local coordination, and connectivity of migration pathways, are transferable across chemistries.</figDesc></figure>
+<figure xmlns="http://www.tei-c.org/ns/1.0" xml:id="fig_7"><head>Fig. 5 |</head><label>5</label><figDesc>Fig. 5 | Machine-learning (ML) prediction and feature analysis of Li-ion migration in Li-In and Li-Sn systems. a Heat map of the Pearson correlation coefficient matrix among the selected structural and chemical descriptors used for machine-learning modeling, including migration distance (d), charge redistribution (|e | ), average Li-In bond length (L ave ), coordination number (N), polyhedral volume (V), and energy change (ΔE IS-FS ). b, c Comparison of Li migration energy barriers obtained from DFT with those predicted by Gradient Boosting Regressor (GBR) model and random forest regression (RFR) for both training and testing datasets of Li-In and Li-Sn system. d Feature importance analysis from the GBR model for predicting migration barriers. e Li migration distances and local charge variations in configurations II, IV, and V in Li 5 In 4 and Li 2 In. f Li migration distances and local charge variations in configurations VIII in Li 5 In 2 , Li 5 Sn 2 and Li 13 Sn 5 . Li atoms are shown in green, In atoms in mauve, Sn atoms in purple, and transitionstate Li positions in blue.</figDesc><graphic coords="8,60.49,49.72,479.96,253.76" type="bitmap" /></figure>
+			<note xmlns="http://www.tei-c.org/ns/1.0" place="foot" xml:id="foot_0"><p>npj Computational Materials | (2026) 12:132</p></note>
+		</body>
+		<back>
+
+			<div type="acknowledgement">
+<div><p>Acknowledgements G.Y. acknowledges the <rs type="funder">Natural Science Foundation of China</rs> under Grants No. <rs type="grantNumber">22372142</rs>, <rs type="grantNumber">12304028</rs>, <rs type="grantNumber">12404027</rs>, and <rs type="grantNumber">U23A20537</rs>, the <rs type="programName">Foreign Expert Introduction Program</rs> (<rs type="grantNumber">G2023003004L</rs>), the <rs type="funder">Central Guiding Local Science and Technology Development Fund Projects</rs> (<rs type="grantNumber">236Z7605G</rs>), the <rs type="funder">Natural Science Foundation of Hebei Province</rs> (Grant No. <rs type="grantNumber">B2024203051</rs> and <rs type="grantNumber">A2024203023</rs>), the <rs type="funder">Science and Technology Project of Hebei Education Department</rs> (Grants No. <rs type="grantNumber">JZX2023020</rs>), and <rs type="funder">Innovation Capability Improvement Project of Hebei province</rs> (<rs type="grantNumber">22567605H</rs>). D.J. thanks the <rs type="funder">Natural Science Foundation of Hebei Province</rs> (<rs type="grantNumber">A2024203002</rs>) and <rs type="funder">Hebei Province Yan Zhao Huang Jin Tai Talent Program (Postdoctoral Platform</rs>, <rs type="grantNumber">B2024003003</rs>).</p></div>
+			</div>
+			<listOrg type="funding">
+				<org type="funding" xml:id="_PrKgEVF">
+					<idno type="grant-number">22372142</idno>
+				</org>
+				<org type="funding" xml:id="_DkZ52HN">
+					<idno type="grant-number">12304028</idno>
+				</org>
+				<org type="funding" xml:id="_ApussCv">
+					<idno type="grant-number">12404027</idno>
+				</org>
+				<org type="funding" xml:id="_Nt7s5pS">
+					<idno type="grant-number">U23A20537</idno>
+					<orgName type="program" subtype="full">Foreign Expert Introduction Program</orgName>
+				</org>
+				<org type="funding" xml:id="_YS2PXre">
+					<idno type="grant-number">G2023003004L</idno>
+				</org>
+				<org type="funding" xml:id="_dGBTDVK">
+					<idno type="grant-number">236Z7605G</idno>
+				</org>
+				<org type="funding" xml:id="_6YvvU9S">
+					<idno type="grant-number">B2024203051</idno>
+				</org>
+				<org type="funding" xml:id="_dpzf7ch">
+					<idno type="grant-number">A2024203023</idno>
+				</org>
+				<org type="funding" xml:id="_evrAQh2">
+					<idno type="grant-number">JZX2023020</idno>
+				</org>
+				<org type="funding" xml:id="_9AqaRas">
+					<idno type="grant-number">22567605H</idno>
+				</org>
+				<org type="funding" xml:id="_SbJvApq">
+					<idno type="grant-number">A2024203002</idno>
+				</org>
+				<org type="funding" xml:id="_smYvjRD">
+					<idno type="grant-number">B2024003003</idno>
+				</org>
+			</listOrg>
+
+			<div type="availability">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Data availability</head><p>The datasets generated and analyzed during the current study are presented as figures and tables in the manuscript and Supplementary information and are available from the corresponding authors on reasonable request.</p></div>
+			</div>
+
+			<div type="annex">
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Author contributions</head><p>D.J. performed calculations, analyzed the data, and wrote the original draft. S.D., H.Q., Y.L., and X.L. assisted the calculations, and participated in the data analysis. G.Y. conceived the initial idea, edited and reviewed the manuscript, and supervised the project. All authors discussed the results and commented on the manuscript.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Competing interests</head><p>The authors declare no competing interests.</p></div>
+<div xmlns="http://www.tei-c.org/ns/1.0"><head>Additional information</head><p>Supplementary information The online version contains supplementary material available at <ref type="url" target="https://doi.org/10.1038/s41524-026-02012-1">https://doi.org/10.1038/s41524-026-02012-1</ref>.</p><p>Correspondence and requests for materials should be addressed to Guochun Yang.</p><p>Reprints and permissions information is available at <ref type="url" target="http://www.nature.com/reprints">http://www.nature.com/reprints</ref> Publisher's note Springer Nature remains neutral with regard to jurisdictional claims in published maps and institutional affiliations.</p><p>Open Access This article is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License, which permits any non-commercial use, sharing, distribution and reproduction in any medium or format, as long as you give appropriate credit to the original author(s) and the source, provide a link to the Creative Commons licence, and indicate if you modified the licensed material. You do not have permission under this licence to share adapted material derived from this article or parts of it. The images or other third party material in this article are included in the article's Creative Commons licence, unless indicated otherwise in a credit line to the material. If material is not included in the article's Creative Commons licence and your intended use is not permitted by statutory regulation or exceeds the permitted use, you will need to obtain permission directly from the copyright holder. To view a copy of this licence, visit <ref type="url" target="http://creativecommons.org/licenses/bync-nd/4.0/">http://creativecommons.org/licenses/bync-nd/4.0/</ref>.</p></div>			</div>
+			<div type="references">
+
+				<listBibl>
+
+<biblStruct xml:id="b0">
+	<analytic>
+		<title level="a" type="main">Material science as a cornerstone driving battery research</title>
+		<author>
+			<persName><forename type="first">Jean-Marie</forename><forename type="middle">M</forename><surname>Tarascon</surname></persName>
+			<idno type="ORCID">0000-0002-7059-6845</idno>
+		</author>
+		<idno type="DOI">10.1038/s41563-022-01342-x</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Materials</title>
+		<title level="j" type="abbrev">Nat. Mater.</title>
+		<idno type="ISSN">1476-1122</idno>
+		<idno type="ISSNe">1476-4660</idno>
+		<imprint>
+			<biblScope unit="volume">21</biblScope>
+			<biblScope unit="issue">9</biblScope>
+			<biblScope unit="page" from="979" to="982" />
+			<date type="published" when="2022-08-24">2022</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Tarascon, J. M. Material science as a cornerstone driving battery research. Nat. Mater. 21, 979-982 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b1">
+	<analytic>
+		<title level="a" type="main">A reflection on lithium-ion battery cathode chemistry</title>
+		<author>
+			<persName><forename type="first">A</forename><surname>Manthiram</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Commun</title>
+		<imprint>
+			<biblScope unit="volume">11</biblScope>
+			<biblScope unit="page">1550</biblScope>
+			<date type="published" when="2020">2020</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Manthiram, A. A reflection on lithium-ion battery cathode chemistry. Nat. Commun. 11, 1550 (2020).</note>
+</biblStruct>
+
+<biblStruct xml:id="b2">
+	<analytic>
+		<title level="a" type="main">Lithium‐Diffusion Induced Capacity Losses in Lithium‐Based Batteries</title>
+		<author>
+			<persName><forename type="first">David</forename><surname>Rehnlund</surname></persName>
+			<idno type="ORCID">0000-0003-2394-287X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zhaohui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Leif</forename><surname>Nyholm</surname></persName>
+		</author>
+		<idno type="DOI">10.1002/adma.202108827</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Materials</title>
+		<title level="j" type="abbrev">Advanced Materials</title>
+		<idno type="ISSN">0935-9648</idno>
+		<idno type="ISSNe">1521-4095</idno>
+		<imprint>
+			<biblScope unit="volume">34</biblScope>
+			<biblScope unit="issue">19</biblScope>
+			<biblScope unit="page">2108827</biblScope>
+			<date type="published" when="2022-03-15">2022</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Rehnlund, D., Wang, Z. &amp; Nyholm, L. Lithium-diffusion induced capacity losses in lithium-based batteries. Adv. Mater. 34, e2108827 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b3">
+	<analytic>
+		<title level="a" type="main">Extending the performance limit of anodes: insights from diffusion kinetics of alloying anodes</title>
+		<author>
+			<persName><forename type="first">Y</forename><forename type="middle">S</forename><surname>Choi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><forename type="middle">O</forename><surname>Scanlon</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><forename type="middle">C</forename><surname>Lee</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Adv. Energy Mater</title>
+		<imprint>
+			<biblScope unit="volume">11</biblScope>
+			<date type="published" when="2020">2003078. 2020</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Choi, Y. S., Scanlon, D. O. &amp; Lee, J. C. Extending the performance limit of anodes: insights from diffusion kinetics of alloying anodes. Adv. Energy Mater. 11, 2003078 (2020).</note>
+</biblStruct>
+
+<biblStruct xml:id="b4">
+	<analytic>
+		<title level="a" type="main">“Fast-Charging” Anode Materials for Lithium-Ion Batteries from Perspective of Ion Diffusion in Crystal Structure</title>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Xiangye</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Youzhi</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fen</forename><surname>Ran</surname></persName>
+			<idno type="ORCID">0000-0002-7383-1265</idno>
+		</author>
+		<idno type="DOI">10.1021/acsnano.3c08712</idno>
+	</analytic>
+	<monogr>
+		<title level="j">ACS Nano</title>
+		<title level="j" type="abbrev">ACS Nano</title>
+		<idno type="ISSN">1936-0851</idno>
+		<idno type="ISSNe">1936-086X</idno>
+		<imprint>
+			<biblScope unit="volume">18</biblScope>
+			<biblScope unit="issue">4</biblScope>
+			<biblScope unit="page" from="2611" to="2648" />
+			<date type="published" when="2024-01-15">2024</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Wang, R. et al. Fast-Charging&quot; anode materials for lithium-ion batteries from perspective of ion diffusion in crystal structure. ACS Nano 18, 2611-2648 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b5">
+	<analytic>
+		<title level="a" type="main">Computational understanding of Li-ion batteries</title>
+		<author>
+			<persName><forename type="first">Alexander</forename><surname>Urban</surname></persName>
+			<idno type="ORCID">0000-0002-9021-279X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Dong-Hwa</forename><surname>Seo</surname></persName>
+			<idno type="ORCID">0000-0002-7200-7186</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Gerbrand</forename><surname>Ceder</surname></persName>
+		</author>
+		<idno type="DOI">10.1038/npjcompumats.2016.2</idno>
+	</analytic>
+	<monogr>
+		<title level="j">npj Computational Materials</title>
+		<title level="j" type="abbrev">npj Comput Mater</title>
+		<idno type="ISSNe">2057-3960</idno>
+		<imprint>
+			<biblScope unit="volume">2</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">16002</biblScope>
+			<date type="published" when="2016-03-18">2016</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Urban, A., Seo, D.-H. &amp; Ceder, G. Computational understanding of Li- ion batteries. npj Comput. Mater. 2, 16002 (2016).</note>
+</biblStruct>
+
+<biblStruct xml:id="b6">
+	<analytic>
+		<title level="a" type="main">Understanding Li Diffusion in Li-Intercalation Compounds</title>
+		<author>
+			<persName><forename type="first">Anton</forename><surname>Van Der Ven</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jishnu</forename><surname>Bhattacharya</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Anna</forename><forename type="middle">A</forename><surname>Belak</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/ar200329r</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Accounts of Chemical Research</title>
+		<title level="j" type="abbrev">Acc. Chem. Res.</title>
+		<idno type="ISSN">0001-4842</idno>
+		<idno type="ISSNe">1520-4898</idno>
+		<imprint>
+			<biblScope unit="volume">46</biblScope>
+			<biblScope unit="issue">5</biblScope>
+			<biblScope unit="page" from="1216" to="1225" />
+			<date type="published" when="2013">2013</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Van der Ven, A., Bhattacharya, J. &amp; Belak, A. A. Understanding Li diffusion in Li-intercalation compounds. Acc. Chem. Res. 46, 1216-1225 (2013).</note>
+</biblStruct>
+
+<biblStruct xml:id="b7">
+	<analytic>
+		<title level="a" type="main">Transition Metal Compounds Family for Li–S Batteries: The DFT‐Guide for Suppressing Polysulfides Shuttle</title>
+		<author>
+			<persName><forename type="first">Qi</forename><surname>Liang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Sizhe</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0002-2068-6308</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yao</forename><surname>Yao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Dong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haojie</forename><surname>Song</surname></persName>
+		</author>
+		<idno type="DOI">10.1002/adfm.202300825</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Functional Materials</title>
+		<title level="j" type="abbrev">Adv Funct Materials</title>
+		<idno type="ISSN">1616-301X</idno>
+		<idno type="ISSNe">1616-3028</idno>
+		<imprint>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="issue">32</biblScope>
+			<biblScope unit="page">2300825</biblScope>
+			<date type="published" when="2023-04-29">2023</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Liang, Q., Wang, S., Yao, Y., Dong, P. &amp; Song, H. Transition metal compounds family for Li-s batteries: the DFT-guide for suppressing polysulfides shuttle. Adv. Funct. Mater. 33, 2300825 (2023).</note>
+</biblStruct>
+
+<biblStruct xml:id="b8">
+	<analytic>
+		<title level="a" type="main">Role of Short-Range Order on Diffusion Coefficients in the Li–Mg Alloy</title>
+		<author>
+			<persName><forename type="first">Sesha</forename><forename type="middle">Sai</forename><surname>Behara</surname></persName>
+			<idno type="ORCID">0000-0003-2144-4586</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Anton</forename><surname>Van Der Ven</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/acs.chemmater.4c02334</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemistry of Materials</title>
+		<title level="j" type="abbrev">Chem. Mater.</title>
+		<idno type="ISSN">0897-4756</idno>
+		<idno type="ISSNe">1520-5002</idno>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="issue">22</biblScope>
+			<biblScope unit="page" from="11236" to="11245" />
+			<date type="published" when="2024-11-13">2024</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Behara, S. S. &amp; Van der Ven, A. Role of short-range order on diffusion coefficients in the Li-mg alloy. Chem. Mater. 36, 11236-11245 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b9">
+	<analytic>
+		<title level="a" type="main">Computational insight into the grain boundary structure and atomic mobility in metallic lithium</title>
+		<author>
+			<persName><forename type="first">A</forename><forename type="middle">V</forename><surname>Sergeev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">A</forename><forename type="middle">A</forename><surname>Rulev</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><forename type="middle">O</forename><surname>Kondratyeva</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><forename type="middle">V</forename><surname>Yashina</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Acta Mater</title>
+		<imprint>
+			<biblScope unit="volume">233</biblScope>
+			<biblScope unit="page">117988</biblScope>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Sergeev, A. V., Rulev, A. A., Kondratyeva, Y. O. &amp; Yashina, L. V. Computational insight into the grain boundary structure and atomic mobility in metallic lithium. Acta Mater 233, 117988 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b10">
+	<analytic>
+		<title level="a" type="main">Favorable Interfacial Chemomechanics Enables Stable Cycling of High-Li-Content Li–In/Sn Anodes in Sulfide Electrolyte-Based Solid-State Batteries</title>
+		<author>
+			<persName><forename type="first">Christian</forename><surname>Hänsel</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Baltej</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Kiwic</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Pieremanuele</forename><surname>Canepa</surname></persName>
+			<idno type="ORCID">0000-0002-5168-9253</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Dipan</forename><surname>Kundu</surname></persName>
+			<idno type="ORCID">0000-0001-5244-9836</idno>
+		</author>
+		<idno type="DOI">10.1021/acs.chemmater.1c01431</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemistry of Materials</title>
+		<title level="j" type="abbrev">Chem. Mater.</title>
+		<idno type="ISSN">0897-4756</idno>
+		<idno type="ISSNe">1520-5002</idno>
+		<imprint>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="issue">15</biblScope>
+			<biblScope unit="page" from="6029" to="6040" />
+			<date type="published" when="2021-07-29">2021</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Hänsel, C., Singh, B., Kiwic, D., Canepa, P. &amp; Kundu, D. Favorable Interfacial chemomechanics enables stable cycling of high-Li-content Li-In/Sn anodes in sulfide electrolyte-based solid-state batteries. Chem. Mater. 33, 6029-6040 (2021).</note>
+</biblStruct>
+
+<biblStruct xml:id="b11">
+	<analytic>
+		<title level="a" type="main">Solid-Solution or Intermetallic Compounds: Phase Dependence of the Li-Alloying Reactions for Li-Metal Batteries</title>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Ye</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/jacs.3c08711.s001</idno>
+	</analytic>
+	<monogr>
+		<title level="j">J. Am. Chem. Soc</title>
+		<imprint>
+			<biblScope unit="volume">145</biblScope>
+			<biblScope unit="page" from="24775" to="24784" />
+			<date type="published" when="2023">2023</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Ye, Y. et al. Solid-solution or intermetallic compounds: phase dependence of the Li-alloying reactions for Li-metal batteries. J. Am. Chem. Soc. 145, 24775-24784 (2023).</note>
+</biblStruct>
+
+<biblStruct xml:id="b12">
+	<monogr>
+		<title level="m" type="main">Tailoring lithium concentration in alloy anodes for long cycling and high areal capacity in sulfide-based all solid-state batteries</title>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Wang</surname></persName>
+		</author>
+		<imprint>
+			<date type="published" when="2023">2023</date>
+			<biblScope unit="volume">3</biblScope>
+			<biblScope unit="page">100087</biblScope>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Wang, Z. et al. Tailoring lithium concentration in alloy anodes for long cycling and high areal capacity in sulfide-based all solid-state batteries. eScience 3, 100087 (2023).</note>
+</biblStruct>
+
+<biblStruct xml:id="b13">
+	<analytic>
+		<title level="a" type="main">Electrodes with High Power and High Capacity for Rechargeable Lithium Batteries</title>
+		<author>
+			<persName><forename type="first">Kisuk</forename><surname>Kang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><forename type="middle">Shirley</forename><surname>Meng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Bréger</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Clare</forename><forename type="middle">P</forename><surname>Grey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gerbrand</forename><surname>Ceder</surname></persName>
+		</author>
+		<idno type="DOI">10.1126/science.1122152</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Science</title>
+		<title level="j" type="abbrev">Science</title>
+		<idno type="ISSN">0036-8075</idno>
+		<idno type="ISSNe">1095-9203</idno>
+		<imprint>
+			<biblScope unit="volume">311</biblScope>
+			<biblScope unit="issue">5763</biblScope>
+			<biblScope unit="page" from="977" to="980" />
+			<date type="published" when="2006-02-17">2006</date>
+			<publisher>American Association for the Advancement of Science (AAAS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Kang, K., Meng, Y. S., Bréger, J., Grey, C. P. &amp; Ceder, G. Electrodes with high power and high capacity for rechargeable lithium batteries. Science 311, 977-980 (2006).</note>
+</biblStruct>
+
+<biblStruct xml:id="b14">
+	<analytic>
+		<title level="a" type="main">Crystal structural framework of lithium super-ionic conductors</title>
+		<author>
+			<persName><forename type="first">X</forename><surname>He</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Adv. Energy Mater</title>
+		<imprint>
+			<biblScope unit="volume">9</biblScope>
+			<biblScope unit="page">1902078</biblScope>
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">He, X. et al. Crystal structural framework of lithium super-ionic conductors. Adv. Energy Mater. 9, 1902078 (2019).</note>
+</biblStruct>
+
+<biblStruct xml:id="b15">
+	<analytic>
+		<title level="a" type="main">Lithium superionic conductors with corner-sharing frameworks</title>
+		<author>
+			<persName><forename type="first">Kyujung</forename><surname>Jun</surname></persName>
+			<idno type="ORCID">0000-0003-1974-028X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yingzhi</forename><surname>Sun</surname></persName>
+			<idno type="ORCID">0000-0003-3559-6863</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yihan</forename><surname>Xiao</surname></persName>
+			<idno type="ORCID">0000-0002-4409-6898</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yan</forename><surname>Zeng</surname></persName>
+			<idno type="ORCID">0000-0002-5831-1210</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Ryounghee</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haegyeom</forename><surname>Kim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lincoln</forename><forename type="middle">J</forename><surname>Miara</surname></persName>
+			<idno type="ORCID">0000-0002-2561-8216</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Dongmin</forename><surname>Im</surname></persName>
+			<idno type="ORCID">0000-0003-2788-0477</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yan</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0002-8648-2172</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Gerbrand</forename><surname>Ceder</surname></persName>
+			<idno type="ORCID">0000-0001-9275-3605</idno>
+		</author>
+		<idno type="DOI">10.1038/s41563-022-01222-4</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Materials</title>
+		<title level="j" type="abbrev">Nat. Mater.</title>
+		<idno type="ISSN">1476-1122</idno>
+		<idno type="ISSNe">1476-4660</idno>
+		<imprint>
+			<biblScope unit="volume">21</biblScope>
+			<biblScope unit="issue">8</biblScope>
+			<biblScope unit="page" from="924" to="931" />
+			<date type="published" when="2022-03-31">2022</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Jun, K. et al. Lithium superionic conductors with corner-sharing frameworks. Nat. Mater. 21, 924-931 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b16">
+	<analytic>
+		<title level="a" type="main">Diffusion mechanisms of fast lithium-ion conductors</title>
+		<author>
+			<persName><forename type="first">Kyujung</forename><surname>Jun</surname></persName>
+			<idno type="ORCID">0000-0003-1974-028X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yu</forename><surname>Chen</surname></persName>
+			<idno type="ORCID">0000-0002-5420-7571</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Grace</forename><surname>Wei</surname></persName>
+			<idno type="ORCID">0000-0002-4211-1927</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaochen</forename><surname>Yang</surname></persName>
+			<idno type="ORCID">0000-0002-8359-5630</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Gerbrand</forename><surname>Ceder</surname></persName>
+			<idno type="ORCID">0000-0001-9275-3605</idno>
+		</author>
+		<idno type="DOI">10.1038/s41578-024-00715-9</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Reviews Materials</title>
+		<title level="j" type="abbrev">Nat Rev Mater</title>
+		<idno type="ISSNe">2058-8437</idno>
+		<imprint>
+			<biblScope unit="volume">9</biblScope>
+			<biblScope unit="issue">12</biblScope>
+			<biblScope unit="page" from="887" to="905" />
+			<date type="published" when="2024-09-12">2024</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Jun, K., Chen, Y., Wei, G., Yang, X. &amp; Ceder, G. Diffusion mechanisms of fast lithium-ion conductors. Nat. Rev. Mater. 9, 887-905 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b17">
+	<analytic>
+		<title level="a" type="main">Boosting the Optimization of Lithium Metal Batteries by Molecular Dynamics Simulations: A Perspective</title>
+		<author>
+			<persName><forename type="first">Yawen</forename><surname>Sun</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tingzhou</forename><surname>Yang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haoqing</forename><surname>Ji</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jinqiu</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zhenkang</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tao</forename><surname>Qian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chenglin</forename><surname>Yan</surname></persName>
+			<idno type="ORCID">0000-0003-4467-9441</idno>
+		</author>
+		<idno type="DOI">10.1002/aenm.202002373</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Advanced Energy Materials</title>
+		<title level="j" type="abbrev">Advanced Energy Materials</title>
+		<idno type="ISSN">1614-6832</idno>
+		<idno type="ISSNe">1614-6840</idno>
+		<imprint>
+			<biblScope unit="volume">10</biblScope>
+			<biblScope unit="issue">41</biblScope>
+			<date type="published" when="2020-09-27">2002373. 2020</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Sun, Y. et al. Boosting the optimization of lithium metal batteries by molecular dynamics simulations: a perspective. Adv. Energy Mater. 10, 2002373 (2020).</note>
+</biblStruct>
+
+<biblStruct xml:id="b18">
+	<analytic>
+		<title level="a" type="main">A climbing image nudged elastic band method for finding saddle points and minimum energy paths</title>
+		<author>
+			<persName><forename type="first">Graeme</forename><surname>Henkelman</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Blas</forename><forename type="middle">P</forename><surname>Uberuaga</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hannes</forename><surname>Jónsson</surname></persName>
+		</author>
+		<idno type="DOI">10.1063/1.1329672</idno>
+	</analytic>
+	<monogr>
+		<title level="j">The Journal of Chemical Physics</title>
+		<idno type="ISSN">0021-9606</idno>
+		<idno type="ISSNe">1089-7690</idno>
+		<imprint>
+			<biblScope unit="volume">113</biblScope>
+			<biblScope unit="issue">22</biblScope>
+			<biblScope unit="page" from="9901" to="9904" />
+			<date type="published" when="2000-12-08">2000</date>
+			<publisher>AIP Publishing</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Henkelman, G., Uberuaga, B. P. &amp; Jónsson, H. A climbing image nudged elastic band method for finding saddle points and minimum energy paths. J. Chem. Phys. 113, 9901-9904 (2000).</note>
+</biblStruct>
+
+<biblStruct xml:id="b19">
+	<analytic>
+		<title level="a" type="main">Recent Developments in the Methods and Applications of the Bond Valence Model</title>
+		<author>
+			<persName><forename type="first">Ian</forename><forename type="middle">D</forename><surname>Brown</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/cr900053k</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemical Reviews</title>
+		<title level="j" type="abbrev">Chem. Rev.</title>
+		<idno type="ISSN">0009-2665</idno>
+		<idno type="ISSNe">1520-6890</idno>
+		<imprint>
+			<biblScope unit="volume">109</biblScope>
+			<biblScope unit="issue">12</biblScope>
+			<biblScope unit="page" from="6858" to="6919" />
+			<date type="published" when="2009-09-03">2009</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Brown, I. D. Recent developments in the methods and applications of the bond valence model. Chem. Rev. 109, 6858-6929 (2009).</note>
+</biblStruct>
+
+<biblStruct xml:id="b20">
+	<analytic>
+		<title level="a" type="main">Perspective: Machine learning potentials for atomistic simulations</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Behler</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">J. Chem. Phys</title>
+		<imprint>
+			<biblScope unit="volume">145</biblScope>
+			<biblScope unit="page">170901</biblScope>
+			<date type="published" when="2016">2016</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Behler, J. Perspective: Machine learning potentials for atomistic simulations. J. Chem. Phys. 145, 170901 (2016).</note>
+</biblStruct>
+
+<biblStruct xml:id="b21">
+	<analytic>
+		<title level="a" type="main">Deep potential molecular dynamics: a scalable model with the accuracy of quantum mechanics</title>
+		<author>
+			<persName><forename type="first">L</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Han</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">R</forename><surname>Car</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">E</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">W</forename></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Phys. Rev. Lett</title>
+		<imprint>
+			<biblScope unit="volume">120</biblScope>
+			<biblScope unit="page">143001</biblScope>
+			<date type="published" when="2018">2018</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Zhang, L., Han, J., Wang, H., Car, R. &amp; E, W. Deep potential molecular dynamics: a scalable model with the accuracy of quantum mechanics. Phys. Rev. Lett. 120, 143001 (2018).</note>
+</biblStruct>
+
+<biblStruct xml:id="b22">
+	<analytic>
+		<title level="a" type="main">Neuroevolution machine learning potentials: Combining high accuracy and low cost in atomistic simulations and application to heat transport</title>
+		<author>
+			<persName><forename type="first">Zheyong</forename><surname>Fan</surname></persName>
+			<idno type="ORCID">0000-0002-2253-8210</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zezhu</forename><surname>Zeng</surname></persName>
+			<idno type="ORCID">0000-0001-5126-4928</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Cunzhi</forename><surname>Zhang</surname></persName>
+			<idno type="ORCID">0000-0002-4562-535X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yanzhou</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Keke</forename><surname>Song</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haikuan</forename><surname>Dong</surname></persName>
+			<idno type="ORCID">0000-0001-9870-0467</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yue</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tapio</forename><surname>Ala-Nissila</surname></persName>
+		</author>
+		<idno type="DOI">10.1103/physrevb.104.104309</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Physical Review B</title>
+		<title level="j" type="abbrev">Phys. Rev. B</title>
+		<idno type="ISSN">2469-9950</idno>
+		<idno type="ISSNe">2469-9969</idno>
+		<imprint>
+			<biblScope unit="volume">104</biblScope>
+			<biblScope unit="issue">10</biblScope>
+			<biblScope unit="page">104309</biblScope>
+			<date type="published" when="2021-09-20">2021</date>
+			<publisher>American Physical Society (APS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Fan, Z. et al. Neuroevolution machine learning potentials: combining high accuracy and low cost in atomistic simulations and application to heat transport. Phys. Rev. B 104, 104309 (2021).</note>
+</biblStruct>
+
+<biblStruct xml:id="b23">
+	<analytic>
+		<title level="a" type="main">Insights into the Atomic Mechanism of Lithium-Ion Diffusion in Li6PS5Cl via a Machine Learning Potential</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Chen</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/acs.chemmater.4c01152.s001</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chem. Mater</title>
+		<imprint>
+			<biblScope unit="volume">37</biblScope>
+			<biblScope unit="page" from="591" to="599" />
+			<date type="published" when="2025">2025</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Chen, J. et al. Insights into the atomic mechanism of lithium-ion diffusion in Li6PS5Cl via a machine learning potential. Chem. Mater. 37, 591-599 (2025).</note>
+</biblStruct>
+
+<biblStruct xml:id="b24">
+	<analytic>
+		<title level="a" type="main">Impact of Lithium Nonstoichiometry on Ionic Diffusion in Tetragonal Garnet-Type Li&lt;sub&gt;7&lt;/sub&gt;La&lt;sub&gt;3&lt;/sub&gt;Zr&lt;sub&gt;2&lt;/sub&gt;O&lt;sub&gt;12&lt;/sub&gt;</title>
+		<author>
+			<persName><forename type="first">Zihan</forename><surname>Yan</surname></persName>
+			<idno type="ORCID">0000-0002-8911-6549</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yizhou</forename><surname>Zhu</surname></persName>
+			<idno type="ORCID">0000-0002-5819-7657</idno>
+		</author>
+		<idno type="DOI">10.1021/acs.chemmater.4c02454</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemistry of Materials</title>
+		<title level="j" type="abbrev">Chem. Mater.</title>
+		<idno type="ISSN">0897-4756</idno>
+		<idno type="ISSNe">1520-5002</idno>
+		<imprint>
+			<biblScope unit="volume">36</biblScope>
+			<biblScope unit="issue">23</biblScope>
+			<biblScope unit="page" from="11551" to="11557" />
+			<date type="published" when="2024-11-19">2024</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Yan, Z. &amp; Zhu, Y. Impact of lithium nonstoichiometry on ionic diffusion in tetragonal garnet-type Li7La3Zr2O12. Chem. Mater. 36, 11551-11557 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b25">
+	<analytic>
+		<title level="a" type="main">Thermodynamic stability and ionic conductivity in lithium–germanium binary system</title>
+		<author>
+			<persName><forename type="first">Anastasiia</forename><forename type="middle">V</forename><surname>Iosimovska</surname></persName>
+			<idno type="ORCID">0009-0001-6510-7023</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Alexey</forename><forename type="middle">P</forename><surname>Maltsev</surname></persName>
+			<idno type="ORCID">0000-0003-4352-7673</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Ilya</forename><forename type="middle">V</forename><surname>Chepkasov</surname></persName>
+			<idno type="ORCID">0000-0001-8376-2999</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Artem</forename><forename type="middle">R</forename><surname>Oganov</surname></persName>
+			<idno type="ORCID">0000-0001-7082-9728</idno>
+		</author>
+		<idno type="DOI">10.1063/5.0208577</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Applied Physics Letters</title>
+		<idno type="ISSN">0003-6951</idno>
+		<idno type="ISSNe">1077-3118</idno>
+		<imprint>
+			<biblScope unit="volume">124</biblScope>
+			<biblScope unit="issue">16</biblScope>
+			<biblScope unit="page">163904</biblScope>
+			<date type="published" when="2024-04-15">2024</date>
+			<publisher>AIP Publishing</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Iosimovska, A. V., Maltsev, A. P., Chepkasov, I. V. &amp; Oganov, A. R. Thermodynamic stability and ionic conductivity in lithium-germanium binary system. Appl. Phys. Lett. 124, 163904 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b26">
+	<analytic>
+		<title level="a" type="main">Structure exploration of gallium based on machine-learning potential</title>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Lei</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Niu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">J. Mater. Sci. Technol</title>
+		<imprint>
+			<biblScope unit="volume">232</biblScope>
+			<biblScope unit="page" from="239" to="245" />
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Yu, Y., Fan, J., Lei, Y. &amp; Niu, H. Structure exploration of gallium based on machine-learning potential. J. Mater. Sci. Technol. 232, 239-245 (2025).</note>
+</biblStruct>
+
+<biblStruct xml:id="b27">
+	<analytic>
+		<title level="a" type="main">Concurrent learning scheme for crystal structure prediction</title>
+		<author>
+			<persName><forename type="first">Zhenyu</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0009-0007-7927-6753</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoyang</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0002-3943-4522</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoshan</forename><surname>Luo</surname></persName>
+			<idno type="ORCID">0000-0001-5873-4347</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Pengyue</forename><surname>Gao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ying</forename><surname>Sun</surname></persName>
+			<idno type="ORCID">0000-0003-1401-107X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Lv</surname></persName>
+			<idno type="ORCID">0000-0002-6201-9888</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Han</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0001-5623-1148</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yanchao</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0003-4518-925X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yanming</forename><surname>Ma</surname></persName>
+		</author>
+		<idno type="DOI">10.1103/physrevb.109.094117</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Physical Review B</title>
+		<title level="j" type="abbrev">Phys. Rev. B</title>
+		<idno type="ISSN">2469-9950</idno>
+		<idno type="ISSNe">2469-9969</idno>
+		<imprint>
+			<biblScope unit="volume">109</biblScope>
+			<biblScope unit="issue">9</biblScope>
+			<biblScope unit="page">94117</biblScope>
+			<date type="published" when="2024-03-22">2024</date>
+			<publisher>American Physical Society (APS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Wang, Z. et al. Concurrent learning scheme for crystal structure prediction. Phys. Rev. B 109, 094117 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b28">
+	<analytic>
+		<title level="a" type="main">A comparative study of predicting high entropy alloy phase fractions with traditional machine learning and deep neural networks</title>
+		<author>
+			<persName><forename type="first">S</forename><surname>Liu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">npj Comput. Mater</title>
+		<imprint>
+			<biblScope unit="volume">10</biblScope>
+			<biblScope unit="page">172</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Liu, S. et al. A comparative study of predicting high entropy alloy phase fractions with traditional machine learning and deep neural networks. npj Comput. Mater. 10, 172 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b29">
+	<analytic>
+		<title level="a" type="main">Observation of dendrite formation at Li metal-electrolyte interface by a machine-learning enhanced constant potential framework</title>
+		<author>
+			<persName><forename type="first">T</forename><surname>Hu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Commun</title>
+		<imprint>
+			<biblScope unit="volume">16</biblScope>
+			<biblScope unit="page">7379</biblScope>
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Hu, T. et al. Observation of dendrite formation at Li metal-electrolyte interface by a machine-learning enhanced constant potential framework. Nat. Commun. 16, 7379 (2025).</note>
+</biblStruct>
+
+<biblStruct xml:id="b30">
+	<analytic>
+		<title level="a" type="main">Machine learning driven insights into lithiation mechanisms at the silicon-graphite interface within composite electrode</title>
+		<author>
+			<persName><forename type="first">B</forename><surname>Zhang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Acta Mater</title>
+		<imprint>
+			<biblScope unit="volume">292</biblScope>
+			<biblScope unit="page">121072</biblScope>
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Zhang, B. et al. Machine learning driven insights into lithiation mechanisms at the silicon-graphite interface within composite electrode. Acta Mater 292, 121072 (2025).</note>
+</biblStruct>
+
+<biblStruct xml:id="b31">
+	<analytic>
+		<title level="a" type="main">Atomistic study on the origins of the anisotropic lithiation behaviors of the silicon anode using the reactive force field based molecular dynamics simulations</title>
+		<author>
+			<persName><forename type="first">Li-Yi</forename><surname>Pan</surname></persName>
+			<idno type="ORCID">0000-0003-1862-2740</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Chin-Lung</forename><surname>Kuo</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.actamat.2023.119610</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Acta Materialia</title>
+		<title level="j" type="abbrev">Acta Materialia</title>
+		<idno type="ISSN">1359-6454</idno>
+		<imprint>
+			<biblScope unit="volume">265</biblScope>
+			<biblScope unit="page">119610</biblScope>
+			<date type="published" when="2024-02">2024</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Pan, L.-Y. &amp; Kuo, C.-L. Atomistic study on the origins of the anisotropic lithiation behaviors of the silicon anode using the reactive force field based molecular dynamics simulations. Acta Mater 265, 119610 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b32">
+	<analytic>
+		<title level="a" type="main">Unraveling the atomic-scale mechanism of phase transformations and structural evolutions during (de)lithiation in Si anodes</title>
+		<author>
+			<persName><forename type="first">F</forename><surname>Fu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Adv. Funct. Mater</title>
+		<imprint>
+			<biblScope unit="volume">33</biblScope>
+			<biblScope unit="page">2303936</biblScope>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Fu, F. et al. Unraveling the atomic-scale mechanism of phase transformations and structural evolutions during (de)lithiation in Si anodes. Adv. Funct. Mater. 33, 2303936 (2023).</note>
+</biblStruct>
+
+<biblStruct xml:id="b33">
+	<analytic>
+		<title level="a" type="main">Accelerated data-driven materials science with the Materials Project</title>
+		<author>
+			<persName><forename type="first">Matthew</forename><forename type="middle">K</forename><surname>Horton</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Patrick</forename><surname>Huck</surname></persName>
+			<idno type="ORCID">0000-0001-8237-2227</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Ruo</forename><forename type="middle">Xi</forename><surname>Yang</surname></persName>
+			<idno type="ORCID">0000-0001-8225-5856</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jason</forename><forename type="middle">M</forename><surname>Munro</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shyam</forename><surname>Dwaraknath</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><forename type="middle">M</forename><surname>Ganose</surname></persName>
+			<idno type="ORCID">0000-0002-4486-3321</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Ryan</forename><forename type="middle">S</forename><surname>Kingsbury</surname></persName>
+			<idno type="ORCID">0000-0002-7168-3967</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Mingjian</forename><surname>Wen</surname></persName>
+			<idno type="ORCID">0000-0003-0013-575X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jimmy</forename><forename type="middle">X</forename><surname>Shen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Tyler</forename><forename type="middle">S</forename><surname>Mathis</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Aaron</forename><forename type="middle">D</forename><surname>Kaplan</surname></persName>
+			<idno type="ORCID">0000-0003-3439-4856</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Karlo</forename><surname>Berket</surname></persName>
+			<idno type="ORCID">0009-0008-9646-0226</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Janosh</forename><surname>Riebesell</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Janine</forename><surname>George</surname></persName>
+			<idno type="ORCID">0000-0001-8907-0336</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><forename type="middle">S</forename><surname>Rosen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Evan</forename><forename type="middle">W C</forename><surname>Spotte-Smith</surname></persName>
+			<idno type="ORCID">0000-0003-1554-197X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><forename type="middle">J</forename><surname>Mcdermott</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Orion</forename><forename type="middle">A</forename><surname>Cohen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Dunn</surname></persName>
+			<idno type="ORCID">0000-0002-8567-1879</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Matthew</forename><forename type="middle">C</forename><surname>Kuner</surname></persName>
+			<idno type="ORCID">0000-0002-8218-8558</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Gian-Marco</forename><surname>Rignanese</surname></persName>
+			<idno type="ORCID">0000-0002-1422-1205</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Guido</forename><surname>Petretto</surname></persName>
+			<idno type="ORCID">0000-0001-7220-5417</idno>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Waroquiers</surname></persName>
+			<idno type="ORCID">0000-0001-8943-9762</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Sinead</forename><forename type="middle">M</forename><surname>Griffin</surname></persName>
+			<idno type="ORCID">0000-0002-9943-4866</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jeffrey</forename><forename type="middle">B</forename><surname>Neaton</surname></persName>
+			<idno type="ORCID">0000-0001-7585-6135</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Daryl</forename><forename type="middle">C</forename><surname>Chrzan</surname></persName>
+			<idno type="ORCID">0000-0001-6957-2240</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><surname>Asta</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Geoffroy</forename><surname>Hautier</surname></persName>
+			<idno type="ORCID">0000-0003-1754-2220</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Shreyas</forename><surname>Cholia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gerbrand</forename><surname>Ceder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shyue</forename><forename type="middle">Ping</forename><surname>Ong</surname></persName>
+			<idno type="ORCID">0000-0001-5726-2587</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Anubhav</forename><surname>Jain</surname></persName>
+			<idno type="ORCID">0000-0001-5893-9967</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Kristin</forename><forename type="middle">A</forename><surname>Persson</surname></persName>
+			<idno type="ORCID">0000-0003-2495-5509</idno>
+		</author>
+		<idno type="DOI">10.1038/s41563-025-02272-0</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Materials</title>
+		<title level="j" type="abbrev">Nat. Mater.</title>
+		<idno type="ISSN">1476-1122</idno>
+		<idno type="ISSNe">1476-4660</idno>
+		<imprint>
+			<biblScope unit="volume">24</biblScope>
+			<biblScope unit="issue">10</biblScope>
+			<biblScope unit="page" from="1522" to="1532" />
+			<date type="published" when="2025-07-03">2025</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Horton, M. K. et al. Accelerated data-driven materials science with the materials project. Nat. Mater. 24, 1522-1532 (2025).</note>
+</biblStruct>
+
+<biblStruct xml:id="b34">
+	<analytic>
+		<title level="a" type="main">Machine learning for alloys</title>
+		<author>
+			<persName><forename type="first">Gus</forename><forename type="middle">L W</forename><surname>Hart</surname></persName>
+			<idno type="ORCID">0000-0002-6149-9234</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Tim</forename><surname>Mueller</surname></persName>
+			<idno type="ORCID">0000-0001-8284-7747</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Cormac</forename><surname>Toher</surname></persName>
+			<idno type="ORCID">0000-0001-7073-8690</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Stefano</forename><surname>Curtarolo</surname></persName>
+			<idno type="ORCID">0000-0003-0570-8238</idno>
+		</author>
+		<idno type="DOI">10.1038/s41578-021-00340-w</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Nature Reviews Materials</title>
+		<title level="j" type="abbrev">Nat Rev Mater</title>
+		<idno type="ISSNe">2058-8437</idno>
+		<imprint>
+			<biblScope unit="volume">6</biblScope>
+			<biblScope unit="issue">8</biblScope>
+			<biblScope unit="page" from="730" to="755" />
+			<date type="published" when="2021-07-20">2021</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Hart, G. L. W., Mueller, T., Toher, C. &amp; Curtarolo, S. Machine learning for alloys. Nat. Rev. Mater. 6, 730-755 (2021).</note>
+</biblStruct>
+
+<biblStruct xml:id="b35">
+	<analytic>
+		<title level="a" type="main">Vacancy formation energies and migration barriers in multi-principal element alloys</title>
+		<author>
+			<persName><forename type="first">A</forename><surname>Roy</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><surname>Singh</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">G</forename><surname>Balasubramanian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><forename type="middle">D</forename><surname>Johnson</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Acta Mater</title>
+		<imprint>
+			<biblScope unit="volume">226</biblScope>
+			<biblScope unit="page">117611</biblScope>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Roy, A., Singh, P., Balasubramanian, G. &amp; Johnson, D. D. Vacancy formation energies and migration barriers in multi-principal element alloys. Acta Mater 226, 117611 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b36">
+	<analytic>
+		<title level="a" type="main">What drives the heterogeneous interdiffusion in the Li-Si interfacial region of Si anodes: the Li flux or the Si flux?</title>
+		<author>
+			<persName><forename type="first">Fangjia</forename><surname>Fu</surname></persName>
+			<idno type="ORCID">0000-0003-2079-375X</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Xiaoxu</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Taiping</forename><surname>Hu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Guobing</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fu-Zhi</forename><surname>Dai</surname></persName>
+			<idno type="ORCID">0000-0003-3115-4363</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Shenzhen</forename><surname>Xu</surname></persName>
+			<idno type="ORCID">0000-0001-7268-9917</idno>
+		</author>
+		<idno type="DOI">10.1038/s41524-024-01327-1</idno>
+	</analytic>
+	<monogr>
+		<title level="j">npj Computational Materials</title>
+		<title level="j" type="abbrev">npj Comput Mater</title>
+		<idno type="ISSNe">2057-3960</idno>
+		<imprint>
+			<biblScope unit="volume">10</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">131</biblScope>
+			<date type="published" when="2024-06-25">2024</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Fu, F. et al. What drives the heterogeneous interdiffusion in the Li-Si interfacial region of Si anodes: the Li flux or the Si flux? npj Comput. Mater 10, 131 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b37">
+	<analytic>
+		<title level="a" type="main">Alloy-type anodes for high-performance rechargeable batteries</title>
+		<author>
+			<persName><forename type="first">M</forename><surname>Peng</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Angew. Chem. Int. Ed</title>
+		<imprint>
+			<biblScope unit="volume">61</biblScope>
+			<biblScope unit="page">202206770</biblScope>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Peng, M. et al. Alloy-type anodes for high-performance rechargeable batteries. Angew. Chem. Int. Ed. 61, e202206770 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b38">
+	<analytic>
+		<title level="a" type="main">The indium-lithium electrode in solid-state lithium-ion batteries: phase formation, redox potentials, and interface stability</title>
+		<author>
+			<persName><forename type="first">A</forename><forename type="middle">L</forename><surname>Santhosha</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><surname>Medenbach</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><forename type="middle">R</forename><surname>Buchheim</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">P</forename><surname>Adelhelm</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Batteries Supercaps</title>
+		<imprint>
+			<biblScope unit="volume">2</biblScope>
+			<biblScope unit="page" from="524" to="529" />
+			<date type="published" when="2019">2019</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Santhosha, A. L., Medenbach, L., Buchheim, J. R. &amp; Adelhelm, P. The indium-lithium electrode in solid-state lithium-ion batteries: phase formation, redox potentials, and interface stability. Batteries Supercaps 2, 524-529 (2019).</note>
+</biblStruct>
+
+<biblStruct xml:id="b39">
+	<analytic>
+		<title level="a" type="main">Effects of the volume changes and elastic-strain energies on the phase transition in the Li-Sn battery</title>
+		<author>
+			<persName><forename type="first">Fan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jianchuan</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuhong</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yong</forename><surname>Du</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.jpowsour.2016.08.136</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of Power Sources</title>
+		<title level="j" type="abbrev">Journal of Power Sources</title>
+		<idno type="ISSN">0378-7753</idno>
+		<imprint>
+			<biblScope unit="volume">330</biblScope>
+			<biblScope unit="page" from="111" to="119" />
+			<date type="published" when="2016-10">2016</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Zhang, F., Wang, J., Liu, S. &amp; Du, Y. Effects of the volume changes and elastic-strain energies on the phase transition in the Li-Sn battery. J. Power Sources 330, 111-119 (2016).</note>
+</biblStruct>
+
+<biblStruct xml:id="b40">
+	<analytic>
+		<title level="a" type="main">GPUMD 4.0: a high-performance molecular dynamics package for versatile materials simulations with machine-learned potentials</title>
+		<author>
+			<persName><forename type="first">K</forename><surname>Xu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Mater. Genome Eng. Adv</title>
+		<imprint>
+			<biblScope unit="volume">3</biblScope>
+			<biblScope unit="page">70028</biblScope>
+			<date type="published" when="2025">2025</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Xu, K. et al. GPUMD 4.0: a high-performance molecular dynamics package for versatile materials simulations with machine-learned potentials. Mater. Genome Eng. Adv. 3, e70028 (2025).</note>
+</biblStruct>
+
+<biblStruct xml:id="b41">
+	<analytic>
+		<title level="a" type="main">GPUMD: a package for constructing accurate machinelearned potentials and performing highly efficient atomistic simulations</title>
+		<author>
+			<persName><forename type="first">Z</forename><surname>Fan</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">J. Chem. Phys</title>
+		<imprint>
+			<biblScope unit="volume">157</biblScope>
+			<biblScope unit="page">114801</biblScope>
+			<date type="published" when="2022">2022</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Fan, Z. et al. GPUMD: a package for constructing accurate machine- learned potentials and performing highly efficient atomistic simulations. J. Chem. Phys. 157, 114801 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b42">
+	<analytic>
+		<title level="a" type="main">The Open Quantum Materials Database (OQMD): assessing the accuracy of DFT formation energies</title>
+		<author>
+			<persName><forename type="first">Scott</forename><surname>Kirklin</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">James</forename><forename type="middle">E</forename><surname>Saal</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bryce</forename><surname>Meredig</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Alex</forename><surname>Thompson</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jeff</forename><forename type="middle">W</forename><surname>Doak</surname></persName>
+			<idno type="ORCID">0000-0001-8576-7304</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Muratahan</forename><surname>Aykol</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephan</forename><surname>Rühl</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Chris</forename><surname>Wolverton</surname></persName>
+		</author>
+		<idno type="DOI">10.1038/npjcompumats.2015.10</idno>
+	</analytic>
+	<monogr>
+		<title level="j">npj Computational Materials</title>
+		<title level="j" type="abbrev">npj Comput Mater</title>
+		<idno type="ISSNe">2057-3960</idno>
+		<imprint>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">15010</biblScope>
+			<date type="published" when="2015-12-11">2015</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Kirklin, S. et al. The open quantum materials database (OQMD): assessing the accuracy of DFT formation energies. npj Comput. Mater. 1, 15010 (2015).</note>
+</biblStruct>
+
+<biblStruct xml:id="b43">
+	<analytic>
+		<title level="a" type="main">Commentary: The Materials Project: A materials genome approach to accelerating materials innovation</title>
+		<author>
+			<persName><forename type="first">Anubhav</forename><surname>Jain</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shyue</forename><forename type="middle">Ping</forename><surname>Ong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Geoffroy</forename><surname>Hautier</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wei</forename><surname>Chen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><forename type="middle">Davidson</forename><surname>Richards</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Stephen</forename><surname>Dacek</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shreyas</forename><surname>Cholia</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><surname>Gunter</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">David</forename><surname>Skinner</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gerbrand</forename><surname>Ceder</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Kristin</forename><forename type="middle">A</forename><surname>Persson</surname></persName>
+		</author>
+		<idno type="DOI">10.1063/1.4812323</idno>
+	</analytic>
+	<monogr>
+		<title level="j">APL Materials</title>
+		<idno type="ISSNe">2166-532X</idno>
+		<imprint>
+			<biblScope unit="volume">1</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">11002</biblScope>
+			<date type="published" when="2013-07-01">2013</date>
+			<publisher>AIP Publishing</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Jain, A. et al. Commentary: the materials project: a materials genome approach to accelerating materials innovation. APL Mater 1, 011002 (2013).</note>
+</biblStruct>
+
+<biblStruct xml:id="b44">
+	<analytic>
+		<title level="a" type="main">Principal component analysis</title>
+		<author>
+			<persName><forename type="first">Hervé</forename><surname>Abdi</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Lynne</forename><forename type="middle">J</forename><surname>Williams</surname></persName>
+		</author>
+		<idno type="DOI">10.1002/wics.101</idno>
+	</analytic>
+	<monogr>
+		<title level="j">WIREs Computational Statistics</title>
+		<title level="j" type="abbrev">WIREs Computational Stats</title>
+		<idno type="ISSN">1939-5108</idno>
+		<idno type="ISSNe">1939-0068</idno>
+		<imprint>
+			<biblScope unit="volume">2</biblScope>
+			<biblScope unit="issue">4</biblScope>
+			<biblScope unit="page" from="433" to="459" />
+			<date type="published" when="2010-07">2010</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Abdi, H. &amp; Williams, L. J. Principal component analysis. WIREs Comput. Stat. 2, 433-459 (2010).</note>
+</biblStruct>
+
+<biblStruct xml:id="b45">
+	<analytic>
+		<title level="a" type="main">Crystal structure prediction via particle-swarm optimization</title>
+		<author>
+			<persName><forename type="first">Yanchao</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jian</forename><surname>Lv</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Li</forename><surname>Zhu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yanming</forename><surname>Ma</surname></persName>
+		</author>
+		<idno type="DOI">10.1103/physrevb.82.094116</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Physical Review B</title>
+		<title level="j" type="abbrev">Phys. Rev. B</title>
+		<idno type="ISSN">1098-0121</idno>
+		<idno type="ISSNe">1550-235X</idno>
+		<imprint>
+			<biblScope unit="volume">82</biblScope>
+			<biblScope unit="issue">9</biblScope>
+			<biblScope unit="page">94116</biblScope>
+			<date type="published" when="2010-09-28">2010</date>
+			<publisher>American Physical Society (APS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Wang, Y., Lv, J., Zhu, L. &amp; Ma, Y. Crystal structure prediction via particle-swarm optimization. Phys. Rev. B 82, 094116 (2010).</note>
+</biblStruct>
+
+<biblStruct xml:id="b46">
+	<analytic>
+		<title level="a" type="main">Publisher&apos;s Note: “Advances in modeling complex materials: The rise of neuroevolution potentials” [Chem. Phys. Rev. &lt;b&gt;6&lt;/b&gt;, 011310 (2025)]</title>
+		<author>
+			<persName><forename type="first">Penghua</forename><surname>Ying</surname></persName>
+			<idno type="ORCID">0000-0002-5758-2369</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Cheng</forename><surname>Qian</surname></persName>
+			<idno type="ORCID">0000-0002-5502-0303</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Rui</forename><surname>Zhao</surname></persName>
+			<idno type="ORCID">0000-0002-0312-8478</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Yanzhou</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0003-1509-4364</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Ke</forename><surname>Xu</surname></persName>
+			<idno type="ORCID">0000-0001-5254-5297</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Feng</forename><surname>Ding</surname></persName>
+			<idno type="ORCID">0000-0001-9153-9279</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Shunda</forename><surname>Chen</surname></persName>
+			<idno type="ORCID">0000-0002-5506-7507</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zheyong</forename><surname>Fan</surname></persName>
+			<idno type="ORCID">0000-0002-2253-8210</idno>
+		</author>
+		<idno type="DOI">10.1063/5.0272090</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemical Physics Reviews</title>
+		<idno type="ISSNe">2688-4070</idno>
+		<imprint>
+			<biblScope unit="volume">6</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page">11310</biblScope>
+			<date type="published" when="2025-03-01">2025</date>
+			<publisher>AIP Publishing</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Ying, P. et al. Advances in modeling complex materials: the rise of neuroevolution potentials. Chem. Phys. Rev. 6, 011310 (2025).</note>
+</biblStruct>
+
+<biblStruct xml:id="b47">
+	<analytic>
+		<title level="a" type="main">General-purpose machine-learned potential for 16 elemental metals and their alloys</title>
+		<author>
+			<persName><forename type="first">K</forename><surname>Song</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Commun</title>
+		<imprint>
+			<biblScope unit="volume">15</biblScope>
+			<biblScope unit="page">10208</biblScope>
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Song, K. et al. General-purpose machine-learned potential for 16 elemental metals and their alloys. Nat. Commun. 15, 10208 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b48">
+	<analytic>
+		<title level="a" type="main">Data-driven prediction of complex crystal structures of dense lithium</title>
+		<author>
+			<persName><forename type="first">X</forename><surname>Wang</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Nat. Commun</title>
+		<imprint>
+			<biblScope unit="volume">14</biblScope>
+			<biblScope unit="page">2924</biblScope>
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Wang, X. et al. Data-driven prediction of complex crystal structures of dense lithium. Nat. Commun. 14, 2924 (2023).</note>
+</biblStruct>
+
+<biblStruct xml:id="b49">
+	<analytic>
+		<title level="a" type="main">USPEX—Evolutionary crystal structure prediction</title>
+		<author>
+			<persName><forename type="first">Colin</forename><forename type="middle">W</forename><surname>Glass</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Artem</forename><forename type="middle">R</forename><surname>Oganov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Nikolaus</forename><surname>Hansen</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.cpc.2006.07.020</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Computer Physics Communications</title>
+		<title level="j" type="abbrev">Computer Physics Communications</title>
+		<idno type="ISSN">0010-4655</idno>
+		<imprint>
+			<biblScope unit="volume">175</biblScope>
+			<biblScope unit="issue">11-12</biblScope>
+			<biblScope unit="page" from="713" to="720" />
+			<date type="published" when="2006-12">2006</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Glass, C. W., Oganov, A. R. &amp; Hansen, N. USPEX-Evolutionary crystal structure prediction. Comput. Phys. Commun. 175, 713-720 (2006).</note>
+</biblStruct>
+
+<biblStruct xml:id="b50">
+	<analytic>
+		<title level="a" type="main">Accelerating materials discovery using integrated deep machine learning approaches</title>
+		<author>
+			<persName><forename type="first">W</forename><surname>Xia</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">J. Mater. Chem. A</title>
+		<imprint>
+			<biblScope unit="volume">11</biblScope>
+			<biblScope unit="page" from="25973" to="25982" />
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Xia, W. et al. Accelerating materials discovery using integrated deep machine learning approaches. J. Mater. Chem. A 11, 25973-25982 (2023).</note>
+</biblStruct>
+
+<biblStruct xml:id="b51">
+	<analytic>
+		<title level="a" type="main">Phase equilibria and thermodynamic investigation of the In–Li system</title>
+		<author>
+			<persName><forename type="first">Xiaoqin</forename><surname>Zhou</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fan</forename><surname>Zhang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shuhong</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Yong</forename><surname>Du</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Bo</forename><surname>Jin</surname></persName>
+			<idno type="ORCID">0000-0002-4921-9084</idno>
+		</author>
+		<idno type="DOI">10.1016/j.calphad.2020.101779</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Calphad</title>
+		<title level="j" type="abbrev">Calphad</title>
+		<idno type="ISSN">0364-5916</idno>
+		<imprint>
+			<biblScope unit="volume">70</biblScope>
+			<biblScope unit="page">101779</biblScope>
+			<date type="published" when="2020-09">2020</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Zhou, X., Zhang, F., Liu, S., Du, Y. &amp; Jin, B. Phase equilibria and thermodynamic investigation of the In-Li system. Calphad 70, 101779 (2020).</note>
+</biblStruct>
+
+<biblStruct xml:id="b52">
+	<analytic>
+		<title level="a" type="main">Thermodynamic assessment and experimental investigation of the Li–Sn system</title>
+		<author>
+			<persName><forename type="first">D</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Fürtauer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><surname>Flandorfer</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><forename type="middle">M</forename><surname>Cupid</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.calphad.2014.09.002</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Calphad</title>
+		<title level="j" type="abbrev">Calphad</title>
+		<idno type="ISSN">0364-5916</idno>
+		<imprint>
+			<biblScope unit="volume">47</biblScope>
+			<biblScope unit="page" from="181" to="195" />
+			<date type="published" when="2014-12">2014</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Li, D., Fürtauer, S., Flandorfer, H. &amp; Cupid, D. M. Thermodynamic assessment and experimental investigation of the Li-Sn system. Calphad 47, 181-195 (2014).</note>
+</biblStruct>
+
+<biblStruct xml:id="b53">
+	<analytic>
+		<title level="a" type="main">Lithium Storage Mechanism and Application of Micron‐Sized Lattice‐Reversible Binary Intermetallic Compounds as High‐Performance Flexible Lithium‐Ion Battery Anodes</title>
+		<author>
+			<persName><forename type="first">Zhenhan</forename><surname>Fang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shaorong</forename><surname>Duan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Haitao</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Zixin</forename><surname>Hong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hengcai</forename><surname>Wu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fei</forename><surname>Zhao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qunqing</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shoushan</forename><surname>Fan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Wenhui</forename><surname>Duan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiaping</forename><surname>Wang</surname></persName>
+			<idno type="ORCID">0000-0002-8300-4992</idno>
+		</author>
+		<idno type="DOI">10.1002/smll.202105172</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Small</title>
+		<title level="j" type="abbrev">Small</title>
+		<idno type="ISSN">1613-6810</idno>
+		<idno type="ISSNe">1613-6829</idno>
+		<imprint>
+			<biblScope unit="volume">18</biblScope>
+			<biblScope unit="issue">2</biblScope>
+			<biblScope unit="page">2105172</biblScope>
+			<date type="published" when="2022">2022</date>
+			<publisher>Wiley</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Fang, Z. et al. Lithium storage mechanism and application of micron- sized lattice-reversible binary intermetallic compounds as high- performance flexible lithium-ion battery anodes. Small 18, 2105172 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b54">
+	<analytic>
+		<title level="a" type="main">&lt;i&gt;In Situ&lt;/i&gt; TEM on the Reversibility of Nanosized Sn Anodes during the Electrochemical Reaction</title>
+		<author>
+			<persName><forename type="first">Qianqian</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peng</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiong</forename><surname>Feng</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Minmin</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiabin</forename><surname>Liu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Scott</forename><forename type="middle">X</forename><surname>Mao</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Hongtao</forename><surname>Wang</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/cm5009448</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemistry of Materials</title>
+		<title level="j" type="abbrev">Chem. Mater.</title>
+		<idno type="ISSN">0897-4756</idno>
+		<idno type="ISSNe">1520-5002</idno>
+		<imprint>
+			<biblScope unit="volume">26</biblScope>
+			<biblScope unit="issue">14</biblScope>
+			<biblScope unit="page" from="4102" to="4108" />
+			<date type="published" when="2014-07-07">2014</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Li, Q. et al. In Situ TEM on the reversibility of nanosized SN anodes during the electrochemical reaction. Chem. Mater. 26, 4102-4108 (2014).</note>
+</biblStruct>
+
+<biblStruct xml:id="b55">
+	<analytic>
+		<title level="a" type="main">The electrochemical reactions of pure indium with Li and Na: Anomalous electrolyte decomposition, benefits of FEC additive, phase transitions and electrode performance</title>
+		<author>
+			<persName><forename type="first">S</forename><forename type="middle">A</forename><surname>Webb</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">L</forename><surname>Baggetto</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">C</forename><forename type="middle">A</forename><surname>Bridges</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">G</forename><forename type="middle">M</forename><surname>Veith</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">J. Power Sources</title>
+		<imprint>
+			<biblScope unit="volume">248</biblScope>
+			<biblScope unit="page" from="1105" to="1117" />
+			<date type="published" when="2014">2014</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Webb, S. A., Baggetto, L., Bridges, C. A. &amp; Veith, G. M. The electrochemical reactions of pure indium with Li and Na: Anomalous electrolyte decomposition, benefits of FEC additive, phase transitions and electrode performance. J. Power Sources 248, 1105-1117 (2014).</note>
+</biblStruct>
+
+<biblStruct xml:id="b56">
+	<analytic>
+		<title level="a" type="main">Effect of microstructure on the cycling behavior of Li-in alloy anodes for solid-state batteries</title>
+		<author>
+			<persName><forename type="first">J</forename><surname>Aspinall</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">ACS Energy Lett</title>
+		<imprint>
+			<biblScope unit="volume">9</biblScope>
+			<biblScope unit="page" from="578" to="585" />
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Aspinall, J. et al. Effect of microstructure on the cycling behavior of Li-in alloy anodes for solid-state batteries. ACS Energy Lett. 9, 578-585 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b57">
+	<analytic>
+		<title level="a" type="main">First Principles Study of the Li&lt;sub&gt;10&lt;/sub&gt;GeP&lt;sub&gt;2&lt;/sub&gt;S&lt;sub&gt;12&lt;/sub&gt; Lithium Super Ionic Conductor Material</title>
+		<author>
+			<persName><forename type="first">Yifei</forename><surname>Mo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Shyue</forename><forename type="middle">Ping</forename><surname>Ong</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Gerbrand</forename><surname>Ceder</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/cm203303y</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Chemistry of Materials</title>
+		<title level="j" type="abbrev">Chem. Mater.</title>
+		<idno type="ISSN">0897-4756</idno>
+		<idno type="ISSNe">1520-5002</idno>
+		<imprint>
+			<biblScope unit="volume">24</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="15" to="17" />
+			<date type="published" when="2012">2012</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Mo, Y., Ong, S. P. &amp; Ceder, G. First principles study of the Li 10 GeP 2 S 12 lithium super ionic conductor material. Chem. Mater. 24, 15-17 (2012).</note>
+</biblStruct>
+
+<biblStruct xml:id="b58">
+	<analytic>
+		<title level="a" type="main">The carrier transition from Li atoms to Li vacancies in solidstate lithium alloy anodes</title>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Lu</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Sci. Adv</title>
+		<imprint>
+			<biblScope unit="volume">7</biblScope>
+			<biblScope unit="page">5520</biblScope>
+			<date type="published" when="2021">2021</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Lu, Y. et al. The carrier transition from Li atoms to Li vacancies in solid- state lithium alloy anodes. Sci. Adv. 7, eabi5520 (2021).</note>
+</biblStruct>
+
+<biblStruct xml:id="b59">
+	<analytic>
+		<title level="a" type="main">High Rate Transfer Mechanism of Lithium Ions in Lithium–Tin and Lithium–Indium Alloys for Lithium Batteries</title>
+		<author>
+			<persName><forename type="first">Jiale</forename><surname>Qu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Jiewen</forename><surname>Xiao</surname></persName>
+			<idno type="ORCID">0000-0002-6686-3867</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Tianshuai</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Dominik</forename><surname>Legut</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qianfan</forename><surname>Zhang</surname></persName>
+			<idno type="ORCID">0000-0001-8121-7727</idno>
+		</author>
+		<idno type="DOI">10.1021/acs.jpcc.0c07880</idno>
+	</analytic>
+	<monogr>
+		<title level="j">The Journal of Physical Chemistry C</title>
+		<title level="j" type="abbrev">J. Phys. Chem. C</title>
+		<idno type="ISSN">1932-7447</idno>
+		<idno type="ISSNe">1932-7455</idno>
+		<imprint>
+			<biblScope unit="volume">124</biblScope>
+			<biblScope unit="issue">45</biblScope>
+			<biblScope unit="page" from="24644" to="24652" />
+			<date type="published" when="2020-11-02">2020</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Qu, J., Xiao, J., Wang, T., Legut, D. &amp; Zhang, Q. High rate transfer mechanism of lithium ions in lithium-tin and lithium-indium alloys for lithium batteries. J. Phys. Chem. C 124, 24644-24652 (2020).</note>
+</biblStruct>
+
+<biblStruct xml:id="b60">
+	<analytic>
+		<title level="a" type="main">Crystal orbital Hamilton populations (COHP): energy-resolved visualization of chemical bonding in solids based on density-functional calculations</title>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Dronskowski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Peter</forename><forename type="middle">E</forename><surname>Bloechl</surname></persName>
+		</author>
+		<idno type="DOI">10.1021/j100135a014</idno>
+	</analytic>
+	<monogr>
+		<title level="j">The Journal of Physical Chemistry</title>
+		<title level="j" type="abbrev">J. Phys. Chem.</title>
+		<idno type="ISSN">0022-3654</idno>
+		<idno type="ISSNe">1541-5740</idno>
+		<imprint>
+			<biblScope unit="volume">97</biblScope>
+			<biblScope unit="issue">33</biblScope>
+			<biblScope unit="page" from="8617" to="8624" />
+			<date type="published" when="1993-08">1993</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Dronskowski, R. &amp; Bloechl, P. E. Crystal orbital Hamilton populations (COHP): energy-resolved visualization of chemical bonding in solids based on density-functional calculations. J. Phys. Chem. 97, 8617-8624 (1993).</note>
+</biblStruct>
+
+<biblStruct xml:id="b61">
+	<analytic>
+		<title level="a" type="main">Random Forests</title>
+		<author>
+			<persName><forename type="first">Leo</forename><surname>Breiman</surname></persName>
+		</author>
+		<idno type="DOI">10.1023/a:1010933404324</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Machine Learning</title>
+		<title level="j" type="abbrev">Machine Learning</title>
+		<idno type="ISSN">0885-6125</idno>
+		<idno type="ISSNe">1573-0565</idno>
+		<imprint>
+			<biblScope unit="volume">45</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="5" to="32" />
+			<date type="published" when="2001-10">2001</date>
+			<publisher>Springer Science and Business Media LLC</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Breiman, L. Random forests. Mach. Learn. 45, 5-32 (2001).</note>
+</biblStruct>
+
+<biblStruct xml:id="b62">
+	<analytic>
+		<title level="a" type="main">Efficiency of ab-initio total energy calculations for metals and semiconductors using a plane-wave basis set</title>
+		<author>
+			<persName><forename type="first">G</forename><surname>Kresse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">J</forename><surname>Furthmüller</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Comput. Mater. Sci</title>
+		<imprint>
+			<biblScope unit="volume">6</biblScope>
+			<biblScope unit="page" from="15" to="50" />
+			<date type="published" when="1996">1996</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Kresse, G. &amp; Furthmüller, J. Efficiency of ab-initio total energy calculations for metals and semiconductors using a plane-wave basis set. Comput. Mater. Sci. 6, 15-50 (1996).</note>
+</biblStruct>
+
+<biblStruct xml:id="b63">
+	<analytic>
+		<title level="a" type="main">From ultrasoft pseudopotentials to the projector augmented-wave method</title>
+		<author>
+			<persName><forename type="first">G</forename><surname>Kresse</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">D</forename><surname>Joubert</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Phys. Rev. B</title>
+		<imprint>
+			<biblScope unit="volume">59</biblScope>
+			<biblScope unit="page" from="1758" to="1775" />
+			<date type="published" when="1999">1999</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Kresse, G. &amp; Joubert, D. From ultrasoft pseudopotentials to the projector augmented-wave method. Phys. Rev. B 59, 1758-1775 (1999).</note>
+</biblStruct>
+
+<biblStruct xml:id="b64">
+	<analytic>
+		<title level="a" type="main">First-Principles Determination of the Soft Mode in Cubic&lt;mml:math xmlns:mml=&quot;http://www.w3.org/1998/Math/MathML&quot; display=&quot;inline&quot;&gt;&lt;mml:mrow&gt;&lt;mml:msub&gt;&lt;mml:mrow&gt;&lt;mml:mi&gt;ZrO&lt;/mml:mi&gt;&lt;/mml:mrow&gt;&lt;mml:mrow&gt;&lt;mml:mn&gt;2&lt;/mml:mn&gt;&lt;/mml:mrow&gt;&lt;/mml:msub&gt;&lt;/mml:mrow&gt;&lt;/mml:math&gt;</title>
+		<author>
+			<persName><forename type="first">K</forename><surname>Parlinski</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Z</forename><forename type="middle">Q</forename><surname>Li</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Y</forename><surname>Kawazoe</surname></persName>
+		</author>
+		<idno type="DOI">10.1103/physrevlett.78.4063</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Physical Review Letters</title>
+		<title level="j" type="abbrev">Phys. Rev. Lett.</title>
+		<idno type="ISSN">0031-9007</idno>
+		<idno type="ISSNe">1079-7114</idno>
+		<imprint>
+			<biblScope unit="volume">78</biblScope>
+			<biblScope unit="issue">21</biblScope>
+			<biblScope unit="page" from="4063" to="4066" />
+			<date type="published" when="1997-05-26">1997</date>
+			<publisher>American Physical Society (APS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Parlinski, K., Li, Z. Q. &amp; Kawazoe, Y. First-principles determination of the soft mode in cubic ZrO 2 . Phys. Rev. Lett. 78, 4063-4066 (1997).</note>
+</biblStruct>
+
+<biblStruct xml:id="b65">
+	<analytic>
+		<title level="a" type="main">First principles phonon calculations in materials science</title>
+		<author>
+			<persName><forename type="first">A</forename><surname>Togo</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">I</forename><surname>Tanaka</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Scr. Mater</title>
+		<imprint>
+			<biblScope unit="volume">108</biblScope>
+			<biblScope unit="page" from="1" to="5" />
+			<date type="published" when="2015">2015</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Togo, A. &amp; Tanaka, I. First principles phonon calculations in materials science. Scr. Mater. 108, 1-5 (2015).</note>
+</biblStruct>
+
+<biblStruct xml:id="b66">
+	<analytic>
+		<title level="a" type="main">New developments in evolutionary structure prediction algorithm USPEX</title>
+		<author>
+			<persName><forename type="first">Andriy</forename><forename type="middle">O</forename><surname>Lyakhov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Artem</forename><forename type="middle">R</forename><surname>Oganov</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Harold</forename><forename type="middle">T</forename><surname>Stokes</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Qiang</forename><surname>Zhu</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.cpc.2012.12.009</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Computer Physics Communications</title>
+		<title level="j" type="abbrev">Computer Physics Communications</title>
+		<idno type="ISSN">0010-4655</idno>
+		<imprint>
+			<biblScope unit="volume">184</biblScope>
+			<biblScope unit="issue">4</biblScope>
+			<biblScope unit="page" from="1172" to="1182" />
+			<date type="published" when="2013-04">2013</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Lyakhov, A. O., Oganov, A. R., Stokes, H. T. &amp; Zhu, Q. New developments in evolutionary structure prediction algorithm USPEX. Comput. Phys. Commun. 184, 1172-1182 (2013).</note>
+</biblStruct>
+
+<biblStruct xml:id="b67">
+	<analytic>
+		<title level="a" type="main">LAMMPS - a flexible simulation tool for particle-based materials modeling at the atomic, meso, and continuum scales</title>
+		<author>
+			<persName><forename type="first">Aidan</forename><forename type="middle">P</forename><surname>Thompson</surname></persName>
+			<idno type="ORCID">0000-0002-0324-9114</idno>
+		</author>
+		<author>
+			<persName><forename type="first">H</forename><forename type="middle">Metin</forename><surname>Aktulga</surname></persName>
+			<idno type="ORCID">0000-0003-3061-6378</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Richard</forename><surname>Berger</surname></persName>
+			<idno type="ORCID">0000-0002-3044-8266</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Dan</forename><forename type="middle">S</forename><surname>Bolintineanu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">W</forename><forename type="middle">Michael</forename><surname>Brown</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Paul</forename><forename type="middle">S</forename><surname>Crozier</surname></persName>
+			<idno type="ORCID">0000-0003-2966-6474</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Pieter</forename><forename type="middle">J</forename><surname>In 't Veld</surname></persName>
+			<idno type="ORCID">0000-0001-8460-5688</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Axel</forename><surname>Kohlmeyer</surname></persName>
+			<idno type="ORCID">0000-0001-6204-6475</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Stan</forename><forename type="middle">G</forename><surname>Moore</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Trung</forename><forename type="middle">Dac</forename><surname>Nguyen</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Ray</forename><surname>Shan</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Mark</forename><forename type="middle">J</forename><surname>Stevens</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Julien</forename><surname>Tranchida</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Christian</forename><surname>Trott</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Steven</forename><forename type="middle">J</forename><surname>Plimpton</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/j.cpc.2021.108171</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Computer Physics Communications</title>
+		<title level="j" type="abbrev">Computer Physics Communications</title>
+		<idno type="ISSN">0010-4655</idno>
+		<imprint>
+			<biblScope unit="volume">271</biblScope>
+			<biblScope unit="page">108171</biblScope>
+			<date type="published" when="2022-02">2022</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Thompson, A. P. et al. LAMMPS-a flexible simulation tool for particle- based materials modeling at the atomic, meso, and continuum scales. Comput. Phys. Commun. 271, 108171 (2022).</note>
+</biblStruct>
+
+<biblStruct xml:id="b68">
+	<analytic>
+		<title level="a" type="main">Atomsk: a tool for manipulating and converting atomic data files</title>
+		<author>
+			<persName><forename type="first">P</forename><forename type="middle">J C P</forename><surname>Hirel</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Comput. Phys. Commun</title>
+		<imprint>
+			<biblScope unit="volume">197</biblScope>
+			<biblScope unit="page" from="212" to="219" />
+			<date type="published" when="2015">2015</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Hirel, P. J. C. P. C. Atomsk: a tool for manipulating and converting atomic data files. Comput. Phys. Commun. 197, 212-219 (2015).</note>
+</biblStruct>
+
+<biblStruct xml:id="b69">
+	<analytic>
+		<title level="a" type="main">Visualization and analysis of atomistic simulation data with OVITO-the open visualization tool</title>
+		<author>
+			<persName><forename type="first">A</forename><surname>Stukowski</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">Modell. Simul. Mater. Sci</title>
+		<imprint>
+			<biblScope unit="volume">18</biblScope>
+			<biblScope unit="page">15012</biblScope>
+			<date type="published" when="2010">2010</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Stukowski, A. Visualization and analysis of atomistic simulation data with OVITO-the open visualization tool. Modell. Simul. Mater. Sci 18, 015012 (2010).</note>
+</biblStruct>
+
+<biblStruct xml:id="b70">
+	<analytic>
+		<title level="a" type="main">VMD: Visual molecular dynamics</title>
+		<author>
+			<persName><forename type="first">William</forename><surname>Humphrey</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Andrew</forename><surname>Dalke</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Klaus</forename><surname>Schulten</surname></persName>
+		</author>
+		<idno type="DOI">10.1016/0263-7855(96)00018-5</idno>
+	</analytic>
+	<monogr>
+		<title level="j">Journal of Molecular Graphics</title>
+		<title level="j" type="abbrev">Journal of Molecular Graphics</title>
+		<idno type="ISSN">0263-7855</idno>
+		<imprint>
+			<biblScope unit="volume">14</biblScope>
+			<biblScope unit="issue">1</biblScope>
+			<biblScope unit="page" from="33" to="38" />
+			<date type="published" when="1996-02">1996</date>
+			<publisher>Elsevier BV</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Humphrey, W., Dalke, A. &amp; Schulten, K. VMD: visual molecular dynamics. J. Mol. Graph. 14, 33-38 (1996).</note>
+</biblStruct>
+
+<biblStruct xml:id="b71">
+	<analytic>
+		<title level="a" type="main">Single transition metal atom catalyst for a high-performance Li-S battery with a graphdiyne-graphene heterostructure host: a DFT investigation+ML predictions</title>
+		<author>
+			<persName><forename type="first">V</forename></persName>
+		</author>
+		<author>
+			<persName><forename type="first">G</forename><forename type="middle">A</forename><surname>Batra</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">R</forename><surname>Nanda</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">B</forename><forename type="middle">R K</forename></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">ACS Catal</title>
+		<imprint>
+			<biblScope unit="volume">14</biblScope>
+			<biblScope unit="page" from="8874" to="8888" />
+			<date type="published" when="2024">2024</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">V, G. A., Batra, R. &amp; Nanda, B. R. K. Single transition metal atom catalyst for a high-performance Li-S battery with a graphdiyne-graphene heterostructure host: a DFT investigation+ML predictions. ACS Catal 14, 8874-8888 (2024).</note>
+</biblStruct>
+
+<biblStruct xml:id="b72">
+	<analytic>
+		<title level="a" type="main">Double-Atom Catalysts Featuring Inverse Sandwich Structure for CO&lt;sub&gt;2&lt;/sub&gt; Reduction Reaction: A Synergetic First-Principles and Machine Learning Investigation</title>
+		<author>
+			<persName><forename type="first">Linke</forename><surname>Yu</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">Fengyu</forename><surname>Li</surname></persName>
+			<idno type="ORCID">0000-0002-9483-8554</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Jingsong</forename><surname>Huang</surname></persName>
+			<idno type="ORCID">0000-0001-8993-2506</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Bobby</forename><forename type="middle">G</forename><surname>Sumpter</surname></persName>
+			<idno type="ORCID">0000-0001-6341-0355</idno>
+		</author>
+		<author>
+			<persName><forename type="first">William</forename><forename type="middle">E</forename><surname>Mustain</surname></persName>
+			<idno type="ORCID">0000-0001-7804-6410</idno>
+		</author>
+		<author>
+			<persName><forename type="first">Zhongfang</forename><surname>Chen</surname></persName>
+			<idno type="ORCID">0000-0002-1445-9184</idno>
+		</author>
+		<idno type="DOI">10.1021/acscatal.3c01584</idno>
+	</analytic>
+	<monogr>
+		<title level="j">ACS Catalysis</title>
+		<title level="j" type="abbrev">ACS Catal.</title>
+		<idno type="ISSN">2155-5435</idno>
+		<imprint>
+			<biblScope unit="volume">13</biblScope>
+			<biblScope unit="issue">14</biblScope>
+			<biblScope unit="page" from="9616" to="9628" />
+			<date type="published" when="2023-07-07">2023</date>
+			<publisher>American Chemical Society (ACS)</publisher>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Yu, L. et al. Double-atom catalysts featuring inverse sandwich structure for CO 2 reduction reaction: a synergetic first-principles and machine learning investigation. ACS Catal 13, 9616-9628 (2023).</note>
+</biblStruct>
+
+<biblStruct xml:id="b73">
+	<analytic>
+		<title level="a" type="main">Machine learning design of single-atom catalysts for nitrogen fixation</title>
+		<author>
+			<persName><forename type="first">S</forename><surname>Wang</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">C</forename><surname>Qian</surname></persName>
+		</author>
+		<author>
+			<persName><forename type="first">S</forename><surname>Zhou</surname></persName>
+		</author>
+	</analytic>
+	<monogr>
+		<title level="j">ACS Appl. Mater. Interfaces</title>
+		<imprint>
+			<biblScope unit="volume">15</biblScope>
+			<biblScope unit="page" from="40656" to="40664" />
+			<date type="published" when="2023">2023</date>
+		</imprint>
+	</monogr>
+	<note type="raw_reference">Wang, S., Qian, C. &amp; Zhou, S. Machine learning design of single-atom catalysts for nitrogen fixation. ACS Appl. Mater. Interfaces 15, 40656-40664 (2023).</note>
+</biblStruct>
+
+				</listBibl>
+			</div>
+		</back>
+	</text>
+</TEI>

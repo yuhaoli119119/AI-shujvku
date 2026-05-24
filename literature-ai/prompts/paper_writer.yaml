@@ -1,0 +1,45 @@
+name: paper_writer
+version: 0.3
+instruction: >
+  Draft only the requested manuscript sections. Stay strictly inside the retrieved Li-S / DFT evidence pack,
+  preserve the topic domain, and never substitute a different field such as ORR, CO2 reduction, or generic catalysis.
+  If evidence is thin, keep the wording narrow and qualitative rather than filling gaps with background knowledge.
+style:
+  tone: "formal scientific"
+  numeric_policy: "only use values that appear in retrieved facts or evidence text"
+  citation_policy: "prefer explicit evidence text summaries over unsupported interpretation"
+  domain_policy: "do not drift away from lithium-sulfur, LiPS conversion, DFT descriptors, or the provided catalyst system"
+  phrasing_policy: "prefer cautious phrases such as suggests, is consistent with, or supports; avoid prove, establish, demonstrate improved performance, or infer barriers/free energies unless explicitly supported"
+sections:
+  outline:
+    goal: "Produce a concise section-level outline for a Li-S catalyst manuscript"
+    output_type: "list[string]"
+  introduction:
+    goal: "Frame the sulfur-redox challenge, research gap, and catalyst design rationale"
+    output_type: "string"
+  dft_results:
+    goal: "Summarize adsorption energies, barriers, free-energy changes, and electronic-structure evidence"
+    output_type: "string"
+  discussion:
+    goal: "Connect DFT evidence, mechanism claims, and electrochemical implications"
+    output_type: "string"
+  figure_storyline:
+    goal: "Suggest a figure order that moves from catalyst structure to DFT evidence to electrochemistry"
+    output_type: "list[string]"
+guardrails:
+  - "Do not invent new DFT numbers."
+  - "If evidence is sparse, stay qualitative."
+  - "Mechanism claims must stay tied to extracted evidence."
+  - "Do not introduce a different reaction system or application that is absent from the retrieved evidence."
+  - "Only return the requested sections in the JSON object."
+  - "Do not claim lowered barriers, free-energy changes, or causality unless those exact ideas appear in the evidence."
+  - "Prefer conservative evidence-linked wording over strong concluding language."
+llm_output_contract:
+  format: "json"
+  return_requested_sections_only: true
+  required_keys:
+    - "outline"
+    - "introduction"
+    - "dft_results"
+    - "discussion"
+    - "figure_storyline"

@@ -1,0 +1,129 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: literature_ai
+      POSTGRES_USER: literature_ai
+      POSTGRES_PASSWORD: literature_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/app/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  grobid:
+    image: lfoppiano/grobid:0.8.1
+    ports:
+      - "8070:8070"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_CELERY_BROKER_URL: redis://redis:6379/0
+      LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
+      LITAI_GROBID_URL: http://grobid:8070
+      LITAI_MINIO_ENDPOINT: minio:9000
+      LITAI_MINIO_ACCESS_KEY: minioadmin
+      LITAI_MINIO_SECRET_KEY: minioadmin
+      LITAI_STORAGE_ROOT: /data/storage
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
+      LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-true}
+      LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
+      LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}
+      LITAI_DOCLING_DOCUMENT_TIMEOUT: ${LITAI_DOCLING_DOCUMENT_TIMEOUT:-120}
+      LITAI_WRITER_BACKEND: ${LITAI_WRITER_BACKEND:-rule}
+      LITAI_WRITER_MODEL: ${LITAI_WRITER_MODEL:-gpt-4.1-mini}
+      LITAI_WRITER_API_BASE: ${LITAI_WRITER_API_BASE:-}
+      LITAI_WRITER_API_KEY: ${LITAI_WRITER_API_KEY:-}
+      LITAI_WRITER_TIMEOUT_SECONDS: ${LITAI_WRITER_TIMEOUT_SECONDS:-30}
+      LITAI_WRITER_FALLBACK_BACKEND: ${LITAI_WRITER_FALLBACK_BACKEND:-rule}
+      LITAI_WRITER_PROMPT_PATH: ${LITAI_WRITER_PROMPT_PATH:-prompts/paper_writer.yaml}
+      LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
+      LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
+      LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
+    depends_on:
+      - postgres
+      - redis
+      - grobid
+      - minio
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./frontend:/frontend
+      - ../app:/legacy/app
+      - ../findpapers:/legacy/findpapers
+      - ./storage:/data/storage
+      - ./storage/docling_cache:/root/.cache/docling
+      - ./.env:/app/.env
+      # 宿主机用户目录映射，允许文献库创建在用户指定的位置
+      # Windows 用户需要在 Docker Desktop → Settings → Resources → File Sharing 中添加 C:\Users
+      - /c/Users:/host/users
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+    environment:
+      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_CELERY_BROKER_URL: redis://redis:6379/0
+      LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
+      LITAI_GROBID_URL: http://grobid:8070
+      LITAI_MINIO_ENDPOINT: minio:9000
+      LITAI_MINIO_ACCESS_KEY: minioadmin
+      LITAI_MINIO_SECRET_KEY: minioadmin
+      LITAI_STORAGE_ROOT: /data/storage
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
+      LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-true}
+      LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
+      LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}
+      LITAI_DOCLING_DOCUMENT_TIMEOUT: ${LITAI_DOCLING_DOCUMENT_TIMEOUT:-120}
+      LITAI_WRITER_BACKEND: ${LITAI_WRITER_BACKEND:-rule}
+      LITAI_WRITER_MODEL: ${LITAI_WRITER_MODEL:-gpt-4.1-mini}
+      LITAI_WRITER_API_BASE: ${LITAI_WRITER_API_BASE:-}
+      LITAI_WRITER_API_KEY: ${LITAI_WRITER_API_KEY:-}
+      LITAI_WRITER_TIMEOUT_SECONDS: ${LITAI_WRITER_TIMEOUT_SECONDS:-30}
+      LITAI_WRITER_FALLBACK_BACKEND: ${LITAI_WRITER_FALLBACK_BACKEND:-rule}
+      LITAI_WRITER_PROMPT_PATH: ${LITAI_WRITER_PROMPT_PATH:-prompts/paper_writer.yaml}
+      LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
+      LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
+      LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
+    depends_on:
+      - postgres
+      - redis
+      - grobid
+      - minio
+    volumes:
+      - ./backend:/app
+      - ../app:/legacy/app
+      - ../findpapers:/legacy/findpapers
+      - ./storage:/data/storage
+      - ./storage/docling_cache:/root/.cache/docling
+      - ./.env:/app/.env
+      - /c/Users:/host/users
+
+volumes:
+  postgres_data:
+  minio_data:

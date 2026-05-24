@@ -1,0 +1,4635 @@
+{
+  "schema_name": "DoclingDocument",
+  "version": "1.10.0",
+  "name": "5fb77132-b738-4736-90b3-b20747c53a1e_2013-锂_硫电池的研究现状_问题及挑战",
+  "origin": {
+    "mimetype": "application/pdf",
+    "binary_hash": 16527025042903844801,
+    "filename": "5fb77132-b738-4736-90b3-b20747c53a1e_2013-锂_硫电池的研究现状_问题及挑战.pdf"
+  },
+  "furniture": {
+    "self_ref": "#/furniture",
+    "children": [],
+    "content_layer": "furniture",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "body": {
+    "self_ref": "#/body",
+    "children": [
+      {
+        "$ref": "#/texts/0"
+      },
+      {
+        "$ref": "#/texts/1"
+      },
+      {
+        "$ref": "#/texts/2"
+      },
+      {
+        "$ref": "#/texts/3"
+      },
+      {
+        "$ref": "#/groups/0"
+      },
+      {
+        "$ref": "#/texts/5"
+      },
+      {
+        "$ref": "#/texts/6"
+      },
+      {
+        "$ref": "#/texts/7"
+      },
+      {
+        "$ref": "#/texts/8"
+      },
+      {
+        "$ref": "#/groups/1"
+      },
+      {
+        "$ref": "#/texts/10"
+      },
+      {
+        "$ref": "#/texts/11"
+      },
+      {
+        "$ref": "#/texts/12"
+      },
+      {
+        "$ref": "#/texts/13"
+      },
+      {
+        "$ref": "#/groups/2"
+      },
+      {
+        "$ref": "#/texts/15"
+      },
+      {
+        "$ref": "#/texts/16"
+      },
+      {
+        "$ref": "#/texts/17"
+      },
+      {
+        "$ref": "#/texts/18"
+      },
+      {
+        "$ref": "#/texts/19"
+      },
+      {
+        "$ref": "#/texts/20"
+      },
+      {
+        "$ref": "#/texts/21"
+      },
+      {
+        "$ref": "#/texts/22"
+      },
+      {
+        "$ref": "#/texts/23"
+      },
+      {
+        "$ref": "#/texts/24"
+      },
+      {
+        "$ref": "#/texts/25"
+      },
+      {
+        "$ref": "#/texts/26"
+      },
+      {
+        "$ref": "#/texts/27"
+      },
+      {
+        "$ref": "#/texts/28"
+      },
+      {
+        "$ref": "#/texts/29"
+      },
+      {
+        "$ref": "#/texts/30"
+      },
+      {
+        "$ref": "#/texts/31"
+      },
+      {
+        "$ref": "#/texts/32"
+      },
+      {
+        "$ref": "#/texts/33"
+      },
+      {
+        "$ref": "#/texts/34"
+      },
+      {
+        "$ref": "#/texts/35"
+      },
+      {
+        "$ref": "#/texts/36"
+      },
+      {
+        "$ref": "#/texts/37"
+      },
+      {
+        "$ref": "#/texts/38"
+      },
+      {
+        "$ref": "#/texts/39"
+      },
+      {
+        "$ref": "#/texts/40"
+      },
+      {
+        "$ref": "#/texts/41"
+      },
+      {
+        "$ref": "#/texts/42"
+      },
+      {
+        "$ref": "#/texts/43"
+      },
+      {
+        "$ref": "#/texts/44"
+      },
+      {
+        "$ref": "#/pictures/0"
+      },
+      {
+        "$ref": "#/texts/50"
+      },
+      {
+        "$ref": "#/texts/51"
+      },
+      {
+        "$ref": "#/texts/52"
+      },
+      {
+        "$ref": "#/texts/53"
+      },
+      {
+        "$ref": "#/texts/54"
+      },
+      {
+        "$ref": "#/texts/55"
+      },
+      {
+        "$ref": "#/texts/56"
+      },
+      {
+        "$ref": "#/texts/57"
+      },
+      {
+        "$ref": "#/texts/58"
+      },
+      {
+        "$ref": "#/pictures/1"
+      },
+      {
+        "$ref": "#/texts/60"
+      },
+      {
+        "$ref": "#/texts/61"
+      },
+      {
+        "$ref": "#/texts/62"
+      },
+      {
+        "$ref": "#/pictures/2"
+      },
+      {
+        "$ref": "#/texts/67"
+      },
+      {
+        "$ref": "#/texts/68"
+      },
+      {
+        "$ref": "#/texts/69"
+      },
+      {
+        "$ref": "#/texts/70"
+      },
+      {
+        "$ref": "#/texts/71"
+      },
+      {
+        "$ref": "#/texts/72"
+      },
+      {
+        "$ref": "#/texts/73"
+      },
+      {
+        "$ref": "#/texts/74"
+      },
+      {
+        "$ref": "#/pictures/3"
+      },
+      {
+        "$ref": "#/texts/79"
+      },
+      {
+        "$ref": "#/texts/80"
+      },
+      {
+        "$ref": "#/texts/81"
+      },
+      {
+        "$ref": "#/texts/82"
+      },
+      {
+        "$ref": "#/texts/83"
+      },
+      {
+        "$ref": "#/texts/84"
+      },
+      {
+        "$ref": "#/texts/85"
+      },
+      {
+        "$ref": "#/texts/86"
+      },
+      {
+        "$ref": "#/texts/87"
+      },
+      {
+        "$ref": "#/texts/88"
+      },
+      {
+        "$ref": "#/texts/89"
+      },
+      {
+        "$ref": "#/texts/90"
+      },
+      {
+        "$ref": "#/groups/3"
+      },
+      {
+        "$ref": "#/texts/107"
+      },
+      {
+        "$ref": "#/groups/4"
+      },
+      {
+        "$ref": "#/texts/123"
+      },
+      {
+        "$ref": "#/texts/124"
+      },
+      {
+        "$ref": "#/texts/125"
+      },
+      {
+        "$ref": "#/texts/126"
+      },
+      {
+        "$ref": "#/groups/5"
+      }
+    ],
+    "content_layer": "body",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "groups": [
+    {
+      "self_ref": "#/groups/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/4"
+        }
+      ],
+      "content_layer": "body",
+      "name": "group",
+      "label": "key_value_area"
+    },
+    {
+      "self_ref": "#/groups/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/9"
+        }
+      ],
+      "content_layer": "body",
+      "name": "group",
+      "label": "key_value_area"
+    },
+    {
+      "self_ref": "#/groups/2",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/14"
+        }
+      ],
+      "content_layer": "body",
+      "name": "group",
+      "label": "key_value_area"
+    },
+    {
+      "self_ref": "#/groups/3",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/91"
+        },
+        {
+          "$ref": "#/texts/92"
+        },
+        {
+          "$ref": "#/texts/93"
+        },
+        {
+          "$ref": "#/texts/94"
+        },
+        {
+          "$ref": "#/texts/95"
+        },
+        {
+          "$ref": "#/texts/96"
+        },
+        {
+          "$ref": "#/texts/97"
+        },
+        {
+          "$ref": "#/texts/98"
+        },
+        {
+          "$ref": "#/texts/99"
+        },
+        {
+          "$ref": "#/texts/100"
+        },
+        {
+          "$ref": "#/texts/101"
+        },
+        {
+          "$ref": "#/texts/102"
+        },
+        {
+          "$ref": "#/texts/103"
+        },
+        {
+          "$ref": "#/texts/104"
+        },
+        {
+          "$ref": "#/texts/105"
+        },
+        {
+          "$ref": "#/texts/106"
+        }
+      ],
+      "content_layer": "body",
+      "name": "list",
+      "label": "list"
+    },
+    {
+      "self_ref": "#/groups/4",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/108"
+        },
+        {
+          "$ref": "#/texts/109"
+        },
+        {
+          "$ref": "#/texts/110"
+        },
+        {
+          "$ref": "#/texts/111"
+        },
+        {
+          "$ref": "#/texts/112"
+        },
+        {
+          "$ref": "#/texts/113"
+        },
+        {
+          "$ref": "#/texts/114"
+        },
+        {
+          "$ref": "#/texts/115"
+        },
+        {
+          "$ref": "#/texts/116"
+        },
+        {
+          "$ref": "#/texts/117"
+        },
+        {
+          "$ref": "#/texts/118"
+        },
+        {
+          "$ref": "#/texts/119"
+        },
+        {
+          "$ref": "#/texts/120"
+        },
+        {
+          "$ref": "#/texts/121"
+        },
+        {
+          "$ref": "#/texts/122"
+        }
+      ],
+      "content_layer": "body",
+      "name": "list",
+      "label": "list"
+    },
+    {
+      "self_ref": "#/groups/5",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/127"
+        },
+        {
+          "$ref": "#/texts/128"
+        },
+        {
+          "$ref": "#/texts/129"
+        },
+        {
+          "$ref": "#/texts/130"
+        },
+        {
+          "$ref": "#/texts/131"
+        },
+        {
+          "$ref": "#/texts/132"
+        },
+        {
+          "$ref": "#/texts/133"
+        },
+        {
+          "$ref": "#/texts/134"
+        },
+        {
+          "$ref": "#/texts/135"
+        },
+        {
+          "$ref": "#/texts/136"
+        },
+        {
+          "$ref": "#/texts/137"
+        },
+        {
+          "$ref": "#/texts/138"
+        },
+        {
+          "$ref": "#/texts/139"
+        },
+        {
+          "$ref": "#/texts/140"
+        }
+      ],
+      "content_layer": "body",
+      "name": "list",
+      "label": "list"
+    }
+  ],
+  "texts": [
+    {
+      "self_ref": "#/texts/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 50.16,
+            "t": 806.711,
+            "r": 118.74,
+            "b": 785.909,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            25
+          ]
+        }
+      ],
+      "orig": "第 28 卷 第 11 期 2013 年 11 月",
+      "text": "第 28 卷 第 11 期 2013 年 11 月"
+    },
+    {
+      "self_ref": "#/texts/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 242.94,
+            "t": 806.299,
+            "r": 347.49,
+            "b": 785.833,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            42
+          ]
+        }
+      ],
+      "orig": "无 机 材 料 学 报 Journal of Inorganic Materials",
+      "text": "无 机 材 料 学 报 Journal of Inorganic Materials"
+    },
+    {
+      "self_ref": "#/texts/2",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 490.98,
+            "t": 804.569,
+            "r": 545.799,
+            "b": 785.909,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            25
+          ]
+        }
+      ],
+      "orig": "Vol. 28 No. 11 Nov., 2013",
+      "text": "Vol. 28 No. 11 Nov., 2013"
+    },
+    {
+      "self_ref": "#/texts/3",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 51.06,
+            "t": 770.591,
+            "r": 205.063,
+            "b": 761.429,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            32
+          ]
+        }
+      ],
+      "orig": "文章编号 : 1000-324X(2013)11-1181-06",
+      "text": "文章编号 : 1000-324X(2013)11-1181-06"
+    },
+    {
+      "self_ref": "#/texts/4",
+      "parent": {
+        "$ref": "#/groups/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 405.48,
+            "t": 768.764,
+            "r": 546.555,
+            "b": 761.429,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            33
+          ]
+        }
+      ],
+      "orig": "DOI: 10.3724/SP.J.1077.2013.13387",
+      "text": "DOI: 10.3724/SP.J.1077.2013.13387"
+    },
+    {
+      "self_ref": "#/texts/5",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 158.34,
+            "t": 739.562,
+            "r": 436.791,
+            "b": 721.238,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            18
+          ]
+        }
+      ],
+      "orig": "锂 / 硫电池的研究现状、问题及挑战",
+      "text": "锂 / 硫电池的研究现状、问题及挑战",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/6",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 222.9,
+            "t": 700.325,
+            "r": 372.24,
+            "b": 682.137,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            15
+          ]
+        }
+      ],
+      "orig": "胡菁菁 , 李国然 , 高学平",
+      "text": "胡菁菁 , 李国然 , 高学平",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/7",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 199.68,
+            "t": 675.191,
+            "r": 397.892,
+            "b": 666.029,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            30
+          ]
+        }
+      ],
+      "orig": "( 南开大学 新能源材料化学研究所 , 天津 300071)",
+      "text": "( 南开大学 新能源材料化学研究所 , 天津 300071)"
+    },
+    {
+      "self_ref": "#/texts/8",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 70.919,
+            "t": 649.811,
+            "r": 528.959,
+            "b": 567.269,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            278
+          ]
+        }
+      ],
+      "orig": "摘 要 : 锂 / 硫电池是以金属锂为负极、单质硫为正极而构筑的二次电池体系。锂 / 硫电池具有高的理论能量密度 (2600 Wh/kg), 成为最具发展潜力的高能化学电源体系。但这种基于溶解 -沉积反应的锂 / 硫电池体系仍面临一些无 法避免的问题 , 包括金属锂负极的显著结构变化、硫正极材料存在的活性物质利用率低和循环性能差等缺点 , 制约了 锂 / 硫电池的发展。 本文结合近年来关于锂 / 硫电池的突破进展 , 简要阐述了锂 / 硫电池的研究现状、 问题及面临的挑战。 关 键 词 : 锂硫电池 ; 硫 ; 锂 ; 电解液 ; 复合材料 ; 综述",
+      "text": "摘 要 : 锂 / 硫电池是以金属锂为负极、单质硫为正极而构筑的二次电池体系。锂 / 硫电池具有高的理论能量密度 (2600 Wh/kg), 成为最具发展潜力的高能化学电源体系。但这种基于溶解 -沉积反应的锂 / 硫电池体系仍面临一些无 法避免的问题 , 包括金属锂负极的显著结构变化、硫正极材料存在的活性物质利用率低和循环性能差等缺点 , 制约了 锂 / 硫电池的发展。 本文结合近年来关于锂 / 硫电池的突破进展 , 简要阐述了锂 / 硫电池的研究现状、 问题及面临的挑战。 关 键 词 : 锂硫电池 ; 硫 ; 锂 ; 电解液 ; 复合材料 ; 综述"
+    },
+    {
+      "self_ref": "#/texts/9",
+      "parent": {
+        "$ref": "#/groups/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 70.92,
+            "t": 558.371,
+            "r": 217.888,
+            "b": 549.209,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            22
+          ]
+        }
+      ],
+      "orig": "中图分类号 : O646 文献标识码 : A",
+      "text": "中图分类号 : O646 文献标识码 : A"
+    },
+    {
+      "self_ref": "#/texts/10",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 106.02,
+            "t": 517.961,
+            "r": 492.612,
+            "b": 507.35,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            67
+          ]
+        }
+      ],
+      "orig": "Current Status, Problems and Challenges in Lithium-sulfur Batteries",
+      "text": "Current Status, Problems and Challenges in Lithium-sulfur Batteries",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/11",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 203.52,
+            "t": 486.728,
+            "r": 394.415,
+            "b": 478.17,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            38
+          ]
+        }
+      ],
+      "orig": "HU Jing-Jing, LI Guo-Ran, GAO Xue-Ping",
+      "text": "HU Jing-Jing, LI Guo-Ran, GAO Xue-Ping"
+    },
+    {
+      "self_ref": "#/texts/12",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 141.18,
+            "t": 467.609,
+            "r": 456.371,
+            "b": 460.665,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            86
+          ]
+        }
+      ],
+      "orig": "(Institute of New Energy Material Chemistry, Nankai University, Tianjin 300071, China)",
+      "text": "(Institute of New Energy Material Chemistry, Nankai University, Tianjin 300071, China)"
+    },
+    {
+      "self_ref": "#/texts/13",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 70.92,
+            "t": 444.968,
+            "r": 526.941,
+            "b": 335.776,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            792
+          ]
+        }
+      ],
+      "orig": "Abstract: Lithium-sulfur battery, fabricated with metal lithium as anode and sulfur as cathode, has received more attention as the most promising high energy power sources due to its high theoretical energy density (2600 Wh/kg). However,  there  are  some  serious  and  unavoidable  problems  for  lithium-sulfur  battery  based  on  the  dissolution-deposition processes in organic electrolyte, including serious structure change of metallic lithium anode, the lower utilization and poor cycle performance of active materials, which become a big barrier for the research and development  of  lithium-sulfur  battery.  The  current  status,  problems  and  challenges  of  lithium-sulfur  battery  are summarized, including the sulfur-based cathode composites, electrolyte and lithium anode.",
+      "text": "Abstract: Lithium-sulfur battery, fabricated with metal lithium as anode and sulfur as cathode, has received more attention as the most promising high energy power sources due to its high theoretical energy density (2600 Wh/kg). However,  there  are  some  serious  and  unavoidable  problems  for  lithium-sulfur  battery  based  on  the  dissolution-deposition processes in organic electrolyte, including serious structure change of metallic lithium anode, the lower utilization and poor cycle performance of active materials, which become a big barrier for the research and development  of  lithium-sulfur  battery.  The  current  status,  problems  and  challenges  of  lithium-sulfur  battery  are summarized, including the sulfur-based cathode composites, electrolyte and lithium anode."
+    },
+    {
+      "self_ref": "#/texts/14",
+      "parent": {
+        "$ref": "#/groups/2"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 72.06,
+            "t": 327.36799999999994,
+            "r": 399.249,
+            "b": 318.80999999999995,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            82
+          ]
+        }
+      ],
+      "orig": "Key words: lithium-sulfur battery; sulfur; lithium; electrolyte; composite; review",
+      "text": "Key words: lithium-sulfur battery; sulfur; lithium; electrolyte; composite; review"
+    },
+    {
+      "self_ref": "#/texts/15",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 51.06,
+            "t": 290.9200000000001,
+            "r": 292.022,
+            "b": 140.30999999999995,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            274
+          ]
+        }
+      ],
+      "orig": "面对新能源技术的飞速发展 , 特别是随着智 能通讯和电动汽车领域的潜在市场需求 , 发展具 有更高能量密度的二次电池体系的任务十分迫切。 从电化学角度考虑 , 多电子反应材料体系是构建 高比能二次电池的基础 [1] , 其中 , 锂 / 硫电池是一个 很好的例证。上世纪 60 年代提出了由金属锂负极、 单质硫正极构建的锂 / 硫电池体系的概念 [2] 。 在理论 上 , 锂与单质硫的完全反应可实现 2 电子反应 , 硫 电极的理论比容量高达 1675  mAh/g, 而金属锂负 极的理论容量也高达 3860 mAh/g 。 因此 , 以单质硫",
+      "text": "面对新能源技术的飞速发展 , 特别是随着智 能通讯和电动汽车领域的潜在市场需求 , 发展具 有更高能量密度的二次电池体系的任务十分迫切。 从电化学角度考虑 , 多电子反应材料体系是构建 高比能二次电池的基础 [1] , 其中 , 锂 / 硫电池是一个 很好的例证。上世纪 60 年代提出了由金属锂负极、 单质硫正极构建的锂 / 硫电池体系的概念 [2] 。 在理论 上 , 锂与单质硫的完全反应可实现 2 电子反应 , 硫 电极的理论比容量高达 1675  mAh/g, 而金属锂负 极的理论容量也高达 3860 mAh/g 。 因此 , 以单质硫"
+    },
+    {
+      "self_ref": "#/texts/16",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 65.64,
+            "t": 112.21900000000005,
+            "r": 104.94,
+            "b": 103.70799999999997,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            5
+          ]
+        }
+      ],
+      "orig": "收稿日期:",
+      "text": "收稿日期:"
+    },
+    {
+      "self_ref": "#/texts/17",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 105.12,
+            "t": 110.48900000000003,
+            "r": 152.946,
+            "b": 103.54499999999996,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            11
+          ]
+        }
+      ],
+      "orig": "2013-08-07;",
+      "text": "2013-08-07;"
+    },
+    {
+      "self_ref": "#/texts/18",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 155.28,
+            "t": 112.21900000000005,
+            "r": 225.3,
+            "b": 103.70799999999997,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            8
+          ]
+        }
+      ],
+      "orig": "收到修改稿日期:",
+      "text": "收到修改稿日期:"
+    },
+    {
+      "self_ref": "#/texts/19",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 225.42,
+            "t": 110.48900000000003,
+            "r": 268.471,
+            "b": 103.54499999999996,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            10
+          ]
+        }
+      ],
+      "orig": "2013-08-17",
+      "text": "2013-08-17"
+    },
+    {
+      "self_ref": "#/texts/20",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 65.76,
+            "t": 101.17899999999997,
+            "r": 352.722,
+            "b": 92.505,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            51
+          ]
+        }
+      ],
+      "orig": "基金项目: 国家自然科学基金 (51072083); 国家 863 计划 (2011AA11A256)",
+      "text": "基金项目: 国家自然科学基金 (51072083); 国家 863 计划 (2011AA11A256)"
+    },
+    {
+      "self_ref": "#/texts/21",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 107.04,
+            "t": 89.30999999999995,
+            "r": 432.109,
+            "b": 82.36599999999999,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            83
+          ]
+        }
+      ],
+      "orig": "National Natural Science Foundation of China (51072083); 863 Program (2011AA11A256)",
+      "text": "National Natural Science Foundation of China (51072083); 863 Program (2011AA11A256)"
+    },
+    {
+      "self_ref": "#/texts/22",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 65.521,
+            "t": 80.41899999999998,
+            "r": 107.01,
+            "b": 71.90800000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            5
+          ]
+        }
+      ],
+      "orig": "作者简介:",
+      "text": "作者简介:"
+    },
+    {
+      "self_ref": "#/texts/23",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 65.52,
+            "t": 69.37900000000002,
+            "r": 107.01,
+            "b": 60.86699999999996,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            5
+          ]
+        }
+      ],
+      "orig": "通讯作者:",
+      "text": "通讯作者:"
+    },
+    {
+      "self_ref": "#/texts/24",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 107.28,
+            "t": 80.41899999999998,
+            "r": 133.321,
+            "b": 71.90800000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            3
+          ]
+        }
+      ],
+      "orig": "胡菁菁",
+      "text": "胡菁菁"
+    },
+    {
+      "self_ref": "#/texts/25",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 133.56,
+            "t": 78.68899999999996,
+            "r": 153.904,
+            "b": 71.745,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            5
+          ]
+        }
+      ],
+      "orig": "(1988",
+      "text": "(1988"
+    },
+    {
+      "self_ref": "#/texts/26",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 154.02,
+            "t": 81.66300000000001,
+            "r": 158.689,
+            "b": 71.23400000000004,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": "-",
+      "text": "-"
+    },
+    {
+      "self_ref": "#/texts/27",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 158.82,
+            "t": 78.68899999999996,
+            "r": 166.17,
+            "b": 71.745,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            2
+          ]
+        }
+      ],
+      "orig": "),",
+      "text": "),"
+    },
+    {
+      "self_ref": "#/texts/28",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 168.54,
+            "t": 80.41899999999998,
+            "r": 177.06,
+            "b": 71.90800000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": "女",
+      "text": "女"
+    },
+    {
+      "self_ref": "#/texts/29",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 177.3,
+            "t": 78.68899999999996,
+            "r": 181.71,
+            "b": 71.745,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": ",",
+      "text": ","
+    },
+    {
+      "self_ref": "#/texts/30",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 184.08,
+            "t": 80.41899999999998,
+            "r": 227.641,
+            "b": 71.90800000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            5
+          ]
+        }
+      ],
+      "orig": "博士研究生",
+      "text": "博士研究生"
+    },
+    {
+      "self_ref": "#/texts/31",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 227.88,
+            "t": 78.68899999999996,
+            "r": 374.078,
+            "b": 71.745,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            39
+          ]
+        }
+      ],
+      "orig": ". E-mail: hujingjing@mail.nankai.edu.cn",
+      "text": ". E-mail: hujingjing@mail.nankai.edu.cn"
+    },
+    {
+      "self_ref": "#/texts/32",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 308.279,
+            "t": 290.9200000000001,
+            "r": 544.139,
+            "b": 202.67100000000005,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            159
+          ]
+        }
+      ],
+      "orig": "与金属锂构建的锂 / 硫二次电池体系的理论能量密 度达 2600  Wh/kg [3-5] 。如果实际电池体系的能量密 度能实现理论能量密度的 20%, 则锂 / 硫电池的能量 密度可达 500  Wh/kg 。因此 , 锂 / 硫电池体系极具发 展潜力 , 成为近年来高能量密度二次电池领域中的 研究热点和重点之一。",
+      "text": "与金属锂构建的锂 / 硫二次电池体系的理论能量密 度达 2600  Wh/kg [3-5] 。如果实际电池体系的能量密 度能实现理论能量密度的 20%, 则锂 / 硫电池的能量 密度可达 500  Wh/kg 。因此 , 锂 / 硫电池体系极具发 展潜力 , 成为近年来高能量密度二次电池领域中的 研究热点和重点之一。"
+    },
+    {
+      "self_ref": "#/texts/33",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 308.28,
+            "t": 184.16899999999998,
+            "r": 447.364,
+            "b": 169.937,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            13
+          ]
+        }
+      ],
+      "orig": "1 锂 / 硫电池反应机制",
+      "text": "1 锂 / 硫电池反应机制",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/34",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 329.28,
+            "t": 150.88,
+            "r": 544.082,
+            "b": 140.19100000000003,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            22
+          ]
+        }
+      ],
+      "orig": "在电池体系中 , 理想的电极活性材料应具备较",
+      "text": "在电池体系中 , 理想的电极活性材料应具备较"
+    },
+    {
+      "self_ref": "#/texts/35",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_footer",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 107.28,
+            "t": 69.37900000000002,
+            "r": 280.159,
+            "b": 60.70500000000004,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            39
+          ]
+        }
+      ],
+      "orig": "高学平 , 研究员 . E-mail: xpgao@nankai.edu.cn",
+      "text": "高学平 , 研究员 . E-mail: xpgao@nankai.edu.cn"
+    },
+    {
+      "self_ref": "#/texts/36",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 51.06,
+            "t": 803.864,
+            "r": 71.369,
+            "b": 796.529,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1182",
+      "text": "1182"
+    },
+    {
+      "self_ref": "#/texts/37",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 256.2,
+            "t": 805.691,
+            "r": 334.741,
+            "b": 796.7,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            11
+          ]
+        }
+      ],
+      "orig": "无 机 材 料 学 报",
+      "text": "无 机 材 料 学 报"
+    },
+    {
+      "self_ref": "#/texts/38",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 513.781,
+            "t": 805.691,
+            "r": 545.821,
+            "b": 796.529,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            6
+          ]
+        }
+      ],
+      "orig": "第 28 卷",
+      "text": "第 28 卷"
+    },
+    {
+      "self_ref": "#/texts/39",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 51.06,
+            "t": 783.22,
+            "r": 289.665,
+            "b": 321.89,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            794
+          ]
+        }
+      ],
+      "orig": "好的电子导电性 , 使参与氧化还原反应的电子能流 畅输入与输出。同时 , 电极材料在循环过程中尽可 能保持结构稳定和较小的体积膨胀 , 以确保电池体 系的稳定循环性能。但单质硫所固有的电子绝缘性 (5 × 10 -30 S/cm, 25 ℃ ) 使其表现出电化学钝性。若作 为高效的电极活性物质 , 单质硫必须与导电性良好 的基质材料相结合 , 这也是为何需要将硫分散负载 或固化在碳材料和导电高聚物上的原因。就反应类 型而言 , 硫与锂反应属溶解 -沉积反应 , 包括硫正 极和锂负极的反应。 溶解 -沉积反应势必伴随电极活 性物质的结构在充放电中发生显著变化 , 从而影响 其循环稳定性 , 表现出远差于嵌入反应的电极稳定 性。特别是 , 硫电极的溶解 -沉积反应不同于铅酸电 池中快速的电化学溶解 -化学沉积反应 ( 放电 ), 硫电 极的放电中间产物 -锂多硫化物在有机电解液中具 有高的溶解性 , 这种在较宽的电位区间形成的高度 溶解的中间产物一直持续到放电终止时才发生化学 沉积反应 , 生成不溶物 Li2S( 充电发生相反的过 程 ) 。因此 , 这种两端沉积、中间溶解的电极过程极 易导致'穿梭效应 (shuttle) '的发生和活性物质的 流失 [4] 。此外 , 由于单质硫和 Li2S 的密度差异 ( 单 质硫 2.03 g/cm 3 , Li2S 1.67 g/cm 3 ) [5] , 导致硫电极在 循环过程中出现明显的体积变化 , 这也易使电极 材料在循环过程中发生破碎 , 进而破坏电极骨架 的导电网络。同时 , 锂负极的溶解 -沉积反应也导 致负极的结构变化显著 , 类似于金属锂电池中的负 极问题也无法回避。以上各因素相互作用与影响 , 严重制约了硫电极的循环性能和实用电池体系的发 展 , 这需要从硫正极、电解液和锂负极各个方面来 考虑和设计电池体系。",
+      "text": "好的电子导电性 , 使参与氧化还原反应的电子能流 畅输入与输出。同时 , 电极材料在循环过程中尽可 能保持结构稳定和较小的体积膨胀 , 以确保电池体 系的稳定循环性能。但单质硫所固有的电子绝缘性 (5 × 10 -30 S/cm, 25 ℃ ) 使其表现出电化学钝性。若作 为高效的电极活性物质 , 单质硫必须与导电性良好 的基质材料相结合 , 这也是为何需要将硫分散负载 或固化在碳材料和导电高聚物上的原因。就反应类 型而言 , 硫与锂反应属溶解 -沉积反应 , 包括硫正 极和锂负极的反应。 溶解 -沉积反应势必伴随电极活 性物质的结构在充放电中发生显著变化 , 从而影响 其循环稳定性 , 表现出远差于嵌入反应的电极稳定 性。特别是 , 硫电极的溶解 -沉积反应不同于铅酸电 池中快速的电化学溶解 -化学沉积反应 ( 放电 ), 硫电 极的放电中间产物 -锂多硫化物在有机电解液中具 有高的溶解性 , 这种在较宽的电位区间形成的高度 溶解的中间产物一直持续到放电终止时才发生化学 沉积反应 , 生成不溶物 Li2S( 充电发生相反的过 程 ) 。因此 , 这种两端沉积、中间溶解的电极过程极 易导致'穿梭效应 (shuttle) '的发生和活性物质的 流失 [4] 。此外 , 由于单质硫和 Li2S 的密度差异 ( 单 质硫 2.03 g/cm 3 , Li2S 1.67 g/cm 3 ) [5] , 导致硫电极在 循环过程中出现明显的体积变化 , 这也易使电极 材料在循环过程中发生破碎 , 进而破坏电极骨架 的导电网络。同时 , 锂负极的溶解 -沉积反应也导 致负极的结构变化显著 , 类似于金属锂电池中的负 极问题也无法回避。以上各因素相互作用与影响 , 严重制约了硫电极的循环性能和实用电池体系的发 展 , 这需要从硫正极、电解液和锂负极各个方面来 考虑和设计电池体系。"
+    },
+    {
+      "self_ref": "#/texts/40",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 51.06,
+            "t": 305.30899999999997,
+            "r": 157.683,
+            "b": 291.077,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            8
+          ]
+        }
+      ],
+      "orig": "2 硫基正极材料",
+      "text": "2 硫基正极材料",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/41",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 51.059,
+            "t": 274.12,
+            "r": 289.664,
+            "b": 76.89099999999996,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            343
+          ]
+        }
+      ],
+      "orig": "为了改善锂 / 硫电池的循环稳定性并提高硫活 性物质的利用率 , 近年来的研究重点主要集中在 硫正极方面 , 包括各种形式的硫分散固定化方式 , 如硫 -碳复合、硫 -聚合物复合、硫 -氧化物复合以 及硫 -碳 -聚合物多重复合等 [6-18] 。其中 , 引入的基 质材料一般应具有三种功能 [19] : 一是具有良好的 导电性 ; 二是具有一定的机械强度或弹性 , 且活性 物质可在基质材料上高度分散 , 以确保活性物质的 高利用率 , 同时减缓循环过程中由于体积膨胀导致 的电极失效 ; 三是基质材料要对活性物质具有良好 的固定化作用。特别是 , 有些基质材料表面具有一 定的官能团 , 表现出部分化学相互作用 ( 如氧化石 墨烯 ) 。固定化作用集物理吸附和化学作用 , 可使硫",
+      "text": "为了改善锂 / 硫电池的循环稳定性并提高硫活 性物质的利用率 , 近年来的研究重点主要集中在 硫正极方面 , 包括各种形式的硫分散固定化方式 , 如硫 -碳复合、硫 -聚合物复合、硫 -氧化物复合以 及硫 -碳 -聚合物多重复合等 [6-18] 。其中 , 引入的基 质材料一般应具有三种功能 [19] : 一是具有良好的 导电性 ; 二是具有一定的机械强度或弹性 , 且活性 物质可在基质材料上高度分散 , 以确保活性物质的 高利用率 , 同时减缓循环过程中由于体积膨胀导致 的电极失效 ; 三是基质材料要对活性物质具有良好 的固定化作用。特别是 , 有些基质材料表面具有一 定的官能团 , 表现出部分化学相互作用 ( 如氧化石 墨烯 ) 。固定化作用集物理吸附和化学作用 , 可使硫"
+    },
+    {
+      "self_ref": "#/texts/42",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 308.279,
+            "t": 783.22,
+            "r": 544.14,
+            "b": 679.49,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            166
+          ]
+        }
+      ],
+      "orig": "基复合物表现出更好的循环稳定性。几类硫基复合 材料的硫复合与固定化方式总结在图 1 中 , 包括近 年来文献报道的典型的化学固定、物理负载、多孔 填充、聚合物修饰等复合方式 [6-10,13,16] 。显然 , 基质 材料的多样化与结构可调控的特征为高效负载与固 定硫活性物质提供了可行的技术途径 , 成为近年来 硫电极的研究热点。",
+      "text": "基复合物表现出更好的循环稳定性。几类硫基复合 材料的硫复合与固定化方式总结在图 1 中 , 包括近 年来文献报道的典型的化学固定、物理负载、多孔 填充、聚合物修饰等复合方式 [6-10,13,16] 。显然 , 基质 材料的多样化与结构可调控的特征为高效负载与固 定硫活性物质提供了可行的技术途径 , 成为近年来 硫电极的研究热点。"
+    },
+    {
+      "self_ref": "#/texts/43",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 544.32,
+            "t": 516.848,
+            "r": 549.644,
+            "b": 508.29,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": ",",
+      "text": ","
+    },
+    {
+      "self_ref": "#/texts/44",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 308.277,
+            "t": 674.44,
+            "r": 546.882,
+            "b": 368.37,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            525
+          ]
+        }
+      ],
+      "orig": "在硫电极的反应机制方面 , 还有很多基础工作 需要进一步探索 , 如 , 硫活性物质及其放电中间产 物在电解液中的溶解问题 , 这也涉及到锂 / 硫电池的 长期储存性能。硫电极的放电中间产物十分复杂 , 对各种锂的多硫化物的分析和确认需要结合谱学和 原位测试技术 [20] 。另外 , 对硫活性物质的固定化方 式也有不同的看法 , 即硫和锂多硫化物 ( 如 Li2S8) 在 有机电解液中的溶解是不可避免的 , 如何固定或是 否需要固定这些可溶物还需要从反应机制和应用需 求上进一步研究和论述 [21] 。总之 , 目前对硫的固定 化方式和电极反应机制还没有完全形成一致的结论 需要从各个角度来探索研究 , 这也是未来基础研究 工作的重点之一。近年来也有报道 , 直接采用可溶 性的锂多硫化物来构筑液相的硫正极 , 这种液相硫 正极仍需要碳材料作为正极骨架 [22-23] 。为了避免电 极体积的膨胀问题 , 也有研究者采用密度较小的 Li2S 与基质材料复合、溶解部分填充的硫以保证足 够的膨胀空间或限制放电电位 , 从而使得放电产物 呈可溶性多硫化物 [17, 23-24] 。但这些方法会牺牲电池 的部分容量 , 削弱硫作为高能电池电极材料的优",
+      "text": "在硫电极的反应机制方面 , 还有很多基础工作 需要进一步探索 , 如 , 硫活性物质及其放电中间产 物在电解液中的溶解问题 , 这也涉及到锂 / 硫电池的 长期储存性能。硫电极的放电中间产物十分复杂 , 对各种锂的多硫化物的分析和确认需要结合谱学和 原位测试技术 [20] 。另外 , 对硫活性物质的固定化方 式也有不同的看法 , 即硫和锂多硫化物 ( 如 Li2S8) 在 有机电解液中的溶解是不可避免的 , 如何固定或是 否需要固定这些可溶物还需要从反应机制和应用需 求上进一步研究和论述 [21] 。总之 , 目前对硫的固定 化方式和电极反应机制还没有完全形成一致的结论 需要从各个角度来探索研究 , 这也是未来基础研究 工作的重点之一。近年来也有报道 , 直接采用可溶 性的锂多硫化物来构筑液相的硫正极 , 这种液相硫 正极仍需要碳材料作为正极骨架 [22-23] 。为了避免电 极体积的膨胀问题 , 也有研究者采用密度较小的 Li2S 与基质材料复合、溶解部分填充的硫以保证足 够的膨胀空间或限制放电电位 , 从而使得放电产物 呈可溶性多硫化物 [17, 23-24] 。但这些方法会牺牲电池 的部分容量 , 削弱硫作为高能电池电极材料的优"
+    },
+    {
+      "self_ref": "#/texts/45",
+      "parent": {
+        "$ref": "#/pictures/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 308.28,
+            "t": 108.49099999999999,
+            "r": 488.52,
+            "b": 75.029,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            45
+          ]
+        }
+      ],
+      "orig": "图 1 锂 / 硫电池中硫基复合材料的研究示意图 battery [6-10,13,16]",
+      "text": "图 1 锂 / 硫电池中硫基复合材料的研究示意图 battery [6-10,13,16]"
+    },
+    {
+      "self_ref": "#/texts/46",
+      "parent": {
+        "$ref": "#/pictures/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 380.6666666666667,
+            "t": 246.0,
+            "r": 388.6666666666667,
+            "b": 240.0,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            2
+          ]
+        }
+      ],
+      "orig": "22",
+      "text": "22"
+    },
+    {
+      "self_ref": "#/texts/47",
+      "parent": {
+        "$ref": "#/pictures/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 374.0,
+            "t": 243.33333333333337,
+            "r": 378.6666666666667,
+            "b": 224.0,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": "1",
+      "text": "1"
+    },
+    {
+      "self_ref": "#/texts/48",
+      "parent": {
+        "$ref": "#/pictures/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 453.33333333333337,
+            "t": 217.33333333333337,
+            "r": 465.33333333333337,
+            "b": 210.66666666666663,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            3
+          ]
+        }
+      ],
+      "orig": "Li$",
+      "text": "Li$"
+    },
+    {
+      "self_ref": "#/texts/49",
+      "parent": {
+        "$ref": "#/pictures/0"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 342.05861220543596,
+            "t": 326.70514271902584,
+            "r": 365.6080544612307,
+            "b": 316.9615239476408,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            6
+          ]
+        }
+      ],
+      "orig": "carbon",
+      "text": "carbon"
+    },
+    {
+      "self_ref": "#/texts/50",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 488.52,
+            "t": 108.71600000000001,
+            "r": 518.54,
+            "b": 103.82600000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            12
+          ]
+        }
+      ],
+      "orig": "[6-10,13,16]",
+      "text": "[6-10,13,16]"
+    },
+    {
+      "self_ref": "#/texts/51",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 308.28,
+            "t": 94.18399999999997,
+            "r": 546.528,
+            "b": 86.84900000000005,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            66
+          ]
+        }
+      ],
+      "orig": "Fig. 1    Scheme  of  sulfur-based  composites  in  lithium-sulfur",
+      "text": "Fig. 1    Scheme  of  sulfur-based  composites  in  lithium-sulfur"
+    },
+    {
+      "self_ref": "#/texts/52",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 51.06,
+            "t": 805.631,
+            "r": 82.74,
+            "b": 796.469,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            6
+          ]
+        }
+      ],
+      "orig": "第 11 期",
+      "text": "第 11 期"
+    },
+    {
+      "self_ref": "#/texts/53",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 201.54,
+            "t": 805.631,
+            "r": 385.796,
+            "b": 796.469,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            26
+          ]
+        }
+      ],
+      "orig": "胡菁菁 , 等 : 锂/硫电池的研究现状、问题及挑战",
+      "text": "胡菁菁 , 等 : 锂/硫电池的研究现状、问题及挑战"
+    },
+    {
+      "self_ref": "#/texts/54",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 527.04,
+            "t": 803.804,
+            "r": 547.408,
+            "b": 796.469,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1183",
+      "text": "1183"
+    },
+    {
+      "self_ref": "#/texts/55",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 51.058,
+            "t": 783.22,
+            "r": 289.665,
+            "b": 648.41,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            204
+          ]
+        }
+      ],
+      "orig": "势。当采用 Li2S 作为正极并作为锂源的提供者时 , 负极需采用硅基负极材料来构筑电池体系 , 此时 硅基负极材料将面临性能衰减过快和体积膨胀等 问题 , 如何解决这些问题需要进一步探索。此外 , 硫电极制备过程中选用的粘结剂也很重要 [25-26] , 适当的粘结剂不仅有足够的强度以保证循环过程 中电极极片的完整性 , 其中粘结剂上的一些官能 团还可与多硫化物产生一定的相互作用 , 限制其 部分溶解。",
+      "text": "势。当采用 Li2S 作为正极并作为锂源的提供者时 , 负极需采用硅基负极材料来构筑电池体系 , 此时 硅基负极材料将面临性能衰减过快和体积膨胀等 问题 , 如何解决这些问题需要进一步探索。此外 , 硫电极制备过程中选用的粘结剂也很重要 [25-26] , 适当的粘结剂不仅有足够的强度以保证循环过程 中电极极片的完整性 , 其中粘结剂上的一些官能 团还可与多硫化物产生一定的相互作用 , 限制其 部分溶解。"
+    },
+    {
+      "self_ref": "#/texts/56",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 51.06,
+            "t": 643.3,
+            "r": 292.424,
+            "b": 492.89,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            263
+          ]
+        }
+      ],
+      "orig": "综上所述 , 无论采用何种方法来制备硫电极 , 碳材料都是不可缺少的基质材料或导电骨架材料。 从未来实用化电池体系的开发角度出发 , 还需要尽 可能采用可大量制备、来源稳定的基质材料和骨架 材料 , 最好是商业化的材料 , 如导电炭黑 [13-14] 。 在确 保电极中活性物质的利用率方面 , 还应考虑设计良 好的界面结构 , 选择适当的粘结剂 , 构筑相互交织、 稳定的 e -/S8/Li + 三相网络的电极骨架结构 , 使参与 反应的锂离子与电子能顺畅地与硫充分接触与反应 , 从而提高硫活性物质的利用率 [27] 。",
+      "text": "综上所述 , 无论采用何种方法来制备硫电极 , 碳材料都是不可缺少的基质材料或导电骨架材料。 从未来实用化电池体系的开发角度出发 , 还需要尽 可能采用可大量制备、来源稳定的基质材料和骨架 材料 , 最好是商业化的材料 , 如导电炭黑 [13-14] 。 在确 保电极中活性物质的利用率方面 , 还应考虑设计良 好的界面结构 , 选择适当的粘结剂 , 构筑相互交织、 稳定的 e -/S8/Li + 三相网络的电极骨架结构 , 使参与 反应的锂离子与电子能顺畅地与硫充分接触与反应 , 从而提高硫活性物质的利用率 [27] 。"
+    },
+    {
+      "self_ref": "#/texts/57",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 51.06,
+            "t": 474.389,
+            "r": 115.021,
+            "b": 460.157,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            5
+          ]
+        }
+      ],
+      "orig": "3 电解液",
+      "text": "3 电解液",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/58",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 51.057,
+            "t": 441.16,
+            "r": 289.665,
+            "b": 275.01099999999997,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            274
+          ]
+        }
+      ],
+      "orig": "锂 / 硫电池的液体电解液可简单分为醚类易溶 性溶剂的电解液和碳酸酯类难溶性溶剂的电解液 , 硫基复合材料在不同的液体电解质中的电化学行为 表现明显不同 , 而不同的电解液也对硫基复合材料 的硫分散复合方式有不同的要求。 (1) 在碳酸酯类 难溶性溶剂的电解液中 , 硫需采用高温固化方式 , 使硫尽可能薄层负载固化在基质材料表面。在这种 电解液中 , 多硫化物的溶解程度较低 , 薄层负载固 化的硫可较为充分地进行溶解 -沉积反应 , 表现出 稳定的循环性能和高的库伦效率 , 但放电电位偏低 , 影响了电极能量密度的提高。如果硫含量较高 , 则",
+      "text": "锂 / 硫电池的液体电解液可简单分为醚类易溶 性溶剂的电解液和碳酸酯类难溶性溶剂的电解液 , 硫基复合材料在不同的液体电解质中的电化学行为 表现明显不同 , 而不同的电解液也对硫基复合材料 的硫分散复合方式有不同的要求。 (1) 在碳酸酯类 难溶性溶剂的电解液中 , 硫需采用高温固化方式 , 使硫尽可能薄层负载固化在基质材料表面。在这种 电解液中 , 多硫化物的溶解程度较低 , 薄层负载固 化的硫可较为充分地进行溶解 -沉积反应 , 表现出 稳定的循环性能和高的库伦效率 , 但放电电位偏低 , 影响了电极能量密度的提高。如果硫含量较高 , 则"
+    },
+    {
+      "self_ref": "#/texts/59",
+      "parent": {
+        "$ref": "#/pictures/1"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 100.33333333333333,
+            "t": 206.66666666666663,
+            "r": 114.33333333333334,
+            "b": 198.0,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            3
+          ]
+        }
+      ],
+      "orig": "800",
+      "text": "800"
+    },
+    {
+      "self_ref": "#/texts/60",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 308.277,
+            "t": 783.22,
+            "r": 546.884,
+            "b": 555.11,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            427
+          ]
+        }
+      ],
+      "orig": "硫不能实现薄层负载固化 , 表面沉积的 Li2S 逐步积 累会阻止内部的硫继续反应 , 表现出放电容量的锐 减。 因此 , 在难溶性碳酸酯类电解液中 , 硫电极中的 硫含量很难提高 , 一般小于 60wt% [28] 。 (2) 在醚类 易溶性溶剂的电解液中 ( 如 ,  1,  3二氧戊环 (DOL)/ 乙 二醇二甲醚 (DME) 溶剂 ), 硫的电化学溶解持续进行 可使硫较为充分地反应与利用 , 有利于获得高放电 容量 , 类似于液态正极材料的反应。但在这种电解 液中 , 硫基复合材料的循环稳定性较差。 另外 , 即便 是硫的电化学溶解可持续反应 , 也受限于 e -/S8/Li + 三相网络的构建 , 电极中过多的硫并不能体现出高 的利用率。相比较而言 , 在醚类易溶性溶剂的电解 液中 , 复合材料中的硫含量可以突破 70wt% 。因此 , 结合不同溶剂的特点 , 调配具有选择性溶解的电解 液体系对改善硫电极的性能十分必要 [29] 。",
+      "text": "硫不能实现薄层负载固化 , 表面沉积的 Li2S 逐步积 累会阻止内部的硫继续反应 , 表现出放电容量的锐 减。 因此 , 在难溶性碳酸酯类电解液中 , 硫电极中的 硫含量很难提高 , 一般小于 60wt% [28] 。 (2) 在醚类 易溶性溶剂的电解液中 ( 如 ,  1,  3二氧戊环 (DOL)/ 乙 二醇二甲醚 (DME) 溶剂 ), 硫的电化学溶解持续进行 可使硫较为充分地反应与利用 , 有利于获得高放电 容量 , 类似于液态正极材料的反应。但在这种电解 液中 , 硫基复合材料的循环稳定性较差。 另外 , 即便 是硫的电化学溶解可持续反应 , 也受限于 e -/S8/Li + 三相网络的构建 , 电极中过多的硫并不能体现出高 的利用率。相比较而言 , 在醚类易溶性溶剂的电解 液中 , 复合材料中的硫含量可以突破 70wt% 。因此 , 结合不同溶剂的特点 , 调配具有选择性溶解的电解 液体系对改善硫电极的性能十分必要 [29] 。"
+    },
+    {
+      "self_ref": "#/texts/61",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 544.259,
+            "t": 703.388,
+            "r": 549.645,
+            "b": 694.83,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": ",",
+      "text": ","
+    },
+    {
+      "self_ref": "#/texts/62",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 308.278,
+            "t": 550.06,
+            "r": 544.32,
+            "b": 274.124,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            503
+          ]
+        }
+      ],
+      "orig": "不同电解液体系及其锂盐浓度变化对硫电极性 能的影响总结在图 2 中。对比研究发现 , 在硫含量 相近的复合材料中 , 硫电极在碳酸酯类难溶性溶剂 的电解液中表现出稳定的循环性能 , 而在醚类易溶 性溶剂的电解液中具有高容量的优势 , 但其循环性 能偏差。除溶剂的影响外 , 锂盐 ( 如 LiTFSI) 浓度的 影响也十分显著。高浓度的锂盐可通过同离子效应 和高粘度影响来抑制多硫化物的溶解 , 同时抑制锂 枝晶的生长及锂负极的形变 , 提高整体的库伦效 率 [ 3 0 - 3 1 ] 。此外 , 在醚类易溶性溶剂的电解液中 (LiTFSI/DOL/DME),  LiNO3 被证明是一种有效的添 加剂 [32-35] , 其添加浓度控制在 0.2~0.5  mol/L 即可起 到明显的作用。 LiNO3 的添加主要作用是在锂负极 表面形成难溶的硝酸盐 -亚硝酸盐薄层 , 也可形成 高价的硫化合物 (Li-S-O) 薄层 , 从而钝化金属锂表 面 , 抑制穿梭机制和改善硫电极的循环稳定性。当 然 , 这种钝化层必须具备锂离子传输功能 , 阻碍大 的多硫阴离子穿梭反应。硫电极在未添加 LiNO3 的",
+      "text": "不同电解液体系及其锂盐浓度变化对硫电极性 能的影响总结在图 2 中。对比研究发现 , 在硫含量 相近的复合材料中 , 硫电极在碳酸酯类难溶性溶剂 的电解液中表现出稳定的循环性能 , 而在醚类易溶 性溶剂的电解液中具有高容量的优势 , 但其循环性 能偏差。除溶剂的影响外 , 锂盐 ( 如 LiTFSI) 浓度的 影响也十分显著。高浓度的锂盐可通过同离子效应 和高粘度影响来抑制多硫化物的溶解 , 同时抑制锂 枝晶的生长及锂负极的形变 , 提高整体的库伦效 率 [ 3 0 - 3 1 ] 。此外 , 在醚类易溶性溶剂的电解液中 (LiTFSI/DOL/DME),  LiNO3 被证明是一种有效的添 加剂 [32-35] , 其添加浓度控制在 0.2~0.5  mol/L 即可起 到明显的作用。 LiNO3 的添加主要作用是在锂负极 表面形成难溶的硝酸盐 -亚硝酸盐薄层 , 也可形成 高价的硫化合物 (Li-S-O) 薄层 , 从而钝化金属锂表 面 , 抑制穿梭机制和改善硫电极的循环稳定性。当 然 , 这种钝化层必须具备锂离子传输功能 , 阻碍大 的多硫阴离子穿梭反应。硫电极在未添加 LiNO3 的"
+    },
+    {
+      "self_ref": "#/texts/63",
+      "parent": {
+        "$ref": "#/pictures/2"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 200.28,
+            "t": 97.67600000000004,
+            "r": 395.058,
+            "b": 88.28899999999999,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            31
+          ]
+        }
+      ],
+      "orig": "图 2 锂 / 硫电池中电解液对硫正极的性能影响 [8,13]",
+      "text": "图 2 锂 / 硫电池中电解液对硫正极的性能影响 [8,13]"
+    },
+    {
+      "self_ref": "#/texts/64",
+      "parent": {
+        "$ref": "#/pictures/2"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 319.0,
+            "t": 246.66666666666663,
+            "r": 337.0,
+            "b": 238.0,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1250",
+      "text": "1250"
+    },
+    {
+      "self_ref": "#/texts/65",
+      "parent": {
+        "$ref": "#/pictures/2"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 304.66666666666663,
+            "t": 225.66666666666663,
+            "r": 317.0,
+            "b": 197.33333333333337,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": "1",
+      "text": "1"
+    },
+    {
+      "self_ref": "#/texts/66",
+      "parent": {
+        "$ref": "#/pictures/2"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 369.0,
+            "t": 132.66666666666663,
+            "r": 379.0,
+            "b": 124.0,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            2
+          ]
+        }
+      ],
+      "orig": "10",
+      "text": "10"
+    },
+    {
+      "self_ref": "#/texts/67",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 166.86,
+            "t": 85.19600000000003,
+            "r": 428.298,
+            "b": 75.80899999999997,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            75
+          ]
+        }
+      ],
+      "orig": "Fig. 2    Effect of electrolyte on the performance of sulfur cathode [8,13]",
+      "text": "Fig. 2    Effect of electrolyte on the performance of sulfur cathode [8,13]"
+    },
+    {
+      "self_ref": "#/texts/68",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 51.06,
+            "t": 803.864,
+            "r": 71.369,
+            "b": 796.529,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1184",
+      "text": "1184"
+    },
+    {
+      "self_ref": "#/texts/69",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 256.2,
+            "t": 805.691,
+            "r": 334.741,
+            "b": 796.7,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            11
+          ]
+        }
+      ],
+      "orig": "无 机 材 料 学 报",
+      "text": "无 机 材 料 学 报"
+    },
+    {
+      "self_ref": "#/texts/70",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 513.781,
+            "t": 805.691,
+            "r": 545.821,
+            "b": 796.529,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            6
+          ]
+        }
+      ],
+      "orig": "第 28 卷",
+      "text": "第 28 卷"
+    },
+    {
+      "self_ref": "#/texts/71",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 51.06,
+            "t": 782.02,
+            "r": 286.924,
+            "b": 676.85,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            193
+          ]
+        }
+      ],
+      "orig": "电解液的库伦效率不仅较低 (60%~80%), 而且随着 循环的进行出现较大的波动性。当硫电极在添加 LiNO3 的电解液中循环时 , 其库伦效率具有良好的 稳定性 , 除最初几周偏低外 ( 锂负极钝化过程 ), 循 环效率一般大于 95% [33] 。 在近几年的锂 / 硫电池的研 究中 , 大量采用添加 LiNO3 的电解液 , 这在抑制穿 梭效应和改善库伦效率方面效果十分显著。",
+      "text": "电解液的库伦效率不仅较低 (60%~80%), 而且随着 循环的进行出现较大的波动性。当硫电极在添加 LiNO3 的电解液中循环时 , 其库伦效率具有良好的 稳定性 , 除最初几周偏低外 ( 锂负极钝化过程 ), 循 环效率一般大于 95% [33] 。 在近几年的锂 / 硫电池的研 究中 , 大量采用添加 LiNO3 的电解液 , 这在抑制穿 梭效应和改善库伦效率方面效果十分显著。"
+    },
+    {
+      "self_ref": "#/texts/72",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 51.06,
+            "t": 658.049,
+            "r": 190.141,
+            "b": 643.817,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            13
+          ]
+        }
+      ],
+      "orig": "4 锂负极和锂 / 硫电池",
+      "text": "4 锂负极和锂 / 硫电池",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/73",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 51.058,
+            "t": 624.52,
+            "r": 292.2,
+            "b": 298.606,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            570
+          ]
+        }
+      ],
+      "orig": "在锂负极修饰保护方面 , 可通过电解液添加剂 ( 如 LiNO3 、 离子液体和溶剂等 [32,36-37] ) 来影响锂负极 的表面状态和 SEI 膜的形成。形成牢固的 SEI 膜将 有助于稳定锂负极表面的结构 , 并抑制锂的多硫化 物穿梭反应 [32,38] 。此外 , 采用高分子聚合物、 Li3N 、 金属 Pt 以及陶瓷 / 聚合物多功能复合膜 ( 如 LiSICON 和 LiPON 等 ) 进行表面修饰 ( 如图 3 所示 ) [39-41] , 也可 抑制锂的多硫化物对锂负极表面状态的破坏 , 削弱 穿梭效应并减缓锂负极在循环过程中表面结构的显 著变化。但由于金属锂固有的强还原性 , 其修饰材 料的选择及其表征具有一定困难 , 并且修饰层的粘 附程度以及机械强度不足 , 造成修饰层在循环过程 中逐渐破损或脱落 , 导致后续反应的锂负极结构变 化显著和性能衰减过快。总之 , 锂负极方面的研究 报道较少 , 尚没有引起足够的关注。 应当指出 , 金属 锂电池中锂负极存在的问题在锂 / 硫电池中依然存 在 , 包括长期循环过程中的锂枝晶生长问题 , 这在 金属锂负极过量的半电池研究中还没有完全显示出 来 , 但在全电池的体系中锂枝晶的生长问题将不可 避免。因此 , 锂 / 硫电池的实用化还必须高度关注锂 负极的研究。",
+      "text": "在锂负极修饰保护方面 , 可通过电解液添加剂 ( 如 LiNO3 、 离子液体和溶剂等 [32,36-37] ) 来影响锂负极 的表面状态和 SEI 膜的形成。形成牢固的 SEI 膜将 有助于稳定锂负极表面的结构 , 并抑制锂的多硫化 物穿梭反应 [32,38] 。此外 , 采用高分子聚合物、 Li3N 、 金属 Pt 以及陶瓷 / 聚合物多功能复合膜 ( 如 LiSICON 和 LiPON 等 ) 进行表面修饰 ( 如图 3 所示 ) [39-41] , 也可 抑制锂的多硫化物对锂负极表面状态的破坏 , 削弱 穿梭效应并减缓锂负极在循环过程中表面结构的显 著变化。但由于金属锂固有的强还原性 , 其修饰材 料的选择及其表征具有一定困难 , 并且修饰层的粘 附程度以及机械强度不足 , 造成修饰层在循环过程 中逐渐破损或脱落 , 导致后续反应的锂负极结构变 化显著和性能衰减过快。总之 , 锂负极方面的研究 报道较少 , 尚没有引起足够的关注。 应当指出 , 金属 锂电池中锂负极存在的问题在锂 / 硫电池中依然存 在 , 包括长期循环过程中的锂枝晶生长问题 , 这在 金属锂负极过量的半电池研究中还没有完全显示出 来 , 但在全电池的体系中锂枝晶的生长问题将不可 避免。因此 , 锂 / 硫电池的实用化还必须高度关注锂 负极的研究。"
+    },
+    {
+      "self_ref": "#/texts/74",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 51.057,
+            "t": 293.255,
+            "r": 295.111,
+            "b": 251.486,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            90
+          ]
+        }
+      ],
+      "orig": "在锂硫电池研制方面 , 美国 PolyPlus 公司采用 陶瓷膜保护的锂负极构筑的锂硫电池能量密度达 300  Wh/kg 以上。美国 Sion  Power 公司与德国 BASF",
+      "text": "在锂硫电池研制方面 , 美国 PolyPlus 公司采用 陶瓷膜保护的锂负极构筑的锂硫电池能量密度达 300  Wh/kg 以上。美国 Sion  Power 公司与德国 BASF"
+    },
+    {
+      "self_ref": "#/texts/75",
+      "parent": {
+        "$ref": "#/pictures/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 51.06,
+            "t": 103.976,
+            "r": 165.801,
+            "b": 94.58899999999994,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            20
+          ]
+        }
+      ],
+      "orig": "图 3 锂负极保护示意图 [39-41]",
+      "text": "图 3 锂负极保护示意图 [39-41]"
+    },
+    {
+      "self_ref": "#/texts/76",
+      "parent": {
+        "$ref": "#/pictures/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 120.33333333333333,
+            "t": 207.33333333333337,
+            "r": 163.66666666666669,
+            "b": 200.66666666666663,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            16
+          ]
+        }
+      ],
+      "orig": "Liions (allowed)",
+      "text": "Liions (allowed)"
+    },
+    {
+      "self_ref": "#/texts/77",
+      "parent": {
+        "$ref": "#/pictures/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 84.33333333333334,
+            "t": 145.33333333333337,
+            "r": 106.33333333333334,
+            "b": 140.0,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            8
+          ]
+        }
+      ],
+      "orig": "Li mctal",
+      "text": "Li mctal"
+    },
+    {
+      "self_ref": "#/texts/78",
+      "parent": {
+        "$ref": "#/pictures/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 56.0,
+            "t": 129.0,
+            "r": 67.33333333333333,
+            "b": 121.0,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            3
+          ]
+        }
+      ],
+      "orig": "(b)",
+      "text": "(b)"
+    },
+    {
+      "self_ref": "#/texts/79",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "caption",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 51.06,
+            "t": 91.49599999999998,
+            "r": 246.744,
+            "b": 82.10900000000004,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            55
+          ]
+        }
+      ],
+      "orig": "Fig. 3    Scheme of the protected lithium anode [39-41]",
+      "text": "Fig. 3    Scheme of the protected lithium anode [39-41]"
+    },
+    {
+      "self_ref": "#/texts/80",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 297.36,
+            "t": 785.069,
+            "r": 298.275,
+            "b": 783.758,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": "1",
+      "text": "1"
+    },
+    {
+      "self_ref": "#/texts/81",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 308.279,
+            "t": 781.96,
+            "r": 549.478,
+            "b": 600.41,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            328
+          ]
+        }
+      ],
+      "orig": "等公司合作 , 研发的锂硫电池能量密度达 350 Wh/kg 。 国内防化研究院报道的软包装锂 / 硫电池的能量密 度也达 300  Wh/kg [42] 。清华大学采用聚丙烯晴固化 硫的复合正极材料和碳酸酯类电解液 , 研制的小型 锂 / 硫电池芯 (100 mAh) 的能量密度达 437 Wh/kg [43] 。 在近期国内的学术会议上 , 也展示了一些锂 / 硫电池 的能量密度数据。因此 , 锂硫电池已经逐步从材料 本身和单电极 ( 正、负极 ) 研究过渡到电池体系研究。 在实际电池体系中 , 锂负极的电化学性能及结构稳 定性至关重要。为了确保电池的能量密度 , 还必须 合理控制锂负极的厚度和有效利用率 , 以兼顾电池 的能量密度和循环性能。",
+      "text": "等公司合作 , 研发的锂硫电池能量密度达 350 Wh/kg 。 国内防化研究院报道的软包装锂 / 硫电池的能量密 度也达 300  Wh/kg [42] 。清华大学采用聚丙烯晴固化 硫的复合正极材料和碳酸酯类电解液 , 研制的小型 锂 / 硫电池芯 (100 mAh) 的能量密度达 437 Wh/kg [43] 。 在近期国内的学术会议上 , 也展示了一些锂 / 硫电池 的能量密度数据。因此 , 锂硫电池已经逐步从材料 本身和单电极 ( 正、负极 ) 研究过渡到电池体系研究。 在实际电池体系中 , 锂负极的电化学性能及结构稳 定性至关重要。为了确保电池的能量密度 , 还必须 合理控制锂负极的厚度和有效利用率 , 以兼顾电池 的能量密度和循环性能。"
+    },
+    {
+      "self_ref": "#/texts/82",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 308.28,
+            "t": 583.829,
+            "r": 429.123,
+            "b": 569.597,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            9
+          ]
+        }
+      ],
+      "orig": "5 问题探讨与展望",
+      "text": "5 问题探讨与展望",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/83",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 308.279,
+            "t": 552.64,
+            "r": 546.883,
+            "b": 358.835,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            317
+          ]
+        }
+      ],
+      "orig": "锂 / 硫电池的能量密度十分诱人 , 因而其研究热 度逐年走高。近年来 , 锂 / 硫电池性能得到显著改善 , 成为最具竞争力的高能量密度电池体系 , 但仍然面 临着许多问题与挑战。目前报道的正极制备技术仍 摆脱不了基质材料与硫的高温复合或液相化学沉积 不利于电极活性物质的均一化控制和电极材料的规 模化生产。特别是 , 目前的研究仍多集中在单电极 研究 , 而作为电池体系的性能则更加复杂 , 需综合 考虑正极、负极和电解液的匹配和相关制约。仅仅 停留在实验室的电极材料和模拟电池的研究难以全 面判断电池的综合性能及其制备技术 , 迫切需要电 池企业界的介入 , 进而从电极技术和电池的整体设 计出发来推进锂 / 硫电池的研发进程。",
+      "text": "锂 / 硫电池的能量密度十分诱人 , 因而其研究热 度逐年走高。近年来 , 锂 / 硫电池性能得到显著改善 , 成为最具竞争力的高能量密度电池体系 , 但仍然面 临着许多问题与挑战。目前报道的正极制备技术仍 摆脱不了基质材料与硫的高温复合或液相化学沉积 不利于电极活性物质的均一化控制和电极材料的规 模化生产。特别是 , 目前的研究仍多集中在单电极 研究 , 而作为电池体系的性能则更加复杂 , 需综合 考虑正极、负极和电解液的匹配和相关制约。仅仅 停留在实验室的电极材料和模拟电池的研究难以全 面判断电池的综合性能及其制备技术 , 迫切需要电 池企业界的介入 , 进而从电极技术和电池的整体设 计出发来推进锂 / 硫电池的研发进程。"
+    },
+    {
+      "self_ref": "#/texts/84",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 544.319,
+            "t": 489.49,
+            "r": 549.644,
+            "b": 480.932,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            1
+          ]
+        }
+      ],
+      "orig": ",",
+      "text": ","
+    },
+    {
+      "self_ref": "#/texts/85",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 308.276,
+            "t": 354.225,
+            "r": 544.177,
+            "b": 205.37099999999998,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            263
+          ]
+        }
+      ],
+      "orig": "应当说 , 人们对锂 / 硫电池在动力电池领域中的 应用期望较高。从实际应用角度看 , 虽然报道的锂 / 硫电池的重量能量密度已较高 ( 大于 300 Wh/kg), 但 其体积能量密度仍不具有竞争性。只有当锂 / 硫电池 的重量能量密度达到 400~500  Wh/kg, 其体积能量 密度才可与目前商业化锂离子电池相竞争。作为纯 电动汽车的电源使用 , 不仅需要实现能量密度的突 破 , 还必须实现电池的长寿命 , 如至少实现 500 周 的循环 , 这对基于溶解-沉积反应的锂 / 硫电池体系 而言是一项更为艰巨的挑战。",
+      "text": "应当说 , 人们对锂 / 硫电池在动力电池领域中的 应用期望较高。从实际应用角度看 , 虽然报道的锂 / 硫电池的重量能量密度已较高 ( 大于 300 Wh/kg), 但 其体积能量密度仍不具有竞争性。只有当锂 / 硫电池 的重量能量密度达到 400~500  Wh/kg, 其体积能量 密度才可与目前商业化锂离子电池相竞争。作为纯 电动汽车的电源使用 , 不仅需要实现能量密度的突 破 , 还必须实现电池的长寿命 , 如至少实现 500 周 的循环 , 这对基于溶解-沉积反应的锂 / 硫电池体系 而言是一项更为艰巨的挑战。"
+    },
+    {
+      "self_ref": "#/texts/86",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 308.278,
+            "t": 200.5,
+            "r": 543.901,
+            "b": 82.36900000000003,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            187
+          ]
+        }
+      ],
+      "orig": "作为高能量密度电池体系 , 锂 / 硫电池的安全 性仍需予以高度关注 , 特别是当单体电池的容量 较大时 , 其安全性是无法回避的问题。针对锂离子 电池的安全性 , 已经报道了一些安全控制技术 , 如 陶瓷隔膜、阻燃电解液和锂负极保护技术等 [44] 。是 否可以在锂 / 硫电池中借鉴或升级这些技术 , 目前 尚无这方面的报道 , 希望引起锂 / 硫电池研究人员 的关注。",
+      "text": "作为高能量密度电池体系 , 锂 / 硫电池的安全 性仍需予以高度关注 , 特别是当单体电池的容量 较大时 , 其安全性是无法回避的问题。针对锂离子 电池的安全性 , 已经报道了一些安全控制技术 , 如 陶瓷隔膜、阻燃电解液和锂负极保护技术等 [44] 。是 否可以在锂 / 硫电池中借鉴或升级这些技术 , 目前 尚无这方面的报道 , 希望引起锂 / 硫电池研究人员 的关注。"
+    },
+    {
+      "self_ref": "#/texts/87",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.06,
+            "t": 805.631,
+            "r": 82.74,
+            "b": 796.469,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            6
+          ]
+        }
+      ],
+      "orig": "第 11 期",
+      "text": "第 11 期"
+    },
+    {
+      "self_ref": "#/texts/88",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 201.54,
+            "t": 805.631,
+            "r": 385.796,
+            "b": 796.469,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            26
+          ]
+        }
+      ],
+      "orig": "胡菁菁 , 等 : 锂/硫电池的研究现状、问题及挑战",
+      "text": "胡菁菁 , 等 : 锂/硫电池的研究现状、问题及挑战"
+    },
+    {
+      "self_ref": "#/texts/89",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 527.04,
+            "t": 803.804,
+            "r": 547.408,
+            "b": 796.469,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1185",
+      "text": "1185"
+    },
+    {
+      "self_ref": "#/texts/90",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.06,
+            "t": 783.136,
+            "r": 111.179,
+            "b": 771.408,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            6
+          ]
+        }
+      ],
+      "orig": "参考文献 :",
+      "text": "参考文献 :",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/91",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.92,
+            "t": 752.015,
+            "r": 287.22,
+            "b": 730.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            135
+          ]
+        }
+      ],
+      "orig": "[1] Gao X P, Yang H X. Multi-electron reaction materials for high energy density batteries. Energy Environ. Sci., 2010, 3(2): 174 -189.",
+      "text": "[1] Gao X P, Yang H X. Multi-electron reaction materials for high energy density batteries. Energy Environ. Sci., 2010, 3(2): 174 -189.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/92",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.92,
+            "t": 722.015,
+            "r": 289.046,
+            "b": 700.511,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            89
+          ]
+        }
+      ],
+      "orig": "[2] Herbert D, Ulam J. Electric dry cells and storage batteries. US Pat., 3043896 (1962).",
+      "text": "[2] Herbert D, Ulam J. Electric dry cells and storage batteries. US Pat., 3043896 (1962).",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/93",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.92,
+            "t": 692.015,
+            "r": 289.038,
+            "b": 655.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            185
+          ]
+        }
+      ],
+      "orig": "[3] Yamin H, Gorenshtein A, Penciner J., et al . Lithium sulfur battery: oxidation/reduction mechanisms of polysulfides in THF solutions. J. Electrochem. Soc., 1988, 135(5): 1045 -1048.",
+      "text": "[3] Yamin H, Gorenshtein A, Penciner J., et al . Lithium sulfur battery: oxidation/reduction mechanisms of polysulfides in THF solutions. J. Electrochem. Soc., 1988, 135(5): 1045 -1048.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/94",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.92,
+            "t": 647.015,
+            "r": 289.113,
+            "b": 610.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            178
+          ]
+        }
+      ],
+      "orig": "[4] Akridge J R, Mikhaylik Y V, White N. Li/S fundamental chemistry and  application  to  high-performance  rechargeable  batteries. Solid State Ionics, 2004, 175(1-4): 243 -245.",
+      "text": "[4] Akridge J R, Mikhaylik Y V, White N. Li/S fundamental chemistry and  application  to  high-performance  rechargeable  batteries. Solid State Ionics, 2004, 175(1-4): 243 -245.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/95",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.92,
+            "t": 602.015,
+            "r": 289.034,
+            "b": 580.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            104
+          ]
+        }
+      ],
+      "orig": "[5] Ji  X  L,  Nazar  L  F.  Advances  in  Li-S  batteries. J.  Mater.  Chem., 2010, 20(44): 9821 -9826.",
+      "text": "[5] Ji  X  L,  Nazar  L  F.  Advances  in  Li-S  batteries. J.  Mater.  Chem., 2010, 20(44): 9821 -9826.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/96",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.92,
+            "t": 572.015,
+            "r": 289.041,
+            "b": 535.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            181
+          ]
+        }
+      ],
+      "orig": "[6] Wang J L, Yang J, Xie J Y, et  al .  A  novel  conductive polymersulfur composite cathode material for rechargeable lithium batteries. Adv. Mater. , 2002, 14(13 / 14): 963 -965.",
+      "text": "[6] Wang J L, Yang J, Xie J Y, et  al .  A  novel  conductive polymersulfur composite cathode material for rechargeable lithium batteries. Adv. Mater. , 2002, 14(13 / 14): 963 -965.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/97",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.92,
+            "t": 527.015,
+            "r": 289.063,
+            "b": 490.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            153
+          ]
+        }
+      ],
+      "orig": "[7] Ji X L, Lee K T, Nazar L F. A highly ordered nanostructured carbonsulphur cathode for lithium-sulphur batteries. Nat. Mater. , 2009, 8 (6): 500 -506.",
+      "text": "[7] Ji X L, Lee K T, Nazar L F. A highly ordered nanostructured carbonsulphur cathode for lithium-sulphur batteries. Nat. Mater. , 2009, 8 (6): 500 -506.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/98",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.921,
+            "t": 482.015,
+            "r": 289.092,
+            "b": 445.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            190
+          ]
+        }
+      ],
+      "orig": "[8] Zhang B, Qin X, Li G R, et  al. Enhancement of long stability of sulfur cathode by encapsulating sulfur into micro-pores of carbon spheres. Energy Environ. Sci., 2010, 3(10): 1531 -1537.",
+      "text": "[8] Zhang B, Qin X, Li G R, et  al. Enhancement of long stability of sulfur cathode by encapsulating sulfur into micro-pores of carbon spheres. Energy Environ. Sci., 2010, 3(10): 1531 -1537.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/99",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 55.922,
+            "t": 437.015,
+            "r": 289.027,
+            "b": 400.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            175
+          ]
+        }
+      ],
+      "orig": "[9] Li  N  W,  Zheng  M  B,  Hong  H  L, et  al. High-rate  lithium-sulfur batteries  promoted  by  reduced  graphene  oxide  coating. Chem. Commun., 2012, 48(34): 4106 -4108.",
+      "text": "[9] Li  N  W,  Zheng  M  B,  Hong  H  L, et  al. High-rate  lithium-sulfur batteries  promoted  by  reduced  graphene  oxide  coating. Chem. Commun., 2012, 48(34): 4106 -4108.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/100",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.962,
+            "t": 392.015,
+            "r": 289.052,
+            "b": 355.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            205
+          ]
+        }
+      ],
+      "orig": "[10] Chen  J  J,  Zhang  Q,  Shi  Y  N, et  al. A  hierarchical  architecture S/MWCNT nanomicrosphere  with  large  pores  for  lithium  sulfur batteries. Phys. Chem. Chem. Phys., 2012, 14(16): 5376 -5382.",
+      "text": "[10] Chen  J  J,  Zhang  Q,  Shi  Y  N, et  al. A  hierarchical  architecture S/MWCNT nanomicrosphere  with  large  pores  for  lithium  sulfur batteries. Phys. Chem. Chem. Phys., 2012, 14(16): 5376 -5382.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/101",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.961,
+            "t": 347.015,
+            "r": 289.068,
+            "b": 310.033,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            165
+          ]
+        }
+      ],
+      "orig": "[11] Lee K T, Black R, Yim T, et  al. Surface-initiated  growth  of  thin oxide coatings for Li-sulfur battery cathodes. Adv. Energy Mater., 2012, 2(12): 1490 -1496.",
+      "text": "[11] Lee K T, Black R, Yim T, et  al. Surface-initiated  growth  of  thin oxide coatings for Li-sulfur battery cathodes. Adv. Energy Mater., 2012, 2(12): 1490 -1496.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/102",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.96,
+            "t": 302.015,
+            "r": 289.073,
+            "b": 250.03300000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            220
+          ]
+        }
+      ],
+      "orig": "[12] Yin L C, Wang J L, Lin F J, et al . Polyacrylonitrile/graphene composite as a precursor to a sulfur-based cathode  material  for high-rate rechargeable Li-S batteries. Energy Environ. Sci .,  2012, 5(5): 6966 -6972.",
+      "text": "[12] Yin L C, Wang J L, Lin F J, et al . Polyacrylonitrile/graphene composite as a precursor to a sulfur-based cathode  material  for high-rate rechargeable Li-S batteries. Energy Environ. Sci .,  2012, 5(5): 6966 -6972.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/103",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.959,
+            "t": 242.015,
+            "r": 289.042,
+            "b": 190.03300000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            216
+          ]
+        }
+      ],
+      "orig": "[13] Li G C, Li G R, Ye S H, et al . A polyaniline-coated sulfur/carbon composite with an enhanced high-rate capability as a cathode material for lithium/sulfur batteries. Adv. Energy Mater., 2012, 2(10): 1238 -1245.",
+      "text": "[13] Li G C, Li G R, Ye S H, et al . A polyaniline-coated sulfur/carbon composite with an enhanced high-rate capability as a cathode material for lithium/sulfur batteries. Adv. Energy Mater., 2012, 2(10): 1238 -1245.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/104",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.959,
+            "t": 182.015,
+            "r": 289.052,
+            "b": 145.03300000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            176
+          ]
+        }
+      ],
+      "orig": "[14] Li G C, Hu J J, Li G R, et al. Sulfur/activated-conductive carbon black composites as cathode materials for lithium/sulfur battery. J. Power Sources , 2013, 240: 598 -605.",
+      "text": "[14] Li G C, Hu J J, Li G R, et al. Sulfur/activated-conductive carbon black composites as cathode materials for lithium/sulfur battery. J. Power Sources , 2013, 240: 598 -605.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/105",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.958,
+            "t": 137.015,
+            "r": 289.032,
+            "b": 100.03300000000002,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            148
+          ]
+        }
+      ],
+      "orig": "[15] He G, Ji X L, L Nazar L. High 'C' rate Li-S cathodes: sulfur imbibed  bimodal  porous  carbons. Energy  Environ.  Sci., 2011, 4(8): 2878 -2883.",
+      "text": "[15] He G, Ji X L, L Nazar L. High 'C' rate Li-S cathodes: sulfur imbibed  bimodal  porous  carbons. Energy  Environ.  Sci., 2011, 4(8): 2878 -2883.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/106",
+      "parent": {
+        "$ref": "#/groups/3"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 51.957,
+            "t": 92.01499999999999,
+            "r": 289.037,
+            "b": 85.51099999999997,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            75
+          ]
+        }
+      ],
+      "orig": "[16] Wu  F,  Chen  J  Z,  Chen  R  J, et  al. Sulfur/polythiophene  with  a",
+      "text": "[16] Wu  F,  Chen  J  Z,  Chen  R  J, et  al. Sulfur/polythiophene  with  a",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/107",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 328.137,
+            "t": 777.995,
+            "r": 546.308,
+            "b": 741.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            160
+          ]
+        }
+      ],
+      "orig": "core/shell structure: synthesis and electrochemical properties of the cathode for rechargeable lithium batteries. J. Phys. Chem . C , 2011, 115(13): 6057 -6063.",
+      "text": "core/shell structure: synthesis and electrochemical properties of the cathode for rechargeable lithium batteries. J. Phys. Chem . C , 2011, 115(13): 6057 -6063."
+    },
+    {
+      "self_ref": "#/texts/108",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.177,
+            "t": 732.995,
+            "r": 546.257,
+            "b": 696.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            181
+          ]
+        }
+      ],
+      "orig": "[17] Seh Z W, Li W Y, Cha J J, et al. Sulphur-TiO2 yolk-shell nanoarchitecture with internal void space for long-cycle lithium-sulphur batteries. Nat. Commun ., 2013, 4: 1331 -1336.",
+      "text": "[17] Seh Z W, Li W Y, Cha J J, et al. Sulphur-TiO2 yolk-shell nanoarchitecture with internal void space for long-cycle lithium-sulphur batteries. Nat. Commun ., 2013, 4: 1331 -1336.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/109",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.18,
+            "t": 687.995,
+            "r": 546.278,
+            "b": 651.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            188
+          ]
+        }
+      ],
+      "orig": "[18] Ding  B,  Shen  L  F,  Xu  J  Y, et al. Encapsulating  sulfur  into mesoporous TiO2 host as a high performance cathode for lithiumsulfur battery. Electrochim. Acta, 2013, 107: 78 -84.",
+      "text": "[18] Ding  B,  Shen  L  F,  Xu  J  Y, et al. Encapsulating  sulfur  into mesoporous TiO2 host as a high performance cathode for lithiumsulfur battery. Electrochim. Acta, 2013, 107: 78 -84.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/110",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.181,
+            "t": 642.995,
+            "r": 546.264,
+            "b": 606.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            169
+          ]
+        }
+      ],
+      "orig": "[19] Lai  C,  Li  G  C,  Ye  S  H, et  al. Research  process  in  sulfur-carbon composites as cathode with high capacity. Progress in Chemistry, 2011, 23(2/3): 527 -532.",
+      "text": "[19] Lai  C,  Li  G  C,  Ye  S  H, et  al. Research  process  in  sulfur-carbon composites as cathode with high capacity. Progress in Chemistry, 2011, 23(2/3): 527 -532.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/111",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.181,
+            "t": 597.995,
+            "r": 546.294,
+            "b": 561.491,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            154
+          ]
+        }
+      ],
+      "orig": "[20] Patel  M  U  M,  Demir-Cakan  R,  Morcrette  M,  et  al.  Li-S  battery analyzed by UV/Vis in operando mode. Chem. Sus. Chem., 2013, 6(7): 1177-1181.",
+      "text": "[20] Patel  M  U  M,  Demir-Cakan  R,  Morcrette  M,  et  al.  Li-S  battery analyzed by UV/Vis in operando mode. Chem. Sus. Chem., 2013, 6(7): 1177-1181.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/112",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.181,
+            "t": 552.995,
+            "r": 546.258,
+            "b": 516.491,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            148
+          ]
+        }
+      ],
+      "orig": "[21] Zhang S S. Does the sulfur cathode require good mixing for a liquid  electrolyte  lithium/sulfur  cell? Electrochem.  Commun., 2013, 31: 10-12.",
+      "text": "[21] Zhang S S. Does the sulfur cathode require good mixing for a liquid  electrolyte  lithium/sulfur  cell? Electrochem.  Commun., 2013, 31: 10-12.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/113",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.182,
+            "t": 507.995,
+            "r": 546.262,
+            "b": 471.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            176
+          ]
+        }
+      ],
+      "orig": "[22] Fu Y Z, Su Y S, Manthiram A. Highly reversible lithium/dissolved polysulfide  batteries  with  carbon  nanotube  electrodes. Angew. Chem. Int. Ed., 13, 52(27): 6930 -6935.",
+      "text": "[22] Fu Y Z, Su Y S, Manthiram A. Highly reversible lithium/dissolved polysulfide  batteries  with  carbon  nanotube  electrodes. Angew. Chem. Int. Ed., 13, 52(27): 6930 -6935.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/114",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.183,
+            "t": 462.995,
+            "r": 546.289,
+            "b": 426.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            164
+          ]
+        }
+      ],
+      "orig": "[23] Yang Y, Zheng G Y, Cui Y. A membrane-free lithium/polysulfide semi-liquid battery for large-scale energy storage. Energy Environ. Sci., 2013, 6(5): 1552 -1558.",
+      "text": "[23] Yang Y, Zheng G Y, Cui Y. A membrane-free lithium/polysulfide semi-liquid battery for large-scale energy storage. Energy Environ. Sci., 2013, 6(5): 1552 -1558.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/115",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.183,
+            "t": 417.995,
+            "r": 546.259,
+            "b": 381.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            176
+          ]
+        }
+      ],
+      "orig": "[24] Yang  Y,  McDowell  M  T,  Jackson  A, et  al. New  nanostructured Li2S/silicon  rechargeable  battery  with  high  specific  energy. Nano Lett ., 2010, 10(4): 1486 -1491.",
+      "text": "[24] Yang  Y,  McDowell  M  T,  Jackson  A, et  al. New  nanostructured Li2S/silicon  rechargeable  battery  with  high  specific  energy. Nano Lett ., 2010, 10(4): 1486 -1491.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/116",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.18,
+            "t": 373.176,
+            "r": 546.255,
+            "b": 337.092,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            169
+          ]
+        }
+      ],
+      "orig": "[25]  He M, Yuan L X, Zhang W X, et al . Enhanced cyclability for sulfur cathode  achieved  by  a  water-soluble  binder. J.  Phys.  Chem. C, 2011, 115(31): 15703-15709.",
+      "text": "[25]  He M, Yuan L X, Zhang W X, et al . Enhanced cyclability for sulfur cathode  achieved  by  a  water-soluble  binder. J.  Phys.  Chem. C, 2011, 115(31): 15703-15709.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/117",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.18,
+            "t": 328.77600000000007,
+            "r": 546.267,
+            "b": 292.21399999999994,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            204
+          ]
+        }
+      ],
+      "orig": "[26]  Wang J L, Yao Z D, Monroe C W, et al. Carbonylβ -cyclodextrin as  a  novel  binder  for  sulfur  composite  cathodes  in  rechargeable lithium batteries. Adv. Funct. Mater., 2013, 23(9): 1194 -1201.",
+      "text": "[26]  Wang J L, Yao Z D, Monroe C W, et al. Carbonylβ -cyclodextrin as  a  novel  binder  for  sulfur  composite  cathodes  in  rechargeable lithium batteries. Adv. Funct. Mater., 2013, 23(9): 1194 -1201.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/118",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.18,
+            "t": 284.37699999999995,
+            "r": 546.236,
+            "b": 247.81500000000005,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            174
+          ]
+        }
+      ],
+      "orig": "[27] Ai X P, Cao Y L, Yang H X. Simple analysis and possible solutions of  the  unusual  interfacial  reactions  in  Li-S  batteries. J.  Electrochem., 2012, 18(3): 224 -228.",
+      "text": "[27] Ai X P, Cao Y L, Yang H X. Simple analysis and possible solutions of  the  unusual  interfacial  reactions  in  Li-S  batteries. J.  Electrochem., 2012, 18(3): 224 -228.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/119",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.18,
+            "t": 239.97800000000007,
+            "r": 546.325,
+            "b": 203.41599999999994,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            182
+          ]
+        }
+      ],
+      "orig": "[28] Lai  C,  Gao  X  P,  Zhang  B, et  al. Synthesis  and  electrochemical performance  of  sulfur/highly  porous  carbon  composites. J.  Phys. Chem. C , 2009, 113(11): 4712 -4716.",
+      "text": "[28] Lai  C,  Gao  X  P,  Zhang  B, et  al. Synthesis  and  electrochemical performance  of  sulfur/highly  porous  carbon  composites. J.  Phys. Chem. C , 2009, 113(11): 4712 -4716.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/120",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.18,
+            "t": 195.57899999999995,
+            "r": 546.302,
+            "b": 144.197,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            236
+          ]
+        }
+      ],
+      "orig": "[29] Barchasz  C,  Lepretre  J,  Patoux  S, et  al .  Revisiting  TEGDME/ DIOX binary  electrolytes  for  lithium/sulfur  batteries:  Importance of  solvation  ability  and  additives. J.  Electrochem.  Soc .,  2013, 160(3): A430 -A436.",
+      "text": "[29] Barchasz  C,  Lepretre  J,  Patoux  S, et  al .  Revisiting  TEGDME/ DIOX binary  electrolytes  for  lithium/sulfur  batteries:  Importance of  solvation  ability  and  additives. J.  Electrochem.  Soc .,  2013, 160(3): A430 -A436.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/121",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.541,
+            "t": 136.41999999999996,
+            "r": 546.239,
+            "b": 114.61799999999994,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            134
+          ]
+        }
+      ],
+      "orig": "[30] Shin E S, Kim K, Oh S H, et al. Polysulfide dissolution control: the common ion effect. Chem. Commun. , 2013, 49(20): 2004 -2006.",
+      "text": "[30] Shin E S, Kim K, Oh S H, et al. Polysulfide dissolution control: the common ion effect. Chem. Commun. , 2013, 49(20): 2004 -2006.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/122",
+      "parent": {
+        "$ref": "#/groups/4"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 5,
+          "bbox": {
+            "l": 309.181,
+            "t": 106.60000000000002,
+            "r": 546.258,
+            "b": 85.096,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            139
+          ]
+        }
+      ],
+      "orig": "[31] Suo L M, Hu Y S, Li H, et al. A new class of solvent-in-salt electrolyte for high-energy rechargeable metallic lithium batteries. Nat.",
+      "text": "[31] Suo L M, Hu Y S, Li H, et al. A new class of solvent-in-salt electrolyte for high-energy rechargeable metallic lithium batteries. Nat.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/123",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.06,
+            "t": 803.864,
+            "r": 71.369,
+            "b": 796.529,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            4
+          ]
+        }
+      ],
+      "orig": "1186",
+      "text": "1186"
+    },
+    {
+      "self_ref": "#/texts/124",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 256.2,
+            "t": 805.691,
+            "r": 334.741,
+            "b": 796.7,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            11
+          ]
+        }
+      ],
+      "orig": "无 机 材 料 学 报",
+      "text": "无 机 材 料 学 报"
+    },
+    {
+      "self_ref": "#/texts/125",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "furniture",
+      "label": "page_header",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 513.781,
+            "t": 805.691,
+            "r": 545.821,
+            "b": 796.529,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            6
+          ]
+        }
+      ],
+      "orig": "第 28 卷",
+      "text": "第 28 卷"
+    },
+    {
+      "self_ref": "#/texts/126",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 70.92,
+            "t": 780.78,
+            "r": 174.977,
+            "b": 771.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            30
+          ]
+        }
+      ],
+      "orig": "Commun ., 2013, 4: 1481 -1489.",
+      "text": "Commun ., 2013, 4: 1481 -1489."
+    },
+    {
+      "self_ref": "#/texts/127",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.96,
+            "t": 762.995,
+            "r": 289.088,
+            "b": 726.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            187
+          ]
+        }
+      ],
+      "orig": "[32] Aurbach D, Pollak E, Elazari R, et al. On the surface chemical aspects of very high energy density, rechargeable Li-sulfur batteries. J. Electrochem. Soc. , 2009, 156(8): A694 -A702.",
+      "text": "[32] Aurbach D, Pollak E, Elazari R, et al. On the surface chemical aspects of very high energy density, rechargeable Li-sulfur batteries. J. Electrochem. Soc. , 2009, 156(8): A694 -A702.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/128",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.96,
+            "t": 717.995,
+            "r": 289.06,
+            "b": 681.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            174
+          ]
+        }
+      ],
+      "orig": "[33] Liang X, Wen Z Y, Liu Y, et al . Improved cycling performances of lithium sulfur batteries with LiNO3-modified electrolyte. J. Power Sources , 2011, 196(22): 9839 -9843.",
+      "text": "[33] Liang X, Wen Z Y, Liu Y, et al . Improved cycling performances of lithium sulfur batteries with LiNO3-modified electrolyte. J. Power Sources , 2011, 196(22): 9839 -9843.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/129",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.96,
+            "t": 672.995,
+            "r": 289.069,
+            "b": 636.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            210
+          ]
+        }
+      ],
+      "orig": "[34] Xiong S Z, Xie K, Diao Y, et al. Properties of surface film on lithium  anode  with  LiNO3  as  lithium  salt  in  electrolyte  solution  for lithium-sulfur batteries. Electrochim. Acta , 2012, 83: 78 -86.",
+      "text": "[34] Xiong S Z, Xie K, Diao Y, et al. Properties of surface film on lithium  anode  with  LiNO3  as  lithium  salt  in  electrolyte  solution  for lithium-sulfur batteries. Electrochim. Acta , 2012, 83: 78 -86.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/130",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.96,
+            "t": 627.995,
+            "r": 289.017,
+            "b": 606.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            109
+          ]
+        }
+      ],
+      "orig": "[35] Zhang S S. Role of LiNO3 in rechargeable lithium/sulfur battery. Electrochim. Acta , 2012, 70: 344 -348.",
+      "text": "[35] Zhang S S. Role of LiNO3 in rechargeable lithium/sulfur battery. Electrochim. Acta , 2012, 70: 344 -348.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/131",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.96,
+            "t": 597.995,
+            "r": 289.03,
+            "b": 561.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            179
+          ]
+        }
+      ],
+      "orig": "[36]  Zheng J M, Gu M, Chen H H, et  al. Ionic  liquid-enhanced  solid state electrolyte interface (SEI) for lithium-sulfur batteries. J. Mater. Chem. A , 2013, 1(29): 8464 -8470.",
+      "text": "[36]  Zheng J M, Gu M, Chen H H, et  al. Ionic  liquid-enhanced  solid state electrolyte interface (SEI) for lithium-sulfur batteries. J. Mater. Chem. A , 2013, 1(29): 8464 -8470.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/132",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.961,
+            "t": 552.995,
+            "r": 289.042,
+            "b": 501.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            209
+          ]
+        }
+      ],
+      "orig": "[37] Song J H, Yeon J T, Jang J Y, et al. Effect of fluoroethylene carbonate on electrochemical performances of lithium electrodes and lithium-sulfur batteries. J. Electrochem. Soc. , 2013, 160(6): A873 -A881.",
+      "text": "[37] Song J H, Yeon J T, Jang J Y, et al. Effect of fluoroethylene carbonate on electrochemical performances of lithium electrodes and lithium-sulfur batteries. J. Electrochem. Soc. , 2013, 160(6): A873 -A881.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/133",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 51.962,
+            "t": 492.995,
+            "r": 289.005,
+            "b": 486.491,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            71
+          ]
+        }
+      ],
+      "orig": "[38] Xiong S Z, Xie K, Diao Y, et al. On the role of polysulfides for a",
+      "text": "[38] Xiong S Z, Xie K, Diao Y, et al. On the role of polysulfides for a",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/134",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 328.142,
+            "t": 777.995,
+            "r": 546.249,
+            "b": 756.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            141
+          ]
+        }
+      ],
+      "orig": "stable  solid  electrolyte  interphase  on  the  lithium  anode  cycled  in lithium-sulfur batteries. J. Power Sources , 2013, 236: 181 -187.",
+      "text": "stable  solid  electrolyte  interphase  on  the  lithium  anode  cycled  in lithium-sulfur batteries. J. Power Sources , 2013, 236: 181 -187.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/135",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 309.182,
+            "t": 747.995,
+            "r": 546.27,
+            "b": 711.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            174
+          ]
+        }
+      ],
+      "orig": "[39] Lee Y M, Choi N S, Park J H, et al . Electrochemical performance of  lithium/sulfur  batteries  with  protected  Li  anodes. J.  Power Sources , 2003, 119-121: 964 -972.",
+      "text": "[39] Lee Y M, Choi N S, Park J H, et al . Electrochemical performance of  lithium/sulfur  batteries  with  protected  Li  anodes. J.  Power Sources , 2003, 119-121: 964 -972.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/136",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 309.182,
+            "t": 702.995,
+            "r": 546.311,
+            "b": 666.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            176
+          ]
+        }
+      ],
+      "orig": "[40] Zheng M S, Chen J J, Dong Q F. The enhanced electrochemical performance of lithium/sulfur battery with protected lithium anode. Adv. Mater. Res. , 2012, 476-478: 676 -680.",
+      "text": "[40] Zheng M S, Chen J J, Dong Q F. The enhanced electrochemical performance of lithium/sulfur battery with protected lithium anode. Adv. Mater. Res. , 2012, 476-478: 676 -680.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/137",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 309.182,
+            "t": 657.995,
+            "r": 546.319,
+            "b": 621.491,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            183
+          ]
+        }
+      ],
+      "orig": "[41]  Wu M F, Wen Z Y, Liu Y, et  al .  Electrochemical  behaviors  of  a Li3N modified Li metal electrode in secondary lithium batteries. J. Power Sources , 2011, 196(19): 8091-8097.",
+      "text": "[41]  Wu M F, Wen Z Y, Liu Y, et  al .  Electrochemical  behaviors  of  a Li3N modified Li metal electrode in secondary lithium batteries. J. Power Sources , 2011, 196(19): 8091-8097.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/138",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 309.18,
+            "t": 612.995,
+            "r": 546.299,
+            "b": 576.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            138
+          ]
+        }
+      ],
+      "orig": "[42]  Yu Z B, Wang W K, Wang A B, et al. Study on the performance of soft-package Li/S battery. Battery Bimonthly , 2007, 37(4): 247 -249.",
+      "text": "[42]  Yu Z B, Wang W K, Wang A B, et al. Study on the performance of soft-package Li/S battery. Battery Bimonthly , 2007, 37(4): 247 -249.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/139",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 309.18,
+            "t": 567.995,
+            "r": 546.308,
+            "b": 516.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            240
+          ]
+        }
+      ],
+      "orig": "[43] Wang L, He X M, Li J J, et al. Charge/discharge characteristics of sulfurized polyacrylonitrile composite with different sulfur content in  carbonate  based  electrolyte  for  lithium  batteries. Electrochim. Acta , 2012, 72: 114 -119.",
+      "text": "[43] Wang L, He X M, Li J J, et al. Charge/discharge characteristics of sulfurized polyacrylonitrile composite with different sulfur content in  carbonate  based  electrolyte  for  lithium  batteries. Electrochim. Acta , 2012, 72: 114 -119.",
+      "enumerated": false,
+      "marker": ""
+    },
+    {
+      "self_ref": "#/texts/140",
+      "parent": {
+        "$ref": "#/groups/5"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "list_item",
+      "prov": [
+        {
+          "page_no": 6,
+          "bbox": {
+            "l": 309.18,
+            "t": 507.995,
+            "r": 546.278,
+            "b": 486.013,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            130
+          ]
+        }
+      ],
+      "orig": "[44] Xia L, Li S L, Ai X P, et al. Safety enhancing methods for Li-ion batteries. Progress in Chemistry , 2011, 23(2/3): 328 -335.",
+      "text": "[44] Xia L, Li S L, Ai X P, et al. Safety enhancing methods for Li-ion batteries. Progress in Chemistry , 2011, 23(2/3): 328 -335.",
+      "enumerated": false,
+      "marker": ""
+    }
+  ],
+  "pictures": [
+    {
+      "self_ref": "#/pictures/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/45"
+        },
+        {
+          "$ref": "#/texts/46"
+        },
+        {
+          "$ref": "#/texts/47"
+        },
+        {
+          "$ref": "#/texts/48"
+        },
+        {
+          "$ref": "#/texts/49"
+        }
+      ],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 310.3985290527344,
+            "t": 354.6031494140625,
+            "r": 541.8069458007812,
+            "b": 124.26861572265625,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [
+        {
+          "$ref": "#/texts/45"
+        }
+      ],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    },
+    {
+      "self_ref": "#/pictures/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/59"
+        }
+      ],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 83.2125473022461,
+            "t": 260.80908203125,
+            "r": 292.4100646972656,
+            "b": 112.21728515625,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    },
+    {
+      "self_ref": "#/pictures/2",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/63"
+        },
+        {
+          "$ref": "#/texts/64"
+        },
+        {
+          "$ref": "#/texts/65"
+        },
+        {
+          "$ref": "#/texts/66"
+        }
+      ],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 304.8710632324219,
+            "t": 260.518310546875,
+            "r": 515.10400390625,
+            "b": 112.42645263671875,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [
+        {
+          "$ref": "#/texts/63"
+        }
+      ],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    },
+    {
+      "self_ref": "#/pictures/3",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [
+        {
+          "$ref": "#/texts/75"
+        },
+        {
+          "$ref": "#/texts/76"
+        },
+        {
+          "$ref": "#/texts/77"
+        },
+        {
+          "$ref": "#/texts/78"
+        }
+      ],
+      "content_layer": "body",
+      "label": "picture",
+      "prov": [
+        {
+          "page_no": 4,
+          "bbox": {
+            "l": 54.70405197143555,
+            "t": 236.297607421875,
+            "r": 282.866455078125,
+            "b": 119.689453125,
+            "coord_origin": "BOTTOMLEFT"
+          },
+          "charspan": [
+            0,
+            0
+          ]
+        }
+      ],
+      "captions": [
+        {
+          "$ref": "#/texts/75"
+        }
+      ],
+      "references": [],
+      "footnotes": [],
+      "annotations": []
+    }
+  ],
+  "tables": [],
+  "key_value_items": [],
+  "form_items": [],
+  "pages": {
+    "1": {
+      "size": {
+        "width": 595.2200317382812,
+        "height": 842.0
+      },
+      "page_no": 1
+    },
+    "2": {
+      "size": {
+        "width": 595.2200317382812,
+        "height": 842.0
+      },
+      "page_no": 2
+    },
+    "3": {
+      "size": {
+        "width": 595.2200317382812,
+        "height": 842.0
+      },
+      "page_no": 3
+    },
+    "4": {
+      "size": {
+        "width": 595.2200317382812,
+        "height": 842.0
+      },
+      "page_no": 4
+    },
+    "5": {
+      "size": {
+        "width": 595.2200317382812,
+        "height": 842.0
+      },
+      "page_no": 5
+    },
+    "6": {
+      "size": {
+        "width": 595.2200317382812,
+        "height": 842.0
+      },
+      "page_no": 6
+    }
+  }
+}

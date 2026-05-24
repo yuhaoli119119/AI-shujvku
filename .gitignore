@@ -11,7 +11,10 @@ build/
 .workbuddy/
 111/
 backend.log
-literature-ai/
+
+config.json
+
+
 
 # 备份文件夹
 *backup*/
@@ -21,4 +24,4 @@ literature-ai_code_backup_*
 patch*.py
 diff.txt
 fix.py
-*.spec
+node_modules/

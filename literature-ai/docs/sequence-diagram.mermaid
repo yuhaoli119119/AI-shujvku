@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant Browser as 浏览器
+    participant HTML as index.html
+    participant Tokens as tokens.css
+    participant TopNavJS as topnav.js
+    participant ThemeMgr as ThemeManager
+    participant LS as localStorage
+
+    Browser->>HTML: 请求页面
+    HTML->>Tokens: <link> 加载 tokens.css
+    Tokens-->>Browser: :root 默认令牌生效（Material Light）
+    HTML->>TopNavJS: <script> 加载 topnav.js
+    Note over HTML: <head> 内联脚本调用 ThemeManager.init()
+    TopNavJS->>ThemeMgr: ThemeManager.init()
+    ThemeMgr->>LS: 读取 litai-theme / litai-mode
+    LS-->>ThemeMgr: 返回保存的 theme + mode
+    ThemeMgr->>HTML: 设置 <html data-theme="..." data-mode="...">
+    Note over HTML: CSS 变量级联生效，无闪烁
+
+    Browser->>HTML: DOMContentLoaded
+    HTML->>TopNavJS: TopNav.init({ currentPage: 'literature' })
+    TopNavJS->>HTML: 注入导航栏 HTML 到 #topnav-mount
+    TopNavJS->>HTML: 注入主题面板 HTML 到 body
+    TopNavJS->>ThemeMgr: ThemeManager.updateNavState(nav)
+    ThemeMgr->>HTML: 同步导航面板中 pill/btn 的 active 状态
+    TopNavJS->>TopNavJS: 绑定 pill/btn 点击事件

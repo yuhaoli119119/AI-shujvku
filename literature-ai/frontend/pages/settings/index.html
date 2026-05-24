@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设置</title>
+    <link rel="stylesheet" href="../../shared/fonts.css">
+    <link rel="stylesheet" href="../../shared/tokens.css">
+    <link rel="stylesheet" href="../../shared/components.css">
+    <link rel="stylesheet" href="../../shared/topnav.css">
+    <script src="../../shared/topnav.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-body);
+            color: var(--color-text);
+            background: var(--color-bg);
+            min-height: 100vh;
+        }
+
+        /* ---- Main Layout ---- */
+        .main {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        /* ---- Section Nav (within settings) ---- */
+        .section-nav {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 28px;
+            border-bottom: 1px solid var(--color-border);
+            padding-bottom: 12px;
+        }
+        .section-nav button {
+            background: transparent;
+            border: none;
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
+            font-weight: 500;
+            font-family: var(--font-body);
+            padding: 8px 18px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .section-nav button:hover {
+            color: var(--color-text);
+            background: var(--color-surface-alt);
+        }
+        .section-nav button.active {
+            color: var(--color-primary);
+            background: var(--color-primary-bg);
+        }
+
+        /* ---- Code Block ---- */
+        .code-block {
+            position: relative;
+            background: var(--color-surface-alt);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            padding: 16px;
+            font-family: var(--font-mono);
+            font-size: var(--font-size-xs);
+            line-height: 1.7;
+            color: var(--color-text-secondary);
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        [data-theme="neumorphism"] .code-block {
+            border: none;
+            box-shadow: var(--shadow-inset);
+        }
+        .code-block .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-xs);
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all var(--transition);
+            font-family: var(--font-body);
+        }
+        .code-block .copy-btn:hover { color: var(--color-text); background: var(--color-surface-alt); }
+
+        /* ---- Theme & Mode Section ---- */
+        .theme-section, .mode-section {
+            margin-bottom: 28px;
+        }
+        .theme-section h3, .mode-section h3 {
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            color: var(--color-text);
+            margin-bottom: 12px;
+        }
+        .theme-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .theme-pill {
+            padding: 8px 20px;
+            border: 1.5px solid var(--color-border);
+            border-radius: var(--radius-pill);
+            background: var(--color-surface);
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
+            font-weight: 500;
+            font-family: var(--font-body);
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .theme-pill:hover {
+            border-color: var(--color-primary);
+            color: var(--color-text);
+            background: var(--color-surface-alt);
+        }
+        .theme-pill.active {
+            background: var(--color-primary);
+            color: #fff;
+            border-color: var(--color-primary);
+        }
+        [data-theme="neumorphism"] .theme-pill {
+            border: none;
+            box-shadow: var(--shadow-card);
+        }
+        [data-theme="neumorphism"] .theme-pill.active {
+            box-shadow: var(--shadow-inset);
+            background: var(--color-primary);
+            color: #fff;
+        }
+
+        .mode-toggle {
+            display: flex;
+            gap: 4px;
+            background: var(--color-surface-alt);
+            border-radius: var(--radius);
+            padding: 4px;
+            border: 1px solid var(--color-border);
+        }
+        [data-theme="neumorphism"] .mode-toggle {
+            border: none;
+            box-shadow: var(--shadow-inset);
+            background: var(--color-surface);
+        }
+        .mode-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: var(--radius);
+            background: transparent;
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
+            font-weight: 500;
+            font-family: var(--font-body);
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .mode-btn:hover {
+            color: var(--color-text);
+            background: var(--color-surface);
+        }
+        .mode-btn.active {
+            background: var(--color-surface);
+            color: var(--color-primary);
+            font-weight: 600;
+            box-shadow: var(--shadow-card);
+        }
+        [data-theme="neumorphism"] .mode-btn.active {
+            box-shadow: var(--shadow-card);
+        }
+
+        /* ---- Usage Guide ---- */
+        .guide-section { margin-bottom: 24px; }
+        .guide-section h3 {
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--color-text);
+        }
+        .guide-section p, .guide-section li {
+            font-size: var(--font-size-sm);
+            line-height: 1.8;
+            color: var(--color-text-secondary);
+        }
+        .guide-section ul { padding-left: 20px; }
+        .guide-section li { margin-bottom: 4px; }
+
+        /* ---- Toast Container ---- */
+        .toast-container {
+            position: fixed;
+            top: 72px;
+            right: 24px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 768px) {
+            .main { padding: 20px 16px; }
+            .theme-pills { gap: 6px; }
+        }
+    </style>
+    <script>ThemeManager.init();</script>
+</head>
+<body>
+    <div id="topnav-mount"></div>
+
+    <div class="main">
+        <!-- Section Navigation -->
+        <div class="section-nav">
+            <button class="active" onclick="showSection('api')">API 配置</button>
+            <button onclick="showSection('ide')">IDE 连接</button>
+            <button onclick="showSection('theme')">主题外观</button>
+            <button onclick="showSection('guide')">使用说明</button>
+        </div>
+
+        <!-- ====== API Configuration Section ====== -->
+        <div id="section-api" class="section-content">
+            <!-- Service Status -->
+            <div class="panel" id="status-panel">
+                <div class="panel-title">服务状态</div>
+                <div class="panel-desc">当前各 AI 服务的连接状态</div>
+                <div id="status-content" style="display:flex; gap:12px; flex-wrap:wrap;">
+                    <span class="badge badge-warn">加载中…</span>
+                </div>
+            </div>
+
+            <!-- Embedding Configuration -->
+            <div class="panel">
+                <div class="panel-title">🔍 Embedding 模型配置</div>
+                <div class="panel-desc">
+                    配置语义检索使用的 Embedding 模型。推荐使用 DeepSeek / OpenAI 等兼容 API。
+                    未配置时使用本地确定性哈希（检索质量较低）。
+                </div>
+                <div class="field">
+                    <label>Provider <span class="hint">deterministic = 离线模式 / openai_compatible = 在线API</span></label>
+                    <select id="embedding_provider">
+                        <option value="deterministic">deterministic（离线模式）</option>
+                        <option value="openai_compatible">openai_compatible（在线 API）</option>
+                    </select>
+                </div>
+                <div id="embedding-api-fields">
+                    <div class="field-row">
+                        <div class="field">
+                            <label>API Base URL <span class="hint">如 https://api.deepseek.com/v1</span></label>
+                            <input type="text" id="embedding_api_base" placeholder="https://api.deepseek.com/v1">
+                        </div>
+                        <div class="field">
+                            <label>API Key</label>
+                            <input type="password" id="embedding_api_key" placeholder="sk-...">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label>Model <span class="hint">如 text-embedding-3-small</span></label>
+                            <input type="text" id="embedding_model" placeholder="text-embedding-3-small">
+                        </div>
+                        <div class="field">
+                            <label>Dimension <span class="hint">向量维度</span></label>
+                            <input type="number" id="embedding_dimension" placeholder="1536">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Writer LLM Configuration -->
+            <div class="panel">
+                <div class="panel-title">✍️ Writer LLM 配置</div>
+                <div class="panel-desc">
+                    配置 AI 写作使用的语言模型。Writer 必须配置 LLM 才能生成内容，否则只返回错误提示。
+                </div>
+                <div class="field">
+                    <label>Backend</label>
+                    <select id="writer_backend">
+                        <option value="openai_compatible">openai_compatible（在线 API）</option>
+                        <option value="rule">rule（纯模板，不推荐）</option>
+                    </select>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>API Base URL <span class="hint">如 https://api.deepseek.com</span></label>
+                        <input type="text" id="writer_api_base" placeholder="https://api.deepseek.com">
+                    </div>
+                    <div class="field">
+                        <label>API Key</label>
+                        <input type="password" id="writer_api_key" placeholder="sk-...">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Model <span class="hint">如 deepseek-chat / gpt-4.1-mini</span></label>
+                        <input type="text" id="writer_model" placeholder="deepseek-chat">
+                    </div>
+                    <div class="field"></div>
+                </div>
+            </div>
+
+            <!-- MCP Keys -->
+            <div class="panel">
+                <div class="panel-title">🔑 MCP API Keys</div>
+                <div class="panel-desc">
+                    配置 MCP 协议的访问密钥，供 IDE 中的 AI 连接使用。
+                    格式：<code>name|label|key|scopes;...</code>，例如
+                    <code>claude|Claude Desktop|litmcp_claude|read_papers,append_notes</code>
+                </div>
+                <div class="field">
+                    <label>MCP API Keys</label>
+                    <textarea id="mcp_api_keys" rows="3" placeholder="claude|Claude Desktop|litmcp_claude|read_papers,append_notes,propose_corrections,request_parse"></textarea>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; margin-top:8px;">
+                <button class="btn btn-primary" onclick="saveSettings()">💾 保存配置</button>
+                <button class="btn btn-ghost" onclick="loadSettings()">🔄 重新加载</button>
+            </div>
+        </div>
+
+        <!-- ====== IDE Connection Section ====== -->
+        <div id="section-ide" class="section-content" style="display:none;">
+            <div class="panel">
+                <div class="panel-title">🔗 IDE AI 连接配置</div>
+                <div class="panel-desc">
+                    复制下方配置到你的 IDE 中，AI 即可通过 MCP 协议连接本系统。
+                    只需要把「一键提示词」发给 AI，AI 就知道怎么连。
+                </div>
+                <div id="ide-status" style="margin-bottom:16px;">
+                    <span class="badge badge-warn">加载中…</span>
+                </div>
+
+                <!-- One-click prompt -->
+                <div class="field">
+                    <label>🚀 一键提示词（发给 AI，AI 自己会连）</label>
+                    <div class="code-block" id="prompt-block">
+                        <button class="copy-btn" onclick="copyText('prompt-text')">复制</button>
+                        <div id="prompt-text">加载中…</div>
+                    </div>
+                </div>
+
+                <!-- Cursor config -->
+                <div class="field">
+                    <label>Cursor / VS Code 配置 <span class="hint">写入 .cursor/mcp.json 或 .vscode/mcp.json</span></label>
+                    <div class="code-block" id="cursor-block">
+                        <button class="copy-btn" onclick="copyText('cursor-text')">复制</button>
+                        <div id="cursor-text">加载中…</div>
+                    </div>
+                </div>
+
+                <!-- Connection info -->
+                <div class="field">
+                    <label>连接信息</label>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                        <div style="background:var(--color-surface-alt); padding:12px; border-radius:var(--radius); border:1px solid var(--color-border);">
+                            <div style="font-size:var(--font-size-xs); color:var(--color-text-muted); margin-bottom:4px;">服务地址</div>
+                            <div id="ide-base-url" style="font-size:var(--font-size-sm); font-family:var(--font-mono);">-</div>
+                        </div>
+                        <div style="background:var(--color-surface-alt); padding:12px; border-radius:var(--radius); border:1px solid var(--color-border);">
+                            <div style="font-size:var(--font-size-xs); color:var(--color-text-muted); margin-bottom:4px;">MCP 端点</div>
+                            <div id="ide-mcp-url" style="font-size:var(--font-size-sm); font-family:var(--font-mono);">-</div>
+                        </div>
+                        <div style="background:var(--color-surface-alt); padding:12px; border-radius:var(--radius); border:1px solid var(--color-border);">
+                            <div style="font-size:var(--font-size-xs); color:var(--color-text-muted); margin-bottom:4px;">本机 IP</div>
+                            <div id="ide-local-ip" style="font-size:var(--font-size-sm); font-family:var(--font-mono);">-</div>
+                        </div>
+                        <div style="background:var(--color-surface-alt); padding:12px; border-radius:var(--radius); border:1px solid var(--color-border);">
+                            <div style="font-size:var(--font-size-xs); color:var(--color-text-muted); margin-bottom:4px;">主机名</div>
+                            <div id="ide-hostname" style="font-size:var(--font-size-sm); font-family:var(--font-mono);">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== Theme Section ====== -->
+        <div id="section-theme" class="section-content" style="display:none;">
+            <div class="panel">
+                <div class="panel-title">🎨 主题外观</div>
+                <div class="panel-desc">选择你喜欢的界面风格和显示模式，即时预览效果。</div>
+
+                <div class="theme-section">
+                    <h3>设计风格</h3>
+                    <div class="theme-pills">
+                        <button class="theme-pill" data-theme="material">Material</button>
+                        <button class="theme-pill" data-theme="expressive">Expressive</button>
+                        <button class="theme-pill" data-theme="gradient">Gradient</button>
+                        <button class="theme-pill" data-theme="impeccable">Impeccable</button>
+                        <button class="theme-pill" data-theme="neumorphism">Neumorphism</button>
+                        <button class="theme-pill" data-theme="refined">Refined</button>
+                    </div>
+                </div>
+
+                <div class="mode-section">
+                    <h3>显示模式</h3>
+                    <div class="mode-toggle">
+                        <button class="mode-btn" data-mode="light">☀️ 浅色</button>
+                        <button class="mode-btn" data-mode="dark">🌙 深色</button>
+                        <button class="mode-btn" data-mode="eyecare">👁 护眼</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ====== Usage Guide Section ====== -->
+        <div id="section-guide" class="section-content" style="display:none;">
+            <div class="panel">
+                <div class="panel-title">📖 使用说明</div>
+
+                <div class="guide-section">
+                    <h3>这套软件能做什么</h3>
+                    <ul>
+                        <li>本地文献库管理</li>
+                        <li>在线检索文献（arXiv / OpenAlex / PubMed / Semantic Scholar）</li>
+                        <li>DOI 下载并自动入库</li>
+                        <li>PDF 解析（Docling + GROBID）</li>
+                        <li>DFT / 电化学 / 机理 / 写作卡片抽取</li>
+                        <li>AI 分类（计算型/实验型/综述型）</li>
+                        <li>图片提取 + VLM 分类 + 数值提取</li>
+                        <li>分类感知 RAG 检索 + 写作</li>
+                        <li>外部 AI 审稿工作台</li>
+                        <li>MCP 对接 IDE 内 AI（Cursor / VS Code / Claude 等）</li>
+                    </ul>
+                </div>
+
+                <div class="guide-section">
+                    <h3>启动方式</h3>
+                    <p>在项目目录运行：</p>
+                    <div class="code-block">docker compose up -d --build</div>
+                    <p style="margin-top:10px;">或者本地开发模式：</p>
+                    <div class="code-block">cd backend
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
+                </div>
+
+                <div class="guide-section">
+                    <h3>常用网页入口</h3>
+                    <ul>
+                        <li><strong>健康检查</strong>：/api/health</li>
+                        <li><strong>文献库</strong>：/pages/literature_library/index.html</li>
+                        <li><strong>论文详情</strong>：/pages/paper_detail/index.html?id=&lt;paper_id&gt;</li>
+                        <li><strong>AI Writer</strong>：/pages/ai_writer/index.html</li>
+                        <li><strong>外部审稿</strong>：/pages/external_analysis_workbench/index.html</li>
+                        <li><strong>设置</strong>：/pages/settings/index.html</li>
+                    </ul>
+                </div>
+
+                <div class="guide-section">
+                    <h3>如果网页打不开</h3>
+                    <ol style="padding-left:20px;">
+                        <li style="margin-bottom:6px;">先确认服务是否在运行：<code>docker ps</code> 或检查本地进程</li>
+                        <li style="margin-bottom:6px;">访问 <code>/api/health</code>，如果健康检查失败，问题在后端</li>
+                        <li style="margin-bottom:6px;">查看后端日志：<code>docker compose logs backend --tail=200</code></li>
+                        <li style="margin-bottom:6px;">局域网访问需确认：防火墙放行 8000 端口 + 同一网段</li>
+                    </ol>
+                </div>
+
+                <div class="guide-section">
+                    <h3>IDE AI 连接</h3>
+                    <ol style="padding-left:20px;">
+                        <li style="margin-bottom:6px;">在本页面「API 配置」中配置好 MCP Keys</li>
+                        <li style="margin-bottom:6px;">切换到「IDE 连接」标签页，复制一键提示词</li>
+                        <li style="margin-bottom:6px;">把提示词发给你的 AI（Cursor / Claude / Gemini 等）</li>
+                        <li style="margin-bottom:6px;">AI 会自动配置 MCP 连接，之后可以直接操作你的文献库</li>
+                    </ol>
+                </div>
+
+                <div class="guide-section">
+                    <h3>推荐工作流</h3>
+                    <ol style="padding-left:20px;">
+                        <li style="margin-bottom:6px;">本地系统负责存储与解析</li>
+                        <li style="margin-bottom:6px;">IDE 里的 AI 通过 MCP 读写文献与审稿候选项</li>
+                        <li style="margin-bottom:6px;">外部 AI 通过审稿工作台参与复核</li>
+                        <li style="margin-bottom:6px;">最终由你或审核 AI 决定哪些修改进入正式数据</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        // ===== Helpers =====
+        const API_BASE = window.location.origin;
+
+        function showToast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            el.className = `toast toast-${type}`;
+            el.textContent = msg;
+            container.appendChild(el);
+            setTimeout(() => el.remove(), 3000);
+        }
+
+        function copyText(elementId) {
+            const el = document.getElementById(elementId);
+            const text = el.textContent || el.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('已复制到剪贴板');
+            }).catch(() => {
+                showToast('复制失败', 'error');
+            });
+        }
+
+        // ===== Section Navigation =====
+        function showSection(name) {
+            document.querySelectorAll('.section-content').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.section-nav button').forEach(el => el.classList.remove('active'));
+            document.getElementById('section-' + name).style.display = 'block';
+            event.target.classList.add('active');
+        }
+
+        // ===== Theme & Mode Controls =====
+        function initThemeControls() {
+            const currentTheme = ThemeManager.getTheme();
+            const currentMode = ThemeManager.getMode();
+
+            // Set active theme pill
+            document.querySelectorAll('.theme-pill').forEach(pill => {
+                if (pill.dataset.theme === currentTheme) pill.classList.add('active');
+            });
+
+            // Set active mode button
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                if (btn.dataset.mode === currentMode) btn.classList.add('active');
+            });
+
+            // Theme pill clicks
+            document.querySelectorAll('.theme-pill').forEach(pill => {
+                pill.addEventListener('click', () => {
+                    document.querySelectorAll('.theme-pill').forEach(p => p.classList.remove('active'));
+                    pill.classList.add('active');
+                    ThemeManager.setTheme(pill.dataset.theme);
+                });
+            });
+
+            // Mode button clicks
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    ThemeManager.setMode(btn.dataset.mode);
+                });
+            });
+        }
+
+        // ===== Load Settings =====
+        async function loadSettings() {
+            try {
+                const resp = await fetch(`${API_BASE}/api/settings`);
+                const data = await resp.json();
+
+                document.getElementById('embedding_provider').value = data.embedding_provider || 'deterministic';
+                document.getElementById('embedding_api_base').value = data.embedding_api_base || '';
+                document.getElementById('embedding_api_key').value = data.embedding_api_key || '';
+                document.getElementById('embedding_model').value = data.embedding_model || 'text-embedding-3-small';
+                document.getElementById('embedding_dimension').value = data.embedding_dimension || '1536';
+                document.getElementById('writer_backend').value = data.writer_backend || 'openai_compatible';
+                document.getElementById('writer_api_base').value = data.writer_api_base || '';
+                document.getElementById('writer_api_key').value = data.writer_api_key || '';
+                document.getElementById('writer_model').value = data.writer_model || 'deepseek-chat';
+                document.getElementById('mcp_api_keys').value = data.mcp_api_keys || '';
+
+                toggleEmbeddingFields();
+            } catch (e) {
+                showToast('加载配置失败: ' + e.message, 'error');
+            }
+        }
+
+        async function loadStatus() {
+            try {
+                const resp = await fetch(`${API_BASE}/api/settings/status`);
+                const data = await resp.json();
+
+                const html = [
+                    makeBadge('Embedding', data.embedding.configured, data.embedding.provider + ' / ' + data.embedding.model),
+                    makeBadge('Writer', data.writer.configured, data.writer.backend + ' / ' + data.writer.model),
+                    makeBadge('MCP', data.mcp.has_keys, data.mcp.enabled ? '已启用' : '未启用'),
+                ].join(' ');
+                document.getElementById('status-content').innerHTML = html;
+            } catch (e) {
+                document.getElementById('status-content').innerHTML =
+                    '<span class="badge badge-err">无法获取状态</span>';
+            }
+        }
+
+        function makeBadge(label, ok, detail) {
+            const cls = ok ? 'badge-ok' : 'badge-warn';
+            return `<span class="badge ${cls}" style="margin-right:4px">${label}${detail ? ' · ' + detail : ''}</span>`;
+        }
+
+        // ===== Save Settings =====
+        async function saveSettings() {
+            const settings = [
+                { key: 'embedding_provider', value: document.getElementById('embedding_provider').value },
+                { key: 'embedding_api_base', value: document.getElementById('embedding_api_base').value || null },
+                { key: 'embedding_api_key', value: document.getElementById('embedding_api_key').value || null },
+                { key: 'embedding_model', value: document.getElementById('embedding_model').value || null },
+                { key: 'embedding_dimension', value: document.getElementById('embedding_dimension').value || null },
+                { key: 'writer_backend', value: document.getElementById('writer_backend').value },
+                { key: 'writer_api_base', value: document.getElementById('writer_api_base').value || null },
+                { key: 'writer_api_key', value: document.getElementById('writer_api_key').value || null },
+                { key: 'writer_model', value: document.getElementById('writer_model').value || null },
+                { key: 'mcp_api_keys', value: document.getElementById('mcp_api_keys').value || null },
+            ];
+
+            try {
+                const resp = await fetch(`${API_BASE}/api/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings }),
+                });
+                const result = await resp.json();
+                if (resp.ok) {
+                    showToast(`配置已保存（更新 ${result.updated} 项）`);
+                    loadStatus();
+                } else {
+                    showToast('保存失败: ' + result.detail, 'error');
+                }
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
+
+        // ===== IDE Prompts =====
+        async function loadIdePrompts() {
+            try {
+                const resp = await fetch(`${API_BASE}/api/settings/ide-prompts`);
+                const data = await resp.json();
+
+                document.getElementById('prompt-text').textContent = data.suggested_prompt;
+                document.getElementById('cursor-text').textContent = data.cursor_config_json;
+                document.getElementById('ide-base-url').textContent = data.base_url;
+                document.getElementById('ide-mcp-url').textContent = data.mcp_url;
+                document.getElementById('ide-local-ip').textContent = data.local_ip;
+                document.getElementById('ide-hostname').textContent = data.hostname;
+
+                document.getElementById('ide-status').innerHTML =
+                    `<span class="badge badge-ok">服务已就绪 · ${data.base_url}</span>`;
+            } catch (e) {
+                document.getElementById('ide-status').innerHTML =
+                    '<span class="badge badge-err">无法获取 IDE 连接信息</span>';
+            }
+        }
+
+        // ===== Toggle embedding fields =====
+        function toggleEmbeddingFields() {
+            const provider = document.getElementById('embedding_provider').value;
+            const fields = document.getElementById('embedding-api-fields');
+            fields.style.display = provider === 'openai_compatible' ? 'block' : 'none';
+        }
+
+        // ===== Init =====
+        document.addEventListener('DOMContentLoaded', () => {
+            TopNav.init({ currentPage: 'settings', mountId: 'topnav-mount' });
+            initThemeControls();
+
+            loadSettings();
+            loadStatus();
+            loadIdePrompts();
+
+            document.getElementById('embedding_provider').addEventListener('change', toggleEmbeddingFields);
+        });
+    </script>
+</body>
+</html>

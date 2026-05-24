@@ -1,0 +1,58 @@
+name: dft_settings_extraction
+version: 1.0
+instruction: |
+  Extract DFT computational settings and Catalyst structural parameters with high-quality evidence spans and confidence scores from scientific papers.
+
+# Target computational details to be identified for DFT Settings Extractor
+dft_settings:
+  software:
+    description: "Computational software package used (e.g. VASP, Gaussian, ORCA, CP2K, Quantum ESPRESSO)."
+    patterns: ["vasp", "gaussian", "orca", "cp2k", "quantum espresso", "qe", "dmol3", "materials studio", "q-chem", "nwchem", "castep", "gpaw", "abinit", "siesta"]
+  functional:
+    description: "Exchange-correlation functional used (e.g. PBE, B3LYP, HSE06, LDA, GGA, PW91, RPBE)."
+    patterns: ["pbe+u", "pbesol", "pbe", "b3lyp", "hse06", "hse", "pw91", "rpbe", "revpbe", "lda", "gga", "meta-gga", "tpss", "m06-2x", "b97d"]
+  dispersion_correction:
+    description: "Dispersion correction methods (e.g. DFT-D3, D3(BJ), D2, TS dispersion)."
+    patterns: ["dft-d3(bj)", "dft-d3", "d3(bj)", "d3", "dft-d2", "d2", "dft-d", "grimme", "tkatchenko-scheffler", "ts dispersion"]
+  pseudopotential_basis_set:
+    description: "Pseudopotential or basis set specification (e.g. PAW, double-zeta, 6-31G*, def2-SVP, LANL2DZ)."
+    patterns: ["paw", "projector augmented wave", "uspp", "ultrasoft pseudopotential", "norm-conserving", "6-31g", "def2-svp", "def2-tzvp", "lanl2dz", "double-zeta", "triple-zeta"]
+  cutoff_energy:
+    description: "Kinetic energy cutoff for plane wave basis sets in eV or Ry (e.g. 400 eV, 500 eV)."
+    patterns: ["cutoff", "cut-off", "kinetic energy", "energy cutoff"]
+  k_points:
+    description: "K-points grid mesh dimensions or sampling method (e.g. 3x3x1, Monkhorst-Pack)."
+    patterns: ["monkhorst-pack", "gamma-centered", "gamma centered", "k-point grid", "k-point mesh"]
+  convergence_criteria:
+    description: "Electronic or force/ionic convergence tolerances (e.g. 10-5 eV, 0.02 eV/A)."
+    patterns: ["electronic convergence", "energy tolerance", "force convergence", "ionic relaxation"]
+  vacuum_thickness:
+    description: "Thickness of the vacuum layer in Angstroms or nm (e.g. 15 A, 20 A)."
+    patterns: ["vacuum", "vacuum layer", "vacuum space", "vacuum thickness"]
+  spin_polarization:
+    description: "Whether spin polarization is enabled (e.g. spin-polarized, spin-unpolarized)."
+    patterns: ["spin-polarized", "spin polarization", "ispin=2", "non-spin-polarized"]
+  solvation_model:
+    description: "Implicit or explicit solvation models used (e.g. SMD, PCM, COSMO, VASPsol)."
+    patterns: ["implicit solvation", "smd", "pcm", "cosmo", "vaspsol", "solvent effect", "implicit solvent"]
+
+# Target catalyst properties to be identified for Catalyst Extractor
+catalyst:
+  single_atom_dual_atom:
+    description: "Identify single-atom (SAC) or dual-atom catalysts (DAC)."
+    patterns: ["sac", "dac", "single-atom", "dual-atom", "single atom", "dual atom"]
+  metal_centers:
+    description: "Transition metal active centers (e.g. Fe, Co, Ni, Cu, Pt, Ru, Ir, Zn, Mn, Pd, Mo, W)."
+    patterns: ["fe", "co", "ni", "cu", "pt", "ru", "ir", "zn", "mn", "pd", "mo", "w"]
+  coordination:
+    description: "Coordination environments of the active site (e.g. Fe-N4, Co-N4, metal-nitrogen, coordination environment)."
+    patterns: ["coordination environment", "coordination number", "fe-n-c", "m-n-c", "metal-nitrogen"]
+  support:
+    description: "Support materials used for the single/dual atom active sites (e.g. N-doped carbon, graphene, g-C3N4, TiO2)."
+    patterns: ["nitrogen-doped carbon", "n-doped carbon", "graphene", "carbon nanotubes", "cnts", "g-c3n4", "tio2", "ceo2", "sio2", "al2o3", "carbon support"]
+  synthesis_method:
+    description: "Synthesis or preparation technique used (e.g. pyrolysis, hydrothermal, wet impregnation, ALD)."
+    patterns: ["pyrolysis", "hydrothermal", "wet impregnation", "impregnation", "atomic layer deposition", "ald", "ball milling", "electrodeposition", "cvd"]
+  structural_evidence:
+    description: "Characterization techniques providing structural proof (e.g. HAADF-STEM, XANES, EXAFS, XPS)."
+    patterns: ["haadf-stem", "xanes", "exafs", "xps", "stem", "xas"]

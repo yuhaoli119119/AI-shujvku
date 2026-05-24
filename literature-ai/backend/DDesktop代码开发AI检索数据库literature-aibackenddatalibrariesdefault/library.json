@@ -1,0 +1,11 @@
+{
+  "name": "默认文献库",
+  "description": "默认文献库",
+  "version": 2,
+  "created_at": "2026-05-24T01:36:27.711489",
+  "last_accessed": "2026-05-24T05:10:55.560829",
+  "paper_count": 0,
+  "tags": [],
+  "storage_mode": "storage",
+  "library_kind": "web_library"
+}

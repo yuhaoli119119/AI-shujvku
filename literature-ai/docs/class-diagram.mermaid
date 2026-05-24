@@ -1,0 +1,68 @@
+classDiagram
+    class ThemeManager {
+        +String STORAGE_THEME = "litai-theme"
+        +String STORAGE_MODE = "litai-mode"
+        +String[] THEMES = ["material","expressive","gradient","impeccable","neumorphism","refined"]
+        +String[] MODES = ["light","dark","eyecare"]
+        +String DEFAULT_THEME = "material"
+        +String DEFAULT_MODE = "light"
+        +init() void
+        +setTheme(theme: String) void
+        +setMode(mode: String) void
+        +getTheme() String
+        +getMode() String
+        +apply() void
+        +updateNavState(navContainer: HTMLElement) void
+    }
+
+    class TopNav {
+        +Object[] NAV_ITEMS
+        +init(config: Object) void
+        +render(currentPage: String) String
+        +renderThemePanel() String
+        +toggleThemePanel() void
+    }
+
+    class NavItem {
+        +String id
+        +String label
+        +String href
+    }
+
+    class CSSTokens {
+        +color-primary
+        +color-primary-hover
+        +color-primary-bg
+        +color-secondary
+        +color-surface
+        +color-surface-alt
+        +color-bg
+        +color-bg-nav
+        +color-text
+        +color-text-secondary
+        +color-text-muted
+        +color-border
+        +color-border-strong
+        +font-body
+        +font-display
+        +font-mono
+        +font-size-xs
+        +font-size-sm
+        +font-size-md
+        +font-size-lg
+        +font-size-xl
+        +font-size-2xl
+        +radius-sm
+        +radius
+        +radius-lg
+        +shadow-card
+        +shadow-elevated
+        +shadow-inset
+        +nav-height
+        +sidebar-width
+        +transition
+    }
+
+    TopNav --> ThemeManager : 调用 setTheme/setMode
+    TopNav --> NavItem : 遍历渲染
+    ThemeManager --> CSSTokens : 通过 data-theme/data-mode 切换变量

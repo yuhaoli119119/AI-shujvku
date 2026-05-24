@@ -1,0 +1,83 @@
+name: writing_card_extraction
+version: 0.2
+stage: mvp
+
+description: >
+  Rule-based writing card skeleton extractor for academic papers.
+  No LLM dependency — uses sentence-level pattern matching, structural heuristics,
+  and standard IMRaD templates.
+
+input:
+  type: UnifiedPaperDocument
+  fields:
+    - abstract: str
+    - sections: list[UnifiedSection]  (section_title, text, page_start)
+    - tables: list[UnifiedTable]      (caption, markdown_content)
+    - figures: list[UnifiedFigure]    (caption, image_path, page)
+
+output:
+  type: WritingCard (dict)
+  schema:
+    paper_type: str              # computational | experimental | mixed | unknown
+    research_gap: str            # identified gap statement
+    proposed_solution: str       # what this work proposes/develops
+    core_hypothesis: str         # underlying hypothesis
+    evidence_chain:
+      - text: str               # key finding or reference
+        source: str             # e.g. "Results", "Figure", "Table"
+    section_strategy:            # per-section writing strategy map
+      "<section_title>":
+        purpose: str
+        key_moves: list[str]
+        typical_length_hint: str
+    figure_logic:
+      - fig_id: str             # e.g. "Fig.1", "Figure_3"
+        purpose: str            # role in argument (e.g. "electronic_structure")
+        supports_claim: str     # what the figure proves
+    abstract_logic: str          # sentence-by-sentence functional breakdown
+    introduction_logic: str      # paragraph-level structural analysis
+    discussion_logic: str        # thematic flow of discussion section
+
+paper_type_rules:
+  computational_signals:
+    - DFT, first-principles, density functional, ab initio, NEB, simulation
+  experimental_signals:
+    - synthesized, XRD, XPS, SEM, TEM, cycling test, electrochemical measurement
+
+gap_detection_patterns:
+  - "however ... [remain/still/lack/challenge/problem]"
+  - "despite ... progress ... [challenge/issue/limit]"
+  - "[major/critical/key] challenge/issue/barrier"
+  - "there is no/little/rarely report"
+
+solution_patterns:
+  - "herein/in this work we [report/present/propose/demonstrate]"
+  - "novel [design/strategy/approach] was [designed/developed] to [address/solve/overcome]"
+  - "we [design/construct/fabricate/synthesize] ..."
+
+hypothesis_patterns:
+  - "we hypothesize / our hypothesis / it is hypothesized"
+  - "based on/motivated by ... can/could/would/may ..."
+  - "expected that / anticipate / predict ..."
+
+figure_purpose_classification:
+  structural_energetic: adsorption/binding energy/config
+  electronic_structure: DOS/PDOS/band structure
+  charge_analysis: charge density difference/CDD
+  kinetic_thermodynamic: reaction pathway/Gibbs/barrier/NEB
+  electrochemical_performance: cycling/capacity/voltage/rate
+  conceptual_schematic: mechanism/scheme/design illustration
+  characterization: XRD/XPS/SEM/TEM/Raman/BET
+  computational_model: model/calculation/simulation
+
+strategy:
+  paper_type: keyword_weighted_scoring
+  research_gap: however_despite_sentence_matching + introduction_localization
+  solution: herein_propose_sentence_matching
+  hypothesis: we_hypothesize_sentence_matching
+  evidence_chain: result_sentences_with_data_refs + figure_table_captions
+  section_strategy: imrad_template_heuristics
+  figure_logic: caption_pattern_classification
+  abstract_logic: sentence_function_tagging
+  introduction_logic: paragraph_role_identification
+  discussion_logic: theme_flow_tracking

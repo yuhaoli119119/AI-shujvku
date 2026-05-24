@@ -1,0 +1,303 @@
+/* ============================================================
+   topnav.css — Top Navigation Bar + Theme Panel Styles
+   ============================================================ */
+
+
+/* ============================================================
+   TOPNAV CONTAINER
+   ============================================================ */
+
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-nav);
+  display: flex;
+  align-items: center;
+  height: var(--nav-height);
+  padding: 0 24px;
+  background: var(--color-bg-nav);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+  transition: all var(--transition);
+}
+
+[data-theme="neumorphism"] .topnav {
+  box-shadow: var(--shadow-elevated);
+}
+
+
+/* ============================================================
+   TOPNAV BRAND
+   ============================================================ */
+
+.topnav-brand {
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-right: 32px;
+  white-space: nowrap;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+  text-decoration: none;
+  user-select: none;
+}
+
+
+/* ============================================================
+   TOPNAV ITEMS
+   ============================================================ */
+
+.topnav-items {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.topnav-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--nav-height);
+  padding: 0 16px;
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--transition);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  position: relative;
+}
+
+.topnav-item:hover {
+  color: var(--color-text);
+  border-bottom-color: var(--color-border-strong);
+}
+
+.topnav-item.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: var(--font-weight-btn);
+}
+
+
+/* ============================================================
+   TOPNAV THEME BUTTON
+   ============================================================ */
+
+.topnav-theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0;
+}
+
+.topnav-theme-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
+.topnav-theme-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+
+/* ============================================================
+   THEME PANEL (floating)
+   ============================================================ */
+
+.theme-panel {
+  position: fixed;
+  top: calc(var(--nav-height) + 8px);
+  right: 24px;
+  z-index: var(--z-tooltip);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-elevated);
+  padding: 20px;
+  min-width: 320px;
+  display: none;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+[data-theme="neumorphism"] .theme-panel {
+  border: none;
+  box-shadow: var(--shadow-elevated);
+}
+
+.theme-panel.open {
+  display: block;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.theme-panel-section {
+  margin-bottom: 16px;
+}
+
+.theme-panel-section:last-child {
+  margin-bottom: 0;
+}
+
+.theme-panel-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+
+
+/* ---- Theme Pills ---- */
+
+.theme-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.theme-pill {
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-family: var(--font-body);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.theme-pill:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.theme-pill.active {
+  background: var(--color-primary);
+  color: #FFF;
+  border-color: var(--color-primary);
+}
+
+
+/* ---- Mode Toggle ---- */
+
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--color-surface-alt);
+  border-radius: var(--radius);
+  padding: 3px;
+  border: 1px solid var(--color-border);
+}
+
+.mode-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.mode-btn:hover {
+  color: var(--color-text);
+}
+
+.mode-btn.active {
+  background: var(--color-primary);
+  color: #FFF;
+  box-shadow: var(--shadow-card);
+}
+
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+/* 1280px+: full display */
+@media (min-width: 1280px) {
+  .topnav-item {
+    padding: 0 16px;
+  }
+}
+
+/* 1024px–1280px: compressed nav items */
+@media (max-width: 1280px) {
+  .topnav-item {
+    padding: 0 10px;
+    font-size: var(--font-size-xs);
+  }
+
+  .topnav-brand {
+    margin-right: 20px;
+  }
+}
+
+/* < 1024px: further compression */
+@media (max-width: 1024px) {
+  .topnav {
+    padding: 0 12px;
+  }
+
+  .topnav-item {
+    padding: 0 8px;
+  }
+
+  .topnav-brand {
+    margin-right: 12px;
+    font-size: var(--font-size-md);
+  }
+
+  .theme-panel {
+    right: 12px;
+    left: 12px;
+    min-width: auto;
+  }
+}
+
+/* < 768px: scrollable nav */
+@media (max-width: 768px) {
+  .topnav-items {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .topnav-items::-webkit-scrollbar {
+    display: none;
+  }
+
+  .topnav-brand {
+    margin-right: 8px;
+  }
+}

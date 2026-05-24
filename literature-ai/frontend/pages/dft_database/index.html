@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>正在跳转到聚合视图</title>
+  <!-- Shared Resources -->
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <script>
+    window.location.replace('/pages/literature_library/index.html?tab=aggregate');
+  </script>
+  <style>
+    body {
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-body);
+    }
+  </style>
+</head>
+<body>
+  <div id="topnav-mount"></div>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      TopNav.init({ currentPage: 'dft-database', mountId: 'topnav-mount' });
+    });
+  </script>
+</body>
+</html>
