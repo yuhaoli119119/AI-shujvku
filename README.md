@@ -1,126 +1,126 @@
-# Lit AI Collector & Literature AI
+# Literature AI
 
-项目包含两个子系统：
-
-- **Lit AI Collector** — PySide6 桌面客户端，全球文献检索与 PDF 下载
-- **Literature AI** — FastAPI 后端 + 静态前端，文献解析与 AI 写作辅助
+Literature AI 是一款先进的文献解析与 AI 写作辅助系统，专为 **DFT 催化研究、单/双原子催化剂、锂硫电池正极** 等材料与化学领域的科研人员打造。系统通过打通多源学术数据库、自动解析学术文献、抽取结构化知识，结合高保真的 RAG（检索增强生成）与 MCP 协作层，为学术阅读、知识归纳与论文写作提供全方位的智能辅助。
 
 ---
 
-## 子系统 A: Lit AI Collector (桌面客户端)
+## 🌟 核心系统特性
 
-基于 PySide6 (Qt) 开发的高颜值桌面文献采集与下载工具，打通全球主流学术数据库及中文学术社区。
+### 1. FastAPI 异步后端
+- **高性能 Web 核心**：基于 FastAPI 开发，利用 Python 异步生态实现高并发的 API 响应。
+- **完善的 API 路由**：模块化设计，提供包括文献（papers）、库管理（libraries）、参考引用（references）、系统状态（system）、写作编排（writer）及 MCP 服务等在内的全套 API 路由。
 
-### 功能
+### 2. 单页模块化静态前端
+- **集成化工作台**：位于 `literature-ai/frontend/pages/` 下，核心主工作台为 [literature_library/index.html](file:///d:/Desktop/03_代码与开发/AI-shujvku/literature-ai/frontend/pages/literature_library/index.html)。
+- **多功能标签视图**：包含论文详情、内部 AI 整理、外部 AI 审核、在线检索入库以及数据聚合等多标签视窗，支持实时的状态更新和任务通知。
+- **极简主题切换**：支持暗色/亮色/护眼主题的外观切换，配置实时保存，界面优雅现代。
 
-- 高颜值 Neumorphism UI，支持高 DPI 缩放
-- 全球多源联合检索：PubMed、Semantic Scholar、IEEE Xplore、Web of Science、arXiv、OpenAlex、X-MOL、Google Scholar
-- 混合检索与 DOI/Title 跨源去重，交叉补全摘要和影响因子
-- PaperFinder 20+ 并发 PDF 下载引擎（Sci-Hub、LibGen、AnnasArchive 等）
-- 精确 DOI/ISBN/URL 下载，Dracula 暗黑风实时控制台终端
-- 本地 SQLite 文献库与项目管理
-- 生产级 PyInstaller 打包
+### 3. 双通道 PDF 解析与多源入库
+- **智能双解析引擎**：结合 **GROBID** 与 **Docling** 解析器。提供高精度的段落、数学公式、表格以及文献引用的细粒度结构化提取。
+- **全自动 PDF 入库**：
+  - 支持本地 PDF 批量上传与导入。
+  - 支持扫描服务器/宿主机指定磁盘路径直接解析入库。
+  - 支持输入 DOI，通过内置多源检索自动下载、抓取 PDF 并入库。
 
-### 开发运行
+### 4. 文件夹即库 (LibraryManager)
+- **零配置多文献库管理**：采用“文件夹即库”设计，自动为每个文献库建立独立的 SQLite 数据表与文件存储空间。
+- **便捷切换**：前端提供库切换下拉菜单，支持新建库、导入现有目录、库激活以及一键移除等功能。
 
-```bash
-python launch.py           # 本地开发
-pyinstaller LitAICollector.spec --clean --noconfirm  # 生产打包
-```
+### 5. 异步 AI Workflow 任务流
+- **非阻塞后台任务**：结合 Celery 与 Redis，文献的 PDF 下载、双通道解析、Stage 2 结构化数据抽取（DFT/催化剂/电化学/机理等 12 维度特征）均在后台异步执行。
+- **前端实时轮询**：前端可动态获取后台解析进度与状态，防止大文件解析阻塞用户当前的交互操作。
 
-### 核心结构
+### 6. 高保真 RAG 流程 (RAG Pipeline)
+- **智能证据包编排**：混合词法与语义向量检索，对检索到的证据段落（Evidence Pack）进行全局去重与 Round-Robin 分段排序。
+- **多写作后端支持**：内置 `rule`、`llm_stub`、`openai_compatible` 三种写作生成后端，支持自动故障回退与服务降级。
+- **事实级别 Citation Guard**：内置数值与逻辑事实校验，通过识别推理触发词，智能检测 RAG 生成段落中的事实偏差，自动发起 Fact-Claim 修正提案。
 
-```text
-app/
-  ui/          # PySide6 GUI (main_window, search_page, library_page)
-  services/    # findpapers 封装、X-MOL、Google Scholar、PDF 下载器
-findpapers/    # 多数据库联合检索核心
-src/           # PaperFinder 20+ 并发爬虫引擎
-```
+### 7. MCP (Model Context Protocol) 协作层
+- **对外 AI 接口标准**：全面兼容 Anthropic 倡导的 MCP 规范。
+- **强大的协作工具箱**：暴露 `retrieve_evidence`、`review_paper`、`import_analysis`、`compare_papers` 等 4 个核心 MCP 工具，使外部 AI（如 Cursor/Claude 等 IDE 辅助工具）可以无缝读取文献库、提交修正提案、导入外部 AI 分析，甚至触发文献的重新解析。
 
 ---
 
-## 子系统 B: Literature AI (Web 后端 + 前端)
+## 🛠 技术栈
 
-AI 辅助文献解析与写作支持，面向 DFT 研究、单/双原子催化剂、锂硫电池正极等领域。
+| 组件 | Web 系统技术栈 |
+|------|--------------|
+| **Web 核心** | FastAPI (Python 3.11-slim) |
+| **异步任务** | Celery + Redis |
+| **数据库** | PostgreSQL/pgvector (主向量数据库) + SQLite (单文献库元数据) |
+| **学术检索引擎**| findpapers (内置子包) + OpenAlex API + arXiv API |
+| **PDF 解析引擎**| GROBID + Docling |
+| **部署与编排** | Docker Compose 一键虚拟化 |
+| **本地文件存储**| 本地磁盘映射挂载 + MinIO 对象存储 |
 
-### 进度：约 90%
+---
 
-### 已完成功能
+## 🚀 快速开始 (Docker Compose 启动)
 
-**后端：**
-- PDF 入库（路径/上传/DOI 下载）+ GROBID + Docling 双解析
-- Stage 2 抽取（DFT/催化剂/电化学/机理/写作卡/综合分析 12 分类 + `type_confidence`）
-- 文件夹即库（LibraryManager + 注册表 + 创建/激活/导入/移除）
-- 参考文献管理（ReferenceEntry CRUD）+ 每篇文献持久化序号（serial_number）
-- 在线文献检索（OpenAlex/arXiv）
-- AI workflow 后台任务（非阻塞 + 轮询）
-- RAG pipeline（检索 → 证据包 dedup + round-robin → 写作 → citation guard）
-- Citation guard fact-level（mediates/infers_causality 触发词 + fact-claim repair）
-- MCP 协作层（外部 AI 读论文/批注/提修正/触发解析）
-- 外部 AI 导入（ExternalAnalysis import/materialize）
-- 3 种 writer 后端：rule / llm_stub / openai_compatible（自动降级）
-- 所有路由注册（papers/corrections/references/libraries/system/mcp/writer）
+请确保您的系统已安装了 [Docker](https://www.docker.com/) 和 Docker Compose。
 
-**前端：**
-- 统一单页工作台（`literature_library/index.html`）：文献列表 + 序号 + 状态标签
-- 5 标签视图：论文详情 / 内部 AI 整理 / 外部 AI 审核 / AI 检索入库 / 聚合视图
-- 库管理工具栏（新建/导入/移除/下拉切换）
-- AI workflow 后台任务轮询 UI
-- 在线检索（100 条批次/去重）
-
-### 变更记录
-
-| 日期 | 变更 |
-|------|------|
-| 2026-05-23 | RAG Pipeline 硬化：evidence pack 全局去重 + round-robin；citation guard 扩展 mediates/infers_causality；fact-claim repair |
-| 2026-05-23 | MCP 协作层 + 外部 AI 导入闭环 |
-| 2026-05-23 | AI workflow 后台任务（非阻塞 + 轮询 UI） |
-| 2026-05-22 | 文件夹即库：LibraryManager + 注册表 + 前端库管理 UI |
-| 2026-05-19 | Writer prompt 精简 + citation guard 多轮扩展 + DeepSeek 烟雾测试通过 + 前端 guard 可视化 |
-| ~2026-05 | RAG pipeline 基础（检索/压缩/3 后端/citation guard）+ discovery 适配层 + 关键词搜索 + 电化学/DFT 抽取器 |
-
-### 待完成
-
-1. **左右分栏拖拽** — git checkout 事故中丢失，需重建 `initSplitDrag`（仅 `index.html`）
-2. 文件夹即库端到端测试（Docker 验证完整流程）
-3. 真实 LLM 质量调优
-4. 前端产品化 polish
-5. 端到端集成测试
-
-### Quick start
-
+### 1. 运行一键构建并启动
 ```bash
 cd literature-ai
 docker compose up --build
+```
+该命令会自动下载并运行以下核心容器：
+- `postgres` (带 pgvector 插件)
+- `redis` (Celery 队列中介)
+- `minio` (PDF 及 TEI 对象存储)
+- `grobid` (PDF 结构分析器)
+- `backend` (FastAPI 异步主服务)
+- `worker` (Celery 后台异步任务处理器)
+
+### 2. 验证系统健康状态
+在命令行或浏览器中访问：
+```bash
 curl http://localhost:8000/api/health
 ```
+如果返回正常的健康状态 json，代表服务启动成功。
 
-### Key API endpoints
-
-- `GET /api/papers` — 文献列表（?q=/?year=/?journal= 筛选）
-- `GET /api/papers/discovery/search?q=...` — 在线检索
-- `POST /api/papers/discovery/download` — DOI 下载
-- `POST /api/papers/ingest/upload` — PDF 上传入库
-- `GET /api/libraries` — 库列表
-- `POST /api/libraries/{name}/activate` — 激活库
-- `GET /api/writer/status` — 写作器状态
-- `POST /api/writer/draft` — 生成草稿
-
-### 协作规则
-
-见 [literature-ai/AGENTS.md](./literature-ai/AGENTS.md) 和项目根 [AGENTS.md](./AGENTS.md)。
+### 3. 访问前端页面
+直接用浏览器打开前端静态网页即可开始工作：
+- [文献库主工作台](file:///d:/Desktop/03_代码与开发/AI-shujvku/literature-ai/frontend/pages/literature_library/index.html)
 
 ---
 
-## 技术栈
+## 📅 近期变更历史 (RAG & Web 专版)
 
-| 组件 | 桌面客户端 | Web 后端 |
-|------|-----------|---------|
-| 框架 | PySide6 (Qt) | FastAPI |
-| 数据库 | SQLite + SQLModel | SQLite（每库独立） |
-| 检索引擎 | findpapers + PaperFinder | findpapers (适配层) |
-| PDF 解析 | PyMuPDF (fitz) | GROBID + Docling |
-| AI | openai API | openai API + 规则抽取器 |
-| 打包 | PyInstaller | Docker Compose |
-| 存储 | 本地文件系统 | 本地（每库 storage/） |
+| 日期 | 变更内容 |
+|------|------|
+| 2026-05-24 | **网页端与桌面端彻底解耦**。内置原外部 `findpapers` 包，移除 docker-compose 中对宿主机外部 app 目录卷挂载依赖，实现网页端 100% 独立开发与打包。 |
+| 2026-05-23 | RAG Pipeline 硬化：证据包全局去重 + Round-Robin 排序；事实级别 Citation Guard 扩展 mediates/infers_causality 以及 Fact-Claim 校验。 |
+| 2026-05-23 | MCP 协作层服务硬化与外部 AI 提案导入全闭环。 |
+| 2026-05-23 | AI Workflow 后台解析任务（非阻塞 + 轮询前端 UI）上线。 |
+| 2026-05-22 | 文件夹即库：设计 LibraryManager + 数据库轻量注册表，开发前端库管理交互 UI。 |
+| 2026-05-19 | AI Writer 提示词精简 + 引用守护组件多轮扩展 + 前端 Guard 结果可视化。 |
+
+---
+
+## 📁 项目目录结构
+
+```text
+AI-shujvku/
+  ├─ literature-ai/             # Web 系统的核心目录
+  │    ├─ backend/              # FastAPI 异步后端应用
+  │    │    ├─ app/             # 业务接口与逻辑层 (api, db, rag, schemas, workers)
+  │    │    ├─ findpapers/      # 内置学术文献多源联合检索子模块
+  │    │    └─ tests/           # 单元测试与集成测试用例
+  │    ├─ frontend/             # 静态前端模块
+  │    │    └─ pages/           # 前端业务视窗 (literature_library, settings 等)
+  │    ├─ prompts/              # LLM 的 RAG 提示词配置文件
+  │    ├─ storage/              # PDF、TEI 解析产物本地缓存目录
+  │    ├─ docker-compose.yml    # 容器编排配置文件
+  │    └─ AGENTS.md             # 专属于网页端的 AI 协作同步规范
+  ├─ scripts/                   # 网页端自动化接口流水线实用脚本
+  ├─ CHANGES.md                 # 项目更新说明文档
+  └─ README.md                  # 本说明文件
+```
+
+---
+
+## 🤝 协作规则
+
+请所有参与修改和协作的 AI 或开发人员在开始编码前严格遵守：
+- [literature-ai/AGENTS.md](./literature-ai/AGENTS.md)（专属于网页端系统的具体规范）
