@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_LIBRARY_NAME = "\u9ed8\u8ba4\u6587\u732e\u5e93"
 JOB_TYPE_AI_WORKFLOW = "ai_workflow"
 JOB_TYPE_CLASSIFY_BATCH = "classify_batch"
+JOB_TYPE_EXTRACTION = "extraction"
 JOB_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
 
 
@@ -218,6 +219,8 @@ def clone_job_for_retry(session: Session, job_id: str) -> WorkflowJob:
                 "max_downloads": retry_payload.get("max_downloads"),
             }
         )
+    if source.type == JOB_TYPE_EXTRACTION:
+        retry_progress.update({"paper_id": retry_payload.get("paper_id"), "schemas": retry_payload.get("schemas")})
 
     return create_job(
         session,
@@ -639,6 +642,74 @@ def run_classify_batch_job(job_id: str, control_database_url: str | None = None)
             )
 
 
+def run_extraction_job(job_id: str, control_database_url: str | None = None) -> None:
+    from app.schemas.extraction import ExtractionJobRequest
+
+    base_settings = get_settings()
+    control_db_url = control_database_url or base_settings.database_url
+    with session_scope(control_db_url) as control_session:
+        job = get_job_or_raise(control_session, job_id)
+        if job.status == "cancelled":
+            return
+        runtime_settings = build_runtime_settings(base_settings, job.runtime_context)
+        payload = ExtractionJobRequest.model_validate(job.payload or {})
+        update_job(
+            control_session,
+            job_id,
+            status="running",
+            progress={
+                "phase": "extraction",
+                "message": "Running schema-driven scientific extraction.",
+                "paper_id": str(payload.paper_id),
+                "schemas": payload.schemas,
+            },
+            error=None,
+        )
+
+    try:
+        with session_scope(runtime_settings.database_url) as job_session:
+            assert_job_not_cancelled(job_session, job_id)
+            reprocess = PaperReprocessingService(session=job_session, settings=runtime_settings)
+            summary = reprocess.rerun_stage2(payload.paper_id)
+            assert_job_not_cancelled(job_session, job_id)
+
+        with session_scope(control_db_url) as control_session:
+            update_job(
+                control_session,
+                job_id,
+                status="completed",
+                progress={
+                    "phase": "completed",
+                    "message": "Extraction completed.",
+                    "paper_id": str(payload.paper_id),
+                    **summary,
+                },
+                result={"paper_id": str(payload.paper_id), "summary": summary, "schemas": payload.schemas},
+                error=None,
+            )
+    except JobCancelledError:
+        with session_scope(control_db_url) as control_session:
+            job = get_job(control_session, job_id)
+            if job and job.status != "cancelled":
+                update_job(
+                    control_session,
+                    job_id,
+                    status="cancelled",
+                    progress=_merge_progress(job.progress, {"phase": "cancelled", "cancel_mode": "soft"}),
+                    error=None,
+                )
+    except Exception as exc:
+        logger.exception("Extraction job failed: %s", job_id)
+        with session_scope(control_db_url) as control_session:
+            update_job(
+                control_session,
+                job_id,
+                status="failed",
+                progress={"phase": "failed"},
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+
 def dispatch_job(
     job_id: str,
     background_tasks: BackgroundTasks | None = None,
@@ -676,5 +747,8 @@ def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None)
         return
     if job_type == JOB_TYPE_CLASSIFY_BATCH:
         run_classify_batch_job(job_id, control_database_url)
+        return
+    if job_type == JOB_TYPE_EXTRACTION:
+        run_extraction_job(job_id, control_database_url)
         return
     raise ValueError(f"Unsupported workflow job type: {job_type}")

@@ -6,10 +6,13 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.corrections import router as corrections_router
 from app.api.external_analysis import router as external_analysis_router
+from app.api.evidence import router as evidence_router
+from app.api.extraction import router as extraction_router
 from app.api.health import router as health_router
 from app.api.libraries import router as libraries_router
 from app.api.papers import router as papers_router
 from app.api.references import router as references_router
+from app.api.retrieval import router as retrieval_router
 from app.api.settings import router as settings_router
 from app.api.system import router as system_router
 from app.api.writer import router as writer_router
@@ -57,6 +60,9 @@ app.include_router(writer_router, prefix="/api/writer", tags=["writer"])
 app.include_router(corrections_router, prefix="/api/corrections", tags=["corrections"])
 app.include_router(external_analysis_router, prefix="/api/external-analysis", tags=["external-analysis"])
 app.include_router(settings_router, prefix="/api/settings", tags=["settings"])
+app.include_router(retrieval_router, prefix="/api/retrieval", tags=["retrieval"])
+app.include_router(evidence_router, prefix="/api/evidence", tags=["evidence"])
+app.include_router(extraction_router, prefix="/api/extraction", tags=["extraction"])
 app.mount("/mcp", mcp_http_app)
 
 frontend_dir = Path("/frontend")

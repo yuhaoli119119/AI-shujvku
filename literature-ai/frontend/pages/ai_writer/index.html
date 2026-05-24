@@ -1,462 +1,359 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Writing Studio - Literature AI</title>
-    <link rel="stylesheet" href="../../shared/fonts.css">
-    <link rel="stylesheet" href="../../shared/tokens.css">
-    <link rel="stylesheet" href="../../shared/components.css">
-    <link rel="stylesheet" href="../../shared/topnav.css">
-    <script src="../../shared/topnav.js"></script>
-    <script>ThemeManager.init();</script>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: var(--font-body);
-            color: var(--color-text);
-            background: var(--color-bg);
-            min-height: 100vh;
-        }
-        .shell {
-            max-width: 1440px;
-            margin: 0 auto;
-            padding: 32px 24px;
-            padding-top: calc(var(--nav-height) + 32px);
-        }
-        .header-section {
-            margin-bottom: 24px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .header-section h1 { font-size: 26px; font-weight: 800; }
-        .header-section p { font-size: 14px; color: var(--color-text-secondary); margin-top: 4px; }
-
-        .layout-grid {
-            display: grid;
-            grid-template-columns: 320px 1fr;
-            gap: 24px;
-        }
-        @media (max-width: 1024px) {
-            .layout-grid { grid-template-columns: 1fr; }
-        }
-
-        .panel-card {
-            background: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            padding: 20px;
-            box-shadow: var(--shadow-card);
-            margin-bottom: 24px;
-        }
-        .panel-title {
-            font-size: 15px;
-            font-weight: 800;
-            margin-bottom: 16px;
-            color: var(--color-text);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        /* Sidebar checklist */
-        .paper-checklist {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            max-height: 580px;
-            overflow-y: auto;
-            padding-right: 4px;
-        }
-        .checklist-item {
-            padding: 10px 12px;
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius);
-            background: var(--color-surface-alt);
-            display: flex;
-            gap: 10px;
-            cursor: pointer;
-            align-items: flex-start;
-        }
-        .checklist-item input {
-            margin-top: 3px;
-        }
-        .checklist-item-title {
-            font-size: 13px;
-            font-weight: 700;
-            line-height: 1.4;
-            color: var(--color-text);
-        }
-
-        /* Tabs and Workspace */
-        .tabs {
-            display: flex;
-            gap: 8px;
-            border-bottom: 1.5px solid var(--color-border);
-            margin-bottom: 20px;
-            padding-bottom: 4px;
-        }
-        .tab-btn {
-            background: transparent;
-            border: none;
-            color: var(--color-text-secondary);
-            padding: 10px 16px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            border-radius: var(--radius) var(--radius) 0 0;
-            transition: var(--transition);
-        }
-        .tab-btn.active {
-            color: var(--color-primary);
-            border-bottom: 2px solid var(--color-primary);
-        }
-
-        .form-group {
-            margin-bottom: 14px;
-        }
-        .form-group label {
-            display: block;
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--color-text-secondary);
-            margin-bottom: 6px;
-        }
-        .form-control {
-            width: 100%;
-            height: 40px;
-            border-radius: var(--radius);
-            border: 1px solid var(--color-border-strong);
-            background: var(--color-surface);
-            color: var(--color-text);
-            padding: 0 10px;
-            font-size: 13px;
-            font-family: var(--font-body);
-            outline: none;
-        }
-        .form-control:focus {
-            border-color: var(--color-primary);
-            box-shadow: 0 0 0 3px var(--color-primary-bg);
-        }
-        textarea.form-control {
-            height: 100px;
-            padding: 10px;
-            resize: vertical;
-        }
-
-        .prewrap { white-space: pre-wrap; line-height: 1.8; font-size: 14px; }
-        .mono {
-            white-space: pre-wrap;
-            font-family: var(--font-mono);
-            font-size: 12px;
-            line-height: 1.7;
-            background: var(--color-surface-alt);
-            border-radius: var(--radius);
-            padding: 16px;
-            overflow: auto;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 80px 24px;
-            color: var(--color-text-secondary);
-        }
-
-        .toast, .progress-box {
-            position: fixed;
-            right: 24px;
-            z-index: 3000;
-            color: #fff;
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-elevated);
-        }
-        .toast {
-            top: 24px;
-            padding: 12px 24px;
-            font-size: 14px;
-            background: var(--color-primary);
-            display: none;
-        }
-        .progress-box {
-            top: 80px;
-            padding: 12px 24px;
-            font-size: 14px;
-            background: var(--color-success);
-            display: none;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Writing Studio - Literature AI</title>
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
+    .shell { max-width: 1440px; margin: 0 auto; padding: calc(var(--nav-height) + 28px) 24px 32px; }
+    .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 22px; }
+    .page-head h1 { margin: 0 0 6px; font-size: 26px; }
+    .page-head p { margin: 0; color: var(--color-text-secondary); font-size: 14px; }
+    .layout { display: grid; grid-template-columns: 310px minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+    .panel-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-card); }
+    .panel-title { font-weight: 800; font-size: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .paper-checklist { display: flex; flex-direction: column; gap: 10px; max-height: 560px; overflow: auto; }
+    .checklist-item { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); cursor: pointer; }
+    .checklist-item-title { font-size: 13px; font-weight: 700; line-height: 1.45; }
+    .stepper { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
+    .step { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 10px; font-size: 12px; color: var(--color-text-secondary); }
+    .step.active { border-color: var(--color-primary); color: var(--color-primary); font-weight: 800; background: var(--color-primary-bg); }
+    .form-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+    label { display: block; font-size: 12px; color: var(--color-text-secondary); font-weight: 700; margin-bottom: 6px; }
+    input, textarea, select { width: 100%; border: 1px solid var(--color-border-strong); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); font: inherit; padding: 10px; }
+    textarea { min-height: 94px; resize: vertical; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-border); margin: 16px 0; padding-bottom: 6px; }
+    .tab-btn { border: 0; background: transparent; color: var(--color-text-secondary); padding: 8px 10px; font-weight: 800; cursor: pointer; }
+    .tab-btn.active { color: var(--color-primary); border-bottom: 2px solid var(--color-primary); }
+    .tab-pane { min-height: 180px; white-space: pre-wrap; line-height: 1.75; font-size: 14px; }
+    .evidence-card, .audit-card { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; background: var(--color-surface-alt); }
+    .evidence-card button { text-align: left; width: 100%; border: 0; background: transparent; color: var(--color-text); font-weight: 800; cursor: pointer; padding: 0; }
+    .muted { color: var(--color-text-secondary); font-size: 12px; }
+    .warning { color: var(--color-warning); font-weight: 800; }
+    .mono { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
+    .empty-state { color: var(--color-text-secondary); text-align: center; padding: 30px 12px; }
+    .toast, .progress-box { position: fixed; right: 24px; z-index: 3000; color: #fff; border-radius: var(--radius); box-shadow: var(--shadow-elevated); display: none; padding: 12px 18px; font-size: 14px; }
+    .toast { top: 24px; background: var(--color-primary); }
+    .progress-box { top: 78px; background: var(--color-success); }
+    @media (max-width: 1120px) { .layout { grid-template-columns: 1fr; } .stepper { grid-template-columns: 1fr 1fr; } }
+  </style>
 </head>
 <body>
-    <div id="topnav-mount"></div>
-    <div class="shell">
-        <div class="header-section">
-            <div>
-                <h1>AI Writing Studio 写作空间</h1>
-                <p>分类感知 RAG 检索模型。勾选左侧文献作为上下文“证据包”，由 AI 高效完成大纲梳理与引言引证撰写。</p>
-            </div>
-            <div>
-                <button class="btn green" onclick="copyMarkdownText()">📋 一键复制 Markdown 成果</button>
-            </div>
+  <div id="topnav-mount"></div>
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <h1>AI Writing Studio</h1>
+        <p>Evidence-first writing workflow for outline, introduction, DFT results, and discussion.</p>
+      </div>
+      <button class="btn green" onclick="copyMarkdownText()">Copy Markdown</button>
+    </header>
+
+    <section class="layout">
+      <aside class="panel-card">
+        <div class="panel-title"><span>Selected papers</span><span id="selectedCount">0</span></div>
+        <div id="paperChecklist" class="paper-checklist">
+          <div class="empty-state">Loading papers...</div>
+        </div>
+      </aside>
+
+      <section class="panel-card">
+        <div class="stepper" id="stepper">
+          <div class="step active">1 Topic</div>
+          <div class="step">2 Evidence search</div>
+          <div class="step">3 Evidence pack</div>
+          <div class="step">4 Draft</div>
+          <div class="step">5 Citation audit</div>
         </div>
 
-        <div class="layout-grid">
-            <!-- Left Side: Paper Checklist -->
-            <div class="side-col">
-                <div class="panel-card">
-                    <div class="panel-title">
-                        <span>选择证据上下文</span>
-                        <span id="selectedCount" style="font-size:12px; color:var(--color-primary);">已选 0 篇</span>
-                    </div>
-                    <div class="paper-checklist" id="paperChecklist">
-                        <div class="empty-state" style="padding:20px 0;">同步文献列表中...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right Side: AI writing workspace -->
-            <div class="main-col">
-                <div class="panel-card">
-                    <div class="panel-title">写作引导配置</div>
-                    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:16px;">
-                        <div class="form-group">
-                            <label for="writingTopic">学术写作主题 / 核心论点</label>
-                            <input type="text" id="writingTopic" class="form-control" placeholder="如：lithium sulfur battery CeO2 catalyst mechanism analysis">
-                        </div>
-                        <div class="form-group">
-                            <label for="writingLimit">最大引用证据条数</label>
-                            <input type="number" id="writingLimit" class="form-control" value="5" min="1" max="20">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="userNotes">额外指示说明 (Notes)</label>
-                        <textarea id="userNotes" class="form-control" placeholder="例：请重点整理 DFT 结果，突显其在降低反应自由能垒上的作用，阐明催化剂配位构型和吸附物分子间的电荷转移机理。"></textarea>
-                    </div>
-                    <button class="btn primary" onclick="generateAcademicDraft()">✍️ 一键调用 AI 撰写学术草稿</button>
-                </div>
-
-                <div class="panel-card">
-                    <div class="tabs">
-                        <button class="tab-btn active" onclick="switchWriteTab('outline')">大纲 (Outline)</button>
-                        <button class="tab-btn" onclick="switchWriteTab('intro')">引言 (Introduction)</button>
-                        <button class="tab-btn" onclick="switchWriteTab('dft')">DFT结果整理</button>
-                        <button class="tab-btn" onclick="switchWriteTab('discussion')">讨论 (Discussion)</button>
-                        <button class="tab-btn" onclick="switchWriteTab('storyline')">图文叙事 (Storyline)</button>
-                        <button class="tab-btn" onclick="switchWriteTab('guard')">引用护卫 (Citation Guard)</button>
-                    </div>
-
-                    <!-- Output Screens -->
-                    <div id="tab-outline" class="tab-pane prewrap">
-                        <div class="empty-state">等待配置写作任务并生成大纲...</div>
-                    </div>
-                    <div id="tab-intro" class="tab-pane prewrap" style="display:none;">
-                        <div class="empty-state">等待配置并生成引言部分...</div>
-                    </div>
-                    <div id="tab-dft" class="tab-pane prewrap" style="display:none;">
-                        <div class="empty-state">等待配置并生成 DFT 报告数据...</div>
-                    </div>
-                    <div id="tab-discussion" class="tab-pane prewrap" style="display:none;">
-                        <div class="empty-state">等待配置并生成讨论段落...</div>
-                    </div>
-                    <div id="tab-storyline" class="tab-pane prewrap" style="display:none;">
-                        <div class="empty-state">等待配置并生成多图画廊关联的 Storyline...</div>
-                    </div>
-                    <div id="tab-guard" class="tab-pane" style="display:none;">
-                        <div class="mono" id="guardLog">无检测事件。</div>
-                    </div>
-                </div>
-            </div>
+        <div class="form-grid">
+          <div>
+            <label for="writingTopic">Topic / research claim</label>
+            <input id="writingTopic" placeholder="lithium sulfur battery CeO2 catalyst mechanism analysis">
+          </div>
+          <div>
+            <label for="writingLimit">Evidence limit</label>
+            <input id="writingLimit" type="number" value="5" min="1" max="20">
+          </div>
         </div>
-    </div>
+        <div style="margin-top:12px;">
+          <label for="userNotes">Notes</label>
+          <textarea id="userNotes" placeholder="Focus on DFT descriptors, catalytic mechanism, and explicitly supported claims."></textarea>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" onclick="retrieveEvidence()">Search evidence</button>
+          <button class="btn primary" onclick="generateAcademicDraft()">Generate draft</button>
+          <button class="btn ghost" onclick="runCitationAudit()">Run Citation Audit</button>
+        </div>
 
-    <div id="toast" class="toast"></div>
-    <div id="progressBox" class="progress-box"></div>
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchWriteTab('outline', event)">Outline</button>
+          <button class="tab-btn" onclick="switchWriteTab('intro', event)">Introduction</button>
+          <button class="tab-btn" onclick="switchWriteTab('dft', event)">DFT results</button>
+          <button class="tab-btn" onclick="switchWriteTab('discussion', event)">Discussion</button>
+          <button class="tab-btn" onclick="switchWriteTab('storyline', event)">Storyline</button>
+          <button class="tab-btn" onclick="switchWriteTab('audit', event)">Citation Audit</button>
+        </div>
+        <div id="tab-outline" class="tab-pane"><div class="empty-state">Draft output will appear here.</div></div>
+        <div id="tab-intro" class="tab-pane" style="display:none;"></div>
+        <div id="tab-dft" class="tab-pane" style="display:none;"></div>
+        <div id="tab-discussion" class="tab-pane" style="display:none;"></div>
+        <div id="tab-storyline" class="tab-pane" style="display:none;"></div>
+        <div id="tab-audit" class="tab-pane" style="display:none;"></div>
+      </section>
 
-    <script>
-        const API_BASE = "/api/papers";
-        const WRITER_API = "/api/writer";
-        const state = {
-            activeTab: 'outline',
-            papers: [],
-            selectedIds: [],
-            generatedData: null
-        };
+      <aside class="panel-card">
+        <div class="panel-title">Evidence Panel</div>
+        <div id="evidencePanel"><div class="empty-state">No evidence selected yet.</div></div>
+        <div class="panel-title" style="margin-top:18px;">Selected Evidence</div>
+        <div id="evidenceDetail" class="mono">Click a claim or evidence item to inspect paper_id, chunk_id, page/span, confidence, and evidence_text.</div>
+      </aside>
+    </section>
+  </main>
 
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.style.display = 'block';
-            setTimeout(() => {
-                toast.style.display = 'none';
-            }, 3000);
+  <div id="toast" class="toast"></div>
+  <div id="progressBox" class="progress-box"></div>
+
+  <script>
+    const API_BASE = "/api/papers";
+    const WRITER_API = "/api/writer";
+    const state = { papers: [], selectedIds: [], retrieved: [], generatedData: null, activeTab: "outline" };
+
+    function showToast(msg) {
+      const toast = document.getElementById("toast");
+      toast.textContent = msg;
+      toast.style.display = "block";
+      setTimeout(() => { toast.style.display = "none"; }, 2600);
+    }
+    function showProgress(msg) {
+      const box = document.getElementById("progressBox");
+      box.textContent = msg;
+      box.style.display = "block";
+    }
+    function hideProgress() { document.getElementById("progressBox").style.display = "none"; }
+    function esc(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+    }
+    async function fetchJSON(url, options) {
+      options = options || {};
+      options.headers = options.headers || {};
+      const token = sessionStorage.getItem("litai-settings-token");
+      if (token) options.headers["X-Settings-Token"] = token;
+      const resp = await fetch(url, options);
+      const text = await resp.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+      return data;
+    }
+    function setStep(index) {
+      document.querySelectorAll(".step").forEach((step, i) => step.classList.toggle("active", i <= index));
+    }
+
+    async function loadPapersChecklist() {
+      try {
+        const papers = await fetchJSON(`${API_BASE}?limit=200`);
+        state.papers = papers || [];
+        const box = document.getElementById("paperChecklist");
+        if (!state.papers.length) {
+          box.innerHTML = '<div class="empty-state">No papers in the library.</div>';
+          return;
         }
+        box.innerHTML = state.papers.map(p => `
+          <label class="checklist-item" id="chk-item-${esc(p.id)}">
+            <input type="checkbox" value="${esc(p.id)}" onchange="toggleSelectPaper('${esc(p.id)}')">
+            <span class="checklist-item-title">${esc(p.title || "Untitled paper")}</span>
+          </label>
+        `).join("");
+      } catch (error) {
+        showToast("Failed to load papers: " + error.message);
+      }
+    }
 
-        function showProgress(msg) {
-            const box = document.getElementById('progressBox');
-            box.textContent = msg;
-            box.style.display = 'block';
-        }
-        function hideProgress() {
-            document.getElementById('progressBox').style.display = 'none';
-        }
+    function toggleSelectPaper(id) {
+      const index = state.selectedIds.indexOf(id);
+      if (index === -1) state.selectedIds.push(id);
+      else state.selectedIds.splice(index, 1);
+      document.getElementById("selectedCount").textContent = state.selectedIds.length;
+      const card = document.getElementById("chk-item-" + id);
+      if (card) card.style.borderColor = state.selectedIds.includes(id) ? "var(--color-primary)" : "var(--color-border)";
+    }
 
-        async function fetchJSON(url, options) {
-            options = options || {};
-            options.headers = options.headers || {};
-            const token = sessionStorage.getItem("litai-settings-token");
-            if (token) {
-                options.headers["X-Settings-Token"] = token;
-            }
-            const resp = await fetch(url, options);
-            if (resp.status === 403) {
-                showToast("无权访问该接口。请先在[设置]中配置管理员 Token。");
-                throw new Error("403 Forbidden");
-            }
-            const text = await resp.text();
-            let data = null;
-            try { data = text ? JSON.parse(text) : null; } catch (_) {}
-            if (!resp.ok) {
-                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
-                throw new Error(detail);
-            }
-            return data;
-        }
-
-        async function loadPapersChecklist() {
-            try {
-                const papers = await fetchJSON(`${API_BASE}?limit=200`);
-                state.papers = papers || [];
-                
-                const checklist = document.getElementById('paperChecklist');
-                if (!papers.length) {
-                    checklist.innerHTML = `<div class="empty-state" style="padding:20px 0;">文献库无文献。去入库中心导入文献吧！</div>`;
-                    return;
-                }
-
-                checklist.innerHTML = papers.map(p => `
-                    <label class="checklist-item" id="chk-item-${p.id}">
-                        <input type="checkbox" value="${p.id}" onchange="toggleSelectPaper('${p.id}')">
-                        <div class="checklist-item-title">${p.title || '未命名文献'}</div>
-                    </label>
-                `).join('');
-            } catch (e) {
-                showToast("加载文献列表失败：" + e.message);
-            }
-        }
-
-        function toggleSelectPaper(id) {
-            const idx = state.selectedIds.indexOf(id);
-            const card = document.getElementById(`chk-item-${id}`);
-            if (idx === -1) {
-                state.selectedIds.push(id);
-                if (card) card.style.borderColor = 'var(--color-primary)';
-            } else {
-                state.selectedIds.splice(idx, 1);
-                if (card) card.style.borderColor = 'var(--color-border)';
-            }
-            document.getElementById('selectedCount').textContent = `已选 ${state.selectedIds.length} 篇`;
-        }
-
-        function switchWriteTab(tab) {
-            state.activeTab = tab;
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-
-            event.target.classList.add('active');
-            document.getElementById('tab-' + tab).style.display = 'block';
-        }
-
-        async function generateAcademicDraft() {
-            const topic = document.getElementById('writingTopic').value.trim();
-            if (!topic) {
-                showToast("请输入学术写作主题！");
-                return;
-            }
-            if (state.selectedIds.length === 0) {
-                showToast("请至少从左侧勾选一篇文献作为上下文证据！");
-                return;
-            }
-            const limit = document.getElementById('writingLimit').value || 5;
-            const notes = document.getElementById('userNotes').value.trim();
-
-            showProgress("内部 AI 正在进行深度分类感知 RAG 能量计算检索与写作，请耐心等候...");
-            try {
-                const data = await fetchJSON(`${WRITER_API}/draft`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        topic: topic,
-                        paper_ids: state.selectedIds,
-                        user_notes: notes || null,
-                        sections: ["outline", "introduction", "dft_results", "discussion", "figure_storyline"],
-                        limit_per_type: Number(limit)
-                    })
-                });
-                state.generatedData = data;
-                showToast("写作归纳生成成功！已更新当前视图大盘。");
-                renderDraftOutput();
-            } catch (e) {
-                showToast("生成学术草案失败：" + e.message);
-            } finally {
-                hideProgress();
-            }
-        }
-
-        function renderDraftOutput() {
-            const d = state.generatedData;
-            if (!d) return;
-
-            document.getElementById('tab-outline').innerHTML = `<h3>Generated Outline</h3>\n${(d.outline || []).join('\n')}`;
-            document.getElementById('tab-intro').innerHTML = `<h3>Generated Introduction</h3>\n${d.introduction || '暂无内容。'}`;
-            document.getElementById('tab-dft').innerHTML = `<h3>Generated DFT Results Summary</h3>\n${d.dft_results || '暂无内容。'}`;
-            document.getElementById('tab-discussion').innerHTML = `<h3>Generated Discussion</h3>\n${d.discussion || '暂无内容。'}`;
-            document.getElementById('tab-storyline').innerHTML = `<h3>Generated Figure Storyline</h3>\n${(d.figure_storyline || []).join('\n')}`;
-            
-            document.getElementById('guardLog').textContent = JSON.stringify({
-                backend_used: d.backend_used,
-                llm_status: d.llm_status,
-                llm_error: d.llm_error,
-                guard_actions: d.guard_actions,
-                citation_guard: d.citation_guard
-            }, null, 2);
-        }
-
-        function copyMarkdownText() {
-            const d = state.generatedData;
-            if (!d) {
-                showToast("请先生成学术草稿后再导出！");
-                return;
-            }
-            const md = `
-# 学术研究报告：${document.getElementById('writingTopic').value}
-
-## 一、研究大纲 (Outline)
-${(d.outline || []).join('\n')}
-
-## 二、引言 (Introduction)
-${d.introduction || ''}
-
-## 三、DFT 结果梳理 (DFT Calculation Results)
-${d.dft_results || ''}
-
-## 四、讨论 (Discussion)
-${d.discussion || ''}
-
-## 五、图表叙事 (Figure Storyline)
-${(d.figure_storyline || []).join('\n')}
-            `;
-            
-            navigator.clipboard.writeText(md.trim()).then(() => {
-                showToast("已成功将完整 Markdown 报告复制至您的剪贴板！");
-            }).catch(() => {
-                showToast("复制失败，请尝试在详情页中手动选取。");
-            });
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            TopNav.init({ currentPage: 'ai-writer', mountId: 'topnav-mount' });
-            loadPapersChecklist();
+    async function retrieveEvidence() {
+      const topic = document.getElementById("writingTopic").value.trim();
+      if (!topic) return showToast("Please enter a topic first.");
+      if (!state.selectedIds.length) return showToast("Select at least one paper.");
+      setStep(1);
+      showProgress("Retrieving hybrid evidence...");
+      try {
+        const data = await fetchJSON("/api/retrieval/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: topic,
+            paper_ids: state.selectedIds,
+            mode: state.selectedIds.length === 1 ? "full_context" : "focused",
+            limit: Number(document.getElementById("writingLimit").value || 5),
+            limit_per_type: Number(document.getElementById("writingLimit").value || 5),
+            rerank: true
+          })
         });
-    </script>
+        state.retrieved = data.items || [];
+        setStep(2);
+        renderEvidencePack();
+      } catch (error) {
+        showToast("Evidence retrieval failed: " + error.message);
+      } finally {
+        hideProgress();
+      }
+    }
+
+    function renderEvidencePack() {
+      const panel = document.getElementById("evidencePanel");
+      if (!state.retrieved.length) {
+        panel.innerHTML = '<div class="empty-state warning">No evidence found. Draft claims should not be treated as supported.</div>';
+        return;
+      }
+      panel.innerHTML = state.retrieved.map((item, idx) => `
+        <div class="evidence-card">
+          <button onclick="showEvidenceDetail(${idx})">${esc(item.section_title || item.source || "Evidence")} · score ${Number(item.score || 0).toFixed(2)}</button>
+          <div class="muted">paper_id ${esc(item.paper_id)} · chunk_id ${esc(item.chunk_id || "-")}</div>
+          <div class="muted">${esc((item.text || "").slice(0, 160))}</div>
+        </div>
+      `).join("");
+    }
+
+    function showEvidenceDetail(index) {
+      const item = state.retrieved[index];
+      document.getElementById("evidenceDetail").textContent = JSON.stringify(item.evidence || item, null, 2);
+    }
+
+    async function generateAcademicDraft() {
+      const topic = document.getElementById("writingTopic").value.trim();
+      if (!topic) return showToast("Please enter a topic first.");
+      if (!state.selectedIds.length) return showToast("Select at least one paper.");
+      if (!state.retrieved.length) await retrieveEvidence();
+      setStep(3);
+      showProgress("Generating evidence-grounded draft...");
+      try {
+        const data = await fetchJSON(`${WRITER_API}/draft`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic,
+            paper_ids: state.selectedIds,
+            user_notes: document.getElementById("userNotes").value.trim() || null,
+            sections: ["outline", "introduction", "dft_results", "discussion", "figure_storyline"],
+            limit_per_type: Number(document.getElementById("writingLimit").value || 5)
+          })
+        });
+        state.generatedData = data;
+        setStep(4);
+        renderDraftOutput();
+        renderAudit(data.citation_audit);
+      } catch (error) {
+        showToast("Draft generation failed: " + error.message);
+      } finally {
+        hideProgress();
+      }
+    }
+
+    async function runCitationAudit() {
+      const d = state.generatedData;
+      if (!d) return showToast("Generate a draft before auditing.");
+      const text = [d.introduction, d.dft_results, d.discussion].filter(Boolean).join("\\n");
+      showProgress("Auditing claims against evidence...");
+      try {
+        const data = await fetchJSON("/api/evidence/audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, paper_ids: state.selectedIds, min_confidence: 0.1 })
+        });
+        state.generatedData.citation_audit = data;
+        renderAudit(data);
+        setStep(4);
+        switchWriteTab("audit");
+      } catch (error) {
+        showToast("Citation audit failed: " + error.message);
+      } finally {
+        hideProgress();
+      }
+    }
+
+    function switchWriteTab(tab, event) {
+      state.activeTab = tab;
+      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+      document.querySelectorAll(".tab-pane").forEach(pane => pane.style.display = "none");
+      if (event && event.target) event.target.classList.add("active");
+      else document.querySelector(`.tab-btn[onclick*="'${tab}'"]`)?.classList.add("active");
+      document.getElementById("tab-" + tab).style.display = "block";
+    }
+
+    function renderDraftOutput() {
+      const d = state.generatedData || {};
+      document.getElementById("tab-outline").textContent = (d.outline || []).join("\\n") || "No outline.";
+      document.getElementById("tab-intro").textContent = d.introduction || "No introduction.";
+      document.getElementById("tab-dft").textContent = d.dft_results || "No DFT result summary.";
+      document.getElementById("tab-discussion").textContent = d.discussion || "No discussion.";
+      document.getElementById("tab-storyline").textContent = (d.figure_storyline || []).join("\\n") || "No storyline.";
+      const claims = d.evidence_claims || [];
+      if (claims.length) {
+        document.getElementById("evidencePanel").innerHTML = claims.map((claim, idx) => `
+          <div class="evidence-card">
+            <button onclick="showClaimEvidence(${idx})">${esc(claim.validation_status || "unverified")} · ${esc(claim.claim_text.slice(0, 120))}</button>
+            <div class="muted">${claim.evidence && claim.evidence.length ? "Evidence linked" : "No evidence linked"}</div>
+          </div>
+        `).join("");
+      }
+    }
+
+    function showClaimEvidence(index) {
+      const claim = (state.generatedData && state.generatedData.evidence_claims || [])[index];
+      document.getElementById("evidenceDetail").textContent = JSON.stringify(claim || {}, null, 2);
+    }
+
+    function renderAudit(audit) {
+      const box = document.getElementById("tab-audit");
+      if (!audit) {
+        box.innerHTML = '<div class="empty-state">No audit has been run.</div>';
+        return;
+      }
+      setStep(4);
+      const claims = audit.claims || [];
+      box.innerHTML = `
+        <div class="audit-card ${audit.ok ? "" : "warning"}">
+          Citation Audit: ${audit.supported_claims || 0}/${audit.total_claims || 0} claims supported.
+        </div>
+        ${claims.map(item => `
+          <div class="audit-card">
+            <strong>${esc(item.status)}</strong>
+            <div>${esc(item.claim_text)}</div>
+            ${item.warning ? `<div class="warning">${esc(item.warning)}</div>` : ""}
+          </div>
+        `).join("")}
+      `;
+    }
+
+    function copyMarkdownText() {
+      const d = state.generatedData;
+      if (!d) return showToast("Generate a draft first.");
+      const md = `# ${document.getElementById("writingTopic").value}\\n\\n## Outline\\n${(d.outline || []).join("\\n")}\\n\\n## Introduction\\n${d.introduction || ""}\\n\\n## DFT Results\\n${d.dft_results || ""}\\n\\n## Discussion\\n${d.discussion || ""}`;
+      navigator.clipboard.writeText(md).then(() => showToast("Markdown copied."));
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      TopNav.init({ currentPage: "ai-writer", mountId: "topnav-mount" });
+      loadPapersChecklist();
+    });
+  </script>
 </body>
 </html>

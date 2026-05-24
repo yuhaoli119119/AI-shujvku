@@ -1,528 +1,199 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>论文详情 - Literature AI</title>
-    <link rel="stylesheet" href="../../shared/fonts.css">
-    <link rel="stylesheet" href="../../shared/tokens.css">
-    <link rel="stylesheet" href="../../shared/components.css">
-    <link rel="stylesheet" href="../../shared/topnav.css">
-    <script src="../../shared/topnav.js"></script>
-    <script>ThemeManager.init();</script>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: var(--font-body);
-            color: var(--color-text);
-            background: var(--color-bg);
-            min-height: 100vh;
-        }
-        .shell {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 32px 24px;
-            padding-top: calc(var(--nav-height) + 32px);
-        }
-        .paper-header {
-            margin-bottom: 28px;
-            border-bottom: 1px solid var(--color-border);
-            padding-bottom: 24px;
-        }
-        .paper-title {
-            font-size: 26px;
-            font-weight: 800;
-            line-height: 1.4;
-            color: var(--color-text);
-        }
-        .paper-meta {
-            margin-top: 10px;
-            font-size: 14px;
-            color: var(--color-text-secondary);
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-        .paper-badges {
-            margin-top: 14px;
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        
-        /* Skeleton loading */
-        .skeleton-block {
-            background: linear-gradient(90deg, var(--color-surface-alt) 25%, var(--color-border) 37%, var(--color-surface-alt) 63%);
-            background-size: 400% 100%;
-            animation: skeleton-loading 1.4s ease infinite;
-            border-radius: var(--radius-sm);
-        }
-        @keyframes skeleton-loading {
-            0% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-
-        .tabs {
-            display: flex;
-            gap: 8px;
-            border-bottom: 1.5px solid var(--color-border);
-            margin-bottom: 24px;
-        }
-        .tab-btn {
-            background: transparent;
-            border: none;
-            color: var(--color-text-secondary);
-            padding: 12px 18px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            border-radius: var(--radius) var(--radius) 0 0;
-            transition: var(--transition);
-        }
-        .tab-btn.active {
-            color: var(--color-primary);
-            border-bottom: 2px solid var(--color-primary);
-        }
-
-        .panel-card {
-            background: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            padding: 24px;
-            box-shadow: var(--shadow-card);
-            margin-bottom: 20px;
-        }
-        .panel-title {
-            font-size: 16px;
-            font-weight: 800;
-            margin-bottom: 16px;
-            border-left: 4px solid var(--color-primary);
-            padding-left: 10px;
-        }
-
-        .prewrap { white-space: pre-wrap; line-height: 1.8; font-size: 14px; }
-        .mono {
-            white-space: pre-wrap;
-            font-family: var(--font-mono);
-            font-size: 12px;
-            line-height: 1.7;
-            background: var(--color-surface-alt);
-            border-radius: var(--radius);
-            padding: 16px;
-            overflow: auto;
-        }
-
-        .cards-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-        .mini-card {
-            background: var(--color-surface-alt);
-            border: 1.5px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            padding: 16px;
-            text-align: center;
-        }
-        .mini-card h4 { font-size: 12px; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 6px; }
-        .mini-card .val { font-size: 24px; font-weight: 800; color: var(--color-text); }
-
-        .image-gallery {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 20px;
-        }
-        .figure-box {
-            background: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            overflow: hidden;
-            padding: 16px;
-        }
-        .figure-img-container {
-            width: 100%;
-            height: 240px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: var(--color-surface-alt);
-            border-radius: var(--radius);
-            overflow: hidden;
-            margin-bottom: 12px;
-            border: 1px solid var(--color-border);
-        }
-        .figure-img-container img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 60px 24px;
-            color: var(--color-text-secondary);
-        }
-        .empty-state h3 { font-size: 18px; margin-bottom: 8px; }
-
-        .key-val-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 16px;
-        }
-        .key-val-box {
-            background: var(--color-surface-alt);
-            border-radius: var(--radius);
-            padding: 12px 16px;
-            border: 1px solid var(--color-border);
-        }
-        .key-val-box .k { font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px; }
-        .key-val-box .v { font-size: 14px; font-weight: 600; word-break: break-all; }
-
-        .tag-pill {
-            display: inline-block;
-            font-size: 11px;
-            font-weight: 700;
-            padding: 4px 10px;
-            border-radius: var(--radius-pill);
-            margin-right: 6px;
-            margin-bottom: 6px;
-        }
-        .tag-pill.primary { background: var(--color-primary-bg); color: var(--color-primary); }
-        .tag-pill.success { background: var(--color-success-bg); color: var(--color-success); }
-        .tag-pill.warning { background: var(--color-warning-bg); color: var(--color-warning); }
-
-        .section-item {
-            border-bottom: 1px solid var(--color-border);
-            padding-bottom: 18px;
-            margin-bottom: 18px;
-        }
-        .section-item:last-child { border: none; padding: 0; margin: 0; }
-        .section-title { font-weight: 800; font-size: 15px; margin-bottom: 8px; color: var(--color-text); }
-        
-        .toast {
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            background: var(--color-primary);
-            color: white;
-            padding: 12px 24px;
-            border-radius: var(--radius);
-            font-weight: 600;
-            box-shadow: var(--shadow-elevated);
-            z-index: 1000;
-            display: none;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paper Detail - Literature AI</title>
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
+    .shell { max-width: 1360px; margin: 0 auto; padding: calc(var(--nav-height) + 28px) 24px 36px; }
+    .paper-header { border-bottom: 1px solid var(--color-border); padding-bottom: 18px; margin-bottom: 18px; }
+    .paper-title { margin: 0; font-size: 26px; line-height: 1.35; }
+    .paper-meta { margin-top: 8px; color: var(--color-text-secondary); font-size: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+    .panel-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-card); margin-bottom: 18px; }
+    .panel-title { font-size: 16px; font-weight: 800; margin-bottom: 12px; border-left: 4px solid var(--color-primary); padding-left: 10px; }
+    .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .mini-card { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 14px; }
+    .mini-card .k { font-size: 12px; color: var(--color-text-secondary); }
+    .mini-card .v { font-size: 22px; font-weight: 800; margin-top: 4px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-border); margin-bottom: 16px; }
+    .tab-btn { border: 0; background: transparent; padding: 10px 12px; color: var(--color-text-secondary); font-weight: 800; cursor: pointer; }
+    .tab-btn.active { color: var(--color-primary); border-bottom: 2px solid var(--color-primary); }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .prewrap { white-space: pre-wrap; line-height: 1.75; font-size: 14px; }
+    .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 14px; overflow: auto; }
+    .section-item, .evidence-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); padding: 12px; margin-bottom: 10px; }
+    .section-title { font-weight: 800; margin-bottom: 8px; }
+    .evidence-card button { width: 100%; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; font-weight: 800; padding: 0; }
+    .muted { color: var(--color-text-secondary); font-size: 12px; }
+    .warning { color: var(--color-warning); font-weight: 800; }
+    .empty-state { text-align: center; color: var(--color-text-secondary); padding: 40px 12px; }
+    .tag { display: inline-flex; align-items: center; border-radius: var(--radius-pill); background: var(--color-primary-bg); color: var(--color-primary); padding: 4px 9px; font-size: 12px; font-weight: 800; margin-right: 6px; margin-top: 10px; }
+    .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
+    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
-    <div id="topnav-mount"></div>
-    <div class="shell">
-        <!-- Error & Empty state fallback -->
-        <div id="fallbackState" class="panel-card empty-state" style="display:none;">
-            <h3>未指定文献或文献加载失败</h3>
-            <p id="fallbackMsg">请在文献库大厅中点击具体文献的“独立打开详情页”来浏览此处的图文和机理详情。</p>
-            <div style="margin-top:20px;">
-                <a href="../literature_library/index.html" class="btn primary">返回文献库</a>
-            </div>
-        </div>
-
-        <div id="paperContent" style="display:none;">
-            <!-- Big header -->
-            <div class="paper-header">
-                <h1 id="paperTitle" class="paper-title">...</h1>
-                <div class="paper-meta">
-                    <span id="paperYear">-</span>
-                    <span style="color:var(--color-border);">|</span>
-                    <span id="paperJournal">-</span>
-                    <span style="color:var(--color-border);">|</span>
-                    <span id="paperDoi" style="font-family:var(--font-mono); font-size:13px;">-</span>
-                </div>
-                <div class="paper-badges" id="paperBadges"></div>
-            </div>
-
-            <!-- Dashboard Mini stats -->
-            <div class="cards-grid">
-                <div class="mini-card">
-                    <h4>章节数</h4>
-                    <div class="val" id="cntSections">-</div>
-                </div>
-                <div class="mini-card">
-                    <h4>图表数</h4>
-                    <div class="val" id="cntFigures">-</div>
-                </div>
-                <div class="mini-card">
-                    <h4>DFT 结果</h4>
-                    <div class="val" id="cntDFT">-</div>
-                </div>
-                <div class="mini-card">
-                    <h4>机理 Claim</h4>
-                    <div class="val" id="cntMechanism">-</div>
-                </div>
-            </div>
-
-            <!-- Navigation Tabs -->
-            <div class="tabs">
-                <button class="tab-btn active" onclick="switchDetailTab('summary')">基本与摘要</button>
-                <button class="tab-btn" onclick="switchDetailTab('sections')">结构化段落</button>
-                <button class="tab-btn" onclick="switchDetailTab('figures')">图解画廊</button>
-                <button class="tab-btn" onclick="switchDetailTab('dft')">DFT 计算与性能</button>
-                <button class="tab-btn" onclick="switchDetailTab('cards')">机理与写作卡</button>
-            </div>
-
-            <!-- Tab 1: Summary -->
-            <div id="tab-summary" class="tab-pane">
-                <div class="panel-card">
-                    <div class="panel-title">论文摘要 (Abstract)</div>
-                    <div class="prewrap" id="paperAbstract" style="line-height:1.9;">暂无摘要。</div>
-                </div>
-                <div class="panel-card">
-                    <div class="panel-title">数据与路径</div>
-                    <div class="key-val-grid">
-                        <div class="key-val-box">
-                            <div class="k">分类置信度</div>
-                            <div class="v" id="pathConfidence">-</div>
-                        </div>
-                        <div class="key-val-box">
-                            <div class="k">PDF 本地路径</div>
-                            <div class="v" id="pathPdf" style="font-family:var(--font-mono); font-size:12px;">-</div>
-                        </div>
-                        <div class="key-val-box">
-                            <div class="k">Markdown 解析路径</div>
-                            <div class="v" id="pathMd" style="font-family:var(--font-mono); font-size:12px;">-</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="panel-card">
-                    <div class="panel-title">综合解析 JSON</div>
-                    <div class="mono" id="comprehensiveJSON">{}</div>
-                </div>
-            </div>
-
-            <!-- Tab 2: Sections -->
-            <div id="tab-sections" class="tab-pane" style="display:none;">
-                <div class="panel-card">
-                    <div class="panel-title">结构化正文</div>
-                    <div id="sectionsList">
-                        <div class="empty-state">正文加载中...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tab 3: Figures -->
-            <div id="tab-figures" class="tab-pane" style="display:none;">
-                <div class="panel-card">
-                    <div class="panel-title">提取图片与 VLM 类别标注</div>
-                    <div class="image-gallery" id="figuresList">
-                        <div class="empty-state">无提取的图片信息。</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tab 4: DFT -->
-            <div id="tab-dft" class="tab-pane" style="display:none;">
-                <div class="panel-card">
-                    <div class="panel-title">DFT 设置 (Settings)</div>
-                    <div class="mono" id="dftSettings">暂无设置。</div>
-                </div>
-                <div class="panel-card">
-                    <div class="panel-title">DFT 计算结果 (Results)</div>
-                    <div class="mono" id="dftResults">暂无计算值。</div>
-                </div>
-                <div class="panel-card">
-                    <div class="panel-title">电化学性能指标 (Performance)</div>
-                    <div class="mono" id="electrochemicalPerformance">暂无电化学测试。</div>
-                </div>
-            </div>
-
-            <!-- Tab 5: Mechanism & Writing Cards -->
-            <div id="tab-cards" class="tab-pane" style="display:none;">
-                <div class="panel-card">
-                    <div class="panel-title">提取机理 Claim</div>
-                    <div class="mono" id="mechanismClaims">暂无 Claim。</div>
-                </div>
-                <div class="panel-card">
-                    <div class="panel-title">写作卡片 (Writing Card)</div>
-                    <div class="mono" id="writingCards">暂无卡片。</div>
-                </div>
-            </div>
-        </div>
+  <div id="topnav-mount"></div>
+  <main class="shell">
+    <div id="fallbackState" class="panel-card empty-state" style="display:none;">
+      <h3>No paper selected</h3>
+      <p id="fallbackMsg">Open this page with ?paper_id=...</p>
+      <div style="margin-top:16px;"><a href="../literature_library/index.html" class="btn primary">Back to library</a></div>
     </div>
 
-    <div id="toast" class="toast"></div>
+    <div id="paperContent" style="display:none;">
+      <header class="paper-header">
+        <h1 id="paperTitle" class="paper-title"></h1>
+        <div class="paper-meta">
+          <span id="paperYear"></span><span>|</span><span id="paperJournal"></span><span>|</span><span id="paperDoi"></span>
+        </div>
+        <div id="paperBadges"></div>
+      </header>
 
-    <script>
-        const API_BASE = "/api/papers";
-        const state = {
-            paperId: null,
-            paper: null
-        };
+      <div class="cards-grid">
+        <div class="mini-card"><div class="k">Sections</div><div class="v" id="cntSections">0</div></div>
+        <div class="mini-card"><div class="k">Figures</div><div class="v" id="cntFigures">0</div></div>
+        <div class="mini-card"><div class="k">DFT Results</div><div class="v" id="cntDFT">0</div></div>
+        <div class="mini-card"><div class="k">Claims</div><div class="v" id="cntMechanism">0</div></div>
+      </div>
 
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.style.display = 'block';
-            setTimeout(() => {
-                toast.style.display = 'none';
-            }, 3000);
-        }
+      <section class="layout">
+        <div>
+          <div class="tabs">
+            <button class="tab-btn active" onclick="switchDetailTab('summary', event)">Summary</button>
+            <button class="tab-btn" onclick="switchDetailTab('sections', event)">Sections</button>
+            <button class="tab-btn" onclick="switchDetailTab('figures', event)">Figures/Tables</button>
+            <button class="tab-btn" onclick="switchDetailTab('dft', event)">DFT & Performance</button>
+            <button class="tab-btn" onclick="switchDetailTab('cards', event)">Mechanism/Writing</button>
+          </div>
 
-        async function fetchJSON(url, options) {
-            options = options || {};
-            options.headers = options.headers || {};
-            const token = sessionStorage.getItem("litai-settings-token");
-            if (token) {
-                options.headers["X-Settings-Token"] = token;
-            }
-            const resp = await fetch(url, options);
-            if (resp.status === 403) {
-                showToast("无权访问该接口。请先在[设置]中配置管理员 Token。");
-                throw new Error("403 Forbidden");
-            }
-            const text = await resp.text();
-            let data = null;
-            try { data = text ? JSON.parse(text) : null; } catch (_) {}
-            if (!resp.ok) {
-                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
-                throw new Error(detail);
-            }
-            return data;
-        }
+          <div id="tab-summary" class="tab-pane active">
+            <div class="panel-card"><div class="panel-title">Abstract</div><div id="paperAbstract" class="prewrap"></div></div>
+            <div class="panel-card"><div class="panel-title">Comprehensive analysis</div><div id="comprehensiveJSON" class="mono">{}</div></div>
+          </div>
+          <div id="tab-sections" class="tab-pane"><div class="panel-card"><div class="panel-title">Parsed sections</div><div id="sectionsList"></div></div></div>
+          <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">Figures and tables</div><div id="figuresList"></div><div id="tablesList" style="margin-top:12px;"></div></div></div>
+          <div id="tab-dft" class="tab-pane">
+            <div class="panel-card"><div class="panel-title">DFT settings</div><div id="dftSettings" class="mono"></div></div>
+            <div class="panel-card"><div class="panel-title">DFT results</div><div id="dftResults" class="mono"></div></div>
+            <div class="panel-card"><div class="panel-title">Electrochemical performance</div><div id="electrochemicalPerformance" class="mono"></div></div>
+          </div>
+          <div id="tab-cards" class="tab-pane">
+            <div class="panel-card"><div class="panel-title">Mechanism claims</div><div id="mechanismClaims" class="mono"></div></div>
+            <div class="panel-card"><div class="panel-title">Writing cards</div><div id="writingCards" class="mono"></div></div>
+          </div>
+        </div>
 
-        function parseParams() {
-            const params = new URLSearchParams(window.location.search);
-            const id = params.get('id') || params.get('paper_id');
-            if (id) {
-                state.paperId = id;
-                return true;
-            }
-            return false;
-        }
-
-        async function loadPaperData() {
-            if (!state.paperId) {
-                showFallback("未指定文献 ID！");
-                return;
-            }
-            try {
-                const data = await fetchJSON(`${API_BASE}/${state.paperId}`);
-                state.paper = data;
-                renderPaperDetails();
-            } catch (e) {
-                showFallback("加载文献详情失败：" + e.message);
-            }
-        }
-
-        function showFallback(msg) {
-            document.getElementById('fallbackState').style.display = 'block';
-            document.getElementById('fallbackMsg').textContent = msg;
-            document.getElementById('paperContent').style.display = 'none';
-        }
-
-        function renderPaperDetails() {
-            const p = state.paper;
-            document.getElementById('fallbackState').style.display = 'none';
-            document.getElementById('paperContent').style.display = 'block';
-
-            // Title, Authors, Metas
-            document.getElementById('paperTitle').textContent = p.title || '无标题文献';
-            document.getElementById('paperYear').textContent = p.year || '-';
-            document.getElementById('paperJournal').textContent = p.journal || '-';
-            document.getElementById('paperDoi').textContent = p.doi ? `DOI: ${p.doi}` : '无 DOI';
-
-            // Badges
-            const badgesBox = document.getElementById('paperBadges');
-            const typeLabel = p.paper_type || 'Unknown';
-            const statusChip = p.pdf_path ? '<span class="tag-pill success">已入库</span>' : '<span class="tag-pill warning">仅元数据</span>';
-            badgesBox.innerHTML = `
-                <span class="tag-pill primary">${typeLabel}类文献</span>
-                ${statusChip}
-            `;
-
-            // Counts
-            document.getElementById('cntSections').textContent = p.counts?.sections || 0;
-            document.getElementById('cntFigures').textContent = p.figures?.length || 0;
-            document.getElementById('cntDFT').textContent = p.counts?.dft_results || 0;
-            document.getElementById('cntMechanism').textContent = p.counts?.mechanism_claims || 0;
-
-            // Abstract
-            document.getElementById('paperAbstract').textContent = p.abstract || '暂无摘要。';
-            
-            // Paths
-            document.getElementById('pathConfidence').textContent = p.type_confidence ? `${(p.type_confidence * 100).toFixed(0)}%` : '-';
-            document.getElementById('pathPdf').textContent = p.pdf_path || '-';
-            document.getElementById('pathMd').textContent = p.markdown_path || '-';
-
-            // JSON
-            document.getElementById('comprehensiveJSON').textContent = JSON.stringify(p.comprehensive_analysis || {}, null, 2);
-
-            // Sections
-            const secBox = document.getElementById('sectionsList');
-            const sections = p.sections || [];
-            if (!sections.length) {
-                secBox.innerHTML = `<div class="empty-state">此文献未提取到结构化章节段落。请重新解析。</div>`;
-            } else {
-                secBox.innerHTML = sections.map((s, idx) => `
-                    <div class="section-item">
-                        <div class="section-title">${idx + 1}. ${s.section_title || s.section_type || '未指定章节'}</div>
-                        <div class="prewrap" style="color:var(--color-text-secondary);">${s.text || ''}</div>
-                    </div>
-                `).join('');
-            }
-
-            // Figures Gallery
-            const figBox = document.getElementById('figuresList');
-            const figures = p.figures || [];
-            if (!figures.length) {
-                figBox.innerHTML = `<div class="empty-state">此文献未提取到科学图表。</div>`;
-            } else {
-                figBox.innerHTML = figures.map((f, idx) => {
-                    const imgHtml = f.image_path ? `<div class="figure-img-container"><img src="/api/papers/assets/${f.image_path}" alt="Figure"></div>` : '';
-                    const roleLabel = f.figure_role ? `<span class="tag-pill primary">${f.figure_role} (${(f.role_confidence*100).toFixed(0)}%)</span>` : '';
-                    const elementsHtml = (f.key_elements || []).map(e => `<span class="tag-pill warning">${e}</span>`).join('');
-                    return `
-                        <div class="figure-box">
-                            ${imgHtml}
-                            <h4 style="font-size:13px; font-weight:700; color:var(--color-text); margin-bottom:8px;">图表 #${idx+1}</h4>
-                            <p style="font-size:12px; color:var(--color-text-secondary); line-height:1.5; height:50px; overflow:hidden; text-overflow:ellipsis;">
-                                ${f.caption || '无 Caption'}
-                            </p>
-                            ${f.content_summary ? `<div style="font-size:12px; font-weight:600; color:var(--color-primary); margin-top:8px;">VLM摘要：${f.content_summary}</div>` : ''}
-                            <div style="margin-top:10px;">
-                                ${roleLabel}
-                                ${elementsHtml}
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            }
-
-            // Tab 4 details
-            document.getElementById('dftSettings').textContent = JSON.stringify(p.dft_settings_items || [], null, 2);
-            document.getElementById('dftResults').textContent = JSON.stringify(p.dft_results_items || [], null, 2);
-            document.getElementById('electrochemicalPerformance').textContent = JSON.stringify(p.electrochemical_performance_items || [], null, 2);
-
-            // Tab 5 details
-            document.getElementById('mechanismClaims').textContent = JSON.stringify(p.mechanism_claims_items || [], null, 2);
-            document.getElementById('writingCards').textContent = JSON.stringify(p.writing_cards_items || [], null, 2);
-        }
-
-        function switchDetailTab(tab) {
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-
-            event.target.classList.add('active');
-            document.getElementById('tab-' + tab).style.display = 'block';
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            TopNav.init({ currentPage: 'paper-detail', mountId: 'topnav-mount' });
-            if (parseParams()) {
-                loadPaperData();
-            } else {
-                showFallback("未指定文献 ID，无法加载论文图文详情！");
-            }
-        });
-    </script>
+        <aside class="panel-card">
+          <div class="panel-title">Evidence Panel</div>
+          <div id="evidencePanel"><div class="empty-state">Loading evidence...</div></div>
+          <div class="panel-title" style="margin-top:18px;">Evidence detail</div>
+          <div id="evidenceDetail" class="mono">Click a claim to inspect source paper, chunk, page/span, confidence, and evidence text.</div>
+        </aside>
+      </section>
+    </div>
+  </main>
+  <div id="toast" class="toast"></div>
+  <script>
+    const API_BASE = "/api/papers";
+    const state = { paperId: null, paper: null, claims: [] };
+    function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+    function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
+    async function fetchJSON(url, options) {
+      options = options || {}; options.headers = options.headers || {};
+      const token = sessionStorage.getItem("litai-settings-token"); if (token) options.headers["X-Settings-Token"] = token;
+      const resp = await fetch(url, options); const text = await resp.text();
+      let data = null; try { data = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+      return data;
+    }
+    function parseParams() {
+      const params = new URLSearchParams(window.location.search);
+      state.paperId = params.get("id") || params.get("paper_id");
+      return Boolean(state.paperId);
+    }
+    function showFallback(msg) {
+      document.getElementById("fallbackState").style.display = "block";
+      document.getElementById("fallbackMsg").textContent = msg;
+      document.getElementById("paperContent").style.display = "none";
+    }
+    async function loadPaperData() {
+      if (!state.paperId) return showFallback("Missing paper_id.");
+      try {
+        state.paper = await fetchJSON(`${API_BASE}/${state.paperId}`);
+        renderPaperDetails();
+        await loadEvidenceClaims();
+      } catch (error) {
+        showFallback("Failed to load paper: " + error.message);
+      }
+    }
+    async function loadEvidenceClaims() {
+      try {
+        state.claims = await fetchJSON(`/api/evidence/claims?paper_id=${encodeURIComponent(state.paperId)}&include_derived=true&limit=80`);
+        renderEvidencePanel();
+      } catch (error) {
+        document.getElementById("evidencePanel").innerHTML = `<div class="empty-state warning">Evidence unavailable: ${esc(error.message)}</div>`;
+      }
+    }
+    function renderPaperDetails() {
+      const p = state.paper;
+      document.getElementById("fallbackState").style.display = "none";
+      document.getElementById("paperContent").style.display = "block";
+      document.getElementById("paperTitle").textContent = p.title || "Untitled paper";
+      document.getElementById("paperYear").textContent = p.year || "-";
+      document.getElementById("paperJournal").textContent = p.journal || "-";
+      document.getElementById("paperDoi").textContent = p.doi ? "DOI: " + p.doi : "No DOI";
+      document.getElementById("paperBadges").innerHTML = `<span class="tag">${esc(p.paper_type || "Unknown type")}</span><span class="tag">${p.pdf_path ? "PDF available" : "metadata only"}</span>`;
+      document.getElementById("cntSections").textContent = p.counts?.sections || (p.sections || []).length || 0;
+      document.getElementById("cntFigures").textContent = (p.figures || []).length;
+      document.getElementById("cntDFT").textContent = p.counts?.dft_results || (p.dft_results_items || []).length || 0;
+      document.getElementById("cntMechanism").textContent = p.counts?.mechanism_claims || (p.mechanism_claims_items || []).length || 0;
+      document.getElementById("paperAbstract").textContent = p.abstract || "No abstract.";
+      document.getElementById("comprehensiveJSON").textContent = JSON.stringify(p.comprehensive_analysis || {}, null, 2);
+      document.getElementById("sectionsList").innerHTML = (p.sections || []).length ? (p.sections || []).map((s, i) => `<div class="section-item"><div class="section-title">${i + 1}. ${esc(s.section_title || s.section_type || "Untitled")}</div><div class="prewrap">${esc(s.text || "")}</div><div class="muted">page ${esc(s.page_start || "-")} - ${esc(s.page_end || "-")}</div></div>`).join("") : '<div class="empty-state">No parsed sections.</div>';
+      document.getElementById("figuresList").innerHTML = (p.figures || []).length ? (p.figures || []).map(f => `<div class="section-item"><strong>${esc(f.figure_role || "Figure")}</strong><div class="muted">${esc(f.caption || "")}</div><div class="muted">page ${esc(f.page || "-")}</div></div>`).join("") : '<div class="empty-state">No figures extracted.</div>';
+      document.getElementById("tablesList").innerHTML = (p.tables || []).length ? (p.tables || []).map(t => `<div class="section-item"><strong>Table</strong><div class="muted">${esc(t.caption || "")}</div><div class="mono">${esc(t.markdown_content || "")}</div></div>`).join("") : "";
+      document.getElementById("dftSettings").textContent = JSON.stringify(p.dft_settings_items || [], null, 2);
+      document.getElementById("dftResults").textContent = JSON.stringify(p.dft_results_items || [], null, 2);
+      document.getElementById("electrochemicalPerformance").textContent = JSON.stringify(p.electrochemical_performance_items || [], null, 2);
+      document.getElementById("mechanismClaims").textContent = JSON.stringify(p.mechanism_claims_items || [], null, 2);
+      document.getElementById("writingCards").textContent = JSON.stringify(p.writing_cards_items || [], null, 2);
+    }
+    function renderEvidencePanel() {
+      const panel = document.getElementById("evidencePanel");
+      if (!state.claims.length) {
+        panel.innerHTML = '<div class="empty-state warning">No evidence-backed claims yet.</div>';
+        return;
+      }
+      panel.innerHTML = state.claims.map((claim, idx) => {
+        const ev = (claim.evidence || [])[0] || {};
+        return `<div class="evidence-card"><button onclick="showClaim(${idx})">${esc(claim.validation_status)} · ${esc((claim.claim_text || "").slice(0, 110))}</button><div class="muted">paper_id ${esc(ev.paper_id || "-")} · chunk_id ${esc(ev.chunk_id || "-")} · confidence ${esc(claim.confidence == null ? "-" : Number(claim.confidence).toFixed(2))}</div></div>`;
+      }).join("");
+    }
+    function showClaim(index) {
+      const claim = state.claims[index];
+      document.getElementById("evidenceDetail").textContent = JSON.stringify(claim, null, 2);
+    }
+    function switchDetailTab(tab, event) {
+      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+      document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.remove("active"));
+      if (event && event.target) event.target.classList.add("active");
+      document.getElementById("tab-" + tab).classList.add("active");
+    }
+    document.addEventListener("DOMContentLoaded", () => {
+      TopNav.init({ currentPage: "paper-detail", mountId: "topnav-mount" });
+      if (parseParams()) loadPaperData(); else showFallback("Open from the library or append ?paper_id=...");
+    });
+  </script>
 </body>
 </html>

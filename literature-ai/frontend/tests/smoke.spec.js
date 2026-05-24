@@ -7,6 +7,7 @@ const PAGES = [
   { name: 'Paper Detail', path: '/pages/paper_detail/index.html', coreSelector: '.panel-card' },
   { name: 'DFT Database', path: '/pages/dft_database/index.html', coreSelector: '#dftTable' },
   { name: 'AI Writing Studio', path: '/pages/ai_writer/index.html', coreSelector: '#paperChecklist' },
+  { name: 'Extraction Review Workbench', path: '/pages/external_analysis_workbench/index.html', coreSelector: '#schemaForm' },
   { name: 'Settings', path: '/pages/settings/index.html', coreSelector: '.field' },
 ];
 
@@ -50,7 +51,7 @@ const PAPER_DETAIL = {
   year: 2025,
   journal: 'Journal of Testing',
   abstract: 'Synthetic paper detail payload used by Playwright smoke tests.',
-  sections: [{ heading: 'Introduction', content: 'Smoke-test content.' }],
+  sections: [{ id: 'chunk-1', section_title: 'Introduction', section_type: 'introduction', text: 'Smoke-test content.', page_start: 1, page_end: 1 }],
   figures: [],
   tables: [],
   dft_settings_items: [{ code: 'PBE', kpoints: '3x3x1' }],
@@ -59,6 +60,76 @@ const PAPER_DETAIL = {
   electrochemical_performance_items: [{ metric: 'onset_potential', value: 0.71, unit: 'V' }],
   mechanism_claims_items: [{ claim: 'Associative pathway is favored.' }],
   writing_cards_items: [{ title: 'Key insight', summary: 'A concise validation card.' }],
+};
+
+const EVIDENCE_ITEMS = [
+  {
+    score: 0.91,
+    source: 'sections',
+    paper_id: 'paper-1',
+    chunk_id: 'chunk-1',
+    section_id: 'chunk-1',
+    section_title: 'Results',
+    text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+    page_start: 5,
+    page_end: 5,
+    score_breakdown: { bm25: 0.8, vector: 0.6, hybrid: 0.73 },
+    evidence: {
+      paper_id: 'paper-1',
+      chunk_id: 'chunk-1',
+      section_id: 'chunk-1',
+      page_span: { page_start: 5, page_end: 5, span_start: null, span_end: null },
+      evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+      confidence: 0.91,
+      source: 'section',
+      section_title: 'Results',
+      target_type: 'section',
+      target_id: 'chunk-1',
+    },
+  },
+];
+
+const CLAIMS = [
+  {
+    claim_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+    source_type: 'writer',
+    target_type: 'dft_results',
+    target_id: null,
+    evidence: [EVIDENCE_ITEMS[0].evidence],
+    confidence: 0.91,
+    validation_status: 'supported',
+    metadata: {},
+  },
+];
+
+const AUDIT = {
+  ok: true,
+  total_claims: 1,
+  supported_claims: 1,
+  unsupported_claims: 0,
+  claims: [{ claim_text: CLAIMS[0].claim_text, status: 'supported', evidence: [EVIDENCE_ITEMS[0].evidence] }],
+};
+
+const EXTRACTION_RESULTS = {
+  paper_id: 'paper-1',
+  schemas: { DFTResult: { title: 'DFTResult' } },
+  validation_status: 'validated',
+  validation_warnings: [],
+  results: {
+    CatalystSample: [],
+    DFTSetting: [],
+    DFTResult: [
+      {
+        catalyst: { value: 'Fe-N4', unit: null, evidence_text: 'Fe-N4 catalyst.', source_section: 'Results', page_span: {}, confidence: 0.8 },
+        adsorbate: { value: 'Li2S4', unit: null, evidence_text: 'Li2S4 adsorption.', source_section: 'Results', page_span: {}, confidence: 0.9 },
+        energy_type: { value: 'adsorption_energy', unit: null, evidence_text: 'adsorption energy.', source_section: 'Results', page_span: {}, confidence: 0.9 },
+        value: { value: -1.23, unit: 'eV', evidence_text: 'The adsorption energy is -1.23 eV.', source_section: 'Results', page_span: {}, confidence: 0.91 },
+        reaction_step: { value: 'Li2S4 adsorption', unit: null, evidence_text: 'Li2S4 adsorption step.', source_section: 'Results', page_span: {}, confidence: 0.85 },
+      },
+    ],
+    MechanismClaim: [],
+    ElectrochemicalPerformance: [],
+  },
 };
 
 function jsonResponse(route, payload, status = 200) {
@@ -125,10 +196,12 @@ async function mockApi(route) {
           paper_id: 'paper-1',
           title: 'Test Paper for Smoke Validation',
           catalyst_type: 'Pt',
-          adsorbate: 'H*',
+          adsorbate: 'Li2S4',
+          property_type: 'adsorption_energy',
           value: -1.23,
           unit: 'eV',
           confidence: 0.9,
+          evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
         },
       ],
       stats: {
@@ -181,6 +254,79 @@ async function mockApi(route) {
     });
   }
 
+  if (pathname === '/api/extraction/jobs' && method === 'GET') {
+    return jsonResponse(route, [
+      {
+        job_id: 'extract-job-1',
+        type: 'extraction',
+        status: 'completed',
+        progress: { phase: 'completed', paper_id: 'paper-1' },
+        result: { paper_id: 'paper-1' },
+        error: null,
+        library_name: 'Default Library',
+      },
+    ]);
+  }
+
+  if (pathname === '/api/extraction/jobs' && method === 'POST') {
+    return jsonResponse(route, {
+      job_id: 'extract-job-1',
+      type: 'extraction',
+      status: 'queued',
+      progress: { phase: 'queued', paper_id: 'paper-1' },
+      result: null,
+      error: null,
+      library_name: 'Default Library',
+    });
+  }
+
+  if (pathname.startsWith('/api/extraction/jobs/') && pathname.endsWith('/retry')) {
+    return jsonResponse(route, {
+      job_id: 'extract-job-retry',
+      type: 'extraction',
+      status: 'queued',
+      progress: { phase: 'queued' },
+      result: null,
+      error: null,
+      library_name: 'Default Library',
+    });
+  }
+
+  if (pathname === '/api/extraction/schemas') {
+    return jsonResponse(route, EXTRACTION_RESULTS.schemas);
+  }
+
+  if (pathname === '/api/extraction/results/paper-1' && method === 'GET') {
+    return jsonResponse(route, EXTRACTION_RESULTS);
+  }
+
+  if (pathname === '/api/extraction/results/paper-1/validate') {
+    return jsonResponse(route, {
+      paper_id: 'paper-1',
+      status: 'validated',
+      validation_warnings: [],
+    });
+  }
+
+  if (pathname === '/api/retrieval/search') {
+    return jsonResponse(route, {
+      query: 'Li2S4',
+      mode: 'focused',
+      recall: { bm25: 'enabled', vector: 'enabled' },
+      reranker: { enabled: true, name: 'noop_score_sort' },
+      total: EVIDENCE_ITEMS.length,
+      items: EVIDENCE_ITEMS,
+    });
+  }
+
+  if (pathname === '/api/evidence/claims') {
+    return jsonResponse(route, CLAIMS);
+  }
+
+  if (pathname === '/api/evidence/audit') {
+    return jsonResponse(route, AUDIT);
+  }
+
   if (pathname === '/api/papers/discovery/search') {
     return jsonResponse(route, { items: [] });
   }
@@ -226,6 +372,8 @@ async function mockApi(route) {
       discussion: 'Mock discussion.',
       figure_storyline: ['Figure 1 supports the main claim.'],
       prompt_preview: 'Mock prompt preview',
+      evidence_claims: CLAIMS,
+      citation_audit: AUDIT,
     });
   }
 
@@ -373,6 +521,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await expect(page.locator('button[onclick="exportCSV()"]')).toBeVisible();
         } else if (pageInfo.name === 'AI Writing Studio') {
           await expect(page.locator('button[onclick="generateAcademicDraft()"]')).toBeVisible();
+        } else if (pageInfo.name === 'Extraction Review Workbench') {
+          await expect(page.locator('#schemaSelect')).toBeVisible();
+          await page.click('button:has-text("Validate")');
+          await expect(page.locator('#warningsBox')).toBeVisible();
         } else if (pageInfo.name === 'Settings') {
           await page.click('button[onclick="showSection(\'ide\')"]');
           await expect(page.locator('#section-ide')).toBeVisible();
@@ -385,4 +537,49 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
     });
   }
+
+  test('business flow: open Writing Studio, add evidence, generate draft, and view Citation Audit', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/ai_writer/index.html`);
+    await page.waitForTimeout(500);
+    await page.fill('#writingTopic', 'Li2S4 adsorption energy Fe-N4');
+    await page.check('#paperChecklist input[type="checkbox"]');
+    await page.click('button:has-text("Search evidence")');
+    await expect(page.locator('#evidencePanel')).toContainText('score');
+    await page.click('button[onclick="generateAcademicDraft()"]');
+    await expect(page.locator('#tab-outline')).toContainText('Intro');
+    await page.click('button:has-text("Run Citation Audit")');
+    await expect(page.locator('#tab-audit')).toContainText('Citation Audit');
+  });
+
+  test('business flow: Paper Detail shows evidence panel and claim detail', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/paper_detail/index.html?paper_id=paper-1`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('#evidencePanel')).toContainText('supported');
+    await page.click('#evidencePanel button');
+    await expect(page.locator('#evidenceDetail')).toContainText('paper_id');
+    await expect(page.locator('#evidenceDetail')).toContainText('chunk_id');
+  });
+
+  test('business flow: open manual validation workbench and validate extraction results', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('#schemaForm')).toContainText('value');
+    await page.click('button:has-text("Validate")');
+    await expect(page.locator('#warningsBox')).toContainText('No validation warnings');
+  });
+
+  test('business flow: view DFT extraction results and evidence link', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('#dftTable')).toContainText('Li2S4');
+    await page.click('button:has-text("evidence link")');
+    await expect(page.locator('#evidenceDetail')).toContainText('evidence_text');
+  });
+
+  test('business flow: literature library opens extraction job center', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('button:has-text("Extraction Jobs")');
+    await expect(page.locator('#acquisitionResult')).toContainText('Extraction Job Center');
+  });
 });

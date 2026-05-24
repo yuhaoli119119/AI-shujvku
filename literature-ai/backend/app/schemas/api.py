@@ -295,6 +295,8 @@ class RAGWriteResponse(BaseModel):
     figure_storyline: list[str] = Field(default_factory=list)
     retrieved: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     citation_guard: dict[str, Any] = Field(default_factory=dict)
+    evidence_claims: list[dict[str, Any]] = Field(default_factory=list)
+    citation_audit: dict[str, Any] = Field(default_factory=dict)
     guard_actions: dict[str, str] = Field(default_factory=dict)
 
 

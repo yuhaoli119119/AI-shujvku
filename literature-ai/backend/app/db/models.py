@@ -237,6 +237,32 @@ class EvidenceSpan(Base):
     confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
 
 
+class EvidenceClaim(Base):
+    __tablename__ = "evidence_claims"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    claim_text: Mapped[str] = mapped_column(sa.Text)
+    source_type: Mapped[str] = mapped_column(sa.String(64), default="manual", index=True)
+    target_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    paper_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    chunk_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    section_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("paper_sections.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    page_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    span_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    span_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    evidence_text: Mapped[str] = mapped_column(sa.Text)
+    confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    validation_status: Mapped[str] = mapped_column(sa.String(32), default="unverified", index=True)
+    meta: Mapped[dict | None] = mapped_column("metadata", json_type(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
 class PaperNote(Base):
     __tablename__ = "paper_notes"
 

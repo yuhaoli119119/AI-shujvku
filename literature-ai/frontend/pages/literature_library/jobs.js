@@ -236,6 +236,50 @@ function renderWorkflowList(title, items, formatter) {
     }).join("");
 }
 
+async function openExtractionJobCenter() {
+    openAddLiteraturePanel("ai");
+    setAcquisitionResult('<div class="workspace-empty small-empty">Loading extraction jobs...</div>');
+    try {
+        const jobs = await fetchJSON("/api/extraction/jobs?limit=30");
+        renderExtractionJobs(jobs || []);
+    } catch (error) {
+        setAcquisitionResult('<div class="workspace-empty small-empty">Extraction Job Center failed: ' + esc(error.message) + "</div>");
+    }
+}
+
+function renderExtractionJobs(jobs) {
+    if (!jobs.length) {
+        setAcquisitionResult('<div class="writer-block"><h3>Extraction Job Center</h3><div class="subtle">No extraction jobs yet. Use Re-extract on a paper or the validation workbench to queue one.</div></div>');
+        return;
+    }
+    setAcquisitionResult(
+        '<div class="writer-block"><h3>Extraction Job Center</h3><div class="subtle">Persistent extraction jobs survive refresh through workflow_jobs.</div></div>' +
+        jobs.map(function(job) {
+            const canRetry = job.status === "failed" || job.status === "cancelled";
+            return (
+                '<div class="section-card">' +
+                    '<h3>' + esc(job.type || "extraction") + " · " + esc(job.status || "-") + "</h3>" +
+                    '<div class="subtle">Job ' + esc(job.job_id || "-") + " | Library " + esc(job.library_name || "-") + "</div>" +
+                    '<div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div>" +
+                    (job.error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
+                    (canRetry ? '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="retryExtractionJob(' + JSON.stringify(job.job_id).replace(/"/g, "&quot;") + ')">Retry</button></div>' : "") +
+                "</div>"
+            );
+        }).join("")
+    );
+}
+
+async function retryExtractionJob(jobId) {
+    if (!jobId) return;
+    try {
+        const job = await fetchJSON("/api/extraction/jobs/" + encodeURIComponent(jobId) + "/retry", { method: "POST" });
+        showToast("Extraction retry queued: " + job.job_id, "success");
+        openExtractionJobCenter();
+    } catch (error) {
+        showToast("Extraction retry failed: " + error.message, "error");
+    }
+}
+
 async function downloadIdentifier(identifier) {
     if (!identifier) return;
     showProgress("正在下载并收录...");

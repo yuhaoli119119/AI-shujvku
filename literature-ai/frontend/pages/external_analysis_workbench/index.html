@@ -3,37 +3,184 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>正在跳转到外部 AI 审核</title>
-  <!-- Shared Resources -->
+  <title>Extraction Review Workbench - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
-  <script>
-    (() => {
-      const params = new URLSearchParams(window.location.search);
-      const target = new URL('/pages/literature_library/index.html', window.location.origin);
-      target.searchParams.set('tab', 'review');
-      const paperId = params.get('review_paper_id') || params.get('paper_id');
-      if (paperId) target.searchParams.set('paper_id', paperId);
-      window.location.replace(target.toString());
-    })();
-  </script>
   <style>
-    body {
-      background: var(--color-bg);
-      color: var(--color-text);
-      font-family: var(--font-body);
-    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
+    .shell { max-width: 1440px; margin: 0 auto; padding: calc(var(--nav-height) + 28px) 24px 36px; }
+    .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+    .page-head h1 { margin: 0 0 6px; font-size: 26px; }
+    .page-head p { margin: 0; color: var(--color-text-secondary); font-size: 14px; }
+    .toolbar, .warnings, .panel-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 16px; box-shadow: var(--shadow-card); margin-bottom: 16px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+    label { display: block; font-size: 12px; font-weight: 800; color: var(--color-text-secondary); margin-bottom: 6px; }
+    input, select, textarea { border: 1px solid var(--color-border-strong); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); font: inherit; padding: 10px; }
+    textarea { width: 100%; min-height: 86px; resize: vertical; }
+    .layout { display: grid; grid-template-columns: 42% minmax(0, 1fr); gap: 16px; align-items: start; }
+    .section-card { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+    .section-card button { border: 0; background: transparent; color: var(--color-text); font-weight: 800; text-align: left; cursor: pointer; padding: 0; }
+    .field-grid { display: grid; grid-template-columns: 160px 1fr 90px 110px; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .field-grid input { width: 100%; }
+    .field-name { font-weight: 800; font-size: 13px; }
+    .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
+    .warning-row { border-left: 4px solid var(--color-warning); padding: 8px 10px; background: var(--color-warning-bg); border-radius: var(--radius); margin-bottom: 8px; }
+    .footer-actions { position: sticky; bottom: 0; display: flex; gap: 10px; justify-content: flex-end; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px; box-shadow: var(--shadow-card); margin-top: 16px; }
+    .empty-state { text-align: center; color: var(--color-text-secondary); padding: 36px 12px; }
+    .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
+    @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } .field-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div id="topnav-mount"></div>
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <h1>Extraction Review Workbench</h1>
+        <p>Human validation for DFT/catalysis schema extraction. Evidence stays visible while fields are reviewed.</p>
+      </div>
+      <a class="btn ghost" href="../dft_database/index.html">Open DFT Database</a>
+    </header>
+
+    <section class="toolbar">
+      <div><label for="paperSelect">Paper</label><select id="paperSelect" onchange="loadSelectedPaper()"><option value="">Loading...</option></select></div>
+      <div><label for="schemaSelect">Schema</label><select id="schemaSelect" onchange="renderSchemaForm()"><option>CatalystSample</option><option>DFTSetting</option><option selected>DFTResult</option><option>MechanismClaim</option><option>ElectrochemicalPerformance</option></select></div>
+      <button class="btn primary" onclick="validateCurrent()">Validate</button>
+      <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
+    </section>
+
+    <section class="warnings" id="warningsBox"><div class="empty-state">Validation warnings will appear here.</div></section>
+
+    <section class="layout">
+      <aside class="panel-card">
+        <h3>Paper / Section / Evidence</h3>
+        <div id="paperMeta" class="mono">Select a paper.</div>
+        <div id="sectionList" style="margin-top:12px;"></div>
+        <h3>Selected Evidence</h3>
+        <div id="evidenceText" class="mono">No evidence selected.</div>
+      </aside>
+      <section class="panel-card">
+        <h3>Schema Field Form</h3>
+        <div id="schemaForm"><div class="empty-state">Load extraction results to edit fields.</div></div>
+      </section>
+    </section>
+
+    <section class="footer-actions">
+      <button class="btn ghost" onclick="saveDraft()">Save</button>
+      <button class="btn primary" onclick="markVerified()">Mark verified</button>
+      <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
+    </section>
+  </main>
+  <div id="toast" class="toast"></div>
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      TopNav.init({ currentPage: 'external', mountId: 'topnav-mount' });
+    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null };
+    function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+    function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
+    async function fetchJSON(url, options) {
+      options = options || {}; options.headers = options.headers || {};
+      const token = sessionStorage.getItem("litai-settings-token"); if (token) options.headers["X-Settings-Token"] = token;
+      const resp = await fetch(url, options); const text = await resp.text();
+      let data = null; try { data = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+      return data;
+    }
+    async function loadPapers() {
+      try {
+        state.papers = await fetchJSON("/api/papers?limit=200");
+        const select = document.getElementById("paperSelect");
+        select.innerHTML = state.papers.map(p => `<option value="${esc(p.id)}">${esc(p.title || p.id)}</option>`).join("");
+        const params = new URLSearchParams(location.search);
+        if (params.get("paper_id")) select.value = params.get("paper_id");
+        await loadSelectedPaper();
+      } catch (error) {
+        showToast("Failed to load papers: " + error.message);
+      }
+    }
+    async function loadSelectedPaper() {
+      const paperId = document.getElementById("paperSelect").value;
+      if (!paperId) return;
+      try {
+        state.paper = await fetchJSON(`/api/papers/${paperId}`);
+        state.extraction = await fetchJSON(`/api/extraction/results/${paperId}`);
+        renderPaper();
+        renderWarnings(state.extraction.validation_warnings || []);
+        renderSchemaForm();
+      } catch (error) {
+        showToast("Failed to load extraction results: " + error.message);
+      }
+    }
+    function renderPaper() {
+      const p = state.paper || {};
+      document.getElementById("paperMeta").textContent = JSON.stringify({ id: p.id, title: p.title, year: p.year, journal: p.journal, doi: p.doi }, null, 2);
+      const sections = p.sections || [];
+      document.getElementById("sectionList").innerHTML = sections.length ? sections.slice(0, 16).map((s, idx) => `<div class="section-card"><button onclick="selectSection(${idx})">${esc(s.section_title || s.section_type || "Section")}</button><div class="muted">page ${esc(s.page_start || "-")}</div></div>`).join("") : '<div class="empty-state">No sections.</div>';
+    }
+    function selectSection(index) {
+      const s = (state.paper.sections || [])[index];
+      state.selectedEvidence = { paper_id: state.paper.id, chunk_id: s.id, section_title: s.section_title, page_span: { page_start: s.page_start, page_end: s.page_end }, evidence_text: s.text };
+      document.getElementById("evidenceText").textContent = JSON.stringify(state.selectedEvidence, null, 2);
+    }
+    function renderWarnings(warnings) {
+      const box = document.getElementById("warningsBox");
+      if (!warnings.length) {
+        box.innerHTML = '<div class="empty-state">No validation warnings.</div>';
+        return;
+      }
+      box.innerHTML = warnings.map(w => `<div class="warning-row"><strong>${esc(w.severity)} · ${esc(w.code)}</strong><div>${esc(w.message)}</div><div class="muted">${esc(w.target_type)} ${esc(w.field || "")}</div></div>`).join("");
+    }
+    function renderSchemaForm() {
+      const schema = document.getElementById("schemaSelect").value;
+      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      const first = results[0] || {};
+      const fields = Object.entries(first);
+      const form = document.getElementById("schemaForm");
+      if (!fields.length) {
+        form.innerHTML = '<div class="empty-state">No extracted records for this schema yet.</div>';
+        return;
+      }
+      form.innerHTML = fields.map(([name, field]) => `
+        <div class="field-grid">
+          <div class="field-name">${esc(name)}</div>
+          <input data-field="${esc(name)}" data-part="value" value="${esc(field.value == null ? "" : field.value)}" placeholder="value">
+          <input data-field="${esc(name)}" data-part="unit" value="${esc(field.unit || "")}" placeholder="unit">
+          <input data-field="${esc(name)}" data-part="confidence" value="${esc(field.confidence == null ? "" : field.confidence)}" placeholder="confidence">
+        </div>
+        <textarea data-field="${esc(name)}" data-part="evidence_text" placeholder="evidence_text">${esc(field.evidence_text || "")}</textarea>
+      `).join("");
+    }
+    async function validateCurrent() {
+      if (!state.paper) return;
+      try {
+        const data = await fetchJSON(`/api/extraction/results/${state.paper.id}/validate`, { method: "POST" });
+        renderWarnings(data.validation_warnings || []);
+        showToast("Validation complete: " + data.status);
+      } catch (error) {
+        showToast("Validation failed: " + error.message);
+      }
+    }
+    async function startExtractionJob() {
+      if (!state.paper) return;
+      try {
+        const data = await fetchJSON("/api/extraction/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paper_id: state.paper.id, schemas: ["CatalystSample", "DFTSetting", "DFTResult", "MechanismClaim", "ElectrochemicalPerformance"], force: true })
+        });
+        showToast("Extraction job queued: " + data.status);
+      } catch (error) {
+        showToast("Failed to queue extraction: " + error.message);
+      }
+    }
+    function saveDraft() { showToast("Draft field edits are staged in the browser. Persistence endpoint is not enabled in P0."); }
+    function markVerified() { showToast("Marked as verified in UI. Durable reviewer state is planned after P0."); }
+    document.addEventListener("DOMContentLoaded", () => {
+      TopNav.init({ currentPage: "external", mountId: "topnav-mount" });
+      loadPapers();
     });
   </script>
 </body>

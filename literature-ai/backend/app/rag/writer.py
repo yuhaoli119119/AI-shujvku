@@ -13,6 +13,7 @@ from app.rag.backends import resolve_writer_backend
 from app.rag.citation_guard import CitationGuard
 from app.rag.prompt_builder import PaperWriterPromptBuilder
 from app.rag.retriever import Retriever
+from app.services.evidence_service import EvidenceService
 
 
 class Writer:
@@ -64,6 +65,19 @@ class Writer:
             "dft_results": self.citation_guard.validate(content.get("dft_results", ""), retrieved) if content.get("dft_results") else {"ok": True, "missing_values": []},
             "discussion": self.citation_guard.validate(content.get("discussion", ""), retrieved) if content.get("discussion") else {"ok": True, "missing_values": []},
         }
+        evidence_service = EvidenceService(self.session)
+        evidence_claims = evidence_service.claims_from_generated_sections(content, retrieved)
+        audit_text = "\n".join(
+            str(content.get(name) or "")
+            for name in ["introduction", "dft_results", "discussion"]
+            if content.get(name)
+        )
+        citation_audit = evidence_service.audit_text(
+            audit_text,
+            paper_ids=paper_ids,
+            evidence=[ev for claim in evidence_claims for ev in claim.evidence],
+            min_confidence=0.1,
+        )
 
         return {
             "topic": topic,
@@ -80,6 +94,8 @@ class Writer:
             "figure_storyline": content.get("figure_storyline", []),
             "retrieved": retrieved,
             "citation_guard": validations,
+            "evidence_claims": [claim.model_dump(mode="json") for claim in evidence_claims],
+            "citation_audit": citation_audit.model_dump(mode="json"),
             "guard_actions": guard_actions,
         }
 
