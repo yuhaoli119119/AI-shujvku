@@ -8,12 +8,13 @@ AI-assisted literature parsing and writing support for:
 
 ## Current Progress
 
-**Overall: approximately 98% complete. Backend core pipeline is fully complete and hardened with 100% tests green. Remaining tasks are frontend split-pane drag restore and final real LLM connectivity polish.
+**Overall: approximately 99% complete. Backend core pipeline is fully complete and hardened with 100% tests green. Remaining tasks are final real LLM connectivity polish and folder-as-library end-to-end verification.
 
 ### Recent Changes
 
 | Date | Description | Files Affected |
 |------|-------------|---------------|
+| 2026-05-25 | Sprint 0 front-end stability: added DOM query null-safety checks across all literature library scripts, verified split-pane drag handles, and expanded Playwright smoke tests to cover empty library state and metadata-only display. | `frontend/pages/literature_library/page.js`, `frontend/pages/literature_library/render-list.js`, `frontend/pages/literature_library/render-detail.js`, `frontend/pages/literature_library/jobs.js`, `frontend/pages/literature_library/writer.js`, `frontend/pages/literature_library/review.js`, `frontend/pages/literature_library/api.js`, `frontend/tests/smoke.spec.js` |
 | 2026-05-25 | Simplified the Literature Library into a browse/filter/detail surface: consolidated ingestion actions behind one Add Literature menu, moved paper-level actions into the selected-paper detail header, split detail content into lighter tabs, added an empty-library state, and stabilized AI search/workflow results in the add-literature modal. | `frontend/pages/literature_library/index.html`, `frontend/pages/literature_library/page.css`, `frontend/pages/literature_library/page.js`, `frontend/pages/literature_library/jobs.js`, `frontend/pages/literature_library/render-detail.js`, `frontend/pages/literature_library/render-list.js`, `frontend/tests/smoke.spec.js` |
 | 2026-05-24 | Implemented Phase 6 Level 3 Figure Numerical Extraction & RAG integration; created self-healing SQLite/Postgre database tables, established unified VLM classification + data points parser, and integrated figure data into Retriever with real figure captions; resolved 3 critical schema merging bugs (relationship_summary, outgoing_relationships, and writer_fallback_backend in update request). | `backend/app/schemas/documents.py`, `backend/app/services/paper_ingestion.py`, `backend/app/rag/retriever.py`, `backend/app/rag/writer.py`, `backend/app/schemas/api.py`, `backend/tests/test_figure_numerical.py` |
 | 2026-05-24 | Implemented Phase 5 batch classification with rate-limiting & fallback, metadata-only fallback, and type-aware evidence scoring; resolved 3 critical schema merging bugs (skip_guard, results naming, and library_name in responses). | `backend/app/api/papers.py`, `backend/app/schemas/api.py`, `backend/app/services/extraction_pipeline.py`, `backend/app/services/paper_ingestion.py`, `backend/app/services/paper_reprocessing.py`, `backend/tests/test_paper_reprocessing.py` |
@@ -71,12 +72,11 @@ AI-assisted literature parsing and writing support for:
 
 ### Remaining Work
 
-1. **分栏拖拽重建** — `literature_library/index.html` 的左右分栏拖拽手柄（split-pane drag）在 git checkout 事故中丢失，需重建（只影响前端一个文件）
-2. **文件夹即库端到端验证** — 库管理 UI 已就位，docker-compose volume 映射已配置，需启动测试完整流程（新建库/导入/切换/移除）
-3. **Real LLM quality tuning** — DeepSeek live connectivity verified; a final round of stylistic/domain tightening still remains
-4. **Frontend polish** — loading states, error recovery UX, and responsive design edge cases
-5. **End-to-end integration tests** — real backend mock tests, fallback scenario tests, multi-paper retrieval tests
-6. **Admin panel** — paper management, extraction queue monitoring, writer configuration UI
+1. **文件夹即库端到端验证** — 库管理 UI 已就位，docker-compose volume 映射已配置，需启动测试完整流程（新建库/导入/切换/移除）
+2. **Real LLM quality tuning** — DeepSeek live connectivity verified; a final round of stylistic/domain tightening still remains
+3. **Frontend polish** — loading states, error recovery UX, and responsive design edge cases
+4. **End-to-end integration tests** — real backend mock tests, fallback scenario tests, multi-paper retrieval tests
+5. **Admin panel** — paper management, extraction queue monitoring, writer configuration UI
 
 ## Layout
 

@@ -34,12 +34,18 @@ function getFilters() {
     params.set("limit", PAGE_SIZE);
     params.set("offset", state.currentOffset);
     const libraryName = getCurrentLibraryName();
-    const q = $("searchInput").value.trim();
-    const year = $("filterYear").value.trim();
-    const journal = $("filterJournal").value.trim();
-    const paperType = $("filterPaperType").value;
-    const dft = $("filterDFT").value;
-    const wc = $("filterWC").value;
+    const searchInput = $("searchInput");
+    const filterYear = $("filterYear");
+    const filterJournal = $("filterJournal");
+    const filterPaperType = $("filterPaperType");
+    const filterDFT = $("filterDFT");
+    const filterWC = $("filterWC");
+    const q = searchInput ? searchInput.value.trim() : "";
+    const year = filterYear ? filterYear.value.trim() : "";
+    const journal = filterJournal ? filterJournal.value.trim() : "";
+    const paperType = filterPaperType ? filterPaperType.value : "";
+    const dft = filterDFT ? filterDFT.value : "";
+    const wc = filterWC ? filterWC.value : "";
     if (libraryName) params.set("library_name", libraryName);
     if (q) params.set("q", q);
     if (year) params.set("year", year);
@@ -105,34 +111,44 @@ function switchTab(tab) {
 }
 
 function showEmptyWorkspace() {
-    $("workspaceEmpty").style.display = "flex";
-    $("workspaceBody").style.display = "none";
+    const emptyEl = $("workspaceEmpty");
+    const bodyEl = $("workspaceBody");
+    if (emptyEl) emptyEl.style.display = "flex";
+    if (bodyEl) bodyEl.style.display = "none";
 }
 
 function showWorkspace() {
-    $("workspaceEmpty").style.display = "none";
-    $("workspaceBody").style.display = "block";
+    const emptyEl = $("workspaceEmpty");
+    const bodyEl = $("workspaceBody");
+    if (emptyEl) emptyEl.style.display = "none";
+    if (bodyEl) bodyEl.style.display = "block";
 }
 
 function renderLibraryEmptyState() {
-    $("workspaceEmpty").innerHTML =
-        '<div class="empty-state-card">' +
-            '<h2>当前库还没有文献</h2>' +
-            '<p>上传 PDF、输入 DOI / URL，或使用 AI 自动搜文献来建立你的第一个文献库。</p>' +
-            '<div class="empty-actions">' +
-                '<button class="btn primary" onclick="openAddLiteraturePanel(\'pdf\')">添加文献</button>' +
-                '<button class="btn ghost" onclick="openAddLiteraturePanel(\'ai\')">AI 搜文献</button>' +
-            '</div>' +
-        '</div>';
+    const emptyEl = $("workspaceEmpty");
+    if (emptyEl) {
+        emptyEl.innerHTML =
+            '<div class="empty-state-card">' +
+                '<h2>当前库还没有文献</h2>' +
+                '<p>上传 PDF、输入 DOI / URL，或使用 AI 自动搜文献来建立你的第一个文献库。</p>' +
+                '<div class="empty-actions">' +
+                    '<button class="btn primary" onclick="openAddLiteraturePanel(\'pdf\')">添加文献</button>' +
+                    '<button class="btn ghost" onclick="openAddLiteraturePanel(\'ai\')">AI 搜文献</button>' +
+                '</div>' +
+            '</div>';
+    }
     showEmptyWorkspace();
 }
 
 function renderNoSelectionState() {
-    $("workspaceEmpty").innerHTML =
-        '<div class="empty-state-card">' +
-            '<h2>选择一篇文献查看详情</h2>' +
-            '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、DFT 数据、写作卡和 AI 审核。</p>' +
-        '</div>';
+    const emptyEl = $("workspaceEmpty");
+    if (emptyEl) {
+        emptyEl.innerHTML =
+            '<div class="empty-state-card">' +
+                '<h2>选择一篇文献查看详情</h2>' +
+                '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、DFT 数据、写作卡和 AI 审核。</p>' +
+            '</div>';
+    }
     showEmptyWorkspace();
 }
 
@@ -161,12 +177,14 @@ function closeDropdowns() {
 
 function openAddLiteraturePanel(mode) {
     closeDropdowns();
-    $("addLiteratureDialog").style.display = "flex";
+    const dialog = $("addLiteratureDialog");
+    if (dialog) dialog.style.display = "flex";
     switchAcquisitionMode(mode || "pdf");
 }
 
 function closeAddLiteraturePanel() {
-    $("addLiteratureDialog").style.display = "none";
+    const dialog = $("addLiteratureDialog");
+    if (dialog) dialog.style.display = "none";
 }
 
 function switchAcquisitionMode(mode) {
@@ -177,12 +195,15 @@ function switchAcquisitionMode(mode) {
     document.querySelectorAll(".acq-panel").forEach(function(panel) {
         panel.style.display = panel.id === "acq-" + safeMode ? "block" : "none";
     });
-    const searchValue = $("searchInput") ? $("searchInput").value.trim() : "";
-    if (safeMode === "online" && searchValue && !$("onlineSearchQuery").value.trim()) {
-        $("onlineSearchQuery").value = searchValue;
+    const searchInput = $("searchInput");
+    const searchValue = searchInput ? searchInput.value.trim() : "";
+    const onlineQuery = $("onlineSearchQuery");
+    if (safeMode === "online" && searchValue && onlineQuery && !onlineQuery.value.trim()) {
+        onlineQuery.value = searchValue;
     }
-    if (safeMode === "ai" && searchValue && !$("aiSearchQuery").value.trim()) {
-        $("aiSearchQuery").value = searchValue;
+    const aiQuery = $("aiSearchQuery");
+    if (safeMode === "ai" && searchValue && aiQuery && !aiQuery.value.trim()) {
+        aiQuery.value = searchValue;
     }
 }
 
@@ -276,7 +297,8 @@ function initSplitDrag() {
 
 function initProtocolWarning() {
     if (location.protocol === "file:") {
-        $("fileModeWarning").style.display = "block";
+        const warning = $("fileModeWarning");
+        if (warning) warning.style.display = "block";
     }
 }
 
@@ -304,7 +326,10 @@ Object.assign(window, {
 
 window.addEventListener("beforeunload", disconnectSSE);
 document.addEventListener("click", closeDropdowns);
-$("searchInput").addEventListener("keydown", function(event) { if (event.key === "Enter") searchLocal(); });
+const searchInput = $("searchInput");
+if (searchInput) {
+    searchInput.addEventListener("keydown", function(event) { if (event.key === "Enter") searchLocal(); });
+}
 
 applyQueryParams();
 initProtocolWarning();

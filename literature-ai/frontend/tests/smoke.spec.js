@@ -582,4 +582,50 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('button:has-text("Extraction Jobs")');
     await expect(page.locator('#acquisitionResult')).toContainText('Extraction Job Center');
   });
+
+  test('business flow: empty literature library does not crash', async ({ page }) => {
+    await page.route(/\/api\/papers/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, []);
+      }
+      return route.fallback();
+    });
+    await page.route(/\/api\/libraries/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, [
+          { name: 'Empty Library', is_active: true, root_path: '/libraries/empty', paper_count: 0 }
+        ]);
+      }
+      return route.fallback();
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('#paperList')).toBeVisible();
+    await expect(page.locator('.list-empty')).toBeVisible();
+    await expect(page.locator('#workspaceEmpty')).toContainText('当前库还没有文献');
+  });
+
+  test('business flow: literature library displays metadata-only state', async ({ page }) => {
+    await page.route(/\/api\/papers/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, [
+          {
+            id: 'paper-meta-only',
+            title: 'Metadata Only Paper',
+            year: 2025,
+            journal: 'Journal of Metadata',
+            paper_type: 'research',
+            oa_status: 'metadata_only',
+            counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+          }
+        ]);
+      }
+      return route.fallback();
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('.status-chip.meta')).toContainText('仅元数据');
+  });
 });

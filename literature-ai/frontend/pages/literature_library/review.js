@@ -14,15 +14,20 @@ async function runInternalAIParse() {
                 auto_apply: true
             })
         });
-        $("externalRawText").value = "";
+        const extRawText = $("externalRawText");
+        if (extRawText) extRawText.value = "";
         showToast("内部 AI 解析完成。", "success");
-        $("externalRuns").insertAdjacentHTML("afterbegin",
-            '<div class="section-card"><h3>最近一次内部 AI 解析</h3><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
-        );
+        const extRuns = $("externalRuns");
+        if (extRuns) {
+            extRuns.insertAdjacentHTML("afterbegin",
+                '<div class="section-card"><h3>最近一次内部 AI 解析</h3><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
+            );
+        }
         await loadExternalRuns();
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
-        $("externalRuns").innerHTML = '<div class="workspace-empty">内部 AI 解析失败：' + esc(error.message) + "</div>";
+        const extRuns = $("externalRuns");
+        if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">内部 AI 解析失败：' + esc(error.message) + "</div>";
         showToast("内部 AI 解析失败：" + error.message, "error");
     }
     hideProgress();
@@ -34,11 +39,14 @@ async function loadAgentGuide() {
     }
     try {
         const guide = await fetchJSON("/api/system/agent-guide");
-        $("externalRuns").innerHTML =
-            '<div class="section-card"><h3>IDE / MCP AI 连接指南</h3>' +
-            '<div class="subtle">外部 IDE AI 可以按这里的入口读取文献、追加 notes、提出 corrections、触发 parse；网页内部 AI 则使用本页“内部 AI 解析”直接写回候选项。</div>' +
-            '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(guide, null, 2)) + "</div></div>" +
-            $("externalRuns").innerHTML;
+        const extRuns = $("externalRuns");
+        if (extRuns) {
+            extRuns.innerHTML =
+                '<div class="section-card"><h3>IDE / MCP AI 连接指南</h3>' +
+                '<div class="subtle">外部 IDE AI 可以按这里的入口读取文献、追加 notes、提出 corrections、触发 parse；网页内部 AI 则使用本页“内部 AI 解析”直接写回候选项。</div>' +
+                '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(guide, null, 2)) + "</div></div>" +
+                extRuns.innerHTML;
+        }
     } catch (error) {
         showToast("读取 IDE / MCP 指南失败：" + error.message, "error");
     }
@@ -49,7 +57,8 @@ async function importExternalAnalysis() {
         showToast("请先选择一篇文献。", "error");
         return;
     }
-    const raw = $("externalRawText").value.trim();
+    const extRawText = $("externalRawText");
+    const raw = extRawText ? extRawText.value.trim() : "";
     if (!raw) {
         showToast("请粘贴外部 AI 返回结果。", "error");
         return;
@@ -60,19 +69,21 @@ async function importExternalAnalysis() {
         rawPayload = JSON.parse(raw);
     } catch (_) {}
     try {
+        const extSource = $("externalSource");
+        const extSourceLabel = $("externalSourceLabel");
         await fetchJSON(EXTERNAL_API + "/import", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 paper_id: state.selectedPaperId,
-                source: $("externalSource").value.trim() || "manual",
-                source_label: $("externalSourceLabel").value.trim() || "外部AI复核",
+                source: extSource ? extSource.value.trim() || "manual" : "manual",
+                source_label: extSourceLabel ? extSourceLabel.value.trim() || "外部AI复核" : "外部AI复核",
                 raw_text: typeof rawPayload === "string" ? rawPayload : null,
                 raw_payload: rawPayload
             })
         });
         showToast("外部 AI 审核结果已导入。", "success");
-        $("externalRawText").value = "";
+        if (extRawText) extRawText.value = "";
         await loadExternalRuns();
     } catch (error) {
         showToast("导入失败：" + error.message, "error");
@@ -82,37 +93,40 @@ async function importExternalAnalysis() {
 
 async function loadExternalRuns() {
     if (!state.selectedPaperId) return;
-    $("externalRuns").innerHTML = '<div class="workspace-empty">正在加载审核记录...</div>';
+    const extRuns = $("externalRuns");
+    if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">正在加载审核记录...</div>';
     try {
         const runs = await fetchJSON(EXTERNAL_API + "/runs?paper_id=" + encodeURIComponent(state.selectedPaperId));
         state.externalRuns = runs || [];
         if (!state.externalRuns.length) {
-            $("externalRuns").innerHTML = '<div class="workspace-empty">当前文献还没有审核记录。</div>';
+            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有审核记录。</div>';
             return;
         }
-        $("externalRuns").innerHTML = state.externalRuns.map(function(run) {
-            const pending = (run.candidates || []).filter(function(item) {
-                return item.status === "pending" || item.status === "requires_resolution";
-            });
-            return (
-                '<div class="run-card">' +
-                    '<h4>' + esc(run.source_label || run.source || "未命名审核源") + "</h4>" +
-                    '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(run.mapping_status || "-") + "</div>" +
-                    (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
-                    (run.raw_text ? '<div class="mono" style="margin-top:10px;">' + esc(ellipsis(run.raw_text, 1200)) + "</div>" : "") +
-                    '<div class="candidate-toolbar" style="margin-top:12px;">' +
-                        '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">全部写回数据库</button>' +
-                        '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开候选项（' + (run.candidates || []).length + "）</button>" +
-                    '</div>' +
-                    '<div id="run-candidates-' + run.id + '" style="display:none;">' +
-                        renderCandidates(run.candidates || []) +
-                    '</div>' +
-                    (pending.length ? '<div class="subtle" style="margin-top:10px;">待处理候选项：' + pending.length + " 个</div>" : '<div class="subtle" style="margin-top:10px;">当前 run 没有待处理候选项。</div>') +
-                "</div>"
-            );
-        }).join("");
+        if (extRuns) {
+            extRuns.innerHTML = state.externalRuns.map(function(run) {
+                const pending = (run.candidates || []).filter(function(item) {
+                    return item.status === "pending" || item.status === "requires_resolution";
+                });
+                return (
+                    '<div class="run-card">' +
+                        '<h4>' + esc(run.source_label || run.source || "未命名审核源") + "</h4>" +
+                        '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(run.mapping_status || "-") + "</div>" +
+                        (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
+                        (run.raw_text ? '<div class="mono" style="margin-top:10px;">' + esc(ellipsis(run.raw_text, 1200)) + "</div>" : "") +
+                        '<div class="candidate-toolbar" style="margin-top:12px;">' +
+                            '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">全部写回数据库</button>' +
+                            '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开候选项（' + (run.candidates || []).length + "）</button>" +
+                        '</div>' +
+                        '<div id="run-candidates-' + run.id + '" style="display:none;">' +
+                            renderCandidates(run.candidates || []) +
+                        '</div>' +
+                        (pending.length ? '<div class="subtle" style="margin-top:10px;">待处理候选项：' + pending.length + " 个</div>" : '<div class="subtle" style="margin-top:10px;">当前 run 没有待处理候选项。</div>') +
+                    "</div>"
+                );
+            }).join("");
+        }
     } catch (error) {
-        $("externalRuns").innerHTML = '<div class="workspace-empty">审核记录加载失败：' + esc(error.message) + "</div>";
+        if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">审核记录加载失败：' + esc(error.message) + "</div>";
     }
 }
 
@@ -155,14 +169,17 @@ async function materializeRun(runId) {
 }
 
 async function loadAggregate() {
-    $("aggregateResult").innerHTML = '<div class="workspace-empty">正在加载聚合视图...</div>';
+    const aggResult = $("aggregateResult");
+    if (aggResult) aggResult.innerHTML = '<div class="workspace-empty">正在加载聚合视图...</div>';
     try {
         state.aggregateData = await fetchJSON(API_BASE + "/aggregate");
-        $("aggregateResult").innerHTML =
-            '<div class="section-card"><h3>吸附物聚合</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.adsorbate_groups || {}, null, 2)) + "</div></div>" +
-            '<div class="section-card"><h3>催化剂聚合</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.catalyst_groups || {}, null, 2)) + "</div></div>" +
-            '<div class="section-card"><h3>可能别名</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.possible_name_aliases || [], null, 2)) + "</div></div>";
+        if (aggResult) {
+            aggResult.innerHTML =
+                '<div class="section-card"><h3>吸附物聚合</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.adsorbate_groups || {}, null, 2)) + "</div></div>" +
+                '<div class="section-card"><h3>催化剂聚合</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.catalyst_groups || {}, null, 2)) + "</div></div>" +
+                '<div class="section-card"><h3>可能别名</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.possible_name_aliases || [], null, 2)) + "</div></div>";
+        }
     } catch (error) {
-        $("aggregateResult").innerHTML = '<div class="workspace-empty">聚合视图加载失败：' + esc(error.message) + "</div>";
+        if (aggResult) aggResult.innerHTML = '<div class="workspace-empty">聚合视图加载失败：' + esc(error.message) + "</div>";
     }
 }

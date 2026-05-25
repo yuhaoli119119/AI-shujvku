@@ -1,6 +1,8 @@
 function renderPaperList() {
     const container = $("paperList");
-    $("paperListMeta").textContent = state.papers.length + " 篇";
+    const meta = $("paperListMeta");
+    if (meta) meta.textContent = state.papers.length + " 篇";
+    if (!container) return;
     if (!state.papers.length) {
         container.innerHTML = '<div class="list-empty">当前条件下没有文献</div>';
         if (state.currentLibraryTotal === 0) {
@@ -66,16 +68,20 @@ async function fetchPapers() {
             }
         }
     } catch (error) {
-        $("paperList").innerHTML = '<div class="list-empty">列表加载失败：' + esc(error.message) + "</div>";
+        const container = $("paperList");
+        if (container) container.innerHTML = '<div class="list-empty">列表加载失败：' + esc(error.message) + "</div>";
         showToast("列表加载失败：" + error.message, "error");
     }
 }
 
 function updatePagination() {
     const page = Math.floor(state.currentOffset / PAGE_SIZE) + 1;
-    $("pageInfo").textContent = "第 " + page + " 页";
-    $("prevBtn").disabled = state.currentOffset === 0;
-    $("nextBtn").disabled = state.papers.length < PAGE_SIZE;
+    const info = $("pageInfo");
+    const prev = $("prevBtn");
+    const next = $("nextBtn");
+    if (info) info.textContent = "第 " + page + " 页";
+    if (prev) prev.disabled = state.currentOffset === 0;
+    if (next) next.disabled = state.papers.length < PAGE_SIZE;
 }
 
 async function selectPaperById(paperId) {
@@ -94,12 +100,12 @@ function searchLocal() {
 }
 
 function clearFilters() {
-    $("filterYear").value = "";
-    $("filterJournal").value = "";
-    $("filterPaperType").value = "";
-    $("filterDFT").value = "";
-    $("filterWC").value = "";
-    $("searchInput").value = "";
+    const y = $("filterYear"); if (y) y.value = "";
+    const j = $("filterJournal"); if (j) j.value = "";
+    const t = $("filterPaperType"); if (t) t.value = "";
+    const d = $("filterDFT"); if (d) d.value = "";
+    const w = $("filterWC"); if (w) w.value = "";
+    const s = $("searchInput"); if (s) s.value = "";
     state.currentOffset = 0;
     refreshCurrentPage();
 }

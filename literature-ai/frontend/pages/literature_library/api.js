@@ -67,21 +67,26 @@ async function fetchJSON(url, options) {
 }
 
 function getCurrentLibraryName() {
-    return $("librarySelect").value || "";
+    const el = $("librarySelect");
+    return el ? el.value || "" : "";
 }
 
 async function loadLibraries() {
     try {
         const libraries = await fetchJSON(LIB_API);
-        $("librarySelect").innerHTML = libraries.map(function(item) {
-            return '<option value="' + esc(item.name) + '"' + (item.is_active ? " selected" : "") + ">" +
-                esc(item.name) + (item.is_active ? "（当前）" : "") +
-            "</option>";
-        }).join("");
+        const el = $("librarySelect");
+        if (el) {
+            el.innerHTML = libraries.map(function(item) {
+                return '<option value="' + esc(item.name) + '"' + (item.is_active ? " selected" : "") + ">" +
+                    esc(item.name) + (item.is_active ? "（当前）" : "") +
+                "</option>";
+            }).join("");
+        }
         const active = (libraries || []).find(function(item) { return item.is_active; });
         state.currentLibrary = active || null;
         state.currentLibraryTotal = active ? Number(active.paper_count || 0) : 0;
-        $("libStatus").textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
+        const status = $("libStatus");
+        if (status) status.textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
     } catch (error) {
         console.error("loadLibraries failed", error);
     }
@@ -118,14 +123,19 @@ async function removeCurrentLibrary() {
             return;
         }
         window._removeLibName = active.name;
-        $("removeLibMsg").textContent = '确定要移除“' + active.name + '”吗？';
-        $("removeLibDialog").style.display = "flex";
+        const msg = $("removeLibMsg");
+        if (msg) msg.textContent = '确定要移除“' + active.name + '”吗？';
+        const dialog = $("removeLibDialog");
+        if (dialog) dialog.style.display = "flex";
     } catch (error) {
         showToast("读取库信息失败：" + error.message, "error");
     }
 }
 
-function closeRemoveLibraryDialog() { $("removeLibDialog").style.display = "none"; }
+function closeRemoveLibraryDialog() {
+    const dialog = $("removeLibDialog");
+    if (dialog) dialog.style.display = "none";
+}
 
 async function confirmRemoveLibrary() {
     if (!window._removeLibName) return;
@@ -142,20 +152,22 @@ async function confirmRemoveLibrary() {
 }
 
 async function loadDirBrowser(kind) {
-    $(kind + "DirBrowser").textContent = "加载中...";
+    const el = $(kind + "DirBrowser");
+    if (el) el.textContent = "加载中...";
     try {
         const roots = await fetchJSON(LIB_API + "/browse-roots");
         if (!roots.length) {
-            $(kind + "DirBrowser").textContent = "没有可浏览的目录";
+            if (el) el.textContent = "没有可浏览的目录";
             return;
         }
         renderDirBrowser(kind, roots[0].path);
     } catch (error) {
-        $(kind + "DirBrowser").textContent = "加载失败：" + error.message;
+        if (el) el.textContent = "加载失败：" + error.message;
     }
 }
 
 async function renderDirBrowser(kind, path) {
+    const el = $(kind + "DirBrowser");
     try {
         const data = await fetchJSON(LIB_API + "/browse?path=" + encodeURIComponent(path));
         const parts = String(data.current_path || "").replace(/\\/g, "/").split("/").filter(Boolean);
@@ -173,35 +185,45 @@ async function renderDirBrowser(kind, path) {
         (data.subdirs || []).forEach(function(item) {
             html += '<div class="dir-item" data-path="' + esc(item.path) + '">📁 ' + esc(item.name) + "</div>";
         });
-        $(kind + "DirBrowser").innerHTML = html;
-        $(kind + "DirBrowser").querySelectorAll(".bc-link").forEach(function(el) {
-            el.onclick = function() { renderDirBrowser(kind, this.getAttribute("data-path")); };
-        });
-        $(kind + "DirBrowser").querySelectorAll(".dir-item").forEach(function(el) {
-            el.onclick = function() { selectDir(kind, this.getAttribute("data-path")); };
-        });
+        if (el) {
+            el.innerHTML = html;
+            el.querySelectorAll(".bc-link").forEach(function(link) {
+                link.onclick = function() { renderDirBrowser(kind, this.getAttribute("data-path")); };
+            });
+            el.querySelectorAll(".dir-item").forEach(function(item) {
+                item.onclick = function() { selectDir(kind, this.getAttribute("data-path")); };
+            });
+        }
     } catch (error) {
-        $(kind + "DirBrowser").textContent = "浏览失败：" + error.message;
+        if (el) el.textContent = "浏览失败：" + error.message;
     }
 }
 
 function selectDir(kind, path) {
     const el = $(kind + "SelectedPath");
-    el.style.display = "block";
-    el.textContent = path;
+    if (el) {
+        el.style.display = "block";
+        el.textContent = path;
+    }
     window["_selectedPath_" + kind] = path;
     renderDirBrowser(kind, path);
 }
 
 function openCreateLibraryDialog() {
-    $("createLibName").value = "";
-    $("createLibSelectedPath").style.display = "none";
+    const name = $("createLibName");
+    if (name) name.value = "";
+    const path = $("createLibSelectedPath");
+    if (path) path.style.display = "none";
     window._selectedPath_createLib = null;
-    $("createLibDialog").style.display = "flex";
+    const dialog = $("createLibDialog");
+    if (dialog) dialog.style.display = "flex";
     loadDirBrowser("createLib");
 }
 
-function closeCreateLibraryDialog() { $("createLibDialog").style.display = "none"; }
+function closeCreateLibraryDialog() {
+    const dialog = $("createLibDialog");
+    if (dialog) dialog.style.display = "none";
+}
 
 async function setCreateDefaultLocation() {
     let path = "";
@@ -212,13 +234,17 @@ async function setCreateDefaultLocation() {
         console.warn("Failed to load browse roots", error);
     }
     if (!path) return;
-    $("createLibSelectedPath").style.display = "block";
-    $("createLibSelectedPath").textContent = path;
+    const pathEl = $("createLibSelectedPath");
+    if (pathEl) {
+        pathEl.style.display = "block";
+        pathEl.textContent = path;
+    }
     window._selectedPath_createLib = path;
 }
 
 async function submitCreateLibrary() {
-    const name = $("createLibName").value.trim();
+    const nameEl = $("createLibName");
+    const name = nameEl ? nameEl.value.trim() : "";
     if (!name) {
         showToast("请输入库名称。", "error");
         return;
@@ -239,13 +265,18 @@ async function submitCreateLibrary() {
 }
 
 function openImportLibraryDialog() {
-    $("importLibSelectedPath").style.display = "none";
+    const path = $("importLibSelectedPath");
+    if (path) path.style.display = "none";
     window._selectedPath_importLib = null;
-    $("importLibDialog").style.display = "flex";
+    const dialog = $("importLibDialog");
+    if (dialog) dialog.style.display = "flex";
     loadDirBrowser("importLib");
 }
 
-function closeImportLibraryDialog() { $("importLibDialog").style.display = "none"; }
+function closeImportLibraryDialog() {
+    const dialog = $("importLibDialog");
+    if (dialog) dialog.style.display = "none";
+}
 
 async function submitImportLibrary() {
     if (!window._selectedPath_importLib) {

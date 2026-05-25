@@ -62,16 +62,19 @@ function setAcquisitionResult(html) {
 }
 
 async function searchOnline() {
-    const query = (($("onlineSearchQuery") && $("onlineSearchQuery").value) || $("searchInput").value || "").trim();
+    const onlineQuery = $("onlineSearchQuery");
+    const searchInput = $("searchInput");
+    const query = ((onlineQuery && onlineQuery.value) || (searchInput ? searchInput.value : "") || "").trim();
     if (!query) {
         showToast("请先输入检索关键词。", "error");
         return;
     }
     openAddLiteraturePanel("online");
-    $("onlineSearchQuery").value = query;
+    if (onlineQuery) onlineQuery.value = query;
     setAcquisitionResult('<div class="workspace-empty small-empty">正在从 OpenAlex / arXiv 检索，最多拉取 100 篇...</div>');
     try {
-        const limit = clampSearchLimit($("onlineSearchMaxResults").value);
+        const maxResults = $("onlineSearchMaxResults");
+        const limit = clampSearchLimit(maxResults ? maxResults.value : 100);
         const data = await fetchJSON(API_BASE + "/discovery/search?q=" + encodeURIComponent(query) + "&limit=" + limit);
         const stats = mergeDiscoveryResults(data.items || []);
         renderDiscoveryResults({ items: state.discoveryCache }, stats, "在线检索结果");
@@ -122,22 +125,25 @@ function getAIQueryRewriteHint() {
 }
 
 async function runAISearch() {
-    const query = ($("aiSearchQuery").value || $("searchInput").value).trim();
+    const aiQuery = $("aiSearchQuery");
+    const searchInput = $("searchInput");
+    const query = ((aiQuery ? aiQuery.value : "") || (searchInput ? searchInput.value : "")).trim();
     if (!query) {
         showToast("请输入 AI 搜索查询。", "error");
         return;
     }
     openAddLiteraturePanel("ai");
-    $("aiSearchQuery").value = query;
+    if (aiQuery) aiQuery.value = query;
     setAcquisitionResult('<div class="workspace-empty small-empty">AI 正在扩展查询并筛选文献...</div>');
     try {
+        const maxResults = $("aiSearchMaxResults");
         const data = await fetchJSON(API_BASE + "/ai_search", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 query: query,
                 model: getAIQueryRewriteModel(),
-                max_results: clampSearchLimit($("aiSearchMaxResults").value),
+                max_results: clampSearchLimit(maxResults ? maxResults.value : 100),
                 providers: [],
                 skip_guard: false
             })
@@ -156,7 +162,9 @@ async function runAISearch() {
 }
 
 async function runAIWorkflow() {
-    const query = ($("aiSearchQuery").value || $("searchInput").value).trim();
+    const aiQuery = $("aiSearchQuery");
+    const searchInput = $("searchInput");
+    const query = ((aiQuery ? aiQuery.value : "") || (searchInput ? searchInput.value : "")).trim();
     if (!query) {
         showToast("请输入 AI 搜索查询。", "error");
         return;
@@ -164,6 +172,8 @@ async function runAIWorkflow() {
     openAddLiteraturePanel("ai");
     showProgress("AI 工作流已转入后台，不会卡住页面...");
     try {
+        const maxResults = $("aiSearchMaxResults");
+        const maxDownloads = $("aiWorkflowMaxDownloads");
         const job = await fetchJSON(API_BASE + "/ai_workflow/jobs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -171,8 +181,8 @@ async function runAIWorkflow() {
                 query: query,
                 library_name: getCurrentLibraryName(),
                 model: getAIQueryRewriteModel(),
-                max_results: clampSearchLimit($("aiSearchMaxResults").value),
-                max_downloads: clampSearchLimit($("aiWorkflowMaxDownloads").value),
+                max_results: clampSearchLimit(maxResults ? maxResults.value : 100),
+                max_downloads: clampSearchLimit(maxDownloads ? maxDownloads.value : 100),
                 providers: [],
                 skip_existing: true
             })
@@ -305,13 +315,14 @@ async function downloadIdentifier(identifier) {
 }
 
 function downloadByDOI() {
-    const identifier = $("doiInput").value.trim();
+    const doiInput = $("doiInput");
+    const identifier = doiInput ? doiInput.value.trim() : "";
     if (!identifier) {
         showToast("请输入 DOI 或 URL。", "error");
         return;
     }
     downloadIdentifier(identifier).then(function() {
-        $("doiInput").value = "";
+        if (doiInput) doiInput.value = "";
     });
 }
 
@@ -344,9 +355,12 @@ async function rerunExtraction() {
     try {
         const data = await fetchJSON(API_BASE + "/" + state.selectedPaperId + "/extract", { method: "POST" });
         showToast("重新解析完成。", "success");
-        $("summaryContent").insertAdjacentHTML("afterbegin",
-            '<div class="section-card"><h3>最近一次重解析结果</h3><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
-        );
+        const summary = $("summaryContent");
+        if (summary) {
+            summary.insertAdjacentHTML("afterbegin",
+                '<div class="section-card"><h3>最近一次重解析结果</h3><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
+            );
+        }
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
         showToast("重解析失败：" + error.message, "error");

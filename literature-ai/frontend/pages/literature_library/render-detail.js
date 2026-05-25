@@ -1,21 +1,29 @@
 function renderWorkspaceHeader(paper) {
     const counts = paper.counts || {};
-    $("paperTitle").textContent = paper.title || "未命名文献";
-    $("paperMeta").textContent = [
-        paper.year || "-",
-        paper.journal || "-",
-        paper.paper_type ? paper.paper_type : "未知类型",
-        paper.doi ? "DOI: " + paper.doi : "无 DOI"
-    ].join(" | ");
-    $("paperHeaderBadges").innerHTML =
-        (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + "</span>" : "") +
-        paperStatusChip(paper) +
-        badge(counts.sections) +
-        badge(counts.figures) +
-        badge(counts.dft_results) +
-        badge(counts.mechanism_claims) +
-        badge(counts.writing_cards);
-    $("writerTopic").value = paper.title || "";
+    const titleEl = $("paperTitle");
+    const metaEl = $("paperMeta");
+    const badgesEl = $("paperHeaderBadges");
+    const topicEl = $("writerTopic");
+    if (titleEl) titleEl.textContent = paper.title || "未命名文献";
+    if (metaEl) {
+        metaEl.textContent = [
+            paper.year || "-",
+            paper.journal || "-",
+            paper.paper_type ? paper.paper_type : "未知类型",
+            paper.doi ? "DOI: " + paper.doi : "无 DOI"
+        ].join(" | ");
+    }
+    if (badgesEl) {
+        badgesEl.innerHTML =
+            (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + "</span>" : "") +
+            paperStatusChip(paper) +
+            badge(counts.sections) +
+            badge(counts.figures) +
+            badge(counts.dft_results) +
+            badge(counts.mechanism_claims) +
+            badge(counts.writing_cards);
+    }
+    if (topicEl) topicEl.value = paper.title || "";
 }
 
 function renderListBlock(title, items, formatter) {
@@ -140,28 +148,45 @@ function renderDetail(detail) {
         );
     });
 
-    $("summaryContent").innerHTML =
-        summaryCards +
-        baseInfo +
-        abstractCard +
-        comprehensiveCard;
-    $("sectionsContent").innerHTML =
-        sectionCards +
-        referenceCards +
-        renderJSONCards("出向关系", detail.outgoing_relationships || []) +
-        renderJSONCards("入向关系", detail.incoming_relationships || []);
-    $("figuresContent").innerHTML =
-        figureCards +
-        renderJSONCards("表格", detail.tables || []);
-    $("dftContent").innerHTML =
-        renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
-        renderJSONCards("催化剂样本", detail.catalyst_samples_items || []) +
-        renderJSONCards("DFT 结果", detail.dft_results_items || []) +
-        renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
-        renderJSONCards("机理声明", detail.mechanism_claims_items || []);
-    $("writingContent").innerHTML =
-        renderJSONCards("写作卡片", detail.writing_cards_items || []);
-    $("aggregateResult").innerHTML = "";
+    const summaryEl = $("summaryContent");
+    const sectionsEl = $("sectionsContent");
+    const figuresEl = $("figuresContent");
+    const dftEl = $("dftContent");
+    const writingEl = $("writingContent");
+    const aggregateEl = $("aggregateResult");
+    
+    if (summaryEl) {
+        summaryEl.innerHTML =
+            summaryCards +
+            baseInfo +
+            abstractCard +
+            comprehensiveCard;
+    }
+    if (sectionsEl) {
+        sectionsEl.innerHTML =
+            sectionCards +
+            referenceCards +
+            renderJSONCards("出向关系", detail.outgoing_relationships || []) +
+            renderJSONCards("入向关系", detail.incoming_relationships || []);
+    }
+    if (figuresEl) {
+        figuresEl.innerHTML =
+            figureCards +
+            renderJSONCards("表格", detail.tables || []);
+    }
+    if (dftEl) {
+        dftEl.innerHTML =
+            renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
+            renderJSONCards("催化剂样本", detail.catalyst_samples_items || []) +
+            renderJSONCards("DFT 结果", detail.dft_results_items || []) +
+            renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
+            renderJSONCards("机理声明", detail.mechanism_claims_items || []);
+    }
+    if (writingEl) {
+        writingEl.innerHTML =
+            renderJSONCards("写作卡片", detail.writing_cards_items || []);
+    }
+    if (aggregateEl) aggregateEl.innerHTML = "";
 }
 
 function renderDetailSkeleton() {
