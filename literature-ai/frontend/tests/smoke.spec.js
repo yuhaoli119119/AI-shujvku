@@ -192,6 +192,10 @@ async function mockApi(route) {
     return jsonResponse(route, PAPERS);
   }
 
+  if (pathname === '/api/papers/paper-1' && method === 'DELETE') {
+    return jsonResponse(route, { status: 'deleted', paper_id: 'paper-1' });
+  }
+
   if (pathname === '/api/papers/aggregate') {
     return jsonResponse(route, {
       adsorbate_groups: { 'H*': ['paper-1'] },
@@ -784,6 +788,39 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#internalAIConfigGuide')).toContainText('网页内 AI 尚未配置，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。');
     await expect(page.locator('#internalAIConfigGuide button:has-text("打开设置页")')).toBeVisible();
+  });
+
+  test('business flow: delete current paper opens confirmation and clears selection', async ({ page }) => {
+    let deleted = false;
+
+    await page.route(/\/api\/papers(\?|$)/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, deleted ? [] : PAPERS);
+      }
+      return route.fallback();
+    });
+    await page.route(/\/api\/papers\/paper-1$/, route => {
+      if (route.request().method() === 'DELETE') {
+        deleted = true;
+        return jsonResponse(route, { status: 'deleted', paper_id: 'paper-1' });
+      }
+      return jsonResponse(route, PAPER_DETAIL);
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-card');
+    await page.click('button:has-text("更多操作")');
+    await page.click('#paperMoreMenu button:has-text("删除当前文献")');
+
+    await expect(page.locator('#deletePaperDialog')).toBeVisible();
+    await expect(page.locator('#deletePaperDialog')).toContainText('Test Paper for Smoke Validation');
+    await expect(page.locator('#deletePaperDialog')).toContainText('默认只删除数据库记录，不删除原 PDF 文件');
+
+    await page.click('#deletePaperDialog button:has-text("确认删除")');
+    await expect(page.locator('#deletePaperDialog')).not.toBeVisible();
+    await expect(page.locator('#paperList')).toContainText('当前条件下没有文献');
+    expect(deleted).toBe(true);
   });
 
   test('business flow: empty literature library does not crash', async ({ page }) => {

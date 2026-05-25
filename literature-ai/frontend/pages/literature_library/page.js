@@ -251,7 +251,8 @@ function openSelectedPdfEvidence() {
     openPdfViewer(state.selectedPaper.id, 1, false, null, "page_only", "从文献标题入口打开：跳转到 PDF 页并显示证据信息。");
 }
 
-function openDeletePaperDialog() {
+function openDeletePaperDialog(event) {
+    if (event) event.stopPropagation();
     closeDropdowns();
     if (!state.selectedPaper) {
         showToast("请先选择一篇文献。", "error");
@@ -266,12 +267,14 @@ function openDeletePaperDialog() {
     if (dialog) dialog.style.display = "flex";
 }
 
-function closeDeletePaperDialog() {
+function closeDeletePaperDialog(event) {
+    if (event) event.stopPropagation();
     const dialog = $("deletePaperDialog");
     if (dialog) dialog.style.display = "none";
 }
 
-async function confirmDeleteCurrentPaper() {
+async function confirmDeleteCurrentPaper(event) {
+    if (event) event.stopPropagation();
     if (!state.selectedPaperId) return;
     try {
         await fetchJSON(API_BASE + "/" + encodeURIComponent(state.selectedPaperId), { method: "DELETE" });
