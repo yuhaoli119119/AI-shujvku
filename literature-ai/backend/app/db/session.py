@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import logging
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -9,6 +10,7 @@ from app.db.models import Base
 
 _engines: dict[str, object] = {}
 _session_factories: dict[str, sessionmaker[Session]] = {}
+logger = logging.getLogger(__name__)
 
 
 def get_engine(database_url: str):
@@ -32,145 +34,161 @@ def init_db(database_url: str) -> None:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
     Base.metadata.create_all(engine)
-    if "papers" in inspect(engine).get_table_names():
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+
+    def has_column(table_name: str, column_name: str) -> bool:
+        if table_name not in table_names:
+            return False
+        return any(column["name"] == column_name for column in inspector.get_columns(table_name))
+
+    def execute_migration_step(table_name: str, column_name: str, statement: str) -> bool:
+        if has_column(table_name, column_name):
+            return False
+        try:
+            connection.execute(text(statement))
+            return True
+        except Exception:
+            logger.exception(
+                "Automatic database migration failed for %s.%s using %s",
+                table_name,
+                column_name,
+                engine.dialect.name,
+            )
+            return False
+
+    if "papers" in table_names:
         with engine.begin() as connection:
+            execute_migration_step(
+                "papers",
+                "comprehensive_analysis",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS comprehensive_analysis JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN comprehensive_analysis JSON"
+                ),
+            )
+            execute_migration_step(
+                "papers",
+                "library_name",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS library_name VARCHAR(255) NOT NULL DEFAULT '\u9ed8\u8ba4\u6587\u732e\u5e93'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN library_name VARCHAR(255) NOT NULL DEFAULT '\u9ed8\u8ba4\u6587\u732e\u5e93'"
+                ),
+            )
+            serial_added = execute_migration_step(
+                "papers",
+                "serial_number",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS serial_number INTEGER"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN serial_number INTEGER"
+                ),
+            )
             try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS comprehensive_analysis JSONB"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE papers ADD COLUMN comprehensive_analysis JSON"
-                    )
-                )
+                if serial_added or has_column("papers", "serial_number"):
+                    if engine.dialect.name == "postgresql":
+                        # Backfill serial_number for existing papers ordered by created_at per library
+                        connection.execute(text("""
+                            UPDATE papers SET serial_number = sub.rn FROM (
+                              SELECT id, ROW_NUMBER() OVER (PARTITION BY library_name ORDER BY created_at) AS rn
+                              FROM papers WHERE serial_number IS NULL
+                            ) sub WHERE papers.id = sub.id
+                        """))
+                    else:
+                        # SQLite: fetch and update individually
+                        rows = connection.execute(
+                            text("SELECT id, library_name, created_at FROM papers WHERE serial_number IS NULL ORDER BY library_name, created_at")
+                        ).fetchall()
+                        counters: dict[str, int] = {}
+                        for row in rows:
+                            lib = row[1] or "\u9ed8\u8ba4\u6587\u732e\u5e93"
+                            max_q = connection.execute(
+                                text("SELECT MAX(serial_number) FROM papers WHERE library_name = :lib AND serial_number IS NOT NULL"),
+                                {"lib": lib}
+                            ).scalar()
+                            if lib not in counters:
+                                counters[lib] = (max_q or 0)
+                            counters[lib] += 1
+                            connection.execute(
+                                text("UPDATE papers SET serial_number = :sn WHERE id = :pid"),
+                                {"sn": counters[lib], "pid": row[0]}
+                            )
             except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS library_name VARCHAR(255) NOT NULL DEFAULT '\u9ed8\u8ba4\u6587\u732e\u5e93'"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE papers ADD COLUMN library_name VARCHAR(255) NOT NULL DEFAULT '\u9ed8\u8ba4\u6587\u732e\u5e93'"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS serial_number INTEGER"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE papers ADD COLUMN serial_number INTEGER"
-                    )
-                )
-                if engine.dialect.name == "postgresql":
-                    # Backfill serial_number for existing papers ordered by created_at per library
-                    connection.execute(text("""
-                        UPDATE papers SET serial_number = sub.rn FROM (
-                          SELECT id, ROW_NUMBER() OVER (PARTITION BY library_name ORDER BY created_at) AS rn
-                          FROM papers WHERE serial_number IS NULL
-                        ) sub WHERE papers.id = sub.id
-                    """))
-                else:
-                    # SQLite: fetch and update individually
-                    rows = connection.execute(
-                        text("SELECT id, library_name, created_at FROM papers WHERE serial_number IS NULL ORDER BY library_name, created_at")
-                    ).fetchall()
-                    counters: dict[str, int] = {}
-                    for row in rows:
-                        lib = row[1] or "\u9ed8\u8ba4\u6587\u732e\u5e93"
-                        max_q = connection.execute(
-                            text("SELECT MAX(serial_number) FROM papers WHERE library_name = :lib AND serial_number IS NOT NULL"),
-                            {"lib": lib}
-                        ).scalar()
-                        if lib not in counters:
-                            counters[lib] = (max_q or 0)
-                        counters[lib] += 1
-                        connection.execute(
-                            text("UPDATE papers SET serial_number = :sn WHERE id = :pid"),
-                            {"sn": counters[lib], "pid": row[0]}
-                        )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_type VARCHAR(20)"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE papers ADD COLUMN paper_type VARCHAR(20)"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS type_confidence DOUBLE PRECISION"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE papers ADD COLUMN type_confidence FLOAT"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE papers ADD COLUMN IF NOT EXISTS classification_source VARCHAR(20)"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE papers ADD COLUMN classification_source VARCHAR(20)"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE paper_tables ADD COLUMN IF NOT EXISTS prov JSONB"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE paper_tables ADD COLUMN prov JSON"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS role_confidence FLOAT"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE paper_figures ADD COLUMN role_confidence FLOAT"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS content_summary TEXT"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE paper_figures ADD COLUMN content_summary TEXT"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS key_elements JSONB"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE paper_figures ADD COLUMN key_elements JSON"
-                    )
-                )
-            except Exception:
-                pass
-            try:
-                connection.execute(
-                    text(
-                        "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS prov JSONB"
-                        if engine.dialect.name == "postgresql"
-                        else "ALTER TABLE paper_figures ADD COLUMN prov JSON"
-                    )
-                )
-            except Exception:
-                pass
+                logger.exception("Automatic database migration failed while backfilling papers.serial_number")
+            execute_migration_step(
+                "papers",
+                "paper_type",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_type VARCHAR(20)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN paper_type VARCHAR(20)"
+                ),
+            )
+            execute_migration_step(
+                "papers",
+                "type_confidence",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS type_confidence DOUBLE PRECISION"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN type_confidence FLOAT"
+                ),
+            )
+            execute_migration_step(
+                "papers",
+                "classification_source",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS classification_source VARCHAR(20)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN classification_source VARCHAR(20)"
+                ),
+            )
+            execute_migration_step(
+                "paper_tables",
+                "prov",
+                (
+                    "ALTER TABLE paper_tables ADD COLUMN IF NOT EXISTS prov JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_tables ADD COLUMN prov JSON"
+                ),
+            )
+            execute_migration_step(
+                "paper_figures",
+                "role_confidence",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS role_confidence FLOAT"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN role_confidence FLOAT"
+                ),
+            )
+            execute_migration_step(
+                "paper_figures",
+                "content_summary",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS content_summary TEXT"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN content_summary TEXT"
+                ),
+            )
+            execute_migration_step(
+                "paper_figures",
+                "key_elements",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS key_elements JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN key_elements JSON"
+                ),
+            )
+            execute_migration_step(
+                "paper_figures",
+                "prov",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS prov JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN prov JSON"
+                ),
+            )
 
 
 def get_db_session():

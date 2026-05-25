@@ -89,6 +89,7 @@ curl http://localhost:8000/api/health
 
 | 日期 | 变更内容 |
 |------|------|
+| 2026-05-25 | Sprint 0 后端稳定性修复：清理 `backend/app/schemas/api.py` 重复 Pydantic schema，保留兼容字段集合；为 `backend/app/db/session.py` 自动迁移失败补充日志，避免关键错误被静默吞掉。 |
 | 2026-05-24 | **网页端与桌面端彻底解耦**。内置原外部 `findpapers` 包，移除 docker-compose 中对宿主机外部 app 目录卷挂载依赖，实现网页端 100% 独立开发与打包。 |
 | 2026-05-23 | RAG Pipeline 硬化：证据包全局去重 + Round-Robin 排序；事实级别 Citation Guard 扩展 mediates/infers_causality 以及 Fact-Claim 校验。 |
 | 2026-05-23 | MCP 协作层服务硬化与外部 AI 提案导入全闭环。 |
