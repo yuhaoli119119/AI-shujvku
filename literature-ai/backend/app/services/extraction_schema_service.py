@@ -20,6 +20,7 @@ from app.schemas.extraction import (
 )
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.review_target_resolver import ACTIVE_REVIEW_STATUSES
+from app.services.evidence_locator_service import EvidenceLocatorService, LOCATOR_WARNING_CODES
 from app.services.extraction_validator import ExtractionValidator
 
 
@@ -44,6 +45,7 @@ class ExtractionSchemaService:
         self.session = session
         self.validator = ExtractionValidator()
         self.review_service = ExtractionReviewService(session)
+        self.locators = EvidenceLocatorService(session)
 
     def schemas(self) -> dict[str, Any]:
         return {name: model.model_json_schema() for name, model in SCHEMA_MODELS.items()}
@@ -53,6 +55,7 @@ class ExtractionSchemaService:
         field_reviews = self.review_service.list_reviews(paper_id)
         warnings = self.validator.validate_payload(payload)
         warnings.extend(self._review_resolution_warnings(field_reviews))
+        warnings.extend(self._locator_warnings(payload))
         status = "needs_review" if any(w.severity in {"warning", "error"} for w in warnings) else "validated"
         return ExtractionResultsResponse(
             paper_id=paper_id,
@@ -67,23 +70,23 @@ class ExtractionSchemaService:
         reviews = self.review_service.reviews_by_target(paper_id)
         results = {
             "CatalystSample": [
-                self._with_reviews("catalyst_samples", row.id, self._catalyst(row).model_dump(mode="json"), reviews)
+                self._with_reviews(paper_id, "catalyst_samples", row.id, self._catalyst(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
             ],
             "DFTSetting": [
-                self._with_reviews("dft_settings", row.id, self._dft_setting(row).model_dump(mode="json"), reviews)
+                self._with_reviews(paper_id, "dft_settings", row.id, self._dft_setting(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()
             ],
             "DFTResult": [
-                self._with_reviews("dft_results", row.id, self._dft_result(row).model_dump(mode="json"), reviews)
+                self._with_reviews(paper_id, "dft_results", row.id, self._dft_result(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
             ],
             "MechanismClaim": [
-                self._with_reviews("mechanism_claims", row.id, self._mechanism(row).model_dump(mode="json"), reviews)
+                self._with_reviews(paper_id, "mechanism_claims", row.id, self._mechanism(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()
             ],
             "ElectrochemicalPerformance": [
-                self._with_reviews("electrochemical_performance", row.id, self._electrochemical(row).model_dump(mode="json"), reviews)
+                self._with_reviews(paper_id, "electrochemical_performance", row.id, self._electrochemical(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper_id)).all()
             ],
         }
@@ -161,8 +164,9 @@ class ExtractionSchemaService:
             decay_per_cycle=self._field(row.decay_per_cycle, unit="%/cycle", evidence_text=ev, confidence=0.55),
         )
 
-    @staticmethod
     def _with_reviews(
+        self,
+        paper_id: UUID,
         canonical_type: str,
         target_id: UUID,
         payload: dict[str, Any],
@@ -172,13 +176,23 @@ class ExtractionSchemaService:
         for field_name, field_value in payload.items():
             if not isinstance(field_value, dict):
                 continue
+            locator = self.locators.resolve_field_locator(
+                paper_id=paper_id,
+                target_type=canonical_type,
+                target_id=str(target_id),
+                field_name=field_name,
+                evidence_text=str(field_value.get("evidence_text") or ""),
+                source_section=field_value.get("source_section"),
+                page_span=PageSpan.model_validate(field_value.get("page_span") or {}),
+            )
             review = reviews.get((canonical_type, str(target_id), field_name))
             if review is None:
-                merged[field_name] = {**field_value, "review": None, "verified": False}
+                merged[field_name] = {**field_value, "evidence_locator": locator.model_dump(mode="json"), "review": None, "verified": False}
                 continue
             is_applicable = review.target_resolution_status in ACTIVE_REVIEW_STATUSES
             merged[field_name] = {
                 **field_value,
+                "evidence_locator": locator.model_dump(mode="json"),
                 "review": review.model_dump(mode="json"),
                 "verified": review.verified if is_applicable else False,
             }
@@ -204,4 +218,39 @@ class ExtractionSchemaService:
                     },
                 )
             )
+        return warnings
+
+    @staticmethod
+    def _locator_warnings(payload: dict[str, list[dict[str, Any]]]) -> list[ValidationWarning]:
+        warnings: list[ValidationWarning] = []
+        for target_type, items in payload.items():
+            for item in items:
+                target_id = item.get("target_id")
+                for field_name, field_value in item.items():
+                    if not isinstance(field_value, dict):
+                        continue
+                    if field_value.get("value") in (None, "", []):
+                        continue
+                    locator = field_value.get("evidence_locator")
+                    if not isinstance(locator, dict):
+                        continue
+                    status = locator.get("locator_status")
+                    code = LOCATOR_WARNING_CODES.get(str(status))
+                    if code is None:
+                        continue
+                    warnings.append(
+                        ValidationWarning(
+                            severity="warning",
+                            code=code,
+                            message=f"{target_type}.{field_name} locator status is {status}.",
+                            target_type=target_type,
+                            target_id=str(target_id) if target_id is not None else None,
+                            field=field_name,
+                            value={
+                                "page": locator.get("page"),
+                                "locator_status": status,
+                                "warning_reason": locator.get("warning_reason"),
+                            },
+                        )
+                    )
         return warnings

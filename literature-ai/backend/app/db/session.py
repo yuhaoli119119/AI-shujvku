@@ -190,6 +190,177 @@ def init_db(database_url: str) -> None:
                 ),
             )
             execute_migration_step(
+                "evidence_locators",
+                "claim_id",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS claim_id UUID"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN claim_id CHAR(32)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "chunk_id",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS chunk_id VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN chunk_id VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "source_type",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) NOT NULL DEFAULT 'unknown'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN source_type VARCHAR(32) NOT NULL DEFAULT 'unknown'"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "page",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS page INTEGER"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN page INTEGER"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "bbox",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS bbox JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN bbox JSON"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "section",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS section VARCHAR(255)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN section VARCHAR(255)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "figure_id",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS figure_id UUID"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN figure_id CHAR(32)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "table_id",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS table_id UUID"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN table_id CHAR(32)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "equation_id",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS equation_id VARCHAR(128)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN equation_id VARCHAR(128)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "target_type",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS target_type VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN target_type VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "target_id",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS target_id VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN target_id VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "field_name",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS field_name VARCHAR(128)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN field_name VARCHAR(128)"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "char_start",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS char_start INTEGER"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN char_start INTEGER"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "char_end",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS char_end INTEGER"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN char_end INTEGER"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "locator_status",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS locator_status VARCHAR(32) NOT NULL DEFAULT 'missing'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN locator_status VARCHAR(32) NOT NULL DEFAULT 'missing'"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "locator_confidence",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS locator_confidence DOUBLE PRECISION NOT NULL DEFAULT 0"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN locator_confidence FLOAT NOT NULL DEFAULT 0"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "parser_source",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS parser_source VARCHAR(32) NOT NULL DEFAULT 'unknown'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN parser_source VARCHAR(32) NOT NULL DEFAULT 'unknown'"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "warning_reason",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS warning_reason TEXT"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN warning_reason TEXT"
+                ),
+            )
+            execute_migration_step(
+                "evidence_locators",
+                "updated_at",
+                (
+                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE evidence_locators ADD COLUMN updated_at DATETIME"
+                ),
+            )
+            execute_migration_step(
                 "extraction_field_reviews",
                 "target_fingerprint",
                 (

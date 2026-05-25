@@ -21,6 +21,7 @@ from app.services.artifact_store import ArtifactStore
 from app.services.pdf_image_extractor import PdfImageExtractor
 from app.services.vlm_service import VLMService
 from app.services.embedding import DeterministicEmbeddingService
+from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_identity import PaperIdentityService
 from app.utils.text_cleaning import normalize_text_tree
@@ -66,6 +67,7 @@ class PaperIngestionService:
             session=session,
             settings=settings,
         )
+        self.locators = EvidenceLocatorService(session)
 
     async def ingest_upload(
         self,
@@ -550,6 +552,25 @@ class PaperIngestionService:
                         confidence=db_dp.confidence,
                     )
                     self.session.add(evidence)
+                    self.session.flush()
+                    bbox = None
+                    if figure.prov and isinstance(figure.prov, list):
+                        first_prov = figure.prov[0]
+                        if isinstance(first_prov, dict):
+                            bbox = first_prov.get("bbox")
+                    self.locators.create_locator_for_span(
+                        paper_id=paper.id,
+                        object_type="figure_data",
+                        object_id=str(db_dp.id),
+                        evidence_text=text_evidence,
+                        page=figure.page,
+                        section=None,
+                        figure=figure.caption or "Figure",
+                        table=None,
+                        confidence=db_dp.confidence,
+                        bbox=bbox,
+                        parser_source="docling" if bbox else "fallback",
+                    )
 
     def _clear_document_entities(self, paper_id: UUID) -> None:
         self.session.execute(

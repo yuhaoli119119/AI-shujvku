@@ -25,6 +25,7 @@ from app.schemas.evidence import (
     EvidenceRef,
     PageSpan,
 )
+from app.services.evidence_locator_service import EvidenceLocatorService
 
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9_+\-.]+")
@@ -40,6 +41,7 @@ class EvidenceService:
 
     def __init__(self, session: Session) -> None:
         self.session = session
+        self.locators = EvidenceLocatorService(session)
 
     def create_claim(self, payload: EvidenceClaimCreate) -> ClaimEvidence:
         ev = payload.evidence
@@ -61,6 +63,9 @@ class EvidenceService:
             meta=payload.metadata,
         )
         self.session.add(row)
+        self.session.commit()
+        self.session.refresh(row)
+        self.locators.create_locator_for_claim(row, ev)
         self.session.commit()
         self.session.refresh(row)
         return self._claim_row_to_schema(row)
@@ -104,6 +109,15 @@ class EvidenceService:
                     section_title=span.section,
                     target_type=span.object_type,
                     target_id=span.object_id,
+                    locator=self.locators.resolve_field_locator(
+                        paper_id=span.paper_id,
+                        target_type=span.object_type,
+                        target_id=span.object_id,
+                        field_name="evidence_text",
+                        evidence_text=span.text,
+                        source_section=span.section,
+                        page_span=PageSpan(page_start=span.page, page_end=span.page),
+                    ),
                 )
             )
 
@@ -192,6 +206,7 @@ class EvidenceService:
             source="evidence_claim",
             target_type=row.target_type,
             target_id=row.target_id,
+            locator=self.locators.get_claim_locator(row.id),
         )
         return ClaimEvidence(
             id=row.id,
@@ -293,6 +308,15 @@ class EvidenceService:
                     section_title=source_section,
                     target_type=target_type,
                     target_id=str(target_id),
+                    locator=self.locators.resolve_field_locator(
+                        paper_id=paper_id,
+                        target_type=target_type,
+                        target_id=str(target_id),
+                        field_name="evidence_text",
+                        evidence_text=ev_text,
+                        source_section=source_section,
+                        page_span=PageSpan(),
+                    ),
                 )
             ],
             confidence=confidence,
@@ -320,6 +344,15 @@ class EvidenceService:
                     section_title=row.section_title,
                     target_type="section",
                     target_id=str(row.id),
+                    locator=self.locators.resolve_field_locator(
+                        paper_id=row.paper_id,
+                        target_type="section",
+                        target_id=str(row.id),
+                        field_name="evidence_text",
+                        evidence_text=text[:1200],
+                        source_section=row.section_title,
+                        page_span=PageSpan(page_start=row.page_start, page_end=row.page_end),
+                    ),
                 )
             )
         return refs
@@ -392,7 +425,8 @@ class EvidenceService:
                         section_title=item.get("section_title") or item.get("source_section"),
                         target_type=item.get("type"),
                         target_id=str(item.get("object_id") or ""),
+                        bbox=item.get("bbox"),
+                        parser_source=item.get("parser_source") or "unknown",
                     )
                 )
         return refs
-

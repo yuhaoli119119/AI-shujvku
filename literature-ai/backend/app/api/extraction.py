@@ -18,8 +18,10 @@ from app.schemas.extraction import (
     ExtractionReviewMarkVerifiedRequest,
     ExtractionValidationResponse,
 )
+from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.extraction_schema_service import ExtractionSchemaService
+from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.workflow_jobs import (
     JOB_TYPE_EXTRACTION,
     build_job_runtime_context,
@@ -199,3 +201,14 @@ async def validate_extraction_results(
         field_reviews=results.field_reviews,
         validation_warnings=results.validation_warnings,
     )
+
+
+@router.get("/results/{paper_id}/evidence-locators", response_model=list[EvidenceLocatorResponse])
+async def get_extraction_result_evidence_locators(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> list[EvidenceLocatorResponse]:
+    if not session.get(Paper, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    results = ExtractionSchemaService(session).results(paper_id)
+    return EvidenceLocatorService(session).list_extraction_locators(paper_id, results.results)

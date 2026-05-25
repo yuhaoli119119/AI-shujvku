@@ -202,6 +202,7 @@ def test_validate_returns_review_state(setup_test_db):
     assert payload["results"]["DFTResult"][0]["value"]["verified"] is True
     assert payload["results"]["DFTResult"][0]["value"]["review"]["reviewer_status"] == "verified"
     assert payload["results"]["DFTResult"][0]["value"]["review"]["target_resolution_status"] == "active"
+    assert payload["results"]["DFTResult"][0]["value"]["evidence_locator"]["locator_status"] in {"needs_reparse", "missing"}
     assert payload["field_reviews"][0]["target_id"] == target_id
 
 
@@ -395,8 +396,11 @@ def test_replace_stage2_marks_stale_review_and_does_not_apply_it(setup_test_db):
     assert validate_response.status_code == 200
     payload = validate_response.json()
     assert payload["results"]["DFTResult"][0]["value"]["verified"] is False
-    assert payload["validation_warnings"][-1]["code"] == "review_target_stale"
-    assert payload["validation_warnings"][-1]["value"]["review_resolution_status"] == "stale"
+    assert any(warning["code"] == "review_target_stale" for warning in payload["validation_warnings"])
+    assert any(
+        warning["code"] == "review_target_stale" and warning["value"]["review_resolution_status"] == "stale"
+        for warning in payload["validation_warnings"]
+    )
 
 
 def test_replace_stage2_marks_ambiguous_review_and_audit_reports_counts(setup_test_db):
@@ -486,3 +490,72 @@ def test_replace_stage2_marks_ambiguous_review_and_audit_reports_counts(setup_te
     assert audit["total_reviews"] == 1
     assert audit["ambiguous"] == 1
     assert audit["active"] == 0
+
+
+def test_validate_reports_locator_warning_without_overriding_stale_review_state(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        paper = Paper(title="Locator Warning Paper", pdf_path="locator-warning.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S4",
+            property_type="adsorption_energy",
+            value=-1.05,
+            unit="eV",
+            source_section="Results",
+            evidence_text="The adsorption energy of Li2S4 is -1.05 eV.",
+            confidence=0.85,
+        )
+        session.add(result)
+        session.commit()
+        paper_id = str(paper.id)
+        paper_uuid = paper.id
+        old_target_id = str(result.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/mark-verified",
+        json={
+            "target_type": "dft_results",
+            "target_id": old_target_id,
+            "field_names": ["value"],
+            "reviewer": "dana",
+            "reviewer_note": "Verified before re-run.",
+        },
+    )
+    assert response.status_code == 200
+
+    with Session() as session:
+        paper = session.get(Paper, paper_uuid)
+        assert paper is not None
+        service = ExtractionPipelineService(session, Settings(storage_root=Path(".")))
+
+        def fake_run_stage2(_paper, _document):
+            replacement = DFTResult(
+                paper_id=_paper.id,
+                adsorbate="Li2S8",
+                property_type="reaction_barrier",
+                value=0.51,
+                unit="eV",
+                source_section="Discussion",
+                evidence_text="The reaction barrier of Li2S8 is 0.51 eV.",
+                confidence=0.83,
+            )
+            session.add(replacement)
+            session.flush()
+            return {"dft_results": 1}
+
+        service.run_stage2 = fake_run_stage2  # type: ignore[method-assign]
+        service.replace_stage2(paper, SimpleNamespace())
+        session.commit()
+
+    validate_response = client.post(f"/api/extraction/results/{paper_id}/validate")
+    assert validate_response.status_code == 200
+    payload = validate_response.json()
+    assert payload["results"]["DFTResult"][0]["value"]["verified"] is False
+    assert any(warning["code"] == "review_target_stale" for warning in payload["validation_warnings"])
+    assert any(warning["code"] == "evidence_locator_needs_reparse" for warning in payload["validation_warnings"])

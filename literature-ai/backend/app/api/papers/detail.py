@@ -9,7 +9,9 @@ from app.config import get_settings
 from app.db.models import Paper
 from app.db.session import get_db_session
 from app.schemas.api import ExtractionRunResponse, PaperDetailResponse
+from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
+from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.paper_reprocessing import PaperReprocessingService
 
 router = APIRouter()
@@ -54,3 +56,14 @@ async def rerun_stage2_extraction(
         mechanism_claims=summary.get("mechanism_claims", 0),
         writing_cards=summary.get("writing_cards", 0),
     )
+
+
+@router.get("/{paper_id}/evidence/locators", response_model=list[EvidenceLocatorResponse])
+async def get_paper_evidence_locators(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> list[EvidenceLocatorResponse]:
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return EvidenceLocatorService(session).list_locators_for_paper(paper_id)

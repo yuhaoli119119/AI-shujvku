@@ -6,8 +6,15 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
-from app.schemas.evidence import CitationAuditRequest, CitationAuditResponse, ClaimEvidence, EvidenceClaimCreate
+from app.schemas.evidence import (
+    CitationAuditRequest,
+    CitationAuditResponse,
+    ClaimEvidence,
+    EvidenceClaimCreate,
+    EvidenceLocatorResponse,
+)
 from app.services.evidence_service import EvidenceService
+from app.services.evidence_locator_service import EvidenceLocatorService
 
 router = APIRouter()
 
@@ -38,6 +45,14 @@ async def create_claim(
     return EvidenceService(session).create_claim(payload)
 
 
+@router.get("/claims/{claim_id}/locator", response_model=EvidenceLocatorResponse)
+async def get_claim_locator(
+    claim_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> EvidenceLocatorResponse:
+    return EvidenceLocatorService(session).get_claim_locator(claim_id)
+
+
 @router.post("/audit", response_model=CitationAuditResponse)
 async def audit_claims(
     payload: CitationAuditRequest,
@@ -49,4 +64,3 @@ async def audit_claims(
         evidence=payload.evidence,
         min_confidence=payload.min_confidence,
     )
-

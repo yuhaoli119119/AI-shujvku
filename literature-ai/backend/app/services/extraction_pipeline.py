@@ -31,6 +31,7 @@ from app.normalizers.chemistry_normalizer import ChemistryNormalizer
 from app.normalizers.dft_normalizer import DFTNormalizer
 from app.schemas.documents import UnifiedPaperDocument
 from app.services.embedding import DeterministicEmbeddingService
+from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
 
 
@@ -50,6 +51,7 @@ class ExtractionPipelineService:
         self.dft_normalizer = DFTNormalizer()
         self.chemistry_normalizer = ChemistryNormalizer()
         self.embedding = DeterministicEmbeddingService(settings.embedding_dimension)
+        self.locators = EvidenceLocatorService(session)
 
     def _rule_based_classify(self, title: str | None, journal: str | None) -> dict[str, Any]:
         """Heuristic rule-based fallback classification when LLM fails or for metadata-only papers."""
@@ -608,6 +610,20 @@ class ExtractionPipelineService:
                 table=location.get("table"),
                 confidence=item.get("confidence"),
             )
+        )
+        self.session.flush()
+        self.locators.create_locator_for_span(
+            paper_id=paper_id,
+            object_type=object_type,
+            object_id=object_id,
+            evidence_text=evidence_text,
+            page=location.get("page"),
+            section=location.get("section") or fallback_section,
+            figure=location.get("figure"),
+            table=location.get("table"),
+            confidence=item.get("confidence"),
+            bbox=location.get("bbox"),
+            parser_source=item.get("parser_source") or "unknown",
         )
 
     @staticmethod

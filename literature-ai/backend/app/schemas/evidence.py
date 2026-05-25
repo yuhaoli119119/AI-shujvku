@@ -13,6 +13,40 @@ class PageSpan(BaseModel):
     span_end: int | None = None
 
 
+class EvidenceBBox(BaseModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    width: float | None = None
+    height: float | None = None
+    coordinate_system: str = "pdf_points"
+
+
+class EvidenceLocatorResponse(BaseModel):
+    id: UUID | None = None
+    paper_id: UUID
+    claim_id: UUID | None = None
+    chunk_id: str | None = None
+    target_type: str | None = None
+    target_id: str | None = None
+    field_name: str | None = None
+    evidence_text: str
+    page: int | None = None
+    bbox: EvidenceBBox | None = None
+    section: str | None = None
+    source_type: str = "unknown"
+    locator_status: str = "missing"
+    locator_confidence: float = 0.0
+    parser_source: str = "unknown"
+    figure_id: UUID | None = None
+    table_id: UUID | None = None
+    equation_id: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    warning_reason: str | None = None
+
+
 class EvidenceRef(BaseModel):
     paper_id: UUID | None = None
     chunk_id: str | None = None
@@ -24,6 +58,12 @@ class EvidenceRef(BaseModel):
     section_title: str | None = None
     target_type: str | None = None
     target_id: str | None = None
+    bbox: EvidenceBBox | None = None
+    parser_source: str = "unknown"
+    locator_status: str | None = None
+    locator_confidence: float | None = None
+    locator_warning: str | None = None
+    locator: EvidenceLocatorResponse | None = None
 
 
 class ClaimEvidence(BaseModel):
@@ -68,4 +108,3 @@ class CitationAuditResponse(BaseModel):
     supported_claims: int
     unsupported_claims: int
     claims: list[CitationAuditItem] = Field(default_factory=list)
-

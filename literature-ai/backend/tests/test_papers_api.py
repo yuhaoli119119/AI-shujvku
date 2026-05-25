@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import Base, ExtractionFieldReview, Paper, WorkflowJob
+from app.db.models import Base, EvidenceLocator, ExtractionFieldReview, Paper, WorkflowJob
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
@@ -1201,3 +1201,63 @@ def test_attach_pdf_preserves_verified_field_reviews_by_paper_id(setup_test_db, 
         review = session.scalar(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == paper.id))
         assert review is not None
         assert review.reviewer_status == "verified"
+
+
+def test_attach_pdf_preserves_evidence_locators_on_original_paper_id(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Locator Placeholder",
+            "year": 2025,
+            "journal": "Locator Journal",
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="LocatorAttachLibrary",
+            title="Locator Placeholder",
+            year=2025,
+            pdf_path="",
+            oa_status="metadata_only",
+            serial_number=12,
+        )
+        session.add(placeholder)
+        session.flush()
+        locator = EvidenceLocator(
+            paper_id=placeholder.id,
+            chunk_id="placeholder-chunk",
+            source_type="text",
+            page=1,
+            section="Body",
+            evidence_text="Metadata placeholder evidence.",
+            locator_status="page_only",
+            locator_confidence=0.7,
+            parser_source="fallback",
+        )
+        session.add(locator)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{placeholder_id}/attach-pdf",
+        files={"file": ("locator.pdf", io.BytesIO(b"%PDF-1.4 locator"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    assert response.json()["paper_id"] == placeholder_id
+
+    locators_response = client.get(f"/api/papers/{placeholder_id}/evidence/locators")
+    assert locators_response.status_code == 200
+    locators = locators_response.json()
+    assert any(item["chunk_id"] == "placeholder-chunk" and item["paper_id"] == placeholder_id for item in locators)
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(placeholder_id))
+        assert paper is not None
+        locators = session.scalars(select(EvidenceLocator).where(EvidenceLocator.paper_id == paper.id)).all()
+        assert len(locators) == 1
+        assert locators[0].chunk_id == "placeholder-chunk"

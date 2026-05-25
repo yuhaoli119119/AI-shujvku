@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.evidence import EvidenceLocatorResponse
 from app.schemas.evidence import PageSpan
 
 
@@ -43,6 +44,7 @@ class EvidenceField(BaseModel):
     source_section: str | None = None
     page_span: PageSpan = Field(default_factory=PageSpan)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    evidence_locator: EvidenceLocatorResponse | None = None
     review: ExtractionFieldReviewResponse | None = None
     verified: bool = False
 

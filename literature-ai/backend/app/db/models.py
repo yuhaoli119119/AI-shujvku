@@ -263,6 +263,40 @@ class EvidenceClaim(Base):
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
 
 
+class EvidenceLocator(Base):
+    __tablename__ = "evidence_locators"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    claim_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("evidence_claims.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    chunk_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    source_type: Mapped[str] = mapped_column(sa.String(32), default="unknown", index=True)
+    page: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    bbox: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    section: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    figure_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("paper_figures.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    table_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("paper_tables.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    equation_id: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, index=True)
+    target_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    field_name: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, index=True)
+    evidence_text: Mapped[str] = mapped_column(sa.Text)
+    char_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    char_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    locator_status: Mapped[str] = mapped_column(sa.String(32), default="missing", index=True)
+    locator_confidence: Mapped[float] = mapped_column(sa.Float, default=0.0)
+    parser_source: Mapped[str] = mapped_column(sa.String(32), default="unknown", index=True)
+    warning_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+
 class PaperNote(Base):
     __tablename__ = "paper_notes"
 
