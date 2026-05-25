@@ -41,7 +41,7 @@ function renderJSONCards(title, items) {
     });
 }
 
-function renderDetail(detail) {
+function renderDetail(detail, audit) {
     const counts = detail.counts || {};
     const summaryCards =
         '<div class="cards">' +
@@ -171,10 +171,48 @@ function renderDetail(detail) {
                 '</div>' +
             '</div>';
     }
+
+    let auditBanner = "";
+    const reviewTabEl = $("tab-review");
+    const existingWarning = $("reviewTabAuditWarning");
+    if (existingWarning) existingWarning.remove();
+    
+    if (audit && (audit.stale > 0 || audit.ambiguous > 0 || audit.unresolved > 0)) {
+        const totalAlerts = (audit.stale || 0) + (audit.ambiguous || 0) + (audit.unresolved || 0);
+        auditBanner = 
+            '<div class="section-card" style="border: 1px dashed var(--color-danger); background: var(--color-danger-bg); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px;">' +
+                '<h3 style="color: var(--color-danger); display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 6px; font-weight: 800;">' +
+                    '⚠️ 人工校验需要重新确认' +
+                '</h3>' +
+                '<p style="color: var(--color-text); font-size: 13px; margin-bottom: 12px; line-height: 1.6;">' +
+                    '该文献有 ' + totalAlerts + ' 条人工校验记录需要重新确认（已失效 ' + (audit.stale || 0) + '，有歧义 ' + (audit.ambiguous || 0) + '，未解析 ' + (audit.unresolved || 0) + '）。' +
+                '</p>' +
+                '<div style="display: flex; gap: 10px; align-items: center;">' +
+                    '<a class="btn primary small" style="text-decoration: none; display: inline-flex; align-items: center;" href="/pages/external_analysis_workbench/index.html?paper_id=' + encodeURIComponent(detail.id) + '">立即核对 (去工作台)</a>' +
+                '</div>' +
+            '</div>';
+        
+        const reviewTabWarningHtml = 
+            '<div id="reviewTabAuditWarning" class="section-card" style="border: 1px dashed var(--color-danger); background: var(--color-danger-bg); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px;">' +
+                '<h3 style="color: var(--color-danger); display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 6px; font-weight: 800;">' +
+                    '⚠️ 人工校验需要重新确认' +
+                '</h3>' +
+                '<p style="color: var(--color-text); font-size: 13px; margin-bottom: 12px; line-height: 1.6;">' +
+                    '该文献有 ' + totalAlerts + ' 条人工校验记录需要重新确认（已失效 ' + (audit.stale || 0) + '，有歧义 ' + (audit.ambiguous || 0) + '，未解析 ' + (audit.unresolved || 0) + '）。' +
+                '</p>' +
+                '<div style="display: flex; gap: 10px; align-items: center;">' +
+                    '<a class="btn primary small" style="text-decoration: none; display: inline-flex; align-items: center;" href="/pages/external_analysis_workbench/index.html?paper_id=' + encodeURIComponent(detail.id) + '">立即核对 (去工作台)</a>' +
+                '</div>' +
+            '</div>';
+        if (reviewTabEl) {
+            reviewTabEl.insertAdjacentHTML("afterbegin", reviewTabWarningHtml);
+        }
+    }
     
     if (summaryEl) {
         summaryEl.innerHTML =
             missingPdfBanner +
+            auditBanner +
             summaryCards +
             baseInfo +
             abstractCard +
@@ -242,9 +280,17 @@ async function loadPaperDetail(paperId) {
         const detail = await fetchJSON(API_BASE + "/" + paperId);
         state.selectedPaperId = paperId;
         state.selectedPaper = detail;
+        
+        let audit = null;
+        try {
+            audit = await fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit");
+        } catch (e) {
+            console.warn("Audit API is not available or failed:", e);
+        }
+        
         renderPaperList();
         renderWorkspaceHeader(detail);
-        renderDetail(detail);
+        renderDetail(detail, audit);
         showWorkspace();
         syncQueryParams();
         if (state.currentTab === "review") loadExternalRuns();

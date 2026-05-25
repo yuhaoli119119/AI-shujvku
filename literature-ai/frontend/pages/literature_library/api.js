@@ -301,3 +301,8 @@ async function submitImportLibrary() {
         showToast("导入失败：" + error.message, "error");
     }
 }
+
+async function fetchExtractionReviewAudit(paperId) {
+    return await fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit");
+}
+

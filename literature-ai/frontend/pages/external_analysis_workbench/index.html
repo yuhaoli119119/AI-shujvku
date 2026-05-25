@@ -57,11 +57,16 @@
           <option value="warnings">仅有警告 (only warnings)</option>
           <option value="unverified">仅未校验 (only unverified)</option>
           <option value="low_confidence">仅低置信度 (&lt; 0.7)</option>
+          <option value="active_remapped">仅有效/已重映射 (only active/remapped)</option>
+          <option value="stale_ambiguous_unresolved">仅失效/有歧义/未解析 (only stale/ambiguous/unresolved)</option>
+          <option value="needs_reconfirmation">仅需重新确认 (only needs reconfirmation)</option>
         </select>
       </div>
       <button class="btn primary" onclick="validateCurrent()">Validate</button>
       <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
     </section>
+
+    <section class="panel-card" id="stabilitySummaryBox" style="display:none; margin-bottom:16px; padding:16px;"></section>
 
     <section class="warnings" id="warningsBox"><div class="empty-state">Validation warnings will appear here.</div></section>
 
@@ -116,12 +121,81 @@
       try {
         state.paper = await fetchJSON(`/api/papers/${paperId}`);
         state.extraction = await fetchJSON(`/api/extraction/results/${paperId}`);
+        
+        try {
+          state.audit = await fetchJSON(`/api/extraction/results/${paperId}/reviews/audit`);
+        } catch (e) {
+          state.audit = { _error: true, message: e.message };
+          console.warn("Audit API failed", e);
+        }
+
         renderPaper();
         renderWarnings(state.extraction.validation_warnings || []);
         renderSchemaForm();
+        renderStabilitySummary();
       } catch (error) {
         showToast("Failed to load extraction results: " + error.message);
       }
+    }
+
+    function renderStabilitySummary() {
+      const box = document.getElementById("stabilitySummaryBox");
+      if (!box) return;
+      if (!state.audit) {
+        box.style.display = "none";
+        return;
+      }
+      box.style.display = "block";
+      
+      if (state.audit._error) {
+        box.innerHTML = `
+          <div style="color: var(--color-warning); font-size: 13px; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+            ⚠️ review audit 暂不可用 (${esc(state.audit.message)})
+          </div>
+        `;
+        return;
+      }
+
+      const total = state.audit.total_reviews || 0;
+      const active = state.audit.active || 0;
+      const remapped = state.audit.remapped || 0;
+      const stale = state.audit.stale || 0;
+      const ambiguous = state.audit.ambiguous || 0;
+      const unresolved = state.audit.unresolved || 0;
+
+      let warningBanner = "";
+      if (stale + ambiguous + unresolved > 0) {
+        warningBanner = `
+          <div style="border: 1px dashed var(--color-danger); background: var(--color-danger-bg); color: var(--color-danger); padding: 12px 16px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; font-weight: 800;">
+            ⚠️ 部分人工校验记录已无法安全匹配到当前抽取结果，请重新确认后再用于导出或写作。
+          </div>
+        `;
+      } else if (total > 0) {
+        warningBanner = `
+          <div style="border: 1px dashed var(--color-success); background: var(--color-success-bg); color: var(--color-success); padding: 12px 16px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; font-weight: 800;">
+            ✓ 人工校验记录与当前抽取结果匹配正常。
+          </div>
+        `;
+      } else {
+        warningBanner = `
+          <div style="border: 1px dashed var(--color-border); background: var(--color-surface-alt); color: var(--color-text-secondary); padding: 12px 16px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; font-weight: 800;">
+            暂无人工校验记录。
+          </div>
+        `;
+      }
+
+      box.innerHTML = `
+        ${warningBanner}
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+          <strong style="font-size: 13px; margin-right: 8px;">人工校验稳定性摘要：</strong>
+          <span style="font-size: 12px; background: var(--color-surface-alt); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);">全部: <strong>${total}</strong></span>
+          <span style="font-size: 12px; background: var(--color-success-bg); color: var(--color-success); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-success)40;">有效: <strong>${active}</strong></span>
+          <span style="font-size: 12px; background: var(--color-primary-bg); color: var(--color-primary); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-primary)40;">已重映射: <strong>${remapped}</strong></span>
+          <span style="font-size: 12px; background: var(--color-danger-bg); color: var(--color-danger); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-danger)40;">已失效: <strong>${stale}</strong></span>
+          <span style="font-size: 12px; background: var(--color-warning-bg); color: var(--color-warning); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-warning)40;">有歧义: <strong>${ambiguous}</strong></span>
+          <span style="font-size: 12px; background: var(--color-danger-bg); color: var(--color-danger); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-danger)40;">未解析: <strong>${unresolved}</strong></span>
+        </div>
+      `;
     }
     function renderPaper() {
       const p = state.paper || {};
@@ -152,7 +226,10 @@
       return "pending";
     }
 
-    function getStatusBadge(status) {
+    function getStatusBadge(status, resStatus) {
+      if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+        return `<span class="status-chip" style="background:var(--color-danger-bg); color:var(--color-danger); border:1px solid var(--color-danger)40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">需重新确认</span>`;
+      }
       let bg = "var(--color-surface-alt)", color = "var(--color-text-secondary)", label = "待校验";
       if (status === "verified") {
         bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "已校验";
@@ -164,6 +241,43 @@
         bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "待校验";
       }
       return `<span class="status-chip" style="background:${bg}; color:${color}; border:1px solid ${color}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">${label}</span>`;
+    }
+
+    function getResolutionBadgeHtml(field) {
+      if (!field || !field.review) return "";
+      const resStatus = field.review.target_resolution_status || "active";
+      const targetLabel = field.review.target_label || "";
+      const fieldPath = field.review.field_path || "";
+      const remapId = field.review.remapped_from_target_id || "";
+      const fingerprint = field.review.target_fingerprint || "";
+
+      let bg = "", color = "", text = "";
+      if (resStatus === "active") {
+        bg = "var(--color-success-bg)"; color = "var(--color-success)"; text = "有效";
+      } else if (resStatus === "remapped") {
+        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; text = "已重映射";
+      } else if (resStatus === "stale") {
+        bg = "var(--color-danger-bg)"; color = "var(--color-danger)"; text = "已失效";
+      } else if (resStatus === "ambiguous") {
+        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; text = "有歧义";
+      } else if (resStatus === "unresolved") {
+        bg = "var(--color-danger-bg)"; color = "var(--color-danger)"; text = "未解析";
+      } else {
+        bg = "var(--color-surface-alt)"; color = "var(--color-text-secondary)"; text = "未知";
+      }
+
+      let html = `<span class="res-status-chip" title="Fingerprint: ${esc(fingerprint)}" style="background:${bg}; color:${color}; border:1px solid ${color}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill); cursor:help;">${text}</span>`;
+      
+      if (targetLabel) {
+        html += ` <span style="font-size: 11px; background: var(--color-surface-alt); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--color-text-secondary);">目标: ${esc(targetLabel)}</span>`;
+      }
+      if (fieldPath) {
+        html += ` <span style="font-size: 11px; background: var(--color-surface-alt); padding: 2px 6px; border-radius: var(--radius-sm); color: var(--color-text-secondary);">路径: ${esc(fieldPath)}</span>`;
+      }
+      if (remapId) {
+        html += ` <div style="font-size: 10px; color: var(--color-text-secondary); margin-top: 2px;">由旧目标 ${esc(remapId.slice(0, 8))} remap 而来</div>`;
+      }
+      return html;
     }
 
     function toggleEvidence(targetId, name) {
@@ -202,12 +316,28 @@
           const isUnverified = !field.verified && status !== "verified";
           const confidence = field.confidence == null ? 1.0 : Number(field.confidence);
           const isLowConfidence = confidence < 0.7;
+          const resStatus = field.review?.target_resolution_status;
           
           if (filterValue === "warnings" && !hasWarning) return;
           if (filterValue === "unverified" && !isUnverified) return;
           if (filterValue === "low_confidence" && !isLowConfidence) return;
+          if (filterValue === "active_remapped") {
+            if (!field.review || !["active", "remapped"].includes(resStatus)) return;
+          }
+          if (filterValue === "stale_ambiguous_unresolved") {
+            if (!field.review || !["stale", "ambiguous", "unresolved"].includes(resStatus)) return;
+          }
+          if (filterValue === "needs_reconfirmation") {
+            const needsReconfirm = (
+              ["stale", "ambiguous", "unresolved"].includes(resStatus) ||
+              status === "needs_check" ||
+              hasWarning ||
+              isLowConfidence
+            );
+            if (!needsReconfirm) return;
+          }
           
-          const statusBadgeHtml = getStatusBadge(status);
+          const statusBadgeHtml = getStatusBadge(status, resStatus);
           const warning = (state.extraction.validation_warnings || []).find(w => 
             w.target_type === record.target_type && 
             w.target_id === record.target_id && 
@@ -216,9 +346,25 @@
           
           let warningHtml = "";
           if (warning) {
+            const isStaleWarning = warning.code === "review_target_stale" || String(warning.message || "").toLowerCase().includes("stale");
             warningHtml = `
               <div class="warning-row" style="margin-bottom:8px; font-size:12px; padding:6px 10px; border-left:3px solid var(--color-danger); background:var(--color-danger-bg); color:var(--color-danger);">
                 ⚠️ <strong>[${esc(warning.code)}]</strong> ${esc(warning.message)}
+                ${isStaleWarning ? `
+                  <div style="margin-top: 4px; font-size: 11px; cursor: pointer; text-decoration: underline;" onclick="const targetEl = this.nextElementSibling; targetEl.style.display = targetEl.style.display === 'none' ? 'block' : 'none';">展开说明 ▾</div>
+                  <div style="display: none; margin-top: 4px; font-weight: normal; font-size: 11px; color: var(--color-text);">
+                    后端阻止了旧人工校验静默应用到当前字段，请重新核对 evidence。
+                  </div>
+                ` : ""}
+              </div>
+            `;
+          }
+          
+          let resStatusWarningHtml = "";
+          if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+            resStatusWarningHtml = `
+              <div class="warning-row" style="margin-bottom:8px; font-size:12px; padding:6px 10px; border-left:3px solid var(--color-danger); background:var(--color-danger-bg); color:var(--color-danger);">
+                ⚠️ <strong>该字段曾被人工校验，但重抽取后无法安全匹配到当前字段。</strong>
               </div>
             `;
           }
@@ -229,10 +375,12 @@
                 <span style="font-weight: 800; font-size: 13px; color: var(--color-primary);">${esc(name)}</span>
                 <div style="display: flex; align-items: center; gap: 8px;">
                   ${statusBadgeHtml}
+                  ${getResolutionBadgeHtml(field)}
                   <button class="btn ghost small" style="height: 24px; padding: 0 6px; font-size: 11px; border-radius: var(--radius-sm);" onclick="toggleEvidence('${record.target_id}', '${name}')">原文证据 ▾</button>
                 </div>
               </div>
               
+              ${resStatusWarningHtml}
               ${warningHtml}
               
               <div class="field-grid" style="margin-bottom: 8px;">
@@ -284,6 +432,76 @@
       }
     }
 
+    function checkStaleTargetConfirmation(targetId, fieldName) {
+      const schema = document.getElementById("schemaSelect").value;
+      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      const record = results.find(r => r.target_id === targetId);
+      if (!record) return true;
+
+      if (fieldName) {
+        const field = record[fieldName];
+        const resStatus = field?.review?.target_resolution_status;
+        if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+          return confirm("该字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新人工确认。是否继续？");
+        }
+      } else {
+        let hasStale = false;
+        Object.entries(record).forEach(([name, field]) => {
+          if (name === "target_id" || name === "target_type") return;
+          const resStatus = field?.review?.target_resolution_status;
+          if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+            hasStale = true;
+          }
+        });
+        if (hasStale) {
+          return confirm("该记录中部分字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新人工确认。是否继续？");
+        }
+      }
+      return true;
+    }
+
+    function checkBulkStaleTargetConfirmation() {
+      const schema = document.getElementById("schemaSelect").value;
+      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      let hasStale = false;
+      results.forEach(record => {
+        Object.keys(record).forEach(name => {
+          if (name === "target_id" || name === "target_type") return;
+          const field = record[name];
+          const resStatus = field?.review?.target_resolution_status;
+          if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+            hasStale = true;
+          }
+        });
+      });
+      if (hasStale) {
+        return confirm("批量操作的记录中包含当前 review target 状态不是 active/remapped 的校验。保存后将作为新人工确认。是否继续？");
+      }
+      return true;
+    }
+
+    async function refreshAllData() {
+      if (!state.paper) return;
+      try {
+        state.extraction = await fetchJSON(`/api/extraction/results/${state.paper.id}`);
+        state.paper = await fetchJSON(`/api/papers/${state.paper.id}`);
+        
+        try {
+          state.audit = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/audit`);
+        } catch (e) {
+          state.audit = { _error: true, message: e.message };
+          console.warn("Audit API failed", e);
+        }
+
+        renderPaper();
+        renderWarnings(state.extraction.validation_warnings || []);
+        renderSchemaForm();
+        renderStabilitySummary();
+      } catch (error) {
+        console.error("refreshAllData failed", error);
+      }
+    }
+
     function getFieldInputs(targetId, fieldName) {
       const vEl = document.querySelector(`input[data-target-id="${targetId}"][data-field="${fieldName}"][data-part="value"]`);
       const uEl = document.querySelector(`input[data-target-id="${targetId}"][data-field="${fieldName}"][data-part="unit"]`);
@@ -301,6 +519,8 @@
 
     async function saveSingleField(targetType, targetId, fieldName) {
       if (!state.paper) return;
+      if (!checkStaleTargetConfirmation(targetId, fieldName)) return;
+      
       const inputs = getFieldInputs(targetId, fieldName);
       if (!inputs) return;
       
@@ -323,7 +543,7 @@
           body: JSON.stringify({ reviews: [reviewItem] })
         });
         showToast(`字段 ${fieldName} 保存成功！`);
-        await loadSelectedPaper();
+        await refreshAllData();
       } catch (error) {
         showToast("保存失败: " + error.message);
       }
@@ -331,6 +551,7 @@
 
     async function verifySingleField(targetType, targetId, fieldName) {
       if (!state.paper) return;
+      if (!checkStaleTargetConfirmation(targetId, fieldName)) return;
       
       const payload = {
         target_type: targetType,
@@ -346,7 +567,7 @@
           body: JSON.stringify(payload)
         });
         showToast(`字段 ${fieldName} 校验成功！`);
-        await loadSelectedPaper();
+        await refreshAllData();
       } catch (error) {
         showToast("校验失败: " + error.message);
       }
@@ -354,6 +575,8 @@
 
     async function verifyRecord(targetType, targetId) {
       if (!state.paper) return;
+      if (!checkStaleTargetConfirmation(targetId)) return;
+      
       const schema = document.getElementById("schemaSelect").value;
       const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
       const record = results.find(r => r.target_id === targetId);
@@ -375,7 +598,7 @@
           body: JSON.stringify(payload)
         });
         showToast("整条记录标记校验成功！");
-        await loadSelectedPaper();
+        await refreshAllData();
       } catch (error) {
         showToast("校验失败: " + error.message);
       }
@@ -383,6 +606,8 @@
 
     async function saveDraft() {
       if (!state.paper) return;
+      if (!checkBulkStaleTargetConfirmation()) return;
+      
       const schema = document.getElementById("schemaSelect").value;
       const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
       
@@ -419,7 +644,7 @@
           body: JSON.stringify({ reviews: reviews })
         });
         showToast("批量修改保存成功！");
-        await loadSelectedPaper();
+        await refreshAllData();
       } catch (error) {
         showToast("批量保存失败: " + error.message);
       }
@@ -427,6 +652,8 @@
 
     async function markVerified() {
       if (!state.paper) return;
+      if (!checkBulkStaleTargetConfirmation()) return;
+      
       const schema = document.getElementById("schemaSelect").value;
       const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
       
@@ -451,7 +678,7 @@
           });
         }
         showToast("批量标记已校验成功！");
-        await loadSelectedPaper();
+        await refreshAllData();
       } catch (error) {
         showToast("批量校验失败: " + error.message);
       }
@@ -463,8 +690,16 @@
           method: "POST"
         });
         state.extraction = resp;
+        
+        try {
+          state.audit = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/audit`);
+        } catch (e) {
+          state.audit = { _error: true, message: e.message };
+        }
+        
         renderWarnings(resp.validation_warnings || []);
         renderSchemaForm();
+        renderStabilitySummary();
         showToast("Validation completed successfully!");
       } catch (error) {
         showToast("Validation failed: " + error.message);

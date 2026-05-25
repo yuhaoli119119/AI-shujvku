@@ -302,6 +302,36 @@ async function mockApi(route) {
     return jsonResponse(route, EXTRACTION_RESULTS);
   }
 
+  if (pathname === '/api/extraction/results/paper-1/reviews/audit' && method === 'GET') {
+    return jsonResponse(route, {
+      paper_id: 'paper-1',
+      total_reviews: 1,
+      active: 1,
+      remapped: 0,
+      stale: 0,
+      ambiguous: 0,
+      unresolved: 0,
+      items: [
+        {
+          id: 'review-1',
+          paper_id: 'paper-1',
+          target_type: 'DFTResult',
+          target_id: 'target-1',
+          target_fingerprint: 'fingerprint-1',
+          target_label: 'Pt(111)',
+          field_path: 'DFTResult.value',
+          target_resolution_status: 'active',
+          field_name: 'value',
+          reviewer_status: 'verified',
+          reviewer: 'manual_reviewer',
+          verified: true,
+          created_at: '2026-05-25T12:00:00',
+          updated_at: '2026-05-25T12:00:00'
+        }
+      ]
+    });
+  }
+
   if (pathname === '/api/extraction/results/paper-1/validate') {
     return jsonResponse(route, {
       paper_id: 'paper-1',
@@ -1139,8 +1169,346 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     
     const resultBox = page.locator('#acquisitionResult');
     await expect(resultBox.locator('.status-chip.parsed').first()).toContainText('已收录');
-    await expect(resultBox.locator('.status-chip.meta')).toContainText('元数据');
-    await expect(resultBox.locator('.status-chip.duplicate')).toContainText('已存在');
-    await expect(resultBox.locator('.status-chip.failed')).toContainText('DOWNLOAD_FAILED');
+    await expect(resultBox.locator('.status-chip.meta').first()).toContainText('元数据');
+    await expect(resultBox.locator('.status-chip.duplicate').first()).toContainText('已存在');
+    await expect(resultBox.locator('.status-chip.failed').first()).toContainText('DOWNLOAD_FAILED');
+  });
+
+  test.describe('G2B Review Stability & Audit Tests', () => {
+    test('1. Audit all green shows matching normal banner', async ({ page }) => {
+      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
+        return jsonResponse(route, {
+          paper_id: 'paper-1',
+          total_reviews: 2,
+          active: 1,
+          remapped: 1,
+          stale: 0,
+          ambiguous: 0,
+          unresolved: 0,
+          items: []
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      const summaryBox = page.locator('#stabilitySummaryBox');
+      await expect(summaryBox).toBeVisible();
+      await expect(summaryBox).toContainText('人工校验记录与当前抽取结果匹配正常');
+      await expect(summaryBox).toContainText('有效: 1');
+      await expect(summaryBox).toContainText('已重映射: 1');
+    });
+
+    test('2. Audit with stale reviews shows needs confirmation banner and overrides verified status', async ({ page }) => {
+      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
+        return jsonResponse(route, {
+          paper_id: 'paper-1',
+          total_reviews: 1,
+          active: 0,
+          remapped: 0,
+          stale: 1,
+          ambiguous: 0,
+          unresolved: 0,
+          items: []
+        });
+      });
+
+      const mockStaleResults = {
+        ...EXTRACTION_RESULTS,
+        results: {
+          ...EXTRACTION_RESULTS.results,
+          DFTResult: [
+            {
+              target_id: 'target-1',
+              target_type: 'DFTResult',
+              value: {
+                value: -1.23,
+                unit: 'eV',
+                review: {
+                  reviewer_status: 'verified',
+                  target_resolution_status: 'stale',
+                  target_label: 'Pt(111)',
+                  field_path: 'DFTResult.value',
+                  target_fingerprint: 'fp-stale'
+                },
+                verified: true
+              }
+            }
+          ]
+        }
+      };
+
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, mockStaleResults);
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      const summaryBox = page.locator('#stabilitySummaryBox');
+      await expect(summaryBox).toBeVisible();
+      await expect(summaryBox).toContainText('部分人工校验记录已无法安全匹配到当前抽取结果');
+      await expect(summaryBox).toContainText('已失效: 1');
+
+      // The field verified status must override to "需重新确认"
+      const statusChip = page.locator('.status-chip').first();
+      await expect(statusChip).toContainText('需重新确认');
+
+      // The resolution status badge must show "已失效"
+      const resChip = page.locator('.res-status-chip').first();
+      await expect(resChip).toContainText('已失效');
+      
+      // Target label and field path must be visible
+      await expect(page.locator('#schemaForm')).toContainText('目标: Pt(111)');
+      await expect(page.locator('#schemaForm')).toContainText('路径: DFTResult.value');
+    });
+
+    test('3. Ambiguous review displays ambiguous badge', async ({ page }) => {
+      const mockAmbiguousResults = {
+        ...EXTRACTION_RESULTS,
+        results: {
+          ...EXTRACTION_RESULTS.results,
+          DFTResult: [
+            {
+              target_id: 'target-1',
+              target_type: 'DFTResult',
+              value: {
+                value: -1.23,
+                unit: 'eV',
+                review: {
+                  reviewer_status: 'verified',
+                  target_resolution_status: 'ambiguous',
+                  target_label: 'Pt(111)'
+                },
+                verified: true
+              }
+            }
+          ]
+        }
+      };
+
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, mockAmbiguousResults);
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      const resChip = page.locator('.res-status-chip').first();
+      await expect(resChip).toContainText('有歧义');
+      
+      const statusChip = page.locator('.status-chip').first();
+      await expect(statusChip).toContainText('需重新确认');
+    });
+
+    test('4. Unresolved review displays unresolved badge', async ({ page }) => {
+      const mockUnresolvedResults = {
+        ...EXTRACTION_RESULTS,
+        results: {
+          ...EXTRACTION_RESULTS.results,
+          DFTResult: [
+            {
+              target_id: 'target-1',
+              target_type: 'DFTResult',
+              value: {
+                value: -1.23,
+                unit: 'eV',
+                review: {
+                  reviewer_status: 'verified',
+                  target_resolution_status: 'unresolved'
+                },
+                verified: true
+              }
+            }
+          ]
+        }
+      };
+
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, mockUnresolvedResults);
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      const resChip = page.locator('.res-status-chip').first();
+      await expect(resChip).toContainText('未解析');
+      
+      const statusChip = page.locator('.status-chip').first();
+      await expect(statusChip).toContainText('需重新确认');
+    });
+
+    test('5. Workbench filtering conditions work correctly', async ({ page }) => {
+      const mockMixedResults = {
+        ...EXTRACTION_RESULTS,
+        results: {
+          ...EXTRACTION_RESULTS.results,
+          DFTResult: [
+            {
+              target_id: 'target-1',
+              target_type: 'DFTResult',
+              catalyst: {
+                value: 'Pt',
+                review: { reviewer_status: 'verified', target_resolution_status: 'active' },
+                verified: true
+              },
+              adsorbate: {
+                value: 'H',
+                review: { reviewer_status: 'verified', target_resolution_status: 'stale' },
+                verified: true
+              }
+            }
+          ]
+        }
+      };
+
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, mockMixedResults);
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      // Verify both are present initially
+      await expect(page.locator('.field-container')).toHaveCount(2);
+
+      const filterSelect = page.locator('#filterSelect');
+      
+      // Filter: active_remapped
+      await filterSelect.selectOption('active_remapped');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container')).toHaveCount(1);
+      await expect(page.locator('.field-container')).toContainText('catalyst');
+
+      // Filter: stale_ambiguous_unresolved
+      await filterSelect.selectOption('stale_ambiguous_unresolved');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container')).toHaveCount(1);
+      await expect(page.locator('.field-container')).toContainText('adsorbate');
+
+      // Filter: needs_reconfirmation
+      await filterSelect.selectOption('needs_reconfirmation');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container')).toHaveCount(1);
+      await expect(page.locator('.field-container')).toContainText('adsorbate');
+    });
+
+    test('6. Save triggers confirm alert and triggers refetching on stale reviews', async ({ page }) => {
+      let confirmTriggered = false;
+      let refetchCalled = false;
+
+      page.on('dialog', dialog => {
+        confirmTriggered = true;
+        dialog.accept();
+      });
+
+      const mockStaleResults = {
+        ...EXTRACTION_RESULTS,
+        results: {
+          ...EXTRACTION_RESULTS.results,
+          DFTResult: [
+            {
+              target_id: 'target-1',
+              target_type: 'DFTResult',
+              value: {
+                value: -1.23,
+                unit: 'eV',
+                review: {
+                  reviewer_status: 'verified',
+                  target_resolution_status: 'stale'
+                },
+                verified: true
+              }
+            }
+          ]
+        }
+      };
+
+      let getResultsCallCount = 0;
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        getResultsCallCount++;
+        if (getResultsCallCount > 1) {
+          refetchCalled = true;
+        }
+        return jsonResponse(route, mockStaleResults);
+      });
+
+      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/save$/, route => {
+        return jsonResponse(route, { status: 'success' });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      // Trigger Save
+      await page.click('button:has-text("保存")');
+      await page.waitForTimeout(200);
+
+      expect(confirmTriggered).toBe(true);
+      expect(refetchCalled).toBe(true);
+    });
+
+    test('7. Audit API 404 gracefully handles degradation', async ({ page }) => {
+      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
+        return route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Not Found' })
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      const summaryBox = page.locator('#stabilitySummaryBox');
+      await expect(summaryBox).toBeVisible();
+      await expect(summaryBox).toContainText('review audit 暂不可用');
+    });
+
+    test('8. Literature Library detail page surfaces warning banner', async ({ page }) => {
+      await page.route(/\/api\/papers\/paper-1$/, route => {
+        return jsonResponse(route, {
+          id: 'paper-1',
+          title: 'Test Paper with Stale Reviews',
+          oa_status: 'local_pdf',
+          counts: { sections: 1, figures: 0, dft_results: 1 }
+        });
+      });
+
+      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
+        return jsonResponse(route, {
+          paper_id: 'paper-1',
+          total_reviews: 3,
+          active: 1,
+          remapped: 0,
+          stale: 2,
+          ambiguous: 0,
+          unresolved: 0,
+          items: []
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+
+      // Click on paper card to load detail
+      await page.click('.paper-card');
+      await page.waitForTimeout(500);
+
+      // Verify the warning banner inside summaryContent is visible
+      const warningBanner = page.locator('#summaryContent .section-card:has-text("人工校验需要重新确认")');
+      await expect(warningBanner).toBeVisible();
+      await expect(warningBanner).toContainText('该文献有 2 条人工校验记录需要重新确认');
+      await expect(warningBanner).toContainText('已失效 2');
+
+      // Go to Review Tab
+      await page.click('button[data-tab="review"]');
+      await page.waitForTimeout(500);
+
+      // Verify the tab review warning banner is visible
+      const tabWarningBanner = page.locator('#tab-review #reviewTabAuditWarning');
+      await expect(tabWarningBanner).toBeVisible();
+      await expect(tabWarningBanner).toContainText('该文献有 2 条人工校验记录需要重新确认');
+    });
   });
 });
