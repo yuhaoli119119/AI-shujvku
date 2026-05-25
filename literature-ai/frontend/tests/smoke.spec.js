@@ -680,14 +680,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const valueInput = page.locator('input[data-field="value"][data-part="value"]').first();
     await valueInput.fill('-1.25');
     
-    const saveBtn = page.locator('button:has-text("保存")').first();
+    const saveBtn = page.locator('button:text-is("保存")').first();
     await saveBtn.click();
-    await page.waitForTimeout(200);
+    await expect(page.locator('#toast')).toContainText('保存成功');
     expect(saveCalled).toBe(true);
 
-    const verifyBtn = page.locator('button:has-text("校验")').first();
+    const verifyBtn = page.locator('button:text-is("校验")').first();
     await verifyBtn.click();
-    await page.waitForTimeout(200);
+    await expect(page.locator('#toast')).toContainText('校验成功');
     expect(verifyCalled).toBe(true);
 
     const filterSelect = page.locator('#filterSelect');
@@ -699,7 +699,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     verifyCalled = false;
     await page.click('.footer-actions button:has-text("Mark verified")');
-    await page.waitForTimeout(200);
+    await expect(page.locator('#toast')).toContainText('批量标记已校验成功');
     expect(verifyCalled).toBe(true);
   });
 
@@ -1666,6 +1666,64 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       expect(resultsIndex).toBeLessThan(validateIndex);
       expect(validateIndex).toBeLessThan(auditIndex);
+    });
+
+    test('11. Orphan review with empty/non-standard target_resolution_status is normalized to unknown', async ({ page }) => {
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, EXTRACTION_RESULTS);
+      });
+
+      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
+        return jsonResponse(route, {
+          paper_id: 'paper-1',
+          total_reviews: 1,
+          active: 0,
+          remapped: 0,
+          stale: 0,
+          ambiguous: 0,
+          unresolved: 0,
+          unknown: 0,
+          items: [
+            {
+              target_id: "old-target-empty-status",
+              target_type: "DFTResult",
+              field_name: "value",
+              target_resolution_status: "",
+              reviewer_status: "verified",
+              target_label: "Ni-N4",
+              field_path: "DFTResult.value",
+              reviewed_value: -7.77,
+              unit: "eV",
+              evidence_text: "empty status should be treated as unknown"
+            }
+          ]
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      const orphanTitle = page.locator('h3:has-text("需要重新确认的旧人工校验记录")');
+      await expect(orphanTitle).toBeVisible();
+
+      const card = page.locator('.field-container:has-text("old-target-empty-status")');
+      await expect(card).toBeVisible();
+
+      await expect(card).toContainText('未知');
+      await expect(card).toContainText('需重新确认');
+      await expect(card).not.toContainText('已校验');
+
+      const summaryBox = page.locator('#stabilitySummaryBox');
+      await expect(summaryBox).toContainText('未知: 1');
+
+      const filterSelect = page.locator('#filterSelect');
+      await filterSelect.selectOption('needs_reconfirmation');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container:has-text("old-target-empty-status")')).toHaveCount(1);
+
+      await filterSelect.selectOption('active_remapped');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container:has-text("old-target-empty-status")')).toHaveCount(0);
     });
   });
 });

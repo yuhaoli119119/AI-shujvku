@@ -138,6 +138,15 @@
       }
     }
 
+    function normalizeReviewResolutionStatus(rawStatus, defaultStatus = "unknown") {
+      if (!rawStatus) return defaultStatus;
+      const s = String(rawStatus).trim().toLowerCase();
+      if (["active", "remapped", "stale", "ambiguous", "unresolved", "unknown"].includes(s)) {
+        return s;
+      }
+      return defaultStatus;
+    }
+
     function renderStabilitySummary() {
       const box = document.getElementById("stabilitySummaryBox");
       if (!box) return;
@@ -156,24 +165,31 @@
         return;
       }
 
-      const total = state.audit.total_reviews || 0;
-      const active = state.audit.active || 0;
-      const remapped = state.audit.remapped || 0;
-      const stale = state.audit.stale || 0;
-      const ambiguous = state.audit.ambiguous || 0;
-      const unresolved = state.audit.unresolved || 0;
-      
-      // Dynamic unknown computation
+      let active = state.audit.active || 0;
+      let remapped = state.audit.remapped || 0;
+      let stale = state.audit.stale || 0;
+      let ambiguous = state.audit.ambiguous || 0;
+      let unresolved = state.audit.unresolved || 0;
       let unknown = state.audit.unknown || 0;
-      if (state.audit.items && Array.isArray(state.audit.items)) {
-        const computedUnknown = state.audit.items.filter(item => {
-          const status = item.target_resolution_status;
-          return !status || !["active", "remapped", "stale", "ambiguous", "unresolved"].includes(status);
-        }).length;
-        if (!unknown) {
-          unknown = computedUnknown;
+      
+      if (state.audit.items && Array.isArray(state.audit.items) && state.audit.items.length > 0) {
+        active = 0; remapped = 0; stale = 0; ambiguous = 0; unresolved = 0; unknown = 0;
+        state.audit.items.forEach(item => {
+          const s = normalizeReviewResolutionStatus(item.target_resolution_status);
+          if (s === "active") active++;
+          else if (s === "remapped") remapped++;
+          else if (s === "stale") stale++;
+          else if (s === "ambiguous") ambiguous++;
+          else if (s === "unresolved") unresolved++;
+          else if (s === "unknown") unknown++;
+        });
+      } else {
+        if (state.audit.unknown === undefined) {
+          unknown = 0;
         }
       }
+
+      const total = state.audit.total_reviews != null ? state.audit.total_reviews : (active + remapped + stale + ambiguous + unresolved + unknown);
 
       let warningBanner = "";
       if (stale + ambiguous + unresolved + unknown > 0) {
@@ -244,7 +260,8 @@
     }
 
     function getStatusBadge(status, resStatus) {
-      if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
+      const normalizedStatus = normalizeReviewResolutionStatus(resStatus);
+      if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(normalizedStatus)) {
         return `<span class="status-chip" style="background:var(--color-danger-bg); color:var(--color-danger); border:1px solid var(--color-danger)40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">需重新确认</span>`;
       }
       let bg = "var(--color-surface-alt)", color = "var(--color-text-secondary)", label = "待校验";
@@ -262,7 +279,7 @@
 
     function getResolutionBadgeHtml(field) {
       if (!field || !field.review) return "";
-      const resStatus = field.review.target_resolution_status || "active";
+      const resStatus = normalizeReviewResolutionStatus(field.review.target_resolution_status);
       const targetLabel = field.review.target_label || "";
       const fieldPath = field.review.field_path || "";
       const remapId = field.review.remapped_from_target_id || "";
@@ -383,7 +400,7 @@
           const isUnverified = !field.verified && status !== "verified";
           const confidence = field.confidence == null ? 1.0 : Number(field.confidence);
           const isLowConfidence = confidence < 0.7;
-          const resStatus = field.review?.target_resolution_status;
+          const resStatus = field.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
           
           if (filterValue === "warnings" && !hasWarning) return;
           if (filterValue === "unverified" && !isUnverified) return;
@@ -503,7 +520,7 @@
 
       allReviews.forEach(item => {
         if (item.target_type !== schema) return;
-        const resStatus = item.target_resolution_status || "active";
+        const resStatus = normalizeReviewResolutionStatus(item.target_resolution_status);
         if (!["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) return;
         
         // Is it missing from the current schema results?
@@ -540,18 +557,21 @@
             `;
           }
           
+          const resStatus = normalizeReviewResolutionStatus(item.target_resolution_status);
           let resText = "未知", resBg = "var(--color-surface-alt)", resColor = "var(--color-text-secondary)";
-          if (item.target_resolution_status === "stale") {
+          if (resStatus === "stale") {
             resText = "已失效"; resBg = "var(--color-danger-bg)"; resColor = "var(--color-danger)";
-          } else if (item.target_resolution_status === "ambiguous") {
+          } else if (resStatus === "ambiguous") {
             resText = "有歧义"; resBg = "var(--color-warning-bg)"; resColor = "var(--color-warning)";
-          } else if (item.target_resolution_status === "unresolved") {
+          } else if (resStatus === "unresolved") {
             resText = "未解析"; resBg = "var(--color-danger-bg)"; resColor = "var(--color-danger)";
-          } else if (item.target_resolution_status === "unknown") {
+          } else if (resStatus === "unknown") {
             resText = "未知"; resBg = "var(--color-warning-bg)"; resColor = "var(--color-warning)";
           }
 
           const fp = item.target_fingerprint || "";
+          const oldTargetId = item.target_id || "-";
+          const shortOldTargetId = oldTargetId === "-" ? "-" : oldTargetId.slice(0, 8);
           
           cardsHtml += `
             <div class="field-container" style="border: 1px dashed var(--color-warning); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; background: var(--color-surface-alt);">
@@ -561,8 +581,8 @@
                   <span class="res-status-chip" style="background:${resBg}; color:${resColor}; border:1px solid ${resColor}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);" title="Fingerprint: ${fp}">${resText}</span>
                 </div>
                 <div style="font-size: 11px; color: var(--color-text-secondary);">
-                  类型: <strong>${esc(item.target_type)}</strong> | 旧 ID: <strong title="${esc(item.target_id)}">${esc(item.target_id.slice(0, 8))}</strong>
-                  <span style="display: none;" class="full-target-id">${esc(item.target_id)}</span>
+                  类型: <strong>${esc(item.target_type)}</strong> | 旧 ID: <strong title="${esc(oldTargetId)}">${esc(shortOldTargetId)}</strong>
+                  <span style="display: none;" class="full-target-id">${esc(oldTargetId)}</span>
                 </div>
               </div>
               
@@ -617,7 +637,7 @@
 
       if (fieldName) {
         const field = record[fieldName];
-        const resStatus = field?.review?.target_resolution_status;
+        const resStatus = field?.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
         if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
           return confirm("该字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新人工确认。是否继续？");
         }
@@ -625,7 +645,7 @@
         let hasStale = false;
         Object.entries(record).forEach(([name, field]) => {
           if (name === "target_id" || name === "target_type") return;
-          const resStatus = field?.review?.target_resolution_status;
+          const resStatus = field?.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
           if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
             hasStale = true;
           }
@@ -645,7 +665,7 @@
         Object.keys(record).forEach(name => {
           if (name === "target_id" || name === "target_type") return;
           const field = record[name];
-          const resStatus = field?.review?.target_resolution_status;
+          const resStatus = field?.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
           if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
             hasStale = true;
           }
