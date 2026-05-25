@@ -203,8 +203,22 @@
             </div>
 
             <div id="acq-pdf" class="acq-panel">
-                <p class="subtle">选择一个 PDF 后会直接上传到当前库并进入后台解析。</p>
-                <button class="btn primary" onclick="document.getElementById('pdfUpload').click()">选择 PDF</button>
+                <div class="writer-block" style="padding: 16px; margin-bottom: 16px;">
+                    <h4 style="margin-bottom: 6px;">直接上传 PDF 文件</h4>
+                    <p class="subtle" style="margin-bottom: 12px;">新建文献条目并自动提取文献元数据与正文。</p>
+                    <button class="btn primary small" onclick="document.getElementById('pdfUpload').click()">选择 PDF 并上传</button>
+                </div>
+                <div class="writer-block" style="padding: 16px; margin-bottom: 0;">
+                    <h4 style="margin-bottom: 6px;">关联到已有元数据文献</h4>
+                    <p class="subtle" style="margin-bottom: 12px;">为库中现有的元数据条目（仅元数据/尚无PDF）上传并绑定 PDF 文件。</p>
+                    <div class="inline-form" style="margin-bottom: 8px;">
+                        <select id="attachPaperSelect" style="flex: 1; min-width: 240px; height: 32px; font-size: 13px; padding: 0 8px;">
+                            <option value="">加载中...</option>
+                        </select>
+                        <button class="btn primary small" onclick="triggerAttachPDF()">上传 PDF 并合并</button>
+                    </div>
+                    <input id="attachPdfInputModal" type="file" accept=".pdf" style="display: none;" onchange="uploadAttachPDFModal(this)">
+                </div>
             </div>
 
             <div id="acq-doi" class="acq-panel" style="display:none;">

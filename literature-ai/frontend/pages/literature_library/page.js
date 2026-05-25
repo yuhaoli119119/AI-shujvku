@@ -4,13 +4,29 @@ function formatSerialNumber(value) {
 }
 
 function paperStatusChip(paper) {
-    if (paper.oa_status === "metadata_only") {
+    if (!paper) return '<span class="status-chip none">状态未知</span>';
+    // 1. duplicate_candidate
+    if (paper.oa_status === "duplicate_candidate" || 
+        (paper.relationship_summary && (paper.relationship_summary["duplicate"] > 0 || paper.relationship_summary["duplicate_candidate"] > 0))) {
+        return '<span class="status-chip duplicate">潜在重复</span>';
+    }
+    // 2. metadata_only / needs_upload
+    if (paper.oa_status === "metadata_only" || paper.oa_status === "needs_upload") {
         return '<span class="status-chip meta">仅元数据</span>';
     }
-    if (paper.pdf_path) {
-        return '<span class="status-chip full">已入库</span>';
+    // 3. extraction_failed
+    if (paper.oa_status === "failed" || paper.oa_status === "extraction_failed" || paper.oa_status === "error") {
+        return '<span class="status-chip failed">解析失败</span>';
     }
-    return '<span class="status-chip none">状态未明</span>';
+    // 4. parsed
+    if (paper.pdf_path && (paper.tei_path || paper.markdown_path || (paper.counts && paper.counts.sections > 0))) {
+        return '<span class="status-chip parsed">已解析</span>';
+    }
+    // 5. pdf_available
+    if (paper.pdf_path) {
+        return '<span class="status-chip pdf-available">PDF已上传</span>';
+    }
+    return '<span class="status-chip none">状态未知</span>';
 }
 
 function badge(count) {
@@ -180,6 +196,9 @@ function openAddLiteraturePanel(mode) {
     const dialog = $("addLiteratureDialog");
     if (dialog) dialog.style.display = "flex";
     switchAcquisitionMode(mode || "pdf");
+    if (typeof loadMetadataOnlyPapers === "function") {
+        loadMetadataOnlyPapers();
+    }
 }
 
 function closeAddLiteraturePanel() {

@@ -230,10 +230,30 @@ function renderAIWorkflowJob(job) {
         "</div>" +
         (result.prompt_used ? '<div class="section-card"><h3>实际检索式</h3><div class="mono">' + esc(result.prompt_used) + "</div></div>" : "") +
         renderWorkflowList("已收录 / 已存在", result.ingested || [], function(item) {
-            return '<div class="subtle">状态：' + esc(item.status) + " | DOI：" + esc(item.doi || "-") + " | 标识符：" + esc(item.identifier || "-") + "</div>";
+            let statusBadge = '';
+            if (item.status === 'completed') {
+                statusBadge = '<span class="status-chip parsed" style="margin-left: 8px;">已收录</span>';
+            } else if (item.status === 'metadata_only') {
+                statusBadge = '<span class="status-chip meta" style="margin-left: 8px;">元数据</span>';
+            } else if (item.status === 'already_exists') {
+                statusBadge = '<span class="status-chip duplicate" style="margin-left: 8px;">已存在</span>';
+            } else if (item.status === 'merged') {
+                statusBadge = '<span class="status-chip parsed" style="margin-left: 8px;">已合并</span>';
+            } else {
+                statusBadge = '<span class="status-chip none" style="margin-left: 8px;">' + esc(item.status) + '</span>';
+            }
+            return '<div class="subtle" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">' +
+                       '状态：' + statusBadge + 
+                       ' | DOI：' + esc(item.doi || "-") + 
+                       ' | 标识符：' + esc(item.identifier || "-") + 
+                       (item.paper_id ? ' | <a href="#" style="color:var(--color-primary);text-decoration:underline;" onclick="loadPaperDetail(\'' + item.paper_id + '\'); closeAddLiteraturePanel(); return false;">查看文献</a>' : '') +
+                   '</div>';
         }) +
         renderWorkflowList("失败项", result.failed || [], function(item) {
-            return '<div class="subtle">代码：' + esc(item.code || "-") + " | 原因：" + esc(item.reason || "-") + "</div>";
+            return '<div class="subtle" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">' +
+                       '代码：<span class="status-chip failed">' + esc(item.code || "unknown") + '</span>' +
+                       ' | 原因：' + esc(item.reason || "-") +
+                   '</div>';
         }));
 }
 
@@ -303,13 +323,22 @@ async function downloadIdentifier(identifier) {
             showToast("已按元数据收录：" + (data.title || ""), "info");
         } else if (data.status === "already_exists") {
             showToast("文献已在库中：" + (data.title || ""), "info");
+            if (data.paper_id) {
+                showAlreadyExistsPrompt(data.paper_id, data.title || "已存在文献");
+            }
         } else {
             showToast("已成功收录：" + (data.title || ""), "success");
         }
         state.currentOffset = 0;
         refreshCurrentPage();
     } catch (error) {
-        showToast("收录失败：" + error.message, "error");
+        const detail = error.detail;
+        if (detail && detail.status === "already_exists") {
+            showToast("收录失败：该文献已存在", "error");
+            showAlreadyExistsPrompt(detail.paper_id, detail.title || "已存在文献");
+        } else {
+            showToast("收录失败：" + error.message, "error");
+        }
     }
     hideProgress();
 }
@@ -338,11 +367,23 @@ async function uploadPDF(input) {
             method: "POST",
             body: formData
         });
-        showToast("已上传并收录：" + (data.title || file.name), "success");
-        state.currentOffset = 0;
-        refreshCurrentPage();
+        if (data.status === "merged") {
+            showToast("已成功与现有元数据文献合并：" + (data.title || file.name), "success");
+            state.selectedPaperId = data.paper_id;
+            refreshCurrentPage();
+        } else {
+            showToast("已上传并收录：" + (data.title || file.name), "success");
+            state.currentOffset = 0;
+            refreshCurrentPage();
+        }
     } catch (error) {
-        showToast("上传失败：" + error.message, "error");
+        const detail = error.detail;
+        if (detail && detail.status === "already_exists") {
+            showToast("上传失败：该文献已存在", "error");
+            showAlreadyExistsPrompt(detail.paper_id, detail.title || "已存在文献");
+        } else {
+            showToast("上传失败：" + error.message, "error");
+        }
     } finally {
         input.value = "";
         hideProgress();
@@ -367,3 +408,145 @@ async function rerunExtraction() {
     }
     hideProgress();
 }
+
+function showAlreadyExistsPrompt(paperId, title) {
+    const existing = document.querySelector(".already-exists-toast");
+    if (existing) existing.remove();
+    
+    const container = document.createElement("div");
+    container.className = "toast error already-exists-toast";
+    container.style.display = "flex";
+    container.style.flexDirection = "column";
+    container.style.gap = "8px";
+    container.style.padding = "16px";
+    container.style.maxWidth = "360px";
+    container.style.background = "var(--color-surface)";
+    container.style.border = "1px solid var(--color-danger)";
+    container.style.color = "var(--color-text)";
+    container.style.boxShadow = "var(--shadow-elevated)";
+    container.style.position = "fixed";
+    container.style.right = "18px";
+    container.style.top = "18px";
+    container.style.zIndex = "3100";
+    
+    container.innerHTML = 
+        '<div style="font-weight:700;color:var(--color-danger);font-size:14px;margin-bottom:2px;">⚠️ 文献已存在</div>' +
+        '<div style="font-size:13px;color:var(--color-text-secondary);word-break:break-all;">' + esc(title) + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:6px;justify-content:flex-end;">' +
+            '<button class="btn primary small" id="jumpToPaperBtn" style="height:28px;padding:0 10px;font-size:12px;">跳转查看</button>' +
+            '<button class="btn ghost small" id="closeExistsToastBtn" style="height:28px;padding:0 10px;font-size:12px;">关闭</button>' +
+        '</div>';
+        
+    document.body.appendChild(container);
+    
+    container.querySelector("#jumpToPaperBtn").onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        loadPaperDetail(paperId);
+        container.remove();
+    };
+    container.querySelector("#closeExistsToastBtn").onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        container.remove();
+    };
+    
+    setTimeout(function() {
+        if (container.parentNode) {
+            container.style.opacity = "0";
+            setTimeout(function() { container.remove(); }, 280);
+        }
+    }, 8000);
+}
+
+async function attachPDFToPaperFile(paperId, file) {
+    if (!paperId || !file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    showProgress("正在上传并关联 PDF：" + file.name);
+    try {
+        const data = await fetchJSON(API_BASE + "/" + paperId + "/attach-pdf", {
+            method: "POST",
+            body: formData
+        });
+        showToast("PDF 关联成功：" + (data.title || file.name), "success");
+        state.selectedPaperId = paperId;
+        closeAddLiteraturePanel();
+        refreshCurrentPage();
+    } catch (error) {
+        const detail = error.detail;
+        if (detail && detail.status === "already_exists") {
+            showToast("关联失败：该 PDF 已存在", "error");
+            showAlreadyExistsPrompt(detail.paper_id, detail.title || "已存在文献");
+        } else {
+            showToast("关联失败：" + error.message, "error");
+        }
+    } finally {
+        hideProgress();
+    }
+}
+
+function triggerAttachPDF() {
+    const selectEl = $("attachPaperSelect");
+    if (!selectEl || !selectEl.value) {
+        showToast("请先选择一个元数据文献条目。", "error");
+        return;
+    }
+    const fileInput = $("attachPdfInputModal");
+    if (fileInput) fileInput.click();
+}
+
+async function uploadAttachPDFModal(input) {
+    if (!input.files || !input.files.length) return;
+    const selectEl = $("attachPaperSelect");
+    if (!selectEl || !selectEl.value) {
+        showToast("未选中目标文献条目。", "error");
+        return;
+    }
+    const paperId = selectEl.value;
+    const file = input.files[0];
+    await attachPDFToPaperFile(paperId, file);
+    input.value = "";
+}
+
+async function attachPDFToPaperDetail(input, paperId) {
+    if (!input.files || !input.files.length) return;
+    const file = input.files[0];
+    await attachPDFToPaperFile(paperId, file);
+    input.value = "";
+}
+
+async function loadMetadataOnlyPapers() {
+    const selectEl = $("attachPaperSelect");
+    if (!selectEl) return;
+    selectEl.innerHTML = '<option value="">正在加载元数据条目...</option>';
+    try {
+        const params = new URLSearchParams();
+        params.set("limit", 100);
+        const libraryName = getCurrentLibraryName();
+        if (libraryName) params.set("library_name", libraryName);
+        
+        const papers = await fetchJSON(API_BASE + "?" + params.toString());
+        const metaOnly = (papers || []).filter(function(p) { return p.oa_status === "metadata_only"; });
+        
+        if (metaOnly.length === 0) {
+            selectEl.innerHTML = '<option value="">无待上传 PDF 的元数据条目</option>';
+        } else {
+            selectEl.innerHTML = '<option value="">-- 请选择文献 --</option>' + 
+                metaOnly.map(function(p) {
+                    return '<option value="' + p.id + '">' + esc(p.title || "未命名文献") + '</option>';
+                }).join("");
+        }
+    } catch (error) {
+        selectEl.innerHTML = '<option value="">加载失败：' + esc(error.message) + '</option>';
+    }
+}
+
+Object.assign(window, {
+    triggerAttachPDF: triggerAttachPDF,
+    uploadAttachPDFModal: uploadAttachPDFModal,
+    attachPDFToPaperDetail: attachPDFToPaperDetail,
+    loadMetadataOnlyPapers: loadMetadataOnlyPapers,
+    showAlreadyExistsPrompt: showAlreadyExistsPrompt
+});

@@ -155,8 +155,26 @@ function renderDetail(detail) {
     const writingEl = $("writingContent");
     const aggregateEl = $("aggregateResult");
     
+    let missingPdfBanner = "";
+    if (detail.oa_status === "metadata_only") {
+        missingPdfBanner = 
+            '<div class="section-card" style="border: 1px dashed var(--color-warning); background: var(--color-warning-bg); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px;">' +
+                '<h3 style="color: var(--color-warning); display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 6px; font-weight: 800;">' +
+                    '⚠️ 尚无 PDF' +
+                '</h3>' +
+                '<p style="color: var(--color-text); font-size: 13px; margin-bottom: 12px; line-height: 1.6;">' +
+                    '当前文献仅包含元数据（标题、期刊、年份、DOI 等），尚未上传或关联实际 PDF 文献文件。' +
+                '</p>' +
+                '<div style="display: flex; gap: 10px; align-items: center;">' +
+                    '<button class="btn primary small" onclick="document.getElementById(\'attachPdfInput\').click()">上传 PDF 并自动合并</button>' +
+                    '<input id="attachPdfInput" type="file" accept=".pdf" style="display: none;" onchange="attachPDFToPaperDetail(this, \'' + detail.id + '\')">' +
+                '</div>' +
+            '</div>';
+    }
+    
     if (summaryEl) {
         summaryEl.innerHTML =
+            missingPdfBanner +
             summaryCards +
             baseInfo +
             abstractCard +

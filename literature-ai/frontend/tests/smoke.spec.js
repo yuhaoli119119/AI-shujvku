@@ -607,7 +607,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: literature library displays metadata-only state', async ({ page }) => {
-    await page.route(/\/api\/papers/, route => {
+    await page.route(/\/api\/papers(\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, [
           {
@@ -627,5 +627,165 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
     await expect(page.locator('.status-chip.meta')).toContainText('仅元数据');
+  });
+
+  test('business flow: metadata-only attach pdf and workflow status checks', async ({ page }) => {
+    let attachCalled = false;
+    
+    await page.route(/\/api\/papers(\?|$)/, route => {
+      if (route.request().method() === 'GET') {
+        if (attachCalled) {
+          return jsonResponse(route, [
+            {
+              id: 'paper-meta-only',
+              title: 'Metadata Only Paper (Attached)',
+              year: 2025,
+              journal: 'Journal of Metadata',
+              paper_type: 'research',
+              pdf_path: '/path/to/pdf',
+              oa_status: 'local_pdf',
+              counts: { sections: 5, figures: 1, dft_results: 1, writing_cards: 1 }
+            }
+          ]);
+        }
+        return jsonResponse(route, [
+          {
+            id: 'paper-meta-only',
+            title: 'Metadata Only Paper',
+            year: 2025,
+            journal: 'Journal of Metadata',
+            paper_type: 'research',
+            oa_status: 'metadata_only',
+            counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+          }
+        ]);
+      }
+      return route.fallback();
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only$/, route => {
+      if (attachCalled) {
+        return jsonResponse(route, {
+          id: 'paper-meta-only',
+          title: 'Metadata Only Paper (Attached)',
+          year: 2025,
+          journal: 'Journal of Metadata',
+          pdf_path: '/path/to/pdf',
+          oa_status: 'local_pdf',
+          abstract: 'This paper now has a PDF attached.',
+          counts: { sections: 5, figures: 1, dft_results: 1, writing_cards: 1 }
+        });
+      }
+      return jsonResponse(route, {
+        id: 'paper-meta-only',
+        title: 'Metadata Only Paper',
+        year: 2025,
+        journal: 'Journal of Metadata',
+        oa_status: 'metadata_only',
+        abstract: 'This is a metadata-only paper without PDF.',
+        counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+      });
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
+      attachCalled = true;
+      return jsonResponse(route, {
+        paper_id: 'paper-meta-only',
+        title: 'Metadata Only Paper (Attached)',
+        status: 'completed'
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+
+    const metaCard = page.locator('.paper-card').first();
+    await expect(metaCard).toContainText('Metadata Only Paper');
+    await expect(metaCard.locator('.status-chip.meta')).toBeVisible();
+
+    await metaCard.click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#summaryContent')).toContainText('尚无 PDF');
+    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    await expect(uploadBtn).toBeVisible();
+
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await uploadBtn.click();
+    const fileChooser = await fileChooserPromise;
+    
+    await fileChooser.setFiles({
+      name: 'test.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4...'),
+    });
+
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('.paper-card.active')).toContainText('Metadata Only Paper (Attached)');
+    await expect(page.locator('.paper-card.active .status-chip.parsed')).toBeVisible();
+  });
+
+  test('business flow: AI workflow job results show metadata_only and already_exists', async ({ page }) => {
+    await page.route(/\/api\/papers\/ai_workflow\/jobs\/job-1/, route => {
+      return jsonResponse(route, {
+        job_id: 'job-1',
+        type: 'ai_workflow',
+        status: 'completed',
+        progress: { message: 'Done' },
+        result: {
+          prompt_used: 'AI Search Prompt',
+          ingested: [
+            {
+              paper_id: 'paper-1',
+              title: 'Ingested Paper 1',
+              status: 'completed',
+              identifier: 'doi:1',
+              doi: '10.1000/1'
+            },
+            {
+              paper_id: 'paper-2',
+              title: 'Metadata Only Ingested',
+              status: 'metadata_only',
+              identifier: 'doi:2',
+              doi: '10.1000/2'
+            },
+            {
+              paper_id: 'paper-3',
+              title: 'Already Existing Paper',
+              status: 'already_exists',
+              identifier: 'doi:3',
+              doi: '10.1000/3'
+            }
+          ],
+          failed: [
+            {
+              identifier: 'doi:4',
+              title: 'Failed Paper',
+              code: 'DOWNLOAD_FAILED',
+              reason: 'Server Timeout'
+            }
+          ]
+        },
+        error: null,
+        library_name: 'Default Library'
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+
+    await page.click('#addLiteratureBtn');
+    await page.click('#addLiteratureMenu [data-add-mode="ai"]');
+    await page.fill('#aiSearchQuery', 'test query');
+    await page.click('#addLiteratureDialog button:has-text("搜索并收录")');
+
+    await page.waitForTimeout(1000);
+    
+    const resultBox = page.locator('#acquisitionResult');
+    await expect(resultBox.locator('.status-chip.parsed').first()).toContainText('已收录');
+    await expect(resultBox.locator('.status-chip.meta')).toContainText('元数据');
+    await expect(resultBox.locator('.status-chip.duplicate')).toContainText('已存在');
+    await expect(resultBox.locator('.status-chip.failed')).toContainText('DOWNLOAD_FAILED');
   });
 });
