@@ -89,7 +89,10 @@ curl http://localhost:8000/api/health
 
 | 日期 | 变更内容 |
 |------|------|
-| 2026-05-25 | 人工校验工作台可用化：对接 review save/mark-verified 接口；实现 pending, verified, corrected, needs_check 四种字段状态 chip 样式；inline 显式 validator warnings 警告；支持“原文证据”面板折叠与定位预留；新增 warning, unverified, low_confidence 校验过滤；Playwright E2E 测试覆盖完整业务流。 |
+| 2026-05-26 | **G3B PDF 证据跳转 UI — 当前 scope 已关闭。** 实现 iframe PDF 预览 + 页码跳转、bbox/原文证据侧面板、PDF 不可用回退提示。后端新增 `GET /api/papers/{id}/pdf` 端点（FileResponse）。修复 `escAttr()` 属性转义（原 `esc()` 经 textContent→innerHTML 不转义 `"`，导致 `data-bbox` 属性含 JSON 时被截断）。iframe 加载前 HEAD 探测，PDF 缺失时展示"PDF 尚未上传或不可预览"而非空白弹窗。无虚假 bbox 高亮叠加层 — 浏览器内置 iframe PDF 阅读器无法可靠支持坐标级像素叠加。exact locator 的 bbox 坐标与 evidence_text 在侧面板展示。经当前 Playwright smoke 测试验证（66/66, 0 skipped）。**已知限制：PDF 页面内像素级高亮未实现，留待 G3C PDF.js Native Evidence Highlight。** |
+| 2026-05-26 | G3A-F 证据定位器后端硬化：Stage2 重处理清理陈旧定位器，畸变 bbox 降级为 page_only 而不伪造坐标，缺失 claim 定位器查询返回 404。 |
+| 2026-05-26 | G3A 证据定位器后端：新增向后兼容的 evidence locator 模型与 API，将页码/bbox/章节/来源元数据穿透至 claim 与 extraction evidence 载荷，安全返回 `page_only`/`text_only`/`missing`/`needs_reparse` 降级而非伪造坐标。已知限制：exact bounding box 仍依赖解析器 provenance，尚未对每篇旧文献和每条抽取路径可用。 |
+| 2026-05-25 | 人工校验工作台可用化：对接 review save/mark-verified 接口；实现 pending, verified, corrected, needs_check 四种字段状态 chip 样式；inline 显式 validator warnings 警告；支持"原文证据"面板折叠与定位预留；新增 warning, unverified, low_confidence 校验过滤；Playwright E2E 测试覆盖完整业务流。 |
 | 2026-05-25 | Extraction result 人工校验持久化：新增字段级 review layer 与 `GET /api/extraction/results/{paper_id}/reviews`、`POST /reviews/save`、`POST /reviews/mark-verified`；`validate` 返回合并 review 状态且不覆盖原始抽取结果，并补充 API 测试。 |
 | 2026-05-25 | Metadata-only 文献条目闭环：新增 `PaperIdentityService`，上传/路径导入 PDF 时优先匹配 `metadata_only` 占位条目并原地补全；新增 `POST /api/papers/{paper_id}/attach-pdf` 强制绑定接口；相同 DOI / arXiv 已有完整 PDF 时返回 `already_exists/409`，并补充自动合并与冲突测试。 |
 | 2026-05-25 | Sprint 0 后端稳定性修复：清理 `backend/app/schemas/api.py` 重复 Pydantic schema，保留兼容字段集合；为 `backend/app/db/session.py` 自动迁移失败补充日志，避免关键错误被静默吞掉。 |
