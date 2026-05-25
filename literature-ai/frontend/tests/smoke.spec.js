@@ -147,6 +147,11 @@ async function mockApi(route) {
   const pathname = requestUrl.pathname;
   const method = route.request().method();
 
+  // Debug logging for G3B tests (disabled)
+  // if (pathname.includes('extraction') || pathname.includes('evidence') || pathname.includes('papers')) {
+  //   console.log(`[mockApi] ${method} ${pathname}`);
+  // }
+
   if (pathname === '/favicon.ico') {
     return route.fulfill({ status: 204, body: '' });
   }
@@ -468,6 +473,23 @@ async function mockApi(route) {
       local_ip: '127.0.0.1',
       hostname: 'localhost',
     });
+  }
+
+  // G3B Evidence Locator APIs
+  if (pathname === '/api/papers/paper-1/evidence/locators' && method === 'GET') {
+    return jsonResponse(route, []);
+  }
+
+  if (pathname === '/api/extraction/results/paper-1/evidence-locators' && method === 'GET') {
+    return jsonResponse(route, []);
+  }
+
+  if (pathname.startsWith('/api/evidence/claims/') && pathname.endsWith('/locator') && method === 'GET') {
+    return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not Found' }) });
+  }
+
+  if (pathname.match(/\/api\/papers\/[^/]+\/pdf$/) && method === 'GET') {
+    return route.fulfill({ status: 204, body: '' });
   }
 
   return route.fulfill({ status: 204, body: '' });
@@ -1724,6 +1746,419 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await filterSelect.selectOption('active_remapped');
       await page.waitForTimeout(200);
       await expect(page.locator('.field-container:has-text("old-target-empty-status")')).toHaveCount(0);
+    });
+  });
+
+  // ── G3B Evidence Locator / PDF Evidence Jump UI Tests ──
+
+  test.describe('G3B Evidence Locator & PDF Evidence Jump UI', () => {
+    const LOCATOR_EXACT = {
+      id: 'loc-1',
+      paper_id: 'paper-1',
+      claim_id: null,
+      chunk_id: 'chunk-1',
+      target_type: 'DFTResult',
+      target_id: 'target-1',
+      field_name: 'value',
+      evidence_text: 'The adsorption energy is -1.23 eV on Fe-N4.',
+      page: 5,
+      bbox: { x0: 72, y0: 144, x1: 360, y1: 180, coordinate_system: 'pdf_points' },
+      section: 'Results',
+      source_type: 'section',
+      locator_status: 'exact',
+      locator_confidence: 0.95,
+      parser_source: 'docling',
+      warning_reason: null,
+    };
+
+    const LOCATOR_PAGE_ONLY = {
+      ...LOCATOR_EXACT,
+      id: 'loc-2',
+      field_name: 'catalyst',
+      evidence_text: 'Fe-N4 catalyst used.',
+      page: 5,
+      bbox: null,
+      locator_status: 'page_only',
+      locator_confidence: 0.7,
+    };
+
+    const LOCATOR_MISSING = {
+      ...LOCATOR_EXACT,
+      id: 'loc-3',
+      field_name: 'adsorbate',
+      evidence_text: 'Li2S4 adsorbate.',
+      page: null,
+      bbox: null,
+      locator_status: 'missing',
+      locator_confidence: 0.0,
+    };
+
+    const LOCATOR_TEXT_ONLY = {
+      ...LOCATOR_EXACT,
+      id: 'loc-4',
+      field_name: 'energy_type',
+      evidence_text: 'adsorption energy type.',
+      page: null,
+      bbox: null,
+      locator_status: 'text_only',
+      locator_confidence: 0.3,
+    };
+
+    const LOCATOR_NEEDS_REPARSE = {
+      ...LOCATOR_EXACT,
+      id: 'loc-5',
+      field_name: 'reaction_step',
+      evidence_text: 'Li2S4 adsorption step.',
+      page: null,
+      bbox: null,
+      locator_status: 'needs_reparse',
+      locator_confidence: 0.1,
+    };
+
+    test('A. Paper detail locator panel: exact, page_only, missing statuses', async ({ page }) => {
+      await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
+        return jsonResponse(route, [LOCATOR_EXACT, LOCATOR_PAGE_ONLY, LOCATOR_MISSING]);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-card');
+      await page.waitForTimeout(800);
+
+      const panel = page.locator('#evidenceLocatorsPanel');
+      await expect(panel).toBeVisible();
+
+      // exact: "跳到 PDF 并高亮"
+      await expect(panel).toContainText('跳到 PDF 并高亮');
+
+      // page_only: "跳到第 5 页"
+      await expect(panel).toContainText('跳到第 5 页');
+      await expect(panel).toContainText('无精确框选');
+
+      // missing: degradation hint
+      await expect(panel).toContainText('暂无可用 PDF 定位');
+    });
+
+    test('B. Workbench field-level locator badge: exact, page_only, needs_reparse', async ({ page }) => {
+      const mockWithLocators = {
+        ...EXTRACTION_RESULTS,
+        results: {
+          ...EXTRACTION_RESULTS.results,
+          DFTResult: [
+            {
+              target_id: 'target-1',
+              target_type: 'DFTResult',
+              catalyst: {
+                value: 'Fe-N4',
+                unit: null,
+                evidence_text: 'Fe-N4 catalyst.',
+                source_section: 'Results',
+                page_span: {},
+                confidence: 0.8,
+                evidence_locator: {
+                  locator_status: 'page_only',
+                  page: 5,
+                  bbox: null,
+                  evidence_text: 'Fe-N4 catalyst used.',
+                  paper_id: 'paper-1',
+                }
+              },
+              adsorbate: {
+                value: 'Li2S4',
+                unit: null,
+                evidence_text: 'Li2S4 adsorption.',
+                source_section: 'Results',
+                page_span: {},
+                confidence: 0.9,
+                evidence_locator: {
+                  locator_status: 'needs_reparse',
+                  page: null,
+                  bbox: null,
+                  evidence_text: 'Li2S4 adsorbate.',
+                  paper_id: 'paper-1',
+                }
+              },
+              energy_type: { value: 'adsorption_energy', unit: null, evidence_text: 'adsorption energy.', source_section: 'Results', page_span: {}, confidence: 0.9 },
+              value: {
+                value: -1.23,
+                unit: 'eV',
+                evidence_text: 'The adsorption energy is -1.23 eV.',
+                source_section: 'Results',
+                page_span: {},
+                confidence: 0.91,
+                evidence_locator: {
+                  locator_status: 'exact',
+                  page: 5,
+                  bbox: { x0: 72, y0: 144, x1: 360, y1: 180, coordinate_system: 'pdf_points' },
+                  evidence_text: 'The adsorption energy is -1.23 eV on Fe-N4.',
+                  paper_id: 'paper-1',
+                }
+              },
+              reaction_step: { value: 'Li2S4 adsorption', unit: null, evidence_text: 'Li2S4 adsorption step.', source_section: 'Results', page_span: {}, confidence: 0.85 },
+            },
+          ],
+        },
+      };
+
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, mockWithLocators);
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(1500);
+
+      // Check locator status badges exist
+      const exactBadge = page.locator('.locator-status-badge[data-locator-status="exact"]');
+      await expect(exactBadge).toBeVisible();
+      await expect(exactBadge).toContainText('exact');
+
+      const pageOnlyBadge = page.locator('.locator-status-badge[data-locator-status="page_only"]');
+      await expect(pageOnlyBadge).toBeVisible();
+      await expect(pageOnlyBadge).toContainText('page_only');
+
+      const needsReparseBadge = page.locator('.locator-status-badge[data-locator-status="needs_reparse"]');
+      await expect(needsReparseBadge).toBeVisible();
+      await expect(needsReparseBadge).toContainText('needs_reparse');
+
+      // exact: has "查看原文" button
+      const viewOriginalBtn = page.locator('button:has-text("查看原文")');
+      await expect(viewOriginalBtn).toBeAttached();
+
+      // page_only: does NOT promise highlighting
+      const pageOnlyBtn = page.locator('button:has-text("查看第 5 页")');
+      await expect(pageOnlyBtn).toBeAttached();
+
+      // needs_reparse: no precise jump
+      await expect(page.locator('#schemaForm')).toContainText('无法精确定位');
+    });
+
+    test('C. Exact bbox click opens PDF viewer with highlight overlay', async ({ page }) => {
+      await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
+        return jsonResponse(route, [LOCATOR_EXACT]);
+      });
+
+      await page.route(/\/api\/papers\/paper-1\/pdf$/, route => {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/pdf',
+          body: Buffer.from('%PDF-1.4 mock'),
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-card');
+      await page.waitForTimeout(800);
+
+      const panel = page.locator('#evidenceLocatorsPanel');
+      await expect(panel).toContainText('跳到 PDF 并高亮');
+
+      // Click the button
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳到 PDF 并高亮")').click();
+      await page.waitForTimeout(500);
+
+      // PDF viewer overlay should be visible
+      const overlay = page.locator('#pdfViewerOverlay');
+      await expect(overlay).toBeVisible();
+
+      // Close the viewer
+      await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
+      await page.waitForTimeout(300);
+      await expect(overlay).not.toBeVisible();
+    });
+
+    test('D. Page_only click opens PDF viewer without bbox highlight overlay', async ({ page }) => {
+      await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
+        return jsonResponse(route, [LOCATOR_PAGE_ONLY]);
+      });
+
+      await page.route(/\/api\/papers\/paper-1\/pdf$/, route => {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/pdf',
+          body: Buffer.from('%PDF-1.4 mock'),
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-card');
+      await page.waitForTimeout(800);
+
+      const panel = page.locator('#evidenceLocatorsPanel');
+      await expect(panel).toContainText('跳到第 5 页');
+
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳到第 5 页")').click();
+      await page.waitForTimeout(500);
+
+      const overlay = page.locator('#pdfViewerOverlay');
+      await expect(overlay).toBeVisible();
+
+      // No bbox highlight overlay (pdfHighlightOverlay should be empty)
+      const highlight = page.locator('#pdfHighlightOverlay .pdf-bbox-highlight');
+      await expect(highlight).toHaveCount(0);
+
+      // Should show "无精确框选"
+      const viewerStatus = page.locator('#pdfViewerStatus');
+      await expect(viewerStatus).toContainText('无精确框选');
+
+      await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
+    });
+
+    test('E. Missing/text_only/needs_reparse do not show highlighting or fake bbox overlay', async ({ page }) => {
+      await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
+        return jsonResponse(route, [LOCATOR_MISSING, LOCATOR_TEXT_ONLY, LOCATOR_NEEDS_REPARSE]);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-card');
+      await page.waitForTimeout(800);
+
+      const panel = page.locator('#evidenceLocatorsPanel');
+      await expect(panel).toBeVisible();
+
+      // No "高亮" text should appear
+      const highlightButtons = page.locator('#evidenceLocatorsPanel button:has-text("高亮")');
+      await expect(highlightButtons).toHaveCount(0);
+
+      // No fake bbox overlay
+      const fakeOverlay = page.locator('.pdf-bbox-highlight');
+      await expect(fakeOverlay).toHaveCount(0);
+
+      // Degradation messages
+      await expect(panel).toContainText('仅有文本证据，暂无法定位到 PDF 页');
+      await expect(panel).toContainText('需要重新解析 PDF 以恢复定位');
+      await expect(panel).toContainText('暂无可用 PDF 定位');
+    });
+
+    test('F. API failure graceful degradation - 404/500', async ({ page }) => {
+      await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
+        return route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Not Found' }),
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-card');
+      await page.waitForTimeout(800);
+
+      // Page should not crash
+      const panel = page.locator('#evidenceLocatorsPanel');
+      await expect(panel).toBeVisible();
+      await expect(panel).toContainText('证据定位暂不可用');
+
+      // Original paper detail still works
+      await expect(page.locator('#summaryContent')).toBeVisible();
+    });
+
+    test('F2. Workbench locator API 500 graceful degradation', async ({ page }) => {
+      await page.route(/\/api\/extraction\/results\/paper-1\/evidence-locators$/, route => {
+        return route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Internal Server Error' }),
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(600);
+
+      // Page should not crash
+      await expect(page.locator('#schemaForm')).toBeVisible();
+      await expect(page.locator('#schemaForm')).toContainText('value');
+    });
+
+    test('G. G2B regression: review target, review stability, audit tests still pass', async ({ page }) => {
+      // This is a basic regression check - make sure G2B features are still intact
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(600);
+
+      // Stability summary box exists
+      const summaryBox = page.locator('#stabilitySummaryBox');
+      await expect(summaryBox).toBeVisible();
+
+      // Review status badges still exist
+      const statusChips = page.locator('.status-chip');
+      await expect(statusChips.first()).toBeVisible();
+
+      // Filter still works
+      const filterSelect = page.locator('#filterSelect');
+      await expect(filterSelect).toBeVisible();
+
+      // Save and verify buttons still exist
+      await expect(page.locator('.footer-actions button:has-text("Save")')).toBeVisible();
+      await expect(page.locator('.footer-actions button:has-text("Mark verified")')).toBeVisible();
+    });
+
+    test('G2. Locator warnings do not override G2B review_target warnings', async ({ page }) => {
+      const mockWithWarnings = {
+        ...EXTRACTION_RESULTS,
+        results: {
+          ...EXTRACTION_RESULTS.results,
+          DFTResult: [{
+            ...EXTRACTION_RESULTS.results.DFTResult[0],
+            value: {
+              ...EXTRACTION_RESULTS.results.DFTResult[0].value,
+              review: {
+                target_resolution_status: 'stale',
+                reviewer_status: 'verified',
+                target_label: 'Fe-N4',
+                field_path: 'DFTResult.value',
+                reviewed_value: -1.23,
+                unit: 'eV',
+              }
+            }
+          }]
+        },
+        validation_warnings: [
+          {
+            severity: 'warning',
+            code: 'review_target_stale',
+            message: 'Review target is stale and needs reconfirmation',
+            target_type: 'DFTResult',
+            target_id: 'target-1',
+            field: 'value'
+          },
+          {
+            severity: 'info',
+            code: 'evidence_locator_page_only',
+            message: 'Evidence locator only has page information, no bbox',
+            target_type: 'DFTResult',
+            target_id: 'target-1',
+            field: 'value'
+          }
+        ],
+      };
+
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, mockWithWarnings);
+      });
+
+      await page.route(/\/api\/extraction\/results\/paper-1\/validate$/, route => {
+        return jsonResponse(route, {
+          paper_id: 'paper-1',
+          status: 'validated',
+          validation_warnings: mockWithWarnings.validation_warnings
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(600);
+
+      // Review target stale warning must take priority
+      const warningBox = page.locator('#warningsBox');
+      await expect(warningBox).toContainText('review_target_stale');
+
+      // Locator warning also visible
+      await expect(warningBox).toContainText('evidence_locator_page_only');
+
+      // G2B status badge must show "需重新确认" not "已校验"
+      const fieldContainer = page.locator('.field-container:has-text("value")');
+      await expect(fieldContainer).toContainText('需重新确认');
     });
   });
 });

@@ -91,9 +91,26 @@
     </section>
   </main>
   <div id="toast" class="toast"></div>
+  <!-- G3B PDF Viewer Overlay -->
+  <div id="pdfViewerOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;align-items:flex-start;justify-content:center;padding-top:40px;">
+    <div style="width:90%;max-width:1000px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-elevated);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 16px 12px;flex-shrink:0;">
+        <div>
+          <h3 id="pdfViewerTitle" style="margin:0;">PDF 预览</h3>
+          <span id="pdfViewerStatus" style="font-size:12px;color:var(--color-warning);"></span>
+        </div>
+        <button class="btn ghost small" onclick="closeWorkbenchPdfViewer()">关闭</button>
+      </div>
+      <div style="flex:1;position:relative;overflow:auto;border:1px solid var(--color-border);border-radius:var(--radius);background:var(--color-surface-alt);margin:0 16px 16px;">
+        <iframe id="pdfViewerIframe" style="width:100%;height:70vh;border:0;display:block;"></iframe>
+        <div id="pdfHighlightOverlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></div>
+      </div>
+    </div>
+  </div>
   <script>
-    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null };
+    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null, locatorCache: {} };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+    function ellipsis(text, limit) { var t = String(text || ""); return t.length > limit ? t.slice(0, limit) + "…" : t; }
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
     async function fetchJSON(url, options) {
       options = options || {}; options.headers = options.headers || {};
@@ -133,6 +150,7 @@
         renderWarnings(state.extraction.validation_warnings || []);
         renderSchemaForm();
         renderStabilitySummary();
+        loadExtractionLocators();
       } catch (error) {
         showToast("Failed to load extraction results: " + error.message);
       }
@@ -246,7 +264,14 @@
         box.innerHTML = '<div class="empty-state">No validation warnings.</div>';
         return;
       }
-      box.innerHTML = warnings.map(w => `<div class="warning-row"><strong>${esc(w.severity)} · ${esc(w.code)}</strong><div>${esc(w.message)}</div><div class="muted">${esc(w.target_type)} ${esc(w.field || "")}</div></div>`).join("");
+      box.innerHTML = warnings.map(w => {
+        var isReviewTargetWarning = w.code && (w.code.startsWith("review_target_") || ["stale","ambiguous","unresolved"].some(k => (w.message || "").toLowerCase().includes(k)));
+        var isLocatorWarning = w.code && w.code.startsWith("evidence_locator_");
+        var borderColor = isReviewTargetWarning ? "var(--color-danger)" : isLocatorWarning ? "var(--color-warning)" : "var(--color-warning)";
+        var bgColor = isReviewTargetWarning ? "var(--color-danger-bg)" : isLocatorWarning ? "var(--color-warning-bg)" : "var(--color-warning-bg)";
+        var label = isReviewTargetWarning ? "需重新确认" : isLocatorWarning ? "定位降级" : esc(w.severity || "warning");
+        return `<div class="warning-row" style="border-left-color:${borderColor};background:${bgColor};"><strong>${esc(label)} · ${esc(w.code)}</strong><div>${esc(w.message)}</div><div class="muted">${esc(w.target_type)} ${esc(w.field || "")}</div></div>`;
+      }).join("");
     }
 
     function getFieldStatus(field) {
@@ -371,6 +396,143 @@
       }
     }
 
+    function getFieldLocatorBadge(field) {
+      if (!field) return "";
+      var locator = field.evidence_locator || null;
+      if (!locator && field.locator_status) {
+        locator = { locator_status: field.locator_status, page: field.page_span ? field.page_span.page_start : null, bbox: field.bbox || null, evidence_text: field.evidence_text || "" };
+      }
+      if (!locator) return "";
+
+      var s = String(locator.locator_status || "unknown").trim().toLowerCase();
+      var bg, color, label;
+      if (s === "exact") {
+        bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "exact";
+      } else if (s === "page_only") {
+        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; label = "page_only";
+      } else if (s === "text_only") {
+        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "text_only";
+      } else if (s === "needs_reparse") {
+        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "needs_reparse";
+      } else if (s === "missing") {
+        bg = "var(--color-surface-alt)"; color = "var(--color-text-secondary)"; label = "missing";
+      } else {
+        bg = "var(--color-surface-alt)"; color = "var(--color-text-secondary)"; label = "unknown";
+      }
+
+      var badge = `<span class="locator-status-badge" data-locator-status="${esc(s)}" style="background:${bg};color:${color};border:1px solid ${color}40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">${label}</span>`;
+
+      return badge;
+    }
+
+    function getFieldLocatorAction(record, fieldName, field) {
+      if (!field) return "";
+      var locator = field.evidence_locator || null;
+      if (!locator && field.locator_status) {
+        locator = { locator_status: field.locator_status, page: field.page_span ? field.page_span.page_start : null, bbox: field.bbox || null, evidence_text: field.evidence_text || "", paper_id: state.paper ? state.paper.id : "" };
+      }
+      if (!locator) return "";
+
+      var s = String(locator.locator_status || "unknown").trim().toLowerCase();
+      var paperId = state.paper ? state.paper.id : "";
+      var page = locator.page;
+      var hasBbox = locator.bbox ? "true" : "false";
+      var evidenceText = locator.evidence_text || "";
+
+      if (s === "exact") {
+        var uid = "loc-act-" + (record.target_id || "x") + "-" + fieldName;
+        var bboxDataAttr = hasBbox === "true" ? ('data-bbox="' + esc(JSON.stringify(locator.bbox)) + '"') : "";
+        return `<span id="${uid}" data-paper-id="${esc(paperId)}" data-page="${page || 0}" data-has-bbox="${hasBbox}" data-locator-status="${esc(s)}" data-evidence-text="${esc(ellipsis(evidenceText, 60))}" ${bboxDataAttr} style="display:none;"></span><button class="btn primary small" style="height:22px;padding:0 6px;font-size:10px;" onclick="triggerWorkbenchLocatorAction('${uid}')">查看原文</button>`;
+      } else if (s === "page_only") {
+        return `<button class="btn ghost small" style="height:22px;padding:0 6px;font-size:10px;" onclick="openWorkbenchPdfViewer('${esc(paperId)}',${page || 0},false,null,'${esc(s)}','')">查看第 ${page || "?"} 页</button>`;
+      } else {
+        return `<span style="font-size:10px;color:var(--color-text-secondary);">无法精确定位</span>`;
+      }
+    }
+
+    function triggerWorkbenchLocatorAction(uid) {
+      var el = document.getElementById(uid);
+      if (!el) return;
+      var paperId = el.getAttribute("data-paper-id") || "";
+      var page = parseInt(el.getAttribute("data-page") || "0", 10);
+      var hasBbox = el.getAttribute("data-has-bbox") === "true";
+      var locatorStatus = el.getAttribute("data-locator-status") || "";
+      var evidenceText = el.getAttribute("data-evidence-text") || "";
+      var bbox = null;
+      try { bbox = JSON.parse(el.getAttribute("data-bbox") || "null"); } catch (_) {}
+      openWorkbenchPdfViewer(paperId, page, hasBbox, bbox, locatorStatus, evidenceText);
+    }
+
+    function openWorkbenchPdfViewer(paperId, page, hasBbox, bboxOrStr, locatorStatus, evidenceText) {
+      var overlay = document.getElementById("pdfViewerOverlay");
+      if (!overlay) return;
+      if (locatorStatus === "text_only" || locatorStatus === "needs_reparse" || locatorStatus === "missing" || locatorStatus === "unknown") return;
+
+      overlay.style.display = "flex";
+      var iframe = document.getElementById("pdfViewerIframe");
+      var highlightOverlay = document.getElementById("pdfHighlightOverlay");
+      var viewerTitle = document.getElementById("pdfViewerTitle");
+      var viewerStatus = document.getElementById("pdfViewerStatus");
+
+      if (viewerTitle) viewerTitle.textContent = "PDF 预览 - 文献 " + paperId.slice(0, 8);
+      if (viewerStatus) viewerStatus.textContent = "";
+
+      var bbox = null;
+      if (typeof bboxOrStr === "string" && bboxOrStr) {
+        try { bbox = JSON.parse(bboxOrStr); } catch (_) { bbox = null; }
+      } else if (typeof bboxOrStr === "object" && bboxOrStr !== null) {
+        bbox = bboxOrStr;
+      }
+
+      if (iframe) {
+        iframe.src = "/api/papers/" + encodeURIComponent(paperId) + "/pdf#page=" + Math.max(1, page || 1);
+        iframe.style.display = "block";
+      }
+
+      if (highlightOverlay) {
+        highlightOverlay.innerHTML = "";
+        if (hasBbox && bbox && locatorStatus === "exact") {
+          var cs = bbox.coordinate_system || "pdf_points";
+          if (cs !== "pdf_points" && cs !== "normalized") {
+            if (viewerStatus) viewerStatus.textContent = "不确定坐标系，已仅跳页";
+          } else {
+            var left = (bbox.x0 || 0);
+            var top = (bbox.y0 || 0);
+            var w = (bbox.x1 || 0) - left;
+            var h = (bbox.y1 || 0) - top;
+            highlightOverlay.innerHTML =
+              '<div style="position:absolute;left:' + left + 'px;top:' + top + 'px;width:' + Math.max(1, w) + 'px;height:' + Math.max(1, h) + 'px;border:2px solid var(--color-danger);background:var(--color-danger-bg);opacity:0.4;pointer-events:none;border-radius:2px;"></div>' +
+              (evidenceText ? '<div style="position:absolute;left:' + left + 'px;top:' + (top + Math.max(1, h) + 4) + 'px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);padding:6px 8px;font-size:11px;max-width:300px;box-shadow:var(--shadow-elevated);pointer-events:none;z-index:10;">' + esc(evidenceText) + '</div>' : '');
+          }
+        } else if (!hasBbox && locatorStatus === "page_only") {
+          if (viewerStatus) viewerStatus.textContent = "无精确框选";
+        }
+      }
+    }
+
+    function closeWorkbenchPdfViewer() {
+      var overlay = document.getElementById("pdfViewerOverlay");
+      if (overlay) overlay.style.display = "none";
+      var iframe = document.getElementById("pdfViewerIframe");
+      if (iframe) iframe.src = "";
+    }
+
+    async function loadExtractionLocators() {
+      if (!state.paper) return;
+      try {
+        var result = await fetchJSON("/api/extraction/results/" + encodeURIComponent(state.paper.id) + "/evidence-locators");
+        if (Array.isArray(result)) {
+          state.locatorCache = {};
+          result.forEach(function(loc) {
+            var key = (loc.target_type || "") + ":" + (loc.field_name || "");
+            if (!state.locatorCache[key]) state.locatorCache[key] = loc;
+          });
+        }
+      } catch (e) {
+        console.warn("Evidence locators API unavailable:", e);
+      }
+    }
+
     function renderSchemaForm() {
       const schema = document.getElementById("schemaSelect").value;
       const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
@@ -422,6 +584,8 @@
           }
           
           const statusBadgeHtml = getStatusBadge(status, resStatus);
+          const locatorBadgeHtml = getFieldLocatorBadge(field);
+          const locatorActionHtml = getFieldLocatorAction(record, name, field);
           const warning = (state.extraction.validation_warnings || []).find(w => 
             w.target_type === record.target_type && 
             w.target_id === record.target_id && 
@@ -457,6 +621,7 @@
             <div id="field-${record.target_id}-${name}" class="field-container" style="border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; background: var(--color-surface);">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-weight: 800; font-size: 13px; color: var(--color-primary);">${esc(name)}</span>
+                ${locatorBadgeHtml}
                 <div style="display: flex; align-items: center; gap: 8px;">
                   ${statusBadgeHtml}
                   ${getResolutionBadgeHtml(field)}
@@ -489,7 +654,7 @@
               <div id="evidence-${record.target_id}-${name}" style="display: none; margin-top: 8px;">
                 <textarea data-target-id="${record.target_id}" data-target-type="${record.target_type}" data-field="${name}" data-part="evidence_text" style="font-size: 12px; min-height: 60px; padding: 8px; width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius);">${esc(field.evidence_text || "")}</textarea>
                 <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
-                  <button class="btn ghost small" style="height: 22px; font-size: 11px; padding: 0 6px;" disabled>🔍 定位 PDF (预留)</button>
+                  ${locatorActionHtml}
                 </div>
               </div>
             </div>

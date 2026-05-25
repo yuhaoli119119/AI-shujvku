@@ -306,3 +306,38 @@ async function fetchExtractionReviewAudit(paperId) {
     return await fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit");
 }
 
+// ── G3B Evidence Locator API ──
+
+async function fetchPaperEvidenceLocators(paperId) {
+    try {
+        return await fetchJSON(API_BASE + "/" + encodeURIComponent(paperId) + "/evidence/locators");
+    } catch (error) {
+        if (error.status === 404 || error.status === 500) {
+            return { _error: true, status: error.status, detail: error.detail || error.message };
+        }
+        return { _error: true, status: 0, detail: error.message };
+    }
+}
+
+async function fetchExtractionEvidenceLocators(paperId) {
+    try {
+        return await fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/evidence-locators");
+    } catch (error) {
+        if (error.status === 404 || error.status === 500) {
+            return { _error: true, status: error.status, detail: error.detail || error.message };
+        }
+        return { _error: true, status: 0, detail: error.message };
+    }
+}
+
+async function fetchClaimEvidenceLocator(claimId) {
+    try {
+        return await fetchJSON("/api/evidence/claims/" + encodeURIComponent(claimId) + "/locator");
+    } catch (error) {
+        if (error.status === 404 || error.status === 500) {
+            return { _error: true, status: error.status, detail: error.detail || error.message };
+        }
+        return { _error: true, status: 0, detail: error.message };
+    }
+}
+
