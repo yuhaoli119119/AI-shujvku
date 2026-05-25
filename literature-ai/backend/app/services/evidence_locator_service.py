@@ -135,6 +135,7 @@ class EvidenceLocatorService:
     ) -> EvidenceLocator:
         if paper_id is None:
             raise ValueError("Evidence locator requires paper_id")
+        evidence_text = evidence_text or ""
         canonical_target_type = self._canonical_target_type(target_type)
         locator = None
         if claim_id is not None:
@@ -526,7 +527,8 @@ class EvidenceLocatorService:
             return "exact", explicit_confidence if explicit_confidence is not None else 0.98, warning_reason
         if page is not None:
             return "page_only", explicit_confidence if explicit_confidence is not None else 0.72, warning_reason or "bbox unavailable"
-        if evidence_text.strip():
+        safe_text = evidence_text or ""
+        if safe_text.strip():
             status = "needs_reparse" if parser_source == "fallback" else "text_only"
             confidence = explicit_confidence if explicit_confidence is not None else (0.35 if status == "text_only" else 0.2)
             reason = warning_reason or ("page missing from parser output" if status == "text_only" else "page missing; reparsing may recover coordinates")
@@ -537,28 +539,31 @@ class EvidenceLocatorService:
     def _normalize_bbox_dict(bbox: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(bbox, dict):
             return None
-        if {"x0", "y0", "x1", "y1"} <= set(bbox):
-            return {
-                "x0": float(bbox["x0"]),
-                "y0": float(bbox["y0"]),
-                "x1": float(bbox["x1"]),
-                "y1": float(bbox["y1"]),
-                "width": bbox.get("width"),
-                "height": bbox.get("height"),
-                "coordinate_system": bbox.get("coordinate_system") or "pdf_points",
-            }
-        if {"l", "t", "r", "b"} <= set(bbox):
-            width = bbox.get("width")
-            height = bbox.get("height")
-            return {
-                "x0": float(bbox["l"]),
-                "y0": float(bbox["t"]),
-                "x1": float(bbox["r"]),
-                "y1": float(bbox["b"]),
-                "width": float(width) if width is not None else None,
-                "height": float(height) if height is not None else None,
-                "coordinate_system": bbox.get("coordinate_system") or bbox.get("coord_origin") or "pdf_points",
-            }
+        try:
+            if {"x0", "y0", "x1", "y1"} <= set(bbox):
+                return {
+                    "x0": float(bbox["x0"]),
+                    "y0": float(bbox["y0"]),
+                    "x1": float(bbox["x1"]),
+                    "y1": float(bbox["y1"]),
+                    "width": float(bbox["width"]) if bbox.get("width") is not None else None,
+                    "height": float(bbox["height"]) if bbox.get("height") is not None else None,
+                    "coordinate_system": bbox.get("coordinate_system") or "pdf_points",
+                }
+            if {"l", "t", "r", "b"} <= set(bbox):
+                width = bbox.get("width")
+                height = bbox.get("height")
+                return {
+                    "x0": float(bbox["l"]),
+                    "y0": float(bbox["t"]),
+                    "x1": float(bbox["r"]),
+                    "y1": float(bbox["b"]),
+                    "width": float(width) if width is not None else None,
+                    "height": float(height) if height is not None else None,
+                    "coordinate_system": bbox.get("coordinate_system") or bbox.get("coord_origin") or "pdf_points",
+                }
+        except (TypeError, ValueError, KeyError):
+            return None
         return None
 
     @staticmethod

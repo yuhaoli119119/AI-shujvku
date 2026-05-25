@@ -15,6 +15,7 @@ from app.db.models import (
     DFTResult,
     DFTSetting,
     ElectrochemicalPerformance,
+    EvidenceLocator,
     EvidenceSpan,
     MechanismClaim,
     Paper,
@@ -33,6 +34,33 @@ from app.schemas.documents import UnifiedPaperDocument
 from app.services.embedding import DeterministicEmbeddingService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
+
+
+STAGE2_LOCATOR_TARGET_TYPES = [
+    "CatalystSample",
+    "DFTSetting",
+    "DFTResult",
+    "MechanismClaim",
+    "ElectrochemicalPerformance",
+    "catalyst_samples",
+    "dft_settings",
+    "dft_results",
+    "mechanism_claims",
+    "electrochemical_performance",
+    "catalyst_sample",
+    "dft_setting",
+    "dft_result",
+    "mechanism_claim",
+]
+
+STAGE2_EVIDENCE_SPAN_TYPES = [
+    "dft_setting",
+    "catalyst_sample",
+    "dft_result",
+    "electrochemical_performance",
+    "mechanism_claim",
+    "writing_card",
+]
 
 
 class ExtractionPipelineService:
@@ -334,21 +362,27 @@ class ExtractionPipelineService:
         return summary
 
     def _delete_existing_stage2(self, paper_id: UUID) -> None:
+        self.session.execute(
+            delete(EvidenceLocator).where(
+                EvidenceLocator.paper_id == paper_id,
+                EvidenceLocator.claim_id.is_(None),
+                EvidenceLocator.target_type.in_(STAGE2_LOCATOR_TARGET_TYPES),
+            )
+        )
+        self.session.execute(
+            delete(EvidenceLocator).where(
+                EvidenceLocator.paper_id == paper_id,
+                EvidenceLocator.claim_id.is_(None),
+                EvidenceLocator.chunk_id.is_not(None),
+                EvidenceLocator.target_type.in_(STAGE2_EVIDENCE_SPAN_TYPES),
+            )
+        )
         for model in (DFTSetting, CatalystSample, DFTResult, ElectrochemicalPerformance, MechanismClaim, WritingCard):
             self.session.execute(delete(model).where(model.paper_id == paper_id))
         self.session.execute(
             delete(EvidenceSpan).where(
                 EvidenceSpan.paper_id == paper_id,
-                EvidenceSpan.object_type.in_(
-                    [
-                        "dft_setting",
-                        "catalyst_sample",
-                        "dft_result",
-                        "electrochemical_performance",
-                        "mechanism_claim",
-                        "writing_card",
-                    ]
-                ),
+                EvidenceSpan.object_type.in_(STAGE2_EVIDENCE_SPAN_TYPES),
             )
         )
 

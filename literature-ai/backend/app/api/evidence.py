@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
@@ -50,7 +50,10 @@ async def get_claim_locator(
     claim_id: UUID,
     session: Session = Depends(get_db_session),
 ) -> EvidenceLocatorResponse:
-    return EvidenceLocatorService(session).get_claim_locator(claim_id)
+    try:
+        return EvidenceLocatorService(session).get_claim_locator(claim_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/audit", response_model=CitationAuditResponse)
