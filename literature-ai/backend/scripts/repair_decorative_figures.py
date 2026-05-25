@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import sys
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 
@@ -14,21 +15,43 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.config import get_settings
-from app.db.models import PaperFigure
 from app.db.session import session_scope
 from app.utils.figure_filtering import decorative_figure_reason
 
 
-DecorativeFigureRow = tuple[PaperFigure, str]
+@dataclass
+class DecorativeFigureCandidate:
+    id: object
+    paper_id: object
+    caption: str | None
+    image_path: str | None
+    prov: list | None = None
+
+
+DecorativeFigureRow = tuple[DecorativeFigureCandidate, str]
+
+
+def _has_column(session: Session, table_name: str, column_name: str) -> bool:
+    return any(column["name"] == column_name for column in inspect(session.bind).get_columns(table_name))
 
 
 def find_decorative_figures(session: Session, paper_id: uuid.UUID | None = None) -> list[DecorativeFigureRow]:
-    query = select(PaperFigure)
+    prov_expr = "prov" if _has_column(session, "paper_figures", "prov") else "NULL AS prov"
+    sql = f"SELECT id, paper_id, caption, image_path, {prov_expr} FROM paper_figures"
+    params = {}
     if paper_id is not None:
-        query = query.where(PaperFigure.paper_id == paper_id)
+        sql += " WHERE paper_id = :paper_id"
+        params["paper_id"] = str(paper_id)
 
     rows: list[DecorativeFigureRow] = []
-    for figure in session.scalars(query).all():
+    for row in session.execute(text(sql), params).mappings().all():
+        figure = DecorativeFigureCandidate(
+            id=row["id"],
+            paper_id=row["paper_id"],
+            caption=row["caption"],
+            image_path=row["image_path"],
+            prov=row["prov"],
+        )
         reason = decorative_figure_reason(figure.caption, figure.prov)
         if reason:
             rows.append((figure, reason))
@@ -44,7 +67,7 @@ def repair_decorative_figures(
     rows = find_decorative_figures(session, paper_id=paper_id)
     if apply:
         for figure, _reason in rows:
-            session.delete(figure)
+            session.execute(text("DELETE FROM paper_figures WHERE id = :figure_id"), {"figure_id": figure.id})
     return rows
 
 
@@ -87,8 +110,7 @@ def main() -> int:
             print("No changes written. Re-run with --apply to delete matching PaperFigure database rows.")
             return 0
 
-        for figure, _reason in rows:
-            session.delete(figure)
+        repair_decorative_figures(session, apply=True, paper_id=paper_id)
         print(f"Applied decorative figure cleanup to {len(rows)} database rows. Image files were not deleted.")
     return 0
 

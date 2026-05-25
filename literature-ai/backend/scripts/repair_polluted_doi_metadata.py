@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import re
 import sys
 from pathlib import Path
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
@@ -15,11 +16,17 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.config import get_settings
-from app.db.models import Paper
 from app.db.session import session_scope
 
 
 DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
+
+
+@dataclass
+class DoiRepairCandidate:
+    id: object
+    title: str | None
+    doi: str | None
 
 
 def extract_dois(value: str | None) -> list[str]:
@@ -35,10 +42,12 @@ def extract_dois(value: str | None) -> list[str]:
     return result
 
 
-def find_polluted_doi_papers(session: Session) -> list[tuple[Paper, list[str]]]:
-    papers = session.scalars(select(Paper).where(Paper.doi.is_not(None))).all()
-    flagged: list[tuple[Paper, list[str]]] = []
-    for paper in papers:
+def find_polluted_doi_papers(session: Session) -> list[tuple[DoiRepairCandidate, list[str]]]:
+    # Select only the columns this repair needs so old schemas with missing newer columns still dry-run safely.
+    papers = session.execute(text("SELECT id, title, doi FROM papers WHERE doi IS NOT NULL")).mappings().all()
+    flagged: list[tuple[DoiRepairCandidate, list[str]]] = []
+    for row in papers:
+        paper = DoiRepairCandidate(id=row["id"], title=row["title"], doi=row["doi"])
         dois = extract_dois(paper.doi)
         if len(dois) != 1 or (paper.doi or "").strip().lower() != dois[0]:
             flagged.append((paper, dois))
@@ -49,11 +58,19 @@ def proposed_doi(dois: Sequence[str], mode: str) -> str | None:
     return dois[0] if mode == "first" and dois else None
 
 
-def repair_polluted_dois(session: Session, *, apply: bool = False, mode: str = "first") -> list[tuple[Paper, list[str]]]:
+def repair_polluted_dois(
+    session: Session,
+    *,
+    apply: bool = False,
+    mode: str = "first",
+) -> list[tuple[DoiRepairCandidate, list[str]]]:
     flagged = find_polluted_doi_papers(session)
     if apply:
         for paper, dois in flagged:
-            paper.doi = proposed_doi(dois, mode)
+            session.execute(
+                text("UPDATE papers SET doi = :doi WHERE id = :paper_id"),
+                {"doi": proposed_doi(dois, mode), "paper_id": paper.id},
+            )
     return flagged
 
 

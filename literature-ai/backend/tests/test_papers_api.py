@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import Base, EvidenceLocator, ExtractionFieldReview, Paper, WorkflowJob
+from app.db.models import Base, EvidenceLocator, ExtractionFieldReview, Paper, PaperFigure, WorkflowJob
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
@@ -118,6 +118,50 @@ def test_papers_status_and_stream(setup_test_db, monkeypatch):
         assert "event: papers_update" in full_output
         assert "First Test Paper" in full_output
         assert "event: heartbeat" in full_output
+
+
+def test_delete_paper_default_keeps_files(setup_test_db, tmp_path, monkeypatch):
+    engine = setup_test_db
+    storage_root = tmp_path / "storage"
+    for name in ["pdf", "tei", "docling_json", "markdown", "figures"]:
+        (storage_root / name).mkdir(parents=True)
+    pdf_file = storage_root / "pdf" / "paper.pdf"
+    tei_file = storage_root / "tei" / "paper.tei.xml"
+    json_file = storage_root / "docling_json" / "paper.json"
+    md_file = storage_root / "markdown" / "paper.md"
+    figure_file = storage_root / "figures" / "figure.png"
+    for path in [pdf_file, tei_file, json_file, md_file, figure_file]:
+        path.write_text("fixture", encoding="utf-8")
+
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Delete Safety Paper",
+            pdf_path="paper.pdf",
+            tei_path="paper.tei.xml",
+            docling_json_path="paper.json",
+            markdown_path="paper.md",
+        )
+        session.add(paper)
+        session.flush()
+        session.add(PaperFigure(paper_id=paper.id, caption="Figure 1. Real caption", image_path="figure.png"))
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    response = client.delete(f"/api/papers/{paper_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["delete_pdf"] is False
+    assert payload["delete_derived"] is False
+    assert payload["deleted_files"] == []
+    assert pdf_file.exists()
+    assert tei_file.exists()
+    assert json_file.exists()
+    assert md_file.exists()
+    assert figure_file.exists()
 
 
 def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
