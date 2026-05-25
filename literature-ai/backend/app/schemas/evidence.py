@@ -36,7 +36,10 @@ class EvidenceLocatorResponse(BaseModel):
     bbox: EvidenceBBox | None = None
     section: str | None = None
     source_type: str = "unknown"
-    locator_status: str = "missing"
+    locator_status: str = "missing_locator"
+    provenance_level: str = "unavailable"
+    can_jump_to_pdf_page: bool = False
+    can_highlight_in_pdf: bool = False
     locator_confidence: float = 0.0
     parser_source: str = "unknown"
     figure_id: UUID | None = None

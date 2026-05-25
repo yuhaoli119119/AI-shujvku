@@ -64,6 +64,13 @@ def test_audit_reports_evidence_quality_without_writing(tmp_path):
         assert report["evidence"]["missing_page"] == 3
         assert report["evidence"]["missing_evidence_text"] == 3
         assert report["evidence"]["abnormal_bbox"] == 1
+        assert report["locator_degradation"]["evidence_total"] == 3
+        assert report["locator_degradation"]["evidence_text_only_count"] == 0
+        assert report["locator_degradation"]["evidence_missing_locator_count"] == 1
+        assert report["locator_degradation"]["evidence_unresolved_count"] == 2
+        assert report["locator_degradation"]["evidence_bbox_without_page_count"] == 1
+        assert report["locator_degradation"]["pdf_jump_exact_eligible_count"] == 0
+        assert report["locator_degradation"]["pdf_jump_degraded_count"] == 3
         assert stored_locator.bbox == {"x0": 10, "y0": 10, "x1": 5, "y1": 20}
     engine.dispose()
 

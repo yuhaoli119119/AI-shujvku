@@ -72,9 +72,14 @@ async function fetchJSON(url, options) {
 
 const UI_LABELS = {
     locator_status: {
+        exact_page: "精确页码",
         exact: "精确定位",
         page_only: "仅页码",
         text_only: "仅文本",
+        missing_page: "缺页码",
+        missing_locator: "暂无定位",
+        approximate: "需确认",
+        unresolved: "待解析",
         needs_reparse: "需重新解析",
         missing: "暂无定位",
         unknown: "未识别"

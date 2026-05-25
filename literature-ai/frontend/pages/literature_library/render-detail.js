@@ -54,18 +54,37 @@ function escAttr(value) {
         .replace(/>/g, "&gt;");
 }
 
+function normalizeLocatorStatus(locator) {
+    const s = String((locator && locator.locator_status) || locator || "unknown").trim().toLowerCase();
+    if (s === "exact" || s === "page_only") return "exact_page";
+    if (s === "needs_reparse") return "missing_page";
+    if (s === "missing") return "missing_locator";
+    if (s === "approximate_candidate" || s === "ambiguous_match") return "approximate";
+    return s;
+}
+
+function locatorCanJump(locator) {
+    return normalizeLocatorStatus(locator) === "exact_page" && locator && locator.can_jump_to_pdf_page !== false && Number(locator.page || 0) > 0;
+}
+
+function locatorDegradedText(locator) {
+    const s = normalizeLocatorStatus(locator);
+    if (s === "approximate") return "可能相关页码，需要人工确认";
+    if (s === "unresolved") return "证据定位待解析/待确认";
+    if (s === "missing_locator") return "暂无可用 PDF 定位";
+    return "仅有证据文本，暂无 PDF 页码定位";
+}
+
 function locatorStatusBadge(locatorStatus) {
-    const s = String(locatorStatus || "unknown").trim().toLowerCase();
+    const s = normalizeLocatorStatus(locatorStatus);
     const label = uiLabel("locator_status", s);
-    if (s === "exact") {
+    if (s === "exact_page") {
         return '<span class="status-chip" style="background:var(--color-success-bg);color:var(--color-success);border:1px solid var(--color-success)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
-    } else if (s === "page_only") {
+    } else if (s === "approximate") {
         return '<span class="status-chip" style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
-    } else if (s === "text_only") {
+    } else if (s === "text_only" || s === "missing_page") {
         return '<span class="status-chip" style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
-    } else if (s === "needs_reparse") {
-        return '<span class="status-chip" style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
-    } else if (s === "missing") {
+    } else if (s === "missing_locator" || s === "unresolved") {
         return '<span class="status-chip" style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
     } else {
         return '<span class="status-chip" style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
@@ -73,30 +92,19 @@ function locatorStatusBadge(locatorStatus) {
 }
 
 function locatorActionHtml(locator) {
-    const s = String(locator.locator_status || "unknown").trim().toLowerCase();
+    const s = normalizeLocatorStatus(locator);
     const paperId = locator.paper_id || "";
     const page = locator.page;
     const bbox = locator.bbox;
     const evidenceText = locator.evidence_text || "";
 
-    if (s === "exact") {
+    if (locatorCanJump(locator)) {
         var uid = "loc-act-detail-" + (locator.id || Math.random().toString(36).slice(2));
         var bboxDataAttr = bbox ? ('data-bbox="' + escAttr(JSON.stringify(bbox)) + '"') : "";
-        return '<span id="' + uid + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="' + (bbox ? "true" : "false") + '" data-locator-status="' + esc(s) + '" data-evidence-text="' + escAttr(ellipsis(evidenceText, 80)) + '" ' + bboxDataAttr + ' style="display:none;"></span>' +
-            '<button class="btn primary small" onclick="triggerDetailLocatorAction(\'' + uid + '\')">跳转到 PDF 页并显示证据信息</button>';
-    } else if (s === "page_only") {
-        var uid2 = "loc-act-detail-" + (locator.id || Math.random().toString(36).slice(2));
-        return '<span id="' + uid2 + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="false" data-locator-status="page_only" data-evidence-text="' + escAttr(ellipsis(evidenceText, 80)) + '" style="display:none;"></span>' +
-            '<button class="btn ghost small" onclick="triggerDetailLocatorAction(\'' + uid2 + '\')">跳到第 ' + (page || "?") + ' 页</button>' +
-            '<span style="font-size:11px;color:var(--color-text-secondary);margin-left:6px;">无精确框选</span>';
-    } else if (s === "text_only") {
-        return '<span style="font-size:12px;color:var(--color-warning);">仅有文本证据，暂无法定位到 PDF 页</span>';
-    } else if (s === "needs_reparse") {
-        return '<span style="font-size:12px;color:var(--color-warning);">需要重新解析 PDF 以恢复定位</span>';
-    } else if (s === "missing") {
-        return '<span style="font-size:12px;color:var(--color-text-secondary);">暂无可用 PDF 定位</span>';
+        return '<span id="' + uid + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="' + (bbox ? "true" : "false") + '" data-locator-status="exact_page" data-evidence-text="' + escAttr(ellipsis(evidenceText, 80)) + '" ' + bboxDataAttr + ' style="display:none;"></span>' +
+            '<button class="btn primary small" onclick="triggerDetailLocatorAction(\'' + uid + '\')">跳转到第 ' + (page || "?") + ' 页</button>';
     } else {
-        return '<span style="font-size:12px;color:var(--color-text-secondary);">定位状态未知</span>';
+        return '<span style="font-size:12px;color:var(--color-text-secondary);">' + locatorDegradedText(locator) + '</span>';
     }
 }
 
@@ -163,7 +171,8 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
     var overlay = $("pdfViewerOverlay");
     if (!overlay) return;
 
-    if (locatorStatus === "text_only" || locatorStatus === "needs_reparse" || locatorStatus === "missing" || locatorStatus === "unknown") {
+    locatorStatus = normalizeLocatorStatus(locatorStatus);
+    if (locatorStatus !== "exact_page") {
         return;
     }
 
@@ -195,17 +204,9 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
 
     // Build evidence panel content
     var evidenceHtml = "";
-    if (hasBbox && bbox && locatorStatus === "exact") {
-        var cs = bbox.coordinate_system || "pdf_points";
-        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-danger);">精确定位</div>' +
-            '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px;">坐标系：' + esc(cs) + '</div>' +
-            '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px;">BBox: x0=' + (bbox.x0 || 0) + ' y0=' + (bbox.y0 || 0) + ' x1=' + (bbox.x1 || 0) + ' y1=' + (bbox.y1 || 0) + '</div>' +
-            (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
-    } else if (locatorStatus === "page_only") {
-        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">仅页码定位</div>' +
-            '<div style="font-size:11px;color:var(--color-text-secondary);">无精确框选，已跳转到目标页并显示证据信息</div>' +
-            (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
-    }
+    evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">PDF 页码定位</div>' +
+        '<div style="font-size:11px;color:var(--color-text-secondary);">已跳转到证据页；当前版本不提供 PDF 页面内框选。</div>' +
+        (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
     if (viewerEvidencePanel) viewerEvidencePanel.innerHTML = evidenceHtml;
 
     // Probe PDF availability with HEAD request
@@ -348,7 +349,7 @@ function renderDetail(detail, audit) {
 
     const pdfEvidenceEntry =
         '<div class="section-card pdf-evidence-entry"><h3>PDF 证据定位</h3>' +
-            '<p>当前版本会跳转到 PDF 页并显示证据信息，不宣称 PDF 内真实高亮。</p>' +
+            '<p>当前版本只在有精确页码时跳转到 PDF 页，并显示证据信息。</p>' +
             '<p class="subtle">请使用标题右侧的“' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '”入口。</p>' +
         '</div>';
 

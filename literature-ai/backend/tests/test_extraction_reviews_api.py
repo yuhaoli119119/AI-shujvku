@@ -202,7 +202,7 @@ def test_validate_returns_review_state(setup_test_db):
     assert payload["results"]["DFTResult"][0]["value"]["verified"] is True
     assert payload["results"]["DFTResult"][0]["value"]["review"]["reviewer_status"] == "verified"
     assert payload["results"]["DFTResult"][0]["value"]["review"]["target_resolution_status"] == "active"
-    assert payload["results"]["DFTResult"][0]["value"]["evidence_locator"]["locator_status"] in {"needs_reparse", "missing"}
+    assert payload["results"]["DFTResult"][0]["value"]["evidence_locator"]["locator_status"] in {"missing_page", "text_only"}
     assert payload["field_reviews"][0]["target_id"] == target_id
 
 
@@ -558,4 +558,4 @@ def test_validate_reports_locator_warning_without_overriding_stale_review_state(
     payload = validate_response.json()
     assert payload["results"]["DFTResult"][0]["value"]["verified"] is False
     assert any(warning["code"] == "review_target_stale" for warning in payload["validation_warnings"])
-    assert any(warning["code"] == "evidence_locator_needs_reparse" for warning in payload["validation_warnings"])
+    assert any(warning["code"] == "evidence_locator_missing_page" for warning in payload["validation_warnings"])

@@ -248,7 +248,7 @@ function openSelectedPdfEvidence() {
         showToast("PDF 未上传，请先上传 PDF。", "error");
         return;
     }
-    openPdfViewer(state.selectedPaper.id, 1, false, null, "page_only", "从文献标题入口打开：跳转到 PDF 页并显示证据信息。");
+    openPdfViewer(state.selectedPaper.id, 1, false, null, "exact_page", "从文献标题入口打开：PDF 预览，不代表证据精确定位。");
 }
 
 function openDeletePaperDialog(event) {

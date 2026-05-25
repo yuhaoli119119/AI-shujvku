@@ -762,7 +762,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#paperMeta')).not.toContainText('10.2000/reference-doi');
     await expect(page.locator('#paperMeta')).toContainText('检测到多个 DOI，可能需要重新解析元数据');
     await expect(page.locator('#summaryContent')).toContainText('PDF 证据定位');
-    await expect(page.locator('#summaryContent')).toContainText('跳转到 PDF 页并显示证据信息');
+    await expect(page.locator('#summaryContent')).toContainText('只在有精确页码时跳转到 PDF 页');
 
     await page.click('button:has-text("更多操作")');
     await expect(page.locator('#paperMoreMenu')).toContainText('删除当前文献');
@@ -1850,7 +1850,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       bbox: { x0: 72, y0: 144, x1: 360, y1: 180, coordinate_system: 'pdf_points' },
       section: 'Results',
       source_type: 'section',
-      locator_status: 'exact',
+      locator_status: 'exact_page',
+      provenance_level: 'exact_pdf_page',
+      can_jump_to_pdf_page: true,
+      can_highlight_in_pdf: false,
       locator_confidence: 0.95,
       parser_source: 'docling',
       warning_reason: null,
@@ -1863,7 +1866,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       evidence_text: 'Fe-N4 catalyst used.',
       page: 5,
       bbox: null,
-      locator_status: 'page_only',
+      locator_status: 'exact_page',
+      provenance_level: 'exact_pdf_page',
+      can_jump_to_pdf_page: true,
+      can_highlight_in_pdf: false,
       locator_confidence: 0.7,
     };
 
@@ -1874,7 +1880,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       evidence_text: 'Li2S4 adsorbate.',
       page: null,
       bbox: null,
-      locator_status: 'missing',
+      locator_status: 'missing_locator',
+      provenance_level: 'unavailable',
+      can_jump_to_pdf_page: false,
+      can_highlight_in_pdf: false,
       locator_confidence: 0.0,
     };
 
@@ -1886,6 +1895,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       page: null,
       bbox: null,
       locator_status: 'text_only',
+      provenance_level: 'text_evidence_only',
+      can_jump_to_pdf_page: false,
+      can_highlight_in_pdf: false,
       locator_confidence: 0.3,
     };
 
@@ -1896,11 +1908,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       evidence_text: 'Li2S4 adsorption step.',
       page: null,
       bbox: null,
-      locator_status: 'needs_reparse',
+      locator_status: 'missing_page',
+      provenance_level: 'text_evidence_only',
+      can_jump_to_pdf_page: false,
+      can_highlight_in_pdf: false,
       locator_confidence: 0.1,
     };
 
-    test('A. Paper detail locator panel: exact, page_only, missing statuses', async ({ page }) => {
+    test('A. Paper detail locator panel: exact_page, missing locator statuses', async ({ page }) => {
       await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
         return jsonResponse(route, [LOCATOR_EXACT, LOCATOR_PAGE_ONLY, LOCATOR_MISSING]);
       });
@@ -1913,18 +1928,17 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       const panel = page.locator('#evidenceLocatorsPanel');
       await expect(panel).toBeVisible();
 
-      // exact: safe jump text, no true-highlight claim
-      await expect(panel).toContainText('跳转到 PDF 页并显示证据信息');
+      // exact_page: safe page jump text, no page-internal box claim
+      await expect(panel).toContainText('跳转到第 5 页');
 
-      // page_only: "跳到第 5 页"
-      await expect(panel).toContainText('跳到第 5 页');
-      await expect(panel).toContainText('无精确框选');
+      // second exact_page locator also jumps to page 5
+      await expect(panel.locator('button:has-text("跳转到第 5 页")')).toHaveCount(2);
 
       // missing: degradation hint
       await expect(panel).toContainText('暂无可用 PDF 定位');
     });
 
-    test('B. Workbench field-level locator badge: exact, page_only, needs_reparse', async ({ page }) => {
+    test('B. Workbench field-level locator badge: exact_page, missing_page', async ({ page }) => {
       const mockWithLocators = {
         ...EXTRACTION_RESULTS,
         results: {
@@ -1941,11 +1955,12 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
                 page_span: {},
                 confidence: 0.8,
                 evidence_locator: {
-                  locator_status: 'page_only',
+                  locator_status: 'exact_page',
                   page: 5,
                   bbox: null,
                   evidence_text: 'Fe-N4 catalyst used.',
                   paper_id: 'paper-1',
+                  can_jump_to_pdf_page: true,
                 }
               },
               adsorbate: {
@@ -1956,11 +1971,12 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
                 page_span: {},
                 confidence: 0.9,
                 evidence_locator: {
-                  locator_status: 'needs_reparse',
+                  locator_status: 'missing_page',
                   page: null,
                   bbox: null,
                   evidence_text: 'Li2S4 adsorbate.',
                   paper_id: 'paper-1',
+                  can_jump_to_pdf_page: false,
                 }
               },
               energy_type: { value: 'adsorption_energy', unit: null, evidence_text: 'adsorption energy.', source_section: 'Results', page_span: {}, confidence: 0.9 },
@@ -1972,11 +1988,12 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
                 page_span: {},
                 confidence: 0.91,
                 evidence_locator: {
-                  locator_status: 'exact',
+                  locator_status: 'exact_page',
                   page: 5,
                   bbox: { x0: 72, y0: 144, x1: 360, y1: 180, coordinate_system: 'pdf_points' },
                   evidence_text: 'The adsorption energy is -1.23 eV on Fe-N4.',
                   paper_id: 'paper-1',
+                  can_jump_to_pdf_page: true,
                 }
               },
               reaction_step: { value: 'Li2S4 adsorption', unit: null, evidence_text: 'Li2S4 adsorption step.', source_section: 'Results', page_span: {}, confidence: 0.85 },
@@ -1993,28 +2010,24 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(1500);
 
       // Check locator status badges exist
-      const exactBadge = page.locator('.locator-status-badge[data-locator-status="exact"]');
-      await expect(exactBadge).toBeVisible();
-      await expect(exactBadge).toContainText('exact');
+      const exactBadge = page.locator('.locator-status-badge[data-locator-status="exact_page"]');
+      await expect(exactBadge.first()).toBeVisible();
+      await expect(exactBadge.first()).toContainText('exact_page');
 
-      const pageOnlyBadge = page.locator('.locator-status-badge[data-locator-status="page_only"]');
-      await expect(pageOnlyBadge).toBeVisible();
-      await expect(pageOnlyBadge).toContainText('page_only');
+      const pageOnlyBadge = page.locator('.locator-status-badge[data-locator-status="exact_page"]');
+      await expect(pageOnlyBadge.first()).toBeVisible();
+      await expect(pageOnlyBadge.first()).toContainText('exact_page');
 
-      const needsReparseBadge = page.locator('.locator-status-badge[data-locator-status="needs_reparse"]');
+      const needsReparseBadge = page.locator('.locator-status-badge[data-locator-status="missing_page"]');
       await expect(needsReparseBadge).toBeVisible();
-      await expect(needsReparseBadge).toContainText('needs_reparse');
+      await expect(needsReparseBadge).toContainText('missing_page');
 
-      // exact: has "查看原文" button
-      const viewOriginalBtn = page.locator('button:has-text("查看原文")');
-      await expect(viewOriginalBtn).toBeAttached();
+      // exact_page: has page jump button
+      const viewOriginalBtn = page.locator('button:has-text("跳转到第 5 页")');
+      await expect(viewOriginalBtn.first()).toBeAttached();
 
-      // page_only: does NOT promise highlighting
-      const pageOnlyBtn = page.locator('button:has-text("查看第 5 页")');
-      await expect(pageOnlyBtn).toBeAttached();
-
-      // needs_reparse: no precise jump
-      await expect(page.locator('#schemaForm')).toContainText('无法精确定位');
+      // missing_page: no precise jump
+      await expect(page.locator('#schemaForm')).toContainText('仅有证据文本，暂无 PDF 页码定位');
     });
 
     test('C. Exact bbox click opens PDF viewer with evidence panel and page indicator', async ({ page }) => {
@@ -2040,10 +2053,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
-      await expect(panel).toContainText('跳转到 PDF 页并显示证据信息');
+      await expect(panel).toContainText('跳转到第 5 页');
 
       // Click the button
-      await page.locator('#evidenceLocatorsPanel button:has-text("跳转到 PDF 页并显示证据信息")').click();
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳转到第 5 页")').click();
       await page.waitForTimeout(800);
 
       // PDF viewer overlay should be visible
@@ -2060,10 +2073,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       const pageIndicator = page.locator('#pdfViewerPageIndicator');
       await expect(pageIndicator).toContainText('5');
 
-      // Evidence panel must show exact locator info
+      // Evidence panel must show page locator info
       const evidencePanel = page.locator('#pdfViewerEvidencePanel');
-      await expect(evidencePanel).toContainText('精确定位');
-      await expect(evidencePanel).toContainText('BBox');
+      await expect(evidencePanel).toContainText('PDF 页码定位');
+      await expect(evidencePanel).toContainText('当前版本不提供 PDF 页面内框选');
 
       // PDF unavailable message must be hidden
       const unavailable = page.locator('#pdfViewerUnavailable');
@@ -2079,7 +2092,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(overlay).not.toBeVisible();
     });
 
-    test('D. Page_only click opens PDF viewer without bbox highlight and shows page_only status', async ({ page }) => {
+    test('D. Exact_page without bbox opens PDF viewer without fake box', async ({ page }) => {
       await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
         return jsonResponse(route, [LOCATOR_PAGE_ONLY]);
       });
@@ -2102,9 +2115,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
-      await expect(panel).toContainText('跳到第 5 页');
+      await expect(panel).toContainText('跳转到第 5 页');
 
-      await page.locator('#evidenceLocatorsPanel button:has-text("跳到第 5 页")').click();
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳转到第 5 页")').click();
       await page.waitForTimeout(800);
 
       const overlay = page.locator('#pdfViewerOverlay');
@@ -2119,9 +2132,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       const pageIndicator = page.locator('#pdfViewerPageIndicator');
       await expect(pageIndicator).toContainText('5');
 
-      // Evidence panel must show page_only status
+      // Evidence panel must show page locator status
       const evidencePanel = page.locator('#pdfViewerEvidencePanel');
-      await expect(evidencePanel).toContainText('仅页码定位');
+      await expect(evidencePanel).toContainText('PDF 页码定位');
 
       // No bbox highlight overlay
       const highlight = page.locator('#pdfHighlightOverlay .pdf-bbox-highlight');
@@ -2130,7 +2143,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
     });
 
-    test('E. Missing/text_only/needs_reparse do not show highlighting or fake bbox overlay', async ({ page }) => {
+    test('E. Missing/text_only/missing_page do not show page jump or fake bbox overlay', async ({ page }) => {
       await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
         return jsonResponse(route, [LOCATOR_MISSING, LOCATOR_TEXT_ONLY, LOCATOR_NEEDS_REPARSE]);
       });
@@ -2152,8 +2165,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(fakeOverlay).toHaveCount(0);
 
       // Degradation messages
-      await expect(panel).toContainText('仅有文本证据，暂无法定位到 PDF 页');
-      await expect(panel).toContainText('需要重新解析 PDF 以恢复定位');
+      await expect(panel).toContainText('仅有证据文本，暂无 PDF 页码定位');
       await expect(panel).toContainText('暂无可用 PDF 定位');
     });
 
@@ -2181,10 +2193,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
-      await expect(panel).toContainText('跳转到 PDF 页并显示证据信息');
+      await expect(panel).toContainText('跳转到第 5 页');
 
       // Click the button
-      await page.locator('#evidenceLocatorsPanel button:has-text("跳转到 PDF 页并显示证据信息")').click();
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳转到第 5 页")').click();
       await page.waitForTimeout(800);
 
       // Overlay should be visible
@@ -2305,8 +2317,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           },
           {
             severity: 'info',
-            code: 'evidence_locator_page_only',
-            message: 'Evidence locator only has page information, no bbox',
+            code: 'evidence_locator_missing_page',
+            message: 'Evidence locator is missing page information',
             target_type: 'DFTResult',
             target_id: 'target-1',
             field: 'value'
@@ -2334,7 +2346,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(warningBox).toContainText('review_target_stale');
 
       // Locator warning also visible
-      await expect(warningBox).toContainText('evidence_locator_page_only');
+      await expect(warningBox).toContainText('evidence_locator_missing_page');
 
       // G2B status badge must show "需重新确认" not "已校验"
       const fieldContainer = page.locator('.field-container:has-text("value")');

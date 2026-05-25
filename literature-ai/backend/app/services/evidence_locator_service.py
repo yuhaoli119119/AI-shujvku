@@ -20,6 +20,7 @@ from app.db.models import (
     PaperTable,
 )
 from app.schemas.evidence import EvidenceBBox, EvidenceLocatorResponse, EvidenceRef, PageSpan
+from app.utils.locator_degradation import locator_degradation
 
 
 TARGET_MODEL_MAP = {
@@ -41,9 +42,11 @@ OBJECT_TYPE_ALIASES = {
 }
 
 LOCATOR_WARNING_CODES = {
-    "missing": "evidence_locator_missing",
-    "page_only": "evidence_locator_page_only",
-    "needs_reparse": "evidence_locator_needs_reparse",
+    "missing_locator": "evidence_locator_missing",
+    "missing_page": "evidence_locator_missing_page",
+    "text_only": "evidence_locator_text_only",
+    "approximate": "evidence_locator_approximate",
+    "unresolved": "evidence_locator_unresolved",
 }
 
 
@@ -241,6 +244,13 @@ class EvidenceLocatorService:
                     locator = field_value.get("evidence_locator")
                     if not isinstance(locator, dict):
                         continue
+                    degradation = locator_degradation(
+                        page=locator.get("page"),
+                        locator_status=locator.get("locator_status"),
+                        evidence_text=locator.get("evidence_text") or "",
+                        bbox=locator.get("bbox") if isinstance(locator.get("bbox"), dict) else None,
+                        warning_reason=locator.get("warning_reason"),
+                    )
                     items.append(
                         EvidenceLocatorResponse.model_validate(
                             {
@@ -250,6 +260,11 @@ class EvidenceLocatorService:
                                 "target_id": target_id,
                                 "field_name": field_name,
                                 "claim_id": None,
+                                "locator_status": degradation.locator_status,
+                                "provenance_level": degradation.provenance_level,
+                                "can_jump_to_pdf_page": degradation.can_jump_to_pdf_page,
+                                "can_highlight_in_pdf": degradation.can_highlight_in_pdf,
+                                "warning_reason": degradation.warning_reason,
                             }
                         )
                     )
@@ -440,6 +455,14 @@ class EvidenceLocatorService:
         )
 
     def _serialize(self, row: EvidenceLocator, field_name: str | None = None) -> EvidenceLocatorResponse:
+        bbox = self._bbox_model(row.bbox)
+        degradation = locator_degradation(
+            page=row.page,
+            locator_status=row.locator_status,
+            evidence_text=row.evidence_text,
+            bbox=bbox.model_dump(mode="json") if bbox else None,
+            warning_reason=row.warning_reason,
+        )
         return EvidenceLocatorResponse(
             id=row.id,
             paper_id=row.paper_id,
@@ -450,10 +473,13 @@ class EvidenceLocatorService:
             field_name=field_name or row.field_name,
             evidence_text=row.evidence_text,
             page=row.page,
-            bbox=self._bbox_model(row.bbox),
+            bbox=bbox,
             section=row.section,
             source_type=row.source_type,
-            locator_status=row.locator_status,
+            locator_status=degradation.locator_status,
+            provenance_level=degradation.provenance_level,
+            can_jump_to_pdf_page=degradation.can_jump_to_pdf_page,
+            can_highlight_in_pdf=degradation.can_highlight_in_pdf,
             locator_confidence=row.locator_confidence,
             parser_source=row.parser_source,
             figure_id=row.figure_id,
@@ -461,7 +487,7 @@ class EvidenceLocatorService:
             equation_id=row.equation_id,
             char_start=row.char_start,
             char_end=row.char_end,
-            warning_reason=row.warning_reason,
+            warning_reason=degradation.warning_reason,
         )
 
     def _serialize_fallback(
@@ -492,6 +518,14 @@ class EvidenceLocatorService:
             explicit_confidence=None,
             warning_reason=None,
         )
+        normalized_bbox = self._bbox_model(bbox)
+        degradation = locator_degradation(
+            page=page,
+            locator_status=status,
+            evidence_text=evidence_text,
+            bbox=normalized_bbox.model_dump(mode="json") if normalized_bbox else None,
+            warning_reason=reason,
+        )
         return EvidenceLocatorResponse(
             paper_id=paper_id,
             claim_id=claim_id,
@@ -501,15 +535,18 @@ class EvidenceLocatorService:
             field_name=field_name,
             evidence_text=evidence_text,
             page=page,
-            bbox=self._bbox_model(bbox),
+            bbox=normalized_bbox,
             section=section,
             source_type=source_type,
-            locator_status=status,
+            locator_status=degradation.locator_status,
+            provenance_level=degradation.provenance_level,
+            can_jump_to_pdf_page=degradation.can_jump_to_pdf_page,
+            can_highlight_in_pdf=degradation.can_highlight_in_pdf,
             locator_confidence=confidence,
             parser_source=parser_source,
             char_start=char_start,
             char_end=char_end,
-            warning_reason=reason,
+            warning_reason=degradation.warning_reason,
         )
 
     @staticmethod
@@ -524,16 +561,16 @@ class EvidenceLocatorService:
     ) -> tuple[str, float, str | None]:
         normalized_bbox = EvidenceLocatorService._normalize_bbox_dict(bbox)
         if normalized_bbox and page is not None:
-            return "exact", explicit_confidence if explicit_confidence is not None else 0.98, warning_reason
+            return "exact_page", explicit_confidence if explicit_confidence is not None else 0.98, warning_reason
         if page is not None:
-            return "page_only", explicit_confidence if explicit_confidence is not None else 0.72, warning_reason or "bbox unavailable"
+            return "exact_page", explicit_confidence if explicit_confidence is not None else 0.72, warning_reason or "bbox unavailable"
         safe_text = evidence_text or ""
         if safe_text.strip():
-            status = "needs_reparse" if parser_source == "fallback" else "text_only"
+            status = "missing_page" if parser_source == "fallback" else "text_only"
             confidence = explicit_confidence if explicit_confidence is not None else (0.35 if status == "text_only" else 0.2)
-            reason = warning_reason or ("page missing from parser output" if status == "text_only" else "page missing; reparsing may recover coordinates")
+            reason = warning_reason or ("page missing from parser output" if status == "text_only" else "page missing; reparsing may recover page")
             return status, confidence, reason
-        return "missing", explicit_confidence if explicit_confidence is not None else 0.0, warning_reason or "no locator evidence available"
+        return "missing_locator", explicit_confidence if explicit_confidence is not None else 0.0, warning_reason or "no locator evidence available"
 
     @staticmethod
     def _normalize_bbox_dict(bbox: dict[str, Any] | None) -> dict[str, Any] | None:

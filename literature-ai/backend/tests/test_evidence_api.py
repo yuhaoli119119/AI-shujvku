@@ -95,7 +95,10 @@ def test_claim_locator_returns_exact_bbox(monkeypatch):
         locator_response = client.get(f"/api/evidence/claims/{claim_id}/locator")
         assert locator_response.status_code == 200
         locator = locator_response.json()
-        assert locator["locator_status"] == "exact"
+        assert locator["locator_status"] == "exact_page"
+        assert locator["provenance_level"] == "exact_pdf_page"
+        assert locator["can_jump_to_pdf_page"] is True
+        assert locator["can_highlight_in_pdf"] is False
         assert locator["page"] == 4
         assert locator["bbox"]["x0"] == 10.0
         assert locator["bbox"]["y1"] == 140.0
@@ -104,7 +107,7 @@ def test_claim_locator_returns_exact_bbox(monkeypatch):
         paper_locators = client.get(f"/api/papers/{paper_id}/evidence/locators")
         assert paper_locators.status_code == 200
         items = paper_locators.json()
-        assert any(item["claim_id"] == claim_id and item["locator_status"] == "exact" for item in items)
+        assert any(item["claim_id"] == claim_id and item["locator_status"] == "exact_page" for item in items)
 
         app.dependency_overrides.clear()
         engine.dispose()
@@ -153,9 +156,11 @@ def test_claim_locator_page_only_fallback(monkeypatch):
         locator_response = client.get(f"/api/evidence/claims/{claim_id}/locator")
         assert locator_response.status_code == 200
         locator = locator_response.json()
-        assert locator["locator_status"] == "page_only"
+        assert locator["locator_status"] == "exact_page"
         assert locator["bbox"] is None
         assert locator["page"] == 2
+        assert locator["can_jump_to_pdf_page"] is True
+        assert locator["can_highlight_in_pdf"] is False
 
         app.dependency_overrides.clear()
         engine.dispose()
@@ -195,8 +200,9 @@ def test_claim_locator_legacy_missing_or_text_only_fallback(monkeypatch):
         locator_response = client.get(f"/api/evidence/claims/{claim_id}/locator")
         assert locator_response.status_code == 200
         locator = locator_response.json()
-        assert locator["locator_status"] in {"text_only", "missing"}
+        assert locator["locator_status"] in {"text_only", "missing_page"}
         assert locator["page"] is None
+        assert locator["can_jump_to_pdf_page"] is False
 
         paper_locators = client.get(f"/api/papers/{paper_id}/evidence/locators")
         assert paper_locators.status_code == 200
@@ -259,7 +265,7 @@ def test_extraction_results_include_evidence_locator_and_locator_api(monkeypatch
         payload = results_response.json()["results"]["DFTResult"][0]["value"]
         assert payload["value"] == -1.45
         assert payload["evidence_text"] == "The adsorption energy of Li2S4 is -1.45 eV on Fe-N4."
-        assert payload["evidence_locator"]["locator_status"] == "page_only"
+        assert payload["evidence_locator"]["locator_status"] == "exact_page"
         assert payload["evidence_locator"]["page"] == 3
         assert payload["evidence_locator"]["chunk_id"] == target_id
 
@@ -270,7 +276,7 @@ def test_extraction_results_include_evidence_locator_and_locator_api(monkeypatch
             item["target_type"] == "dft_results"
             and item["target_id"] == target_id
             and item["field_name"] == "value"
-            and item["locator_status"] == "page_only"
+            and item["locator_status"] == "exact_page"
             for item in locators
         )
 
@@ -391,7 +397,7 @@ def test_stage2_replace_cleanup_removes_old_extraction_locators_but_keeps_review
         assert locators_response.status_code == 200
         locators = locators_response.json()
         assert not any(item["target_id"] == old_target_id and item["claim_id"] is None for item in locators)
-        assert any(item["target_id"] == new_target_id and item["locator_status"] == "page_only" for item in locators)
+        assert any(item["target_id"] == new_target_id and item["locator_status"] == "exact_page" for item in locators)
         assert any(item["claim_id"] is not None and item["target_id"] == "manual-claim" for item in locators)
 
         audit_response = client.get(f"/api/extraction/results/{paper_id}/reviews/audit")
@@ -445,7 +451,7 @@ def test_malformed_bbox_degrades_to_page_only(monkeypatch):
         locators_response = client.get(f"/api/papers/{paper_id}/evidence/locators")
         assert locators_response.status_code == 200
         locator = next(item for item in locators_response.json() if item["target_id"] == "bad-bbox-target")
-        assert locator["locator_status"] == "page_only"
+        assert locator["locator_status"] == "exact_page"
         assert locator["page"] == 5
         assert locator["bbox"] is None
 

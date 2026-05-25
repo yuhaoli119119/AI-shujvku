@@ -191,7 +191,7 @@ def test_dft_export_does_not_fabricate_page_or_bbox(tmp_path):
 
             _, rows = _export_rows(session)
 
-            assert rows[0]["provenance_level"] == "text_only"
+            assert rows[0]["provenance_level"] == "text_evidence_only"
             assert rows[0]["locator_status"] == "missing_locator"
             assert "page" not in rows[0]
             assert "bbox" not in rows[0]

@@ -16,6 +16,7 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     WritingCard,
 )
+from app.utils.locator_degradation import locator_degradation
 
 
 SAFE_REVIEWER_STATUS = "verified"
@@ -219,12 +220,26 @@ def _locator_summary(
         ).all()
     )
     if not locators:
-        return "text_only", "missing_locator"
+        return "text_evidence_only", "missing_locator"
     if any(locator.page is not None for locator in locators):
-        if any(locator.locator_status == "exact" and locator.bbox for locator in locators):
-            return "pdf_exact", "exact"
-        return "pdf_page", "page_only"
-    return "text_only", "missing_page"
+        return "exact_pdf_page", "exact_page"
+    statuses = [
+        locator_degradation(
+            page=locator.page,
+            locator_status=locator.locator_status,
+            evidence_text=locator.evidence_text,
+            bbox=locator.bbox,
+            warning_reason=locator.warning_reason,
+        ).locator_status
+        for locator in locators
+    ]
+    if "approximate" in statuses:
+        return "approximate_pdf_page", "approximate"
+    if "unresolved" in statuses:
+        return "unavailable", "unresolved"
+    if "text_only" in statuses:
+        return "text_evidence_only", "text_only"
+    return "text_evidence_only", "missing_page"
 
 
 def build_export_gate_reason(

@@ -18,7 +18,9 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.config import get_settings
 from app.db.models import DFTResult, WritingCard
 from app.db.session import session_scope
+from app.utils.locator_degradation import locator_degradation
 from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
+from scripts.recover_evidence_pages import analyze_evidence_pages
 
 
 ACTIVE_REVIEW_RESOLUTION_STATUSES = {"active", "remapped"}
@@ -101,6 +103,89 @@ def _bbox_abnormal_count(session: Session, paper_id: str | None = None) -> int:
         params,
     ).all()
     return sum(1 for row in rows if not _is_valid_bbox(row[0]))
+
+
+def _is_valid_page(value: Any) -> bool:
+    try:
+        return int(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _evidence_locator_degradation_stats(session: Session, paper_id: str | None, limit: int) -> dict[str, int]:
+    tables = _table_names(session)
+    stats = Counter()
+
+    if "evidence_claims" in tables:
+        where, params = _paper_where(session, "evidence_claims", paper_id)
+        rows = session.execute(
+            text("SELECT page_start, page_end, evidence_text FROM evidence_claims WHERE " + where),
+            params,
+        ).all()
+        for page_start, page_end, evidence_text in rows:
+            status = "exact_page" if (_is_valid_page(page_start) or _is_valid_page(page_end)) else (
+                "text_only" if str(evidence_text or "").strip() else "unresolved"
+            )
+            stats[f"status_{status}"] += 1
+
+    if "evidence_spans" in tables:
+        where, params = _paper_where(session, "evidence_spans", paper_id)
+        rows = session.execute(text("SELECT page, text FROM evidence_spans WHERE " + where), params).all()
+        for page, evidence_text in rows:
+            status = "exact_page" if _is_valid_page(page) else ("text_only" if str(evidence_text or "").strip() else "unresolved")
+            stats[f"status_{status}"] += 1
+
+    if "evidence_locators" in tables:
+        where, params = _paper_where(session, "evidence_locators", paper_id)
+        rows = session.execute(
+            text("SELECT page, locator_status, evidence_text, bbox, warning_reason FROM evidence_locators WHERE " + where),
+            params,
+        ).all()
+        for page, status, evidence_text, bbox, warning_reason in rows:
+            parsed_bbox = _parse_bbox(bbox)
+            degradation = locator_degradation(
+                page=page,
+                locator_status=status,
+                evidence_text=evidence_text,
+                bbox=parsed_bbox if isinstance(parsed_bbox, dict) else None,
+                warning_reason=warning_reason,
+            )
+            stats[f"status_{degradation.locator_status}"] += 1
+            if parsed_bbox is not None:
+                stats["evidence_with_bbox_count"] += 1
+                if not _is_valid_page(page):
+                    stats["evidence_bbox_without_page_count"] += 1
+
+    total = (
+        stats["status_exact_page"]
+        + stats["status_text_only"]
+        + stats["status_missing_page"]
+        + stats["status_missing_locator"]
+        + stats["status_approximate"]
+        + stats["status_unresolved"]
+    )
+    recovery = analyze_evidence_pages(session, paper_id=paper_id, limit=None if limit <= 0 else None)
+    recoverable = int(recovery["summary"]["proposed_apply_count"])
+    unrecoverable = sum(
+        1
+        for item in recovery["decisions"]
+        if not item.get("apply_eligible") and item.get("existing_page") is None
+    )
+    return {
+        "evidence_total": total,
+        "evidence_exact_page_count": stats["status_exact_page"],
+        "evidence_missing_page_count": stats["status_missing_page"] + stats["status_text_only"],
+        "evidence_text_only_count": stats["status_text_only"],
+        "evidence_missing_locator_count": stats["status_missing_locator"],
+        "evidence_approximate_count": stats["status_approximate"],
+        "evidence_unresolved_count": stats["status_unresolved"],
+        "evidence_with_bbox_count": stats["evidence_with_bbox_count"],
+        "evidence_bbox_without_page_count": stats["evidence_bbox_without_page_count"],
+        "evidence_recoverable_from_parsed_artifact_count": recoverable,
+        "evidence_unrecoverable_count": unrecoverable,
+        "pdf_jump_exact_eligible_count": stats["status_exact_page"],
+        "pdf_jump_degraded_count": max(total - stats["status_exact_page"], 0),
+    }
 
 
 def _group_counts(
@@ -383,6 +468,7 @@ def run_audit(session: Session, *, paper_id: str | None = None, limit: int = 10)
 
     dft_export_gate = _dft_export_gate_stats(session, paper_id)
     writing_gate = _writing_gate_stats(session, paper_id)
+    locator_degradation_stats = _evidence_locator_degradation_stats(session, paper_id, limit)
 
     orphan_counts = {
         table_name: _orphan_count(session, table_name, paper_id)
@@ -413,6 +499,7 @@ def run_audit(session: Session, *, paper_id: str | None = None, limit: int = 10)
             "invalid_page": evidence_invalid_page,
             "abnormal_bbox": _bbox_abnormal_count(session, paper_id=paper_id),
         },
+        "locator_degradation": locator_degradation_stats,
         "extraction": {
             "total": extraction_total,
             "missing_evidence_reference": extraction_missing_evidence,
@@ -515,6 +602,19 @@ def print_report(report: dict[str, Any]) -> None:
     print(
         "missing_page={missing_page} missing_evidence_text={missing_evidence_text} "
         "invalid_page={invalid_page} abnormal_bbox={abnormal_bbox}".format(**evidence)
+    )
+    locator = report["locator_degradation"]
+    print(
+        "locator_status: evidence_total={evidence_total} exact_page={evidence_exact_page_count} "
+        "missing_page={evidence_missing_page_count} text_only={evidence_text_only_count} "
+        "missing_locator={evidence_missing_locator_count} approximate={evidence_approximate_count} "
+        "unresolved={evidence_unresolved_count} with_bbox={evidence_with_bbox_count} "
+        "bbox_without_page={evidence_bbox_without_page_count}".format(**locator)
+    )
+    print(
+        "recovery: recoverable_from_parsed_artifact={evidence_recoverable_from_parsed_artifact_count} "
+        "unrecoverable={evidence_unrecoverable_count} pdf_jump_exact_eligible={pdf_jump_exact_eligible_count} "
+        "pdf_jump_degraded={pdf_jump_degraded_count}".format(**locator)
     )
     print("")
     print("[Extraction]")
