@@ -43,6 +43,15 @@ function renderJSONCards(title, items) {
 
 // ── G3B Evidence Locator Rendering ──
 
+function escAttr(value) {
+    return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
 function locatorStatusBadge(locatorStatus) {
     const s = String(locatorStatus || "unknown").trim().toLowerCase();
     if (s === "exact") {
@@ -69,11 +78,13 @@ function locatorActionHtml(locator) {
 
     if (s === "exact") {
         var uid = "loc-act-detail-" + (locator.id || Math.random().toString(36).slice(2));
-        var bboxDataAttr = bbox ? ('data-bbox="' + esc(JSON.stringify(bbox)) + '"') : "";
-        return '<span id="' + uid + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="' + (bbox ? "true" : "false") + '" data-locator-status="' + esc(s) + '" data-evidence-text="' + esc(ellipsis(evidenceText, 80)) + '" ' + bboxDataAttr + ' style="display:none;"></span>' +
+        var bboxDataAttr = bbox ? ('data-bbox="' + escAttr(JSON.stringify(bbox)) + '"') : "";
+        return '<span id="' + uid + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="' + (bbox ? "true" : "false") + '" data-locator-status="' + esc(s) + '" data-evidence-text="' + escAttr(ellipsis(evidenceText, 80)) + '" ' + bboxDataAttr + ' style="display:none;"></span>' +
             '<button class="btn primary small" onclick="triggerDetailLocatorAction(\'' + uid + '\')">跳到 PDF 并高亮</button>';
     } else if (s === "page_only") {
-        return '<button class="btn ghost small" onclick="openPdfViewer(\'' + esc(paperId) + '\',' + (page || 0) + ',false,null,\'' + esc(s) + '\',\'\')">跳到第 ' + (page || "?") + ' 页</button>' +
+        var uid2 = "loc-act-detail-" + (locator.id || Math.random().toString(36).slice(2));
+        return '<span id="' + uid2 + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="false" data-locator-status="page_only" data-evidence-text="' + escAttr(ellipsis(evidenceText, 80)) + '" style="display:none;"></span>' +
+            '<button class="btn ghost small" onclick="triggerDetailLocatorAction(\'' + uid2 + '\')">跳到第 ' + (page || "?") + ' 页</button>' +
             '<span style="font-size:11px;color:var(--color-text-secondary);margin-left:6px;">无精确框选</span>';
     } else if (s === "text_only") {
         return '<span style="font-size:12px;color:var(--color-warning);">仅有文本证据，暂无法定位到 PDF 页</span>';
@@ -145,7 +156,7 @@ function triggerDetailLocatorAction(uid) {
     openPdfViewer(paperId, page, hasBbox, bbox, locatorStatus, evidenceText);
 }
 
-function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, evidenceText) {
+async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, evidenceText) {
     var overlay = $("pdfViewerOverlay");
     if (!overlay) return;
 
@@ -166,35 +177,64 @@ function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, eviden
     var highlightOverlay = $("pdfHighlightOverlay");
     var viewerTitle = $("pdfViewerTitle");
     var viewerStatus = $("pdfViewerStatus");
+    var viewerPageIndicator = $("pdfViewerPageIndicator");
+    var viewerEvidencePanel = $("pdfViewerEvidencePanel");
+    var viewerPdfUnavailable = $("pdfViewerUnavailable");
+    var viewerPdfContent = $("pdfViewerContent");
 
     if (viewerTitle) viewerTitle.textContent = "PDF 预览 - 文献 " + paperId.slice(0, 8);
+    if (viewerStatus) viewerStatus.textContent = "加载中...";
+    if (viewerPageIndicator) viewerPageIndicator.textContent = "目标页码：" + Math.max(1, page || 1);
+
+    // Hide unavailable message, show content area
+    if (viewerPdfUnavailable) viewerPdfUnavailable.style.display = "none";
+    if (viewerPdfContent) viewerPdfContent.style.display = "block";
+
+    // Build evidence panel content
+    var evidenceHtml = "";
+    if (hasBbox && bbox && locatorStatus === "exact") {
+        var cs = bbox.coordinate_system || "pdf_points";
+        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-danger);">📍 精确定位 (exact)</div>' +
+            '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px;">坐标系：' + esc(cs) + '</div>' +
+            '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px;">BBox: x0=' + (bbox.x0 || 0) + ' y0=' + (bbox.y0 || 0) + ' x1=' + (bbox.x1 || 0) + ' y1=' + (bbox.y1 || 0) + '</div>' +
+            (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
+    } else if (locatorStatus === "page_only") {
+        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">📄 仅页码定位 (page_only)</div>' +
+            '<div style="font-size:11px;color:var(--color-text-secondary);">无精确框选 — 已跳转到目标页</div>' +
+            (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
+    }
+    if (viewerEvidencePanel) viewerEvidencePanel.innerHTML = evidenceHtml;
+
+    // Probe PDF availability with HEAD request
+    var pdfUrl = "/api/papers/" + encodeURIComponent(paperId) + "/pdf";
+    try {
+        var probeResp = await fetch(pdfUrl, { method: "HEAD" });
+        if (!probeResp.ok) {
+            // PDF not available
+            if (viewerPdfContent) viewerPdfContent.style.display = "none";
+            if (viewerPdfUnavailable) viewerPdfUnavailable.style.display = "block";
+            if (viewerStatus) viewerStatus.textContent = "PDF 尚未上传或不可预览";
+            return;
+        }
+    } catch (_) {
+        // Network error
+        if (viewerPdfContent) viewerPdfContent.style.display = "none";
+        if (viewerPdfUnavailable) viewerPdfUnavailable.style.display = "block";
+        if (viewerStatus) viewerStatus.textContent = "PDF 请求失败";
+        return;
+    }
+
     if (viewerStatus) viewerStatus.textContent = "";
 
+    // Load PDF in iframe with page fragment
     if (iframe) {
-        iframe.src = "/api/papers/" + encodeURIComponent(paperId) + "/pdf#page=" + Math.max(1, page || 1);
+        iframe.src = pdfUrl + "#page=" + Math.max(1, page || 1);
         iframe.style.display = "block";
     }
 
-    if (highlightOverlay) {
-        highlightOverlay.innerHTML = "";
-        if (hasBbox && bbox && locatorStatus === "exact") {
-            var cs = bbox.coordinate_system || "pdf_points";
-            if (cs !== "pdf_points" && cs !== "normalized") {
-                if (viewerStatus) viewerStatus.textContent = "不确定坐标系，已仅跳页";
-                highlightOverlay.innerHTML = "";
-            } else {
-                var left = (bbox.x0 || 0);
-                var top = (bbox.y0 || 0);
-                var w = (bbox.x1 || 0) - left;
-                var h = (bbox.y1 || 0) - top;
-                highlightOverlay.innerHTML =
-                    '<div class="pdf-bbox-highlight" style="position:absolute;left:' + left + 'px;top:' + top + 'px;width:' + Math.max(1, w) + 'px;height:' + Math.max(1, h) + 'px;border:2px solid var(--color-danger);background:var(--color-danger-bg);opacity:0.4;pointer-events:none;border-radius:2px;"></div>' +
-                    (evidenceText ? '<div class="pdf-evidence-tooltip" style="position:absolute;left:' + left + 'px;top:' + (top + Math.max(1, h) + 4) + 'px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);padding:6px 8px;font-size:11px;max-width:300px;box-shadow:var(--shadow-elevated);pointer-events:none;z-index:10;">' + esc(evidenceText) + '</div>' : '');
-            }
-        } else if (!hasBbox && locatorStatus === "page_only") {
-            if (viewerStatus) viewerStatus.textContent = "无精确框选";
-        }
-    }
+    // Clear highlight overlay (bbox positioning over iframe is unreliable;
+    // evidence info is shown in the side panel instead)
+    if (highlightOverlay) highlightOverlay.innerHTML = "";
 }
 
 function closePdfViewer() {

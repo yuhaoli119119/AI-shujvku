@@ -492,6 +492,10 @@ async function mockApi(route) {
     return route.fulfill({ status: 204, body: '' });
   }
 
+  if (pathname.match(/\/api\/papers\/[^/]+\/pdf$/) && method === 'HEAD') {
+    return route.fulfill({ status: 200, headers: { 'content-type': 'application/pdf' } });
+  }
+
   return route.fulfill({ status: 204, body: '' });
 }
 
@@ -1932,12 +1936,16 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('#schemaForm')).toContainText('无法精确定位');
     });
 
-    test('C. Exact bbox click opens PDF viewer with highlight overlay', async ({ page }) => {
+    test('C. Exact bbox click opens PDF viewer with evidence panel and page indicator', async ({ page }) => {
       await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
         return jsonResponse(route, [LOCATOR_EXACT]);
       });
 
       await page.route(/\/api\/papers\/paper-1\/pdf$/, route => {
+        const method = route.request().method();
+        if (method === 'HEAD') {
+          return route.fulfill({ status: 200, headers: { 'content-type': 'application/pdf' } });
+        }
         return route.fulfill({
           status: 200,
           contentType: 'application/pdf',
@@ -1955,11 +1963,35 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       // Click the button
       await page.locator('#evidenceLocatorsPanel button:has-text("跳到 PDF 并高亮")').click();
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(800);
 
       // PDF viewer overlay should be visible
       const overlay = page.locator('#pdfViewerOverlay');
       await expect(overlay).toBeVisible();
+
+      // iframe src must be set and point to PDF endpoint
+      const iframe = page.locator('#pdfViewerIframe');
+      const src = await iframe.getAttribute('src');
+      expect(src).toContain('/api/papers/paper-1/pdf');
+      expect(src).toContain('page=5');
+
+      // Page indicator must show target page
+      const pageIndicator = page.locator('#pdfViewerPageIndicator');
+      await expect(pageIndicator).toContainText('5');
+
+      // Evidence panel must show exact locator info
+      const evidencePanel = page.locator('#pdfViewerEvidencePanel');
+      await expect(evidencePanel).toContainText('精确定位');
+      await expect(evidencePanel).toContainText('exact');
+      await expect(evidencePanel).toContainText('BBox');
+
+      // PDF unavailable message must be hidden
+      const unavailable = page.locator('#pdfViewerUnavailable');
+      await expect(unavailable).not.toBeVisible();
+
+      // No fake highlight overlay content
+      const highlight = page.locator('#pdfHighlightOverlay');
+      await expect(highlight.locator('div')).toHaveCount(0);
 
       // Close the viewer
       await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
@@ -1967,12 +1999,16 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(overlay).not.toBeVisible();
     });
 
-    test('D. Page_only click opens PDF viewer without bbox highlight overlay', async ({ page }) => {
+    test('D. Page_only click opens PDF viewer without bbox highlight and shows page_only status', async ({ page }) => {
       await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
         return jsonResponse(route, [LOCATOR_PAGE_ONLY]);
       });
 
       await page.route(/\/api\/papers\/paper-1\/pdf$/, route => {
+        const method = route.request().method();
+        if (method === 'HEAD') {
+          return route.fulfill({ status: 200, headers: { 'content-type': 'application/pdf' } });
+        }
         return route.fulfill({
           status: 200,
           contentType: 'application/pdf',
@@ -1989,18 +2025,28 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(panel).toContainText('跳到第 5 页');
 
       await page.locator('#evidenceLocatorsPanel button:has-text("跳到第 5 页")').click();
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(800);
 
       const overlay = page.locator('#pdfViewerOverlay');
       await expect(overlay).toBeVisible();
 
-      // No bbox highlight overlay (pdfHighlightOverlay should be empty)
+      // iframe src must be set
+      const iframe = page.locator('#pdfViewerIframe');
+      const src = await iframe.getAttribute('src');
+      expect(src).toContain('/api/papers/paper-1/pdf');
+
+      // Page indicator must show target page
+      const pageIndicator = page.locator('#pdfViewerPageIndicator');
+      await expect(pageIndicator).toContainText('5');
+
+      // Evidence panel must show page_only status
+      const evidencePanel = page.locator('#pdfViewerEvidencePanel');
+      await expect(evidencePanel).toContainText('仅页码定位');
+      await expect(evidencePanel).toContainText('page_only');
+
+      // No bbox highlight overlay
       const highlight = page.locator('#pdfHighlightOverlay .pdf-bbox-highlight');
       await expect(highlight).toHaveCount(0);
-
-      // Should show "无精确框选"
-      const viewerStatus = page.locator('#pdfViewerStatus');
-      await expect(viewerStatus).toContainText('无精确框选');
 
       await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
     });
@@ -2030,6 +2076,61 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(panel).toContainText('仅有文本证据，暂无法定位到 PDF 页');
       await expect(panel).toContainText('需要重新解析 PDF 以恢复定位');
       await expect(panel).toContainText('暂无可用 PDF 定位');
+    });
+
+    test('E2. PDF not available shows unavailable message and no fake highlight', async ({ page }) => {
+      await page.route(/\/api\/papers\/paper-1\/evidence\/locators$/, route => {
+        return jsonResponse(route, [LOCATOR_EXACT]);
+      });
+
+      // PDF endpoint returns 404
+      await page.route(/\/api\/papers\/paper-1\/pdf$/, route => {
+        const method = route.request().method();
+        if (method === 'HEAD') {
+          return route.fulfill({ status: 404, headers: {} });
+        }
+        return route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'PDF not uploaded or unavailable' }),
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-card');
+      await page.waitForTimeout(800);
+
+      const panel = page.locator('#evidenceLocatorsPanel');
+      await expect(panel).toContainText('跳到 PDF 并高亮');
+
+      // Click the button
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳到 PDF 并高亮")').click();
+      await page.waitForTimeout(800);
+
+      // Overlay should be visible
+      const overlay = page.locator('#pdfViewerOverlay');
+      await expect(overlay).toBeVisible();
+
+      // PDF unavailable message should be visible
+      const unavailable = page.locator('#pdfViewerUnavailable');
+      await expect(unavailable).toBeVisible();
+      await expect(unavailable).toContainText('PDF 尚未上传或不可预览');
+
+      // PDF content area should be hidden
+      const pdfContent = page.locator('#pdfViewerContent');
+      await expect(pdfContent).not.toBeVisible();
+
+      // No fake highlight
+      const fakeOverlay = page.locator('.pdf-bbox-highlight');
+      await expect(fakeOverlay).toHaveCount(0);
+
+      // No iframe loading
+      const iframe = page.locator('#pdfViewerIframe');
+      const src = await iframe.getAttribute('src');
+      expect(src).toBeFalsy();
+
+      await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
     });
 
     test('F. API failure graceful degradation - 404/500', async ({ page }) => {

@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -67,3 +68,21 @@ async def get_paper_evidence_locators(
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
     return EvidenceLocatorService(session).list_locators_for_paper(paper_id)
+
+
+@router.get("/{paper_id}/pdf")
+async def get_paper_pdf(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+):
+    """Serve the PDF file for a paper, for in-browser preview."""
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if not paper.pdf_path:
+        raise HTTPException(status_code=404, detail="PDF not uploaded or unavailable")
+    settings = get_settings()
+    file_path = settings.storage_paths["pdf"] / paper.pdf_path
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="PDF file missing on disk")
+    return FileResponse(str(file_path), media_type="application/pdf")
