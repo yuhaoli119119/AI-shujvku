@@ -470,6 +470,9 @@ def run_audit(session: Session, *, paper_id: str | None = None, limit: int = 10)
     writing_gate = _writing_gate_stats(session, paper_id)
     locator_degradation_stats = _evidence_locator_degradation_stats(session, paper_id, limit)
 
+    # D1 Phase 3: review boundary enforcement statistics
+    review_boundary = _review_boundary_stats(session, paper_id, tables)
+
     orphan_counts = {
         table_name: _orphan_count(session, table_name, paper_id)
         for table_name in [
@@ -534,8 +537,107 @@ def run_audit(session: Session, *, paper_id: str | None = None, limit: int = 10)
             "dataset_tables_detected": [],
         },
         "orphans": orphan_counts,
+        "review_boundary": review_boundary,
         "samples": samples,
     }
+
+
+def _review_boundary_stats(session: Session, paper_id: str | None, tables: set[str]) -> dict[str, Any]:
+    """D1 Phase 3: review boundary enforcement statistics."""
+    stats: dict[str, Any] = {}
+    if "extraction_field_reviews" not in tables:
+        return stats
+
+    where, params = _paper_where(session, "extraction_field_reviews", paper_id)
+    cols = _columns(session, "extraction_field_reviews")
+
+    # reviews_total
+    stats["reviews_total"] = _count(session, "extraction_field_reviews", where, params)
+
+    # reviews_safe_verified: reviewer_status=verified AND target_resolution_status IN (active, remapped)
+    stats["reviews_safe_verified"] = _count(
+        session, "extraction_field_reviews",
+        _and([where, "reviewer_status = 'verified'", "target_resolution_status IN ('active', 'remapped')"]),
+        params,
+    )
+
+    # reviews_verified_but_unsafe_target: reviewer_status=verified AND target_resolution_status NOT IN (active, remapped)
+    stats["reviews_verified_but_unsafe_target"] = _count(
+        session, "extraction_field_reviews",
+        _and([
+            where,
+            "reviewer_status = 'verified'",
+            "COALESCE(NULLIF(TRIM(CAST(target_resolution_status AS TEXT)), ''), 'unknown') NOT IN ('active', 'remapped')",
+        ]),
+        params,
+    )
+
+    # reviews_missing_evidence: verified but no evidence_text
+    if "evidence_text" in cols:
+        stats["reviews_missing_evidence"] = _count(
+            session, "extraction_field_reviews",
+            _and([where, "reviewer_status = 'verified'", _blank_condition("evidence_text")]),
+            params,
+        )
+        stats["reviews_missing_evidence_text"] = stats["reviews_missing_evidence"]
+    else:
+        stats["reviews_missing_evidence"] = 0
+        stats["reviews_missing_evidence_text"] = 0
+
+    # AI candidate stats
+    ai_candidates_total = 0
+    ai_candidates_with_evidence = 0
+    ai_candidates_missing_evidence = 0
+    ai_candidates_marked_verified = 0
+    external_candidates_total = 0
+    external_candidates_missing_evidence = 0
+    potential_ai_overwrite_risk = 0
+
+    if "external_analysis_candidates" in tables:
+        ext_where, ext_params = _paper_where(session, "external_analysis_candidates", paper_id)
+        ai_candidates_total = _count(session, "external_analysis_candidates", ext_where, ext_params)
+
+        if "evidence_payload" in _columns(session, "external_analysis_candidates"):
+            ai_candidates_with_evidence = _count(
+                session, "external_analysis_candidates",
+                _and([ext_where, "NOT " + _json_blank_condition("evidence_payload")]),
+                ext_params,
+            )
+            ai_candidates_missing_evidence = _count(
+                session, "external_analysis_candidates",
+                _and([ext_where, _json_blank_condition("evidence_payload")]),
+                ext_params,
+            )
+
+        # AI candidates that somehow got marked as verified (should be 0)
+        if "extraction_field_reviews" in tables and "reviewer_status" in cols:
+            # Cross-check: external candidates whose materialized target is also a verified review
+            # This is an indirect check — potential overwrite risk
+            potential_ai_overwrite_risk = _count(
+                session, "extraction_field_reviews",
+                _and([
+                    where,
+                    "reviewer_status = 'verified'",
+                    "reviewer IN ('internal_ai', 'external', 'mcp_review', 'auto')",
+                ]),
+                params,
+            )
+
+    stats["ai_candidates_total"] = ai_candidates_total
+    stats["ai_candidates_with_evidence_payload"] = ai_candidates_with_evidence
+    stats["ai_candidates_missing_evidence_payload"] = ai_candidates_missing_evidence
+    stats["ai_candidates_marked_verified_count"] = ai_candidates_marked_verified
+    stats["external_candidates_total"] = ai_candidates_total  # Same table, aliased for clarity
+    stats["external_candidates_missing_evidence_payload"] = ai_candidates_missing_evidence
+    stats["potential_ai_overwrite_risk_count"] = potential_ai_overwrite_risk
+
+    # Export/writing safe verified counts (reuse existing gate results)
+    dft_export = _dft_export_gate_stats(session, paper_id)
+    writing = _writing_gate_stats(session, paper_id)
+    stats["export_safe_verified_count"] = dft_export.get("dft_export_safe_eligible", 0)
+    stats["writing_safe_verified_count"] = writing.get("writing_cards_safe_usable", 0)
+
+    return stats
 
 
 def _collect_samples(session: Session, *, paper_id: str | None, limit: int) -> dict[str, list[dict[str, Any]]]:
@@ -647,6 +749,32 @@ def print_report(report: dict[str, Any]) -> None:
     print(f"reviewer_status_counts={reviews['reviewer_status_counts']}")
     print(f"target_resolution_status_counts={reviews['target_resolution_status_counts']}")
     print(f"unsafe_resolution_status_counts={reviews['unsafe_resolution_status_counts']}")
+    print("")
+    print("[Review Boundary Enforcement (D1 Phase 3)]")
+    boundary = report.get("review_boundary", {})
+    if boundary:
+        print(
+            f"reviews_total={boundary.get('reviews_total', 0)} "
+            f"reviews_safe_verified={boundary.get('reviews_safe_verified', 0)} "
+            f"reviews_verified_but_unsafe_target={boundary.get('reviews_verified_but_unsafe_target', 0)} "
+            f"reviews_missing_evidence={boundary.get('reviews_missing_evidence', 0)} "
+            f"reviews_missing_evidence_text={boundary.get('reviews_missing_evidence_text', 0)}"
+        )
+        print(
+            f"ai_candidates_total={boundary.get('ai_candidates_total', 0)} "
+            f"ai_candidates_with_evidence_payload={boundary.get('ai_candidates_with_evidence_payload', 0)} "
+            f"ai_candidates_missing_evidence_payload={boundary.get('ai_candidates_missing_evidence_payload', 0)} "
+            f"ai_candidates_marked_verified_count={boundary.get('ai_candidates_marked_verified_count', 0)}"
+        )
+        print(
+            f"external_candidates_total={boundary.get('external_candidates_total', 0)} "
+            f"external_candidates_missing_evidence_payload={boundary.get('external_candidates_missing_evidence_payload', 0)} "
+            f"potential_ai_overwrite_risk_count={boundary.get('potential_ai_overwrite_risk_count', 0)} "
+            f"export_safe_verified_count={boundary.get('export_safe_verified_count', 0)} "
+            f"writing_safe_verified_count={boundary.get('writing_safe_verified_count', 0)}"
+        )
+    else:
+        print("(no review boundary data)")
     print("")
     print("[Export/Writing/Dataset]")
     export = report["export_writing_dataset"]

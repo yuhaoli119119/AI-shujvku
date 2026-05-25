@@ -732,7 +732,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('input[data-field="catalyst"]')).toHaveCount(0);
 
     verifyCalled = false;
-    await page.click('.footer-actions button:has-text("Mark verified")');
+    await page.click('.footer-actions button:has-text("人工确认校验")');
     await expect(page.locator('#toast')).toContainText('批量标记已校验成功');
     expect(verifyCalled).toBe(true);
   });
@@ -2283,7 +2283,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       // Save and verify buttons still exist
       await expect(page.locator('.footer-actions button:has-text("Save")')).toBeVisible();
-      await expect(page.locator('.footer-actions button:has-text("Mark verified")')).toBeVisible();
+      await expect(page.locator('.footer-actions button:has-text("人工确认校验")')).toBeVisible();
     });
 
     test('G2. Locator warnings do not override G2B review_target warnings', async ({ page }) => {

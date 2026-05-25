@@ -27,7 +27,11 @@ from app.services.review_target_resolver import (
     canonical_target_type,
     ReviewTargetResolver,
 )
-from app.utils.review_safety import is_safe_verified_review
+from app.utils.review_safety import (
+    can_manual_review_mark_verified,
+    has_required_evidence_reference,
+    is_safe_verified_review,
+)
 
 RESULT_KEY_BY_TARGET_TYPE = {
     "catalyst_samples": "CatalystSample",
@@ -130,16 +134,27 @@ class ExtractionReviewService:
             field_snapshot = snapshot[item.field_name]
             review = self._get_or_create_review(paper_id, canonical_type, item.target_id, item.field_name)
             self._guard_verified_review_mutation(review, item.reviewed_value, item.reviewer_status)
+            # D1 Phase 3: save_reviews cannot directly set reviewer_status=verified
+            # Verified must go through mark_verified API which has evidence checks
+            incoming_status = item.reviewer_status
+            if incoming_status == "verified":
+                raise ValueError(
+                    "Cannot set reviewer_status=verified through save. "
+                    "Use the mark-verified endpoint for human verification."
+                )
             review.original_value = item.original_value if item.original_value is not None else field_snapshot["value"]
             review.reviewed_value = item.reviewed_value if review.reviewer_status != "verified" else review.reviewed_value
             review.unit = item.unit if item.unit is not None else field_snapshot["unit"]
             review.evidence_text = item.evidence_text if item.evidence_text is not None else field_snapshot["evidence_text"]
-            review.reviewer_status = item.reviewer_status if review.reviewer_status != "verified" else review.reviewer_status
+            review.reviewer_status = incoming_status if review.reviewer_status != "verified" else review.reviewer_status
             review.reviewer = item.reviewer
             review.reviewer_note = item.reviewer_note
-            review.target_resolution_status = "active"
-            review.remapped_from_target_id = None
-            review.last_resolved_target_id = item.target_id
+            # D1 Phase 3: do not reset target_resolution_status on save
+            # Only mark_verified is allowed to set it to "active"
+            if review.id is None:
+                review.target_resolution_status = "active"
+                review.remapped_from_target_id = None
+                review.last_resolved_target_id = item.target_id
             self.resolver._refresh_review_identity(review, canonical_type, target)
             self.session.add(review)
             self.session.flush()
@@ -153,11 +168,34 @@ class ExtractionReviewService:
         snapshot = self.get_target_field_snapshot(canonical_type, target)
         field_names = payload.field_names or list(snapshot.keys())
 
+        # D1 Phase 3: check target exists (already done by get_target_or_raise above)
+        # and check evidence reference and evidence text before marking verified
+        has_evidence_ref = has_required_evidence_reference(
+            self.session,
+            paper_id=paper_id,
+            target_type=canonical_type,
+            target_id=target.id,
+        )
+
         saved: list[ExtractionFieldReviewResponse] = []
         for field_name in field_names:
             if field_name not in snapshot:
                 raise ValueError(f"Unsupported field for {canonical_type}: {field_name}")
             field_snapshot = snapshot[field_name]
+            # D1 Phase 3: evidence text guard
+            evidence_text_value = field_snapshot["evidence_text"]
+            has_evidence_text = bool(evidence_text_value and str(evidence_text_value).strip())
+            allowed, reason = can_manual_review_mark_verified(
+                target_exists=True,
+                evidence_reference_exists=has_evidence_ref,
+                evidence_text_exists=has_evidence_text,
+                target_resolution_status="active",
+            )
+            if not allowed:
+                raise ValueError(
+                    f"Cannot mark {canonical_type}.{field_name} as verified: {reason}. "
+                    f"Ensure target exists, evidence reference and evidence text are present."
+                )
             review = self._get_or_create_review(paper_id, canonical_type, payload.target_id, field_name)
             review.original_value = field_snapshot["value"]
             if review.reviewed_value is None:
@@ -237,6 +275,8 @@ class ExtractionReviewService:
     def _serialize(row: ExtractionFieldReview) -> ExtractionFieldReviewResponse:
         created = row.created_at.replace(tzinfo=UTC).isoformat() if row.created_at else ""
         updated = row.updated_at.replace(tzinfo=UTC).isoformat() if row.updated_at else ""
+        # D1 Phase 3: verified flag is strictly determined by is_safe_verified_review
+        # This ensures stale/ambiguous/unresolved/unknown can never be serialized as verified
         return ExtractionFieldReviewResponse(
             id=row.id,
             paper_id=row.paper_id,

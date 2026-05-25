@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, get_settings
-from app.db.models import Base, DFTResult, ExtractionFieldReview, Paper
+from app.db.models import Base, DFTResult, EvidenceSpan, ExtractionFieldReview, Paper
 from app.db.session import get_db_session
 from app.main import app
 from app.services.extraction_pipeline import ExtractionPipelineService
@@ -132,6 +132,13 @@ def test_mark_verified_persists_verified_review(setup_test_db):
             confidence=0.8,
         )
         session.add(result)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(result.id),
+            text=result.evidence_text or "The adsorption energy of Li2S6 is -0.91 eV.",
+        ))
         session.commit()
         paper_id = str(paper.id)
         target_id = str(result.id)
@@ -173,24 +180,26 @@ def test_validate_returns_review_state(setup_test_db):
             confidence=0.92,
         )
         session.add(result)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(result.id),
+            text=result.evidence_text or "The adsorption energy is -1.11 eV.",
+        ))
         session.commit()
         paper_id = str(paper.id)
         target_id = str(result.id)
 
     client = TestClient(app)
+    # Use mark-verified API instead of save with verified status (D1 Phase 3 boundary)
     save_response = client.post(
-        f"/api/extraction/results/{paper_id}/reviews/save",
+        f"/api/extraction/results/{paper_id}/reviews/mark-verified",
         json={
-            "reviews": [
-                {
-                    "target_type": "dft_results",
-                    "target_id": target_id,
-                    "field_name": "value",
-                    "reviewed_value": -1.11,
-                    "reviewer_status": "verified",
-                    "reviewer": "carol",
-                }
-            ]
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_names": ["value"],
+            "reviewer": "carol",
         },
     )
     assert save_response.status_code == 200
@@ -259,12 +268,20 @@ def test_replace_stage2_remaps_review_when_semantics_are_unchanged(setup_test_db
             confidence=0.9,
         )
         session.add(original)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(original.id),
+            text=original.evidence_text or "The adsorption energy of Li2S4 is -1.23 eV on Fe-N4.",
+        ))
         session.commit()
         paper_id = str(paper.id)
         paper_uuid = paper.id
         old_target_id = str(original.id)
 
     client = TestClient(app)
+    # First save as corrected, then mark verified (D1 Phase 3 boundary)
     save_response = client.post(
         f"/api/extraction/results/{paper_id}/reviews/save",
         json={
@@ -274,7 +291,7 @@ def test_replace_stage2_remaps_review_when_semantics_are_unchanged(setup_test_db
                     "target_id": old_target_id,
                     "field_name": "value",
                     "reviewed_value": -1.2,
-                    "reviewer_status": "verified",
+                    "reviewer_status": "corrected",
                     "reviewer": "alice",
                     "reviewer_note": "Confirmed against the PDF.",
                 }
@@ -282,6 +299,17 @@ def test_replace_stage2_remaps_review_when_semantics_are_unchanged(setup_test_db
         },
     )
     assert save_response.status_code == 200
+    verify_response = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/mark-verified",
+        json={
+            "target_type": "dft_results",
+            "target_id": old_target_id,
+            "field_names": ["value"],
+            "reviewer": "alice",
+            "reviewer_note": "Confirmed against the PDF.",
+        },
+    )
+    assert verify_response.status_code == 200
 
     with Session() as session:
         paper = session.get(Paper, paper_uuid)
@@ -344,6 +372,13 @@ def test_replace_stage2_marks_stale_review_and_does_not_apply_it(setup_test_db):
             confidence=0.9,
         )
         session.add(original)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(original.id),
+            text=original.evidence_text or "The adsorption energy of Li2S4 is -1.23 eV.",
+        ))
         session.commit()
         paper_id = str(paper.id)
         paper_uuid = paper.id
@@ -511,6 +546,13 @@ def test_validate_reports_locator_warning_without_overriding_stale_review_state(
             confidence=0.85,
         )
         session.add(result)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(result.id),
+            text=result.evidence_text or "The adsorption energy of Li2S4 is -1.05 eV.",
+        ))
         session.commit()
         paper_id = str(paper.id)
         paper_uuid = paper.id

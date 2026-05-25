@@ -375,3 +375,172 @@ def external_candidate_has_evidence(candidate: ExternalAnalysisCandidate) -> boo
 
 def trusted_external_candidate(candidate: ExternalAnalysisCandidate) -> bool:
     return external_candidate_has_evidence(candidate) and _normalized(candidate.status) in {"pending", "materialized"}
+
+
+# ---------------------------------------------------------------------------
+# D1 Phase 3 Review Boundary Enforcement helpers
+# ---------------------------------------------------------------------------
+
+
+def normalize_review_status(review: ExtractionFieldReview | dict[str, Any] | None) -> str:
+    """Return a normalized reviewer_status string."""
+    if review is None:
+        return "missing"
+    if isinstance(review, dict):
+        raw = review.get("reviewer_status") or review.get("review_status") or review.get("status")
+        return _normalized(raw) or "unknown"
+    return _normalized(review.reviewer_status) or "unknown"
+
+
+def normalize_target_resolution_status(review: ExtractionFieldReview | dict[str, Any] | None) -> str:
+    """Return a normalized target_resolution_status string."""
+    if review is None:
+        return "missing"
+    if isinstance(review, dict):
+        raw = (
+            review.get("target_resolution_status")
+            or review.get("resolution_status")
+            or review.get("review_resolution_status")
+        )
+        return _normalized(raw) or "unknown"
+    return _normalized(review.target_resolution_status) or "unknown"
+
+
+def is_unsafe_review_status(review: ExtractionFieldReview | dict[str, Any] | None) -> bool:
+    """Return True if the review has an unsafe reviewer_status or target_resolution_status."""
+    if review is None:
+        return True
+    rs = normalize_review_status(review)
+    if rs in UNSAFE_REVIEWER_STATUSES:
+        return True
+    trs = normalize_target_resolution_status(review)
+    if trs in UNSAFE_TARGET_RESOLUTION_STATUSES:
+        return True
+    return False
+
+
+def can_ai_candidate_update_target(
+    *,
+    existing_review: ExtractionFieldReview | None,
+    candidate_source: str,
+) -> bool:
+    """AI / external candidates must never overwrite a human-verified review.
+
+    Returns True only when the candidate is allowed to write.
+    """
+    if existing_review is None:
+        return True
+    if normalize_review_status(existing_review) != SAFE_REVIEWER_STATUS:
+        return True
+    # Existing review is verified — block AI/external overwrite
+    ai_sources = {"internal_ai", "external", "mcp_review", "auto"}
+    if candidate_source in ai_sources:
+        return False
+    # Manual source explicitly marking verified is allowed
+    return True
+
+
+def can_manual_review_mark_verified(
+    *,
+    target_exists: bool,
+    evidence_reference_exists: bool,
+    evidence_text_exists: bool,
+    target_resolution_status: str,
+) -> tuple[bool, str]:
+    """Check whether a manual review can be marked verified.
+
+    Returns (allowed, reason) where reason is empty when allowed.
+    """
+    if not target_exists:
+        return False, "target_not_found"
+    if not evidence_reference_exists:
+        return False, "missing_evidence_reference"
+    if not evidence_text_exists:
+        return False, "missing_evidence_text"
+    trs = _normalized(target_resolution_status)
+    if trs not in SAFE_TARGET_RESOLUTION_STATUSES and trs not in {"active", "remapped"}:
+        return False, f"unsafe_target_resolution_status:{trs or 'missing'}"
+    return True, ""
+
+
+def build_review_boundary_reason(
+    *,
+    review: ExtractionFieldReview | dict[str, Any] | None,
+    is_ai_candidate: bool = False,
+    is_external_candidate: bool = False,
+    has_evidence_payload: bool = True,
+) -> str:
+    """Build a human-readable reason string for why a review is at the boundary."""
+    rs = normalize_review_status(review)
+    trs = normalize_target_resolution_status(review)
+    parts: list[str] = []
+
+    if is_ai_candidate:
+        parts.append("ai_candidate")
+    if is_external_candidate:
+        parts.append("external_candidate")
+
+    if rs != SAFE_REVIEWER_STATUS:
+        parts.append(f"reviewer_status={rs}")
+    elif trs not in SAFE_TARGET_RESOLUTION_STATUSES:
+        parts.append(f"target_resolution={trs}")
+    else:
+        parts.append("safe_verified")
+
+    if is_external_candidate and not has_evidence_payload:
+        parts.append("missing_evidence_payload")
+
+    return ";".join(parts) if parts else "ok"
+
+
+@dataclass(frozen=True)
+class ReviewBoundaryGate:
+    """Result of a review boundary check for serialization / export."""
+    is_safe_verified: bool
+    reviewer_status: str
+    target_resolution_status: str
+    blocked_reasons: tuple[str, ...]
+    boundary_label: str
+
+
+def serialize_review_gate(
+    review: ExtractionFieldReview | dict[str, Any] | None,
+    *,
+    is_ai_candidate: bool = False,
+    is_external_candidate: bool = False,
+    has_evidence_payload: bool = True,
+) -> ReviewBoundaryGate:
+    """Serialize a review through the boundary gate.
+
+    Unsafe reviews get blocked_reasons and a non-safe boundary_label.
+    This is the single canonical path for deciding whether a review
+    can enter export/writing trusted paths.
+    """
+    rs = normalize_review_status(review)
+    trs = normalize_target_resolution_status(review)
+    safe = is_safe_verified_review(review)
+
+    blocked: list[str] = []
+    if not safe:
+        if rs != SAFE_REVIEWER_STATUS:
+            blocked.append(f"unsafe_reviewer_status:{rs}")
+        if trs not in SAFE_TARGET_RESOLUTION_STATUSES:
+            blocked.append(f"unsafe_target_resolution:{trs}")
+        if review is None:
+            blocked.append("missing_review")
+
+    if is_ai_candidate and rs == SAFE_REVIEWER_STATUS:
+        blocked.append("ai_candidate_cannot_be_verified")
+    if is_external_candidate and not has_evidence_payload:
+        blocked.append("external_candidate_missing_evidence_payload")
+    if is_external_candidate and rs == SAFE_REVIEWER_STATUS:
+        blocked.append("external_candidate_cannot_be_verified")
+
+    label = "safe_verified" if not blocked else "blocked"
+    return ReviewBoundaryGate(
+        is_safe_verified=safe and not blocked,
+        reviewer_status=rs,
+        target_resolution_status=trs,
+        blocked_reasons=tuple(blocked),
+        boundary_label=label,
+    )

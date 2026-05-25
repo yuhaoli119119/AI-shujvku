@@ -140,9 +140,19 @@ function renderCandidates(candidates) {
         return '<div class="candidate-card"><div class="muted">没有候选项。</div></div>';
     }
     return candidates.map(function(item) {
+        var candidateLabel = "";
+        if (item.candidate_type === "correction") {
+            candidateLabel = '<span style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 候选建议 · 待人工确认</span>';
+        } else if (item.candidate_type === "note") {
+            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 候选笔记 · 待人工确认</span>';
+        } else if (item.candidate_type === "relationship") {
+            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 候选关联 · 待人工确认</span>';
+        } else {
+            candidateLabel = '<span style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">候选项 · 待人工确认</span>';
+        }
         return (
             '<div class="candidate-card">' +
-                '<h4>' + esc(item.candidate_type || "候选项") + " | 状态：" + esc(uiLabel("candidate_status", item.status || "-")) + "</h4>" +
+                '<h4>' + esc(item.candidate_type || "候选项") + candidateLabel + " | 状态：" + esc(uiLabel("candidate_status", item.status || "-")) + "</h4>" +
                 '<div class="subtle">置信度：' + esc(item.confidence == null ? "-" : item.confidence) + " | 目标类型：" + esc(item.materialized_target_type || "-") + "</div>" +
                 '<div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(item.normalized_payload || {}, null, 2)) + "</div>" +
             "</div>"
