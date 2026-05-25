@@ -2,13 +2,17 @@
 
 AI-assisted literature parsing and writing support for:
 
+# Literature AI
+
+AI-assisted literature parsing and writing support for:
+
 - first-principles / DFT studies
 - single-atom and dual-atom catalysts
 - lithium-sulfur battery cathodes
 
 ## Current Progress
  
-**Overall: approximately 99.5% complete. Literature Acquisition Center frontend integration is 100% complete and fully verified with Playwright tests green. Backend core pipeline is fully complete and hardened.**
+**Overall: closed for current scope. Literature Acquisition Center frontend integration is verified by current smoke/backend tests with Playwright tests green. Backend core pipeline is verified by current smoke/backend tests and hardened.**
 
 ### Recent Changes
 

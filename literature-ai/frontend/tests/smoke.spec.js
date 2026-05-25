@@ -648,6 +648,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       return jsonResponse(route, mockResults);
     });
 
+    await page.route(/\/api\/extraction\/results\/paper-1\/validate$/, route => {
+      return jsonResponse(route, {
+        paper_id: 'paper-1',
+        status: 'validated',
+        validation_warnings: mockResults.validation_warnings
+      });
+    });
+
     await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/save$/, route => {
       saveCalled = true;
       return jsonResponse(route, { status: 'success' });
@@ -1509,6 +1517,155 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       const tabWarningBanner = page.locator('#tab-review #reviewTabAuditWarning');
       await expect(tabWarningBanner).toBeVisible();
       await expect(tabWarningBanner).toContainText('该文献有 2 条人工校验记录需要重新确认');
+    });
+
+    test('9. Orphan stale/unknown review renders properly in dedicated section without safe verified state and respects filters', async ({ page }) => {
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, EXTRACTION_RESULTS);
+      });
+
+      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
+        return jsonResponse(route, {
+          paper_id: 'paper-1',
+          total_reviews: 2,
+          active: 0,
+          remapped: 0,
+          stale: 1,
+          ambiguous: 0,
+          unresolved: 0,
+          unknown: 1,
+          items: [
+            {
+              target_id: 'old-target-1',
+              target_type: 'DFTResult',
+              field_name: 'value',
+              target_resolution_status: 'stale',
+              reviewer_status: 'verified',
+              target_label: 'Pt(111)',
+              field_path: 'DFTResult.value',
+              reviewed_value: -9.99,
+              unit: 'eV',
+              evidence_text: 'old evidence showing -9.99 eV',
+              remapped_from_target_id: 'original-id-1',
+              target_fingerprint: 'fingerprint-123'
+            },
+            {
+              target_id: 'old-target-2',
+              target_type: 'DFTResult',
+              field_name: 'value',
+              target_resolution_status: 'unknown',
+              reviewer_status: 'corrected',
+              target_label: 'Pd(100)',
+              field_path: 'DFTResult.value',
+              reviewed_value: -8.88,
+              unit: 'eV',
+              evidence_text: 'unknown status evidence showing -8.88 eV',
+              remapped_from_target_id: 'original-id-2',
+              target_fingerprint: 'fingerprint-456'
+            }
+          ]
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      const orphanTitle = page.locator('h3:has-text("需要重新确认的旧人工校验记录")');
+      await expect(orphanTitle).toBeVisible();
+
+      const staleCard = page.locator('.field-container:has-text("old-target-1")');
+      await expect(staleCard).toBeVisible();
+      await expect(staleCard).toContainText('已失效');
+      await expect(staleCard).toContainText('需重新确认');
+      await expect(staleCard).not.toContainText('已校验');
+      await expect(staleCard).toContainText('Pt(111)');
+      await expect(staleCard).toContainText('DFTResult.value');
+      await expect(staleCard).toContainText('-9.99 eV');
+      await expect(staleCard).toContainText('old evidence showing -9.99 eV');
+      await expect(staleCard).toContainText('这是一条旧目标人工校验记录，当前抽取结果中未能安全匹配。请在当前字段中重新确认后保存为新的人工确认。');
+
+      const unknownCard = page.locator('.field-container:has-text("old-target-2")');
+      await expect(unknownCard).toBeVisible();
+      await expect(unknownCard).toContainText('未知');
+      await expect(unknownCard).toContainText('需重新确认');
+      await expect(unknownCard).not.toContainText('已校验');
+      await expect(unknownCard).toContainText('Pd(100)');
+      await expect(unknownCard).toContainText('-8.88 eV');
+      await expect(unknownCard).toContainText('unknown status evidence showing -8.88 eV');
+
+      const filterSelect = page.locator('#filterSelect');
+
+      await filterSelect.selectOption('active_remapped');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container:has-text("old-target-1")')).toHaveCount(0);
+      await expect(page.locator('.field-container:has-text("old-target-2")')).toHaveCount(0);
+
+      await filterSelect.selectOption('stale_ambiguous_unresolved');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container:has-text("old-target-1")')).toHaveCount(1);
+      await expect(page.locator('.field-container:has-text("old-target-2")')).toHaveCount(0);
+
+      await filterSelect.selectOption('needs_reconfirmation');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.field-container:has-text("old-target-1")')).toHaveCount(1);
+      await expect(page.locator('.field-container:has-text("old-target-2")')).toHaveCount(1);
+    });
+
+    test('10. Save success triggers strict sequential refresh sequence', async ({ page }) => {
+      const apiCalls = [];
+
+      await page.route('**/api/extraction/results/paper-1**', async (route, request) => {
+        const url = request.url();
+        const method = request.method();
+        
+        if (url.endsWith('/reviews/save') && method === 'POST') {
+          apiCalls.push('SAVE');
+          return jsonResponse(route, { status: 'success' });
+        } else if (url.endsWith('/validate') && method === 'POST') {
+          apiCalls.push('VALIDATE');
+          return jsonResponse(route, EXTRACTION_RESULTS);
+        } else if (url.endsWith('/reviews/audit') && method === 'GET') {
+          apiCalls.push('AUDIT');
+          return jsonResponse(route, {
+            paper_id: 'paper-1',
+            total_reviews: 0,
+            active: 0,
+            remapped: 0,
+            stale: 0,
+            ambiguous: 0,
+            unresolved: 0,
+            items: []
+          });
+        } else if (url.endsWith('/paper-1') && method === 'GET') {
+          apiCalls.push('RESULTS');
+          return jsonResponse(route, EXTRACTION_RESULTS);
+        }
+        
+        return route.continue();
+      });
+
+      await page.route(/\/api\/papers\/paper-1$/, route => {
+        return jsonResponse(route, { id: 'paper-1', title: 'Paper 1' });
+      });
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+      await page.waitForTimeout(500);
+
+      apiCalls.length = 0;
+
+      await page.click('button:has-text("保存")');
+      await page.waitForTimeout(600);
+
+      expect(apiCalls).toContain('RESULTS');
+      expect(apiCalls).toContain('VALIDATE');
+      expect(apiCalls).toContain('AUDIT');
+
+      const resultsIndex = apiCalls.indexOf('RESULTS');
+      const validateIndex = apiCalls.indexOf('VALIDATE');
+      const auditIndex = apiCalls.indexOf('AUDIT');
+
+      expect(resultsIndex).toBeLessThan(validateIndex);
+      expect(validateIndex).toBeLessThan(auditIndex);
     });
   });
 });

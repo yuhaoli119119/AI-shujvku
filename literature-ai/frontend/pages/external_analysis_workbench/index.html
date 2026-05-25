@@ -162,9 +162,21 @@
       const stale = state.audit.stale || 0;
       const ambiguous = state.audit.ambiguous || 0;
       const unresolved = state.audit.unresolved || 0;
+      
+      // Dynamic unknown computation
+      let unknown = state.audit.unknown || 0;
+      if (state.audit.items && Array.isArray(state.audit.items)) {
+        const computedUnknown = state.audit.items.filter(item => {
+          const status = item.target_resolution_status;
+          return !status || !["active", "remapped", "stale", "ambiguous", "unresolved"].includes(status);
+        }).length;
+        if (!unknown) {
+          unknown = computedUnknown;
+        }
+      }
 
       let warningBanner = "";
-      if (stale + ambiguous + unresolved > 0) {
+      if (stale + ambiguous + unresolved + unknown > 0) {
         warningBanner = `
           <div style="border: 1px dashed var(--color-danger); background: var(--color-danger-bg); color: var(--color-danger); padding: 12px 16px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; font-weight: 800;">
             ⚠️ 部分人工校验记录已无法安全匹配到当前抽取结果，请重新确认后再用于导出或写作。
@@ -194,20 +206,24 @@
           <span style="font-size: 12px; background: var(--color-danger-bg); color: var(--color-danger); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-danger)40;">已失效: <strong>${stale}</strong></span>
           <span style="font-size: 12px; background: var(--color-warning-bg); color: var(--color-warning); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-warning)40;">有歧义: <strong>${ambiguous}</strong></span>
           <span style="font-size: 12px; background: var(--color-danger-bg); color: var(--color-danger); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-danger)40;">未解析: <strong>${unresolved}</strong></span>
+          <span style="font-size: 12px; background: var(--color-warning-bg); color: var(--color-warning); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-warning)40;">未知: <strong>${unknown}</strong></span>
         </div>
       `;
     }
+
     function renderPaper() {
       const p = state.paper || {};
       document.getElementById("paperMeta").textContent = JSON.stringify({ id: p.id, title: p.title, year: p.year, journal: p.journal, doi: p.doi }, null, 2);
       const sections = p.sections || [];
       document.getElementById("sectionList").innerHTML = sections.length ? sections.slice(0, 16).map((s, idx) => `<div class="section-card"><button onclick="selectSection(${idx})">${esc(s.section_title || s.section_type || "Section")}</button><div class="muted">page ${esc(s.page_start || "-")}</div></div>`).join("") : '<div class="empty-state">No sections.</div>';
     }
+
     function selectSection(index) {
       const s = (state.paper.sections || [])[index];
       state.selectedEvidence = { paper_id: state.paper.id, chunk_id: s.id, section_title: s.section_title, page_span: { page_start: s.page_start, page_end: s.page_end }, evidence_text: s.text };
       document.getElementById("evidenceText").textContent = JSON.stringify(state.selectedEvidence, null, 2);
     }
+
     function renderWarnings(warnings) {
       const box = document.getElementById("warningsBox");
       if (!warnings.length) {
@@ -216,6 +232,7 @@
       }
       box.innerHTML = warnings.map(w => `<div class="warning-row"><strong>${esc(w.severity)} · ${esc(w.code)}</strong><div>${esc(w.message)}</div><div class="muted">${esc(w.target_type)} ${esc(w.field || "")}</div></div>`).join("");
     }
+
     function getFieldStatus(field) {
       if (field && field.review && field.review.reviewer_status) {
         return field.review.reviewer_status;
@@ -227,7 +244,7 @@
     }
 
     function getStatusBadge(status, resStatus) {
-      if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+      if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
         return `<span class="status-chip" style="background:var(--color-danger-bg); color:var(--color-danger); border:1px solid var(--color-danger)40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">需重新确认</span>`;
       }
       let bg = "var(--color-surface-alt)", color = "var(--color-text-secondary)", label = "待校验";
@@ -262,6 +279,8 @@
         bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; text = "有歧义";
       } else if (resStatus === "unresolved") {
         bg = "var(--color-danger-bg)"; color = "var(--color-danger)"; text = "未解析";
+      } else if (resStatus === "unknown") {
+        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; text = "未知";
       } else {
         bg = "var(--color-surface-alt)"; color = "var(--color-text-secondary)"; text = "未知";
       }
@@ -287,12 +306,60 @@
       }
     }
 
+    function findCandidateField(item) {
+      const schema = document.getElementById("schemaSelect").value;
+      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      for (const record of results) {
+        if (record[item.field_name] === undefined) continue;
+        
+        let matchesTargetLabel = false;
+        for (const [name, field] of Object.entries(record)) {
+          if (name === "target_id" || name === "target_type") continue;
+          if (field && String(field.value).trim() === String(item.target_label).trim()) {
+            matchesTargetLabel = true;
+            break;
+          }
+          if (field && field.review && String(field.review.target_label).trim() === String(item.target_label).trim()) {
+            matchesTargetLabel = true;
+            break;
+          }
+        }
+        
+        if (matchesTargetLabel) {
+          return { record, fieldName: item.field_name };
+        }
+      }
+      return null;
+    }
+
+    function scrollToCandidateField(targetId, fieldName) {
+      const el = document.getElementById(`field-${targetId}-${fieldName}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        
+        el.style.transition = "all 0.3s ease";
+        const oldBorder = el.style.border;
+        const oldShadow = el.style.boxShadow;
+        const oldBackground = el.style.background;
+        
+        el.style.border = "2px dashed var(--color-warning)";
+        el.style.boxShadow = "0 0 12px var(--color-warning)";
+        el.style.background = "var(--color-warning-bg)";
+        
+        setTimeout(() => {
+          el.style.border = oldBorder;
+          el.style.boxShadow = oldShadow;
+          el.style.background = oldBackground;
+        }, 2000);
+      }
+    }
+
     function renderSchemaForm() {
       const schema = document.getElementById("schemaSelect").value;
       const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
       const form = document.getElementById("schemaForm");
       
-      if (!results.length) {
+      if (!results.length && (!state.audit || !state.audit.items)) {
         form.innerHTML = '<div class="empty-state">No extracted records for this schema yet.</div>';
         return;
       }
@@ -329,7 +396,7 @@
           }
           if (filterValue === "needs_reconfirmation") {
             const needsReconfirm = (
-              ["stale", "ambiguous", "unresolved"].includes(resStatus) ||
+              ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus) ||
               status === "needs_check" ||
               hasWarning ||
               isLowConfidence
@@ -361,7 +428,7 @@
           }
           
           let resStatusWarningHtml = "";
-          if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+          if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
             resStatusWarningHtml = `
               <div class="warning-row" style="margin-bottom:8px; font-size:12px; padding:6px 10px; border-left:3px solid var(--color-danger); background:var(--color-danger-bg); color:var(--color-danger);">
                 ⚠️ <strong>该字段曾被人工校验，但重抽取后无法安全匹配到当前字段。</strong>
@@ -370,7 +437,7 @@
           }
           
           fieldsHtml += `
-            <div class="field-container" style="border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; background: var(--color-surface);">
+            <div id="field-${record.target_id}-${name}" class="field-container" style="border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; background: var(--color-surface);">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-weight: 800; font-size: 13px; color: var(--color-primary);">${esc(name)}</span>
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -424,11 +491,121 @@
           `;
         }
       });
+
+      // Find orphan reviews (stale/ambiguous/unresolved/unknown in audit.items or field_reviews that are not in current results)
+      const orphanReviews = [];
+      const allReviews = [];
+      if (state.audit && Array.isArray(state.audit.items)) {
+        allReviews.push(...state.audit.items);
+      } else if (state.extraction && Array.isArray(state.extraction.field_reviews)) {
+        allReviews.push(...state.extraction.field_reviews);
+      }
+
+      allReviews.forEach(item => {
+        if (item.target_type !== schema) return;
+        const resStatus = item.target_resolution_status || "active";
+        if (!["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) return;
+        
+        // Is it missing from the current schema results?
+        const isOrphan = !results.some(record => record.target_id === item.target_id && record[item.field_name] !== undefined);
+        if (isOrphan) {
+          // Check filters
+          let visible = false;
+          if (filterValue === "") {
+            visible = true;
+          } else if (filterValue === "stale_ambiguous_unresolved") {
+            visible = ["stale", "ambiguous", "unresolved"].includes(resStatus);
+          } else if (filterValue === "needs_reconfirmation") {
+            visible = ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus);
+          }
+          if (visible) {
+            orphanReviews.push(item);
+          }
+        }
+      });
+
+      let orphanHtml = "";
+      if (orphanReviews.length > 0) {
+        let cardsHtml = "";
+        orphanReviews.forEach(item => {
+          // Check if there is a candidate field
+          const candidate = findCandidateField(item);
+          let jumpButtonHtml = "";
+          if (candidate) {
+            jumpButtonHtml = `
+              <button class="btn ghost small" style="height: 26px; padding: 0 8px; font-size: 11px; margin-top: 4px;" 
+                onclick="scrollToCandidateField('${candidate.record.target_id}', '${candidate.fieldName}')">
+                🔍 跳到候选字段
+              </button>
+            `;
+          }
+          
+          let resText = "未知", resBg = "var(--color-surface-alt)", resColor = "var(--color-text-secondary)";
+          if (item.target_resolution_status === "stale") {
+            resText = "已失效"; resBg = "var(--color-danger-bg)"; resColor = "var(--color-danger)";
+          } else if (item.target_resolution_status === "ambiguous") {
+            resText = "有歧义"; resBg = "var(--color-warning-bg)"; resColor = "var(--color-warning)";
+          } else if (item.target_resolution_status === "unresolved") {
+            resText = "未解析"; resBg = "var(--color-danger-bg)"; resColor = "var(--color-danger)";
+          } else if (item.target_resolution_status === "unknown") {
+            resText = "未知"; resBg = "var(--color-warning-bg)"; resColor = "var(--color-warning)";
+          }
+
+          const fp = item.target_fingerprint || "";
+          
+          cardsHtml += `
+            <div class="field-container" style="border: 1px dashed var(--color-warning); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; background: var(--color-surface-alt);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="status-chip" style="background:var(--color-danger-bg); color:var(--color-danger); border:1px solid var(--color-danger)40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">需重新确认</span>
+                  <span class="res-status-chip" style="background:${resBg}; color:${resColor}; border:1px solid ${resColor}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);" title="Fingerprint: ${fp}">${resText}</span>
+                </div>
+                <div style="font-size: 11px; color: var(--color-text-secondary);">
+                  类型: <strong>${esc(item.target_type)}</strong> | 旧 ID: <strong title="${esc(item.target_id)}">${esc(item.target_id.slice(0, 8))}</strong>
+                  <span style="display: none;" class="full-target-id">${esc(item.target_id)}</span>
+                </div>
+              </div>
+              
+              <div style="background: var(--color-surface); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); font-size: 12px; line-height: 1.5; margin-bottom: 8px;">
+                <div style="display: grid; grid-template-columns: 80px 1fr; gap: 4px;">
+                  <span class="muted">字段名称:</span> <strong>${esc(item.field_name)}</strong>
+                  <span class="muted">目标 Label:</span> <span>${esc(item.target_label || "-")}</span>
+                  <span class="muted">字段路径:</span> <span>${esc(item.field_path || "-")}</span>
+                  <span class="muted">旧人工校验值:</span> <strong style="color: var(--color-primary);">${esc(item.reviewed_value !== undefined ? item.reviewed_value : item.original_value)} ${esc(item.unit || "")}</strong>
+                  <span class="muted">原文证据:</span> <span style="font-family: var(--font-mono); white-space: pre-wrap; font-size: 11px; background: var(--color-surface-alt); padding: 4px 6px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);">${esc(item.evidence_text || "无")}</span>
+                  ${item.remapped_from_target_id ? `<span class="muted">来源旧 ID:</span> <span>${esc(item.remapped_from_target_id)}</span>` : ""}
+                </div>
+              </div>
+              
+              <div style="font-size: 11px; color: var(--color-danger); font-weight: 800; border-top: 1px solid var(--color-border); padding-top: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <span>这是一条旧目标人工校验记录，当前抽取结果中未能安全匹配。请在当前字段中重新确认后保存为新的人工确认。</span>
+                ${jumpButtonHtml}
+              </div>
+            </div>
+          `;
+        });
+        
+        orphanHtml = `
+          <div class="section-card" style="margin-top: 24px; border: 1px dashed var(--color-warning); background: var(--color-warning-bg)10; border-radius: var(--radius-lg); padding: 16px;">
+            <h3 style="margin-top: 0; color: var(--color-warning); font-size: 15px; display: flex; align-items: center; gap: 8px;">
+              ⚠️ 需要重新确认的旧人工校验记录
+            </h3>
+            <p style="font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px; margin-top: -6px;">
+              由于文档重新解析或实体边界变化，以下人工校验数据已失效或无法匹配。请核对原文证据后，在上方当前字段中重新确认保存。
+            </p>
+            ${cardsHtml}
+          </div>
+        `;
+      }
       
       if (!html) {
-        form.innerHTML = '<div class="empty-state">当前过滤条件下没有匹配的记录。</div>';
+        if (orphanHtml) {
+          form.innerHTML = `<div class="empty-state">当前过滤条件下没有匹配的活跃记录。</div>` + orphanHtml;
+        } else {
+          form.innerHTML = '<div class="empty-state">当前过滤条件下没有匹配的记录。</div>';
+        }
       } else {
-        form.innerHTML = html;
+        form.innerHTML = html + orphanHtml;
       }
     }
 
@@ -441,7 +618,7 @@
       if (fieldName) {
         const field = record[fieldName];
         const resStatus = field?.review?.target_resolution_status;
-        if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+        if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
           return confirm("该字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新人工确认。是否继续？");
         }
       } else {
@@ -449,7 +626,7 @@
         Object.entries(record).forEach(([name, field]) => {
           if (name === "target_id" || name === "target_type") return;
           const resStatus = field?.review?.target_resolution_status;
-          if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+          if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
             hasStale = true;
           }
         });
@@ -469,7 +646,7 @@
           if (name === "target_id" || name === "target_type") return;
           const field = record[name];
           const resStatus = field?.review?.target_resolution_status;
-          if (resStatus && ["stale", "ambiguous", "unresolved"].includes(resStatus)) {
+          if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
             hasStale = true;
           }
         });
@@ -480,17 +657,43 @@
       return true;
     }
 
-    async function refreshAllData() {
+    async function refreshReviewStateAfterMutation() {
       if (!state.paper) return;
+      const paperId = state.paper.id;
       try {
-        state.extraction = await fetchJSON(`/api/extraction/results/${state.paper.id}`);
-        state.paper = await fetchJSON(`/api/papers/${state.paper.id}`);
+        // 1. GET /api/extraction/results/{paper_id}
+        state.extraction = await fetchJSON(`/api/extraction/results/${paperId}`);
         
+        // 2. POST /api/extraction/results/{paper_id}/validate
         try {
-          state.audit = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/audit`);
+          const validated = await fetchJSON(`/api/extraction/results/${paperId}/validate`, {
+            method: "POST"
+          });
+          if (validated) {
+            state.extraction = {
+              ...state.extraction,
+              ...validated,
+              results: validated.results || state.extraction.results,
+              schemas: validated.schemas || state.extraction.schemas
+            };
+          }
+        } catch (err) {
+          console.warn("POST validate failed", err);
+        }
+        
+        // 3. GET /api/extraction/results/{paper_id}/reviews/audit
+        try {
+          state.audit = await fetchJSON(`/api/extraction/results/${paperId}/reviews/audit`);
         } catch (e) {
           state.audit = { _error: true, message: e.message };
           console.warn("Audit API failed", e);
+        }
+        
+        // 4. GET /api/papers/{paper_id}
+        try {
+          state.paper = await fetchJSON(`/api/papers/${paperId}`);
+        } catch (err) {
+          console.warn("GET paper metadata failed", err);
         }
 
         renderPaper();
@@ -498,9 +701,15 @@
         renderSchemaForm();
         renderStabilitySummary();
       } catch (error) {
-        console.error("refreshAllData failed", error);
+        console.error("refreshReviewStateAfterMutation failed", error);
+        showToast("Refresh failed: " + error.message);
       }
     }
+
+    async function refreshAllData() {
+      await refreshReviewStateAfterMutation();
+    }
+
 
     function getFieldInputs(targetId, fieldName) {
       const vEl = document.querySelector(`input[data-target-id="${targetId}"][data-field="${fieldName}"][data-part="value"]`);
@@ -689,7 +898,12 @@
         const resp = await fetchJSON(`/api/extraction/results/${state.paper.id}/validate`, {
           method: "POST"
         });
-        state.extraction = resp;
+        state.extraction = {
+          ...state.extraction,
+          ...resp,
+          results: resp.results || state.extraction.results,
+          schemas: resp.schemas || state.extraction.schemas
+        };
         
         try {
           state.audit = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/audit`);
