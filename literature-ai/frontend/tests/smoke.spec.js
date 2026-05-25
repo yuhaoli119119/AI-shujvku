@@ -465,6 +465,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
     await page.route('**/api/**', mockApi);
+    // Intercept Google Fonts requests to prevent external network flakiness/timeouts
+    await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+    await page.route('https://fonts.gstatic.com/**', route => route.fulfill({ status: 404, body: '' }));
 
     page.on('console', msg => {
       if (msg.type() === 'error') {
@@ -483,7 +486,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await page.setViewportSize(viewport);
 
           const url = `${BASE_URL}${pageInfo.path}`;
-          const response = await page.goto(url);
+          const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
           expect(response.status()).toBe(200);
           await page.waitForTimeout(1000);
