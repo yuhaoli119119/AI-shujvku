@@ -60,10 +60,11 @@ async function fetchJSON(url, options) {
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch (_) {}
     if (!resp.ok) {
-        const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
+        const detail = (data && data.detail) ? data.detail : (data && (data.status || data.message) ? data : ("HTTP " + resp.status));
         const errStr = typeof detail === "object" ? (detail.message || detail.status || "请求失败") : detail;
         const err = new Error(errStr);
         err.detail = detail;
+        err.status = resp.status;
         throw err;
     }
     return data;

@@ -459,31 +459,175 @@ function showAlreadyExistsPrompt(paperId, title) {
     }, 8000);
 }
 
-async function attachPDFToPaperFile(paperId, file) {
+function showIdentityConfirmationPrompt(paperId, file, detail) {
+    const existing = document.getElementById("identityConfirmModal");
+    if (existing) existing.remove();
+    
+    const target = detail.target || {};
+    const incoming = detail.incoming || {};
+    const matchScore = detail.match_score;
+    const matchScoreText = matchScore != null ? (Number(matchScore) * 100).toFixed(0) + "%" : "未知";
+    const doiText = (doi) => (doi && doi.trim()) ? doi : "未识别";
+    const yearText = (year) => (year != null && year !== "") ? year : "未识别";
+    
+    const container = document.createElement("div");
+    container.id = "identityConfirmModal";
+    container.className = "modal-overlay";
+    container.style.cssText = "display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 3200; justify-content: center; align-items: center; padding: 20px;";
+    
+    container.innerHTML = 
+        '<div class="modal" style="max-width: 600px; width: 100%; background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-elevated);">' +
+            '<div class="modal-title-row" style="margin-bottom: 16px;">' +
+                '<h3 style="margin: 0; color: var(--color-warning);">⚠️ 需要确认文献身份</h3>' +
+            '</div>' +
+            '<div style="margin-bottom: 18px; font-size: 14px; line-height: 1.5;">' +
+                '<p style="margin-top: 0; color: var(--color-text-secondary);">系统认为这份 PDF 与当前 metadata-only 条目匹配置信度较低（匹配度：<strong style="color: var(--color-primary);">' + matchScoreText + '</strong>）。</p>' +
+                '<p style="margin-bottom: 12px;"><strong>匹配原因：</strong> ' + esc(detail.match_reason || "未知") + '</p>' +
+                
+                '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; background: var(--color-surface-alt); padding: 12px; border-radius: var(--radius); border: 1px solid var(--color-border);">' +
+                    '<div>' +
+                        '<h4 style="margin: 0 0 8px; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); padding-bottom: 4px;">当前条目信息 (Target)</h4>' +
+                        '<div style="margin-bottom: 6px; font-weight: 500;"><strong>标题:</strong> ' + esc(target.title || "未知") + '</div>' +
+                        '<div style="margin-bottom: 6px;"><strong>DOI:</strong> ' + esc(doiText(target.doi)) + '</div>' +
+                        '<div><strong>年份:</strong> ' + esc(yearText(target.year)) + '</div>' +
+                    '</div>' +
+                    '<div>' +
+                        '<h4 style="margin: 0 0 8px; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); padding-bottom: 4px;">上传 PDF 信息 (Incoming)</h4>' +
+                        '<div style="margin-bottom: 6px; font-weight: 500;"><strong>标题:</strong> ' + esc(incoming.title || "未知") + '</div>' +
+                        '<div style="margin-bottom: 6px;"><strong>DOI:</strong> ' + esc(doiText(incoming.doi)) + '</div>' +
+                        '<div><strong>年份:</strong> ' + esc(yearText(incoming.year)) + '</div>' +
+                    '</div>' +
+                '</div>' +
+                
+                '<div style="border-left: 4px solid var(--color-warning); background: var(--color-warning-bg); padding: 10px; border-radius: var(--radius); color: var(--color-warning); font-weight: bold; font-size: 13px;">' +
+                    '风险提示：系统认为这份 PDF 与当前 metadata-only 条目匹配置信度较低。确认后会绑定到当前文献条目，并保留当前 paper_id。' +
+                '</div>' +
+            '</div>' +
+            '<div class="modal-actions" style="display: flex; gap: 12px; justify-content: flex-end;">' +
+                '<button class="btn ghost" id="confirmCancelBtn">取消</button>' +
+                '<button class="btn primary" id="confirmAttachBtn">确认绑定</button>' +
+            '</div>' +
+        '</div>';
+        
+    document.body.appendChild(container);
+    
+    container.querySelector("#confirmCancelBtn").onclick = function(e) {
+        e.preventDefault();
+        container.remove();
+    };
+    container.querySelector("#confirmAttachBtn").onclick = function(e) {
+        e.preventDefault();
+        container.remove();
+        attachPDFToPaperFile(paperId, file, true);
+    };
+}
+
+function showIdentityMismatchPrompt(detail) {
+    const existing = document.getElementById("identityMismatchModal");
+    if (existing) existing.remove();
+    
+    const target = detail.target || {};
+    const incoming = detail.incoming || {};
+    const doiText = (doi) => (doi && doi.trim()) ? doi : "未识别";
+    const yearText = (year) => (year != null && year !== "") ? year : "未识别";
+    
+    const container = document.createElement("div");
+    container.id = "identityMismatchModal";
+    container.className = "modal-overlay";
+    container.style.cssText = "display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 3200; justify-content: center; align-items: center; padding: 20px;";
+    
+    container.innerHTML = 
+        '<div class="modal" style="max-width: 600px; width: 100%; background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-elevated);">' +
+            '<div class="modal-title-row" style="margin-bottom: 16px;">' +
+                '<h3 style="margin: 0; color: var(--color-danger);">❌ 文献身份冲突</h3>' +
+            '</div>' +
+            '<div style="margin-bottom: 18px; font-size: 14px; line-height: 1.5;">' +
+                '<p style="margin-top: 0; color: var(--color-danger); font-weight: bold;">目标条目和上传 PDF 的 DOI 冲突，系统已阻止绑定。请检查是否上传错 PDF，或将 PDF 作为新文献导入。</p>' +
+                '<p style="margin-bottom: 12px;"><strong>匹配原因：</strong> ' + esc(detail.match_reason || "未知") + '</p>' +
+                
+                '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; background: var(--color-surface-alt); padding: 12px; border-radius: var(--radius); border: 1px solid var(--color-border);">' +
+                    '<div>' +
+                        '<h4 style="margin: 0 0 8px; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); padding-bottom: 4px;">当前条目信息 (Target)</h4>' +
+                        '<div style="margin-bottom: 6px; font-weight: 500;"><strong>标题:</strong> ' + esc(target.title || "未知") + '</div>' +
+                        '<div style="margin-bottom: 6px;"><strong>DOI:</strong> <strong style="color: var(--color-danger);">' + esc(doiText(target.doi)) + '</strong></div>' +
+                        '<div><strong>年份:</strong> ' + esc(yearText(target.year)) + '</div>' +
+                    '</div>' +
+                    '<div>' +
+                        '<h4 style="margin: 0 0 8px; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); padding-bottom: 4px;">上传 PDF 信息 (Incoming)</h4>' +
+                        '<div style="margin-bottom: 6px; font-weight: 500;"><strong>标题:</strong> ' + esc(incoming.title || "未知") + '</div>' +
+                        '<div style="margin-bottom: 6px;"><strong>DOI:</strong> <strong style="color: var(--color-danger);">' + esc(doiText(incoming.doi)) + '</strong></div>' +
+                        '<div><strong>年份:</strong> ' + esc(yearText(incoming.year)) + '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="modal-actions" style="display: flex; gap: 12px; justify-content: flex-end;">' +
+                '<button class="btn ghost" id="mismatchCancelBtn">取消</button>' +
+                '<button class="btn primary" id="mismatchUploadNewBtn">作为新文献上传</button>' +
+            '</div>' +
+        '</div>';
+        
+    document.body.appendChild(container);
+    
+    container.querySelector("#mismatchCancelBtn").onclick = function(e) {
+        e.preventDefault();
+        container.remove();
+    };
+    container.querySelector("#mismatchUploadNewBtn").onclick = function(e) {
+        e.preventDefault();
+        container.remove();
+        closeAddLiteraturePanel();
+        const pdfUpload = document.getElementById("pdfUpload");
+        if (pdfUpload) pdfUpload.click();
+    };
+}
+
+async function attachPDFToPaperFile(paperId, file, confirmIdentityMismatch) {
     if (!paperId || !file) return;
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("confirm_identity_mismatch", confirmIdentityMismatch ? "true" : "false");
     
     showProgress("正在上传并关联 PDF：" + file.name);
+    let keepProgress = false;
     try {
         const data = await fetchJSON(API_BASE + "/" + paperId + "/attach-pdf", {
             method: "POST",
             body: formData
         });
-        showToast("PDF 关联成功：" + (data.title || file.name), "success");
+        if (confirmIdentityMismatch) {
+            showToast("PDF 已经经人工确认绑定到当前文献条目。", "success");
+        } else {
+            showToast("PDF 关联成功：" + (data.title || file.name), "success");
+        }
         state.selectedPaperId = paperId;
         closeAddLiteraturePanel();
         refreshCurrentPage();
     } catch (error) {
         const detail = error.detail;
-        if (detail && detail.status === "already_exists") {
-            showToast("关联失败：该 PDF 已存在", "error");
-            showAlreadyExistsPrompt(detail.paper_id, detail.title || "已存在文献");
-        } else {
-            showToast("关联失败：" + error.message, "error");
+        if (detail && typeof detail === "object") {
+            if (detail.status === "needs_confirmation") {
+                keepProgress = true;
+                hideProgress();
+                showIdentityConfirmationPrompt(paperId, file, detail);
+                return;
+            } else if (detail.status === "identity_mismatch") {
+                keepProgress = true;
+                hideProgress();
+                showIdentityMismatchPrompt(detail);
+                return;
+            } else if (detail.status === "already_exists") {
+                keepProgress = true;
+                hideProgress();
+                showToast("系统发现该文献已有 PDF，未覆盖已有文件。", "error");
+                showAlreadyExistsPrompt(detail.target_paper_id || detail.paper_id, detail.target?.title || detail.incoming?.title || detail.title || "已存在文献");
+                return;
+            }
         }
+        showToast("关联失败：" + error.message, "error");
     } finally {
-        hideProgress();
+        if (!keepProgress) {
+            hideProgress();
+        }
     }
 }
 
@@ -506,15 +650,21 @@ async function uploadAttachPDFModal(input) {
     }
     const paperId = selectEl.value;
     const file = input.files[0];
-    await attachPDFToPaperFile(paperId, file);
-    input.value = "";
+    try {
+        await attachPDFToPaperFile(paperId, file);
+    } finally {
+        input.value = "";
+    }
 }
 
 async function attachPDFToPaperDetail(input, paperId) {
     if (!input.files || !input.files.length) return;
     const file = input.files[0];
-    await attachPDFToPaperFile(paperId, file);
-    input.value = "";
+    try {
+        await attachPDFToPaperFile(paperId, file);
+    } finally {
+        input.value = "";
+    }
 }
 
 async function loadMetadataOnlyPapers() {

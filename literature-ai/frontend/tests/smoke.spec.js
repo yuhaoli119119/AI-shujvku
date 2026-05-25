@@ -820,6 +820,264 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('.paper-card.active .status-chip.parsed')).toBeVisible();
   });
 
+  test('business flow: attach-pdf identity verification - needs_confirmation and confirm', async ({ page }) => {
+    let firstCall = true;
+    let secondCallPayload = null;
+
+    await page.route(/\/api\/papers(\?|$)/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, [
+          {
+            id: 'paper-meta-only',
+            title: 'Metadata Only Paper',
+            year: 2025,
+            journal: 'Journal of Metadata',
+            paper_type: 'research',
+            oa_status: 'metadata_only',
+            counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+          }
+        ]);
+      }
+      return route.fallback();
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only$/, route => {
+      return jsonResponse(route, {
+        id: 'paper-meta-only',
+        title: 'Metadata Only Paper',
+        year: 2025,
+        journal: 'Journal of Metadata',
+        oa_status: 'metadata_only',
+        abstract: 'This is a metadata-only paper without PDF.',
+        counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+      });
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
+      const postData = route.request().postData() || '';
+      if (postData.includes('confirm_identity_mismatch') && postData.includes('true')) {
+        secondCallPayload = postData;
+        return jsonResponse(route, {
+          paper_id: 'paper-meta-only',
+          title: 'Metadata Only Paper (Attached Confirmed)',
+          status: 'merged_confirmed'
+        });
+      } else {
+        return route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            detail: {
+              status: 'needs_confirmation',
+              target_paper_id: 'paper-meta-only',
+              target: { title: 'Metadata Only Paper', doi: '10.1000/xyz', year: 2025 },
+              incoming: { title: 'Different Ingested Title', doi: '10.1000/xyz', year: 2026 },
+              match_score: 0.65,
+              match_reason: 'Title similarity is slightly low but DOI matches.'
+            }
+          })
+        });
+      }
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+
+    const metaCard = page.locator('.paper-card').first();
+    await metaCard.click();
+    await page.waitForTimeout(500);
+
+    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await uploadBtn.click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: 'test.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4...'),
+    });
+
+    await page.waitForTimeout(500);
+
+    // Confirmation dialog should be visible
+    const confirmModal = page.locator('#identityConfirmModal');
+    await expect(confirmModal).toBeVisible();
+    await expect(confirmModal).toContainText('需要确认文献身份');
+    await expect(confirmModal).toContainText('65%');
+    await expect(confirmModal).toContainText('Title similarity is slightly low');
+
+    // Click cancel in confirm dialog
+    await confirmModal.locator('#confirmCancelBtn').click();
+    await expect(confirmModal).not.toBeVisible();
+    expect(secondCallPayload).toBeNull();
+
+    // Trigger upload again to confirm
+    const fileChooserPromise2 = page.waitForEvent('filechooser');
+    await uploadBtn.click();
+    const fileChooser2 = await fileChooserPromise2;
+    await fileChooser2.setFiles({
+      name: 'test.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4...'),
+    });
+
+    await page.waitForTimeout(500);
+    await expect(confirmModal).toBeVisible();
+    await confirmModal.locator('#confirmAttachBtn').click();
+
+    await page.waitForTimeout(500);
+    await expect(confirmModal).not.toBeVisible();
+    expect(secondCallPayload).toContain('confirm_identity_mismatch');
+    expect(secondCallPayload).toContain('true');
+  });
+
+  test('business flow: attach-pdf identity verification - identity_mismatch block', async ({ page }) => {
+    await page.route(/\/api\/papers(\?|$)/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, [
+          {
+            id: 'paper-meta-only',
+            title: 'Metadata Only Paper',
+            year: 2025,
+            journal: 'Journal of Metadata',
+            paper_type: 'research',
+            oa_status: 'metadata_only',
+            counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+          }
+        ]);
+      }
+      return route.fallback();
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only$/, route => {
+      return jsonResponse(route, {
+        id: 'paper-meta-only',
+        title: 'Metadata Only Paper',
+        year: 2025,
+        journal: 'Journal of Metadata',
+        oa_status: 'metadata_only',
+        abstract: 'This is a metadata-only paper without PDF.',
+        counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+      });
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          detail: {
+            status: 'identity_mismatch',
+            target_paper_id: 'paper-meta-only',
+            target: { title: 'Metadata Only Paper', doi: '10.1000/xyz', year: 2025 },
+            incoming: { title: 'Entirely Different Paper', doi: '10.1000/abc', year: 2026 },
+            match_score: 0.12,
+            match_reason: 'DOIs are incompatible.'
+          }
+        })
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+
+    const metaCard = page.locator('.paper-card').first();
+    await metaCard.click();
+    await page.waitForTimeout(500);
+
+    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await uploadBtn.click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: 'test.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4...'),
+    });
+
+    await page.waitForTimeout(500);
+
+    // Mismatch block dialog should be visible
+    const mismatchModal = page.locator('#identityMismatchModal');
+    await expect(mismatchModal).toBeVisible();
+    await expect(mismatchModal).toContainText('文献身份冲突');
+    await expect(mismatchModal).toContainText('DOI 冲突');
+    await expect(mismatchModal.locator('#confirmAttachBtn')).toHaveCount(0); // Should NOT have forced confirm button
+
+    // Click cancel in mismatch block dialog
+    await mismatchModal.locator('#mismatchCancelBtn').click();
+    await expect(mismatchModal).not.toBeVisible();
+  });
+
+  test('business flow: attach-pdf identity verification - already_exists', async ({ page }) => {
+    await page.route(/\/api\/papers(\?|$)/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, [
+          {
+            id: 'paper-meta-only',
+            title: 'Metadata Only Paper',
+            year: 2025,
+            journal: 'Journal of Metadata',
+            paper_type: 'research',
+            oa_status: 'metadata_only',
+            counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+          }
+        ]);
+      }
+      return route.fallback();
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only$/, route => {
+      return jsonResponse(route, {
+        id: 'paper-meta-only',
+        title: 'Metadata Only Paper',
+        year: 2025,
+        journal: 'Journal of Metadata',
+        oa_status: 'metadata_only',
+        abstract: 'This is a metadata-only paper without PDF.',
+        counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
+      });
+    });
+
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          detail: {
+            status: 'already_exists',
+            target_paper_id: 'paper-existing',
+            title: 'Existing Full Paper'
+          }
+        })
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+
+    const metaCard = page.locator('.paper-card').first();
+    await metaCard.click();
+    await page.waitForTimeout(500);
+
+    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await uploadBtn.click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: 'test.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4...'),
+    });
+
+    await page.waitForTimeout(500);
+
+    // Jump toast should be visible
+    const jumpToast = page.locator('.already-exists-toast');
+    await expect(jumpToast).toBeVisible();
+    await expect(jumpToast).toContainText('文献已存在');
+  });
+
   test('business flow: AI workflow job results show metadata_only and already_exists', async ({ page }) => {
     await page.route(/\/api\/papers\/ai_workflow\/jobs\/job-1/, route => {
       return jsonResponse(route, {
