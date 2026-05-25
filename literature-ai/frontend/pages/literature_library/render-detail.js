@@ -349,7 +349,7 @@ function renderDetail(detail, audit) {
     const pdfEvidenceEntry =
         '<div class="section-card pdf-evidence-entry"><h3>PDF 证据定位</h3>' +
             '<p>当前版本会跳转到 PDF 页并显示证据信息，不宣称 PDF 内真实高亮。</p>' +
-            '<button class="btn primary small" onclick="openSelectedPdfEvidence()">' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '</button>' +
+            '<p class="subtle">请使用标题右侧的“' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '”入口。</p>' +
         '</div>';
 
     const referenceCards = renderListBlock("参考文献", detail.references ? detail.references.slice(0, 20) : [], function(item) {

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import Base, Paper
+from app.db.models import Base, Paper, PaperFigure
 from app.db.session import get_db_session
 from app.schemas.api import ExtractionRunResponse, PaperDetailResponse
 from app.schemas.evidence import EvidenceLocatorResponse
@@ -16,6 +18,27 @@ from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.paper_reprocessing import PaperReprocessingService
 
 router = APIRouter()
+
+
+def _safe_unlink(base_dir: Path, stored_path: str | None) -> str | None:
+    if not stored_path:
+        return None
+    base = base_dir.resolve()
+    candidate = Path(stored_path)
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    target = candidate.resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return None
+    if target.exists() and target.is_file():
+        try:
+            target.unlink()
+            return str(target)
+        except OSError:
+            return None
+    return None
 
 
 @router.get("/{paper_id}", response_model=PaperDetailResponse)
@@ -27,11 +50,30 @@ async def get_paper(paper_id: UUID, session: Session = Depends(get_db_session)) 
 
 
 @router.delete("/{paper_id}")
-async def delete_paper(paper_id: UUID, session: Session = Depends(get_db_session)) -> dict:
+async def delete_paper(
+    paper_id: UUID,
+    delete_pdf: bool = False,
+    delete_derived: bool = False,
+    session: Session = Depends(get_db_session),
+) -> dict:
     paper = session.get(Paper, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    # Keep file storage untouched; remove only database rows linked to this paper.
+    settings = get_settings()
+    files_to_delete: list[tuple[Path, str | None]] = []
+    if delete_pdf:
+        files_to_delete.append((settings.storage_paths["pdf"], paper.pdf_path))
+    if delete_derived:
+        files_to_delete.extend(
+            [
+                (settings.storage_paths["tei"], paper.tei_path),
+                (settings.storage_paths["docling_json"], paper.docling_json_path),
+                (settings.storage_paths["markdown"], paper.markdown_path),
+            ]
+        )
+        figure_paths = session.scalars(select(PaperFigure.image_path).where(PaperFigure.paper_id == paper_id)).all()
+        files_to_delete.extend((settings.storage_paths["figures"], path) for path in figure_paths)
+
     for table in reversed(Base.metadata.sorted_tables):
         if table.name == "papers":
             continue
@@ -49,7 +91,19 @@ async def delete_paper(paper_id: UUID, session: Session = Depends(get_db_session
             session.execute(table.delete().where(condition))
     session.delete(paper)
     session.commit()
-    return {"status": "deleted", "paper_id": str(paper_id)}
+
+    deleted_files = []
+    for base_dir, stored_path in files_to_delete:
+        deleted = _safe_unlink(base_dir, stored_path)
+        if deleted:
+            deleted_files.append(deleted)
+    return {
+        "status": "deleted",
+        "paper_id": str(paper_id),
+        "delete_pdf": delete_pdf,
+        "delete_derived": delete_derived,
+        "deleted_files": deleted_files,
+    }
 
 
 @router.post("/{paper_id}/extract", response_model=ExtractionRunResponse)

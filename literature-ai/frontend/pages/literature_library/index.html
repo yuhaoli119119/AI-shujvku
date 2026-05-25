@@ -334,6 +334,10 @@
                 <div class="k">DOI</div>
                 <div id="deletePaperDoi" class="v doi-clamped">-</div>
             </div>
+            <div class="delete-options">
+                <label><input type="checkbox" id="deletePaperPdfFiles"> 同时删除原 PDF 文件</label>
+                <label><input type="checkbox" id="deletePaperDerivedFiles"> 同时删除解析产物文件（TEI / Markdown / Docling JSON / 图片）</label>
+            </div>
             <div class="modal-actions">
                 <button class="btn ghost" onclick="closeDeletePaperDialog(event)">取消</button>
                 <button class="btn danger" onclick="confirmDeleteCurrentPaper(event)">确认删除</button>

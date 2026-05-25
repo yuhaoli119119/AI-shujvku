@@ -260,9 +260,13 @@ function openDeletePaperDialog(event) {
     }
     const titleEl = $("deletePaperTitle");
     const doiEl = $("deletePaperDoi");
+    const deletePdfEl = $("deletePaperPdfFiles");
+    const deleteDerivedEl = $("deletePaperDerivedFiles");
     const info = primaryDoiInfo(state.selectedPaper.doi);
     if (titleEl) titleEl.textContent = state.selectedPaper.title || "未命名文献";
     if (doiEl) doiEl.textContent = info.doi || "无 DOI";
+    if (deletePdfEl) deletePdfEl.checked = false;
+    if (deleteDerivedEl) deleteDerivedEl.checked = false;
     const dialog = $("deletePaperDialog");
     if (dialog) dialog.style.display = "flex";
 }
@@ -277,9 +281,15 @@ async function confirmDeleteCurrentPaper(event) {
     if (event) event.stopPropagation();
     if (!state.selectedPaperId) return;
     try {
-        await fetchJSON(API_BASE + "/" + encodeURIComponent(state.selectedPaperId), { method: "DELETE" });
+        const params = new URLSearchParams();
+        if ($("deletePaperPdfFiles")?.checked) params.set("delete_pdf", "true");
+        if ($("deletePaperDerivedFiles")?.checked) params.set("delete_derived", "true");
+        const suffix = params.toString() ? "?" + params.toString() : "";
+        const result = await fetchJSON(API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + suffix, { method: "DELETE" });
         closeDeletePaperDialog();
-        showToast("文献记录已删除，原 PDF 文件未删除。", "success");
+        const deletedFileCount = Array.isArray(result.deleted_files) ? result.deleted_files.length : 0;
+        const fileMessage = deletedFileCount ? "，同时删除文件 " + deletedFileCount + " 个。" : "，文件未删除。";
+        showToast("文献记录已删除" + fileMessage, "success");
         state.selectedPaperId = null;
         state.selectedPaper = null;
         await fetchPapers();

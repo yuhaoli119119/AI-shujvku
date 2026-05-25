@@ -1,8 +1,15 @@
 """Tests for decorative figure filtering and figure number extraction."""
 from __future__ import annotations
 
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
+from app.db.models import Base, Paper, PaperFigure
 from app.parsers.docling_parser import DoclingParser
 from app.services.pdf_image_extractor import PdfImageExtractor
+from app.utils.figure_filtering import decorative_figure_reason, is_decorative_figure
+from scripts.repair_decorative_figures import repair_decorative_figures
+from scripts.repair_polluted_doi_metadata import repair_polluted_dois
 
 
 class TestIsDecorativeFigure:
@@ -60,6 +67,12 @@ class TestIsDecorativeFigure:
         """SEM/TEM figure caption should NOT be decorative."""
         caption = "Fig. 2. SEM images of the as-prepared catalyst"
         assert DoclingParser._is_decorative_figure(caption, []) is False
+
+    def test_docling_parser_uses_shared_filter_behavior(self):
+        """Parser behavior should match the shared helper used by cleanup scripts."""
+        caption = "Science China Press logo"
+        assert DoclingParser._is_decorative_figure(caption, []) == is_decorative_figure(caption, [])
+        assert decorative_figure_reason(caption, []) == "decorative keyword: science china press"
 
 
 class TestExtractFigureNumber:
@@ -143,3 +156,85 @@ class TestExtractFiguresFiltersDecorative:
         }
         result = DoclingParser._extract_figures(payload)
         assert len(result) == 0
+
+
+class TestRepairScripts:
+    """Tests for dry-run-first cleanup helpers used by maintenance scripts."""
+
+    @staticmethod
+    def _session(tmp_path):
+        db_url = f"sqlite:///{tmp_path / 'cleanup.db'}"
+        engine = create_engine(db_url, future=True)
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+        return engine, Session
+
+    def test_doi_repair_dry_run_does_not_modify_database(self, tmp_path):
+        engine, Session = self._session(tmp_path)
+        with Session() as session:
+            paper = Paper(
+                title="Polluted DOI Paper",
+                doi="10.1000/main 10.2000/reference",
+                pdf_path="paper.pdf",
+            )
+            session.add(paper)
+            session.commit()
+
+            flagged = repair_polluted_dois(session, apply=False)
+            session.commit()
+
+            stored = session.scalars(select(Paper).where(Paper.id == paper.id)).one()
+            assert len(flagged) == 1
+            assert stored.doi == "10.1000/main 10.2000/reference"
+        engine.dispose()
+
+    def test_decorative_figure_repair_dry_run_does_not_modify_database(self, tmp_path):
+        engine, Session = self._session(tmp_path)
+        with Session() as session:
+            paper = Paper(title="Decorative Figure Paper", pdf_path="paper.pdf")
+            session.add(paper)
+            session.flush()
+            figure = PaperFigure(
+                paper_id=paper.id,
+                caption="CrossMark",
+                image_path="figures/crossmark.png",
+            )
+            session.add(figure)
+            session.commit()
+
+            flagged = repair_decorative_figures(session, apply=False)
+            session.commit()
+
+            remaining = session.scalars(select(PaperFigure)).all()
+            assert len(flagged) == 1
+            assert len(remaining) == 1
+            assert remaining[0].caption == "CrossMark"
+        engine.dispose()
+
+    def test_decorative_figure_apply_keeps_real_caption_figure(self, tmp_path):
+        engine, Session = self._session(tmp_path)
+        with Session() as session:
+            paper = Paper(title="Mixed Figures Paper", pdf_path="paper.pdf")
+            session.add(paper)
+            session.flush()
+            decorative = PaperFigure(
+                paper_id=paper.id,
+                caption="Publisher logo",
+                image_path="figures/logo.png",
+            )
+            real = PaperFigure(
+                paper_id=paper.id,
+                caption="Figure 2. SEM images of the prepared catalyst",
+                image_path="figures/sem.png",
+            )
+            session.add_all([decorative, real])
+            session.commit()
+
+            flagged = repair_decorative_figures(session, apply=True)
+            session.commit()
+
+            remaining = session.scalars(select(PaperFigure)).all()
+            assert len(flagged) == 1
+            assert len(remaining) == 1
+            assert remaining[0].caption == "Figure 2. SEM images of the prepared catalyst"
+        engine.dispose()

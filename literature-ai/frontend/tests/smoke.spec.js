@@ -816,6 +816,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#deletePaperDialog')).toBeVisible();
     await expect(page.locator('#deletePaperDialog')).toContainText('Test Paper for Smoke Validation');
     await expect(page.locator('#deletePaperDialog')).toContainText('默认只删除数据库记录，不删除原 PDF 文件');
+    await expect(page.locator('#deletePaperPdfFiles')).not.toBeChecked();
+    await expect(page.locator('#deletePaperDerivedFiles')).not.toBeChecked();
 
     await page.click('#deletePaperDialog button:has-text("确认删除")');
     await expect(page.locator('#deletePaperDialog')).not.toBeVisible();

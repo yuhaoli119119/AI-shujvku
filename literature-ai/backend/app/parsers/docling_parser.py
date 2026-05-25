@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-import re
 
 from app.config import Settings
+from app.utils.figure_filtering import is_decorative_figure
 
 
 @dataclass
@@ -19,18 +19,6 @@ class DoclingParseResult:
 
 class DoclingParser:
     """Thin adapter around Docling with a text-only fallback for offline setups."""
-
-    # 装饰图 caption 关键词黑名单
-    _DECORATIVE_CAPTION_KEYWORDS: tuple[str, ...] = (
-        "crossmark", "cross mark", "checkmark",
-        "elsevier", "springer", "wiley", "acs publications", "rsc publishing",
-        "royal society", "nature publishing",
-        "science china press", "publisher logo", "copyright", "\u00a9",
-        "creative commons", "cc-by", "cc by",
-        "doi:", "https://doi.org",
-        "open access", "update", "logo",
-    )
-    _SHORT_CAPTION_RE = re.compile(r"^\s*(figure|fig\.?|scheme)\s*\d+\s*[\.:：-]?\s*$", re.IGNORECASE)
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -145,21 +133,8 @@ class DoclingParser:
 
     @staticmethod
     def _is_decorative_figure(caption: str | None, prov: list) -> bool:
-        """判断图片是否为装饰性图片（CrossMark、出版商标识、版权标识等）。"""
-        if not caption:
-            # 无 caption 的图片不自动补 Figure N 入库，避免 CrossMark/Logo 污染图片 tab。
-            return True
-
-        caption_lower = caption.lower().strip()
-        if DoclingParser._SHORT_CAPTION_RE.match(caption_lower):
-            return True
-
-        # 匹配黑名单关键词
-        for kw in DoclingParser._DECORATIVE_CAPTION_KEYWORDS:
-            if kw in caption_lower:
-                return True
-
-        return False
+        """Detect decorative figures such as CrossMark, publisher logos, and bare labels."""
+        return is_decorative_figure(caption, prov)
 
     @staticmethod
     def _extract_tables(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -187,7 +162,6 @@ class DoclingParser:
             caption = DoclingParser._resolve_caption(item, payload)
             prov = item.get("prov", [])
 
-            # 过滤装饰性图片（CrossMark、出版商标识等）
             if DoclingParser._is_decorative_figure(caption, prov):
                 continue
 
