@@ -17,6 +17,7 @@ from app.schemas.extraction import (
     ExtractionResultsResponse,
     MechanismClaimSchema,
 )
+from app.services.extraction_review_service import ExtractionReviewService
 from app.services.extraction_validator import ExtractionValidator
 
 
@@ -40,30 +41,49 @@ class ExtractionSchemaService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self.validator = ExtractionValidator()
+        self.review_service = ExtractionReviewService(session)
 
     def schemas(self) -> dict[str, Any]:
         return {name: model.model_json_schema() for name, model in SCHEMA_MODELS.items()}
 
     def results(self, paper_id: UUID) -> ExtractionResultsResponse:
-        results = {
-            "CatalystSample": [self._catalyst(row) for row in self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()],
-            "DFTSetting": [self._dft_setting(row) for row in self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()],
-            "DFTResult": [self._dft_result(row) for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()],
-            "MechanismClaim": [self._mechanism(row) for row in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()],
-            "ElectrochemicalPerformance": [
-                self._electrochemical(row)
-                for row in self.session.scalars(select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper_id)).all()
-            ],
-        }
-        warnings = self.validator.validate_payload(results)
+        payload = self.result_payload(paper_id)
+        warnings = self.validator.validate_payload(payload)
         status = "needs_review" if any(w.severity in {"warning", "error"} for w in warnings) else "validated"
         return ExtractionResultsResponse(
             paper_id=paper_id,
             schemas=self.schemas(),
-            results={name: [item.model_dump(mode="json") for item in items] for name, items in results.items()},
+            results=payload,
+            field_reviews=self.review_service.list_reviews(paper_id),
             validation_warnings=warnings,
             validation_status=status,
         )
+
+    def result_payload(self, paper_id: UUID) -> dict[str, list[dict[str, Any]]]:
+        reviews = self.review_service.reviews_by_target(paper_id)
+        results = {
+            "CatalystSample": [
+                self._with_reviews("catalyst_samples", row.id, self._catalyst(row).model_dump(mode="json"), reviews)
+                for row in self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
+            ],
+            "DFTSetting": [
+                self._with_reviews("dft_settings", row.id, self._dft_setting(row).model_dump(mode="json"), reviews)
+                for row in self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()
+            ],
+            "DFTResult": [
+                self._with_reviews("dft_results", row.id, self._dft_result(row).model_dump(mode="json"), reviews)
+                for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+            ],
+            "MechanismClaim": [
+                self._with_reviews("mechanism_claims", row.id, self._mechanism(row).model_dump(mode="json"), reviews)
+                for row in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()
+            ],
+            "ElectrochemicalPerformance": [
+                self._with_reviews("electrochemical_performance", row.id, self._electrochemical(row).model_dump(mode="json"), reviews)
+                for row in self.session.scalars(select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper_id)).all()
+            ],
+        }
+        return results
 
     @staticmethod
     def _field(
@@ -137,3 +157,24 @@ class ExtractionSchemaService:
             decay_per_cycle=self._field(row.decay_per_cycle, unit="%/cycle", evidence_text=ev, confidence=0.55),
         )
 
+    @staticmethod
+    def _with_reviews(
+        canonical_type: str,
+        target_id: UUID,
+        payload: dict[str, Any],
+        reviews: dict[tuple[str, str, str], Any],
+    ) -> dict[str, Any]:
+        merged = {"target_id": str(target_id), "target_type": canonical_type, **payload}
+        for field_name, field_value in payload.items():
+            if not isinstance(field_value, dict):
+                continue
+            review = reviews.get((canonical_type, str(target_id), field_name))
+            if review is None:
+                merged[field_name] = {**field_value, "review": None, "verified": False}
+                continue
+            merged[field_name] = {
+                **field_value,
+                "review": review.model_dump(mode="json"),
+                "verified": review.verified,
+            }
+        return merged

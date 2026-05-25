@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db.models import Paper
 from app.db.session import get_db_session
-from app.schemas.extraction import ExtractionJobRequest, ExtractionResultsResponse, ExtractionValidationResponse
+from app.schemas.extraction import (
+    ExtractionFieldReviewResponse,
+    ExtractionFieldReviewSaveRequest,
+    ExtractionJobRequest,
+    ExtractionResultsResponse,
+    ExtractionReviewMarkVerifiedRequest,
+    ExtractionValidationResponse,
+)
+from app.services.extraction_review_service import ExtractionReviewService
 from app.services.extraction_schema_service import ExtractionSchemaService
 from app.services.extraction_validator import ExtractionValidator
 from app.services.workflow_jobs import (
@@ -124,6 +132,48 @@ async def get_extraction_results(
     return ExtractionSchemaService(session).results(paper_id)
 
 
+@router.get("/results/{paper_id}/reviews", response_model=list[ExtractionFieldReviewResponse])
+async def get_extraction_field_reviews(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> list[ExtractionFieldReviewResponse]:
+    if not session.get(Paper, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return ExtractionReviewService(session).list_reviews(paper_id)
+
+
+@router.post("/results/{paper_id}/reviews/save", response_model=list[ExtractionFieldReviewResponse])
+async def save_extraction_field_reviews(
+    paper_id: UUID,
+    payload: ExtractionFieldReviewSaveRequest,
+    session: Session = Depends(get_db_session),
+) -> list[ExtractionFieldReviewResponse]:
+    if not session.get(Paper, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    try:
+        return ExtractionReviewService(session).save_reviews(paper_id, payload.reviews)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/results/{paper_id}/reviews/mark-verified", response_model=list[ExtractionFieldReviewResponse])
+async def mark_extraction_fields_verified(
+    paper_id: UUID,
+    payload: ExtractionReviewMarkVerifiedRequest,
+    session: Session = Depends(get_db_session),
+) -> list[ExtractionFieldReviewResponse]:
+    if not session.get(Paper, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    try:
+        return ExtractionReviewService(session).mark_verified(paper_id, payload)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/results/{paper_id}/validate", response_model=ExtractionValidationResponse)
 async def validate_extraction_results(
     paper_id: UUID,
@@ -134,5 +184,10 @@ async def validate_extraction_results(
     results = ExtractionSchemaService(session).results(paper_id)
     warnings = ExtractionValidator().validate_payload(results.results)
     status = "needs_review" if any(item.severity in {"warning", "error"} for item in warnings) else "validated"
-    return ExtractionValidationResponse(paper_id=paper_id, status=status, validation_warnings=warnings)
-
+    return ExtractionValidationResponse(
+        paper_id=paper_id,
+        status=status,
+        results=results.results,
+        field_reviews=results.field_reviews,
+        validation_warnings=warnings,
+    )

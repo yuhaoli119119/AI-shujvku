@@ -436,3 +436,25 @@ class FigureDataPoint(Base):
     confidence: Mapped[float] = mapped_column(sa.Float, default=1.0)
     raw_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class ExtractionFieldReview(Base):
+    __tablename__ = "extraction_field_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    target_type: Mapped[str] = mapped_column(sa.String(64), index=True)
+    target_id: Mapped[str] = mapped_column(sa.String(64), index=True)
+    field_name: Mapped[str] = mapped_column(sa.String(128), index=True)
+    original_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(json_type(), nullable=True)
+    reviewed_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(json_type(), nullable=True)
+    unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    reviewer_status: Mapped[str] = mapped_column(sa.String(32), default="pending", index=True)
+    reviewer: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    reviewer_note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+    __table_args__ = (
+        sa.UniqueConstraint("paper_id", "target_type", "target_id", "field_name", name="uq_extraction_field_review"),
+    )

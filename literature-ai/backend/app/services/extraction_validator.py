@@ -29,7 +29,7 @@ class ExtractionValidator:
         warnings: list[ValidationWarning] = []
         for name, items in payload.items():
             for idx, item in enumerate(items or []):
-                target_id = f"{name}[{idx}]"
+                target_id = self._target_id(item, name, idx)
                 fields = self._field_map(item)
                 warnings.extend(self._validate_required_evidence(name, target_id, fields))
                 warnings.extend(self._validate_units(name, target_id, fields))
@@ -238,3 +238,8 @@ class ExtractionValidator:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _target_id(item: Any, name: str, idx: int) -> str:
+        if isinstance(item, dict) and item.get("target_id"):
+            return str(item["target_id"])
+        return f"{name}[{idx}]"

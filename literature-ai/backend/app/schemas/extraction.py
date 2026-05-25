@@ -8,6 +8,27 @@ from pydantic import BaseModel, Field
 from app.schemas.evidence import PageSpan
 
 
+ReviewStatus = Literal["pending", "verified", "rejected", "corrected", "needs_check"]
+
+
+class ExtractionFieldReviewResponse(BaseModel):
+    id: UUID
+    paper_id: UUID
+    target_type: str
+    target_id: str
+    field_name: str
+    original_value: Any = None
+    reviewed_value: Any = None
+    unit: str | None = None
+    evidence_text: str | None = None
+    reviewer_status: ReviewStatus
+    reviewer: str | None = None
+    reviewer_note: str | None = None
+    verified: bool = False
+    created_at: str
+    updated_at: str
+
+
 class EvidenceField(BaseModel):
     value: Any = None
     unit: str | None = None
@@ -15,6 +36,8 @@ class EvidenceField(BaseModel):
     source_section: str | None = None
     page_span: PageSpan = Field(default_factory=PageSpan)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    review: ExtractionFieldReviewResponse | None = None
+    verified: bool = False
 
 
 class CatalystSampleSchema(BaseModel):
@@ -95,10 +118,36 @@ class ValidationWarning(BaseModel):
     value: Any = None
 
 
+class ExtractionFieldReviewSaveItem(BaseModel):
+    target_type: str
+    target_id: str
+    field_name: str
+    original_value: Any = None
+    reviewed_value: Any = None
+    unit: str | None = None
+    evidence_text: str | None = None
+    reviewer_status: ReviewStatus = "corrected"
+    reviewer: str | None = None
+    reviewer_note: str | None = None
+
+
+class ExtractionFieldReviewSaveRequest(BaseModel):
+    reviews: list[ExtractionFieldReviewSaveItem] = Field(default_factory=list)
+
+
+class ExtractionReviewMarkVerifiedRequest(BaseModel):
+    target_type: str
+    target_id: str
+    field_names: list[str] = Field(default_factory=list)
+    reviewer: str | None = None
+    reviewer_note: str | None = None
+
+
 class ExtractionResultsResponse(BaseModel):
     paper_id: UUID
     schemas: dict[str, Any]
     results: dict[str, list[dict[str, Any]]]
+    field_reviews: list[ExtractionFieldReviewResponse] = Field(default_factory=list)
     validation_warnings: list[ValidationWarning] = Field(default_factory=list)
     validation_status: str = "unvalidated"
 
@@ -106,5 +155,6 @@ class ExtractionResultsResponse(BaseModel):
 class ExtractionValidationResponse(BaseModel):
     paper_id: UUID
     status: str
+    results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    field_reviews: list[ExtractionFieldReviewResponse] = Field(default_factory=list)
     validation_warnings: list[ValidationWarning] = Field(default_factory=list)
-
