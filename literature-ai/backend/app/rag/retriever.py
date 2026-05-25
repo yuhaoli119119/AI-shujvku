@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, ElectrochemicalPerformance, MechanismClaim, PaperSection, WritingCard, Paper, FigureDataPoint
 from app.services.embedding import DeterministicEmbeddingService, get_embedding_service, EmbeddingService
+from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 
 
 def _tokenize(text: str) -> set[str]:
@@ -104,6 +105,9 @@ class Retriever:
         rows = self.session.scalars(query).all()
         results = []
         for row in rows:
+            gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+            if not gate.eligible:
+                continue
             haystack = " ".join(
                 filter(
                     None,
@@ -162,6 +166,9 @@ class Retriever:
         rows = self.session.scalars(query).all()
         results = []
         for row in rows:
+            gate = is_export_eligible_extraction(self.session, row, target_type="electrochemical_performance")
+            if not gate.eligible:
+                continue
             haystack = self._format_electrochemical(row)
             score, score_info = self._hybrid_score(tokens, query_embedding, haystack, None, allow_paper_fallback=bool(paper_ids))
             if score <= 0:
@@ -205,6 +212,9 @@ class Retriever:
         rows = self.session.scalars(query).all()
         results = []
         for row in rows:
+            gate = is_export_eligible_extraction(self.session, row, target_type="mechanism_claims")
+            if not gate.eligible:
+                continue
             haystack = " ".join(filter(None, [row.claim_type, row.claim_text, row.evidence_text, " ".join(row.evidence_types or [])]))
             score, score_info = self._hybrid_score(tokens, query_embedding, haystack, None, allow_paper_fallback=bool(paper_ids))
             if score <= 0:
@@ -239,6 +249,9 @@ class Retriever:
         rows = self.session.scalars(query).all()
         results = []
         for row in rows:
+            gate = writing_card_gate(row)
+            if not gate.can_use_for_writing:
+                continue
             haystack = " ".join(
                 filter(
                     None,
@@ -269,6 +282,9 @@ class Retriever:
                     "proposed_solution": row.proposed_solution,
                     "core_hypothesis": row.core_hypothesis,
                     "figure_logic": row.figure_logic,
+                    "evidence_chain_status": gate.evidence_chain_status,
+                    "review_gate_status": gate.review_gate_status,
+                    "can_use_for_writing": gate.can_use_for_writing,
                 }
             )
         return self._top_k(results, limit)

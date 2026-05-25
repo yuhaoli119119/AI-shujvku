@@ -9,8 +9,8 @@ from app.schemas.evidence import EvidenceLocatorResponse
 from app.schemas.evidence import PageSpan
 
 
-ReviewStatus = Literal["pending", "verified", "rejected", "corrected", "needs_check"]
-ReviewResolutionStatus = Literal["active", "remapped", "stale", "ambiguous", "unresolved"]
+ReviewStatus = Literal["pending", "verified", "rejected", "corrected", "needs_check", "unknown"]
+ReviewResolutionStatus = Literal["active", "remapped", "stale", "ambiguous", "unresolved", "unknown"]
 
 
 class ExtractionFieldReviewResponse(BaseModel):

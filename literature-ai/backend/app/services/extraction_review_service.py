@@ -27,6 +27,7 @@ from app.services.review_target_resolver import (
     canonical_target_type,
     ReviewTargetResolver,
 )
+from app.utils.review_safety import is_safe_verified_review
 
 RESULT_KEY_BY_TARGET_TYPE = {
     "catalyst_samples": "CatalystSample",
@@ -255,7 +256,7 @@ class ExtractionReviewService:
             reviewer_status=row.reviewer_status,  # type: ignore[arg-type]
             reviewer=row.reviewer,
             reviewer_note=row.reviewer_note,
-            verified=row.reviewer_status == "verified",
+            verified=is_safe_verified_review(row),
             created_at=created,
             updated_at=updated,
         )

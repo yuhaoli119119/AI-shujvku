@@ -5,7 +5,17 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import Base, DFTResult, ElectrochemicalPerformance, MechanismClaim, Paper, PaperSection, WritingCard
+from app.db.models import (
+    Base,
+    DFTResult,
+    ElectrochemicalPerformance,
+    EvidenceSpan,
+    ExtractionFieldReview,
+    MechanismClaim,
+    Paper,
+    PaperSection,
+    WritingCard,
+)
 from app.rag.backends import OpenAICompatibleWriterBackend, RuleWriterBackend
 from app.rag.citation_guard import CitationGuard
 from app.rag.prompt_builder import PaperWriterPromptBuilder
@@ -46,35 +56,31 @@ def test_retriever_writer_and_citation_guard_work_together():
                         page_end=5,
                     )
                 )
-                session.add(
-                    DFTResult(
-                        paper_id=paper.id,
-                        adsorbate="Li2S4",
-                        property_type="adsorption_energy",
-                        value=-1.23,
-                        unit="eV",
-                        evidence_text="The adsorption energy of Li2S4 on Fe-N4 was -1.23 eV.",
-                    )
+                dft_result = DFTResult(
+                    paper_id=paper.id,
+                    adsorbate="Li2S4",
+                    property_type="adsorption_energy",
+                    value=-1.23,
+                    unit="eV",
+                    evidence_text="The adsorption energy of Li2S4 on Fe-N4 was -1.23 eV.",
                 )
-                session.add(
-                    ElectrochemicalPerformance(
-                        paper_id=paper.id,
-                        sulfur_loading_mg_cm2=4.2,
-                        capacity_value=900.0,
-                        rate="0.5C",
-                        cycle_number=200,
-                        evidence_text="The cell delivered 900 mAh/g at 0.5C after 200 cycles.",
-                    )
+                electrochemical = ElectrochemicalPerformance(
+                    paper_id=paper.id,
+                    sulfur_loading_mg_cm2=4.2,
+                    capacity_value=900.0,
+                    rate="0.5C",
+                    cycle_number=200,
+                    evidence_text="The cell delivered 900 mAh/g at 0.5C after 200 cycles.",
                 )
-                session.add(
-                    MechanismClaim(
-                        paper_id=paper.id,
-                        claim_type="lips_conversion",
-                        claim_text="Fe-N4 accelerates LiPS conversion by strengthening intermediate binding.",
-                        evidence_types=["Li2S4", "DOS"],
-                        evidence_text="The catalyst accelerates LiPS conversion through stronger Li2S4 binding.",
-                    )
+                mechanism = MechanismClaim(
+                    paper_id=paper.id,
+                    claim_type="lips_conversion",
+                    claim_text="Fe-N4 accelerates LiPS conversion by strengthening intermediate binding.",
+                    evidence_types=["Li2S4", "DOS"],
+                    evidence_text="The catalyst accelerates LiPS conversion through stronger Li2S4 binding.",
                 )
+                session.add_all([dft_result, electrochemical, mechanism])
+                session.flush()
                 session.add(
                     WritingCard(
                         paper_id=paper.id,
@@ -83,8 +89,40 @@ def test_retriever_writer_and_citation_guard_work_together():
                         proposed_solution="Fe-N4 single-atom sites are introduced to regulate sulfur redox intermediates",
                         core_hypothesis="strong but not overly irreversible LiPS binding can improve bidirectional redox kinetics",
                         figure_logic='[{"fig_id":"Figure 1","purpose":"structure"},{"fig_id":"Figure 2","purpose":"DFT evidence"}]',
+                        evidence_chain=[
+                            {
+                                "text": "The adsorption energy of Li2S4 on Fe-N4 was -1.23 eV.",
+                                "source": "Results",
+                                "reviewer_status": "verified",
+                                "target_resolution_status": "active",
+                            }
+                        ],
                     )
                 )
+                for target_type, row, field_name in [
+                    ("dft_results", dft_result, "value"),
+                    ("electrochemical_performance", electrochemical, "capacity"),
+                    ("mechanism_claims", mechanism, "claim_text"),
+                ]:
+                    session.add(
+                        EvidenceSpan(
+                            paper_id=paper.id,
+                            object_type=target_type,
+                            object_id=str(row.id),
+                            text=row.evidence_text,
+                        )
+                    )
+                    session.add(
+                        ExtractionFieldReview(
+                            paper_id=paper.id,
+                            target_type=target_type,
+                            target_id=str(row.id),
+                            field_name=field_name,
+                            reviewer_status="verified",
+                            target_resolution_status="active",
+                            evidence_text=row.evidence_text,
+                        )
+                    )
                 session.commit()
 
                 retrieved = Retriever(session).retrieve("Fe-N4 Li2S4 adsorption conversion lithium sulfur", [paper.id], 3)

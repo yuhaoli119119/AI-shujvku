@@ -39,6 +39,7 @@ from app.schemas.api import (
     WritingCardResponse,
     FigureDataPointResponse,
 )
+from app.utils.review_safety import writing_card_gate
 
 
 class PaperQueryService:
@@ -277,6 +278,7 @@ class PaperQueryService:
                 figure_logic = json.loads(figure_logic)
             except json.JSONDecodeError:
                 pass
+        gate = writing_card_gate(item)
         return WritingCardResponse(
             id=item.id,
             paper_type=item.paper_type,
@@ -289,6 +291,10 @@ class PaperQueryService:
             abstract_logic=item.abstract_logic,
             introduction_logic=item.introduction_logic,
             discussion_logic=item.discussion_logic,
+            evidence_chain_status=gate.evidence_chain_status,
+            review_gate_status=gate.review_gate_status,
+            can_use_for_writing=gate.can_use_for_writing,
+            blocked_reasons=list(gate.blocked_reasons),
         )
 
     @staticmethod

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import io
+import json
+import logging
 import re
 from collections import defaultdict
 
@@ -14,8 +16,10 @@ from app.db.models import CatalystSample as CS
 from app.db.models import DFTResult as DR
 from app.db.models import Paper as P
 from app.db.session import get_db_session
+from app.utils.review_safety import is_export_eligible_extraction, summarize_gate_results
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/export/csv")
@@ -56,9 +60,18 @@ async def export_dft_results_csv(
             "source_figure",
             "confidence",
             "evidence_text",
+            "review_status",
+            "review_gate_status",
+            "provenance_level",
+            "locator_status",
         ]
     )
+    gate_results = []
     for dr, paper in rows:
+        gate = is_export_eligible_extraction(session, dr, target_type="dft_results")
+        gate_results.append(gate)
+        if not gate.eligible:
+            continue
         authors_str = ", ".join(paper.authors) if isinstance(paper.authors, list) else (paper.authors or "")
         writer.writerow(
             [
@@ -77,14 +90,25 @@ async def export_dft_results_csv(
                 dr.source_figure or "",
                 dr.confidence if dr.confidence is not None else "",
                 (dr.evidence_text or "").replace("\n", " "),
+                gate.review_status,
+                gate.review_gate_status,
+                gate.provenance_level,
+                gate.locator_status,
             ]
         )
 
+    gate_summary = summarize_gate_results(gate_results)
+    logger.info("DFT CSV export safety gate summary: %s", gate_summary)
     csv_bytes = output.getvalue().encode("utf-8-sig")
     return StreamingResponse(
         io.BytesIO(csv_bytes),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=dft_results_export.csv"},
+        headers={
+            "Content-Disposition": "attachment; filename=dft_results_export.csv",
+            "X-D1-Exported-Count": str(gate_summary["eligible"]),
+            "X-D1-Blocked-Count": str(gate_summary["blocked"]),
+            "X-D1-Blocked-Reasons": json.dumps(gate_summary["blocked_reasons"], sort_keys=True),
+        },
     )
 
 

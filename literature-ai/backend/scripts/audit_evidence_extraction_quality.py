@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 
 
@@ -16,7 +16,9 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.config import get_settings
+from app.db.models import DFTResult, WritingCard
 from app.db.session import session_scope
+from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 
 
 ACTIVE_REVIEW_RESOLUTION_STATUSES = {"active", "remapped"}
@@ -172,6 +174,71 @@ def _missing_safe_review_count(session: Session, table_name: str, paper_id: str 
     return sum(1 for row_id in ids if row_id not in reviewed)
 
 
+def _dft_export_gate_stats(session: Session, paper_id: str | None) -> dict[str, int]:
+    if "dft_results" not in _table_names(session):
+        return {
+            "dft_export_total_candidates": 0,
+            "dft_export_safe_eligible": 0,
+            "dft_export_blocked_missing_review": 0,
+            "dft_export_blocked_unsafe_review": 0,
+            "dft_export_blocked_missing_evidence": 0,
+            "dft_export_blocked_missing_evidence_text": 0,
+        }
+    stmt = select(DFTResult)
+    if paper_id:
+        stmt = stmt.where(DFTResult.paper_id == paper_id)
+    rows = session.scalars(stmt).all()
+    stats = Counter()
+    stats["dft_export_total_candidates"] = len(rows)
+    for row in rows:
+        gate = is_export_eligible_extraction(session, row, target_type="dft_results")
+        if gate.eligible:
+            stats["dft_export_safe_eligible"] += 1
+            continue
+        for reason in gate.reasons:
+            stats[f"dft_export_blocked_{reason}"] += 1
+    return {
+        "dft_export_total_candidates": stats["dft_export_total_candidates"],
+        "dft_export_safe_eligible": stats["dft_export_safe_eligible"],
+        "dft_export_blocked_missing_review": stats["dft_export_blocked_missing_review"],
+        "dft_export_blocked_unsafe_review": stats["dft_export_blocked_unsafe_review"],
+        "dft_export_blocked_missing_evidence": stats["dft_export_blocked_missing_evidence"],
+        "dft_export_blocked_missing_evidence_text": stats["dft_export_blocked_missing_evidence_text"],
+    }
+
+
+def _writing_gate_stats(session: Session, paper_id: str | None) -> dict[str, int]:
+    if "writing_cards" not in _table_names(session):
+        return {
+            "writing_cards_total": 0,
+            "writing_cards_safe_usable": 0,
+            "writing_cards_blocked_missing_evidence_chain": 0,
+            "writing_cards_blocked_unsafe_review": 0,
+        }
+    stmt = select(WritingCard)
+    if paper_id:
+        stmt = stmt.where(WritingCard.paper_id == paper_id)
+    rows = session.scalars(stmt).all()
+    stats = Counter()
+    stats["writing_cards_total"] = len(rows)
+    for row in rows:
+        gate = writing_card_gate(row)
+        if gate.can_use_for_writing:
+            stats["writing_cards_safe_usable"] += 1
+            continue
+        for reason in gate.blocked_reasons:
+            if reason == "missing_evidence_chain":
+                stats["writing_cards_blocked_missing_evidence_chain"] += 1
+            elif reason in {"unsafe_review", "missing_review"}:
+                stats["writing_cards_blocked_unsafe_review"] += 1
+    return {
+        "writing_cards_total": stats["writing_cards_total"],
+        "writing_cards_safe_usable": stats["writing_cards_safe_usable"],
+        "writing_cards_blocked_missing_evidence_chain": stats["writing_cards_blocked_missing_evidence_chain"],
+        "writing_cards_blocked_unsafe_review": stats["writing_cards_blocked_unsafe_review"],
+    }
+
+
 def _orphan_count(session: Session, table_name: str, paper_id: str | None = None) -> int:
     if table_name not in _table_names(session) or "paper_id" not in _columns(session, table_name):
         return 0
@@ -314,6 +381,9 @@ def run_audit(session: Session, *, paper_id: str | None = None, limit: int = 10)
                 params,
             )
 
+    dft_export_gate = _dft_export_gate_stats(session, paper_id)
+    writing_gate = _writing_gate_stats(session, paper_id)
+
     orphan_counts = {
         table_name: _orphan_count(session, table_name, paper_id)
         for table_name in [
@@ -364,12 +434,14 @@ def run_audit(session: Session, *, paper_id: str | None = None, limit: int = 10)
             "verified_but_unsafe_resolution": verified_bad_resolution,
         },
         "export_writing_dataset": {
+            **dft_export_gate,
             "dft_results_export_missing_evidence": extraction_tables.get("dft_results", {}).get(
                 "missing_evidence_text_or_payload", 0
             ),
             "dft_results_export_missing_safe_verified_review": extraction_tables.get("dft_results", {}).get(
                 "missing_safe_verified_review", 0
             ),
+            **writing_gate,
             "writing_cards_total": writing_total,
             "writing_cards_missing_evidence_chain": writing_missing_evidence_chain,
             "dataset_tables_detected": [],
@@ -479,9 +551,20 @@ def print_report(report: dict[str, Any]) -> None:
     print("[Export/Writing/Dataset]")
     export = report["export_writing_dataset"]
     print(
+        f"dft_export_total_candidates={export['dft_export_total_candidates']} "
+        f"dft_export_safe_eligible={export['dft_export_safe_eligible']} "
+        f"dft_export_blocked_missing_review={export['dft_export_blocked_missing_review']} "
+        f"dft_export_blocked_unsafe_review={export['dft_export_blocked_unsafe_review']} "
+        f"dft_export_blocked_missing_evidence={export['dft_export_blocked_missing_evidence']} "
+        f"dft_export_blocked_missing_evidence_text={export['dft_export_blocked_missing_evidence_text']}"
+    )
+    print(
         f"dft_results_export_missing_evidence={export['dft_results_export_missing_evidence']} "
         f"dft_results_export_missing_safe_verified_review={export['dft_results_export_missing_safe_verified_review']} "
         f"writing_cards_total={export['writing_cards_total']} "
+        f"writing_cards_safe_usable={export['writing_cards_safe_usable']} "
+        f"writing_cards_blocked_missing_evidence_chain={export['writing_cards_blocked_missing_evidence_chain']} "
+        f"writing_cards_blocked_unsafe_review={export['writing_cards_blocked_unsafe_review']} "
         f"writing_cards_missing_evidence_chain={export['writing_cards_missing_evidence_chain']} "
         f"dataset_tables_detected={export['dataset_tables_detected']}"
     )

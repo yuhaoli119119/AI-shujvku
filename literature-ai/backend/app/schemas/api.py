@@ -209,6 +209,10 @@ class WritingCardResponse(BaseModel):
     abstract_logic: str | None = None
     introduction_logic: str | None = None
     discussion_logic: str | None = None
+    evidence_chain_status: str = "missing"
+    review_gate_status: str = "blocked"
+    can_use_for_writing: bool = False
+    blocked_reasons: list[str] = Field(default_factory=list)
 
 
 class FigureDataPointResponse(BaseModel):
