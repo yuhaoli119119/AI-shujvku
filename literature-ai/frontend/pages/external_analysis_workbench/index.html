@@ -50,6 +50,15 @@
     <section class="toolbar">
       <div><label for="paperSelect">Paper</label><select id="paperSelect" onchange="loadSelectedPaper()"><option value="">Loading...</option></select></div>
       <div><label for="schemaSelect">Schema</label><select id="schemaSelect" onchange="renderSchemaForm()"><option>CatalystSample</option><option>DFTSetting</option><option selected>DFTResult</option><option>MechanismClaim</option><option>ElectrochemicalPerformance</option></select></div>
+      <div>
+        <label for="filterSelect">校验过滤</label>
+        <select id="filterSelect" onchange="renderSchemaForm()" style="height: 38px; min-width: 160px;">
+          <option value="">全部字段</option>
+          <option value="warnings">仅有警告 (only warnings)</option>
+          <option value="unverified">仅未校验 (only unverified)</option>
+          <option value="low_confidence">仅低置信度 (&lt; 0.7)</option>
+        </select>
+      </div>
       <button class="btn primary" onclick="validateCurrent()">Validate</button>
       <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
     </section>
@@ -133,51 +142,353 @@
       }
       box.innerHTML = warnings.map(w => `<div class="warning-row"><strong>${esc(w.severity)} · ${esc(w.code)}</strong><div>${esc(w.message)}</div><div class="muted">${esc(w.target_type)} ${esc(w.field || "")}</div></div>`).join("");
     }
+    function getFieldStatus(field) {
+      if (field && field.review && field.review.reviewer_status) {
+        return field.review.reviewer_status;
+      }
+      if (field && field.verified) {
+        return "verified";
+      }
+      return "pending";
+    }
+
+    function getStatusBadge(status) {
+      let bg = "var(--color-surface-alt)", color = "var(--color-text-secondary)", label = "待校验";
+      if (status === "verified") {
+        bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "已校验";
+      } else if (status === "corrected") {
+        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; label = "已修改";
+      } else if (status === "needs_check") {
+        bg = "var(--color-danger-bg)"; color = "var(--color-danger)"; label = "需核对";
+      } else if (status === "pending") {
+        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "待校验";
+      }
+      return `<span class="status-chip" style="background:${bg}; color:${color}; border:1px solid ${color}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">${label}</span>`;
+    }
+
+    function toggleEvidence(targetId, name) {
+      const el = document.getElementById(`evidence-${targetId}-${name}`);
+      if (el) {
+        el.style.display = el.style.display === "none" ? "block" : "none";
+      }
+    }
+
     function renderSchemaForm() {
       const schema = document.getElementById("schemaSelect").value;
       const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
-      const first = results[0] || {};
-      const fields = Object.entries(first);
       const form = document.getElementById("schemaForm");
-      if (!fields.length) {
+      
+      if (!results.length) {
         form.innerHTML = '<div class="empty-state">No extracted records for this schema yet.</div>';
         return;
       }
-      form.innerHTML = fields.map(([name, field]) => `
-        <div class="field-grid">
-          <div class="field-name">${esc(name)}</div>
-          <input data-field="${esc(name)}" data-part="value" value="${esc(field.value == null ? "" : field.value)}" placeholder="value">
-          <input data-field="${esc(name)}" data-part="unit" value="${esc(field.unit || "")}" placeholder="unit">
-          <input data-field="${esc(name)}" data-part="confidence" value="${esc(field.confidence == null ? "" : field.confidence)}" placeholder="confidence">
-        </div>
-        <textarea data-field="${esc(name)}" data-part="evidence_text" placeholder="evidence_text">${esc(field.evidence_text || "")}</textarea>
-      `).join("");
+      
+      const filterValue = document.getElementById("filterSelect") ? document.getElementById("filterSelect").value : "";
+      let html = "";
+      
+      results.forEach((record, recordIdx) => {
+        let fieldsHtml = "";
+        
+        Object.entries(record).forEach(([name, field]) => {
+          if (name === "target_id" || name === "target_type") return;
+          
+          const hasWarning = (state.extraction.validation_warnings || []).some(w => 
+            w.target_type === record.target_type && 
+            w.target_id === record.target_id && 
+            w.field === name
+          );
+          
+          const status = getFieldStatus(field);
+          const isUnverified = !field.verified && status !== "verified";
+          const confidence = field.confidence == null ? 1.0 : Number(field.confidence);
+          const isLowConfidence = confidence < 0.7;
+          
+          if (filterValue === "warnings" && !hasWarning) return;
+          if (filterValue === "unverified" && !isUnverified) return;
+          if (filterValue === "low_confidence" && !isLowConfidence) return;
+          
+          const statusBadgeHtml = getStatusBadge(status);
+          const warning = (state.extraction.validation_warnings || []).find(w => 
+            w.target_type === record.target_type && 
+            w.target_id === record.target_id && 
+            w.field === name
+          );
+          
+          let warningHtml = "";
+          if (warning) {
+            warningHtml = `
+              <div class="warning-row" style="margin-bottom:8px; font-size:12px; padding:6px 10px; border-left:3px solid var(--color-danger); background:var(--color-danger-bg); color:var(--color-danger);">
+                ⚠️ <strong>[${esc(warning.code)}]</strong> ${esc(warning.message)}
+              </div>
+            `;
+          }
+          
+          fieldsHtml += `
+            <div class="field-container" style="border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; background: var(--color-surface);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 800; font-size: 13px; color: var(--color-primary);">${esc(name)}</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  ${statusBadgeHtml}
+                  <button class="btn ghost small" style="height: 24px; padding: 0 6px; font-size: 11px; border-radius: var(--radius-sm);" onclick="toggleEvidence('${record.target_id}', '${name}')">原文证据 ▾</button>
+                </div>
+              </div>
+              
+              ${warningHtml}
+              
+              <div class="field-grid" style="margin-bottom: 8px;">
+                <div>
+                  <label style="margin-bottom: 2px;">数值/文本</label>
+                  <input data-target-id="${record.target_id}" data-target-type="${record.target_type}" data-field="${name}" data-part="value" value="${esc(field.value == null ? "" : field.value)}" style="height: 32px; padding: 0 8px; font-size: 13px;">
+                </div>
+                <div>
+                  <label style="margin-bottom: 2px;">单位</label>
+                  <input data-target-id="${record.target_id}" data-target-type="${record.target_type}" data-field="${name}" data-part="unit" value="${esc(field.unit || "")}" style="height: 32px; padding: 0 8px; font-size: 13px;">
+                </div>
+                <div>
+                  <label style="margin-bottom: 2px;">置信度</label>
+                  <input data-target-id="${record.target_id}" data-target-type="${record.target_type}" data-field="${name}" data-part="confidence" value="${esc(field.confidence == null ? "" : field.confidence)}" style="height: 32px; padding: 0 8px; font-size: 13px;">
+                </div>
+                <div style="display: flex; gap: 4px; align-items: flex-end; height: 100%;">
+                  <button class="btn primary small" style="height: 32px; font-size: 12px; padding: 0 8px;" onclick="saveSingleField('${record.target_type}', '${record.target_id}', '${name}')">保存</button>
+                  <button class="btn ghost small" style="height: 32px; font-size: 12px; padding: 0 8px; color: var(--color-success); border-color: var(--color-success);" onclick="verifySingleField('${record.target_type}', '${record.target_id}', '${name}')">校验</button>
+                </div>
+              </div>
+              
+              <div id="evidence-${record.target_id}-${name}" style="display: none; margin-top: 8px;">
+                <textarea data-target-id="${record.target_id}" data-target-type="${record.target_type}" data-field="${name}" data-part="evidence_text" style="font-size: 12px; min-height: 60px; padding: 8px; width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius);">${esc(field.evidence_text || "")}</textarea>
+                <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                  <button class="btn ghost small" style="height: 22px; font-size: 11px; padding: 0 6px;" disabled>🔍 定位 PDF (预留)</button>
+                </div>
+              </div>
+            </div>
+          `;
+        });
+        
+        if (fieldsHtml) {
+          html += `
+            <div class="section-card" style="margin-bottom: 20px; background: var(--color-surface-alt); border: 1px solid var(--color-border-strong);">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border-strong); padding-bottom: 8px; margin-bottom: 12px;">
+                <strong style="font-size: 14px;">记录 #${recordIdx + 1} (${record.target_id.slice(0, 8)})</strong>
+                <button class="btn ghost small" style="color: var(--color-success); border-color: var(--color-success);" onclick="verifyRecord('${record.target_type}', '${record.target_id}')">本条全校验</button>
+              </div>
+              ${fieldsHtml}
+            </div>
+          `;
+        }
+      });
+      
+      if (!html) {
+        form.innerHTML = '<div class="empty-state">当前过滤条件下没有匹配的记录。</div>';
+      } else {
+        form.innerHTML = html;
+      }
+    }
+
+    function getFieldInputs(targetId, fieldName) {
+      const vEl = document.querySelector(`input[data-target-id="${targetId}"][data-field="${fieldName}"][data-part="value"]`);
+      const uEl = document.querySelector(`input[data-target-id="${targetId}"][data-field="${fieldName}"][data-part="unit"]`);
+      const cEl = document.querySelector(`input[data-target-id="${targetId}"][data-field="${fieldName}"][data-part="confidence"]`);
+      const eEl = document.querySelector(`textarea[data-target-id="${targetId}"][data-field="${fieldName}"][data-part="evidence_text"]`);
+      
+      if (!vEl) return null;
+      return {
+        value: vEl.value,
+        unit: uEl ? uEl.value : null,
+        confidence: cEl ? Number(cEl.value || 1.0) : null,
+        evidence_text: eEl ? eEl.value : null
+      };
+    }
+
+    async function saveSingleField(targetType, targetId, fieldName) {
+      if (!state.paper) return;
+      const inputs = getFieldInputs(targetId, fieldName);
+      if (!inputs) return;
+      
+      const reviewItem = {
+        target_type: targetType,
+        target_id: targetId,
+        field_name: fieldName,
+        original_value: null,
+        reviewed_value: inputs.value,
+        unit: inputs.unit,
+        evidence_text: inputs.evidence_text,
+        reviewer_status: "corrected",
+        reviewer: "manual_reviewer"
+      };
+      
+      try {
+        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reviews: [reviewItem] })
+        });
+        showToast(`字段 ${fieldName} 保存成功！`);
+        await loadSelectedPaper();
+      } catch (error) {
+        showToast("保存失败: " + error.message);
+      }
+    }
+
+    async function verifySingleField(targetType, targetId, fieldName) {
+      if (!state.paper) return;
+      
+      const payload = {
+        target_type: targetType,
+        target_id: targetId,
+        field_names: [fieldName],
+        reviewer: "manual_reviewer"
+      };
+      
+      try {
+        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        showToast(`字段 ${fieldName} 校验成功！`);
+        await loadSelectedPaper();
+      } catch (error) {
+        showToast("校验失败: " + error.message);
+      }
+    }
+
+    async function verifyRecord(targetType, targetId) {
+      if (!state.paper) return;
+      const schema = document.getElementById("schemaSelect").value;
+      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      const record = results.find(r => r.target_id === targetId);
+      if (!record) return;
+      
+      const fieldNames = Object.keys(record).filter(name => name !== "target_id" && name !== "target_type");
+      
+      const payload = {
+        target_type: targetType,
+        target_id: targetId,
+        field_names: fieldNames,
+        reviewer: "manual_reviewer"
+      };
+      
+      try {
+        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        showToast("整条记录标记校验成功！");
+        await loadSelectedPaper();
+      } catch (error) {
+        showToast("校验失败: " + error.message);
+      }
+    }
+
+    async function saveDraft() {
+      if (!state.paper) return;
+      const schema = document.getElementById("schemaSelect").value;
+      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      
+      const reviews = [];
+      results.forEach(record => {
+        Object.keys(record).forEach(name => {
+          if (name === "target_id" || name === "target_type") return;
+          const inputs = getFieldInputs(record.target_id, name);
+          if (!inputs) return;
+          
+          reviews.push({
+            target_type: record.target_type,
+            target_id: record.target_id,
+            field_name: name,
+            original_value: null,
+            reviewed_value: inputs.value,
+            unit: inputs.unit,
+            evidence_text: inputs.evidence_text,
+            reviewer_status: "corrected",
+            reviewer: "manual_reviewer"
+          });
+        });
+      });
+      
+      if (reviews.length === 0) {
+        showToast("无可保存的字段修改。");
+        return;
+      }
+      
+      try {
+        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reviews: reviews })
+        });
+        showToast("批量修改保存成功！");
+        await loadSelectedPaper();
+      } catch (error) {
+        showToast("批量保存失败: " + error.message);
+      }
+    }
+
+    async function markVerified() {
+      if (!state.paper) return;
+      const schema = document.getElementById("schemaSelect").value;
+      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      
+      if (results.length === 0) {
+        showToast("当前没有待校验的记录。");
+        return;
+      }
+      
+      try {
+        for (const record of results) {
+          const fieldNames = Object.keys(record).filter(name => name !== "target_id" && name !== "target_type");
+          const payload = {
+            target_type: record.target_type,
+            target_id: record.target_id,
+            field_names: fieldNames,
+            reviewer: "manual_reviewer"
+          };
+          await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        }
+        showToast("批量标记已校验成功！");
+        await loadSelectedPaper();
+      } catch (error) {
+        showToast("批量校验失败: " + error.message);
+      }
     }
     async function validateCurrent() {
       if (!state.paper) return;
       try {
-        const data = await fetchJSON(`/api/extraction/results/${state.paper.id}/validate`, { method: "POST" });
-        renderWarnings(data.validation_warnings || []);
-        showToast("Validation complete: " + data.status);
+        const resp = await fetchJSON(`/api/extraction/results/${state.paper.id}/validate`, {
+          method: "POST"
+        });
+        state.extraction = resp;
+        renderWarnings(resp.validation_warnings || []);
+        renderSchemaForm();
+        showToast("Validation completed successfully!");
       } catch (error) {
         showToast("Validation failed: " + error.message);
       }
     }
+
     async function startExtractionJob() {
       if (!state.paper) return;
       try {
-        const data = await fetchJSON("/api/extraction/jobs", {
+        const schema = document.getElementById("schemaSelect").value;
+        const job = await fetchJSON("/api/extraction/jobs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paper_id: state.paper.id, schemas: ["CatalystSample", "DFTSetting", "DFTResult", "MechanismClaim", "ElectrochemicalPerformance"], force: true })
+          body: JSON.stringify({
+            paper_id: state.paper.id,
+            schemas: [schema]
+          })
         });
-        showToast("Extraction job queued: " + data.status);
+        showToast(`Extraction job queued successfully! Job ID: ${job.job_id}`);
       } catch (error) {
-        showToast("Failed to queue extraction: " + error.message);
+        showToast("Failed to queue extraction job: " + error.message);
       }
     }
-    function saveDraft() { showToast("Draft field edits are staged in the browser. Persistence endpoint is not enabled in P0."); }
-    function markVerified() { showToast("Marked as verified in UI. Durable reviewer state is planned after P0."); }
+
     document.addEventListener("DOMContentLoaded", () => {
       TopNav.init({ currentPage: "external", mountId: "topnav-mount" });
       loadPapers();

@@ -89,6 +89,7 @@ curl http://localhost:8000/api/health
 
 | 日期 | 变更内容 |
 |------|------|
+| 2026-05-25 | 人工校验工作台可用化：对接 review save/mark-verified 接口；实现 pending, verified, corrected, needs_check 四种字段状态 chip 样式；inline 显式 validator warnings 警告；支持“原文证据”面板折叠与定位预留；新增 warning, unverified, low_confidence 校验过滤；Playwright E2E 测试覆盖完整业务流。 |
 | 2026-05-25 | Extraction result 人工校验持久化：新增字段级 review layer 与 `GET /api/extraction/results/{paper_id}/reviews`、`POST /reviews/save`、`POST /reviews/mark-verified`；`validate` 返回合并 review 状态且不覆盖原始抽取结果，并补充 API 测试。 |
 | 2026-05-25 | Metadata-only 文献条目闭环：新增 `PaperIdentityService`，上传/路径导入 PDF 时优先匹配 `metadata_only` 占位条目并原地补全；新增 `POST /api/papers/{paper_id}/attach-pdf` 强制绑定接口；相同 DOI / arXiv 已有完整 PDF 时返回 `already_exists/409`，并补充自动合并与冲突测试。 |
 | 2026-05-25 | Sprint 0 后端稳定性修复：清理 `backend/app/schemas/api.py` 重复 Pydantic schema，保留兼容字段集合；为 `backend/app/db/session.py` 自动迁移失败补充日志，避免关键错误被静默吞掉。 |

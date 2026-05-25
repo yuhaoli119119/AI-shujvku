@@ -120,6 +120,8 @@ const EXTRACTION_RESULTS = {
     DFTSetting: [],
     DFTResult: [
       {
+        target_id: 'target-1',
+        target_type: 'DFTResult',
         catalyst: { value: 'Fe-N4', unit: null, evidence_text: 'Fe-N4 catalyst.', source_section: 'Results', page_span: {}, confidence: 0.8 },
         adsorbate: { value: 'Li2S4', unit: null, evidence_text: 'Li2S4 adsorption.', source_section: 'Results', page_span: {}, confidence: 0.9 },
         energy_type: { value: 'adsorption_energy', unit: null, evidence_text: 'adsorption energy.', source_section: 'Results', page_span: {}, confidence: 0.9 },
@@ -566,6 +568,98 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#schemaForm')).toContainText('value');
     await page.click('button:has-text("Validate")');
     await expect(page.locator('#warningsBox')).toContainText('No validation warnings');
+  });
+
+  test('business flow: validation workbench editing, verifying, and warning filtering', async ({ page }) => {
+    const mockResults = {
+      ...EXTRACTION_RESULTS,
+      validation_warnings: [
+        {
+          severity: 'warning',
+          code: 'INVALID_VALUE',
+          message: 'Energy value seems unusually high',
+          target_type: 'DFTResult',
+          target_id: 'target-1',
+          field: 'value'
+        }
+      ],
+      results: {
+        ...EXTRACTION_RESULTS.results,
+        DFTResult: [
+          {
+            target_id: 'target-1',
+            target_type: 'DFTResult',
+            catalyst: { value: 'Fe-N4', unit: null, evidence_text: 'Fe-N4 catalyst.', source_section: 'Results', page_span: {}, confidence: 0.8 },
+            adsorbate: { value: 'Li2S4', unit: null, evidence_text: 'Li2S4 adsorption.', source_section: 'Results', page_span: {}, confidence: 0.9 },
+            energy_type: { value: 'adsorption_energy', unit: null, evidence_text: 'adsorption energy.', source_section: 'Results', page_span: {}, confidence: 0.9 },
+            value: { 
+              value: -1.23, 
+              unit: 'eV', 
+              evidence_text: 'The adsorption energy is -1.23 eV.', 
+              source_section: 'Results', 
+              page_span: {}, 
+              confidence: 0.91,
+              review: { reviewer_status: 'pending' },
+              verified: false
+            },
+            reaction_step: { value: 'Li2S4 adsorption', unit: null, evidence_text: 'Li2S4 adsorption step.', source_section: 'Results', page_span: {}, confidence: 0.85 },
+          }
+        ]
+      }
+    };
+
+    let saveCalled = false;
+    let verifyCalled = false;
+
+    await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+      return jsonResponse(route, mockResults);
+    });
+
+    await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/save$/, route => {
+      saveCalled = true;
+      return jsonResponse(route, { status: 'success' });
+    });
+
+    await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/mark-verified$/, route => {
+      verifyCalled = true;
+      return jsonResponse(route, { status: 'success' });
+    });
+
+    await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#schemaForm')).toContainText('Fe-N4');
+    await expect(page.locator('#schemaForm')).toContainText('Energy value seems unusually high');
+
+    const evidenceBtn = page.locator('button:has-text("原文证据 ▾")').first();
+    await evidenceBtn.click();
+    const evidenceTextarea = page.locator('textarea[data-field="catalyst"]').first();
+    await expect(evidenceTextarea).toBeVisible();
+
+    const valueInput = page.locator('input[data-field="value"][data-part="value"]').first();
+    await valueInput.fill('-1.25');
+    
+    const saveBtn = page.locator('button:has-text("保存")').first();
+    await saveBtn.click();
+    await page.waitForTimeout(200);
+    expect(saveCalled).toBe(true);
+
+    const verifyBtn = page.locator('button:has-text("校验")').first();
+    await verifyBtn.click();
+    await page.waitForTimeout(200);
+    expect(verifyCalled).toBe(true);
+
+    const filterSelect = page.locator('#filterSelect');
+    await filterSelect.selectOption('warnings');
+    await page.waitForTimeout(200);
+
+    await expect(page.locator('#schemaForm')).toContainText('Energy value seems unusually high');
+    await expect(page.locator('input[data-field="catalyst"]')).toHaveCount(0);
+
+    verifyCalled = false;
+    await page.click('.footer-actions button:has-text("Mark verified")');
+    await page.waitForTimeout(200);
+    expect(verifyCalled).toBe(true);
   });
 
   test('business flow: view DFT extraction results and evidence link', async ({ page }) => {
