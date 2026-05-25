@@ -89,6 +89,7 @@ curl http://localhost:8000/api/health
 
 | 日期 | 变更内容 |
 |------|------|
+| 2026-05-25 | Metadata-only 文献条目闭环：新增 `PaperIdentityService`，上传/路径导入 PDF 时优先匹配 `metadata_only` 占位条目并原地补全；新增 `POST /api/papers/{paper_id}/attach-pdf` 强制绑定接口；相同 DOI / arXiv 已有完整 PDF 时返回 `already_exists/409`，并补充自动合并与冲突测试。 |
 | 2026-05-25 | Sprint 0 后端稳定性修复：清理 `backend/app/schemas/api.py` 重复 Pydantic schema，保留兼容字段集合；为 `backend/app/db/session.py` 自动迁移失败补充日志，避免关键错误被静默吞掉。 |
 | 2026-05-24 | **网页端与桌面端彻底解耦**。内置原外部 `findpapers` 包，移除 docker-compose 中对宿主机外部 app 目录卷挂载依赖，实现网页端 100% 独立开发与打包。 |
 | 2026-05-23 | RAG Pipeline 硬化：证据包全局去重 + Round-Robin 排序；事实级别 Citation Guard 扩展 mediates/infers_causality 以及 Fact-Claim 校验。 |

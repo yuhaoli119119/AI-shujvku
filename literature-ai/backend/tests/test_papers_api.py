@@ -2,9 +2,10 @@ import os
 import tempfile
 import pytest
 import asyncio
+import io
 from datetime import datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -14,6 +15,7 @@ from app.main import app
 from app.config import get_settings
 from app.db.models import Base, Paper, WorkflowJob
 from app.db.session import get_db_session
+from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 import app.api.papers as papers_api
 
 @pytest.fixture
@@ -611,3 +613,282 @@ def test_discovery_download_falls_back_to_metadata_only_ingest(setup_test_db, mo
         assert paper.library_name == "MetaLibrary"
         assert paper.pdf_path == ""
         assert paper.oa_status == "metadata_only"
+
+
+def _install_ingest_document_stubs(monkeypatch, metadata: dict[str, object], section_text: str = "Parsed section text"):
+    async def fake_grobid_parse(self, stored_pdf):
+        return None
+
+    async def fake_docling_parse(self, stored_pdf):
+        return None
+
+    async def fake_build_unified_document(self, stored_pdf, grobid_result, docling_result):
+        return UnifiedPaperDocument(
+            metadata=metadata,
+            abstract=str(metadata.get("abstract") or ""),
+            sections=[UnifiedSection(section_title="Body", section_type="body", text=section_text, page_start=1, page_end=1)],
+            tables=[],
+            figures=[],
+            references=[],
+            markdown="# Parsed",
+            tei_xml="<TEI/>",
+            docling_json={"title": metadata.get("title")},
+            source_pdf_path=stored_pdf,
+            tei_path=stored_pdf.with_suffix(".tei.xml"),
+            markdown_path=stored_pdf.with_suffix(".md"),
+            docling_json_path=stored_pdf.with_suffix(".json"),
+        )
+
+    def fake_run_stage2(self, paper, document):
+        return {
+            "dft_settings": 0,
+            "catalyst_samples": 0,
+            "dft_results": 0,
+            "electrochemical_performance": 0,
+            "mechanism_claims": 0,
+            "writing_cards": 0,
+            "comprehensive_analysis": 0,
+        }
+
+    monkeypatch.setattr("app.services.paper_ingestion.GrobidParser.parse_pdf", fake_grobid_parse)
+    monkeypatch.setattr("app.services.paper_ingestion.DoclingParser.parse_pdf", fake_docling_parse)
+    monkeypatch.setattr(papers_api.PaperIngestionService, "_build_unified_document", fake_build_unified_document)
+    monkeypatch.setattr("app.services.extraction_pipeline.ExtractionPipelineService.run_stage2", fake_run_stage2)
+    monkeypatch.setattr("app.services.extraction_pipeline.ExtractionPipelineService.replace_stage2", fake_run_stage2)
+
+
+def test_upload_pdf_merges_metadata_only_placeholder_by_doi(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Merged By DOI",
+            "doi": "10.1000/merged-doi",
+            "year": 2024,
+            "journal": "Merge Journal",
+            "authors": ["Alice"],
+            "abstract": "Merged abstract",
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="MergeLibrary",
+            doi="10.1000/merged-doi",
+            title="Merged By DOI",
+            year=2024,
+            journal="Merge Journal",
+            authors=["Alice"],
+            abstract="Metadata only",
+            pdf_path="",
+            source_path="https://doi.org/10.1000/merged-doi",
+            oa_status="metadata_only",
+            serial_number=7,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ingest/upload",
+        data={"library_name": "MergeLibrary"},
+        files={"file": ("merged.pdf", io.BytesIO(b"%PDF-1.4 merged"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paper_id"] == placeholder_id
+    assert data["status"] == "merged"
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "MergeLibrary")).all()
+        assert len(papers) == 1
+        paper = papers[0]
+        assert str(paper.id) == placeholder_id
+        assert paper.serial_number == 7
+        assert paper.oa_status == "uploaded"
+        assert paper.pdf_path.endswith(".pdf")
+        assert paper.tei_path.endswith(".tei.xml")
+
+
+def test_upload_pdf_merges_metadata_only_placeholder_by_title_and_year(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Exact Title Match For Merge",
+            "year": 2025,
+            "journal": "Match Journal",
+            "authors": ["Alice", "Bob"],
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="MergeLibrary",
+            doi=None,
+            title="Exact Title Match For Merge",
+            year=2025,
+            journal="Match Journal",
+            authors=["Alice", "Bob"],
+            abstract="Metadata only",
+            pdf_path="",
+            source_path="https://example.com/placeholder",
+            oa_status="metadata_only",
+            serial_number=3,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ingest/upload",
+        data={"library_name": "MergeLibrary"},
+        files={"file": ("title-match.pdf", io.BytesIO(b"%PDF-1.4 title match"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    assert response.json()["paper_id"] == placeholder_id
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "MergeLibrary")).all()
+        assert len(papers) == 1
+        assert str(papers[0].id) == placeholder_id
+        assert papers[0].oa_status == "uploaded"
+
+
+def test_upload_pdf_with_existing_full_doi_returns_conflict(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Existing DOI Paper",
+            "doi": "10.1000/existing-full",
+            "year": 2022,
+        },
+    )
+
+    with Session() as session:
+        existing = Paper(
+            library_name="ConflictLibrary",
+            doi="10.1000/existing-full",
+            title="Existing DOI Paper",
+            year=2022,
+            pdf_path="existing.pdf",
+            oa_status="downloaded",
+            serial_number=1,
+        )
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        existing_id = str(existing.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ingest/upload",
+        data={"library_name": "ConflictLibrary"},
+        files={"file": ("existing.pdf", io.BytesIO(b"%PDF-1.4 conflict"), "application/pdf")},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["status"] == "already_exists"
+    assert detail["paper_id"] == existing_id
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "ConflictLibrary")).all()
+        assert len(papers) == 1
+        assert papers[0].pdf_path == "existing.pdf"
+
+
+def test_low_confidence_title_does_not_auto_merge(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Distinct catalyst reconstruction pathway",
+            "year": 2025,
+            "journal": "Different Journal",
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="LowConfidenceLibrary",
+            title="Single atom catalyst design study",
+            year=2025,
+            journal="Match Journal",
+            pdf_path="",
+            source_path="https://example.com/metadata-only",
+            oa_status="metadata_only",
+            serial_number=2,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ingest/upload",
+        data={"library_name": "LowConfidenceLibrary"},
+        files={"file": ("low-confidence.pdf", io.BytesIO(b"%PDF-1.4 low confidence"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paper_id"] != placeholder_id
+    assert data["status"] == "completed"
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "LowConfidenceLibrary")).all()
+        assert len(papers) == 2
+        assert any(str(paper.id) == placeholder_id for paper in papers)
+
+
+def test_attach_pdf_endpoint_binds_to_requested_metadata_only_paper(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Forced Attach Paper",
+            "year": 2024,
+            "journal": "Attach Journal",
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="AttachLibrary",
+            title="Placeholder Title That Does Not Match",
+            year=2024,
+            pdf_path="",
+            source_path="https://example.com/attach-me",
+            oa_status="metadata_only",
+            serial_number=5,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{placeholder_id}/attach-pdf",
+        files={"file": ("attach.pdf", io.BytesIO(b"%PDF-1.4 attach"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paper_id"] == placeholder_id
+    assert data["status"] == "merged"
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(placeholder_id))
+        assert paper is not None
+        assert paper.oa_status == "uploaded"
+        assert paper.pdf_path.endswith(".pdf")

@@ -6,9 +6,10 @@ import re
 import uuid
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -21,11 +22,18 @@ from app.services.pdf_image_extractor import PdfImageExtractor
 from app.services.vlm_service import VLMService
 from app.services.embedding import DeterministicEmbeddingService
 from app.services.extraction_pipeline import ExtractionPipelineService
+from app.services.paper_identity import PaperIdentityService
 from app.utils.text_cleaning import normalize_text_tree
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LIBRARY_NAME = "\u9ed8\u8ba4\u6587\u732e\u5e93"
+
+
+class PaperConflictError(RuntimeError):
+    def __init__(self, paper: Paper, message: str = "Paper already exists") -> None:
+        super().__init__(message)
+        self.paper = paper
 
 class PaperIngestionService:
     def __init__(self, session: Session, settings: Settings) -> None:
@@ -35,6 +43,7 @@ class PaperIngestionService:
         self.grobid_parser = GrobidParser(settings.grobid_url)
         self.docling_parser = DoclingParser(settings)
         self.embedding = DeterministicEmbeddingService(settings.embedding_dimension)
+        self.identity = PaperIdentityService()
         self.extraction_pipeline = ExtractionPipelineService(
             session=session,
             settings=settings,
@@ -45,6 +54,7 @@ class PaperIngestionService:
         file: UploadFile,
         external_metadata: dict[str, Any] | None = None,
         library_name: str | None = None,
+        attach_to_paper_id: UUID | None = None,
     ) -> Paper:
         target_name = f"{uuid.uuid4()}.pdf"
         stored_pdf = await self.artifacts.save_upload(file, target_name)
@@ -55,6 +65,8 @@ class PaperIngestionService:
             external_metadata=external_metadata,
             source_reference=None,
             library_name=library_name,
+            attach_to_paper_id=attach_to_paper_id,
+            ingest_source="uploaded",
         )
 
     async def ingest_pdf(
@@ -65,6 +77,8 @@ class PaperIngestionService:
         external_metadata: dict[str, Any] | None = None,
         source_reference: str | None = None,
         library_name: str | None = None,
+        attach_to_paper_id: UUID | None = None,
+        ingest_source: str | None = None,
     ) -> Paper:
         if copy_pdf:
             stored_pdf = self.artifacts.save_pdf_copy(source_path, f"{uuid.uuid4()}_{original_filename}")
@@ -96,7 +110,74 @@ class PaperIngestionService:
                 except Exception as exc:
                     logger.warning("Auto-enrichment via discovery failed for DOI %s: %s", doi, exc)
 
-        return self._persist(unified, external_metadata, source_reference=source_reference, library_name=library_name)
+        library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
+        identity_metadata = self._build_identity_metadata(unified, external_metadata, source_reference)
+        doi = identity_metadata.get("doi")
+        title = identity_metadata.get("title")
+        year = identity_metadata.get("year")
+        arxiv_id = identity_metadata.get("arxiv_id")
+        oa_status = ingest_source or self._infer_oa_status(source_reference=source_reference, copy_pdf=copy_pdf)
+
+        if attach_to_paper_id is not None:
+            target_paper = self.session.get(Paper, attach_to_paper_id)
+            if target_paper is None:
+                raise ValueError("Paper not found")
+            if target_paper.pdf_path and target_paper.oa_status != "metadata_only":
+                raise PaperConflictError(target_paper, "Paper already has an attached PDF")
+            conflict = self._find_conflicting_paper(
+                doi=doi,
+                arxiv_id=arxiv_id,
+                library_name=target_paper.library_name,
+                exclude_paper_id=target_paper.id,
+            )
+            if conflict is not None:
+                raise PaperConflictError(conflict, "Another paper with the same identity already has a PDF")
+            paper = self._merge_into_existing_paper(
+                target_paper,
+                unified,
+                external_metadata,
+                source_reference=source_reference,
+                oa_status=oa_status,
+            )
+            setattr(paper, "_ingest_status", "merged")
+            return paper
+
+        placeholder = self.identity.find_metadata_placeholder(
+            self.session,
+            doi=doi,
+            title=title,
+            year=year,
+            arxiv_id=arxiv_id,
+            library_name=library,
+        )
+        if placeholder is not None:
+            paper = self._merge_into_existing_paper(
+                placeholder,
+                unified,
+                external_metadata,
+                source_reference=source_reference,
+                oa_status=oa_status,
+            )
+            setattr(paper, "_ingest_status", "merged")
+            return paper
+
+        conflict = self._find_conflicting_paper(
+            doi=doi,
+            arxiv_id=arxiv_id,
+            library_name=library,
+        )
+        if conflict is not None:
+            raise PaperConflictError(conflict, "Paper already exists with the same DOI or arXiv identity")
+
+        paper = self._persist(
+            unified,
+            external_metadata,
+            source_reference=source_reference,
+            library_name=library,
+            oa_status=oa_status,
+        )
+        setattr(paper, "_ingest_status", "completed")
+        return paper
 
     def ingest_pdf_sync(self, source_path: Path, original_filename: str) -> Paper:
         import asyncio
@@ -270,11 +351,12 @@ class PaperIngestionService:
         external_metadata: dict[str, Any] | None = None,
         source_reference: str | None = None,
         library_name: str | None = None,
+        oa_status: str | None = None,
     ) -> Paper:
         ext = external_metadata or {}
         paper = Paper(
             library_name=(library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME,
-            doi=ext.get("doi") or document.metadata.get("doi"),
+            doi=self.identity.normalize_doi(ext.get("doi") or document.metadata.get("doi")),
             title=ext.get("title") or document.metadata.get("title"),
             year=ext.get("year") or document.metadata.get("year"),
             journal=ext.get("journal") or document.metadata.get("journal"),
@@ -282,8 +364,8 @@ class PaperIngestionService:
             abstract=ext.get("abstract") or document.abstract or None,
             pdf_path=str(document.source_pdf_path),
             source_path=source_reference,
-            oa_status=document.metadata.get("oa_status"),
-            license=document.metadata.get("license"),
+            oa_status=oa_status or ext.get("oa_status") or document.metadata.get("oa_status"),
+            license=ext.get("license") or document.metadata.get("license"),
             tei_path=str(document.tei_path) if document.tei_path else None,
             docling_json_path=str(document.docling_json_path) if document.docling_json_path else None,
             markdown_path=str(document.markdown_path) if document.markdown_path else None,
@@ -294,7 +376,45 @@ class PaperIngestionService:
         paper.serial_number = (max_sn or 0) + 1
         self.session.add(paper)
         self.session.flush()
+        self._persist_document_entities(paper, document)
+        self.extraction_pipeline.run_stage2(paper, document)
+        self.session.commit()
+        self.session.refresh(paper)
+        return paper
 
+    def _merge_into_existing_paper(
+        self,
+        paper: Paper,
+        document: UnifiedPaperDocument,
+        external_metadata: dict[str, Any] | None = None,
+        source_reference: str | None = None,
+        oa_status: str | None = None,
+    ) -> Paper:
+        ext = external_metadata or {}
+        paper.doi = self.identity.normalize_doi(ext.get("doi") or document.metadata.get("doi") or paper.doi)
+        paper.title = ext.get("title") or document.metadata.get("title") or paper.title
+        paper.year = ext.get("year") or document.metadata.get("year") or paper.year
+        paper.journal = ext.get("journal") or document.metadata.get("journal") or paper.journal
+        paper.authors = ext.get("authors") or document.metadata.get("authors", []) or paper.authors or []
+        paper.abstract = ext.get("abstract") or document.abstract or paper.abstract
+        paper.pdf_path = str(document.source_pdf_path)
+        paper.source_path = source_reference or paper.source_path
+        paper.oa_status = oa_status or ext.get("oa_status") or document.metadata.get("oa_status") or paper.oa_status
+        paper.license = ext.get("license") or document.metadata.get("license") or paper.license
+        paper.tei_path = str(document.tei_path) if document.tei_path else None
+        paper.docling_json_path = str(document.docling_json_path) if document.docling_json_path else None
+        paper.markdown_path = str(document.markdown_path) if document.markdown_path else None
+        self.session.add(paper)
+        self.session.flush()
+
+        self._clear_document_entities(paper.id)
+        self._persist_document_entities(paper, document)
+        self.extraction_pipeline.replace_stage2(paper, document)
+        self.session.commit()
+        self.session.refresh(paper)
+        return paper
+
+    def _persist_document_entities(self, paper: Paper, document: UnifiedPaperDocument) -> None:
         for section in document.sections:
             self.session.add(
                 PaperSection(
@@ -362,13 +482,12 @@ class PaperIngestionService:
                 )
             )
 
-            # VLM Level 3 Numerical Extraction persistence
             if figure.numerical_data_points:
                 for dp in figure.numerical_data_points:
                     metric_name = dp.get("metric_name")
                     if not metric_name:
                         continue
-                    
+
                     try:
                         metric_value = float(dp["metric_value"]) if dp.get("metric_value") is not None else None
                     except (ValueError, TypeError):
@@ -390,12 +509,11 @@ class PaperIngestionService:
                         conditions=dp.get("conditions"),
                         sample_label=dp.get("sample_label"),
                         confidence=confidence,
-                        raw_text=str(dp)
+                        raw_text=str(dp),
                     )
                     self.session.add(db_dp)
                     self.session.flush()
 
-                    # Automatically generate an EvidenceSpan for downstream RAG
                     unit_str = f" {db_dp.unit}" if db_dp.unit else ""
                     val_str = f": {db_dp.metric_value}" if db_dp.metric_value is not None else ""
                     sample_str = f" for {db_dp.sample_label}" if db_dp.sample_label else ""
@@ -409,11 +527,82 @@ class PaperIngestionService:
                         text=text_evidence,
                         page=figure.page,
                         figure=figure.caption or "Figure",
-                        confidence=db_dp.confidence
+                        confidence=db_dp.confidence,
                     )
                     self.session.add(evidence)
 
-        self.extraction_pipeline.run_stage2(paper, document)
-        self.session.commit()
-        self.session.refresh(paper)
-        return paper
+    def _clear_document_entities(self, paper_id: UUID) -> None:
+        self.session.execute(
+            delete(EvidenceSpan).where(
+                EvidenceSpan.paper_id == paper_id,
+                EvidenceSpan.object_type == "figure_data",
+            )
+        )
+        self.session.execute(delete(FigureDataPoint).where(FigureDataPoint.paper_id == paper_id))
+        self.session.execute(delete(PaperFigure).where(PaperFigure.paper_id == paper_id))
+        self.session.execute(delete(PaperTable).where(PaperTable.paper_id == paper_id))
+        self.session.execute(delete(PaperSection).where(PaperSection.paper_id == paper_id))
+
+    def _build_identity_metadata(
+        self,
+        document: UnifiedPaperDocument,
+        external_metadata: dict[str, Any] | None,
+        source_reference: str | None,
+    ) -> dict[str, Any]:
+        ext = external_metadata or {}
+        doi = self.identity.normalize_doi(ext.get("doi") or document.metadata.get("doi"))
+        title = ext.get("title") or document.metadata.get("title")
+        year = ext.get("year") or document.metadata.get("year")
+        arxiv_source = (
+            ext.get("arxiv_id")
+            or ext.get("identifier")
+            or ext.get("url")
+            or source_reference
+            or document.metadata.get("identifier")
+            or document.metadata.get("source_path")
+            or title
+        )
+        return {
+            "doi": doi,
+            "title": title,
+            "year": year,
+            "arxiv_id": self.identity.extract_arxiv_id(str(arxiv_source) if arxiv_source else None),
+        }
+
+    def _find_conflicting_paper(
+        self,
+        doi: str | None,
+        arxiv_id: str | None,
+        library_name: str,
+        exclude_paper_id: UUID | None = None,
+    ) -> Paper | None:
+        if not doi and not arxiv_id:
+            return None
+        candidate = self.identity.find_existing_paper(
+            self.session,
+            doi=doi,
+            title=None,
+            year=None,
+            arxiv_id=arxiv_id,
+            library_name=library_name,
+        )
+        if candidate is None:
+            return None
+        if exclude_paper_id is not None and candidate.id == exclude_paper_id:
+            return None
+        if candidate.oa_status == "metadata_only":
+            return None
+        if doi and self.identity.normalize_doi(candidate.doi) == doi and candidate.pdf_path:
+            return candidate
+        candidate_arxiv = self.identity.extract_arxiv_id(candidate.source_path or candidate.title or candidate.doi)
+        if arxiv_id and candidate_arxiv == arxiv_id and candidate.pdf_path:
+            return candidate
+        return None
+
+    @staticmethod
+    def _infer_oa_status(source_reference: str | None, copy_pdf: bool) -> str:
+        if not copy_pdf:
+            return "uploaded"
+        if source_reference:
+            return "local_pdf"
+        return "downloaded"
