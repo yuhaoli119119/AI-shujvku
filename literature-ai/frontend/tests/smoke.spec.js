@@ -32,9 +32,11 @@ const PAPERS = [
   {
     id: 'paper-1',
     title: 'Test Paper for Smoke Validation',
+    doi: '10.1000/primary-doi 10.2000/reference-doi',
     year: 2025,
     journal: 'Journal of Testing',
     paper_type: 'research',
+    pdf_path: 'test.pdf',
     serial_number: 1,
     counts: {
       sections: 8,
@@ -48,8 +50,10 @@ const PAPERS = [
 const PAPER_DETAIL = {
   id: 'paper-1',
   title: 'Test Paper for Smoke Validation',
+  doi: '10.1000/primary-doi 10.2000/reference-doi',
   year: 2025,
   journal: 'Journal of Testing',
+  pdf_path: 'test.pdf',
   abstract: 'Synthetic paper detail payload used by Playwright smoke tests.',
   sections: [{ id: 'chunk-1', section_title: 'Introduction', section_type: 'introduction', text: 'Smoke-test content.', page_start: 1, page_end: 1 }],
   figures: [],
@@ -740,8 +744,46 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: literature library opens extraction job center', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await page.click('button:has-text("Extraction Jobs")');
-    await expect(page.locator('#acquisitionResult')).toContainText('Extraction Job Center');
+    await page.click('button:has-text("解析任务")');
+    await expect(page.locator('#acquisitionResult')).toContainText('解析任务中心');
+  });
+
+  test('business flow: literature library UX is Chinese, clamps DOI, and exposes key entries', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-card');
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#paperMeta')).toContainText('10.1000/primary-doi');
+    await expect(page.locator('#paperMeta')).not.toContainText('10.2000/reference-doi');
+    await expect(page.locator('#paperMeta')).toContainText('检测到多个 DOI，可能需要重新解析元数据');
+    await expect(page.locator('#summaryContent')).toContainText('PDF 证据定位');
+    await expect(page.locator('#summaryContent')).toContainText('跳转到 PDF 页并显示证据信息');
+
+    await page.click('button:has-text("更多操作")');
+    await expect(page.locator('#paperMoreMenu')).toContainText('删除当前文献');
+
+    const visibleText = await page.locator('body').innerText();
+    expect(visibleText).not.toMatch(/Extraction Jobs|Extraction Job Center|source label|manual|unknown/);
+  });
+
+  test('business flow: unconfigured internal AI shows Chinese settings guide', async ({ page }) => {
+    await page.route(/\/api\/external-analysis\/papers\/paper-1\/internal-parse$/, route => {
+      return route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Internal AI is not configured' }),
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-card');
+    await page.click('button[data-tab="review"]');
+    await page.click('button:has-text("生成 AI 候选项")');
+
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('网页内 AI 尚未配置，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。');
+    await expect(page.locator('#internalAIConfigGuide button:has-text("打开设置页")')).toBeVisible();
   });
 
   test('business flow: empty literature library does not crash', async ({ page }) => {
@@ -1832,8 +1874,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       const panel = page.locator('#evidenceLocatorsPanel');
       await expect(panel).toBeVisible();
 
-      // exact: "跳到 PDF 并高亮"
-      await expect(panel).toContainText('跳到 PDF 并高亮');
+      // exact: safe jump text, no true-highlight claim
+      await expect(panel).toContainText('跳转到 PDF 页并显示证据信息');
 
       // page_only: "跳到第 5 页"
       await expect(panel).toContainText('跳到第 5 页');
@@ -1959,10 +2001,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
-      await expect(panel).toContainText('跳到 PDF 并高亮');
+      await expect(panel).toContainText('跳转到 PDF 页并显示证据信息');
 
       // Click the button
-      await page.locator('#evidenceLocatorsPanel button:has-text("跳到 PDF 并高亮")').click();
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳转到 PDF 页并显示证据信息")').click();
       await page.waitForTimeout(800);
 
       // PDF viewer overlay should be visible
@@ -1982,7 +2024,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       // Evidence panel must show exact locator info
       const evidencePanel = page.locator('#pdfViewerEvidencePanel');
       await expect(evidencePanel).toContainText('精确定位');
-      await expect(evidencePanel).toContainText('exact');
       await expect(evidencePanel).toContainText('BBox');
 
       // PDF unavailable message must be hidden
@@ -2042,7 +2083,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       // Evidence panel must show page_only status
       const evidencePanel = page.locator('#pdfViewerEvidencePanel');
       await expect(evidencePanel).toContainText('仅页码定位');
-      await expect(evidencePanel).toContainText('page_only');
 
       // No bbox highlight overlay
       const highlight = page.locator('#pdfHighlightOverlay .pdf-bbox-highlight');
@@ -2102,10 +2142,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
-      await expect(panel).toContainText('跳到 PDF 并高亮');
+      await expect(panel).toContainText('跳转到 PDF 页并显示证据信息');
 
       // Click the button
-      await page.locator('#evidenceLocatorsPanel button:has-text("跳到 PDF 并高亮")').click();
+      await page.locator('#evidenceLocatorsPanel button:has-text("跳转到 PDF 页并显示证据信息")').click();
       await page.waitForTimeout(800);
 
       // Overlay should be visible

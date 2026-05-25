@@ -238,6 +238,53 @@ function openAggregateView() {
     loadAggregate();
 }
 
+function openSelectedPdfEvidence() {
+    closeDropdowns();
+    if (!state.selectedPaper) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    if (!paperHasPdf(state.selectedPaper)) {
+        showToast("PDF 未上传，请先上传 PDF。", "error");
+        return;
+    }
+    openPdfViewer(state.selectedPaper.id, 1, false, null, "page_only", "从文献标题入口打开：跳转到 PDF 页并显示证据信息。");
+}
+
+function openDeletePaperDialog() {
+    closeDropdowns();
+    if (!state.selectedPaper) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    const titleEl = $("deletePaperTitle");
+    const doiEl = $("deletePaperDoi");
+    const info = primaryDoiInfo(state.selectedPaper.doi);
+    if (titleEl) titleEl.textContent = state.selectedPaper.title || "未命名文献";
+    if (doiEl) doiEl.textContent = info.doi || "无 DOI";
+    const dialog = $("deletePaperDialog");
+    if (dialog) dialog.style.display = "flex";
+}
+
+function closeDeletePaperDialog() {
+    const dialog = $("deletePaperDialog");
+    if (dialog) dialog.style.display = "none";
+}
+
+async function confirmDeleteCurrentPaper() {
+    if (!state.selectedPaperId) return;
+    try {
+        await fetchJSON(API_BASE + "/" + encodeURIComponent(state.selectedPaperId), { method: "DELETE" });
+        closeDeletePaperDialog();
+        showToast("文献记录已删除，原 PDF 文件未删除。", "success");
+        state.selectedPaperId = null;
+        state.selectedPaper = null;
+        await fetchPapers();
+    } catch (error) {
+        showToast("删除失败：" + error.message, "error");
+    }
+}
+
 async function showFolderImportGuide() {
     setAcquisitionResult('<div class="workspace-empty small-empty">正在读取 MCP 批量导入指南...</div>');
     try {
@@ -339,6 +386,10 @@ Object.assign(window, {
     togglePaperMoreMenu: togglePaperMoreMenu,
     addToEvidencePack: addToEvidencePack,
     openAggregateView: openAggregateView,
+    openSelectedPdfEvidence: openSelectedPdfEvidence,
+    openDeletePaperDialog: openDeletePaperDialog,
+    closeDeletePaperDialog: closeDeletePaperDialog,
+    confirmDeleteCurrentPaper: confirmDeleteCurrentPaper,
     showFolderImportGuide: showFolderImportGuide,
     switchTab: switchTab
 });

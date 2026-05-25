@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import Paper
+from app.db.models import Base, Paper
 from app.db.session import get_db_session
 from app.schemas.api import ExtractionRunResponse, PaperDetailResponse
 from app.schemas.evidence import EvidenceLocatorResponse
@@ -31,6 +31,22 @@ async def delete_paper(paper_id: UUID, session: Session = Depends(get_db_session
     paper = session.get(Paper, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
+    # Keep file storage untouched; remove only database rows linked to this paper.
+    for table in reversed(Base.metadata.sorted_tables):
+        if table.name == "papers":
+            continue
+        conditions = []
+        if "paper_id" in table.c:
+            conditions.append(table.c.paper_id == paper_id)
+        if "source_paper_id" in table.c:
+            conditions.append(table.c.source_paper_id == paper_id)
+        if "target_paper_id" in table.c:
+            conditions.append(table.c.target_paper_id == paper_id)
+        if conditions:
+            condition = conditions[0]
+            for extra in conditions[1:]:
+                condition = condition | extra
+            session.execute(table.delete().where(condition))
     session.delete(paper)
     session.commit()
     return {"status": "deleted", "paper_id": str(paper_id)}

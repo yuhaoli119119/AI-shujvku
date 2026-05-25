@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import re
 
 import httpx
 from lxml import etree
 
 
 NS = {"tei": "http://www.tei-c.org/ns/1.0"}
+DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 
 
 @dataclass
@@ -54,14 +56,21 @@ class GrobidParser:
         abstract = self._join_text(
             root.xpath("//tei:profileDesc/tei:abstract//text()", namespaces=NS)
         ).strip()
-        doi = self._join_text(
-            root.xpath("//tei:idno[@type='DOI']/text()", namespaces=NS)
-        ).strip()
+        header = root.xpath("//tei:teiHeader/tei:fileDesc/tei:sourceDesc", namespaces=NS)
+        header_node = header[0] if header else root
+        doi = self._first_valid_doi(
+            header_node.xpath(".//tei:idno[@type='DOI' or @type='doi']/text()", namespaces=NS)
+        )
         year = self._safe_year(
-            self._join_text(root.xpath("//tei:date[@type='published']/@when", namespaces=NS))
+            self._join_text(
+                header_node.xpath(
+                    ".//tei:date[@type='published']/@when | .//tei:date[@type='published']//text() | .//tei:imprint/tei:date/@when | .//tei:imprint/tei:date//text()",
+                    namespaces=NS,
+                )
+            )
         )
         journal = self._join_text(
-            root.xpath("//tei:monogr/tei:title[@level='j']//text()", namespaces=NS)
+            header_node.xpath(".//tei:monogr/tei:title[@level='j']//text()", namespaces=NS)
         ).strip()
         authors = [
             self._join_text(author.xpath(".//tei:persName//text()", namespaces=NS)).strip()
@@ -90,7 +99,9 @@ class GrobidParser:
             references.append(
                 {
                     "title": self._join_text(ref.xpath(".//tei:title//text()", namespaces=NS)).strip(),
-                    "doi": self._join_text(ref.xpath(".//tei:idno[@type='DOI']/text()", namespaces=NS)).strip(),
+                    "doi": self._first_valid_doi(
+                        ref.xpath(".//tei:idno[@type='DOI' or @type='doi']/text()", namespaces=NS)
+                    ),
                     "raw_text": self._join_text(ref.xpath(".//text()", namespaces=NS)).strip(),
                 }
             )
@@ -113,6 +124,25 @@ class GrobidParser:
     @staticmethod
     def _join_text(parts: list[str]) -> str:
         return " ".join(part.strip() for part in parts if part and part.strip())
+
+    @staticmethod
+    def _normalize_doi(raw: str | None) -> str | None:
+        if not raw:
+            return None
+        cleaned = raw.strip()
+        cleaned = re.sub(r"^(?:doi:\s*|https?://(?:dx\.)?doi\.org/)", "", cleaned, flags=re.IGNORECASE)
+        match = DOI_RE.search(cleaned)
+        if not match:
+            return None
+        return match.group(0).rstrip(".,;:)").lower()
+
+    @classmethod
+    def _first_valid_doi(cls, values: list[str]) -> str | None:
+        for value in values:
+            normalized = cls._normalize_doi(value)
+            if normalized:
+                return normalized
+        return None
 
     @staticmethod
     def _safe_year(raw: str) -> int | None:

@@ -131,6 +131,9 @@ textarea {
 .dropdown-menu button:hover {
     background: var(--color-surface-alt);
 }
+.dropdown-menu .danger-menu-item {
+    color: var(--color-danger);
+}
 .pager {
     display: inline-flex;
     align-items: center;
@@ -337,6 +340,42 @@ body.resizing iframe {
     color: var(--color-text-secondary);
     line-height: 1.7;
     font-size: 14px;
+    max-width: min(980px, 100%);
+}
+.doi-main {
+    display: inline-block;
+    max-width: min(560px, 100%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+    white-space: nowrap;
+    overflow-wrap: anywhere;
+}
+.doi-warning {
+    display: inline-block;
+    margin-left: 8px;
+    color: var(--color-warning);
+    font-size: 12px;
+}
+.doi-clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.pdf-evidence-entry {
+    border-color: var(--color-primary);
+    background: var(--color-primary-bg);
+}
+.pdf-evidence-entry p {
+    margin-bottom: 12px;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+}
+.ai-review-section p {
+    line-height: 1.65;
+    margin-bottom: 12px;
 }
 .workspace-actions {
     display: flex;

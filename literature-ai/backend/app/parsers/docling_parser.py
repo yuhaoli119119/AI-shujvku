@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import re
 
 from app.config import Settings
 
@@ -24,11 +25,12 @@ class DoclingParser:
         "crossmark", "cross mark", "checkmark",
         "elsevier", "springer", "wiley", "acs publications", "rsc publishing",
         "royal society", "nature publishing",
-        "copyright", "\u00a9",
+        "science china press", "publisher logo", "copyright", "\u00a9",
         "creative commons", "cc-by", "cc by",
         "doi:", "https://doi.org",
-        "open access",
+        "open access", "update", "logo",
     )
+    _SHORT_CAPTION_RE = re.compile(r"^\s*(figure|fig\.?|scheme)\s*\d+\s*[\.:：-]?\s*$", re.IGNORECASE)
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -145,19 +147,12 @@ class DoclingParser:
     def _is_decorative_figure(caption: str | None, prov: list) -> bool:
         """判断图片是否为装饰性图片（CrossMark、出版商标识、版权标识等）。"""
         if not caption:
-            # 无 caption 的图片大概率是装饰图，但保留有合理 bbox 的（可能是 caption 丢失的真实图片）
-            if prov and isinstance(prov, list) and len(prov) > 0:
-                item = prov[0]
-                bbox = item.get("bbox") if isinstance(item, dict) else getattr(item, "bbox", None)
-                if isinstance(bbox, dict):
-                    w = abs(bbox.get("r", 0) - bbox.get("l", 0))
-                    h = abs(bbox.get("b", 0) - bbox.get("t", 0))
-                    # 非常小的图片（< 50pt）且无 caption → 装饰图
-                    if w < 50 and h < 50:
-                        return True
+            # 无 caption 的图片不自动补 Figure N 入库，避免 CrossMark/Logo 污染图片 tab。
             return True
 
         caption_lower = caption.lower().strip()
+        if DoclingParser._SHORT_CAPTION_RE.match(caption_lower):
+            return True
 
         # 匹配黑名单关键词
         for kw in DoclingParser._DECORATIVE_CAPTION_KEYWORDS:
@@ -189,7 +184,7 @@ class DoclingParser:
         figures = payload.get("figures") or payload.get("pictures") or []
         normalized = []
         for index, item in enumerate(figures, start=1):
-            caption = DoclingParser._resolve_caption(item, payload) or f"Figure {index}"
+            caption = DoclingParser._resolve_caption(item, payload)
             prov = item.get("prov", [])
 
             # 过滤装饰性图片（CrossMark、出版商标识等）

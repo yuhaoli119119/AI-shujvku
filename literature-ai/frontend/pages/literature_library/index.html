@@ -46,7 +46,7 @@
                     </div>
                 </div>
                 <button class="btn ghost" onclick="refreshCurrentPage()">刷新</button>
-                <button class="btn ghost" onclick="openExtractionJobCenter()">Extraction Jobs</button>
+                <button class="btn ghost" onclick="openExtractionJobCenter()">解析任务</button>
             </div>
             <div class="toolbar-row">
                 <input id="filterYear" class="small-input" type="number" placeholder="年份">
@@ -106,7 +106,8 @@
                             <div id="paperMeta" class="workspace-meta"></div>
                         </div>
                         <div class="paper-actionbar">
-                            <button class="btn primary small" onclick="openPaperDetailPage()">打开详情</button>
+                            <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF / 证据定位</button>
+                            <button class="btn ghost small" onclick="openPaperDetailPage()">打开详情</button>
                             <button class="btn ghost small" onclick="rerunExtraction()">重新解析</button>
                             <div class="dropdown" id="paperMoreDropdown">
                                 <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
@@ -116,6 +117,7 @@
                                     <button type="button" onclick="switchTab('review')">外部 AI 审核</button>
                                     <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
                                     <button type="button" onclick="openAggregateView()">查看聚合视图</button>
+                                    <button type="button" class="danger-menu-item" onclick="openDeletePaperDialog()">删除当前文献</button>
                                 </div>
                             </div>
                         </div>
@@ -165,13 +167,28 @@
                     </section>
 
                     <section id="tab-review" class="tab-panel">
-                        <div class="writer-block">
-                            <h3>AI 审核</h3>
+                        <div class="writer-block ai-review-section">
+                            <h3>网页内 AI 分析</h3>
+                            <p class="subtle">调用 internal-parse，只生成候选项；需要 Writer API 配置，用户确认后才写回数据库。</p>
+                            <div id="internalAIConfigGuide"></div>
+                            <div class="modal-actions" style="justify-content:flex-start;">
+                                <button class="btn primary" onclick="runInternalAIParse()">生成 AI 候选项</button>
+                                <button class="btn ghost" onclick="window.location.href='../settings/index.html'">打开设置页</button>
+                            </div>
+                        </div>
+                        <div class="writer-block ai-review-section">
+                            <h3>IDE / MCP AI 分析</h3>
+                            <p class="subtle">显示 MCP 连接指南，供 IDE 或 MCP 客户端读取文献、生成建议；本入口不会自动写回数据库。</p>
+                            <div class="modal-actions" style="justify-content:flex-start;">
+                                <button class="btn ghost" onclick="loadAgentGuide()">显示 MCP 指南</button>
+                            </div>
+                            <div id="mcpGuideBox"></div>
+                        </div>
+                        <div class="writer-block ai-review-section">
+                            <h3>导入外部 AI 结果</h3>
                             <div class="external-toolbar">
-                                <input id="externalSource" class="medium-input" type="text" value="manual" placeholder="source">
-                                <input id="externalSourceLabel" class="medium-input" type="text" value="外部AI复核" placeholder="source label">
-                                <button class="btn ghost" onclick="runInternalAIParse()">内部 AI 解析</button>
-                                <button class="btn ghost" onclick="loadAgentGuide()">显示 IDE / MCP 指南</button>
+                                <input id="externalSource" class="medium-input" type="text" value="手动导入" placeholder="来源">
+                                <input id="externalSourceLabel" class="medium-input" type="text" value="外部AI复核" placeholder="来源名称">
                             </div>
                             <textarea id="externalRawText" placeholder="把外部 AI 返回的 JSON 或文本粘贴到这里，然后导入。"></textarea>
                             <div class="modal-actions" style="margin-top:12px;">
@@ -301,6 +318,25 @@
             <div class="modal-actions">
                 <button class="btn ghost" onclick="closeRemoveLibraryDialog()">取消</button>
                 <button class="btn danger" onclick="confirmRemoveLibrary()">移除</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="deletePaperDialog" class="modal-overlay">
+        <div class="modal">
+            <h3>删除当前文献</h3>
+            <p class="subtle">默认只删除数据库记录，不删除原 PDF 文件。</p>
+            <div class="key-value" style="margin-top:12px;">
+                <div class="k">标题</div>
+                <div id="deletePaperTitle" class="v doi-clamped">-</div>
+            </div>
+            <div class="key-value" style="margin-top:10px;">
+                <div class="k">DOI</div>
+                <div id="deletePaperDoi" class="v doi-clamped">-</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn ghost" onclick="closeDeletePaperDialog()">取消</button>
+                <button class="btn danger" onclick="confirmDeleteCurrentPaper()">确认删除</button>
             </div>
         </div>
     </div>

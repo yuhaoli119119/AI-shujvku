@@ -70,6 +70,86 @@ async function fetchJSON(url, options) {
     return data;
 }
 
+const UI_LABELS = {
+    locator_status: {
+        exact: "精确定位",
+        page_only: "仅页码",
+        text_only: "仅文本",
+        needs_reparse: "需重新解析",
+        missing: "暂无定位",
+        unknown: "未识别"
+    },
+    source: {
+        manual: "手动导入",
+        internal_ai: "网页内 AI",
+        chatgpt_web: "ChatGPT 网页",
+        claude_web: "Claude 网页",
+        section: "章节",
+        sections: "章节",
+        text: "文本",
+        docling: "Docling",
+        grobid: "GROBID",
+        unknown: "未识别"
+    },
+    mapping_status: {
+        normalized: "已规范化",
+        heuristic: "规则映射",
+        normalized_with_llm: "AI 规范化",
+        pending: "待处理",
+        failed: "失败",
+        unknown: "未识别"
+    },
+    candidate_status: {
+        pending: "待确认",
+        requires_resolution: "需人工处理",
+        materialized: "已写回",
+        skipped: "已跳过",
+        unknown: "未识别"
+    }
+};
+
+function uiLabel(kind, value) {
+    const key = String(value || "unknown").trim().toLowerCase();
+    return (UI_LABELS[kind] && UI_LABELS[kind][key]) || (value ? String(value) : UI_LABELS[kind]?.unknown || "未识别");
+}
+
+function normalizeExternalSourceForApi(value) {
+    const raw = String(value || "").trim();
+    if (!raw || raw === "手动导入") return "manual";
+    if (raw === "网页内 AI") return "internal_ai";
+    return raw;
+}
+
+function extractDoiList(raw) {
+    const value = String(raw || "");
+    const matches = value.match(/10\.\d{4,9}\/[-._;()/:A-Z0-9]+/ig) || [];
+    const seen = new Set();
+    return matches.map(function(item) {
+        return item.replace(/[.,;:)]$/g, "").toLowerCase();
+    }).filter(function(item) {
+        if (seen.has(item)) return false;
+        seen.add(item);
+        return true;
+    });
+}
+
+function primaryDoiInfo(raw) {
+    const dois = extractDoiList(raw);
+    if (dois.length) return { doi: dois[0], hasMultiple: dois.length > 1 };
+    return { doi: String(raw || "").trim(), hasMultiple: false };
+}
+
+function renderDoiMeta(raw) {
+    const info = primaryDoiInfo(raw);
+    if (!info.doi) return '<span class="doi-main">无 DOI</span>';
+    return '<span class="doi-main" title="' + escAttr(info.doi) + '">DOI: ' + esc(info.doi) + '</span>' +
+        (info.hasMultiple ? '<span class="doi-warning">检测到多个 DOI，可能需要重新解析元数据</span>' : '');
+}
+
+function paperHasPdf(paper) {
+    return !!(paper && paper.pdf_path && paper.oa_status !== "metadata_only" && paper.oa_status !== "needs_upload");
+}
+
 function getCurrentLibraryName() {
     const el = $("librarySelect");
     return el ? el.value || "" : "";

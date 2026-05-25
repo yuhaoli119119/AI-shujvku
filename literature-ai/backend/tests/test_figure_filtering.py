@@ -47,6 +47,15 @@ class TestIsDecorativeFigure:
         caption = "Figure 3. Schematic illustration of CO2 reduction on Fe-N4 catalyst"
         assert DoclingParser._is_decorative_figure(caption, []) is False
 
+    def test_short_caption_only_is_decorative(self):
+        """Bare 'Figure 1' / 'Scheme 1' labels should not enter the figure tab."""
+        assert DoclingParser._is_decorative_figure("Figure 1", []) is True
+        assert DoclingParser._is_decorative_figure("Fig. 1.", []) is True
+        assert DoclingParser._is_decorative_figure("Scheme 1", []) is True
+
+    def test_science_china_press_logo_is_decorative(self):
+        assert DoclingParser._is_decorative_figure("Science China Press logo", []) is True
+
     def test_morphology_caption_is_not_decorative(self):
         """SEM/TEM figure caption should NOT be decorative."""
         caption = "Fig. 2. SEM images of the as-prepared catalyst"
@@ -109,6 +118,20 @@ class TestExtractFiguresFiltersDecorative:
         result = DoclingParser._extract_figures(payload)
         assert len(result) == 1
         assert "SEM" in result[0]["caption"]
+
+    def test_missing_caption_is_not_autofilled_and_is_filtered(self):
+        payload = {
+            "figures": [
+                {"prov": [{"page_no": 1, "bbox": {"l": 0, "t": 0, "r": 300, "b": 300}}]},
+                {
+                    "captions": [{"text": "Figure 2. XRD patterns of the prepared catalyst"}],
+                    "prov": [{"page_no": 2, "bbox": {"l": 50, "t": 50, "r": 300, "b": 300}}],
+                },
+            ]
+        }
+        result = DoclingParser._extract_figures(payload)
+        assert len(result) == 1
+        assert result[0]["caption"].startswith("Figure 2.")
 
     def test_all_decorative_returns_empty(self):
         """If all figures are decorative, result should be empty."""

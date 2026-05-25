@@ -4,31 +4,37 @@ async function runInternalAIParse() {
         return;
     }
     switchTab("review");
-    showProgress("内部 AI 正在审查并写回候选项...");
+    showProgress("网页内 AI 正在生成候选项，完成后请手动确认写回...");
     try {
         const data = await fetchJSON(EXTERNAL_API + "/papers/" + state.selectedPaperId + "/internal-parse", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                source_label: "内部AI解析",
-                auto_apply: true
+                source_label: "网页内 AI 分析",
+                auto_apply: false
             })
         });
         const extRawText = $("externalRawText");
         if (extRawText) extRawText.value = "";
-        showToast("内部 AI 解析完成。", "success");
+        showToast("网页内 AI 候选项已生成，请手动确认后写回。", "success");
         const extRuns = $("externalRuns");
         if (extRuns) {
             extRuns.insertAdjacentHTML("afterbegin",
-                '<div class="section-card"><h3>最近一次内部 AI 解析</h3><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
+                '<div class="section-card"><h3>最近一次网页内 AI 分析</h3><div class="subtle">默认不会自动写回数据库。</div><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
             );
         }
         await loadExternalRuns();
-        await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
-        const extRuns = $("externalRuns");
-        if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">内部 AI 解析失败：' + esc(error.message) + "</div>";
-        showToast("内部 AI 解析失败：" + error.message, "error");
+        const guide = $("internalAIConfigGuide");
+        const message = "网页内 AI 尚未配置，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
+        if (error.status === 400 && String(error.message || "").includes("Internal AI is not configured")) {
+            if (guide) guide.innerHTML = '<div class="section-card" style="border-color:var(--color-warning);background:var(--color-warning-bg);"><div class="subtle" style="color:var(--color-warning);">' + message + '</div><div class="modal-actions" style="justify-content:flex-start;"><button class="btn primary small" onclick="window.location.href=\'../settings/index.html\'">打开设置页</button></div></div>';
+            showToast(message, "error");
+        } else {
+            const extRuns = $("externalRuns");
+            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">网页内 AI 分析失败：' + esc(error.message) + "</div>";
+            showToast("网页内 AI 分析失败：" + error.message, "error");
+        }
     }
     hideProgress();
 }
@@ -39,13 +45,12 @@ async function loadAgentGuide() {
     }
     try {
         const guide = await fetchJSON("/api/system/agent-guide");
-        const extRuns = $("externalRuns");
-        if (extRuns) {
-            extRuns.innerHTML =
-                '<div class="section-card"><h3>IDE / MCP AI 连接指南</h3>' +
-                '<div class="subtle">外部 IDE AI 可以按这里的入口读取文献、追加 notes、提出 corrections、触发 parse；网页内部 AI 则使用本页“内部 AI 解析”直接写回候选项。</div>' +
-                '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(guide, null, 2)) + "</div></div>" +
-                extRuns.innerHTML;
+        const mcpGuide = $("mcpGuideBox");
+        if (mcpGuide) {
+            mcpGuide.innerHTML =
+                '<div class="section-card"><h3>IDE / MCP AI 分析指南</h3>' +
+                '<div class="subtle">外部 IDE / MCP AI 可以按这里的入口读取文献、追加 notes、提出 corrections 或触发 parse；本区只展示指南，不自动写回。</div>' +
+                '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(guide, null, 2)) + "</div></div>";
         }
     } catch (error) {
         showToast("读取 IDE / MCP 指南失败：" + error.message, "error");
@@ -76,7 +81,7 @@ async function importExternalAnalysis() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 paper_id: state.selectedPaperId,
-                source: extSource ? extSource.value.trim() || "manual" : "manual",
+                source: normalizeExternalSourceForApi(extSource ? extSource.value : "manual"),
                 source_label: extSourceLabel ? extSourceLabel.value.trim() || "外部AI复核" : "外部AI复核",
                 raw_text: typeof rawPayload === "string" ? rawPayload : null,
                 raw_payload: rawPayload
@@ -109,8 +114,8 @@ async function loadExternalRuns() {
                 });
                 return (
                     '<div class="run-card">' +
-                        '<h4>' + esc(run.source_label || run.source || "未命名审核源") + "</h4>" +
-                        '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(run.mapping_status || "-") + "</div>" +
+                        '<h4>' + esc(run.source_label || uiLabel("source", run.source) || "未命名审核源") + "</h4>" +
+                        '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(uiLabel("mapping_status", run.mapping_status || "-")) + "</div>" +
                         (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
                         (run.raw_text ? '<div class="mono" style="margin-top:10px;">' + esc(ellipsis(run.raw_text, 1200)) + "</div>" : "") +
                         '<div class="candidate-toolbar" style="margin-top:12px;">' +
@@ -137,7 +142,7 @@ function renderCandidates(candidates) {
     return candidates.map(function(item) {
         return (
             '<div class="candidate-card">' +
-                '<h4>' + esc(item.candidate_type || "candidate") + " | 状态：" + esc(item.status || "-") + "</h4>" +
+                '<h4>' + esc(item.candidate_type || "候选项") + " | 状态：" + esc(uiLabel("candidate_status", item.status || "-")) + "</h4>" +
                 '<div class="subtle">置信度：' + esc(item.confidence == null ? "-" : item.confidence) + " | 目标类型：" + esc(item.materialized_target_type || "-") + "</div>" +
                 '<div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(item.normalized_payload || {}, null, 2)) + "</div>" +
             "</div>"

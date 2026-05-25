@@ -6,13 +6,15 @@ function renderWorkspaceHeader(paper) {
     const topicEl = $("writerTopic");
     if (titleEl) titleEl.textContent = paper.title || "未命名文献";
     if (metaEl) {
-        metaEl.textContent = [
-            paper.year || "-",
-            paper.journal || "-",
-            paper.paper_type ? paper.paper_type : "未知类型",
-            paper.doi ? "DOI: " + paper.doi : "无 DOI"
+        metaEl.innerHTML = [
+            esc(paper.year || "-"),
+            esc(paper.journal || "-"),
+            esc(paper.paper_type ? paper.paper_type : "未知类型"),
+            renderDoiMeta(paper.doi)
         ].join(" | ");
     }
+    const pdfBtn = $("pdfEvidenceHeaderBtn");
+    if (pdfBtn) pdfBtn.textContent = paperHasPdf(paper) ? "查看 PDF / 证据定位" : "PDF 未上传";
     if (badgesEl) {
         badgesEl.innerHTML =
             (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + "</span>" : "") +
@@ -54,18 +56,19 @@ function escAttr(value) {
 
 function locatorStatusBadge(locatorStatus) {
     const s = String(locatorStatus || "unknown").trim().toLowerCase();
+    const label = uiLabel("locator_status", s);
     if (s === "exact") {
-        return '<span class="status-chip" style="background:var(--color-success-bg);color:var(--color-success);border:1px solid var(--color-success)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">exact</span>';
+        return '<span class="status-chip" style="background:var(--color-success-bg);color:var(--color-success);border:1px solid var(--color-success)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
     } else if (s === "page_only") {
-        return '<span class="status-chip" style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">page_only</span>';
+        return '<span class="status-chip" style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
     } else if (s === "text_only") {
-        return '<span class="status-chip" style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">text_only</span>';
+        return '<span class="status-chip" style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
     } else if (s === "needs_reparse") {
-        return '<span class="status-chip" style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">needs_reparse</span>';
+        return '<span class="status-chip" style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
     } else if (s === "missing") {
-        return '<span class="status-chip" style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">missing</span>';
+        return '<span class="status-chip" style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
     } else {
-        return '<span class="status-chip" style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">unknown</span>';
+        return '<span class="status-chip" style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:2px 8px;font-size:11px;font-weight:700;border-radius:var(--radius-pill);">' + label + '</span>';
     }
 }
 
@@ -80,7 +83,7 @@ function locatorActionHtml(locator) {
         var uid = "loc-act-detail-" + (locator.id || Math.random().toString(36).slice(2));
         var bboxDataAttr = bbox ? ('data-bbox="' + escAttr(JSON.stringify(bbox)) + '"') : "";
         return '<span id="' + uid + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="' + (bbox ? "true" : "false") + '" data-locator-status="' + esc(s) + '" data-evidence-text="' + escAttr(ellipsis(evidenceText, 80)) + '" ' + bboxDataAttr + ' style="display:none;"></span>' +
-            '<button class="btn primary small" onclick="triggerDetailLocatorAction(\'' + uid + '\')">跳到 PDF 并高亮</button>';
+            '<button class="btn primary small" onclick="triggerDetailLocatorAction(\'' + uid + '\')">跳转到 PDF 页并显示证据信息</button>';
     } else if (s === "page_only") {
         var uid2 = "loc-act-detail-" + (locator.id || Math.random().toString(36).slice(2));
         return '<span id="' + uid2 + '" data-paper-id="' + esc(paperId) + '" data-page="' + (page || 0) + '" data-has-bbox="false" data-locator-status="page_only" data-evidence-text="' + escAttr(ellipsis(evidenceText, 80)) + '" style="display:none;"></span>' +
@@ -124,7 +127,7 @@ function renderEvidenceLocators(locators) {
             '</div>' +
             '<div style="display:grid;grid-template-columns:80px 1fr;gap:2px 8px;font-size:12px;margin-bottom:6px;">' +
                 '<span class="muted">页码</span><span>' + esc(loc.page != null ? loc.page : "-") + '</span>' +
-                '<span class="muted">来源类型</span><span>' + esc(loc.source_type || "-") + '</span>' +
+                '<span class="muted">来源类型</span><span>' + esc(uiLabel("source", loc.source_type || "-")) + '</span>' +
                 '<span class="muted">章节</span><span>' + esc(loc.section || "-") + '</span>' +
                 '<span class="muted">目标类型</span><span>' + esc(loc.target_type || "-") + '</span>' +
                 '<span class="muted">字段</span><span>' + esc(loc.field_name || "-") + '</span>' +
@@ -194,13 +197,13 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
     var evidenceHtml = "";
     if (hasBbox && bbox && locatorStatus === "exact") {
         var cs = bbox.coordinate_system || "pdf_points";
-        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-danger);">📍 精确定位 (exact)</div>' +
+        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-danger);">精确定位</div>' +
             '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px;">坐标系：' + esc(cs) + '</div>' +
             '<div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px;">BBox: x0=' + (bbox.x0 || 0) + ' y0=' + (bbox.y0 || 0) + ' x1=' + (bbox.x1 || 0) + ' y1=' + (bbox.y1 || 0) + '</div>' +
             (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
     } else if (locatorStatus === "page_only") {
-        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">📄 仅页码定位 (page_only)</div>' +
-            '<div style="font-size:11px;color:var(--color-text-secondary);">无精确框选 — 已跳转到目标页</div>' +
+        evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">仅页码定位</div>' +
+            '<div style="font-size:11px;color:var(--color-text-secondary);">无精确框选，已跳转到目标页并显示证据信息</div>' +
             (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
     }
     if (viewerEvidencePanel) viewerEvidencePanel.innerHTML = evidenceHtml;
@@ -309,7 +312,7 @@ function renderDetail(detail, audit) {
         const cardsHtml = detail.figures.slice(0, 15).map(function(item, index) {
             let imgHtml = "";
             if (item.image_path) {
-                imgHtml = '<div style="margin-top: 12px; text-align: center;"><img src="/api/papers/assets/' + esc(item.image_path) + '" style="max-width: 100%; max-height: 400px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); object-fit: contain;" alt="Extracted Figure" /></div>';
+                imgHtml = '<div style="margin-top: 12px; text-align: center;"><img src="/api/papers/assets/' + esc(item.image_path) + '" style="max-width: 100%; max-height: 400px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); object-fit: contain;" alt="提取的文献图片" /></div>';
             }
 
             let metaHtml = "";
@@ -342,6 +345,12 @@ function renderDetail(detail, audit) {
     } else {
         figureCards = '<div class="section-card"><h3>图片</h3><div class="muted">暂无内容。</div></div>';
     }
+
+    const pdfEvidenceEntry =
+        '<div class="section-card pdf-evidence-entry"><h3>PDF 证据定位</h3>' +
+            '<p>当前版本会跳转到 PDF 页并显示证据信息，不宣称 PDF 内真实高亮。</p>' +
+            '<button class="btn primary small" onclick="openSelectedPdfEvidence()">' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '</button>' +
+        '</div>';
 
     const referenceCards = renderListBlock("参考文献", detail.references ? detail.references.slice(0, 20) : [], function(item) {
         return (
@@ -415,6 +424,7 @@ function renderDetail(detail, audit) {
     if (summaryEl) {
         summaryEl.innerHTML =
             missingPdfBanner +
+            pdfEvidenceEntry +
             auditBanner +
             summaryCards +
             baseInfo +

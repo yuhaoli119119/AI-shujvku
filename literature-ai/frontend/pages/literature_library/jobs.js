@@ -154,7 +154,7 @@ async function runAISearch() {
             return;
         }
         const stats = mergeDiscoveryResults(papers);
-        const prefix = '<div class="writer-block"><h3>AI 自动搜索结果</h3><div class="subtle">模型状态：' + esc(data.llm_status || "unknown") + " | 注释状态：" + esc(data.result_annotation_status || "-") + '</div><div class="mono" style="margin-top:12px;">' + esc(data.prompt_used || "") + "</div></div>";
+        const prefix = '<div class="writer-block"><h3>AI 自动搜索结果</h3><div class="subtle">模型状态：' + esc(uiLabel("mapping_status", data.llm_status || "unknown")) + " | 注释状态：" + esc(data.result_annotation_status || "-") + '</div><div class="mono" style="margin-top:12px;">' + esc(data.prompt_used || "") + "</div></div>";
         renderDiscoveryResults({ items: state.discoveryCache }, stats, "AI 自动搜索结果", prefix);
     } catch (error) {
         setAcquisitionResult('<div class="workspace-empty small-empty">AI 搜索失败：' + esc(error.message) + "</div>");
@@ -251,7 +251,7 @@ function renderAIWorkflowJob(job) {
         }) +
         renderWorkflowList("失败项", result.failed || [], function(item) {
             return '<div class="subtle" style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">' +
-                       '代码：<span class="status-chip failed">' + esc(item.code || "unknown") + '</span>' +
+                       '代码：<span class="status-chip failed">' + esc(item.code || "未识别") + '</span>' +
                        ' | 原因：' + esc(item.reason || "-") +
                    '</div>';
         }));
@@ -268,31 +268,31 @@ function renderWorkflowList(title, items, formatter) {
 
 async function openExtractionJobCenter() {
     openAddLiteraturePanel("ai");
-    setAcquisitionResult('<div class="workspace-empty small-empty">Loading extraction jobs...</div>');
+    setAcquisitionResult('<div class="workspace-empty small-empty">正在加载解析任务...</div>');
     try {
         const jobs = await fetchJSON("/api/extraction/jobs?limit=30");
         renderExtractionJobs(jobs || []);
     } catch (error) {
-        setAcquisitionResult('<div class="workspace-empty small-empty">Extraction Job Center failed: ' + esc(error.message) + "</div>");
+        setAcquisitionResult('<div class="workspace-empty small-empty">解析任务中心加载失败：' + esc(error.message) + "</div>");
     }
 }
 
 function renderExtractionJobs(jobs) {
     if (!jobs.length) {
-        setAcquisitionResult('<div class="writer-block"><h3>Extraction Job Center</h3><div class="subtle">No extraction jobs yet. Use Re-extract on a paper or the validation workbench to queue one.</div></div>');
+        setAcquisitionResult('<div class="writer-block"><h3>解析任务中心</h3><div class="subtle">暂无解析任务。可以在文献详情中点击重新解析，或在校验工作台中创建任务。</div></div>');
         return;
     }
     setAcquisitionResult(
-        '<div class="writer-block"><h3>Extraction Job Center</h3><div class="subtle">Persistent extraction jobs survive refresh through workflow_jobs.</div></div>' +
+        '<div class="writer-block"><h3>解析任务中心</h3><div class="subtle">解析任务会保存在 workflow_jobs 中，刷新页面后仍可查看。</div></div>' +
         jobs.map(function(job) {
             const canRetry = job.status === "failed" || job.status === "cancelled";
             return (
                 '<div class="section-card">' +
                     '<h3>' + esc(job.type || "extraction") + " · " + esc(job.status || "-") + "</h3>" +
-                    '<div class="subtle">Job ' + esc(job.job_id || "-") + " | Library " + esc(job.library_name || "-") + "</div>" +
+                    '<div class="subtle">任务 ' + esc(job.job_id || "-") + " | 文献库 " + esc(job.library_name || "-") + "</div>" +
                     '<div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div>" +
                     (job.error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
-                    (canRetry ? '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="retryExtractionJob(' + JSON.stringify(job.job_id).replace(/"/g, "&quot;") + ')">Retry</button></div>' : "") +
+                    (canRetry ? '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="retryExtractionJob(' + JSON.stringify(job.job_id).replace(/"/g, "&quot;") + ')">重试</button></div>' : "") +
                 "</div>"
             );
         }).join("")
@@ -303,10 +303,10 @@ async function retryExtractionJob(jobId) {
     if (!jobId) return;
     try {
         const job = await fetchJSON("/api/extraction/jobs/" + encodeURIComponent(jobId) + "/retry", { method: "POST" });
-        showToast("Extraction retry queued: " + job.job_id, "success");
+        showToast("解析重试已入队：" + job.job_id, "success");
         openExtractionJobCenter();
     } catch (error) {
-        showToast("Extraction retry failed: " + error.message, "error");
+        showToast("解析重试失败：" + error.message, "error");
     }
 }
 
