@@ -12,7 +12,7 @@ from app.db.models import Paper
 from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
 from app.services.discovery_service import DiscoveryService
-from app.services.paper_ingestion import PaperConflictError, PaperIngestionService
+from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
 from app.services.workflow_jobs import normalize_library_name
 
 router = APIRouter()
@@ -26,6 +26,28 @@ def _raise_already_exists(exc: PaperConflictError) -> None:
             "paper_id": str(exc.paper.id),
             "title": exc.paper.title,
             "message": str(exc),
+        },
+    ) from exc
+
+
+def _raise_identity_guard(exc: PaperIdentityMismatchError) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "status": exc.status,
+            "target_paper_id": str(exc.target_paper.id),
+            "target": {
+                "title": exc.target_paper.title,
+                "doi": exc.target_paper.doi,
+                "year": exc.target_paper.year,
+            },
+            "incoming": {
+                "title": exc.incoming.get("title"),
+                "doi": exc.incoming.get("doi"),
+                "year": exc.incoming.get("year"),
+            },
+            "match_score": exc.match_report.get("score", 0.0),
+            "match_reason": exc.match_report.get("reason", ""),
         },
     ) from exc
 
@@ -106,6 +128,10 @@ async def attach_pdf_to_existing_paper(
     paper_id: UUID,
     file: UploadFile = File(...),
     identifier: str | None = Form(default=None, description="Optional DOI or identifier to fetch metadata"),
+    confirm_identity_mismatch: bool = Form(
+        default=False,
+        description="Allow low-confidence title/year binding. Explicit DOI conflicts are still rejected.",
+    ),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
@@ -134,7 +160,10 @@ async def attach_pdf_to_existing_paper(
             external_metadata=external_metadata,
             library_name=target.library_name,
             attach_to_paper_id=target.id,
+            confirm_identity_mismatch=confirm_identity_mismatch,
         )
+    except PaperIdentityMismatchError as exc:
+        _raise_identity_guard(exc)
     except PaperConflictError as exc:
         _raise_already_exists(exc)
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))

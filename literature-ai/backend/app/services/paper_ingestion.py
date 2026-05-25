@@ -35,6 +35,24 @@ class PaperConflictError(RuntimeError):
         super().__init__(message)
         self.paper = paper
 
+
+class PaperIdentityMismatchError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        status: str,
+        target_paper: Paper,
+        incoming: dict[str, Any],
+        match_report: dict[str, Any],
+        message: str = "Paper identity needs confirmation",
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.target_paper = target_paper
+        self.incoming = incoming
+        self.match_report = match_report
+
+
 class PaperIngestionService:
     def __init__(self, session: Session, settings: Settings) -> None:
         self.session = session
@@ -55,6 +73,7 @@ class PaperIngestionService:
         external_metadata: dict[str, Any] | None = None,
         library_name: str | None = None,
         attach_to_paper_id: UUID | None = None,
+        confirm_identity_mismatch: bool = False,
     ) -> Paper:
         target_name = f"{uuid.uuid4()}.pdf"
         stored_pdf = await self.artifacts.save_upload(file, target_name)
@@ -66,6 +85,7 @@ class PaperIngestionService:
             source_reference=None,
             library_name=library_name,
             attach_to_paper_id=attach_to_paper_id,
+            confirm_identity_mismatch=confirm_identity_mismatch,
             ingest_source="uploaded",
         )
 
@@ -78,6 +98,7 @@ class PaperIngestionService:
         source_reference: str | None = None,
         library_name: str | None = None,
         attach_to_paper_id: UUID | None = None,
+        confirm_identity_mismatch: bool = False,
         ingest_source: str | None = None,
     ) -> Paper:
         if copy_pdf:
@@ -124,6 +145,25 @@ class PaperIngestionService:
                 raise ValueError("Paper not found")
             if target_paper.pdf_path and target_paper.oa_status != "metadata_only":
                 raise PaperConflictError(target_paper, "Paper already has an attached PDF")
+            match_report = self.identity.identity_match_report(
+                self.identity.metadata_for_paper(target_paper),
+                identity_metadata,
+            )
+            if match_report["decision"] == "doi_conflict":
+                raise PaperIdentityMismatchError(
+                    status="identity_mismatch",
+                    target_paper=target_paper,
+                    incoming=identity_metadata,
+                    match_report=match_report,
+                    message="Incoming PDF DOI does not match target paper DOI",
+                )
+            if match_report["decision"] == "low_confidence" and not confirm_identity_mismatch:
+                raise PaperIdentityMismatchError(
+                    status="needs_confirmation",
+                    target_paper=target_paper,
+                    incoming=identity_metadata,
+                    match_report=match_report,
+                )
             conflict = self._find_conflicting_paper(
                 doi=doi,
                 arxiv_id=arxiv_id,
@@ -139,7 +179,8 @@ class PaperIngestionService:
                 source_reference=source_reference,
                 oa_status=oa_status,
             )
-            setattr(paper, "_ingest_status", "merged")
+            ingest_status = "merged_confirmed" if match_report["decision"] == "low_confidence" else "merged"
+            setattr(paper, "_ingest_status", ingest_status)
             return paper
 
         placeholder = self.identity.find_metadata_placeholder(
@@ -191,36 +232,15 @@ class PaperIngestionService:
         library_name: str | None = None,
         source_reference: str | None = None,
     ) -> Paper:
-        ext = external_metadata or {}
-        title = ext.get("title") or identifier or "Untitled paper"
-        paper = Paper(
-            library_name=(library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME,
-            doi=ext.get("doi"),
-            title=title,
-            year=ext.get("year"),
-            journal=ext.get("journal"),
-            authors=ext.get("authors") or [],
-            abstract=ext.get("abstract") or None,
-            pdf_path="",
-            source_path=source_reference or ext.get("url") or ext.get("identifier") or identifier,
-            oa_status="metadata_only",
-            license=ext.get("license"),
+        library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
+        return self.identity.upsert_metadata_only(
+            self.session,
+            external_metadata=external_metadata or {},
+            identifier=identifier,
+            library_name=library,
+            source_reference=source_reference,
+            classify_callback=self.extraction_pipeline._rule_based_classify,
         )
-        
-        # 针对 metadata_only 论文执行自适应启发式快速分类
-        res = self.extraction_pipeline._rule_based_classify(title, ext.get("journal"))
-        paper.paper_type = res["paper_type"]
-        paper.type_confidence = res["type_confidence"]
-        paper.classification_source = res["classification_source"]
-
-        max_sn = self.session.scalar(
-            select(func.max(Paper.serial_number)).where(Paper.library_name == paper.library_name)
-        )
-        paper.serial_number = (max_sn or 0) + 1
-        self.session.add(paper)
-        self.session.commit()
-        self.session.refresh(paper)
-        return paper
 
     async def _build_unified_document(self, stored_pdf: Path, grobid_result, docling_result) -> UnifiedPaperDocument:
         normalized_metadata = normalize_text_tree(grobid_result.metadata) or {}
@@ -586,6 +606,15 @@ class PaperIngestionService:
             arxiv_id=arxiv_id,
             library_name=library_name,
         )
+        if candidate is None and (doi or arxiv_id):
+            candidate = self.identity.find_existing_paper(
+                self.session,
+                doi=doi,
+                title=None,
+                year=None,
+                arxiv_id=arxiv_id,
+                library_name=None,
+            )
         if candidate is None:
             return None
         if exclude_paper_id is not None and candidate.id == exclude_paper_id:

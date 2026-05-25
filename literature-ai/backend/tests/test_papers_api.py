@@ -13,9 +13,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import Base, Paper, WorkflowJob
+from app.db.models import Base, ExtractionFieldReview, Paper, WorkflowJob
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
+from app.services.paper_ingestion import PaperIngestionService
 import app.api.papers as papers_api
 
 @pytest.fixture
@@ -615,6 +616,116 @@ def test_discovery_download_falls_back_to_metadata_only_ingest(setup_test_db, mo
         assert paper.oa_status == "metadata_only"
 
 
+def test_metadata_only_same_doi_upsert_reuses_paper(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        service = PaperIngestionService(session=session, settings=get_settings())
+        first = service.ingest_metadata_only(
+            {
+                "title": "Stable Metadata Paper",
+                "doi": "10.1000/stable-meta",
+                "year": 2024,
+                "journal": "Metadata Journal",
+            },
+            library_name="MetaDedup",
+        )
+        first_id = first.id
+        first_serial = first.serial_number
+        second = service.ingest_metadata_only(
+            {
+                "title": "Stable Metadata Paper",
+                "doi": "10.1000/stable-meta",
+                "year": 2024,
+                "abstract": "New abstract should fill a missing field",
+            },
+            library_name="MetaDedup",
+        )
+        assert second.id == first_id
+        assert second.serial_number == first_serial
+        assert second.abstract == "New abstract should fill a missing field"
+        papers = session.scalars(select(Paper).where(Paper.library_name == "MetaDedup")).all()
+        assert len(papers) == 1
+
+
+def test_metadata_only_doi_url_variants_normalize_to_same_paper(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        service = PaperIngestionService(session=session, settings=get_settings())
+        first = service.ingest_metadata_only(
+            {"title": "DOI Variant Paper", "doi": "https://doi.org/10.1000/variant", "year": 2025},
+            library_name="VariantLibrary",
+        )
+        second = service.ingest_metadata_only(
+            {"title": "DOI Variant Paper", "doi": "doi:10.1000/variant", "year": 2025},
+            library_name="VariantLibrary",
+        )
+        assert second.id == first.id
+        assert second.doi == "10.1000/variant"
+        papers = session.scalars(select(Paper).where(Paper.library_name == "VariantLibrary")).all()
+        assert len(papers) == 1
+
+
+def test_ai_workflow_metadata_only_fallback_does_not_duplicate(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
+    monkeypatch.setenv("LITAI_WRITER_API_KEY", "")
+    get_settings.cache_clear()
+
+    class DummyPaper:
+        pass
+
+    def fake_search(self, query, providers=None, limit=10, target_types=None):
+        return [
+            {
+                "identifier": "https://doi.org/10.1000/workflow-meta",
+                "title": "Workflow Metadata Fallback",
+                "doi": "https://doi.org/10.1000/workflow-meta",
+                "year": 2025,
+                "url": "https://example.com/workflow-meta",
+                "databases": ["openalex"],
+            }
+        ]
+
+    def fake_fetch_metadata(self, identifier, providers=None):
+        return DummyPaper(), {
+            "identifier": identifier,
+            "title": "Workflow Metadata Fallback",
+            "doi": "doi:10.1000/workflow-meta",
+            "year": 2025,
+            "journal": "Workflow Journal",
+            "url": "https://example.com/workflow-meta",
+        }
+
+    def fake_download_pdf(self, paper, dest_dir):
+        raise ValueError("primary download failed")
+
+    def fake_download_pdf_url(self, pdf_url, dest_dir, filename=None):
+        raise ValueError("direct download failed")
+
+    monkeypatch.setattr(papers_api.DiscoveryService, "search", fake_search)
+    monkeypatch.setattr(papers_api.DiscoveryService, "fetch_metadata", fake_fetch_metadata)
+    monkeypatch.setattr(papers_api.DiscoveryService, "download_pdf", fake_download_pdf)
+    monkeypatch.setattr(papers_api.DiscoveryService, "download_pdf_url", fake_download_pdf_url)
+
+    client = TestClient(app)
+    payload = {"query": "workflow metadata", "library_name": "WorkflowMeta", "max_results": 1, "max_downloads": 1}
+    first = client.post("/api/papers/ai_workflow", json=payload)
+    second = client.post("/api/papers/ai_workflow", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "WorkflowMeta")).all()
+        assert len(papers) == 1
+        assert papers[0].doi == "10.1000/workflow-meta"
+        assert papers[0].oa_status == "metadata_only"
+
+
 def _install_ingest_document_stubs(monkeypatch, metadata: dict[str, object], section_text: str = "Parsed section text"):
     async def fake_grobid_parse(self, stored_pdf):
         return None
@@ -850,7 +961,7 @@ def test_low_confidence_title_does_not_auto_merge(setup_test_db, monkeypatch):
         assert any(str(paper.id) == placeholder_id for paper in papers)
 
 
-def test_attach_pdf_endpoint_binds_to_requested_metadata_only_paper(setup_test_db, monkeypatch):
+def test_attach_pdf_low_confidence_requires_confirmation_by_default(setup_test_db, monkeypatch):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     _install_ingest_document_stubs(
@@ -882,13 +993,211 @@ def test_attach_pdf_endpoint_binds_to_requested_metadata_only_paper(setup_test_d
         f"/api/papers/{placeholder_id}/attach-pdf",
         files={"file": ("attach.pdf", io.BytesIO(b"%PDF-1.4 attach"), "application/pdf")},
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["paper_id"] == placeholder_id
-    assert data["status"] == "merged"
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["status"] == "needs_confirmation"
+    assert detail["target_paper_id"] == placeholder_id
+    assert detail["incoming"]["title"] == "Forced Attach Paper"
 
     with Session() as session:
         paper = session.get(Paper, UUID(placeholder_id))
         assert paper is not None
+        assert paper.oa_status == "metadata_only"
+        assert paper.pdf_path == ""
+
+
+def test_attach_pdf_low_confidence_confirmed_binds_and_preserves_identity(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Forced Attach Paper",
+            "year": 2024,
+            "journal": "Attach Journal",
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="AttachLibrary",
+            title="Placeholder Title That Does Not Match",
+            year=2024,
+            pdf_path="",
+            source_path="https://example.com/attach-me",
+            oa_status="metadata_only",
+            serial_number=5,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+        placeholder_serial = placeholder.serial_number
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{placeholder_id}/attach-pdf",
+        data={"confirm_identity_mismatch": "true"},
+        files={"file": ("attach.pdf", io.BytesIO(b"%PDF-1.4 attach"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paper_id"] == placeholder_id
+    assert data["status"] == "merged_confirmed"
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(placeholder_id))
+        assert paper is not None
+        assert paper.serial_number == placeholder_serial
         assert paper.oa_status == "uploaded"
         assert paper.pdf_path.endswith(".pdf")
+
+
+def test_attach_pdf_doi_conflict_rejected_even_when_confirmed(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Incoming DOI Conflict",
+            "doi": "10.1000/incoming-conflict",
+            "year": 2024,
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="AttachLibrary",
+            doi="10.1000/target-conflict",
+            title="Target DOI Conflict",
+            year=2024,
+            pdf_path="",
+            oa_status="metadata_only",
+            serial_number=9,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{placeholder_id}/attach-pdf",
+        data={"confirm_identity_mismatch": "true"},
+        files={"file": ("doi-conflict.pdf", io.BytesIO(b"%PDF-1.4 conflict"), "application/pdf")},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["status"] == "identity_mismatch"
+    assert detail["target"]["doi"] == "10.1000/target-conflict"
+    assert detail["incoming"]["doi"] == "10.1000/incoming-conflict"
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(placeholder_id))
+        assert paper is not None
+        assert paper.pdf_path == ""
+        assert paper.oa_status == "metadata_only"
+
+
+def test_attach_pdf_existing_full_paper_returns_already_exists(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={"title": "Already Has PDF", "doi": "10.1000/already-attached", "year": 2024},
+    )
+
+    with Session() as session:
+        existing = Paper(
+            library_name="AttachLibrary",
+            doi="10.1000/already-attached",
+            title="Already Has PDF",
+            year=2024,
+            pdf_path="existing.pdf",
+            oa_status="uploaded",
+            serial_number=4,
+        )
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        existing_id = str(existing.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{existing_id}/attach-pdf",
+        files={"file": ("already.pdf", io.BytesIO(b"%PDF-1.4 already"), "application/pdf")},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["status"] == "already_exists"
+    assert detail["paper_id"] == existing_id
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(existing_id))
+        assert paper.pdf_path == "existing.pdf"
+        assert paper.oa_status == "uploaded"
+
+
+def test_attach_pdf_preserves_verified_field_reviews_by_paper_id(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Reviewed Metadata Placeholder",
+            "year": 2025,
+            "journal": "Review Journal",
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="ReviewAttachLibrary",
+            title="Reviewed Metadata Placeholder",
+            year=2025,
+            pdf_path="",
+            oa_status="metadata_only",
+            serial_number=11,
+        )
+        session.add(placeholder)
+        session.flush()
+        review = ExtractionFieldReview(
+            paper_id=placeholder.id,
+            target_type="dft_results",
+            target_id="legacy-target-id",
+            field_name="adsorption_energy",
+            original_value="-1.0",
+            reviewed_value="-1.1",
+            unit="eV",
+            evidence_text="Legacy evidence",
+            reviewer_status="verified",
+            reviewer="qa",
+            reviewer_note="checked before attach",
+        )
+        session.add(review)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+        placeholder_serial = placeholder.serial_number
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{placeholder_id}/attach-pdf",
+        files={"file": ("reviewed.pdf", io.BytesIO(b"%PDF-1.4 reviewed"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    assert response.json()["paper_id"] == placeholder_id
+
+    reviews_response = client.get(f"/api/extraction/results/{placeholder_id}/reviews")
+    assert reviews_response.status_code == 200
+    reviews = reviews_response.json()
+    assert len(reviews) == 1
+    assert reviews[0]["reviewer_status"] == "verified"
+    assert reviews[0]["reviewed_value"] == "-1.1"
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(placeholder_id))
+        assert paper.serial_number == placeholder_serial
+        review = session.scalar(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == paper.id))
+        assert review is not None
+        assert review.reviewer_status == "verified"

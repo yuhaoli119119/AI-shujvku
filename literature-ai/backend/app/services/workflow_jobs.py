@@ -24,6 +24,7 @@ from app.schemas.api import (
     ClassifyBatchPayload,
 )
 from app.services.discovery_service import DiscoveryService
+from app.services.paper_identity import PaperIdentityService
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
 
@@ -232,13 +233,34 @@ def clone_job_for_retry(session: Session, job_id: str) -> WorkflowJob:
     )
 
 
-def _find_existing_paper(session: Session, doi: str | None, title: str | None) -> Paper | None:
+def _find_existing_paper(
+    session: Session,
+    doi: str | None,
+    title: str | None,
+    year: int | None = None,
+    arxiv_id: str | None = None,
+    library_name: str | None = None,
+) -> Paper | None:
+    identity = PaperIdentityService()
+    existing = identity.find_existing_paper(
+        session,
+        doi=identity.normalize_doi(doi),
+        title=title,
+        year=year,
+        arxiv_id=arxiv_id,
+        library_name=library_name,
+    )
+    if existing is not None:
+        return existing
     if doi:
-        existing = session.scalar(select(Paper).where(Paper.doi == doi))
-        if existing:
-            return existing
-    if title:
-        return session.scalar(select(Paper).where(Paper.title == title))
+        return identity.find_existing_paper(
+            session,
+            doi=identity.normalize_doi(doi),
+            title=title,
+            year=year,
+            arxiv_id=arxiv_id,
+            library_name=None,
+        )
     return None
 
 
@@ -314,6 +336,9 @@ async def execute_ai_workflow(
             session,
             doi=doi if payload.skip_existing else None,
             title=item.get("title") if payload.skip_existing else None,
+            year=item.get("year") if payload.skip_existing else None,
+            arxiv_id=PaperIdentityService.extract_arxiv_id(str(identifier)) if payload.skip_existing else None,
+            library_name=target_library,
         )
         if payload.skip_existing and existing:
             if existing.library_name != target_library:
@@ -338,7 +363,16 @@ async def execute_ai_workflow(
                 service.fetch_metadata, identifier, active_providers
             )
             existing = (
-                _find_existing_paper(session, doi=metadata.get("doi"), title=metadata.get("title"))
+                _find_existing_paper(
+                    session,
+                    doi=metadata.get("doi"),
+                    title=metadata.get("title"),
+                    year=metadata.get("year"),
+                    arxiv_id=PaperIdentityService.extract_arxiv_id(
+                        str(metadata.get("arxiv_id") or metadata.get("identifier") or metadata.get("url") or identifier)
+                    ),
+                    library_name=target_library,
+                )
                 if payload.skip_existing
                 else None
             )

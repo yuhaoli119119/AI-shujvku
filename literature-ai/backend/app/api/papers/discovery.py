@@ -17,6 +17,7 @@ from app.schemas.api import (
     IngestResponse,
 )
 from app.services.discovery_service import DiscoveryService
+from app.services.paper_identity import PaperIdentityService
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.workflow_jobs import download_discovery_candidate, normalize_library_name
 
@@ -87,8 +88,9 @@ async def discovery_download_and_ingest(
         response_status = "metadata_only"
 
     updated = False
-    if doi and paper.doi != doi:
-        paper.doi = doi
+    normalized_doi = PaperIdentityService.normalize_doi(doi)
+    if normalized_doi and paper.doi != normalized_doi:
+        paper.doi = normalized_doi
         updated = True
     if metadata.get("title") and (not paper.title or (downloaded_pdf_name and paper.title == downloaded_pdf_name)):
         paper.title = metadata["title"]
