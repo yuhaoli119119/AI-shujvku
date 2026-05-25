@@ -189,6 +189,60 @@ def init_db(database_url: str) -> None:
                     else "ALTER TABLE paper_figures ADD COLUMN prov JSON"
                 ),
             )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "target_fingerprint",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_fingerprint VARCHAR(128)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN target_fingerprint VARCHAR(128)"
+                ),
+            )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "target_label",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_label VARCHAR(255)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN target_label VARCHAR(255)"
+                ),
+            )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "field_path",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS field_path VARCHAR(255)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN field_path VARCHAR(255)"
+                ),
+            )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "target_resolution_status",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_resolution_status VARCHAR(32) NOT NULL DEFAULT 'active'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN target_resolution_status VARCHAR(32) NOT NULL DEFAULT 'active'"
+                ),
+            )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "remapped_from_target_id",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS remapped_from_target_id VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN remapped_from_target_id VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "last_resolved_target_id",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS last_resolved_target_id VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN last_resolved_target_id VARCHAR(64)"
+                ),
+            )
 
 
 def get_db_session():

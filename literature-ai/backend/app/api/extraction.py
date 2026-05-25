@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.db.models import Paper
 from app.db.session import get_db_session
 from app.schemas.extraction import (
+    ExtractionReviewAuditResponse,
     ExtractionFieldReviewResponse,
     ExtractionFieldReviewSaveRequest,
     ExtractionJobRequest,
@@ -19,7 +20,6 @@ from app.schemas.extraction import (
 )
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.extraction_schema_service import ExtractionSchemaService
-from app.services.extraction_validator import ExtractionValidator
 from app.services.workflow_jobs import (
     JOB_TYPE_EXTRACTION,
     build_job_runtime_context,
@@ -142,6 +142,16 @@ async def get_extraction_field_reviews(
     return ExtractionReviewService(session).list_reviews(paper_id)
 
 
+@router.get("/results/{paper_id}/reviews/audit", response_model=ExtractionReviewAuditResponse)
+async def audit_extraction_field_reviews(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> ExtractionReviewAuditResponse:
+    if not session.get(Paper, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return ExtractionReviewService(session).audit_reviews(paper_id)
+
+
 @router.post("/results/{paper_id}/reviews/save", response_model=list[ExtractionFieldReviewResponse])
 async def save_extraction_field_reviews(
     paper_id: UUID,
@@ -182,12 +192,10 @@ async def validate_extraction_results(
     if not session.get(Paper, paper_id):
         raise HTTPException(status_code=404, detail="Paper not found")
     results = ExtractionSchemaService(session).results(paper_id)
-    warnings = ExtractionValidator().validate_payload(results.results)
-    status = "needs_review" if any(item.severity in {"warning", "error"} for item in warnings) else "validated"
     return ExtractionValidationResponse(
         paper_id=paper_id,
-        status=status,
+        status=results.validation_status,
         results=results.results,
         field_reviews=results.field_reviews,
-        validation_warnings=warnings,
+        validation_warnings=results.validation_warnings,
     )

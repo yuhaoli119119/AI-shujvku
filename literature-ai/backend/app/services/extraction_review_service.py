@@ -16,33 +16,17 @@ from app.db.models import (
     MechanismClaim,
 )
 from app.schemas.extraction import (
+    ExtractionReviewAuditResponse,
     ExtractionFieldReviewResponse,
     ExtractionFieldReviewSaveItem,
     ExtractionReviewMarkVerifiedRequest,
 )
-
-
-TARGET_TYPE_ALIASES = {
-    "catalystsample": "catalyst_samples",
-    "catalyst_samples": "catalyst_samples",
-    "catalystsample_schema": "catalyst_samples",
-    "dftsetting": "dft_settings",
-    "dft_settings": "dft_settings",
-    "dftresult": "dft_results",
-    "dft_results": "dft_results",
-    "mechanismclaim": "mechanism_claims",
-    "mechanism_claims": "mechanism_claims",
-    "electrochemicalperformance": "electrochemical_performance",
-    "electrochemical_performance": "electrochemical_performance",
-}
-
-TARGET_TYPE_MODELS = {
-    "catalyst_samples": CatalystSample,
-    "dft_settings": DFTSetting,
-    "dft_results": DFTResult,
-    "mechanism_claims": MechanismClaim,
-    "electrochemical_performance": ElectrochemicalPerformance,
-}
+from app.services.review_target_resolver import (
+    ACTIVE_REVIEW_STATUSES,
+    TARGET_TYPE_MODELS,
+    canonical_target_type,
+    ReviewTargetResolver,
+)
 
 RESULT_KEY_BY_TARGET_TYPE = {
     "catalyst_samples": "CatalystSample",
@@ -104,6 +88,7 @@ def _raw_evidence(row: DFTSetting) -> str:
 class ExtractionReviewService:
     def __init__(self, session: Session) -> None:
         self.session = session
+        self.resolver = ReviewTargetResolver(session)
 
     def list_reviews(self, paper_id: UUID) -> list[ExtractionFieldReviewResponse]:
         rows = self.session.scalars(
@@ -117,6 +102,22 @@ class ExtractionReviewService:
         ).all()
         return [self._serialize(row) for row in rows]
 
+    def audit_reviews(self, paper_id: UUID) -> ExtractionReviewAuditResponse:
+        items = self.list_reviews(paper_id)
+        counts = {status: 0 for status in ("active", "remapped", "stale", "ambiguous", "unresolved")}
+        for item in items:
+            counts[item.target_resolution_status] = counts.get(item.target_resolution_status, 0) + 1
+        return ExtractionReviewAuditResponse(
+            paper_id=paper_id,
+            total_reviews=len(items),
+            active=counts["active"],
+            remapped=counts["remapped"],
+            stale=counts["stale"],
+            ambiguous=counts["ambiguous"],
+            unresolved=counts["unresolved"],
+            items=items,
+        )
+
     def save_reviews(self, paper_id: UUID, items: list[ExtractionFieldReviewSaveItem]) -> list[ExtractionFieldReviewResponse]:
         saved: list[ExtractionFieldReviewResponse] = []
         for item in items:
@@ -127,13 +128,18 @@ class ExtractionReviewService:
                 raise ValueError(f"Unsupported field for {canonical_type}: {item.field_name}")
             field_snapshot = snapshot[item.field_name]
             review = self._get_or_create_review(paper_id, canonical_type, item.target_id, item.field_name)
+            self._guard_verified_review_mutation(review, item.reviewed_value, item.reviewer_status)
             review.original_value = item.original_value if item.original_value is not None else field_snapshot["value"]
-            review.reviewed_value = item.reviewed_value
+            review.reviewed_value = item.reviewed_value if review.reviewer_status != "verified" else review.reviewed_value
             review.unit = item.unit if item.unit is not None else field_snapshot["unit"]
             review.evidence_text = item.evidence_text if item.evidence_text is not None else field_snapshot["evidence_text"]
-            review.reviewer_status = item.reviewer_status
+            review.reviewer_status = item.reviewer_status if review.reviewer_status != "verified" else review.reviewer_status
             review.reviewer = item.reviewer
             review.reviewer_note = item.reviewer_note
+            review.target_resolution_status = "active"
+            review.remapped_from_target_id = None
+            review.last_resolved_target_id = item.target_id
+            self.resolver._refresh_review_identity(review, canonical_type, target)
             self.session.add(review)
             self.session.flush()
             saved.append(self._serialize(review))
@@ -160,6 +166,10 @@ class ExtractionReviewService:
             review.reviewer_status = "verified"
             review.reviewer = payload.reviewer
             review.reviewer_note = payload.reviewer_note
+            review.target_resolution_status = "active"
+            review.remapped_from_target_id = None
+            review.last_resolved_target_id = payload.target_id
+            self.resolver._refresh_review_identity(review, canonical_type, target)
             self.session.add(review)
             self.session.flush()
             saved.append(self._serialize(review))
@@ -172,11 +182,7 @@ class ExtractionReviewService:
 
     @staticmethod
     def canonical_target_type(value: str) -> str:
-        key = (value or "").replace("-", "_").replace(" ", "_").lower()
-        canonical = TARGET_TYPE_ALIASES.get(key)
-        if canonical is None:
-            raise ValueError(f"Unsupported target_type: {value}")
-        return canonical
+        return canonical_target_type(value)
 
     def get_target_or_raise(self, paper_id: UUID, canonical_type: str, target_id: str):
         model = TARGET_TYPE_MODELS[canonical_type]
@@ -205,7 +211,22 @@ class ExtractionReviewService:
             target_type=canonical_type,
             target_id=target_id,
             field_name=field_name,
+            target_resolution_status="active",
+            last_resolved_target_id=target_id,
         )
+
+    @staticmethod
+    def _guard_verified_review_mutation(
+        review: ExtractionFieldReview,
+        incoming_reviewed_value: Any,
+        incoming_status: str,
+    ) -> None:
+        if review.id is None or review.reviewer_status != "verified":
+            return
+        if incoming_status != "verified":
+            raise ValueError("Verified reviews cannot be downgraded through save")
+        if incoming_reviewed_value != review.reviewed_value:
+            raise ValueError("Verified reviews cannot overwrite reviewed_value")
 
     @staticmethod
     def result_key(canonical_type: str) -> str:
@@ -220,6 +241,12 @@ class ExtractionReviewService:
             paper_id=row.paper_id,
             target_type=row.target_type,
             target_id=row.target_id,
+            target_fingerprint=row.target_fingerprint,
+            target_label=row.target_label,
+            field_path=row.field_path,
+            target_resolution_status=row.target_resolution_status,  # type: ignore[arg-type]
+            remapped_from_target_id=row.remapped_from_target_id,
+            last_resolved_target_id=row.last_resolved_target_id,
             field_name=row.field_name,
             original_value=row.original_value,
             reviewed_value=row.reviewed_value,

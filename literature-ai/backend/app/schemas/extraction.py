@@ -9,6 +9,7 @@ from app.schemas.evidence import PageSpan
 
 
 ReviewStatus = Literal["pending", "verified", "rejected", "corrected", "needs_check"]
+ReviewResolutionStatus = Literal["active", "remapped", "stale", "ambiguous", "unresolved"]
 
 
 class ExtractionFieldReviewResponse(BaseModel):
@@ -16,6 +17,12 @@ class ExtractionFieldReviewResponse(BaseModel):
     paper_id: UUID
     target_type: str
     target_id: str
+    target_fingerprint: str | None = None
+    target_label: str | None = None
+    field_path: str | None = None
+    target_resolution_status: ReviewResolutionStatus = "active"
+    remapped_from_target_id: str | None = None
+    last_resolved_target_id: str | None = None
     field_name: str
     original_value: Any = None
     reviewed_value: Any = None
@@ -158,3 +165,14 @@ class ExtractionValidationResponse(BaseModel):
     results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     field_reviews: list[ExtractionFieldReviewResponse] = Field(default_factory=list)
     validation_warnings: list[ValidationWarning] = Field(default_factory=list)
+
+
+class ExtractionReviewAuditResponse(BaseModel):
+    paper_id: UUID
+    total_reviews: int = 0
+    active: int = 0
+    remapped: int = 0
+    stale: int = 0
+    ambiguous: int = 0
+    unresolved: int = 0
+    items: list[ExtractionFieldReviewResponse] = Field(default_factory=list)

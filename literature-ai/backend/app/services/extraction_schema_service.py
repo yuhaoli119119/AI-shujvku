@@ -16,8 +16,10 @@ from app.schemas.extraction import (
     EvidenceField,
     ExtractionResultsResponse,
     MechanismClaimSchema,
+    ValidationWarning,
 )
 from app.services.extraction_review_service import ExtractionReviewService
+from app.services.review_target_resolver import ACTIVE_REVIEW_STATUSES
 from app.services.extraction_validator import ExtractionValidator
 
 
@@ -48,13 +50,15 @@ class ExtractionSchemaService:
 
     def results(self, paper_id: UUID) -> ExtractionResultsResponse:
         payload = self.result_payload(paper_id)
+        field_reviews = self.review_service.list_reviews(paper_id)
         warnings = self.validator.validate_payload(payload)
+        warnings.extend(self._review_resolution_warnings(field_reviews))
         status = "needs_review" if any(w.severity in {"warning", "error"} for w in warnings) else "validated"
         return ExtractionResultsResponse(
             paper_id=paper_id,
             schemas=self.schemas(),
             results=payload,
-            field_reviews=self.review_service.list_reviews(paper_id),
+            field_reviews=field_reviews,
             validation_warnings=warnings,
             validation_status=status,
         )
@@ -172,9 +176,32 @@ class ExtractionSchemaService:
             if review is None:
                 merged[field_name] = {**field_value, "review": None, "verified": False}
                 continue
+            is_applicable = review.target_resolution_status in ACTIVE_REVIEW_STATUSES
             merged[field_name] = {
                 **field_value,
                 "review": review.model_dump(mode="json"),
-                "verified": review.verified,
+                "verified": review.verified if is_applicable else False,
             }
         return merged
+
+    @staticmethod
+    def _review_resolution_warnings(field_reviews: list[Any]) -> list[Any]:
+        warnings: list[ValidationWarning] = []
+        for review in field_reviews:
+            if review.target_resolution_status in ACTIVE_REVIEW_STATUSES:
+                continue
+            warnings.append(
+                ValidationWarning(
+                    severity="warning",
+                    code="review_target_stale",
+                    message=f"Review target is {review.target_resolution_status} after re-extraction and was not applied.",
+                    target_type=review.target_type,
+                    target_id=review.target_id,
+                    field=review.field_name,
+                    value={
+                        "review_id": str(review.id),
+                        "review_resolution_status": review.target_resolution_status,
+                    },
+                )
+            )
+        return warnings

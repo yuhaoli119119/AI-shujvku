@@ -31,6 +31,7 @@ from app.normalizers.chemistry_normalizer import ChemistryNormalizer
 from app.normalizers.dft_normalizer import DFTNormalizer
 from app.schemas.documents import UnifiedPaperDocument
 from app.services.embedding import DeterministicEmbeddingService
+from app.services.review_target_resolver import ReviewTargetResolver
 
 
 class ExtractionPipelineService:
@@ -324,8 +325,11 @@ class ExtractionPipelineService:
         return min(score, 1.0)
 
     def replace_stage2(self, paper: Paper, document: UnifiedPaperDocument) -> dict[str, int]:
+        ReviewTargetResolver(self.session).backfill_review_targets(paper.id)
         self._delete_existing_stage2(paper.id)
-        return self.run_stage2(paper, document)
+        summary = self.run_stage2(paper, document)
+        ReviewTargetResolver(self.session).remap_reviews_for_paper(paper.id)
+        return summary
 
     def _delete_existing_stage2(self, paper_id: UUID) -> None:
         for model in (DFTSetting, CatalystSample, DFTResult, ElectrochemicalPerformance, MechanismClaim, WritingCard):
