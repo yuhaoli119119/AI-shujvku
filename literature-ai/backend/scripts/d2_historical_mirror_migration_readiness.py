@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import sys
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,14 @@ ARTIFACT_FIELDS: dict[str, str] = {
     "markdown_path": "markdown",
 }
 FILESYSTEM_ARTIFACT_DIRS = ("pdf", "markdown", "tei", "docling_json", "figures", "tables", "images")
+UUID_PREFIX_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:_|$)",
+    re.IGNORECASE,
+)
+UUID_ONLY_STEM_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def _sha256(path: Path) -> str | None:
@@ -44,6 +54,30 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _path_mtime_utc(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+
+
+def _file_entry(path: Path, *, root: Path | None = None, item_type: str | None = None) -> dict[str, Any]:
+    resolved = path.resolve()
+    relative_path = path.name
+    if root is not None:
+        try:
+            relative_path = resolved.relative_to(root.resolve()).as_posix()
+        except ValueError:
+            relative_path = path.as_posix()
+
+    return {
+        "type": item_type or path.parent.name,
+        "relative_path": relative_path,
+        "absolute_path": str(resolved),
+        "bytes": int(path.stat().st_size),
+        "mtime_utc": _path_mtime_utc(path),
+    }
 
 
 def _registry_entry(payload: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -86,6 +120,63 @@ def _papers_total(path: Path) -> int:
         connection.close()
 
 
+def _sqlite_tables(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    connection = _sqlite_connect(path)
+    try:
+        rows = connection.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name ASC").fetchall()
+        return [str(row[0]) for row in rows]
+    finally:
+        connection.close()
+
+
+def sqlite_file_summary(path: Path) -> dict[str, Any]:
+    resolved = path.resolve()
+    exists = resolved.exists()
+    summary: dict[str, Any] = {
+        "path": str(resolved),
+        "exists": exists,
+        "size": int(resolved.stat().st_size) if exists else 0,
+        "sha256": _sha256(resolved),
+        "mtime_utc": _path_mtime_utc(resolved),
+        "sqlite_integrity_check": None,
+        "tables": [],
+        "table_count": 0,
+        "papers_total": 0,
+    }
+    if not exists:
+        return summary
+
+    try:
+        tables = _sqlite_tables(resolved)
+        summary["tables"] = tables
+        summary["table_count"] = len(tables)
+        summary["sqlite_integrity_check"] = _sqlite_integrity(resolved)
+        if "papers" in tables:
+            summary["papers_total"] = _papers_total(resolved)
+    except sqlite3.Error as exc:
+        summary["sqlite_integrity_check"] = f"sqlite_error:{type(exc).__name__}"
+    return summary
+
+
+def json_file_summary(path: Path) -> dict[str, Any]:
+    resolved = path.resolve()
+    payload = _load_json(resolved)
+    return {
+        "path": str(resolved),
+        "exists": resolved.exists(),
+        "size": int(resolved.stat().st_size) if resolved.exists() else 0,
+        "sha256": _sha256(resolved),
+        "mtime_utc": _path_mtime_utc(resolved),
+        "is_valid_json_object": payload is not None,
+        "active_library": payload.get("active_library") if payload else None,
+        "name": payload.get("name") if payload else None,
+        "storage_mode": payload.get("storage_mode") if payload else None,
+        "project_name": payload.get("project_name") if payload else None,
+    }
+
+
 def _runtime_settings_for(root: Path):
     from app.config import get_settings
 
@@ -115,14 +206,9 @@ def _storage_dir_counts(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]
                     continue
                 rel = path.relative_to(root).as_posix()
                 item_size = int(path.stat().st_size)
-                files.append(
-                    {
-                        "type": dirname,
-                        "relative_path": rel,
-                        "absolute_path": str(path.resolve()),
-                        "bytes": item_size,
-                    }
-                )
+                file_entry = _file_entry(path, root=root, item_type=dirname)
+                file_entry["relative_path"] = rel
+                files.append(file_entry)
                 count += 1
                 size += item_size
                 total_count += 1
@@ -151,6 +237,7 @@ def _paper_artifact_audit(db_path: Path, source_root: Path, target_root: Path) -
     duplicate_targets: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     path_conflicts: list[dict[str, Any]] = []
     referenced_source_paths: set[Path] = set()
+    referenced_source_files: dict[str, dict[str, Any]] = {}
     already_canonical_count = 0
     needing_update_count = 0
     field_value_total = 0
@@ -191,6 +278,21 @@ def _paper_artifact_audit(db_path: Path, source_root: Path, target_root: Path) -
                 continue
 
             referenced_source_paths.add(resolved.resolve())
+            resolved_str = str(resolved.resolve())
+            if resolved_str not in referenced_source_files:
+                referenced_source_files[resolved_str] = {
+                    **_file_entry(resolved, root=source_root, item_type=category),
+                    "referenced_by": [],
+                }
+            referenced_source_files[resolved_str]["referenced_by"].append(
+                {
+                    "paper_id": paper_id,
+                    "title": title,
+                    "field": field,
+                    "stored_path": stored_str,
+                    "canonical_target_relative_path": canonical or stored_str,
+                }
+            )
             duplicate_sources[str(resolved.resolve())].append(
                 {"paper_id": paper_id, "title": title, "field": field, "stored_path": stored_str}
             )
@@ -242,6 +344,107 @@ def _paper_artifact_audit(db_path: Path, source_root: Path, target_root: Path) -
         "path_conflicts": path_conflicts,
         "duplicate_artifact_paths": duplicate_artifact_paths,
         "referenced_source_path_count": len(referenced_source_paths),
+        "referenced_source_files": sorted(
+            referenced_source_files.values(),
+            key=lambda item: (str(item["type"]), str(item["relative_path"])),
+        ),
+    }
+
+
+def _source_inventory_summary(files: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = Counter(item["type"] for item in files)
+    bytes_by_type: defaultdict[str, int] = defaultdict(int)
+    for item in files:
+        bytes_by_type[str(item["type"])] += int(item["bytes"])
+    return {
+        "total_files": len(files),
+        "total_bytes": sum(int(item["bytes"]) for item in files),
+        "by_type": {
+            artifact_type: {
+                "files": int(counts.get(artifact_type, 0)),
+                "bytes": int(bytes_by_type.get(artifact_type, 0)),
+            }
+            for artifact_type in FILESYSTEM_ARTIFACT_DIRS
+        },
+    }
+
+
+def _unreferenced_pdf_origin(relative_path: str, size_bytes: int) -> str:
+    name = Path(relative_path).name
+    stem = Path(relative_path).stem
+    lowered = name.lower()
+    if size_bytes <= 1024:
+        return "tiny_placeholder_or_test_residue"
+    if lowered.endswith(".tmp.pdf") or lowered.startswith("tmp") or "temp" in lowered:
+        return "temporary_file_pattern"
+    if UUID_ONLY_STEM_RE.match(stem):
+        return "uuid_only_import_or_test_residue"
+    if UUID_PREFIX_RE.match(name):
+        return "uuid_prefixed_historical_import_residue"
+    return "document_like_unreferenced_pdf"
+
+
+def classify_source_artifact_inventory(source_root: Path, target_root: Path, db_path: Path) -> dict[str, Any]:
+    storage_summary, storage_files, _, _ = _storage_dir_counts(source_root)
+    artifact_audit = _paper_artifact_audit(db_path, source_root, target_root)
+
+    referenced_files = artifact_audit["referenced_source_files"]
+    referenced_paths = {str(Path(item["absolute_path"]).resolve()) for item in referenced_files}
+    unreferenced_files = [
+        item for item in storage_files if str(Path(item["absolute_path"]).resolve()) not in referenced_paths
+    ]
+    unreferenced_pdf_files = [item for item in unreferenced_files if item["type"] == "pdf"]
+    unreferenced_non_pdf_files = [item for item in unreferenced_files if item["type"] != "pdf"]
+
+    pdf_origin_counts = Counter(
+        _unreferenced_pdf_origin(str(item["relative_path"]), int(item["bytes"])) for item in unreferenced_pdf_files
+    )
+    mtime_values = [item["mtime_utc"] for item in unreferenced_pdf_files if item.get("mtime_utc")]
+
+    duplicate_or_suspect_files = [
+        {
+            "kind": "duplicate_artifact_path",
+            "path": item["path"],
+            "references": item["references"],
+        }
+        for item in artifact_audit["duplicate_artifact_paths"]
+    ]
+    duplicate_or_suspect_files.extend(
+        {
+            "kind": "unreferenced_pdf_suspect",
+            "path": item["relative_path"],
+            "bytes": item["bytes"],
+            "origin_hint": _unreferenced_pdf_origin(str(item["relative_path"]), int(item["bytes"])),
+        }
+        for item in unreferenced_pdf_files
+        if _unreferenced_pdf_origin(str(item["relative_path"]), int(item["bytes"])) != "document_like_unreferenced_pdf"
+    )
+
+    return {
+        "source_file_inventory_all": {
+            **storage_summary,
+            **_source_inventory_summary(storage_files),
+        },
+        "source_file_inventory_db_referenced": _source_inventory_summary(referenced_files),
+        "source_file_inventory_unreferenced": _source_inventory_summary(unreferenced_files),
+        "db_referenced_files": referenced_files,
+        "db_referenced_files_to_copy_count": len(referenced_files),
+        "unreferenced_files_count": len(unreferenced_files),
+        "unreferenced_pdf_files": unreferenced_pdf_files,
+        "unreferenced_pdf_count": len(unreferenced_pdf_files),
+        "unreferenced_pdf_total_bytes": sum(int(item["bytes"]) for item in unreferenced_pdf_files),
+        "unreferenced_pdf_examples": [str(item["relative_path"]) for item in unreferenced_pdf_files[:20]],
+        "unreferenced_pdf_mtime_range": {
+            "min": min(mtime_values) if mtime_values else None,
+            "max": max(mtime_values) if mtime_values else None,
+        },
+        "unreferenced_pdf_origin_hints": dict(sorted(pdf_origin_counts.items())),
+        "unreferenced_non_pdf_files": unreferenced_non_pdf_files,
+        "unreferenced_non_pdf_count": len(unreferenced_non_pdf_files),
+        "missing_referenced_files_count": len(artifact_audit["missing_files"]),
+        "missing_referenced_files": artifact_audit["missing_files"],
+        "duplicate_or_suspect_files": duplicate_or_suspect_files,
+        "artifact_audit": artifact_audit,
     }
 
 
@@ -341,17 +544,33 @@ def _recommended_next_gate(risk_level: str, *, path_conflicts: int, missing_file
     return "controlled_migration_apply_can_be_planned_after_backup_and_freeze_confirmation"
 
 
-def _read_sha_stability(canonical_registry: Path, shadow_paths: list[Path], active_db: Path) -> dict[str, Any]:
-    before = {
-        "canonical_registry_sha256": _sha256(canonical_registry),
-        "shadow_registry_sha256": {str(path.resolve()): _sha256(path) for path in shadow_paths},
-        "active_sqlite_sha256": _sha256(active_db),
-    }
-    after = {
-        "canonical_registry_sha256": _sha256(canonical_registry),
-        "shadow_registry_sha256": {str(path.resolve()): _sha256(path) for path in shadow_paths},
-        "active_sqlite_sha256": _sha256(active_db),
-    }
+def _migration_mode_recommendation(*, missing_files: int, unreferenced_files: int, target_conflicts: int) -> str:
+    if missing_files > 0:
+        return "blocked_until_missing_referenced_files_are_resolved"
+    if unreferenced_files > 0 or target_conflicts > 0:
+        return "db_referenced_only_plus_required_library_metadata"
+    return "all_source_files"
+
+
+def _read_sha_stability(
+    canonical_registry: Path,
+    shadow_paths: list[Path],
+    active_db: Path,
+    *,
+    extra_paths: dict[str, Path] | None = None,
+) -> dict[str, Any]:
+    extra_paths = extra_paths or {}
+
+    def snapshot() -> dict[str, Any]:
+        return {
+            "canonical_registry_sha256": _sha256(canonical_registry),
+            "shadow_registry_sha256": {str(path.resolve()): _sha256(path) for path in shadow_paths},
+            "active_sqlite_sha256": _sha256(active_db),
+            **{label: _sha256(path.resolve()) for label, path in extra_paths.items()},
+        }
+
+    before = snapshot()
+    after = snapshot()
     return {
         "before": before,
         "after": after,
@@ -369,8 +588,10 @@ def build_report() -> dict[str, Any]:
     active_library = canonical_payload.get("active_library")
     current_root = Path(str(active_entry["root_path"])).resolve()
     current_db = (current_root / "database.sqlite").resolve()
+    current_library_json = (current_root / "library.json").resolve()
     proposed_root = default_library_root().resolve()
     proposed_db = (proposed_root / "database.sqlite").resolve()
+    proposed_library_json = (proposed_root / "library.json").resolve()
     shadows = [path.resolve() for path in shadow_registry_paths() if path.exists()]
 
     if not current_db.exists():
@@ -388,7 +609,8 @@ def build_report() -> dict[str, Any]:
     ]
     all_source_bytes = int(current_db.stat().st_size) + storage_total_bytes
 
-    artifact_audit = _paper_artifact_audit(current_db, current_root, proposed_root)
+    source_inventory = classify_source_artifact_inventory(current_root, proposed_root, current_db)
+    artifact_audit = source_inventory["artifact_audit"]
     base_conflicts = _existing_file_conflicts(current_root, proposed_root)
     merged_conflicts = base_conflicts + [
         item for item in artifact_audit["path_conflicts"] if item not in base_conflicts
@@ -397,7 +619,15 @@ def build_report() -> dict[str, Any]:
     papers_total = _papers_total(current_db)
 
     files_to_copy_by_type = Counter(item["type"] for item in all_source_files)
-    sha_stability = _read_sha_stability(canonical_registry, shadows, current_db)
+    sha_stability = _read_sha_stability(
+        canonical_registry,
+        shadows,
+        current_db,
+        extra_paths={
+            "target_sqlite_sha256": proposed_db,
+            "target_library_json_sha256": proposed_library_json,
+        },
+    )
     risk_level = _risk_level(
         source_is_mirror=_is_mirror_path(str(current_root)),
         missing_files=len(artifact_audit["missing_files"]),
@@ -416,6 +646,7 @@ def build_report() -> dict[str, Any]:
         "proposed_canonical_library_root": str(proposed_root),
         "proposed_database_path": str(proposed_db),
         "files_to_copy_count": len(all_source_files),
+        "all_source_files_to_copy_count": len(all_source_files),
         "files_to_copy_by_type": {
             "database.sqlite": int(files_to_copy_by_type.get("database.sqlite", 0)),
             "pdf": int(files_to_copy_by_type.get("pdf", 0)),
@@ -427,6 +658,27 @@ def build_report() -> dict[str, Any]:
             "images": int(files_to_copy_by_type.get("images", 0)),
         },
         "total_bytes_to_copy": all_source_bytes,
+        "required_library_metadata_files": [
+            json_file_summary(current_library_json),
+        ],
+        "db_referenced_files_to_copy_count": source_inventory["db_referenced_files_to_copy_count"],
+        "unreferenced_files_count": source_inventory["unreferenced_files_count"],
+        "source_file_inventory_all": source_inventory["source_file_inventory_all"],
+        "source_file_inventory_db_referenced": source_inventory["source_file_inventory_db_referenced"],
+        "source_file_inventory_unreferenced": source_inventory["source_file_inventory_unreferenced"],
+        "unreferenced_pdf_count": source_inventory["unreferenced_pdf_count"],
+        "unreferenced_pdf_total_bytes": source_inventory["unreferenced_pdf_total_bytes"],
+        "unreferenced_pdf_examples": source_inventory["unreferenced_pdf_examples"],
+        "unreferenced_pdf_mtime_range": source_inventory["unreferenced_pdf_mtime_range"],
+        "unreferenced_pdf_origin_hints": source_inventory["unreferenced_pdf_origin_hints"],
+        "unreferenced_non_pdf_count": source_inventory["unreferenced_non_pdf_count"],
+        "missing_referenced_files_count": source_inventory["missing_referenced_files_count"],
+        "duplicate_or_suspect_files": source_inventory["duplicate_or_suspect_files"],
+        "migration_mode_recommendation": _migration_mode_recommendation(
+            missing_files=source_inventory["missing_referenced_files_count"],
+            unreferenced_files=source_inventory["unreferenced_files_count"],
+            target_conflicts=len(merged_conflicts),
+        ),
         "missing_files": artifact_audit["missing_files"],
         "path_conflicts": merged_conflicts,
         "duplicate_artifact_paths": artifact_audit["duplicate_artifact_paths"],

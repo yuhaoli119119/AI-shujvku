@@ -112,6 +112,15 @@ def test_build_report_detects_conflicts_and_missing_files(monkeypatch, tmp_path)
     assert report["files_to_copy_by_type"]["database.sqlite"] == 1
     assert report["files_to_copy_by_type"]["pdf"] == 1
     assert report["files_to_copy_by_type"]["figures"] == 1
+    assert report["all_source_files_to_copy_count"] == 6
+    assert report["db_referenced_files_to_copy_count"] == 4
+    assert report["unreferenced_files_count"] == 1
+    assert report["source_file_inventory_db_referenced"]["total_files"] == 4
+    assert report["source_file_inventory_unreferenced"]["total_files"] == 1
+    assert report["unreferenced_pdf_count"] == 0
+    assert report["unreferenced_non_pdf_count"] == 1
+    assert report["missing_referenced_files_count"] == 2
+    assert report["migration_mode_recommendation"] == "blocked_until_missing_referenced_files_are_resolved"
     assert report["artifact_paths_already_canonical_count"] == 4
     assert report["artifact_paths_needing_update_count"] == 2
     assert report["sqlite_integrity_check_result"] == "ok"
@@ -150,3 +159,6 @@ def test_build_report_is_cwd_stable(monkeypatch, tmp_path):
     assert report_from_workspace["current_active_database_path"] == report_from_project["current_active_database_path"]
     assert report_from_project["current_active_database_path"] == report_from_backend["current_active_database_path"]
     assert report_from_workspace["proposed_canonical_library_root"] == report_from_backend["proposed_canonical_library_root"]
+    assert report_from_workspace["all_source_files_to_copy_count"] == report_from_backend["all_source_files_to_copy_count"]
+    assert report_from_workspace["db_referenced_files_to_copy_count"] == report_from_backend["db_referenced_files_to_copy_count"]
+    assert report_from_workspace["migration_mode_recommendation"] == report_from_backend["migration_mode_recommendation"]
