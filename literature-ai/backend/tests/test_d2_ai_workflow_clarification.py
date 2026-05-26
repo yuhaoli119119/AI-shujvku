@@ -88,3 +88,34 @@ def test_d2_e2e_rollback_keeps_ai_to_verified_boundary(active_sqlite_db):
         post_rollback = build_audit(session)
         assert post_rollback["review_status_counts"] == {}
         assert post_rollback["dft_export_safe_eligible"] == 0
+
+
+def test_d2_e2e_seed_if_needed_is_identified_and_rolled_back(active_sqlite_db):
+    engine, _ = active_sqlite_db
+    with Session(engine, future=True) as session:
+        assert build_audit(session)["dft_export_total_candidates"] == 0
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            with Session(bind=connection, future=True) as session:
+                result = run_e2e_rollback(session, seed_if_needed=True)
+        finally:
+            transaction.rollback()
+
+    assert result["status"] == "passed"
+    assert result["seed_created"] is True
+    assert result["seed_cleaned_by_rollback"] is True
+    assert result["seed_marker"] == "D2_E2E_TEST"
+    assert result["seed_page"] is None
+    assert result["seed_bbox"] is None
+    assert result["safe_eligible_count"] == 1
+    assert result["blocked_count"] == 1
+    assert "missing_review" in result["unsafe_gate_reasons"]
+    assert "missing_evidence" in result["unsafe_gate_reasons"]
+    assert result["writing_cards_safe_usable"] == 0
+
+    with Session(engine, future=True) as session:
+        titles = [paper.title for paper in session.query(Paper).all()]
+        assert not any("D2_E2E_TEST" in (title or "") for title in titles)
+        assert build_audit(session)["dft_export_total_candidates"] == 0

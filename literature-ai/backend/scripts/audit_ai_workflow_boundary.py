@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import (
     DFTResult,
+    EvidenceSpan,
     ExtractionFieldReview,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
@@ -79,7 +80,7 @@ def build_audit(session: Session) -> dict[str, Any]:
     }
 
 
-def _pick_e2e_target(session: Session) -> DFTResult | None:
+def _pick_e2e_target(session: Session) -> tuple[DFTResult | None, dict[str, Any]]:
     rows = session.scalars(
         select(DFTResult).where(DFTResult.evidence_text.is_not(None), DFTResult.evidence_text != "").limit(100)
     ).all()
@@ -101,19 +102,90 @@ def _pick_e2e_target(session: Session) -> DFTResult | None:
             )
         )
         if existing is None:
-            return row
-    return None
+            return row, {"seed_created": False, "seed_reason": "existing_dft_result_with_evidence"}
+    return None, {"seed_created": False, "seed_reason": "no_existing_dft_result_with_required_evidence"}
 
 
-def run_e2e_rollback(session: Session) -> dict[str, Any]:
-    target = _pick_e2e_target(session)
+def _create_seed_target(session: Session) -> tuple[DFTResult, DFTResult, dict[str, Any]]:
+    paper = Paper(
+        title="D2_E2E_TEST rollback-only extraction seed",
+        pdf_path="D2_E2E_TEST_no_pdf_page_or_bbox.pdf",
+        authors=["D2_E2E_TEST"],
+        journal="D2_E2E_TEST",
+        year=2026,
+    )
+    session.add(paper)
+    session.flush()
+
+    evidence_text = (
+        "D2_E2E_TEST rollback-only evidence text for active-library extraction gate; "
+        "this is not a PDF exact locator and has no page or bbox."
+    )
+    target = DFTResult(
+        paper_id=paper.id,
+        adsorbate="D2_E2E_TEST_Li2S4",
+        property_type="D2_E2E_TEST_adsorption_energy",
+        value=-1.23,
+        unit="eV",
+        reaction_step="D2_E2E_TEST_seed",
+        evidence_text=evidence_text,
+        confidence=1.0,
+    )
+    unsafe_target = DFTResult(
+        paper_id=paper.id,
+        adsorbate="D2_E2E_TEST_UNSAFE",
+        property_type="D2_E2E_TEST_missing_review",
+        value=-9.99,
+        unit="eV",
+        reaction_step="D2_E2E_TEST_seed_unsafe",
+        evidence_text=evidence_text,
+        confidence=1.0,
+    )
+    session.add_all([target, unsafe_target])
+    session.flush()
+
+    span = EvidenceSpan(
+        paper_id=paper.id,
+        object_type="dft_results",
+        object_id=str(target.id),
+        text=evidence_text,
+        page=None,
+        confidence=1.0,
+    )
+    session.add(span)
+    session.flush()
+    return target, unsafe_target, {
+        "seed_created": True,
+        "seed_cleaned_by_rollback": True,
+        "seed_reason": "created_rollback_only_d2_e2e_test_seed",
+        "seed_paper_id": str(paper.id),
+        "seed_target_id": str(target.id),
+        "seed_unsafe_target_id": str(unsafe_target.id),
+        "seed_evidence_span_id": str(span.id),
+        "seed_marker": "D2_E2E_TEST",
+        "seed_page": None,
+        "seed_bbox": None,
+    }
+
+
+def run_e2e_rollback(session: Session, *, seed_if_needed: bool = False) -> dict[str, Any]:
+    target, seed_info = _pick_e2e_target(session)
     candidate_exists = (session.scalar(select(func.count()).select_from(ExternalAnalysisCandidate)) or 0) > 0
     if target is None:
-        return {
-            "status": "skipped",
-            "reason": "no dft_results row with evidence_text, evidence_span, and no existing verified value review",
-            "external_or_extraction_result_exists": bool(candidate_exists or session.scalar(select(func.count()).select_from(DFTResult))),
-        }
+        if not seed_if_needed:
+            return {
+                "status": "skipped",
+                "reason": "no dft_results row with evidence_text, evidence_span, and no existing verified value review",
+                "external_or_extraction_result_exists": bool(candidate_exists or session.scalar(select(func.count()).select_from(DFTResult))),
+                **seed_info,
+            }
+        target, unsafe_target, seed_info = _create_seed_target(session)
+    else:
+        unsafe_target = DFTResult(
+            id=uuid4(),
+            paper_id=target.paper_id,
+            evidence_text=target.evidence_text,
+        )
 
     service = ExtractionReviewService(session)
     save_result = service.save_reviews(
@@ -145,20 +217,15 @@ def run_e2e_rollback(session: Session) -> dict[str, Any]:
         ),
     )
     gate = is_export_eligible_extraction(session, target, target_type="dft_results")
-    unsafe_probe = is_export_eligible_extraction(
-        session,
-        DFTResult(
-            id=uuid4(),
-            paper_id=target.paper_id,
-            evidence_text=target.evidence_text,
-        ),
-        target_type="dft_results",
-    )
+    unsafe_probe = is_export_eligible_extraction(session, unsafe_target, target_type="dft_results")
+    audit_after_gate = build_audit(session)
     return {
         "status": "passed",
         "rolled_back": True,
+        **seed_info,
         "paper_id": str(target.paper_id),
         "target_id": str(target.id),
+        "unsafe_target_id": str(unsafe_target.id),
         "external_or_extraction_result_exists": True,
         "corrected_review_status_after_save": corrected_status,
         "mark_verified_status": marked[0].reviewer_status if marked else "missing",
@@ -166,6 +233,11 @@ def run_e2e_rollback(session: Session) -> dict[str, Any]:
         "export_gate_safe_verified": gate.eligible,
         "export_gate_reasons": list(gate.reasons),
         "unsafe_data_blocked": not unsafe_probe.eligible,
+        "unsafe_gate_reasons": list(unsafe_probe.reasons),
+        "safe_eligible_count": audit_after_gate["dft_export_safe_eligible"],
+        "blocked_count": audit_after_gate["dft_export_blocked"],
+        "blocked_reasons": audit_after_gate["dft_export_blocked_reasons"],
+        "writing_cards_safe_usable": audit_after_gate["writing_cards_safe_usable"],
     }
 
 
@@ -173,6 +245,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Audit D2-1 AI candidate/review/export/writing safety boundaries.")
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
     parser.add_argument("--e2e-rollback", action="store_true", help="Run rollback-only review/verify/export gate probe.")
+    parser.add_argument(
+        "--seed-if-needed",
+        action="store_true",
+        help="Create D2_E2E_TEST rollback-only Paper/DFTResult/EvidenceSpan when no existing target is available.",
+    )
     args = parser.parse_args()
 
     activate_active_library_database()
@@ -190,9 +267,11 @@ def main() -> None:
             transaction = connection.begin()
             try:
                 with Session(bind=connection, autoflush=False, future=True) as session:
-                    report["e2e_rollback"] = run_e2e_rollback(session)
+                    report["e2e_rollback"] = run_e2e_rollback(session, seed_if_needed=args.seed_if_needed)
             finally:
                 transaction.rollback()
+        with Session(engine, autoflush=False, future=True) as session:
+            report["post_e2e_audit"] = build_audit(session)
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
