@@ -615,6 +615,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: open Writing Studio, add evidence, generate draft, and view Citation Audit', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/ai_writer/index.html`);
     await page.waitForTimeout(500);
+    await expect(page.locator('.step')).toContainText(['1 Topic', '2 Evidence search', '3 Evidence pack', '4 Draft', '5 Citation audit']);
+    await expect(page.locator('button:has-text("Search evidence")')).toBeVisible();
+    await expect(page.locator('button:has-text("Run Citation Audit")')).toBeVisible();
+    await expect(page.locator('#evidencePanel')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(/Export final|Final conclusion|Direct export/i);
     await page.fill('#writingTopic', 'Li2S4 adsorption energy Fe-N4');
     await page.check('#paperChecklist input[type="checkbox"]');
     await page.click('button:has-text("Search evidence")');
@@ -710,6 +715,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#schemaForm')).toContainText('Fe-N4');
     await expect(page.locator('#schemaForm')).toContainText('Energy value seems unusually high');
+    await expect(page.locator('#schemaForm')).toContainText('已生成待确认记录');
 
     const evidenceBtn = page.locator('button:has-text("原文证据 ▾")').first();
     await evidenceBtn.click();
@@ -736,6 +742,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#schemaForm')).toContainText('Energy value seems unusually high');
     await expect(page.locator('input[data-field="catalyst"]')).toHaveCount(0);
 
+    const scopeSummary = page.locator('#actionScopeSummary');
+    await expect(scopeSummary).toContainText('当前 schema');
+    await expect(scopeSummary).toContainText('DFTResult');
+    await expect(scopeSummary).toContainText('当前过滤');
+    await expect(scopeSummary).toContainText('当前可见记录');
+    await expect(scopeSummary).toContainText('即将处理字段');
+    await expect(scopeSummary).toContainText(/警告|warnings/);
+
     verifyCalled = false;
     await page.click('.footer-actions button:has-text("人工确认校验")');
     await expect(page.locator('#toast')).toContainText('批量人工确认通过成功');
@@ -754,6 +768,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
     await expect(page.locator('.export-note')).toContainText('Human verified + required evidence');
+    await expect(page.locator('.export-note')).toContainText('blocked rows 不会导出');
+    await expect(page.locator('#dftTable')).toContainText('Li2S4');
 
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
@@ -783,6 +799,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       ],
     };
     const materializePayloads = [];
+    const materializeDialogs = [];
 
     await page.route(/\/api\/external-analysis\/runs(\?|$)/, route => jsonResponse(route, [runPayload]));
     await page.route(/\/api\/external-analysis\/runs\/run-1\/materialize$/, async route => {
@@ -791,6 +808,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
     page.on('dialog', async dialog => {
       expect(dialog.message()).toContain('这不是人工 verified');
+      materializeDialogs.push(dialog.message());
       await dialog.accept();
     });
 
@@ -805,20 +823,33 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     }
 
     await openReviewCandidates();
+    const reviewAreaText = await page.locator('#tab-review').innerText();
+    expect(reviewAreaText).toMatch(/AI 建议候选/);
+    expect(reviewAreaText).toMatch(/生成待确认记录/);
+    expect(reviewAreaText).not.toMatch(/写回数据库|一键全部写回数据库|AI 审核|AI 分析结果|审核结果|已验证|已校验/);
+
     await page.click('.candidate-card button:has-text("生成待确认记录")');
     await expect.poll(() => materializePayloads.length).toBe(1);
     expect(materializePayloads[0]).toEqual({ candidate_ids: ['candidate-1'], created_by: 'web_user' });
+    expect(materializePayloads[0].candidate_ids).not.toEqual([]);
+
+    await openReviewCandidates();
+    await page.click('button:has-text("选中生成待确认记录")');
+    await expect.poll(() => materializePayloads.length).toBe(1);
 
     await openReviewCandidates();
     await page.check('.candidate-select[value="candidate-1"]');
     await page.click('button:has-text("选中生成待确认记录")');
     await expect.poll(() => materializePayloads.length).toBe(2);
     expect(materializePayloads[1]).toEqual({ candidate_ids: ['candidate-1'], created_by: 'web_user' });
+    expect(materializePayloads[1].candidate_ids).not.toEqual([]);
 
     await openReviewCandidates();
     await page.click('button:has-text("批量生成待确认记录")');
     await expect.poll(() => materializePayloads.length).toBe(3);
     expect(materializePayloads[2]).toEqual({ explicit_all: true, created_by: 'web_user' });
+    expect(materializePayloads[2]).not.toHaveProperty('candidate_ids');
+    expect(materializeDialogs).toHaveLength(3);
   });
 
   test('business flow: literature library opens extraction job center', async ({ page }) => {
