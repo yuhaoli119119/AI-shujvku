@@ -446,3 +446,4 @@ LITAI_MCP_API_KEYS=cursor|Cursor|sk-cursor-key|read_papers,request_parse,append_
 
 
 
+> 历史归档说明：此文件为历史规划文档，存在编码损坏，仅作历史参考，不作为当前执行依据。

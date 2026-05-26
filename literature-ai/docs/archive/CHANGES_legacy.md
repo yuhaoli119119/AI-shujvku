@@ -1,4 +1,4 @@
-# CHANGES.md — 改动记录
+﻿# CHANGES.md — 改动记录
 
 > 本文件记录所有代码改动，供其他 AI 或协作者查看和查收。
 
@@ -201,3 +201,4 @@
 - 全量 pytest 回归测试通过（跳过因缺少 `requests` 的 `test_papers_api.py`）
 - 文件夹库 CRUD 验证通过（新建/激活/切换/导入/移除/默认库保护）
 - 前端分栏拖拽增强（鼠标+触摸+RAF节流+localStorage持久化）
+> 历史归档说明：此文件为旧版变更记录，存在编码损坏和阶段性描述，仅作历史参考，不作为当前执行依据。当前真实进度以根 README、`literature-ai/AGENTS.md` 与 git history 为准。
