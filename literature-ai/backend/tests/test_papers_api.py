@@ -23,11 +23,14 @@ import app.api.papers as papers_api
 def setup_test_db(monkeypatch):
     # Create temp DB file
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_api.db"
+        tmp_root = Path(tmpdir)
+        db_path = tmp_root / "test_api.db"
         db_url = f"sqlite:///{db_path}"
+        storage_root = tmp_root / "storage"
         
-        # Patch environment
+        # Keep API tests from writing uploads into the real active library.
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
+        monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
         get_settings.cache_clear()
         
         # Setup tables
