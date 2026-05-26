@@ -128,8 +128,58 @@ def test_apply_creates_backups_and_reports_without_rewriting_shadow_registry(mon
     result = hygiene_gate.apply_hygiene()
 
     assert result["apply_executed"] is True
+    assert result["selected_option"] == "A"
     assert str(canonical_registry.resolve()) in result["backups"]
     assert str(shadow_registry.resolve()) in result["backups"]
+    assert Path(result["backup_dir"]).exists()
     for path in result["generated_shadow_reports"]:
         assert Path(path).exists()
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert payload["status"] == "shadow_registry_deprecated"
+        assert payload["do_not_use_as_source_of_truth"] is True
+        assert payload["generated_by"] == "d2_shadow_registry_hygiene_gate"
     assert shadow_registry.read_text(encoding="utf-8") == original_shadow_text
+
+
+def test_build_report_detects_shadow_report_presence(monkeypatch, tmp_path):
+    canonical_root = tmp_path / "canonical_library"
+    canonical_db = canonical_root / "database.sqlite"
+    _write_sqlite(canonical_db, papers_total=15)
+
+    canonical_registry = tmp_path / "literature-ai" / "data" / "library_registry.json"
+    shadow_registry = tmp_path / "workspace" / "data" / "library_registry.json"
+    shadow_report = shadow_registry.parent / "library_registry.shadow-report.json"
+    _write_registry(canonical_registry, root_path=canonical_root)
+    _write_registry(shadow_registry, root_path=tmp_path / "other_library")
+    shadow_report.parent.mkdir(parents=True, exist_ok=True)
+    shadow_report.write_text("{\"status\":\"shadow_registry_deprecated\"}", encoding="utf-8")
+
+    monkeypatch.setattr(hygiene_gate, "canonical_registry_path", lambda: canonical_registry.resolve())
+    monkeypatch.setattr(hygiene_gate, "shadow_registry_paths", lambda: [shadow_registry.resolve()])
+    monkeypatch.setattr(
+        hygiene_gate,
+        "activate_active_library_database",
+        lambda: {
+            "active_library": "默认文献库",
+            "active_library_db_path": str(canonical_db.resolve()),
+            "effective_db_path": str(canonical_db.resolve()),
+            "recovered_from_candidate_scan": False,
+        },
+    )
+    monkeypatch.setattr(
+        hygiene_gate,
+        "get_active_database_info",
+        lambda: {
+            "active_library": "默认文献库",
+            "active_library_db_path": str(canonical_db.resolve()),
+            "effective_db_path": str(canonical_db.resolve()),
+            "recovered_from_candidate_scan": False,
+        },
+    )
+
+    report = hygiene_gate.build_report()
+
+    detail = report["shadow_registry_details"][0]
+    assert report["source_of_truth"] == "canonical_registry"
+    assert detail["shadow_report_exists"] is True
+    assert detail["shadow_report_path"] == str(shadow_report.resolve())

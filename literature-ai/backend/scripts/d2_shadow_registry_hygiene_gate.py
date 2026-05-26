@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import shutil
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,12 @@ def _active_entry(payload: dict[str, Any] | None) -> dict[str, Any] | None:
         if entry.get("name") == active_library:
             return entry
     return None
+
+
+def _sha256(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _sqlite_summary(db_path: Path | None) -> dict[str, Any]:
@@ -101,15 +108,19 @@ def _shadow_registry_detail(path: Path, active_database_path: Path | None) -> di
             reasons.append("contains_windows_mirror_root")
 
     is_stale_or_dangerous = bool(reasons and reasons != ["missing"])
+    shadow_report_path = path.with_name("library_registry.shadow-report.json")
     return {
         "path": str(path.resolve()),
         "exists": path.exists(),
+        "sha256": _sha256(path),
         "active_library": payload.get("active_library") if payload else None,
         "active_root_path": active_root_path,
         "active_database_path": registry_db_path,
         "points_to_active_db": points_to_active_db,
         "is_stale_or_dangerous": is_stale_or_dangerous,
         "danger_reasons": reasons,
+        "shadow_report_path": str(shadow_report_path.resolve()),
+        "shadow_report_exists": shadow_report_path.exists(),
     }
 
 
@@ -156,7 +167,10 @@ def build_report() -> dict[str, Any]:
     ]
 
     return {
+        "source_of_truth": "canonical_registry",
+        "source_of_truth_registry_path": str(canonical_path),
         "canonical_registry_path": str(canonical_path),
+        "canonical_registry_sha256": _sha256(canonical_path),
         "activation_info": activation_info,
         "active_library": active_info.get("active_library"),
         "active_library_root_path": active_library_root_path,
@@ -169,6 +183,9 @@ def build_report() -> dict[str, Any]:
         "whether_each_shadow_registry_is_stale_or_dangerous": {
             item["path"]: item["is_stale_or_dangerous"] for item in shadow_details
         },
+        "whether_each_shadow_report_exists": {
+            item["path"]: item["shadow_report_exists"] for item in shadow_details
+        },
         "shadow_registry_details": shadow_details,
         "proposed_actions": _proposed_actions(shadow_details, active_database_path),
         "risk_level": _risk_level(
@@ -180,9 +197,9 @@ def build_report() -> dict[str, Any]:
 
 
 def apply_hygiene() -> dict[str, Any]:
-    report = build_report()
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backup_dir = canonical_registry_path().parent.parent / "backups" / f"d2_shadow_registry_hygiene_{timestamp}"
+    pre_apply_report = build_report()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_dir = canonical_registry_path().resolve().parents[2] / "backups" / f"d2_shadow_registry_lockdown_{timestamp}"
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     backups: dict[str, str] = {}
@@ -190,39 +207,50 @@ def apply_hygiene() -> dict[str, Any]:
     if canonical_path.exists():
         target = backup_dir / "canonical.library_registry.json.bak"
         shutil.copy2(canonical_path, target)
-        backups[str(canonical_path)] = str(target)
+        backups[str(canonical_path.resolve())] = str(target.resolve())
 
+    shadow_labels = {
+        str(path.resolve()): label for path, label in zip(shadow_registry_paths(), ["repo-root", "backend"], strict=False)
+    }
     report_files: list[str] = []
-    for shadow_path_str in report["discovered_shadow_registry_paths"]:
+    for shadow_path_str in pre_apply_report["discovered_shadow_registry_paths"]:
         shadow_path = Path(shadow_path_str)
         if shadow_path.exists():
-            target = backup_dir / f"{shadow_path.parent.name}.library_registry.json.bak"
-            suffix = 1
-            while target.exists():
-                target = backup_dir / f"{shadow_path.parent.name}.{suffix}.library_registry.json.bak"
-                suffix += 1
+            label = shadow_labels.get(str(shadow_path.resolve()), shadow_path.parent.name)
+            target = backup_dir / f"{label}.library_registry.json.bak"
             shutil.copy2(shadow_path, target)
-            backups[str(shadow_path)] = str(target)
+            backups[str(shadow_path.resolve())] = str(target.resolve())
 
-        report_path = shadow_path.with_suffix(".json.shadow-report.json")
+        report_path = shadow_path.with_name("library_registry.shadow-report.json")
+        shadow_detail = next(
+            item for item in pre_apply_report["shadow_registry_details"] if item["path"] == str(shadow_path.resolve())
+        )
         report_payload = {
-            "generated_at": datetime.utcnow().isoformat(),
-            "canonical_registry_path": report["canonical_registry_path"],
-            "shadow_registry_path": str(shadow_path),
-            "shadow_registry_detail": next(
-                item for item in report["shadow_registry_details"] if item["path"] == str(shadow_path.resolve())
-            ),
-            "note": "D2-6 apply mode only writes diagnostic reports. It does not delete or rewrite live data files.",
+            "status": "shadow_registry_deprecated",
+            "canonical_registry_path": pre_apply_report["canonical_registry_path"],
+            "active_database_path": pre_apply_report["active_database_path"],
+            "shadow_registry_path": str(shadow_path.resolve()),
+            "stale_or_dangerous": shadow_detail["is_stale_or_dangerous"],
+            "do_not_use_as_source_of_truth": True,
+            "source_of_truth": "canonical_registry",
+            "generated_by": "d2_shadow_registry_hygiene_gate",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "danger_reasons": shadow_detail["danger_reasons"],
         }
         report_path.write_text(json.dumps(report_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        report_files.append(str(report_path))
+        report_files.append(str(report_path.resolve()))
 
+    post_apply_report = build_report()
     return {
         "apply_executed": True,
+        "lockdown_strategy": "diagnostic_report_only",
+        "selected_option": "A",
         "mode": "diagnostic_reports_only",
+        "backup_dir": str(backup_dir.resolve()),
         "backups": backups,
         "generated_shadow_reports": report_files,
-        "report": report,
+        "pre_apply_report": pre_apply_report,
+        "post_apply_report": post_apply_report,
     }
 
 
