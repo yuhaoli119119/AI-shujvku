@@ -4,9 +4,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from app.utils.project_paths import BACKEND_ROOT, WORKSPACE_ROOT
 
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-WORKSPACE_ROOT = BACKEND_ROOT.parent
 WINDOWS_MIRROR_COLON = "\uf03a"
 WINDOWS_MIRROR_SEP = "\uf05c"
 

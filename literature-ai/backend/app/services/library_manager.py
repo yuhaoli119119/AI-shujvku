@@ -8,6 +8,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.utils.project_paths import DEFAULT_LIBRARY_ROOT as CANONICAL_DEFAULT_LIBRARY_ROOT
+from app.utils.project_paths import PROJECT_ROOT as CANONICAL_PROJECT_ROOT
+from app.utils.project_paths import canonical_registry_path
+
 
 DEFAULT_LIBRARY_NAME = "默认文献库"
 LEGACY_STORAGE_MODE = "storage"
@@ -30,12 +34,24 @@ class LibraryInfo(BaseModel):
 
 
 class LibraryManager:
-    PROJECT_ROOT = Path(__file__).resolve().parents[3]
-    REGISTRY_PATH = PROJECT_ROOT / "data" / "library_registry.json"
-    DEFAULT_LIBRARY_ROOT = PROJECT_ROOT / "data" / "libraries" / "default"
+    PROJECT_ROOT = CANONICAL_PROJECT_ROOT
+    REGISTRY_PATH = canonical_registry_path()
+    DEFAULT_LIBRARY_ROOT = CANONICAL_DEFAULT_LIBRARY_ROOT
 
     def __init__(self) -> None:
         self._ensure_registry()
+
+    @classmethod
+    def project_root(cls) -> Path:
+        return Path(cls.PROJECT_ROOT).resolve()
+
+    @classmethod
+    def registry_path(cls) -> Path:
+        return Path(cls.REGISTRY_PATH).resolve()
+
+    @classmethod
+    def default_library_root(cls) -> Path:
+        return Path(cls.DEFAULT_LIBRARY_ROOT).resolve()
 
     def list_libraries(self) -> list[LibraryInfo]:
         registry = self._read_registry()
@@ -290,8 +306,10 @@ class LibraryManager:
         init_db(database_url)
 
     def _ensure_registry(self) -> None:
-        self.REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if not self.REGISTRY_PATH.exists():
+        registry_path = self.registry_path()
+        default_library_root = self.default_library_root()
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        if not registry_path.exists():
             now_iso = datetime.utcnow().isoformat()
             registry: dict[str, Any] = {
                 "version": REGISTRY_VERSION,
@@ -299,7 +317,7 @@ class LibraryManager:
                 "libraries": [
                     {
                         "name": DEFAULT_LIBRARY_NAME,
-                        "root_path": str(self.DEFAULT_LIBRARY_ROOT.resolve()),
+                        "root_path": str(default_library_root),
                         "description": DEFAULT_LIBRARY_NAME,
                         "created_at": now_iso,
                     }
@@ -313,7 +331,7 @@ class LibraryManager:
             now_iso = datetime.utcnow().isoformat()
             default_entry = {
                 "name": DEFAULT_LIBRARY_NAME,
-                "root_path": str(self.DEFAULT_LIBRARY_ROOT.resolve()),
+                "root_path": str(default_library_root),
                 "description": DEFAULT_LIBRARY_NAME,
                 "created_at": now_iso,
             }
@@ -340,13 +358,14 @@ class LibraryManager:
         if root_path and root_path.strip():
             return Path(root_path).resolve()
         safe_name = name.replace(" ", "_").replace("/", "_").replace("\\", "_")
-        return (self.PROJECT_ROOT / "data" / "libraries" / safe_name).resolve()
+        return (self.default_library_root().parent / safe_name).resolve()
 
     def _read_registry(self) -> dict[str, Any]:
-        if not self.REGISTRY_PATH.exists():
+        registry_path = self.registry_path()
+        if not registry_path.exists():
             return {"version": REGISTRY_VERSION, "active_library": DEFAULT_LIBRARY_NAME, "libraries": []}
         try:
-            data = json.loads(self.REGISTRY_PATH.read_text(encoding="utf-8"))
+            data = json.loads(registry_path.read_text(encoding="utf-8"))
         except Exception:
             return {"version": REGISTRY_VERSION, "active_library": DEFAULT_LIBRARY_NAME, "libraries": []}
         data.setdefault("version", REGISTRY_VERSION)
@@ -355,11 +374,12 @@ class LibraryManager:
         return data
 
     def _write_registry(self, registry: dict[str, Any]) -> None:
+        registry_path = self.registry_path()
         registry["version"] = REGISTRY_VERSION
-        self.REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.REGISTRY_PATH.with_suffix(".json.tmp")
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = registry_path.with_suffix(".json.tmp")
         tmp_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(self.REGISTRY_PATH)
+        tmp_path.replace(registry_path)
 
     @staticmethod
     def _find_entry(registry: dict[str, Any], name: str) -> dict[str, Any] | None:
