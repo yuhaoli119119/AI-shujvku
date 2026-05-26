@@ -147,11 +147,17 @@ class ExternalAnalysisService:
         self,
         run_id: UUID,
         candidate_ids: list[UUID] | None = None,
+        explicit_all: bool = False,
         created_by: str = "system",
     ) -> MaterializationResult:
         run = self.get_run(run_id)
+        if candidate_ids == []:
+            raise ValueError("candidate_ids=[] is an empty selection and will not materialize candidates")
+        if candidate_ids is None and not explicit_all:
+            raise ValueError("Materializing all candidates requires explicit_all=true")
+
         stmt = select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id == run.id)
-        if candidate_ids:
+        if candidate_ids is not None:
             stmt = stmt.where(ExternalAnalysisCandidate.id.in_(candidate_ids))
         candidates = self.session.scalars(stmt.order_by(ExternalAnalysisCandidate.created_at.asc())).all()
 

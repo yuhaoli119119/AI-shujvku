@@ -105,6 +105,9 @@ async def export_dft_results_csv(
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": "attachment; filename=dft_results_export.csv",
+            "X-D3-Export-Safety-Gate": "safe_verified_with_required_evidence",
+            "X-D3-Export-Count": str(gate_summary["eligible"]),
+            "X-D3-Block-Count": str(gate_summary["blocked"]),
             "X-D1-Exported-Count": str(gate_summary["eligible"]),
             "X-D1-Blocked-Count": str(gate_summary["blocked"]),
             "X-D1-Blocked-Reasons": json.dumps(gate_summary["blocked_reasons"], sort_keys=True),

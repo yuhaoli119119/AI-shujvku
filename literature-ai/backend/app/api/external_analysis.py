@@ -94,6 +94,7 @@ async def materialize_external_analysis_run(
         result = service.materialize_candidates(
             run_id=run_id,
             candidate_ids=payload.candidate_ids,
+            explicit_all=payload.explicit_all,
             created_by=payload.created_by,
         )
         session.commit()
@@ -163,6 +164,7 @@ async def internal_ai_parse_paper(
         materialized = service.materialize_candidates(
             run_id=run.id,
             candidate_ids=None,
+            explicit_all=True,
             created_by="internal_ai",
         )
         created_notes = materialized.created_notes

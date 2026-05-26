@@ -551,6 +551,7 @@ async def review_paper(
             materialized = service.materialize_candidates(
                 run_id=run.id,
                 candidate_ids=None,
+                explicit_all=True,
                 created_by="mcp_review",
             )
             created_notes = materialized.created_notes

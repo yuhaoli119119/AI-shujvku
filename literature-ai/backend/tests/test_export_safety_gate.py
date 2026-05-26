@@ -102,6 +102,9 @@ def test_dft_export_default_excludes_missing_review(tmp_path):
             response, rows = _export_rows(session)
 
             assert rows == []
+            assert response.headers["x-d3-export-safety-gate"] == "safe_verified_with_required_evidence"
+            assert response.headers["x-d3-export-count"] == "0"
+            assert response.headers["x-d3-block-count"] == "1"
             assert response.headers["x-d1-exported-count"] == "0"
             assert response.headers["x-d1-blocked-count"] == "1"
             assert "missing_review" in response.headers["x-d1-blocked-reasons"]
@@ -175,6 +178,25 @@ def test_dft_export_allows_safe_verified_with_evidence_text(tmp_path):
             assert rows[0]["value"] == "-1.23"
             assert rows[0]["review_status"] == "verified"
             assert rows[0]["review_gate_status"] == "safe_verified"
+    finally:
+        engine.dispose()
+
+
+def test_dft_export_default_excludes_missing_evidence_text(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper, evidence_text="")
+            _safe_review(session, paper, row)
+            _evidence_ref(session, paper, row)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert response.headers["x-d3-block-count"] == "1"
+            assert "missing_evidence_text" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 

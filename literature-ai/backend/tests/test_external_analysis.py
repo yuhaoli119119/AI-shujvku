@@ -94,7 +94,7 @@ def test_external_analysis_import_and_materialize_flow():
             run_id = run_payload["id"]
             materialized = client.post(
                 f"/api/external-analysis/runs/{run_id}/materialize",
-                json={"created_by": "reviewer_ai"},
+                json={"explicit_all": True, "created_by": "reviewer_ai"},
             )
             assert materialized.status_code == 200
             assert materialized.json()["created_notes"] == 1
@@ -118,6 +118,66 @@ def test_external_analysis_import_and_materialize_flow():
                 assert session.query(PaperNote).count() == 1
                 assert session.query(PaperCorrection).count() == 1
                 assert session.query(PaperRelationship).count() == 1
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_materialize_rejects_empty_or_implicit_all():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_contract.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Contract Paper", pdf_path="contract.pdf", authors=[])
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper.id),
+                    "source": "chatgpt_web",
+                    "raw_payload": {
+                        "review_notes": [{"content": "Candidate note.", "field_name": "abstract"}],
+                    },
+                },
+            )
+            assert imported.status_code == 200
+            run_id = imported.json()["id"]
+
+            empty_selection = client.post(
+                f"/api/external-analysis/runs/{run_id}/materialize",
+                json={"candidate_ids": [], "created_by": "reviewer_ai"},
+            )
+            assert empty_selection.status_code == 400
+            assert "candidate_ids=[]" in empty_selection.json()["detail"]
+
+            implicit_all = client.post(
+                f"/api/external-analysis/runs/{run_id}/materialize",
+                json={"created_by": "reviewer_ai"},
+            )
+            assert implicit_all.status_code == 400
+            assert "explicit_all=true" in implicit_all.json()["detail"]
+
+            with Session(engine) as session:
+                assert session.query(PaperNote).count() == 0
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

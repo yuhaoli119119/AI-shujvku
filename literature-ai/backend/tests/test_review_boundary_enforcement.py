@@ -234,7 +234,7 @@ def test_ai_candidate_cannot_overwrite_human_verified(tmp_path):
 
             # materialize should not overwrite the verified review
             service = ExternalAnalysisService(session, Settings())
-            result = service.materialize_candidates(run.id)
+            result = service.materialize_candidates(run.id, explicit_all=True)
             session.flush()
 
             stored = session.get(ExtractionFieldReview, review.id)
@@ -309,7 +309,7 @@ def test_import_ai_candidate_does_not_create_verified_review(tmp_path):
 
             # materialize should create a PaperCorrection, not an ExtractionFieldReview with verified
             service = ExternalAnalysisService(session, Settings())
-            result = service.materialize_candidates(run.id)
+            result = service.materialize_candidates(run.id, explicit_all=True)
             session.flush()
 
             # No ExtractionFieldReview should exist with verified from AI import

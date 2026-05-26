@@ -208,7 +208,7 @@ def test_ai_candidate_does_not_overwrite_manual_verified_review(tmp_path):
             )
             session.commit()
 
-            result = ExternalAnalysisService(session, Settings()).materialize_candidates(run.id)
+            result = ExternalAnalysisService(session, Settings()).materialize_candidates(run.id, explicit_all=True)
             session.flush()
 
             stored = session.get(ExtractionFieldReview, review.id)

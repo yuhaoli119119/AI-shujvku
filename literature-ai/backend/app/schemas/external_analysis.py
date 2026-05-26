@@ -16,7 +16,14 @@ class ExternalAnalysisImportRequest(BaseModel):
 
 
 class ExternalAnalysisMaterializeRequest(BaseModel):
-    candidate_ids: list[UUID] = Field(default_factory=list)
+    candidate_ids: list[UUID] | None = Field(
+        default=None,
+        description="Explicit candidate ids to materialize. Empty lists are rejected; use explicit_all=true for all.",
+    )
+    explicit_all: bool = Field(
+        default=False,
+        description="Required when candidate_ids is null/omitted and all candidates should be materialized.",
+    )
     created_by: str = "system"
 
 
