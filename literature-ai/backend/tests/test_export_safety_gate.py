@@ -96,7 +96,7 @@ def test_dft_export_default_excludes_missing_review(tmp_path):
         with SessionLocal() as session:
             paper = _paper(session)
             row = _dft(session, paper)
-            _evidence_ref(session, paper, row)
+            _evidence_ref(session, paper, row, page=1)
             session.commit()
 
             response, rows = _export_rows(session)
@@ -168,7 +168,7 @@ def test_dft_export_allows_safe_verified_with_evidence_text(tmp_path):
             paper = _paper(session)
             row = _dft(session, paper)
             _safe_review(session, paper, row)
-            _evidence_ref(session, paper, row)
+            _evidence_ref(session, paper, row, page=1)
             session.commit()
 
             response, rows = _export_rows(session)
@@ -201,7 +201,7 @@ def test_dft_export_default_excludes_missing_evidence_text(tmp_path):
         engine.dispose()
 
 
-def test_dft_export_does_not_fabricate_page_or_bbox(tmp_path):
+def test_dft_export_blocks_missing_page_and_does_not_fabricate_page_or_bbox(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -211,11 +211,11 @@ def test_dft_export_does_not_fabricate_page_or_bbox(tmp_path):
             _evidence_ref(session, paper, row, page=None)
             session.commit()
 
-            _, rows = _export_rows(session)
+            response, rows = _export_rows(session)
 
-            assert rows[0]["provenance_level"] == "text_evidence_only"
-            assert rows[0]["locator_status"] == "missing_locator"
-            assert "page" not in rows[0]
-            assert "bbox" not in rows[0]
+            assert rows == []
+            assert response.headers["x-d3-export-count"] == "0"
+            assert response.headers["x-d3-block-count"] == "1"
+            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()

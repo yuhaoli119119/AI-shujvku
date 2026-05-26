@@ -143,7 +143,7 @@ def test_text_only_evidence_with_unsafe_review_cannot_enter_writing_or_export(tm
 
             assert gate.eligible is False
             assert gate.provenance_level == "text_evidence_only"
-            assert gate.locator_status == "missing_locator"
+            assert gate.locator_status == "missing_page"
             assert "unsafe_review" in gate.reasons
             assert retrieved["dft_results"] == []
     finally:

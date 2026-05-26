@@ -284,6 +284,7 @@ def test_unreviewed_extraction_fact_is_not_retrieved_for_writing(tmp_path):
                         object_type="mechanism_claims",
                         object_id=str(safe.id),
                         text="Safe evidence.",
+                        page=1,
                     ),
                     ExtractionFieldReview(
                         paper_id=paper.id,

@@ -110,6 +110,7 @@ def test_retriever_writer_and_citation_guard_work_together():
                             object_type=target_type,
                             object_id=str(row.id),
                             text=row.evidence_text,
+                            page=1,
                         )
                     )
                     session.add(

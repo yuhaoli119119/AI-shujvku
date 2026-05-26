@@ -37,6 +37,16 @@ TARGET_TYPE_ALIASES: dict[str, set[str]] = {
     "writing_cards": {"writing_cards", "writing_card", "WritingCard"},
 }
 
+LOCATOR_PAYLOAD_KEYS = {
+    "locator_status",
+    "provenance_level",
+    "page",
+    "bbox",
+    "can_jump_to_pdf_page",
+    "can_highlight_in_pdf",
+    "evidence_locator",
+}
+
 
 @dataclass(frozen=True)
 class ExportGateResult:
@@ -199,6 +209,27 @@ def has_required_evidence_reference(
     return False
 
 
+def _safe_locator_from_parts(
+    *,
+    page: Any,
+    locator_status: Any,
+    evidence_text: Any = "",
+    bbox: Any = None,
+    warning_reason: Any = None,
+    can_jump_to_pdf_page: Any = None,
+) -> bool:
+    degradation = locator_degradation(
+        page=page,
+        locator_status=locator_status,
+        evidence_text=str(evidence_text or ""),
+        bbox=bbox if isinstance(bbox, dict) else None,
+        warning_reason=str(warning_reason) if warning_reason else None,
+    )
+    if can_jump_to_pdf_page is False:
+        return False
+    return degradation.locator_status == "exact_page" and degradation.can_jump_to_pdf_page
+
+
 def _locator_summary(
     session: Session,
     *,
@@ -220,8 +251,56 @@ def _locator_summary(
         ).all()
     )
     if not locators:
+        span_pages = []
+        if _table_exists(session, "evidence_spans"):
+            span_pages = list(
+                session.scalars(
+                    select(EvidenceSpan.page).where(
+                        EvidenceSpan.paper_id == paper_id,
+                        EvidenceSpan.object_id == target_id_str,
+                        EvidenceSpan.object_type.in_(target_types),
+                        EvidenceSpan.text.is_not(None),
+                        EvidenceSpan.text != "",
+                    )
+                ).all()
+            )
+        if any(_safe_locator_from_parts(page=page, locator_status="exact_page") for page in span_pages):
+            return "exact_pdf_page", "exact_page"
+        if span_pages:
+            return "text_evidence_only", "missing_page"
+
+        claim_pages = []
+        if _table_exists(session, "evidence_claims"):
+            claim_pages = list(
+                session.execute(
+                    select(EvidenceClaim.page_start, EvidenceClaim.page_end).where(
+                        EvidenceClaim.paper_id == paper_id,
+                        EvidenceClaim.target_id == target_id_str,
+                        EvidenceClaim.target_type.in_(target_types),
+                        EvidenceClaim.evidence_text.is_not(None),
+                        EvidenceClaim.evidence_text != "",
+                    )
+                ).all()
+            )
+        if any(
+            _safe_locator_from_parts(page=page_start or page_end, locator_status="exact_page")
+            for page_start, page_end in claim_pages
+        ):
+            return "exact_pdf_page", "exact_page"
+        if claim_pages:
+            return "text_evidence_only", "missing_page"
+
         return "text_evidence_only", "missing_locator"
-    if any(locator.page is not None for locator in locators):
+    if any(
+        _safe_locator_from_parts(
+            page=locator.page,
+            locator_status=locator.locator_status,
+            evidence_text=locator.evidence_text,
+            bbox=locator.bbox,
+            warning_reason=locator.warning_reason,
+        )
+        for locator in locators
+    ):
         return "exact_pdf_page", "exact_page"
     statuses = [
         locator_degradation(
@@ -248,6 +327,7 @@ def build_export_gate_reason(
     has_safe_review: bool,
     has_evidence_reference: bool,
     has_evidence_text: bool,
+    has_safe_locator: bool,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if not has_review:
@@ -258,6 +338,8 @@ def build_export_gate_reason(
         reasons.append("missing_evidence")
     if not has_evidence_text:
         reasons.append("missing_evidence_text")
+    if has_evidence_reference and not has_safe_locator:
+        reasons.append("unsafe_locator")
     return tuple(reasons)
 
 
@@ -282,17 +364,18 @@ def is_export_eligible_extraction(
         target_id=row.id,
     )
     has_evidence_text = has_required_evidence_text(row)
-    reasons = build_export_gate_reason(
-        has_review=has_review,
-        has_safe_review=safe_review is not None,
-        has_evidence_reference=has_evidence_reference,
-        has_evidence_text=has_evidence_text,
-    )
     provenance_level, locator_status = _locator_summary(
         session,
         paper_id=row.paper_id,
         target_type=target_type,
         target_id=row.id,
+    )
+    reasons = build_export_gate_reason(
+        has_review=has_review,
+        has_safe_review=safe_review is not None,
+        has_evidence_reference=has_evidence_reference,
+        has_evidence_text=has_evidence_text,
+        has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
     )
     review_status = safe_review.reviewer_status if safe_review is not None else (
         ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews})) if reviews else "missing"
@@ -332,6 +415,28 @@ def _iter_dicts(value: Any) -> list[dict[str, Any]]:
     return items
 
 
+def _locator_payloads(value: Any) -> list[dict[str, Any]]:
+    payloads = []
+    for item in _iter_dicts(value):
+        nested = item.get("evidence_locator")
+        if isinstance(nested, dict):
+            payloads.append(nested)
+        if any(key in item for key in LOCATOR_PAYLOAD_KEYS - {"evidence_locator"}):
+            payloads.append(item)
+    return payloads
+
+
+def _safe_locator_payload(item: dict[str, Any]) -> bool:
+    return _safe_locator_from_parts(
+        page=item.get("page"),
+        locator_status=item.get("locator_status"),
+        evidence_text=item.get("evidence_text") or item.get("text") or "",
+        bbox=item.get("bbox"),
+        warning_reason=item.get("warning_reason"),
+        can_jump_to_pdf_page=item.get("can_jump_to_pdf_page"),
+    )
+
+
 def writing_card_gate(card: WritingCard) -> WritingGateResult:
     evidence_chain = card.evidence_chain
     if _is_blank(evidence_chain):
@@ -360,6 +465,14 @@ def writing_card_gate(card: WritingCard) -> WritingGateResult:
             evidence_chain_status="present",
             review_gate_status="blocked",
             blocked_reasons=("unsafe_review",),
+        )
+    locator_payloads = _locator_payloads(evidence_chain)
+    if locator_payloads and not all(_safe_locator_payload(item) for item in locator_payloads):
+        return WritingGateResult(
+            can_use_for_writing=False,
+            evidence_chain_status="present",
+            review_gate_status="blocked",
+            blocked_reasons=("unsafe_locator",),
         )
     return WritingGateResult(
         can_use_for_writing=True,

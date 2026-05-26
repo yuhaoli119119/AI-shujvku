@@ -63,6 +63,7 @@ def _evidence_ref(session: Session, paper: Paper, row: DFTResult) -> EvidenceSpa
         object_type="dft_results",
         object_id=str(row.id),
         text=row.evidence_text or "Reviewed evidence.",
+        page=1,
     )
     session.add(span)
     session.flush()

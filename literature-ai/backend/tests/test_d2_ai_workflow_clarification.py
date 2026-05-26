@@ -82,7 +82,8 @@ def test_d2_e2e_rollback_keeps_ai_to_verified_boundary(active_sqlite_db):
         assert result["corrected_review_status_after_save"] == "corrected"
         assert result["mark_verified_status"] == "verified"
         assert result["mark_verified_safe_flag"] is True
-        assert result["export_gate_safe_verified"] is True
+        assert result["export_gate_safe_verified"] is False
+        assert "unsafe_locator" in result["export_gate_reasons"]
         assert result["unsafe_data_blocked"] is True
 
         post_rollback = build_audit(session)
@@ -109,8 +110,9 @@ def test_d2_e2e_seed_if_needed_is_identified_and_rolled_back(active_sqlite_db):
     assert result["seed_marker"] == "D2_E2E_TEST"
     assert result["seed_page"] is None
     assert result["seed_bbox"] is None
-    assert result["safe_eligible_count"] == 1
-    assert result["blocked_count"] == 1
+    assert result["safe_eligible_count"] == 0
+    assert result["blocked_count"] == 2
+    assert "unsafe_locator" in result["export_gate_reasons"]
     assert "missing_review" in result["unsafe_gate_reasons"]
     assert "missing_evidence" in result["unsafe_gate_reasons"]
     assert result["writing_cards_safe_usable"] == 0
@@ -160,7 +162,8 @@ def test_d2_real_extraction_sample_uses_real_markdown_and_rolls_back(active_sqli
     assert result["bbox"] is None
     assert result["corrected_review_status_after_save"] == "corrected"
     assert result["mark_verified_status"] == "verified"
-    assert result["export_gate_safe_verified"] is True
+    assert result["export_gate_safe_verified"] is False
+    assert "unsafe_locator" in result["export_gate_reasons"]
     assert result["unsafe_data_blocked"] is True
     assert result["writing_cards_safe_usable"] == 0
 
