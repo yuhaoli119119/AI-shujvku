@@ -18,7 +18,12 @@ WORKSPACE_ROOT = PROJECT_ROOT.parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.utils.active_database import WINDOWS_MIRROR_COLON, WINDOWS_MIRROR_SEP, get_registered_active_library_info
+from app.utils.active_database import (
+    WINDOWS_MIRROR_COLON,
+    WINDOWS_MIRROR_SEP,
+    get_active_database_info,
+    get_registered_active_library_info,
+)
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
 from app.utils.project_paths import canonical_registry_path, default_library_root, shadow_registry_paths
 
@@ -544,6 +549,87 @@ def _recommended_next_gate(risk_level: str, *, path_conflicts: int, missing_file
     return "controlled_migration_apply_can_be_planned_after_backup_and_freeze_confirmation"
 
 
+def _resolved_path_or_none(path_value: Any) -> Path | None:
+    if path_value is None or not str(path_value).strip():
+        return None
+    return Path(str(path_value)).resolve()
+
+
+def _expected_active_files_count(*, root: Path) -> int:
+    return sum(1 for path in (root / "database.sqlite", root / "library.json") if path.exists())
+
+
+def _phase_state(
+    *,
+    current_root: Path,
+    current_db: Path,
+    proposed_root: Path,
+    proposed_db: Path,
+    proposed_library_json: Path,
+    active_db_info: dict[str, Any],
+    papers_total: int,
+    missing_referenced_files: int,
+    duplicate_artifact_paths: int,
+) -> dict[str, Any]:
+    active_db_path = _resolved_path_or_none(active_db_info.get("active_library_db_path"))
+    effective_db_path = _resolved_path_or_none(active_db_info.get("effective_db_path"))
+    db_recovered = bool(active_db_info.get("recovered_from_candidate_scan"))
+    db_is_target = active_db_path == proposed_db.resolve() and effective_db_path == proposed_db.resolve()
+    root_is_target = current_root.resolve() == proposed_root.resolve()
+    target_files_exist = proposed_db.exists() and proposed_library_json.exists()
+    referenced_present = missing_referenced_files == 0
+    no_duplicate_artifacts = duplicate_artifact_paths == 0
+    papers_total_ok = papers_total == 15
+
+    post_migration_candidate = root_is_target and db_is_target and target_files_exist
+    migration_complete = (
+        post_migration_candidate
+        and papers_total_ok
+        and not db_recovered
+        and referenced_present
+        and no_duplicate_artifacts
+    )
+    if post_migration_candidate:
+        readiness_result = "complete" if migration_complete else "post_migration_attention_required"
+        return {
+            "migration_phase": "post_migration",
+            "migration_complete": migration_complete,
+            "migration_action_required": not migration_complete,
+            "apply_should_run": False,
+            "readiness_result": readiness_result,
+            "active_root_status": "canonical_target_active" if db_is_target else "canonical_target_registry_only",
+            "historical_mirror_status": "legacy_retained_not_active",
+            "recommended_next_action": (
+                "none_or_post_migration_monitoring" if migration_complete else "investigate_post_migration_drift"
+            ),
+            "db_referenced_files_present": referenced_present,
+            "post_migration_risk_reasons": [
+                reason
+                for reason, active in (
+                    ("active_database_papers_total_not_15", not papers_total_ok),
+                    ("recovered_from_candidate_scan_true", db_recovered),
+                    ("missing_referenced_files", not referenced_present),
+                    ("duplicate_artifact_paths", not no_duplicate_artifacts),
+                    ("active_db_not_target_root", not db_is_target),
+                )
+                if active
+            ],
+        }
+
+    return {
+        "migration_phase": "pre_migration",
+        "migration_complete": False,
+        "migration_action_required": True,
+        "apply_should_run": True,
+        "readiness_result": "ready_check",
+        "active_root_status": "historical_mirror_active" if _is_mirror_path(str(current_root)) else "non_target_active",
+        "historical_mirror_status": "active_source" if _is_mirror_path(str(current_root)) else "not_detected_as_active",
+        "recommended_next_action": "continue_controlled_migration_readiness",
+        "db_referenced_files_present": referenced_present,
+        "post_migration_risk_reasons": [],
+    }
+
+
 def _migration_mode_recommendation(*, missing_files: int, unreferenced_files: int, target_conflicts: int) -> str:
     if missing_files > 0:
         return "blocked_until_missing_referenced_files_are_resolved"
@@ -592,6 +678,7 @@ def build_report() -> dict[str, Any]:
     proposed_db = (proposed_root / "database.sqlite").resolve()
     proposed_library_json = (proposed_root / "library.json").resolve()
     shadows = [path.resolve() for path in shadow_registry_paths() if path.exists()]
+    active_db_info = get_active_database_info()
 
     if not current_db.exists():
         raise RuntimeError(f"Active database missing: {current_db}")
@@ -634,10 +721,47 @@ def build_report() -> dict[str, Any]:
         integrity_result=integrity_result,
         papers_total=papers_total,
     )
+    phase_state = _phase_state(
+        current_root=current_root,
+        current_db=current_db,
+        proposed_root=proposed_root,
+        proposed_db=proposed_db,
+        proposed_library_json=proposed_library_json,
+        active_db_info=active_db_info,
+        papers_total=papers_total,
+        missing_referenced_files=source_inventory["missing_referenced_files_count"],
+        duplicate_artifact_paths=len(artifact_audit["duplicate_artifact_paths"]),
+    )
+    phase_aware_path_conflicts_count = 0 if phase_state["migration_complete"] else len(merged_conflicts)
+    phase_aware_risk_level = "low" if phase_state["migration_complete"] else risk_level
+    phase_aware_next_gate = (
+        phase_state["recommended_next_action"]
+        if phase_state["migration_complete"]
+        else _recommended_next_gate(
+            risk_level,
+            path_conflicts=len(merged_conflicts),
+            missing_files=len(artifact_audit["missing_files"]),
+        )
+    )
+    phase_aware_migration_mode = (
+        "already_migrated_no_apply"
+        if phase_state["migration_complete"]
+        else _migration_mode_recommendation(
+            missing_files=source_inventory["missing_referenced_files_count"],
+            unreferenced_files=source_inventory["unreferenced_files_count"],
+            target_conflicts=len(merged_conflicts),
+        )
+    )
 
     report = {
         "mode": "dry_run",
         "apply_supported": False,
+        **phase_state,
+        "active_database_info": active_db_info,
+        "target_conflicts_count": phase_aware_path_conflicts_count,
+        "expected_active_files_count": (
+            _expected_active_files_count(root=proposed_root) if phase_state["migration_phase"] == "post_migration" else 0
+        ),
         "active_library": active_library,
         "current_active_library_root": str(current_root),
         "current_active_database_path": str(current_db),
@@ -675,7 +799,8 @@ def build_report() -> dict[str, Any]:
         "unreferenced_non_pdf_count": source_inventory["unreferenced_non_pdf_count"],
         "missing_referenced_files_count": source_inventory["missing_referenced_files_count"],
         "duplicate_or_suspect_files": source_inventory["duplicate_or_suspect_files"],
-        "migration_mode_recommendation": _migration_mode_recommendation(
+        "migration_mode_recommendation": phase_aware_migration_mode,
+        "legacy_migration_mode_recommendation": _migration_mode_recommendation(
             missing_files=source_inventory["missing_referenced_files_count"],
             unreferenced_files=source_inventory["unreferenced_files_count"],
             target_conflicts=len(merged_conflicts),
@@ -701,8 +826,10 @@ def build_report() -> dict[str, Any]:
         "active_db_papers_total": papers_total,
         "backup_plan": _backup_plan(canonical_registry, current_db, current_root, proposed_root),
         "rollback_plan": _rollback_plan(canonical_registry, current_db, current_root, proposed_root),
-        "migration_risk_level": risk_level,
-        "recommended_next_gate": _recommended_next_gate(
+        "migration_risk_level": phase_aware_risk_level,
+        "legacy_migration_risk_level": risk_level,
+        "recommended_next_gate": phase_aware_next_gate,
+        "legacy_recommended_next_gate": _recommended_next_gate(
             risk_level,
             path_conflicts=len(merged_conflicts),
             missing_files=len(artifact_audit["missing_files"]),

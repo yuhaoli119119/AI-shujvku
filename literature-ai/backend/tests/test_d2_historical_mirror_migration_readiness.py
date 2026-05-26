@@ -31,8 +31,30 @@ def _write_registry(path: Path, *, root_path: Path) -> None:
     )
 
 
-def _write_sqlite(path: Path) -> None:
+def _write_sqlite(
+    path: Path,
+    *,
+    rows: list[tuple[str, str, str | None, str | None, str | None, str | None]] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    rows = rows or [
+        (
+            "paper-1",
+            "Ready paper",
+            "storage/pdf/ready.pdf",
+            "storage/tei/ready.tei.xml",
+            "storage/docling_json/ready.docling.json",
+            "storage/markdown/ready.md",
+        ),
+        (
+            "paper-2",
+            "Missing markdown",
+            "storage/pdf/missing.pdf",
+            None,
+            None,
+            "storage/markdown/missing.md",
+        ),
+    ]
     connection = sqlite3.connect(str(path))
     try:
         connection.execute(
@@ -49,24 +71,7 @@ def _write_sqlite(path: Path) -> None:
         )
         connection.executemany(
             "INSERT INTO papers (id, title, pdf_path, tei_path, docling_json_path, markdown_path) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-                (
-                    "paper-1",
-                    "Ready paper",
-                    "storage/pdf/ready.pdf",
-                    "storage/tei/ready.tei.xml",
-                    "storage/docling_json/ready.docling.json",
-                    "storage/markdown/ready.md",
-                ),
-                (
-                    "paper-2",
-                    "Missing markdown",
-                    "storage/pdf/missing.pdf",
-                    None,
-                    None,
-                    "storage/markdown/missing.md",
-                ),
-            ],
+            rows,
         )
         connection.commit()
     finally:
@@ -165,3 +170,109 @@ def test_build_report_is_cwd_stable(monkeypatch, tmp_path):
     assert report_from_workspace["all_source_files_to_copy_count"] == report_from_backend["all_source_files_to_copy_count"]
     assert report_from_workspace["db_referenced_files_to_copy_count"] == report_from_backend["db_referenced_files_to_copy_count"]
     assert report_from_workspace["migration_mode_recommendation"] == report_from_backend["migration_mode_recommendation"]
+
+
+def _configure_post_migration(monkeypatch, tmp_path, *, recovered: bool = False, missing_artifact: bool = False):
+    workspace_root = tmp_path / "workspace"
+    project_root = workspace_root / "literature-ai"
+    backend_root = project_root / "backend"
+    target_root = project_root / "data" / "libraries" / "default"
+    canonical_registry = project_root / "data" / "library_registry.json"
+
+    rows = []
+    for index in range(15):
+        rows.append(
+            (
+                f"paper-{index}",
+                f"Paper {index}",
+                "storage/pdf/ready.pdf" if index == 0 else None,
+                "storage/tei/ready.tei.xml" if index == 0 else None,
+                "storage/docling_json/ready.docling.json" if index == 0 else None,
+                "storage/markdown/ready.md" if index == 0 else None,
+            )
+        )
+    if missing_artifact:
+        rows[0] = (
+            "paper-0",
+            "Paper 0",
+            "storage/pdf/missing.pdf",
+            "storage/tei/ready.tei.xml",
+            "storage/docling_json/ready.docling.json",
+            "storage/markdown/ready.md",
+        )
+
+    _write_sqlite(target_root / "database.sqlite", rows=rows)
+    _write_artifact(target_root / "library.json", '{"name":"default","storage_mode":"library"}')
+    _write_artifact(target_root / "storage" / "pdf" / "ready.pdf")
+    _write_artifact(target_root / "storage" / "tei" / "ready.tei.xml")
+    _write_artifact(target_root / "storage" / "docling_json" / "ready.docling.json")
+    _write_artifact(target_root / "storage" / "markdown" / "ready.md")
+    historical_root = backend_root / "D\uf03a\uf05cDesktop\uf05ctest\uf05clibraries\uf05cdefault"
+    _write_artifact(historical_root / "library.json", '{"name":"legacy"}')
+
+    _write_registry(canonical_registry, root_path=target_root)
+
+    monkeypatch.setattr(readiness, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(readiness, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(readiness, "WORKSPACE_ROOT", workspace_root)
+    monkeypatch.setattr(readiness, "canonical_registry_path", lambda: canonical_registry.resolve())
+    monkeypatch.setattr(readiness, "default_library_root", lambda: target_root.resolve())
+    monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [])
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
+    monkeypatch.setattr(
+        readiness,
+        "get_active_database_info",
+        lambda: {
+            "active_library_db_path": str((target_root / "database.sqlite").resolve()),
+            "effective_db_path": str((target_root / "database.sqlite").resolve()),
+            "db_kind": "sqlite",
+            "recovered_from_candidate_scan": recovered,
+        },
+    )
+    return target_root, historical_root
+
+
+def test_post_migration_readiness_reports_complete_without_apply(monkeypatch, tmp_path):
+    target_root, historical_root = _configure_post_migration(monkeypatch, tmp_path)
+
+    report = readiness.build_report()
+
+    assert report["migration_phase"] == "post_migration"
+    assert report["migration_complete"] is True
+    assert report["migration_action_required"] is False
+    assert report["apply_should_run"] is False
+    assert report["readiness_result"] == "complete"
+    assert report["active_root_status"] == "canonical_target_active"
+    assert report["historical_mirror_status"] == "legacy_retained_not_active"
+    assert report["recommended_next_gate"] == "none_or_post_migration_monitoring"
+    assert report["migration_mode_recommendation"] == "already_migrated_no_apply"
+    assert report["target_conflicts_count"] == 0
+    assert report["expected_active_files_count"] == 2
+    assert report["db_referenced_files_present"] is True
+    assert report["current_active_library_root"] == str(target_root.resolve())
+    assert historical_root.exists()
+
+
+def test_post_migration_recovered_candidate_scan_reports_attention(monkeypatch, tmp_path):
+    _configure_post_migration(monkeypatch, tmp_path, recovered=True)
+
+    report = readiness.build_report()
+
+    assert report["migration_phase"] == "post_migration"
+    assert report["migration_complete"] is False
+    assert report["migration_action_required"] is True
+    assert report["apply_should_run"] is False
+    assert report["readiness_result"] == "post_migration_attention_required"
+    assert "recovered_from_candidate_scan_true" in report["post_migration_risk_reasons"]
+
+
+def test_post_migration_missing_referenced_artifact_reports_attention(monkeypatch, tmp_path):
+    _configure_post_migration(monkeypatch, tmp_path, missing_artifact=True)
+
+    report = readiness.build_report()
+
+    assert report["migration_phase"] == "post_migration"
+    assert report["migration_complete"] is False
+    assert report["db_referenced_files_present"] is False
+    assert report["missing_referenced_files_count"] == 1
+    assert "missing_referenced_files" in report["post_migration_risk_reasons"]
