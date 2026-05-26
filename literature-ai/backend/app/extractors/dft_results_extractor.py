@@ -126,6 +126,8 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
     "reaction_barrier": [
         r"(?:reaction\s+)?(?:barrier|activation\s+energy|E_a).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         r"E_a\s*[=\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"E\s*[_\-\s]?\s*a\s*[=＝\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"(?:活化能|活化能垒|能垒|反应能垒).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         r"energy\s+barrier.{0,30}([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         ],
     "li2s_decomposition_barrier": [
@@ -373,6 +375,9 @@ class DFTResultsExtractor:
                 sec_text_map[offset] = (title, ps)
                 full_text_parts.append(f"\n\n{txt}")
                 offset += len(txt) + 2
+        if markdown:
+            sec_text_map[offset] = ("markdown", None)
+            full_text_parts.append(f"\n\n{markdown}")
         full_text = "\n\n".join(full_text_parts)
 
         for cat in self.categories:

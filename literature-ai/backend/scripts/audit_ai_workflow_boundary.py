@@ -6,7 +6,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -28,6 +28,7 @@ from app.db.models import (
 from app.db.session import get_engine
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
+from app.services.paper_reprocessing import PaperReprocessingService
 from app.utils.active_database import activate_active_library_database, require_active_library_sqlite
 from app.utils.review_safety import has_required_evidence_reference, is_export_eligible_extraction, writing_card_gate
 
@@ -241,6 +242,184 @@ def run_e2e_rollback(session: Session, *, seed_if_needed: bool = False) -> dict[
     }
 
 
+def _choose_real_sample_paper(session: Session, paper_id: UUID | None = None) -> tuple[Paper | None, dict[str, Any]]:
+    settings = get_settings()
+    service = PaperReprocessingService(session, settings)
+    stmt = select(Paper).where(Paper.markdown_path.is_not(None))
+    if paper_id is not None:
+        stmt = stmt.where(Paper.id == paper_id)
+    papers = session.scalars(stmt.order_by(Paper.created_at.asc())).all()
+    inspected: list[dict[str, Any]] = []
+    for paper in papers:
+        try:
+            document = service._rebuild_document(paper)
+            candidates = service.pipeline.dft_results_extractor.extract(document)
+        except Exception as exc:
+            inspected.append({"paper_id": str(paper.id), "title": paper.title, "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        inspected.append(
+            {
+                "paper_id": str(paper.id),
+                "title": paper.title,
+                "candidate_count": len(candidates),
+            }
+        )
+        if candidates:
+            return paper, {
+                "sample_selection_reason": "real_markdown_produced_dft_result_candidates",
+                "sample_candidate_count": len(candidates),
+                "sample_candidates_preview": candidates[:3],
+                "inspected_papers": inspected,
+            }
+    return None, {
+        "sample_selection_reason": "no_real_paper_produced_dft_result_candidates",
+        "inspected_papers": inspected,
+    }
+
+
+def _target_evidence_count(session: Session, target: DFTResult) -> int:
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(EvidenceSpan)
+            .where(
+                EvidenceSpan.paper_id == target.paper_id,
+                EvidenceSpan.object_id == str(target.id),
+                EvidenceSpan.object_type.in_(["dft_result", "dft_results", "DFTResult"]),
+                EvidenceSpan.text.is_not(None),
+                EvidenceSpan.text != "",
+            )
+        )
+        or 0
+    )
+
+
+def run_real_extraction_sample_rollback(session: Session, *, paper_id: UUID | None = None) -> dict[str, Any]:
+    paper, selection = _choose_real_sample_paper(session, paper_id)
+    if paper is None:
+        return {
+            "status": "skipped",
+            "reason": selection["sample_selection_reason"],
+            **selection,
+        }
+
+    settings = get_settings()
+    reprocess = PaperReprocessingService(session, settings)
+    document = reprocess._rebuild_document(paper)
+    summary = reprocess.pipeline.replace_stage2(paper, document)
+    session.flush()
+
+    targets = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+    target = next(
+        (
+            row
+            for row in targets
+            if has_required_evidence_reference(
+                session,
+                paper_id=row.paper_id,
+                target_type="dft_results",
+                target_id=row.id,
+            )
+            and (row.evidence_text or "").strip()
+        ),
+        None,
+    )
+    if target is None:
+        return {
+            "status": "skipped",
+            "reason": "real_pipeline_produced_no_dft_result_with_required_evidence",
+            "sample_paper_id": str(paper.id),
+            "sample_title": paper.title,
+            "summary": summary,
+            **selection,
+        }
+    evidence_span = session.scalar(
+        select(EvidenceSpan)
+        .where(
+            EvidenceSpan.paper_id == target.paper_id,
+            EvidenceSpan.object_id == str(target.id),
+            EvidenceSpan.object_type.in_(["dft_result", "dft_results", "DFTResult"]),
+        )
+        .limit(1)
+    )
+
+    service = ExtractionReviewService(session)
+    saved = service.save_reviews(
+        paper.id,
+        [
+            ExtractionFieldReviewSaveItem(
+                target_type="dft_results",
+                target_id=str(target.id),
+                field_name="value",
+                original_value=target.value,
+                reviewed_value=target.value,
+                unit=target.unit,
+                evidence_text=target.evidence_text,
+                reviewer_status="corrected",
+                reviewer="d2_real_sample_probe",
+                reviewer_note="D2-3 rollback-only corrected review for real extraction sample",
+            )
+        ],
+    )
+    marked = service.mark_verified(
+        paper.id,
+        ExtractionReviewMarkVerifiedRequest(
+            target_type="dft_results",
+            target_id=str(target.id),
+            field_names=["value"],
+            reviewer="d2_real_sample_probe",
+            reviewer_note="D2-3 rollback-only mark verified for real extraction sample",
+        ),
+    )
+    safe_gate = is_export_eligible_extraction(session, target, target_type="dft_results")
+
+    unsafe_target = DFTResult(
+        paper_id=paper.id,
+        adsorbate="D2_REAL_SAMPLE_UNSAFE",
+        property_type="D2_REAL_SAMPLE_missing_review_and_evidence",
+        value=target.value,
+        unit=target.unit,
+        evidence_text=target.evidence_text,
+    )
+    session.add(unsafe_target)
+    session.flush()
+    unsafe_gate = is_export_eligible_extraction(session, unsafe_target, target_type="dft_results")
+    audit_after_gate = build_audit(session)
+
+    return {
+        "status": "passed",
+        "rolled_back": True,
+        "sample_paper_id": str(paper.id),
+        "sample_title": paper.title,
+        "sample_markdown_path": paper.markdown_path,
+        "pipeline_summary": summary,
+        "extraction_target_count": len(targets),
+        "evidence_reference_count": _target_evidence_count(session, target),
+        "target_id": str(target.id),
+        "target_property_type": target.property_type,
+        "target_adsorbate": target.adsorbate,
+        "target_value": target.value,
+        "target_unit": target.unit,
+        "evidence_text": target.evidence_text,
+        "evidence_text_source": "real_paper_markdown_or_parsed_artifact",
+        "page": evidence_span.page if evidence_span is not None else None,
+        "bbox": None,
+        "corrected_review_status_after_save": saved[0].reviewer_status if saved else "missing",
+        "mark_verified_status": marked[0].reviewer_status if marked else "missing",
+        "mark_verified_safe_flag": marked[0].verified if marked else False,
+        "export_gate_safe_verified": safe_gate.eligible,
+        "export_gate_reasons": list(safe_gate.reasons),
+        "unsafe_target_id": str(unsafe_target.id),
+        "unsafe_data_blocked": not unsafe_gate.eligible,
+        "unsafe_gate_reasons": list(unsafe_gate.reasons),
+        "safe_eligible_count": audit_after_gate["dft_export_safe_eligible"],
+        "blocked_count": audit_after_gate["dft_export_blocked"],
+        "blocked_reasons": audit_after_gate["dft_export_blocked_reasons"],
+        "writing_cards_safe_usable": audit_after_gate["writing_cards_safe_usable"],
+        **selection,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Audit D2-1 AI candidate/review/export/writing safety boundaries.")
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
@@ -250,6 +429,12 @@ def main() -> None:
         action="store_true",
         help="Create D2_E2E_TEST rollback-only Paper/DFTResult/EvidenceSpan when no existing target is available.",
     )
+    parser.add_argument(
+        "--real-extraction-sample",
+        action="store_true",
+        help="Run rollback-only real paper reprocess/review/export sample gate.",
+    )
+    parser.add_argument("--sample-paper-id", help="Optional paper UUID for --real-extraction-sample.")
     args = parser.parse_args()
 
     activate_active_library_database()
@@ -261,6 +446,7 @@ def main() -> None:
             "active_database": db_info,
             "audit": build_audit(session),
             "e2e_rollback": None,
+            "real_extraction_sample": None,
         }
     if args.e2e_rollback:
         with engine.connect() as connection:
@@ -272,6 +458,20 @@ def main() -> None:
                 transaction.rollback()
         with Session(engine, autoflush=False, future=True) as session:
             report["post_e2e_audit"] = build_audit(session)
+    if args.real_extraction_sample:
+        sample_paper_id = UUID(args.sample_paper_id) if args.sample_paper_id else None
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                with Session(bind=connection, autoflush=False, future=True) as session:
+                    report["real_extraction_sample"] = run_real_extraction_sample_rollback(
+                        session,
+                        paper_id=sample_paper_id,
+                    )
+            finally:
+                transaction.rollback()
+        with Session(engine, autoflush=False, future=True) as session:
+            report["post_real_sample_audit"] = build_audit(session)
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
@@ -287,6 +487,8 @@ def main() -> None:
         print(f"{key}={value}")
     if report["e2e_rollback"] is not None:
         print(f"e2e_rollback={report['e2e_rollback']}")
+    if report["real_extraction_sample"] is not None:
+        print(f"real_extraction_sample={report['real_extraction_sample']}")
 
 
 if __name__ == "__main__":

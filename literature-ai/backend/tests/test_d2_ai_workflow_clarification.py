@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import Base, DFTResult, EvidenceSpan, ExternalAnalysisRun, Paper
 from app.utils.active_database import require_active_library_sqlite
-from scripts.audit_ai_workflow_boundary import build_audit, run_e2e_rollback
+from scripts.audit_ai_workflow_boundary import build_audit, run_e2e_rollback, run_real_extraction_sample_rollback
 
 
 @pytest.fixture
@@ -119,3 +119,51 @@ def test_d2_e2e_seed_if_needed_is_identified_and_rolled_back(active_sqlite_db):
         titles = [paper.title for paper in session.query(Paper).all()]
         assert not any("D2_E2E_TEST" in (title or "") for title in titles)
         assert build_audit(session)["dft_export_total_candidates"] == 0
+
+
+def test_d2_real_extraction_sample_uses_real_markdown_and_rolls_back(active_sqlite_db, tmp_path):
+    engine, _ = active_sqlite_db
+    markdown = tmp_path / "real_sample.md"
+    markdown.write_text(
+        "Li2S2 to Li2S conversion is the rate-limiting step. "
+        "The graphene baseline has an activation barrier (E a = 2.73 eV), "
+        "while SAC substrates reduce the barrier.",
+        encoding="utf-8",
+    )
+    with Session(engine, future=True) as session:
+        paper = Paper(
+            title="D2 real paper sample",
+            pdf_path="real.pdf",
+            markdown_path=str(markdown),
+            authors=["A"],
+        )
+        session.add(paper)
+        session.commit()
+        paper_id = paper.id
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            with Session(bind=connection, future=True) as session:
+                result = run_real_extraction_sample_rollback(session, paper_id=paper_id)
+        finally:
+            transaction.rollback()
+
+    assert result["status"] == "passed"
+    assert result["sample_paper_id"] == str(paper_id)
+    assert result["target_property_type"] == "reaction_barrier"
+    assert result["target_value"] == 2.73
+    assert result["target_unit"] == "eV"
+    assert "E a = 2.73 eV" in result["evidence_text"]
+    assert result["evidence_reference_count"] == 1
+    assert result["page"] is None
+    assert result["bbox"] is None
+    assert result["corrected_review_status_after_save"] == "corrected"
+    assert result["mark_verified_status"] == "verified"
+    assert result["export_gate_safe_verified"] is True
+    assert result["unsafe_data_blocked"] is True
+    assert result["writing_cards_safe_usable"] == 0
+
+    with Session(engine, future=True) as session:
+        assert session.query(DFTResult).count() == 0
+        assert build_audit(session)["dft_export_safe_eligible"] == 0
