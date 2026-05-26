@@ -123,6 +123,36 @@ class ExtractionReviewService:
             items=items,
         )
 
+    def prepare_pending_reviews(self, paper_id: UUID) -> list[ExtractionFieldReviewResponse]:
+        prepared: list[ExtractionFieldReviewResponse] = []
+        for canonical_type, model in TARGET_TYPE_MODELS.items():
+            rows = self.session.scalars(select(model).where(model.paper_id == paper_id)).all()
+            for target in rows:
+                snapshot = self.get_target_field_snapshot(canonical_type, target)
+                for field_name, field_snapshot in snapshot.items():
+                    if self._is_blank(field_snapshot["value"]):
+                        continue
+                    review = self._get_or_create_review(paper_id, canonical_type, str(target.id), field_name)
+                    if review.id is not None and review.reviewer_status == "verified":
+                        prepared.append(self._serialize(review))
+                        continue
+                    review.original_value = field_snapshot["value"]
+                    review.reviewed_value = None
+                    review.unit = field_snapshot["unit"]
+                    review.evidence_text = field_snapshot["evidence_text"]
+                    review.reviewer_status = "pending"
+                    review.reviewer = None
+                    review.reviewer_note = "prepared_from_extraction"
+                    review.target_resolution_status = "active"
+                    review.remapped_from_target_id = None
+                    review.last_resolved_target_id = str(target.id)
+                    self.resolver._refresh_review_identity(review, canonical_type, target)
+                    self.session.add(review)
+                    self.session.flush()
+                    prepared.append(self._serialize(review))
+        self.session.commit()
+        return prepared
+
     def save_reviews(self, paper_id: UUID, items: list[ExtractionFieldReviewSaveItem]) -> list[ExtractionFieldReviewResponse]:
         saved: list[ExtractionFieldReviewResponse] = []
         for item in items:
@@ -253,6 +283,16 @@ class ExtractionReviewService:
             target_resolution_status="active",
             last_resolved_target_id=target_id,
         )
+
+    @staticmethod
+    def _is_blank(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return not value.strip()
+        if isinstance(value, (list, dict)):
+            return len(value) == 0
+        return False
 
     @staticmethod
     def _guard_verified_review_mutation(

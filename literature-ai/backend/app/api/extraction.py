@@ -154,6 +154,16 @@ async def audit_extraction_field_reviews(
     return ExtractionReviewService(session).audit_reviews(paper_id)
 
 
+@router.post("/results/{paper_id}/reviews/prepare", response_model=list[ExtractionFieldReviewResponse])
+async def prepare_extraction_field_reviews(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> list[ExtractionFieldReviewResponse]:
+    if not session.get(Paper, paper_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return ExtractionReviewService(session).prepare_pending_reviews(paper_id)
+
+
 @router.post("/results/{paper_id}/reviews/save", response_model=list[ExtractionFieldReviewResponse])
 async def save_extraction_field_reviews(
     paper_id: UUID,
