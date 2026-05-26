@@ -204,9 +204,21 @@
           throw new Error(detail || "HTTP " + resp.status);
         }
         const gate = resp.headers.get("X-D3-Export-Safety-Gate") || "not returned";
-        const exported = resp.headers.get("X-D3-Export-Count") || "0";
-        const blocked = resp.headers.get("X-D3-Block-Count") || "0";
-        setExportSafetyStatus(`Safety gate: ${gate} | exported: ${exported} | blocked: ${blocked}`);
+        const exported = parseInt(resp.headers.get("X-D3-Export-Count") || "0", 10);
+        const blocked = parseInt(resp.headers.get("X-D3-Block-Count") || "0", 10);
+        
+        let statusMessage = `Safety gate: ${gate} | exported: ${exported} | blocked: ${blocked}`;
+        let toastMessage = "CSV export completed.";
+        
+        if (exported === 0 && blocked === 0) {
+            statusMessage = `Safety gate: ${gate} | exported: 0 | blocked: 0 (没有可导出的 Human verified + required evidence 记录)`;
+            toastMessage = "0 rows exported / 没有记录被导出";
+        } else if (exported === 0 && blocked > 0) {
+            statusMessage = `Safety gate: ${gate} | exported: 0 | blocked: ${blocked} (没有 safe rows 被导出，因缺少 Human verified 或 required evidence)`;
+            toastMessage = `0 rows exported / 没有 safe rows 被导出 (${blocked} blocked)`;
+        }
+
+        setExportSafetyStatus(statusMessage);
 
         const blob = new Blob([text], { type: resp.headers.get("Content-Type") || "text/csv;charset=utf-8" });
         const downloadUrl = URL.createObjectURL(blob);
@@ -217,7 +229,7 @@
         link.click();
         link.remove();
         URL.revokeObjectURL(downloadUrl);
-        showToast("CSV export completed.");
+        showToast(toastMessage);
       } catch (error) {
         setExportSafetyStatus("导出失败：" + error.message);
         showToast("CSV export failed: " + error.message);

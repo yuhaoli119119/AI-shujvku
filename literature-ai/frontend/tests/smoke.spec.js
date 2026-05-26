@@ -780,6 +780,77 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 2');
   });
 
+  test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {
+    await page.route(/\/api\/papers\/export\/csv/, route => {
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/csv',
+        headers: {
+          'X-D3-Export-Safety-Gate': 'enforced',
+          'X-D3-Export-Count': '0',
+          'X-D3-Block-Count': '0',
+        },
+        body: 'paper_id,title,value\n',
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('.export-note')).toContainText('Human verified + required evidence');
+    
+    const downloadPromise = page.waitForEvent('download');
+    await page.click('button[onclick="exportCSV()"]');
+    await downloadPromise;
+
+    await expect(page.locator('#exportSafetyStatus')).toContainText('enforced');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('exported: 0');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 0');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('没有可导出的 Human verified + required evidence 记录');
+    
+    // assert toast
+    await expect(page.locator('#toast')).toContainText('0 rows exported / 没有记录被导出');
+    
+    // check no misleading wording
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).not.toMatch(/Export successful|导出成功|已导出|全部完成|Final export|Final conclusion|Direct export/i);
+  });
+
+  test('business flow: DFT export blocked-only state shows correct wording and status', async ({ page }) => {
+    await page.route(/\/api\/papers\/export\/csv/, route => {
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/csv',
+        headers: {
+          'X-D3-Export-Safety-Gate': 'enforced',
+          'X-D3-Export-Count': '0',
+          'X-D3-Block-Count': '3',
+        },
+        body: 'paper_id,title,value\n',
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('.export-note')).toContainText('Human verified + required evidence');
+    
+    const downloadPromise = page.waitForEvent('download');
+    await page.click('button[onclick="exportCSV()"]');
+    await downloadPromise;
+
+    await expect(page.locator('#exportSafetyStatus')).toContainText('enforced');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('exported: 0');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 3');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('没有 safe rows 被导出');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('缺少 Human verified 或 required evidence');
+
+    // assert toast
+    await expect(page.locator('#toast')).toContainText('没有 safe rows 被导出 (3 blocked)');
+    
+    // check no misleading wording
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).not.toMatch(/Export successful|导出成功|已导出|全部完成|Final export|Final conclusion|Direct export/i);
+  });
+
   test('business flow: AI candidate materialize uses explicit scope contracts', async ({ page }) => {
     const runPayload = {
       id: 'run-1',
