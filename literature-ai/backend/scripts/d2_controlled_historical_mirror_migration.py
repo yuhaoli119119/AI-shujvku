@@ -322,6 +322,71 @@ def _verify_hash_match(copy_plan: list[dict[str, Any]]) -> tuple[bool, dict[str,
     return source_hashes == target_hashes, comparison
 
 
+def _post_migration_copy_plan_verification(copy_plan: list[dict[str, Any]]) -> tuple[bool, list[dict[str, Any]]]:
+    mismatches: list[dict[str, Any]] = []
+    for item in copy_plan:
+        target = Path(str(item["target_path"])).resolve()
+        expected_sha = str(item["source_sha256"])
+        if not target.exists():
+            mismatches.append(
+                {
+                    "relative_path": item["relative_path"],
+                    "reason": "target_missing",
+                    "expected_sha256": expected_sha,
+                    "target_sha256": None,
+                }
+            )
+            continue
+        actual_sha = _sha256(target)
+        if actual_sha != expected_sha:
+            mismatches.append(
+                {
+                    "relative_path": item["relative_path"],
+                    "reason": "sha256_mismatch",
+                    "expected_sha256": expected_sha,
+                    "target_sha256": actual_sha,
+                }
+            )
+    return not mismatches, mismatches
+
+
+def _already_migrated_state(
+    *,
+    readiness_report: dict[str, Any],
+    gate_report: dict[str, Any],
+    active_db_info: dict[str, Any],
+    target_root: Path,
+    copy_plan: list[dict[str, Any]],
+) -> dict[str, Any]:
+    target_db = (target_root / "database.sqlite").resolve()
+    active_root = Path(str(readiness_report["current_active_library_root"])).resolve()
+    registry_root = Path(str(readiness_report["current_active_library_root"])).resolve()
+    hash_ok, hash_mismatches = _post_migration_copy_plan_verification(copy_plan)
+    already_migrated = (
+        active_root == target_root.resolve()
+        and registry_root == target_root.resolve()
+        and _resolved_path_or_none(active_db_info.get("active_library_db_path")) == target_db
+        and _resolved_path_or_none(active_db_info.get("effective_db_path")) == target_db
+        and (target_root / "library.json").exists()
+        and int(readiness_report["active_db_papers_total"]) == EXPECTED_ACTIVE_DATABASE_PAPERS_TOTAL
+        and not bool(active_db_info.get("recovered_from_candidate_scan"))
+        and readiness_report["missing_referenced_files_count"] == 0
+        and readiness_report["duplicate_artifact_paths_count"] == 0
+        and gate_report.get("target_conflicts_count") == 0
+    )
+    migration_complete = already_migrated and hash_ok
+    return {
+        "migration_phase": "post_migration" if already_migrated else "pre_migration",
+        "already_migrated": already_migrated,
+        "migration_complete": migration_complete,
+        "apply_should_run": False if already_migrated else True,
+        "ready_for_apply_reason": "already_migrated" if migration_complete else None,
+        "post_migration_hashes_ok": hash_ok,
+        "post_migration_hash_mismatches": hash_mismatches,
+        "post_migration_hash_mismatches_count": len(hash_mismatches),
+    }
+
+
 def _update_canonical_registry_root(
     *,
     canonical_registry: Path,
@@ -410,12 +475,34 @@ def build_report(*, apply: bool = False) -> dict[str, Any]:
         copy_plan=copy_plan,
     )
     registry_backup_path = _planned_registry_backup_path(timestamp)
+    already_migrated_state = _already_migrated_state(
+        readiness_report=readiness_report,
+        gate_report=gate_report,
+        active_db_info=active_db_info,
+        target_root=target_root,
+        copy_plan=copy_plan,
+    )
+    ready_for_apply = not precondition_failures and not already_migrated_state["already_migrated"]
+    displayed_precondition_failures = [] if already_migrated_state["migration_complete"] else precondition_failures
+    ready_for_apply_reason = (
+        str(already_migrated_state["ready_for_apply_reason"])
+        if already_migrated_state["ready_for_apply_reason"]
+        else ("preconditions_passed" if ready_for_apply else "precondition_failure")
+    )
 
     report: dict[str, Any] = {
         "mode": "apply" if apply else "dry_run",
         "apply_requested": apply,
         "apply_executed": False,
         "apply_supported": True,
+        "migration_phase": already_migrated_state["migration_phase"],
+        "already_migrated": already_migrated_state["already_migrated"],
+        "migration_complete": already_migrated_state["migration_complete"],
+        "apply_should_run": already_migrated_state["apply_should_run"],
+        "ready_for_apply_reason": ready_for_apply_reason,
+        "post_migration_hashes_ok": already_migrated_state["post_migration_hashes_ok"],
+        "post_migration_hash_mismatches": already_migrated_state["post_migration_hash_mismatches"],
+        "post_migration_hash_mismatches_count": already_migrated_state["post_migration_hash_mismatches_count"],
         "source_root": str(source_root),
         "target_root": str(target_root),
         "canonical_registry_path": str(canonical_registry),
@@ -447,8 +534,10 @@ def build_report(*, apply: bool = False) -> dict[str, Any]:
         },
         "target_sha256_after": {},
         "apply_preconditions": {
-            "ready_for_apply": not precondition_failures,
-            "failures": precondition_failures,
+            "ready_for_apply": ready_for_apply,
+            "ready_for_apply_reason": ready_for_apply_reason,
+            "failures": displayed_precondition_failures,
+            "legacy_pre_apply_failures": precondition_failures,
         },
         "registry_update_rule": {
             "only_after_copy_and_hash_verification": True,
@@ -468,6 +557,11 @@ def build_report(*, apply: bool = False) -> dict[str, Any]:
     }
 
     if not apply:
+        report["markdown_audit_report"] = _render_markdown_report(report)
+        return report
+
+    if already_migrated_state["already_migrated"]:
+        report["error"] = "apply_blocked_already_migrated"
         report["markdown_audit_report"] = _render_markdown_report(report)
         return report
 

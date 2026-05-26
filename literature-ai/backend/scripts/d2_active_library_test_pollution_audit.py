@@ -116,7 +116,7 @@ def build_report(*, cleanup: bool = False, apply: bool = False) -> dict[str, Any
             cleanup_deleted.append(item)
 
     return {
-        "mode": "cleanup_apply" if cleanup and apply else ("cleanup_dry_run" if cleanup else "audit"),
+        "mode": "cleanup_apply" if cleanup and apply else ("cleanup_dry_run" if cleanup else "dry_run"),
         "cleanup_requested": cleanup,
         "cleanup_apply": cleanup and apply,
         "active_library_root": str(library_root),
@@ -129,6 +129,8 @@ def build_report(*, cleanup: bool = False, apply: bool = False) -> dict[str, Any
         "pdf_files_count": len(pdf_files),
         "unreferenced_pdf_count": len(unreferenced),
         "tiny_uuid_unreferenced_pdf_count": len(tiny_uuid_unreferenced),
+        "tiny_uuid_only_unref_pdf_count": len(tiny_uuid_unreferenced),
+        "pollution_detected": len(tiny_uuid_unreferenced) > 0,
         "tiny_uuid_unreferenced_pdfs": tiny_uuid_unreferenced,
         "cleanup_deleted_count": len(cleanup_deleted),
         "cleanup_deleted_files": cleanup_deleted,
@@ -137,6 +139,7 @@ def build_report(*, cleanup: bool = False, apply: bool = False) -> dict[str, Any
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit active library tiny UUID-only unreferenced PDF pollution.")
+    parser.add_argument("--dry-run", action="store_true", help="Explicit audit mode (default).")
     parser.add_argument("--cleanup", action="store_true", help="Plan cleanup of tiny UUID-only unreferenced PDFs.")
     parser.add_argument("--apply", action="store_true", help="Apply cleanup. Requires --cleanup.")
     return parser.parse_args()

@@ -141,3 +141,47 @@ def test_build_report_summarizes_target_conflicts_and_unreferenced_inventory(mon
     assert report["migration_mode_recommendation"] == "db_referenced_only_plus_required_library_metadata"
     assert report["risk_level"] == "high"
     assert report["apply_executed"] is False
+
+
+def test_post_migration_target_active_files_are_expected_not_conflicts(monkeypatch, tmp_path):
+    workspace_root = tmp_path / "workspace"
+    project_root = workspace_root / "literature-ai"
+    backend_root = project_root / "backend"
+    target_root = project_root / "data" / "libraries" / "default"
+    canonical_registry = project_root / "data" / "library_registry.json"
+
+    rows = [
+        (f"paper-{index}", f"Paper {index}", None, None, None, None)
+        for index in range(15)
+    ]
+    _write_sqlite(target_root / "database.sqlite", rows=rows)
+    _write_artifact(target_root / "library.json", '{"name":"default","storage_mode":"library"}')
+    _write_registry(canonical_registry, root_path=target_root)
+
+    monkeypatch.setattr(readiness, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(readiness, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(readiness, "WORKSPACE_ROOT", workspace_root)
+    monkeypatch.setattr(readiness, "canonical_registry_path", lambda: canonical_registry.resolve())
+    monkeypatch.setattr(readiness, "default_library_root", lambda: target_root.resolve())
+    monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [])
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
+    monkeypatch.setattr(
+        gate,
+        "get_active_database_info",
+        lambda: {
+            "configured_db_path": None,
+            "active_library_db_path": str((target_root / "database.sqlite").resolve()),
+            "effective_db_path": str((target_root / "database.sqlite").resolve()),
+            "effective_matches_active_library_db_path": True,
+            "recovered_from_candidate_scan": False,
+        },
+    )
+
+    report = gate.build_report()
+
+    assert report["migration_phase"] == "post_migration"
+    assert report["target_root_status"] == "active_canonical_target"
+    assert report["raw_target_conflicts_count"] == 2
+    assert report["expected_active_files_count"] == 2
+    assert report["target_conflicts_count"] == 0
+    assert report["target_conflicts"] == []

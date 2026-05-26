@@ -106,6 +106,33 @@ def _target_quarantine_plan(target_root: Path, target_conflicts: list[dict[str, 
     }
 
 
+def _is_post_migration_active_target(
+    *,
+    active_info: dict[str, Any],
+    readiness_report: dict[str, Any],
+    target_root: Path,
+    target_database_path: Path,
+) -> bool:
+    active_root = Path(str(readiness_report["current_active_library_root"])).resolve()
+    active_db = Path(str(readiness_report["current_active_database_path"])).resolve()
+    effective_db = active_info.get("effective_db_path")
+    active_library_db = active_info.get("active_library_db_path")
+    return (
+        active_root == target_root.resolve()
+        and active_db == target_database_path.resolve()
+        and _resolved_path(active_library_db) == target_database_path.resolve()
+        and _resolved_path(effective_db) == target_database_path.resolve()
+        and readiness_report["active_db_papers_total"] == 15
+        and not bool(active_info.get("recovered_from_candidate_scan"))
+    )
+
+
+def _resolved_path(path_value: Any) -> Path | None:
+    if path_value is None or not str(path_value).strip():
+        return None
+    return Path(str(path_value)).resolve()
+
+
 def build_report() -> dict[str, Any]:
     readiness_report = readiness.build_report()
     source_root = Path(readiness_report["current_active_library_root"]).resolve()
@@ -137,27 +164,45 @@ def build_report() -> dict[str, Any]:
     )
 
     target_library_json_summary["origin_assessment"] = _target_library_json_origin_assessment(target_library_json_summary)
-    target_conflicts = _target_conflicts(
+    raw_target_conflicts = _target_conflicts(
         readiness_report,
         source_root=source_root,
         target_root=target_root,
         target_database_summary=target_database_summary,
         target_library_json_summary=target_library_json_summary,
     )
+    post_migration_active_target = _is_post_migration_active_target(
+        active_info=active_info,
+        readiness_report=readiness_report,
+        target_root=target_root,
+        target_database_path=target_database_path,
+    )
+    expected_active_files = raw_target_conflicts if post_migration_active_target else []
+    target_conflicts = [] if post_migration_active_target else raw_target_conflicts
     target_quarantine_plan = _target_quarantine_plan(target_root, target_conflicts)
 
     recommended_next_gate = (
         "approve_target_quarantine_manifest_then_repeat_d2_9_and_d2_8_before_any_migration_apply"
         if target_conflicts
-        else "classify_remaining_unreferenced_artifacts_then_plan_referenced_only_migration_gate"
+        else (
+            "post_migration_regression_guards"
+            if post_migration_active_target
+            else "classify_remaining_unreferenced_artifacts_then_plan_referenced_only_migration_gate"
+        )
     )
     risk_level = "high" if target_conflicts or readiness_report["missing_referenced_files_count"] > 0 else "medium"
+    migration_phase = "post_migration" if post_migration_active_target else "pre_migration"
 
     return {
         "mode": "dry_run",
         "apply_supported": False,
         "apply_executed": False,
+        "migration_phase": migration_phase,
+        "target_root_status": "active_canonical_target" if post_migration_active_target else "pre_migration_target",
         "target_root": str(target_root),
+        "expected_active_files": expected_active_files,
+        "expected_active_files_count": len(expected_active_files),
+        "raw_target_conflicts_count": len(raw_target_conflicts),
         "target_conflicts": target_conflicts,
         "target_conflicts_count": len(target_conflicts),
         "target_database_summary": target_database_summary,

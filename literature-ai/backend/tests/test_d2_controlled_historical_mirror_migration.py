@@ -275,6 +275,98 @@ def test_restore_registry_backup_restores_original_contents(tmp_path):
     assert canonical_registry.read_text(encoding="utf-8") == '{"active_library":"old"}'
 
 
+def test_dry_run_reports_already_migrated_without_suggesting_apply(monkeypatch, tmp_path):
+    env = _configure_happy_path(monkeypatch, tmp_path)
+    target_root = env["target_root"]
+    _write_file(target_root / "database.sqlite", "sqlite-bytes")
+    _write_file(target_root / "library.json", '{"name":"default","storage_mode":"library"}')
+    db_referenced_files = _referenced_artifact_entries(target_root)
+    _write_registry(env["canonical_registry"], active_library=env["active_library"], root_path=target_root)
+
+    readiness_report = {
+        "active_library": env["active_library"],
+        "current_active_library_root": str(target_root.resolve()),
+        "current_active_database_path": str((target_root / "database.sqlite").resolve()),
+        "proposed_canonical_library_root": str(target_root.resolve()),
+        "required_library_metadata_files": [{"path": str((target_root / "library.json").resolve())}],
+        "db_referenced_files": db_referenced_files,
+        "active_db_papers_total": 15,
+        "missing_referenced_files_count": 0,
+        "duplicate_artifact_paths_count": 0,
+        "duplicate_artifact_paths": [],
+        "unreferenced_files_count": 0,
+        "source_root_is_historical_mirror": False,
+    }
+    active_db_info = {
+        "db_kind": "sqlite",
+        "recovered_from_candidate_scan": False,
+        "active_library_db_path": str((target_root / "database.sqlite").resolve()),
+        "effective_db_path": str((target_root / "database.sqlite").resolve()),
+        "effective_db_papers_total": 15,
+    }
+    monkeypatch.setattr(migration.readiness, "build_report", lambda: readiness_report)
+    monkeypatch.setattr(migration.gate, "build_report", lambda: {"target_conflicts_count": 0})
+    monkeypatch.setattr(migration, "get_active_database_info", lambda: active_db_info)
+
+    report = migration.build_report()
+
+    assert report["migration_phase"] == "post_migration"
+    assert report["already_migrated"] is True
+    assert report["migration_complete"] is True
+    assert report["apply_should_run"] is False
+    assert report["apply_preconditions"]["ready_for_apply"] is False
+    assert report["ready_for_apply_reason"] == "already_migrated"
+
+
+def test_already_migrated_hash_mismatch_is_not_complete(monkeypatch, tmp_path):
+    _configure_happy_path(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        migration,
+        "_post_migration_copy_plan_verification",
+        lambda copy_plan: (False, [{"relative_path": "database.sqlite", "reason": "sha256_mismatch"}]),
+    )
+    target_root = migration.default_library_root().resolve()
+    monkeypatch.setattr(
+        migration.readiness,
+        "build_report",
+        lambda: {
+            "active_library": "default",
+            "current_active_library_root": str(target_root),
+            "current_active_database_path": str((target_root / "database.sqlite").resolve()),
+            "proposed_canonical_library_root": str(target_root),
+            "required_library_metadata_files": [{"path": str((target_root / "library.json").resolve())}],
+            "db_referenced_files": _referenced_artifact_entries(target_root),
+            "active_db_papers_total": 15,
+            "missing_referenced_files_count": 0,
+            "duplicate_artifact_paths_count": 0,
+            "duplicate_artifact_paths": [],
+            "unreferenced_files_count": 0,
+            "source_root_is_historical_mirror": False,
+        },
+    )
+    _write_file(target_root / "database.sqlite", "sqlite-bytes")
+    _write_file(target_root / "library.json", '{"name":"default","storage_mode":"library"}')
+    monkeypatch.setattr(migration.gate, "build_report", lambda: {"target_conflicts_count": 0})
+    monkeypatch.setattr(
+        migration,
+        "get_active_database_info",
+        lambda: {
+            "db_kind": "sqlite",
+            "recovered_from_candidate_scan": False,
+            "active_library_db_path": str((target_root / "database.sqlite").resolve()),
+            "effective_db_path": str((target_root / "database.sqlite").resolve()),
+            "effective_db_papers_total": 15,
+        },
+    )
+
+    report = migration.build_report()
+
+    assert report["already_migrated"] is True
+    assert report["migration_complete"] is False
+    assert report["post_migration_hash_mismatches_count"] == 1
+    assert report["ready_for_apply_reason"] == "precondition_failure"
+
+
 def test_root_wrapper_and_backend_script_share_canonical_paths():
     repo_root = Path(__file__).resolve().parents[3]
     wrapper_path = repo_root / "scripts" / "d2_controlled_historical_mirror_migration.py"
