@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -130,6 +131,9 @@ def test_dry_run_writes_nothing_by_default(monkeypatch, tmp_path):
     after_files = sorted(path.relative_to(env["workspace_root"]).as_posix() for path in env["workspace_root"].rglob("*"))
     assert report["apply_executed"] is False
     assert report["mode"] == "dry_run"
+    assert report["active_database_kind"] == "sqlite"
+    assert report["recovered_from_candidate_scan"] is False
+    assert report["apply_preconditions"]["ready_for_apply"] is True
     assert env["target_root"].exists() is False
     assert env["canonical_registry"].read_text(encoding="utf-8") == before_registry
     assert before_files == after_files
@@ -186,6 +190,49 @@ def test_apply_is_blocked_when_referenced_artifact_is_missing(monkeypatch, tmp_p
     assert env["canonical_registry"].read_text(encoding="utf-8") == registry_before
 
 
+def test_apply_is_blocked_when_active_db_kind_is_not_sqlite(monkeypatch, tmp_path):
+    _configure_happy_path(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        migration,
+        "get_active_database_info",
+        lambda: {
+            "db_kind": "postgresql",
+            "recovered_from_candidate_scan": False,
+            "active_library_db_path": None,
+            "effective_db_path": None,
+            "effective_db_papers_total": 0,
+        },
+    )
+
+    report = migration.build_report(apply=True)
+
+    assert report["apply_executed"] is False
+    assert report["error"] == "apply_blocked_by_preconditions"
+    assert "active db kind is postgresql (expected sqlite)" in report["apply_preconditions"]["failures"]
+
+
+def test_apply_is_blocked_when_candidate_scan_recovery_is_required(monkeypatch, tmp_path):
+    env = _configure_happy_path(monkeypatch, tmp_path)
+    source_db = env["source_root"] / "database.sqlite"
+    monkeypatch.setattr(
+        migration,
+        "get_active_database_info",
+        lambda: {
+            "db_kind": "sqlite",
+            "recovered_from_candidate_scan": True,
+            "active_library_db_path": str(source_db.resolve()),
+            "effective_db_path": str(source_db.resolve()),
+            "effective_db_papers_total": 15,
+        },
+    )
+
+    report = migration.build_report(apply=True)
+
+    assert report["apply_executed"] is False
+    assert report["error"] == "apply_blocked_by_preconditions"
+    assert "recovered_from_candidate_scan=true (expected false)" in report["apply_preconditions"]["failures"]
+
+
 def test_registry_update_waits_until_copy_and_hash_verification_pass(monkeypatch, tmp_path):
     env = _configure_happy_path(monkeypatch, tmp_path)
     events: list[str] = []
@@ -226,3 +273,26 @@ def test_restore_registry_backup_restores_original_contents(tmp_path):
     )
 
     assert canonical_registry.read_text(encoding="utf-8") == '{"active_library":"old"}'
+
+
+def test_root_wrapper_and_backend_script_share_canonical_paths():
+    repo_root = Path(__file__).resolve().parents[3]
+    wrapper_path = repo_root / "scripts" / "d2_controlled_historical_mirror_migration.py"
+    backend_path = repo_root / "literature-ai" / "backend" / "scripts" / "d2_controlled_historical_mirror_migration.py"
+
+    wrapper_spec = importlib.util.spec_from_file_location("root_wrapper_d2_controlled", wrapper_path)
+    assert wrapper_spec is not None and wrapper_spec.loader is not None
+    wrapper_module = importlib.util.module_from_spec(wrapper_spec)
+    wrapper_spec.loader.exec_module(wrapper_module)
+
+    backend_from_wrapper = wrapper_module._load_backend_script()
+    backend_spec = importlib.util.spec_from_file_location("backend_d2_controlled_direct", backend_path)
+    assert backend_spec is not None and backend_spec.loader is not None
+    backend_module = importlib.util.module_from_spec(backend_spec)
+    backend_spec.loader.exec_module(backend_module)
+
+    assert backend_from_wrapper.BACKEND_ROOT.resolve() == backend_module.BACKEND_ROOT.resolve()
+    assert backend_from_wrapper.PROJECT_ROOT.resolve() == backend_module.PROJECT_ROOT.resolve()
+    assert backend_from_wrapper.WORKSPACE_ROOT.resolve() == backend_module.WORKSPACE_ROOT.resolve()
+    assert backend_from_wrapper.canonical_registry_path().resolve() == backend_module.canonical_registry_path().resolve()
+    assert backend_from_wrapper.default_library_root().resolve() == backend_module.default_library_root().resolve()

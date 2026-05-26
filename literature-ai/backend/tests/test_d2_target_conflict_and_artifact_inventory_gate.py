@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from app.utils import active_database as active_database_module
 from scripts import d2_historical_mirror_migration_readiness as readiness
 from scripts import d2_target_conflict_and_artifact_inventory_gate as gate
 
@@ -104,6 +105,7 @@ def test_build_report_summarizes_target_conflicts_and_unreferenced_inventory(mon
     monkeypatch.setattr(readiness, "canonical_registry_path", lambda: canonical_registry.resolve())
     monkeypatch.setattr(readiness, "default_library_root", lambda: proposed_root.resolve())
     monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [shadow_registry.resolve()])
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
     monkeypatch.setattr(
         gate,
         "get_active_database_info",

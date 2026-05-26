@@ -62,6 +62,7 @@ def test_activate_active_library_database_recovers_populated_mirror_sqlite(tmp_p
     get_settings.cache_clear()
     monkeypatch.setattr(library_manager_module.LibraryManager, "REGISTRY_PATH", registry_path)
     monkeypatch.setattr(library_manager_module.LibraryManager, "DEFAULT_LIBRARY_ROOT", library_root)
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
     monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
     monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
 
@@ -71,6 +72,55 @@ def test_activate_active_library_database_recovers_populated_mirror_sqlite(tmp_p
     assert Path(info["db_path"]) == (mirrored_root / "database.sqlite").resolve()
     assert info["effective_db_papers_total"] == 1
     assert info["recovered_from_candidate_scan"] is True
+
+
+def test_get_active_database_info_prefers_registered_active_sqlite_without_candidate_recovery(tmp_path, monkeypatch):
+    workspace_root = tmp_path
+    backend_root = workspace_root / "backend"
+    backend_root.mkdir(parents=True, exist_ok=True)
+
+    library_root = backend_root / active_database_module._library_root_mirror_segment(
+        Path(r"D:\Desktop\03_代码与开发\AI-shujvku\literature-ai\backend\data\libraries\default")
+    )
+    (library_root / "storage").mkdir(parents=True, exist_ok=True)
+    _write_sqlite(library_root / "database.sqlite", paper_count=15)
+
+    registry_path = workspace_root / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "默认文献库",
+                "libraries": [
+                    {
+                        "name": "默认文献库",
+                        "root_path": str(library_root.resolve()),
+                        "description": "默认文献库",
+                        "created_at": "2026-05-26T00:00:00",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    get_settings.cache_clear()
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
+    monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
+
+    info = active_database_module.get_active_database_info()
+
+    assert info["db_kind"] == "sqlite"
+    assert Path(str(info["db_path"])) == (library_root / "database.sqlite").resolve()
+    assert info["configured_db_kind"] == "postgresql"
+    assert info["active_library"] == "默认文献库"
+    assert Path(str(info["active_library_db_path"])) == (library_root / "database.sqlite").resolve()
+    assert info["effective_matches_active_library_db_path"] is True
+    assert info["recovered_from_candidate_scan"] is False
 
 
 def test_resolve_persisted_artifact_path_finds_mirrored_file(tmp_path, monkeypatch):

@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from app.utils import active_database as active_database_module
 from scripts import d2_historical_mirror_migration_readiness as readiness
 
 
@@ -104,6 +105,7 @@ def test_build_report_detects_conflicts_and_missing_files(monkeypatch, tmp_path)
     monkeypatch.setattr(readiness, "canonical_registry_path", lambda: canonical_registry.resolve())
     monkeypatch.setattr(readiness, "default_library_root", lambda: proposed_root.resolve())
     monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [shadow_registry.resolve()])
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
 
     report = readiness.build_report()
 
@@ -148,6 +150,7 @@ def test_build_report_is_cwd_stable(monkeypatch, tmp_path):
     monkeypatch.setattr(readiness, "canonical_registry_path", lambda: canonical_registry.resolve())
     monkeypatch.setattr(readiness, "default_library_root", lambda: proposed_root.resolve())
     monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [])
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
 
     monkeypatch.chdir(workspace_root)
     report_from_workspace = readiness.build_report()

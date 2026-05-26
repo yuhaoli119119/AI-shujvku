@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from app.utils.project_paths import BACKEND_ROOT, WORKSPACE_ROOT
+from app.utils.project_paths import BACKEND_ROOT, WORKSPACE_ROOT, canonical_registry_path
 
 WINDOWS_MIRROR_COLON = "\uf03a"
 WINDOWS_MIRROR_SEP = "\uf05c"
@@ -31,6 +32,29 @@ def _mask_url(database_url: str) -> str:
         path = _sqlite_path(database_url)
         return f"sqlite:///{Path(path).name if path else 'database.sqlite'}"
     return "***"
+
+
+def _load_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        data = json.loads(payload)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _registry_entry(payload: dict[str, Any] | None, active_library: str | None) -> dict[str, Any] | None:
+    if payload is None or not active_library:
+        return None
+    for entry in payload.get("libraries", []):
+        if entry.get("name") == active_library:
+            return entry
+    return None
 
 
 def _library_root_mirror_segment(library_root: Path) -> str:
@@ -62,6 +86,28 @@ def _sqlite_candidate_summary(path: Path) -> dict[str, Any]:
     except sqlite3.Error:
         return summary
     return summary
+
+
+def get_registered_active_library_info() -> dict[str, Any]:
+    registry_path = canonical_registry_path().resolve()
+    payload = _load_json(registry_path)
+    active_library = payload.get("active_library") if payload else None
+    if not isinstance(active_library, str) or not active_library.strip():
+        active_library = None
+    entry = _registry_entry(payload, active_library)
+    active_library_root = None
+    active_library_db_path = None
+    if entry and entry.get("root_path"):
+        active_library_root = str(Path(str(entry["root_path"])).resolve())
+        active_library_db_path = str((Path(active_library_root) / "database.sqlite").resolve())
+
+    return {
+        "canonical_registry_path": str(registry_path),
+        "active_library": active_library,
+        "active_library_root": active_library_root,
+        "active_library_db_path": active_library_db_path,
+        "registry_entry_found": entry is not None,
+    }
 
 
 def _candidate_sqlite_paths(active_library_root: Path | None, configured_sqlite_path: Path | None) -> list[Path]:
@@ -98,6 +144,12 @@ def _choose_effective_sqlite_candidate(
 ) -> dict[str, Any] | None:
     preferred_registered = (active_library_root / "database.sqlite").resolve() if active_library_root is not None else None
     preferred_configured = configured_sqlite_path.resolve() if configured_sqlite_path is not None else None
+
+    if preferred_registered is not None:
+        registered_summary = _sqlite_candidate_summary(preferred_registered)
+        if registered_summary["exists"] and registered_summary["has_papers_table"] and registered_summary["papers_total"] > 0:
+            registered_summary["score"] = 10_000 + int(registered_summary["papers_total"])
+            return registered_summary
 
     best: dict[str, Any] | None = None
     for candidate in _candidate_sqlite_paths(active_library_root, configured_sqlite_path):
@@ -137,26 +189,20 @@ def _effective_storage_root(effective_db_path: Path | None) -> str | None:
 def get_active_database_info() -> dict[str, Any]:
     """Return safe runtime DB source-of-truth metadata for scripts and APIs."""
     from app.config import get_settings
-    from app.services.library_manager import LibraryManager
 
     settings = get_settings()
     database_url = settings.database_url
-    kind = _kind_from_url(database_url)
-    path = _sqlite_path(database_url)
-    configured_sqlite_path = Path(path).resolve() if path else None
-    active_library: str | None = None
-    active_library_database_path: str | None = None
-    active_library_root: Path | None = None
-
-    try:
-        active = LibraryManager().get_active_library()
-        if active:
-            active_library = active.name
-            active_library_root = Path(active.root_path).resolve()
-            active_library_database_path = str((active_library_root / "database.sqlite").resolve())
-    except Exception:
-        active = None
-        active_library_root = None
+    configured_kind = _kind_from_url(database_url)
+    configured_path = _sqlite_path(database_url)
+    configured_sqlite_path = Path(configured_path).resolve() if configured_path else None
+    registered_active = get_registered_active_library_info()
+    active_library = registered_active["active_library"]
+    active_library_database_path = registered_active["active_library_db_path"]
+    active_library_root = (
+        Path(str(registered_active["active_library_root"])).resolve()
+        if registered_active.get("active_library_root")
+        else None
+    )
 
     effective = _choose_effective_sqlite_candidate(
         active_library_root=active_library_root,
@@ -164,22 +210,46 @@ def get_active_database_info() -> dict[str, Any]:
     )
     effective_db_path = effective["path"] if effective is not None else None
     effective_storage_root = _effective_storage_root(Path(effective_db_path)) if effective_db_path else None
+    configured_runtime_is_sqlite = configured_kind == "sqlite" and configured_path is not None
+    resolved_db_path = configured_path if configured_runtime_is_sqlite else (effective_db_path or configured_path)
+    resolved_db_kind = configured_kind if configured_runtime_is_sqlite else ("sqlite" if resolved_db_path is not None else configured_kind)
+    resolved_db_url_masked = (
+        _mask_url(f"sqlite:///{Path(resolved_db_path).as_posix()}") if resolved_db_path is not None else _mask_url(database_url)
+    )
+    configured_matches_active_library_db_path = bool(
+        configured_kind == "sqlite"
+        and configured_path is not None
+        and active_library_database_path is not None
+        and Path(configured_path) == Path(active_library_database_path)
+    )
+    recovered_from_candidate_scan = bool(
+        effective_db_path is not None
+        and (
+            active_library_database_path is None
+            or Path(effective_db_path) != Path(active_library_database_path)
+        )
+    )
 
     return {
-        "db_kind": kind,
-        "db_path": path,
-        "db_url_masked": _mask_url(database_url),
-        "configured_db_kind": kind,
-        "configured_db_path": path,
+        "db_kind": resolved_db_kind,
+        "db_path": resolved_db_path,
+        "db_url_masked": resolved_db_url_masked,
+        "configured_db_kind": configured_kind,
+        "configured_db_path": configured_path,
+        "configured_db_url_masked": _mask_url(database_url),
         "active_library": active_library,
         "active_library_db_path": active_library_database_path,
         "matches_active_library_db_path": bool(
-            kind == "sqlite"
-            and path is not None
+            resolved_db_path is not None
             and active_library_database_path is not None
-            and Path(path) == Path(active_library_database_path)
+            and Path(resolved_db_path) == Path(active_library_database_path)
         ),
-        "is_active_library_sqlite": kind == "sqlite" and path is not None and Path(path).name == "database.sqlite",
+        "configured_matches_active_library_db_path": configured_matches_active_library_db_path,
+        "is_active_library_sqlite": bool(
+            resolved_db_kind == "sqlite"
+            and resolved_db_path is not None
+            and Path(resolved_db_path).name == "database.sqlite"
+        ),
         "effective_db_path": effective_db_path,
         "effective_storage_root": effective_storage_root,
         "effective_db_has_papers_table": bool(effective and effective["has_papers_table"]),
@@ -189,13 +259,7 @@ def get_active_database_info() -> dict[str, Any]:
             and active_library_database_path is not None
             and Path(effective_db_path) == Path(active_library_database_path)
         ),
-        "recovered_from_candidate_scan": bool(
-            effective_db_path is not None
-            and (
-                path is None
-                or Path(effective_db_path) != Path(path)
-            )
-        ),
+        "recovered_from_candidate_scan": recovered_from_candidate_scan,
     }
 
 

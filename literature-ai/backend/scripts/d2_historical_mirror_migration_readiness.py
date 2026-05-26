@@ -18,7 +18,7 @@ WORKSPACE_ROOT = PROJECT_ROOT.parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.utils.active_database import WINDOWS_MIRROR_COLON, WINDOWS_MIRROR_SEP
+from app.utils.active_database import WINDOWS_MIRROR_COLON, WINDOWS_MIRROR_SEP, get_registered_active_library_info
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
 from app.utils.project_paths import canonical_registry_path, default_library_root, shadow_registry_paths
 
@@ -580,14 +580,13 @@ def _read_sha_stability(
 
 def build_report() -> dict[str, Any]:
     canonical_registry = canonical_registry_path().resolve()
-    canonical_payload = _load_json(canonical_registry)
-    active_entry = _registry_entry(canonical_payload)
-    if active_entry is None or not active_entry.get("root_path"):
+    active_registration = get_registered_active_library_info()
+    if not active_registration.get("active_library_root") or not active_registration.get("active_library_db_path"):
         raise RuntimeError(f"Active library entry missing in canonical registry: {canonical_registry}")
 
-    active_library = canonical_payload.get("active_library")
-    current_root = Path(str(active_entry["root_path"])).resolve()
-    current_db = (current_root / "database.sqlite").resolve()
+    active_library = active_registration["active_library"]
+    current_root = Path(str(active_registration["active_library_root"])).resolve()
+    current_db = Path(str(active_registration["active_library_db_path"])).resolve()
     current_library_json = (current_root / "library.json").resolve()
     proposed_root = default_library_root().resolve()
     proposed_db = (proposed_root / "database.sqlite").resolve()
