@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config import get_settings
 from app.db.models import Base, Paper, PaperCorrection, PaperNote, PaperRelationship
 from app.db.session import get_db_session
 from app.main import app
@@ -124,7 +125,10 @@ def test_external_analysis_import_and_materialize_flow():
 
 def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'internal_parse.db'}", future=True)
+        db_path = Path(tmpdir) / "database.sqlite"
+        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+        get_settings.cache_clear()
+        engine = create_engine(f"sqlite:///{db_path}", future=True)
         with engine.begin() as connection:
             connection.execute(text("PRAGMA foreign_keys=ON"))
         Base.metadata.create_all(engine)
@@ -198,6 +202,13 @@ def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
             )
 
             client = TestClient(app)
+            health = client.get("/api/health")
+            assert health.status_code == 200
+            health_payload = health.json()
+            assert health_payload["db_kind"] == "sqlite"
+            assert health_payload["db_path"].endswith("database.sqlite")
+            assert health_payload["is_active_library_sqlite"] is True
+
             response = client.post(
                 f"/api/external-analysis/papers/{main_paper.id}/internal-parse",
                 json={"source_label": "内部AI解析", "auto_apply": True},
@@ -208,7 +219,7 @@ def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
             assert payload["created_notes"] == 1
             assert payload["created_corrections"] == 1
             assert payload["created_relationships"] == 1
-            assert payload["auto_applied_corrections"] == 1
+            assert payload["auto_applied_corrections"] == 0
 
             detail = client.get(f"/api/papers/{main_paper.id}")
             assert detail.status_code == 200
@@ -228,7 +239,10 @@ def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
                 assert session.query(PaperRelationship).count() == 1
                 correction = session.query(PaperCorrection).first()
                 assert correction is not None
-                assert correction.status == "approved"
+                assert correction.status == "pending"
+                stored_paper = session.get(Paper, main_paper.id)
+                assert stored_paper.abstract == "A parsed paper ready for internal AI review."
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
+            get_settings.cache_clear()

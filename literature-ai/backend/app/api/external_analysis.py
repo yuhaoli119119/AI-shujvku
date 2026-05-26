@@ -22,7 +22,6 @@ from app.services.external_analysis_service import (
     sanitize_internal_corrections as _sanitize_internal_corrections,
 )
 from app.services.paper_query import PaperQueryService
-from app.services.review_service import ReviewService
 
 router = APIRouter()
 
@@ -170,19 +169,9 @@ async def internal_ai_parse_paper(
         created_corrections = materialized.created_corrections
         created_relationships = materialized.created_relationships
         skipped_candidates = materialized.skipped_candidates
-        if materialized.created_corrections:
-            reviewer = ReviewService(session)
-            correction_candidate_ids = [
-                item.materialized_target_id
-                for item in service.list_candidates(run.id)
-                if item.materialized_target_type == "paper_correction" and item.materialized_target_id
-            ]
-            for correction_id in correction_candidate_ids:
-                try:
-                    reviewer.approve_correction(UUID(str(correction_id)), reviewer="internal_ai")
-                    auto_applied_corrections += 1
-                except ValueError:
-                    continue
+        # D2-1 safety boundary: internal AI may suggest and materialize pending
+        # corrections, but only the human correction/review routes may approve or
+        # verify them. Keep auto_applied_corrections at 0 for compatibility.
 
     session.commit()
     return InternalAIParseResponse(

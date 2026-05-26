@@ -18,6 +18,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.config import get_settings
 from app.db.models import DFTResult, WritingCard
 from app.db.session import session_scope
+from app.utils.active_database import activate_active_library_database, require_active_library_sqlite
 from app.utils.locator_degradation import locator_degradation
 from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 from scripts.recover_evidence_pages import analyze_evidence_pages
@@ -815,30 +816,21 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     args = parser.parse_args()
 
+    activate_active_library_database()
+    db_info = require_active_library_sqlite()
     settings = get_settings()
-    active_url = settings.database_url
-    db_kind = "postgresql" if active_url.startswith("postgresql") else "sqlite" if active_url.startswith("sqlite") else "unknown"
-    # Mask credentials in URL for safe printing
-    if "@" in active_url:
-        masked = active_url.split("@")[-1]
-    elif "/" in active_url:
-        masked = active_url.split("/")[-1]
-    else:
-        masked = "***"
 
-    # Show active library info if available
-    try:
-        from app.services.library_manager import LibraryManager
-        _mgr = LibraryManager()
-        _active_lib = _mgr.get_active_library()
-        lib_hint = _active_lib.name if _active_lib else "(none)"
-    except Exception:
-        lib_hint = "(unknown)"
-
-    print(f"[audit] Database source-of-truth: kind={db_kind}, library={lib_hint}, url_masked={masked}")
+    print(
+        "[audit] Database source-of-truth: "
+        f"kind={db_info['db_kind']}, "
+        f"library={db_info['active_library']}, "
+        f"path={db_info['db_path']}, "
+        f"is_active_library_sqlite={db_info['is_active_library_sqlite']}"
+    )
 
     with session_scope(settings.database_url) as session:
         report = run_audit(session, paper_id=args.paper_id, limit=args.limit)
+        report["active_database"] = db_info
         session.rollback()
 
     if args.json:

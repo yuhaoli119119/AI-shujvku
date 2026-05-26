@@ -15,38 +15,20 @@ class SwitchDbPayload(BaseModel):
 @router.get("/db-info")
 async def get_db_info() -> dict:
     from app.config import get_settings
-    from app.services.library_manager import LibraryManager
+    from app.utils.active_database import get_active_database_info
 
     settings = get_settings()
-    url = settings.database_url
-    dialect = "unknown"
-    if url.startswith("postgresql"):
-        dialect = "postgresql"
-    elif url.startswith("sqlite"):
-        dialect = "sqlite"
-
-    # Mask credentials for safe display
-    if "@" in url:
-        masked_url = url.split("@")[-1]
-    elif "/" in url:
-        masked_url = "sqlite:///" + url.split("/")[-1]
-    else:
-        masked_url = "***"
-
-    active_library: str | None = None
-    try:
-        mgr = LibraryManager()
-        active_lib = mgr.get_active_library()
-        if active_lib:
-            active_library = active_lib.name
-    except Exception:
-        pass
+    info = get_active_database_info()
 
     return {
-        "database_url_masked": masked_url,
-        "dialect": dialect,
+        "database_url_masked": info["db_url_masked"],
+        "dialect": info["db_kind"],
+        "db_path": info["db_path"],
         "storage_root": str(settings.storage_root),
-        "active_library": active_library,
+        "active_library": info["active_library"],
+        "active_library_db_path": info["active_library_db_path"],
+        "is_active_library_sqlite": info["is_active_library_sqlite"],
+        "matches_active_library_db_path": info["matches_active_library_db_path"],
     }
 
 
