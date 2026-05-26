@@ -233,6 +233,11 @@ async function mockApi(route) {
     return route.fulfill({
       status: 200,
       contentType: 'text/csv',
+      headers: {
+        'X-D3-Export-Safety-Gate': 'safe_verified_with_required_evidence',
+        'X-D3-Export-Count': '1',
+        'X-D3-Block-Count': '2',
+      },
       body: 'paper_id,title,value\npaper-1,Test Paper for Smoke Validation,-1.23\n',
     });
   }
@@ -719,9 +724,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#toast')).toContainText('保存成功');
     expect(saveCalled).toBe(true);
 
-    const verifyBtn = page.locator('button:text-is("校验")').first();
+    const verifyBtn = page.locator('button:text-is("人工确认")').first();
     await verifyBtn.click();
-    await expect(page.locator('#toast')).toContainText('校验成功');
+    await expect(page.locator('#toast')).toContainText('人工确认通过');
     expect(verifyCalled).toBe(true);
 
     const filterSelect = page.locator('#filterSelect');
@@ -733,7 +738,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     verifyCalled = false;
     await page.click('.footer-actions button:has-text("人工确认校验")');
-    await expect(page.locator('#toast')).toContainText('批量标记已校验成功');
+    await expect(page.locator('#toast')).toContainText('批量人工确认通过成功');
     expect(verifyCalled).toBe(true);
   });
 
@@ -743,6 +748,77 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#dftTable')).toContainText('Li2S4');
     await page.click('button:has-text("evidence link")');
     await expect(page.locator('#evidenceDetail')).toContainText('evidence_text');
+  });
+
+  test('business flow: DFT export displays safety headers', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('.export-note')).toContainText('Human verified + required evidence');
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.click('button[onclick="exportCSV()"]');
+    await downloadPromise;
+
+    await expect(page.locator('#exportSafetyStatus')).toContainText('safe_verified_with_required_evidence');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('exported: 1');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 2');
+  });
+
+  test('business flow: AI candidate materialize uses explicit scope contracts', async ({ page }) => {
+    const runPayload = {
+      id: 'run-1',
+      source: 'manual',
+      source_label: '外部 AI 候选建议',
+      created_at: '2026-05-26T12:00:00',
+      mapping_status: 'normalized',
+      candidates: [
+        {
+          id: 'candidate-1',
+          candidate_type: 'correction',
+          status: 'pending',
+          confidence: 0.86,
+          materialized_target_type: null,
+          normalized_payload: { field_name: 'dft_results', target_path: 'dft_results:target-1:value' },
+        },
+      ],
+    };
+    const materializePayloads = [];
+
+    await page.route(/\/api\/external-analysis\/runs(\?|$)/, route => jsonResponse(route, [runPayload]));
+    await page.route(/\/api\/external-analysis\/runs\/run-1\/materialize$/, async route => {
+      materializePayloads.push(JSON.parse(route.request().postData() || '{}'));
+      return jsonResponse(route, { ok: true });
+    });
+    page.on('dialog', async dialog => {
+      expect(dialog.message()).toContain('这不是人工 verified');
+      await dialog.accept();
+    });
+
+    async function openReviewCandidates() {
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-card');
+      await page.click('button[data-tab="review"]');
+      await expect(page.locator('#externalRuns')).toContainText('外部 AI 候选建议');
+      await page.click('button:has-text("展开候选项")');
+      await expect(page.locator('.candidate-card').first()).toBeVisible();
+    }
+
+    await openReviewCandidates();
+    await page.click('.candidate-card button:has-text("生成待确认记录")');
+    await expect.poll(() => materializePayloads.length).toBe(1);
+    expect(materializePayloads[0]).toEqual({ candidate_ids: ['candidate-1'], created_by: 'web_user' });
+
+    await openReviewCandidates();
+    await page.check('.candidate-select[value="candidate-1"]');
+    await page.click('button:has-text("选中生成待确认记录")');
+    await expect.poll(() => materializePayloads.length).toBe(2);
+    expect(materializePayloads[1]).toEqual({ candidate_ids: ['candidate-1'], created_by: 'web_user' });
+
+    await openReviewCandidates();
+    await page.click('button:has-text("批量生成待确认记录")');
+    await expect.poll(() => materializePayloads.length).toBe(3);
+    expect(materializePayloads[2]).toEqual({ explicit_all: true, created_by: 'web_user' });
   });
 
   test('business flow: literature library opens extraction job center', async ({ page }) => {

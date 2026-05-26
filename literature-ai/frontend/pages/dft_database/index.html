@@ -26,6 +26,9 @@
     .stat-box .lbl { color: var(--color-text-secondary); font-size: 12px; }
     .stat-box .val { font-size: 22px; font-weight: 800; margin-top: 4px; }
     .panel-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .export-panel { max-width: 360px; text-align: right; }
+    .export-panel .export-note { margin-top: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+    .export-panel .export-status { margin-top: 6px; color: var(--color-primary); font-size: 12px; font-weight: 700; }
     .table-container { width: 100%; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 12px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
@@ -49,7 +52,11 @@
         <h1>DFT Database</h1>
         <p>Schema extraction results with catalyst, adsorbate, energy type, confidence, validation status, and evidence links.</p>
       </div>
-      <button class="btn green" onclick="exportCSV()">Export CSV</button>
+      <div class="export-panel">
+        <button class="btn green" onclick="exportCSV()">Export CSV</button>
+        <div class="export-note">默认仅导出 Human verified + required evidence；blocked rows 不会导出。</div>
+        <div id="exportSafetyStatus" class="export-status">等待导出。</div>
+      </div>
     </header>
 
     <section class="filter-panel">
@@ -172,13 +179,49 @@
       }, null, 2);
       document.getElementById("validationSummary").textContent = item.evidence_text ? "Evidence available" : "No evidence text for this record";
     }
-    function exportCSV() {
+    function setExportSafetyStatus(message) {
+      const el = document.getElementById("exportSafetyStatus");
+      if (el) el.textContent = message;
+    }
+    async function exportCSV() {
       const prop = document.getElementById("propertyType").value || "adsorption_energy";
       const adsorbate = document.getElementById("adsorbate").value.trim();
       let url = `/api/papers/export/csv?property_type=${encodeURIComponent(prop)}`;
       if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
-      window.location.href = url;
-      showToast("CSV export started.");
+      const headers = {};
+      const token = sessionStorage.getItem("litai-settings-token");
+      if (token) headers["X-Settings-Token"] = token;
+      setExportSafetyStatus("正在读取导出安全结果...");
+      try {
+        const resp = await fetch(url, { headers });
+        const text = await resp.text();
+        if (!resp.ok) {
+          let detail = text;
+          try {
+            const parsed = JSON.parse(text);
+            detail = parsed.detail || parsed.message || text;
+          } catch (_) {}
+          throw new Error(detail || "HTTP " + resp.status);
+        }
+        const gate = resp.headers.get("X-D3-Export-Safety-Gate") || "not returned";
+        const exported = resp.headers.get("X-D3-Export-Count") || "0";
+        const blocked = resp.headers.get("X-D3-Block-Count") || "0";
+        setExportSafetyStatus(`Safety gate: ${gate} | exported: ${exported} | blocked: ${blocked}`);
+
+        const blob = new Blob([text], { type: resp.headers.get("Content-Type") || "text/csv;charset=utf-8" });
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = "dft_results_export.csv";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+        showToast("CSV export completed.");
+      } catch (error) {
+        setExportSafetyStatus("导出失败：" + error.message);
+        showToast("CSV export failed: " + error.message);
+      }
     }
     document.addEventListener("DOMContentLoaded", () => {
       TopNav.init({ currentPage: "dft-database", mountId: "topnav-mount" });

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Extraction Review Workbench - Literature AI</title>
+  <title>人工确认工作台 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
@@ -30,7 +30,8 @@
     .field-name { font-weight: 800; font-size: 13px; }
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
     .warning-row { border-left: 4px solid var(--color-warning); padding: 8px 10px; background: var(--color-warning-bg); border-radius: var(--radius); margin-bottom: 8px; }
-    .footer-actions { position: sticky; bottom: 0; display: flex; gap: 10px; justify-content: flex-end; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px; box-shadow: var(--shadow-card); margin-top: 16px; }
+    .footer-actions { position: sticky; bottom: 0; display: flex; gap: 10px; justify-content: flex-end; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px; box-shadow: var(--shadow-card); margin-top: 16px; }
+    .action-scope { margin-right: auto; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .empty-state { text-align: center; color: var(--color-text-secondary); padding: 36px 12px; }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
     @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } .field-grid { grid-template-columns: 1fr; } }
@@ -41,8 +42,8 @@
   <main class="shell">
     <header class="page-head">
       <div>
-        <h1>Extraction Review Workbench</h1>
-        <p>Human validation for DFT/catalysis schema extraction. Evidence stays visible while fields are reviewed.</p>
+        <h1>人工确认工作台</h1>
+        <p>Human verification for DFT/catalysis schema extraction. Evidence stays visible while fields are manually corrected or confirmed.</p>
       </div>
       <a class="btn ghost" href="../dft_database/index.html">Open DFT Database</a>
     </header>
@@ -51,11 +52,11 @@
       <div><label for="paperSelect">Paper</label><select id="paperSelect" onchange="loadSelectedPaper()"><option value="">Loading...</option></select></div>
       <div><label for="schemaSelect">Schema</label><select id="schemaSelect" onchange="renderSchemaForm()"><option>CatalystSample</option><option>DFTSetting</option><option selected>DFTResult</option><option>MechanismClaim</option><option>ElectrochemicalPerformance</option></select></div>
       <div>
-        <label for="filterSelect">校验过滤</label>
+        <label for="filterSelect">人工确认过滤</label>
         <select id="filterSelect" onchange="renderSchemaForm()" style="height: 38px; min-width: 160px;">
           <option value="">全部字段</option>
           <option value="warnings">仅有警告 (only warnings)</option>
-          <option value="unverified">仅未校验 (only unverified)</option>
+          <option value="unverified">仅未人工确认 (only unverified)</option>
           <option value="low_confidence">仅低置信度 (&lt; 0.7)</option>
           <option value="active_remapped">仅有效/已重映射 (only active/remapped)</option>
           <option value="stale_ambiguous_unresolved">仅失效/有歧义/未解析 (only stale/ambiguous/unresolved)</option>
@@ -85,6 +86,7 @@
     </section>
 
     <section class="footer-actions">
+      <div id="actionScopeSummary" class="action-scope">作用域：请选择文献。</div>
       <button class="btn ghost" onclick="saveDraft()">Save</button>
       <button class="btn primary" onclick="markVerified()">人工确认校验</button>
       <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
@@ -301,17 +303,114 @@
       if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(normalizedStatus)) {
         return `<span class="status-chip" style="background:var(--color-danger-bg); color:var(--color-danger); border:1px solid var(--color-danger)40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">需重新确认</span>`;
       }
-      let bg = "var(--color-surface-alt)", color = "var(--color-text-secondary)", label = "待校验";
+      let bg = "var(--color-surface-alt)", color = "var(--color-text-secondary)", label = "已生成待确认记录";
       if (status === "verified") {
-        bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "已校验";
+        bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "人工确认通过";
       } else if (status === "corrected") {
-        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; label = "已修改";
+        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; label = "人工修正";
       } else if (status === "needs_check") {
         bg = "var(--color-danger-bg)"; color = "var(--color-danger)"; label = "需核对";
       } else if (status === "pending") {
-        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "待校验";
+        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "已生成待确认记录";
       }
       return `<span class="status-chip" style="background:${bg}; color:${color}; border:1px solid ${color}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">${label}</span>`;
+    }
+
+    function getCurrentSchema() {
+      return document.getElementById("schemaSelect").value;
+    }
+
+    function getCurrentFilterValue() {
+      const filter = document.getElementById("filterSelect");
+      return filter ? filter.value : "";
+    }
+
+    function getCurrentFilterLabel() {
+      const filter = document.getElementById("filterSelect");
+      if (!filter) return "全部字段";
+      return filter.options[filter.selectedIndex] ? filter.options[filter.selectedIndex].textContent : "全部字段";
+    }
+
+    function getCurrentSchemaResults() {
+      const schema = getCurrentSchema();
+      return state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+    }
+
+    function getFieldVisibilityContext(record, name, field) {
+      const warnings = state.extraction && state.extraction.validation_warnings ? state.extraction.validation_warnings : [];
+      const hasWarning = warnings.some(w =>
+        w.target_type === record.target_type &&
+        w.target_id === record.target_id &&
+        w.field === name
+      );
+      const status = getFieldStatus(field);
+      const isUnverified = !field.verified && status !== "verified";
+      const confidence = field.confidence == null ? 1.0 : Number(field.confidence);
+      const isLowConfidence = confidence < 0.7;
+      const resStatus = field.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
+      return { record, name, field, hasWarning, status, isUnverified, confidence, isLowConfidence, resStatus };
+    }
+
+    function fieldPassesFilter(view, filterValue) {
+      if (filterValue === "warnings") return view.hasWarning;
+      if (filterValue === "unverified") return view.isUnverified;
+      if (filterValue === "low_confidence") return view.isLowConfidence;
+      if (filterValue === "active_remapped") return !!view.field.review && ["active", "remapped"].includes(view.resStatus);
+      if (filterValue === "stale_ambiguous_unresolved") return !!view.field.review && ["stale", "ambiguous", "unresolved"].includes(view.resStatus);
+      if (filterValue === "needs_reconfirmation") {
+        return (
+          ["stale", "ambiguous", "unresolved", "unknown"].includes(view.resStatus) ||
+          view.status === "needs_check" ||
+          view.hasWarning ||
+          view.isLowConfidence
+        );
+      }
+      return true;
+    }
+
+    function getVisibleReviewScope() {
+      const schema = getCurrentSchema();
+      const results = getCurrentSchemaResults();
+      const filterValue = getCurrentFilterValue();
+      const visibleRecords = [];
+      let visibleFieldCount = 0;
+
+      results.forEach(record => {
+        const fieldNames = [];
+        Object.entries(record).forEach(([name, field]) => {
+          if (name === "target_id" || name === "target_type") return;
+          const view = getFieldVisibilityContext(record, name, field);
+          if (fieldPassesFilter(view, filterValue)) {
+            fieldNames.push(name);
+          }
+        });
+        if (fieldNames.length) {
+          visibleRecords.push({ record, fieldNames });
+          visibleFieldCount += fieldNames.length;
+        }
+      });
+
+      return {
+        schema,
+        filterValue,
+        filterLabel: getCurrentFilterLabel(),
+        totalRecords: results.length,
+        visibleRecordCount: visibleRecords.length,
+        visibleFieldCount,
+        visibleRecords
+      };
+    }
+
+    function updateActionScopeSummary() {
+      const box = document.getElementById("actionScopeSummary");
+      if (!box) return;
+      if (!state.paper) {
+        box.textContent = "作用域：请选择文献。";
+        return;
+      }
+      const scope = getVisibleReviewScope();
+      box.innerHTML =
+        '<strong>作用域</strong>：当前 schema <strong>' + esc(scope.schema) + '</strong> · 当前过滤 <strong>' + esc(scope.filterLabel) + '</strong> · 当前可见记录 <strong>' + scope.visibleRecordCount + '</strong> / 全部记录 <strong>' + scope.totalRecords + '</strong> · 即将处理字段 <strong>' + scope.visibleFieldCount + '</strong>';
     }
 
     function getResolutionBadgeHtml(field) {
@@ -586,16 +685,17 @@
     }
 
     function renderSchemaForm() {
-      const schema = document.getElementById("schemaSelect").value;
-      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      const schema = getCurrentSchema();
+      const results = getCurrentSchemaResults();
       const form = document.getElementById("schemaForm");
       
       if (!results.length && (!state.audit || !state.audit.items)) {
         form.innerHTML = '<div class="empty-state">No extracted records for this schema yet.</div>';
+        updateActionScopeSummary();
         return;
       }
       
-      const filterValue = document.getElementById("filterSelect") ? document.getElementById("filterSelect").value : "";
+      const filterValue = getCurrentFilterValue();
       let html = "";
       
       results.forEach((record, recordIdx) => {
@@ -604,36 +704,11 @@
         Object.entries(record).forEach(([name, field]) => {
           if (name === "target_id" || name === "target_type") return;
           
-          const hasWarning = (state.extraction.validation_warnings || []).some(w => 
-            w.target_type === record.target_type && 
-            w.target_id === record.target_id && 
-            w.field === name
-          );
-          
-          const status = getFieldStatus(field);
-          const isUnverified = !field.verified && status !== "verified";
-          const confidence = field.confidence == null ? 1.0 : Number(field.confidence);
-          const isLowConfidence = confidence < 0.7;
-          const resStatus = field.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
-          
-          if (filterValue === "warnings" && !hasWarning) return;
-          if (filterValue === "unverified" && !isUnverified) return;
-          if (filterValue === "low_confidence" && !isLowConfidence) return;
-          if (filterValue === "active_remapped") {
-            if (!field.review || !["active", "remapped"].includes(resStatus)) return;
-          }
-          if (filterValue === "stale_ambiguous_unresolved") {
-            if (!field.review || !["stale", "ambiguous", "unresolved"].includes(resStatus)) return;
-          }
-          if (filterValue === "needs_reconfirmation") {
-            const needsReconfirm = (
-              ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus) ||
-              status === "needs_check" ||
-              hasWarning ||
-              isLowConfidence
-            );
-            if (!needsReconfirm) return;
-          }
+          const view = getFieldVisibilityContext(record, name, field);
+          if (!fieldPassesFilter(view, filterValue)) return;
+          const hasWarning = view.hasWarning;
+          const status = view.status;
+          const resStatus = view.resStatus;
           
           const statusBadgeHtml = getStatusBadge(status, resStatus);
           const locatorBadgeHtml = getFieldLocatorBadge(field);
@@ -699,7 +774,7 @@
                 </div>
                 <div style="display: flex; gap: 4px; align-items: flex-end; height: 100%;">
                   <button class="btn primary small" style="height: 32px; font-size: 12px; padding: 0 8px;" onclick="saveSingleField('${record.target_type}', '${record.target_id}', '${name}')">保存</button>
-                  <button class="btn ghost small" style="height: 32px; font-size: 12px; padding: 0 8px; color: var(--color-success); border-color: var(--color-success);" onclick="verifySingleField('${record.target_type}', '${record.target_id}', '${name}')">校验</button>
+                  <button class="btn ghost small" style="height: 32px; font-size: 12px; padding: 0 8px; color: var(--color-success); border-color: var(--color-success);" onclick="verifySingleField('${record.target_type}', '${record.target_id}', '${name}')">人工确认</button>
                 </div>
               </div>
               
@@ -718,7 +793,7 @@
             <div class="section-card" style="margin-bottom: 20px; background: var(--color-surface-alt); border: 1px solid var(--color-border-strong);">
               <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border-strong); padding-bottom: 8px; margin-bottom: 12px;">
                 <strong style="font-size: 14px;">记录 #${recordIdx + 1} (${record.target_id.slice(0, 8)})</strong>
-                <button class="btn ghost small" style="color: var(--color-success); border-color: var(--color-success);" onclick="verifyRecord('${record.target_type}', '${record.target_id}')">本条全校验</button>
+                <button class="btn ghost small" style="color: var(--color-success); border-color: var(--color-success);" onclick="verifyRecord('${record.target_type}', '${record.target_id}')">本条人工确认</button>
               </div>
               ${fieldsHtml}
             </div>
@@ -844,6 +919,7 @@
       } else {
         form.innerHTML = html + orphanHtml;
       }
+      updateActionScopeSummary();
     }
 
     function checkStaleTargetConfirmation(targetId, fieldName) {
@@ -874,13 +950,12 @@
       return true;
     }
 
-    function checkBulkStaleTargetConfirmation() {
-      const schema = document.getElementById("schemaSelect").value;
-      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+    function checkBulkStaleTargetConfirmation(visibleRecords) {
       let hasStale = false;
-      results.forEach(record => {
-        Object.keys(record).forEach(name => {
-          if (name === "target_id" || name === "target_type") return;
+      const scopedRecords = visibleRecords || getVisibleReviewScope().visibleRecords;
+      scopedRecords.forEach(entry => {
+        entry.fieldNames.forEach(name => {
+          const record = entry.record;
           const field = record[name];
           const resStatus = field?.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
           if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
@@ -1012,10 +1087,10 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        showToast(`字段 ${fieldName} 校验成功！`);
+        showToast(`字段 ${fieldName} 人工确认通过！`);
         await refreshAllData();
       } catch (error) {
-        showToast("校验失败: " + error.message);
+        showToast("人工确认失败: " + error.message);
       }
     }
 
@@ -1043,24 +1118,22 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        showToast("整条记录标记校验成功！");
+        showToast("整条记录人工确认通过！");
         await refreshAllData();
       } catch (error) {
-        showToast("校验失败: " + error.message);
+        showToast("人工确认失败: " + error.message);
       }
     }
 
     async function saveDraft() {
       if (!state.paper) return;
-      if (!checkBulkStaleTargetConfirmation()) return;
-      
-      const schema = document.getElementById("schemaSelect").value;
-      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
+      const scope = getVisibleReviewScope();
+      if (!checkBulkStaleTargetConfirmation(scope.visibleRecords)) return;
       
       const reviews = [];
-      results.forEach(record => {
-        Object.keys(record).forEach(name => {
-          if (name === "target_id" || name === "target_type") return;
+      scope.visibleRecords.forEach(entry => {
+        const record = entry.record;
+        entry.fieldNames.forEach(name => {
           const inputs = getFieldInputs(record.target_id, name);
           if (!inputs) return;
           
@@ -1079,7 +1152,7 @@
       });
       
       if (reviews.length === 0) {
-        showToast("无可保存的字段修改。");
+        showToast("当前过滤范围没有可保存的字段。");
         return;
       }
       
@@ -1098,23 +1171,21 @@
 
     async function markVerified() {
       if (!state.paper) return;
-      if (!checkBulkStaleTargetConfirmation()) return;
+      const scope = getVisibleReviewScope();
+      if (!checkBulkStaleTargetConfirmation(scope.visibleRecords)) return;
       
-      const schema = document.getElementById("schemaSelect").value;
-      const results = state.extraction && state.extraction.results ? (state.extraction.results[schema] || []) : [];
-      
-      if (results.length === 0) {
-        showToast("当前没有待校验的记录。");
+      if (scope.visibleFieldCount === 0) {
+        showToast("当前过滤范围没有待人工确认的字段。");
         return;
       }
       
       try {
-        for (const record of results) {
-          const fieldNames = Object.keys(record).filter(name => name !== "target_id" && name !== "target_type");
+        for (const entry of scope.visibleRecords) {
+          const record = entry.record;
           const payload = {
             target_type: record.target_type,
             target_id: record.target_id,
-            field_names: fieldNames,
+            field_names: entry.fieldNames,
             reviewer: "manual_reviewer"
           };
           await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
@@ -1123,10 +1194,10 @@
             body: JSON.stringify(payload)
           });
         }
-        showToast("批量标记已校验成功！");
+        showToast("批量人工确认通过成功！");
         await refreshAllData();
       } catch (error) {
-        showToast("批量校验失败: " + error.message);
+        showToast("批量人工确认失败: " + error.message);
       }
     }
     async function validateCurrent() {

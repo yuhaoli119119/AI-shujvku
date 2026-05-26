@@ -107,7 +107,7 @@ const UI_LABELS = {
     candidate_status: {
         pending: "待确认",
         requires_resolution: "需人工处理",
-        materialized: "已写回",
+        materialized: "已生成待确认记录",
         skipped: "已跳过",
         unknown: "未识别"
     }
