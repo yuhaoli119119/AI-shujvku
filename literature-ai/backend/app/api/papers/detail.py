@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db.models import Base, Paper, PaperFigure
 from app.db.session import get_db_session
 from app.schemas.api import ExtractionRunResponse, PaperDetailResponse
@@ -21,14 +21,19 @@ from app.utils.artifact_paths import resolve_persisted_artifact_path
 router = APIRouter()
 
 
-def _safe_unlink(base_dir: Path, stored_path: str | None) -> str | None:
+def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, settings: Settings) -> str | None:
     if not stored_path:
         return None
     base = base_dir.resolve()
-    candidate = Path(stored_path)
-    if not candidate.is_absolute():
-        candidate = base / candidate
-    target = candidate.resolve()
+    target = resolve_persisted_artifact_path(
+        stored_path,
+        category=category,
+        settings=settings,
+        must_exist=False,
+    )
+    if target is None:
+        return None
+    target = target.resolve()
     try:
         target.relative_to(base)
     except ValueError:
@@ -95,7 +100,8 @@ async def delete_paper(
 
     deleted_files = []
     for base_dir, stored_path in files_to_delete:
-        deleted = _safe_unlink(base_dir, stored_path)
+        category = base_dir.name
+        deleted = _safe_unlink(base_dir, stored_path, category=category, settings=settings)
         if deleted:
             deleted_files.append(deleted)
     return {

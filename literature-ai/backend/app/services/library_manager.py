@@ -30,8 +30,9 @@ class LibraryInfo(BaseModel):
 
 
 class LibraryManager:
-    REGISTRY_PATH = Path("data/library_registry.json")
-    DEFAULT_LIBRARY_ROOT = Path("data/libraries/default")
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    REGISTRY_PATH = PROJECT_ROOT / "data" / "library_registry.json"
+    DEFAULT_LIBRARY_ROOT = PROJECT_ROOT / "data" / "libraries" / "default"
 
     def __init__(self) -> None:
         self._ensure_registry()
@@ -339,7 +340,7 @@ class LibraryManager:
         if root_path and root_path.strip():
             return Path(root_path).resolve()
         safe_name = name.replace(" ", "_").replace("/", "_").replace("\\", "_")
-        return (Path("data/libraries") / safe_name).resolve()
+        return (self.PROJECT_ROOT / "data" / "libraries" / safe_name).resolve()
 
     def _read_registry(self) -> dict[str, Any]:
         if not self.REGISTRY_PATH.exists():

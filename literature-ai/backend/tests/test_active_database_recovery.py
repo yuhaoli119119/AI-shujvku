@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.db.models import Base, Paper
 import app.services.library_manager as library_manager_module
 from app.utils import active_database as active_database_module
-from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
 
 
 def _write_sqlite(path: Path, *, paper_count: int) -> None:
@@ -99,3 +99,34 @@ def test_resolve_persisted_artifact_path_finds_mirrored_file(tmp_path, monkeypat
     )
 
     assert resolved == target.resolve()
+
+
+def test_resolve_persisted_artifact_path_accepts_storage_relative_reference(tmp_path, monkeypatch):
+    storage_root = tmp_path / "library" / "storage"
+    target = storage_root / "markdown" / "sample.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("sample evidence", encoding="utf-8")
+
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    resolved = resolve_persisted_artifact_path("storage/markdown/sample.md", category="markdown")
+
+    assert resolved == target.resolve()
+
+
+def test_canonicalize_persisted_artifact_reference_repairs_legacy_app_prefix(tmp_path, monkeypatch):
+    storage_root = tmp_path / "library" / "storage"
+    target = storage_root / "markdown" / "sample.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("sample evidence", encoding="utf-8")
+
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    canonical = canonicalize_persisted_artifact_reference(
+        "/app/D:\\Desktop\\代码开发\\AI检索数据库\\literature-ai\\backend\\data\\libraries\\default\\storage\\markdown\\sample.md",
+        category="markdown",
+    )
+
+    assert canonical == "storage/markdown/sample.md"

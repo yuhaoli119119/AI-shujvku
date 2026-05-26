@@ -24,6 +24,7 @@ from app.services.embedding import DeterministicEmbeddingService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_identity import PaperIdentityService
+from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
 from app.utils.text_cleaning import normalize_text_tree
 
 logger = logging.getLogger(__name__)
@@ -384,13 +385,13 @@ class PaperIngestionService:
             journal=ext.get("journal") or document.metadata.get("journal"),
             authors=ext.get("authors") or document.metadata.get("authors", []),
             abstract=ext.get("abstract") or document.abstract or None,
-            pdf_path=str(document.source_pdf_path),
+            pdf_path=self._artifact_ref(document.source_pdf_path, category="pdf") or str(document.source_pdf_path),
             source_path=source_reference,
             oa_status=oa_status or ext.get("oa_status") or document.metadata.get("oa_status"),
             license=ext.get("license") or document.metadata.get("license"),
-            tei_path=str(document.tei_path) if document.tei_path else None,
-            docling_json_path=str(document.docling_json_path) if document.docling_json_path else None,
-            markdown_path=str(document.markdown_path) if document.markdown_path else None,
+            tei_path=self._artifact_ref(document.tei_path, category="tei"),
+            docling_json_path=self._artifact_ref(document.docling_json_path, category="docling_json"),
+            markdown_path=self._artifact_ref(document.markdown_path, category="markdown"),
         )
         max_sn = self.session.scalar(
             select(func.max(Paper.serial_number)).where(Paper.library_name == paper.library_name)
@@ -419,13 +420,13 @@ class PaperIngestionService:
         paper.journal = ext.get("journal") or document.metadata.get("journal") or paper.journal
         paper.authors = ext.get("authors") or document.metadata.get("authors", []) or paper.authors or []
         paper.abstract = ext.get("abstract") or document.abstract or paper.abstract
-        paper.pdf_path = str(document.source_pdf_path)
+        paper.pdf_path = self._artifact_ref(document.source_pdf_path, category="pdf") or str(document.source_pdf_path)
         paper.source_path = source_reference or paper.source_path
         paper.oa_status = oa_status or ext.get("oa_status") or document.metadata.get("oa_status") or paper.oa_status
         paper.license = ext.get("license") or document.metadata.get("license") or paper.license
-        paper.tei_path = str(document.tei_path) if document.tei_path else None
-        paper.docling_json_path = str(document.docling_json_path) if document.docling_json_path else None
-        paper.markdown_path = str(document.markdown_path) if document.markdown_path else None
+        paper.tei_path = self._artifact_ref(document.tei_path, category="tei")
+        paper.docling_json_path = self._artifact_ref(document.docling_json_path, category="docling_json")
+        paper.markdown_path = self._artifact_ref(document.markdown_path, category="markdown")
         self.session.add(paper)
         self.session.flush()
 
@@ -609,6 +610,9 @@ class PaperIngestionService:
             "year": year,
             "arxiv_id": self.identity.extract_arxiv_id(str(arxiv_source) if arxiv_source else None),
         }
+
+    def _artifact_ref(self, path: Path | None, *, category: str) -> str | None:
+        return canonicalize_persisted_artifact_reference(path, category=category, settings=self.settings)
 
     def _find_conflicting_paper(
         self,
