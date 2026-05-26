@@ -22,5 +22,6 @@ docling==2.34.0
 pymatgen==2025.4.24
 ase==3.25.0
 pytest==8.3.5
+pytest-asyncio==0.25.3
 mcp==1.27.1
 PyMuPDF==1.25.3
