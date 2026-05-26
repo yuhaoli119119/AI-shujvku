@@ -1,4 +1,8 @@
 services:
+  # NOTE: PostgreSQL is started and initialized but NOT the default active database.
+  # The backend activates a per-library SQLite database via LibraryManager at startup.
+  # PostgreSQL is available for future use (e.g. pgvector retrieval) but sits idle unless
+  # the library system is bypassed (no active library in the registry).
   postgres:
     image: pgvector/pgvector:pg16
     environment:

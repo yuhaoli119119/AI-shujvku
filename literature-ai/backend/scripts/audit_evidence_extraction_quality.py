@@ -816,6 +816,27 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = get_settings()
+    active_url = settings.database_url
+    db_kind = "postgresql" if active_url.startswith("postgresql") else "sqlite" if active_url.startswith("sqlite") else "unknown"
+    # Mask credentials in URL for safe printing
+    if "@" in active_url:
+        masked = active_url.split("@")[-1]
+    elif "/" in active_url:
+        masked = active_url.split("/")[-1]
+    else:
+        masked = "***"
+
+    # Show active library info if available
+    try:
+        from app.services.library_manager import LibraryManager
+        _mgr = LibraryManager()
+        _active_lib = _mgr.get_active_library()
+        lib_hint = _active_lib.name if _active_lib else "(none)"
+    except Exception:
+        lib_hint = "(unknown)"
+
+    print(f"[audit] Database source-of-truth: kind={db_kind}, library={lib_hint}, url_masked={masked}")
+
     with session_scope(settings.database_url) as session:
         report = run_audit(session, paper_id=args.paper_id, limit=args.limit)
         session.rollback()

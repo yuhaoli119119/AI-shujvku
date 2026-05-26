@@ -4,7 +4,7 @@
 
 Literature AI：文献解析与 AI 写作辅助系统，面向 DFT 催化/锂硫电池研究。
 
-技术栈：FastAPI + PostgreSQL/pgvector + Redis + MinIO + GROBID + Docling + Celery + 静态前端。
+技术栈：FastAPI + SQLite（默认活跃） / PostgreSQL+pgvector（可选，Docker 中启动但非默认活跃库） + Redis + MinIO + GROBID + Docling + Celery + 静态前端。
 
 ## 同步规则（所有 AI 必须遵守）
 

@@ -1,5 +1,6 @@
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+import logging
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -25,12 +26,14 @@ from app.mcp.auth import enforce_mcp_auth
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
-    # 确保默认库注册表和目录结构存在
+    # Database source-of-truth: the library system always activates per-library SQLite.
+    # LITAI_DATABASE_URL (PostgreSQL) is only used as fallback when no library is registered.
+    settings = get_settings()
     from app.services.library_manager import LibraryManager
     mgr = LibraryManager()
-    # 使用默认库的 DB 初始化（LibraryManager._ensure_registry 已处理）
     active = mgr.get_active_library()
     if active:
+        # Normal path: activate_library() switches to SQLite via switch_database()
         try:
             mgr.activate_library(active.name)
         except Exception:
@@ -38,7 +41,22 @@ async def lifespan(_: FastAPI):
             db_path = _Path(active.root_path) / "database.sqlite"
             init_db(f"sqlite:///{db_path.as_posix()}")
     else:
+        # Fallback: no library registered, use LITAI_DATABASE_URL (PostgreSQL)
         init_db(settings.database_url)
+
+    # Log the actual active database after startup
+    startup_logger = logging.getLogger("app.startup")
+    final_settings = get_settings()
+    active_url = final_settings.database_url
+    db_kind = "postgresql" if active_url.startswith("postgresql") else "sqlite" if active_url.startswith("sqlite") else "unknown"
+    active_lib = mgr.get_active_library()
+    startup_logger.info(
+        "Database source-of-truth: kind=%s, library=%s, url_masked=%s",
+        db_kind,
+        active_lib.name if active_lib else "(none)",
+        active_url.split("@")[-1] if "@" in active_url else active_url.split("/")[-1] if "/" in active_url else "***",
+    )
+
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(mcp_server.session_manager.run())
         yield

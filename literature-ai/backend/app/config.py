@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
+    # NOTE: This default is overridden at startup by LibraryManager.activate_library(),
+    # which switches to the per-library SQLite database. The PostgreSQL URL is only
+    # used as a fallback when no active library exists in the registry.
     database_url: str = "postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai"
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"

@@ -63,7 +63,7 @@ AI-assisted literature parsing and writing support for:
 
 - PDF ingestion via path or upload, with GROBID + Docling dual parsing
 - Unified paper document assembly (sections, tables, figures)
-- SQLite (local) / PostgreSQL + pgvector (Docker) persistence
+- SQLite (default, per-library) / PostgreSQL + pgvector (available but not active by default) persistence
 - Stage 2 extraction: Comprehensive 12-class paper categorization with confidence scoring, DFT settings, catalyst samples, computational results, electrochemical performance, mechanism claims, writing cards
 - **Serial numbers** — each paper gets a persistent, per-library sequence number (001, 002 …) assigned at ingest time
 - **Reference management** — each paper carries its own reference list (`ReferenceEntry`), with optional cross-linking to other ingested papers; CRUD via `GET/POST/PUT/DELETE /api/papers/{id}/references`
@@ -118,7 +118,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-`docker-compose.yml` uses development-only default credentials for PostgreSQL and MinIO. Keep them only for local/dev use and override them before any shared deployment.
+`docker-compose.yml` includes a PostgreSQL + pgvector service, but the active runtime database is SQLite (per-library `database.sqlite`). PostgreSQL is available for future use but is **not** the default active database. MinIO uses development-only default credentials — override them before any shared deployment.
 
 Host directory browsing notes:
 
@@ -385,7 +385,7 @@ Artifacts are kept under `storage/`:
 Please mirror these before build:
 
 - Docker images:
-  - `pgvector/pgvector:pg16`
+  - `pgvector/pgvector:pg16` (optional — PostgreSQL not used as active DB by default)
   - `redis:7`
   - `minio/minio:RELEASE.2025-04-22T22-12-26Z`
   - `lfoppiano/grobid:0.8.1`
@@ -398,7 +398,7 @@ Please mirror these before build:
 - writer quality is still prompt/rule oriented unless a real LLM backend is configured
 - citation guard checks numeric support, fact-level triggers (mediates/causality), and common claim patterns; fact-level repair now active but full claim-level truthfulness still requires real LLM verification
 - frontend is static HTML/JS, not a full componentized app
-- pgvector retrieval is scaffolded through stored embeddings, but the current retriever is still lexical-first
+- pgvector retrieval is scaffolded but not active by default; the runtime database is SQLite (which does not support pgvector). PostgreSQL + pgvector is available for future activation.
 
 ## AI Collaboration
 

@@ -25,6 +25,14 @@ async def get_db_info() -> dict:
     elif url.startswith("sqlite"):
         dialect = "sqlite"
 
+    # Mask credentials for safe display
+    if "@" in url:
+        masked_url = url.split("@")[-1]
+    elif "/" in url:
+        masked_url = "sqlite:///" + url.split("/")[-1]
+    else:
+        masked_url = "***"
+
     active_library: str | None = None
     try:
         mgr = LibraryManager()
@@ -35,7 +43,7 @@ async def get_db_info() -> dict:
         pass
 
     return {
-        "database_url": url,
+        "database_url_masked": masked_url,
         "dialect": dialect,
         "storage_root": str(settings.storage_root),
         "active_library": active_library,
