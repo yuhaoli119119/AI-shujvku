@@ -159,6 +159,7 @@ def build_report() -> dict[str, Any]:
         "apply_executed": False,
         "target_root": str(target_root),
         "target_conflicts": target_conflicts,
+        "target_conflicts_count": len(target_conflicts),
         "target_database_summary": target_database_summary,
         "target_library_json_summary": target_library_json_summary,
         "target_quarantine_plan": target_quarantine_plan,
