@@ -1,21 +1,11 @@
 from celery import Celery
 
 from app.config import get_settings
-from app.db.session import init_db
-from app.services.library_manager import LibraryManager
+from app.utils.active_database import activate_active_library_database
 
 
 def bootstrap_worker_database() -> None:
-    settings = get_settings()
-    manager = LibraryManager()
-    active = manager.get_active_library()
-    if active:
-        try:
-            manager.activate_library(active.name)
-            return
-        except Exception:
-            pass
-    init_db(settings.database_url)
+    activate_active_library_database()
 
 
 bootstrap_worker_database()

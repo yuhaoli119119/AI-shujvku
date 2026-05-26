@@ -16,6 +16,7 @@ from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.paper_reprocessing import PaperReprocessingService
+from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 router = APIRouter()
 
@@ -152,7 +153,7 @@ async def get_paper_pdf(
     if not paper.pdf_path:
         raise HTTPException(status_code=404, detail="PDF not uploaded or unavailable")
     settings = get_settings()
-    file_path = settings.storage_paths["pdf"] / paper.pdf_path
-    if not file_path.exists():
+    file_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
+    if file_path is None or not file_path.exists():
         raise HTTPException(status_code=404, detail="PDF file missing on disk")
     return FileResponse(str(file_path), media_type="application/pdf")

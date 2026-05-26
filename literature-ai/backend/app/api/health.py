@@ -29,4 +29,9 @@ async def health() -> dict:
         "active_library_path_hint": active_library_path,
         "is_active_library_sqlite": info["is_active_library_sqlite"],
         "matches_active_library_db_path": info["matches_active_library_db_path"],
+        "effective_db_path": info.get("effective_db_path"),
+        "effective_storage_root": info.get("effective_storage_root"),
+        "effective_db_papers_total": info.get("effective_db_papers_total"),
+        "effective_matches_active_library_db_path": info.get("effective_matches_active_library_db_path"),
+        "recovered_from_candidate_scan": info.get("recovered_from_candidate_scan"),
     }

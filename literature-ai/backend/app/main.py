@@ -18,43 +18,23 @@ from app.api.settings import router as settings_router
 from app.api.system import router as system_router
 from app.api.writer import router as writer_router
 from app.config import get_settings
-from app.db.session import init_db
 from app.mcp import mcp_http_app, mcp_server
 from app.mcp.auth import enforce_mcp_auth
+from app.utils.active_database import activate_active_library_database
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    settings = get_settings()
-    # Database source-of-truth: the library system always activates per-library SQLite.
-    # LITAI_DATABASE_URL (PostgreSQL) is only used as fallback when no library is registered.
-    settings = get_settings()
-    from app.services.library_manager import LibraryManager
-    mgr = LibraryManager()
-    active = mgr.get_active_library()
-    if active:
-        # Normal path: activate_library() switches to SQLite via switch_database()
-        try:
-            mgr.activate_library(active.name)
-        except Exception:
-            from pathlib import Path as _Path
-            db_path = _Path(active.root_path) / "database.sqlite"
-            init_db(f"sqlite:///{db_path.as_posix()}")
-    else:
-        # Fallback: no library registered, use LITAI_DATABASE_URL (PostgreSQL)
-        init_db(settings.database_url)
+    info = activate_active_library_database()
 
     # Log the actual active database after startup
     startup_logger = logging.getLogger("app.startup")
-    final_settings = get_settings()
-    active_url = final_settings.database_url
-    db_kind = "postgresql" if active_url.startswith("postgresql") else "sqlite" if active_url.startswith("sqlite") else "unknown"
-    active_lib = mgr.get_active_library()
     startup_logger.info(
-        "Database source-of-truth: kind=%s, library=%s, url_masked=%s",
-        db_kind,
-        active_lib.name if active_lib else "(none)",
-        active_url.split("@")[-1] if "@" in active_url else active_url.split("/")[-1] if "/" in active_url else "***",
+        "Database source-of-truth: kind=%s, library=%s, configured=%s, effective=%s",
+        info["db_kind"],
+        info["active_library"] or "(none)",
+        info["db_url_masked"],
+        info.get("effective_db_path"),
     )
 
     async with AsyncExitStack() as stack:

@@ -12,6 +12,7 @@ from app.config import Settings
 from app.db.models import Paper, PaperFigure, PaperSection, PaperTable
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.extraction_pipeline import ExtractionPipelineService
+from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 
 class PaperReprocessingService:
@@ -115,9 +116,28 @@ class PaperReprocessingService:
             .order_by(PaperFigure.page.asc().nulls_last())
         ).all()
 
-        docling_json = self._load_json(paper.docling_json_path)
-        markdown = self._load_text(paper.markdown_path)
-        tei_xml = self._load_text(paper.tei_path)
+        docling_json = self._load_json(paper.docling_json_path, category="docling_json")
+        markdown = self._load_text(paper.markdown_path, category="markdown")
+        tei_xml = self._load_text(paper.tei_path, category="tei")
+        source_pdf_path = resolve_persisted_artifact_path(
+            paper.pdf_path,
+            category="pdf",
+            settings=self.settings,
+            must_exist=False,
+        ) or Path(paper.pdf_path or "")
+        tei_path = resolve_persisted_artifact_path(paper.tei_path, category="tei", settings=self.settings, must_exist=False)
+        markdown_path = resolve_persisted_artifact_path(
+            paper.markdown_path,
+            category="markdown",
+            settings=self.settings,
+            must_exist=False,
+        )
+        docling_json_path = resolve_persisted_artifact_path(
+            paper.docling_json_path,
+            category="docling_json",
+            settings=self.settings,
+            must_exist=False,
+        )
 
         return UnifiedPaperDocument(
             metadata={
@@ -162,24 +182,22 @@ class PaperReprocessingService:
             markdown=markdown,
             tei_xml=tei_xml,
             docling_json=docling_json,
-            source_pdf_path=Path(paper.pdf_path),
-            tei_path=Path(paper.tei_path) if paper.tei_path else None,
-            markdown_path=Path(paper.markdown_path) if paper.markdown_path else None,
-            docling_json_path=Path(paper.docling_json_path) if paper.docling_json_path else None,
+            source_pdf_path=source_pdf_path,
+            tei_path=tei_path,
+            markdown_path=markdown_path,
+            docling_json_path=docling_json_path,
         )
 
     @staticmethod
-    def _load_text(path_str: str | None) -> str:
-        if not path_str:
-            return ""
-        path = Path(path_str)
-        if not path.exists():
+    def _load_text(path_str: str | None, category: str | None = None) -> str:
+        path = resolve_persisted_artifact_path(path_str, category=category)
+        if path is None:
             return ""
         return path.read_text(encoding="utf-8")
 
     @staticmethod
-    def _load_json(path_str: str | None) -> dict:
-        raw = PaperReprocessingService._load_text(path_str)
+    def _load_json(path_str: str | None, category: str | None = None) -> dict:
+        raw = PaperReprocessingService._load_text(path_str, category=category)
         if not raw:
             return {}
         try:
