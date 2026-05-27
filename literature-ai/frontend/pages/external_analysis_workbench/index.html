@@ -313,6 +313,9 @@
       } else if (status === "pending") {
         bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "已生成待确认记录";
       }
+      if (status === "pending") {
+        label = "Pending human review / Not verified";
+      }
       return `<span class="status-chip" style="background:${bg}; color:${color}; border:1px solid ${color}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">${label}</span>`;
     }
 
@@ -578,7 +581,7 @@
         var bboxDataAttr = hasBbox === "true" ? ('data-bbox="' + escAttr(JSON.stringify(locator.bbox)) + '"') : "";
         return `<span id="${uid}" data-paper-id="${esc(paperId)}" data-page="${page || 0}" data-has-bbox="${hasBbox}" data-locator-status="exact_page" data-evidence-text="${escAttr(ellipsis(evidenceText, 60))}" ${bboxDataAttr} style="display:none;"></span><button class="btn primary small" style="height:22px;padding:0 6px;font-size:10px;" onclick="triggerWorkbenchLocatorAction('${uid}')">跳转到第 ${page || "?"} 页</button>`;
       } else {
-        return `<span style="font-size:10px;color:var(--color-text-secondary);">${locatorDegradedText(locator)}</span>`;
+        return `<span style="font-size:10px;color:var(--color-text-secondary);">Exact PDF locator missing / missing_page / unsafe_locator / no exact locator. ${locatorDegradedText(locator)} Blocked from export/writing until exact locator + human verification.</span>`;
       }
     }
 

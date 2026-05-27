@@ -114,6 +114,233 @@ const AUDIT = {
   claims: [{ claim_text: CLAIMS[0].claim_text, status: 'supported', evidence: [EVIDENCE_ITEMS[0].evidence] }],
 };
 
+const PILOT_PAPER_ID = '3978dc79f94f4457863fd68449ae293d';
+
+const PILOT_PAPER = {
+  id: PILOT_PAPER_ID,
+  title: '锂硫电池非均相电催化剂',
+  doi: '',
+  year: 2026,
+  journal: 'Pilot active library',
+  paper_type: 'research',
+  pdf_path: 'pilot.pdf',
+  counts: {
+    sections: 1,
+    figures: 0,
+    dft_results: 0,
+    writing_cards: 1,
+    field_reviews: 5,
+  },
+  abstract: 'D4-3C pilot paper for pending review UX verification.',
+  sections: [
+    {
+      id: 'pilot-section-1',
+      section_title: 'Results',
+      section_type: 'results',
+      text: 'The Li-S heterogeneous electrocatalyst evidence text is available but lacks an exact PDF page locator.',
+      page_start: null,
+      page_end: null,
+    },
+  ],
+};
+
+const PILOT_PENDING_REVIEW_IDS = [
+  'e2c75b7f-2d9c-41ff-a6e1-e95e5d491896',
+  '09f83676-8f13-4e82-a576-ab359b264933',
+  '280f2d9e-3ebb-4107-9702-f6ea6d645465',
+  '4ba0e490-5934-439c-8136-33a8ddf4e201',
+  '56f72584-45b3-465b-9a40-97ec60a2fabf',
+];
+
+const PILOT_PENDING_REVIEWS = [
+  {
+    id: PILOT_PENDING_REVIEW_IDS[0],
+    paper_id: PILOT_PAPER_ID,
+    target_type: 'catalyst_samples',
+    target_id: '11111111-1111-4111-8111-111111111111',
+    target_fingerprint: 'pilot-catalyst-name',
+    target_label: 'heterogeneous Li-S electrocatalyst',
+    field_path: 'CatalystSample.name',
+    field_name: 'name',
+    original_value: 'heterogeneous Li-S electrocatalyst',
+    reviewed_value: null,
+    unit: null,
+    evidence_text: 'Evidence text for the heterogeneous catalyst is present.',
+    reviewer_status: 'pending',
+    reviewer: null,
+    reviewer_note: 'prepared_from_extraction',
+    target_resolution_status: 'active',
+    remapped_from_target_id: null,
+    last_resolved_target_id: '11111111-1111-4111-8111-111111111111',
+    created_at: '2026-05-27T10:00:00',
+    updated_at: '2026-05-27T10:00:00',
+  },
+  {
+    id: PILOT_PENDING_REVIEW_IDS[1],
+    paper_id: PILOT_PAPER_ID,
+    target_type: 'catalyst_samples',
+    target_id: '11111111-1111-4111-8111-111111111111',
+    target_fingerprint: 'pilot-catalyst-type',
+    target_label: 'single atom catalyst',
+    field_path: 'CatalystSample.catalyst_type',
+    field_name: 'catalyst_type',
+    original_value: 'single atom catalyst',
+    reviewed_value: null,
+    unit: null,
+    evidence_text: 'Catalyst type evidence text is visible to the reviewer.',
+    reviewer_status: 'pending',
+    reviewer: null,
+    reviewer_note: 'prepared_from_extraction',
+    target_resolution_status: 'active',
+    remapped_from_target_id: null,
+    last_resolved_target_id: '11111111-1111-4111-8111-111111111111',
+    created_at: '2026-05-27T10:00:00',
+    updated_at: '2026-05-27T10:00:00',
+  },
+  {
+    id: PILOT_PENDING_REVIEW_IDS[2],
+    paper_id: PILOT_PAPER_ID,
+    target_type: 'catalyst_samples',
+    target_id: '11111111-1111-4111-8111-111111111111',
+    target_fingerprint: 'pilot-metal-centers',
+    target_label: 'Co-N4',
+    field_path: 'CatalystSample.metal_centers',
+    field_name: 'metal_centers',
+    original_value: ['Co-N4'],
+    reviewed_value: null,
+    unit: null,
+    evidence_text: 'Metal-center evidence text is visible.',
+    reviewer_status: 'pending',
+    reviewer: null,
+    reviewer_note: 'prepared_from_extraction',
+    target_resolution_status: 'active',
+    remapped_from_target_id: null,
+    last_resolved_target_id: '11111111-1111-4111-8111-111111111111',
+    created_at: '2026-05-27T10:00:00',
+    updated_at: '2026-05-27T10:00:00',
+  },
+  {
+    id: PILOT_PENDING_REVIEW_IDS[3],
+    paper_id: PILOT_PAPER_ID,
+    target_type: 'dft_settings',
+    target_id: '22222222-2222-4222-8222-222222222222',
+    target_fingerprint: 'pilot-convergence',
+    target_label: 'convergence settings',
+    field_path: 'DFTSetting.convergence_settings',
+    field_name: 'convergence_settings',
+    original_value: { force: '0.02 eV/A' },
+    reviewed_value: null,
+    unit: null,
+    evidence_text: 'DFT convergence evidence text is visible.',
+    reviewer_status: 'pending',
+    reviewer: null,
+    reviewer_note: 'prepared_from_extraction',
+    target_resolution_status: 'active',
+    remapped_from_target_id: null,
+    last_resolved_target_id: '22222222-2222-4222-8222-222222222222',
+    created_at: '2026-05-27T10:00:00',
+    updated_at: '2026-05-27T10:00:00',
+  },
+  {
+    id: PILOT_PENDING_REVIEW_IDS[4],
+    paper_id: PILOT_PAPER_ID,
+    target_type: 'electrochemical_performance',
+    target_id: '33333333-3333-4333-8333-333333333333',
+    target_fingerprint: 'pilot-rate',
+    target_label: '0.5 C',
+    field_path: 'ElectrochemicalPerformance.rate',
+    field_name: 'rate',
+    original_value: '0.5 C',
+    reviewed_value: null,
+    unit: null,
+    evidence_text: 'Rate-performance evidence text is visible.',
+    reviewer_status: 'pending',
+    reviewer: null,
+    reviewer_note: 'prepared_from_extraction',
+    target_resolution_status: 'active',
+    remapped_from_target_id: null,
+    last_resolved_target_id: '33333333-3333-4333-8333-333333333333',
+    created_at: '2026-05-27T10:00:00',
+    updated_at: '2026-05-27T10:00:00',
+  },
+];
+
+function reviewToField(review, valueOverride) {
+  return {
+    value: valueOverride === undefined ? review.original_value : valueOverride,
+    unit: review.unit,
+    evidence_text: review.evidence_text,
+    source_section: 'Results',
+    page_span: {},
+    confidence: 0.74,
+    verified: false,
+    review,
+    evidence_locator: {
+      locator_status: 'missing_page',
+      page: null,
+      bbox: null,
+      evidence_text: review.evidence_text,
+      paper_id: PILOT_PAPER_ID,
+      can_jump_to_pdf_page: false,
+      can_highlight_in_pdf: false,
+      warning_reason: 'unsafe_locator',
+    },
+  };
+}
+
+const PILOT_EXTRACTION_RESULTS = {
+  paper_id: PILOT_PAPER_ID,
+  field_reviews: PILOT_PENDING_REVIEWS,
+  schemas: { CatalystSample: {}, DFTSetting: {}, ElectrochemicalPerformance: {} },
+  validation_status: 'needs_review',
+  validation_warnings: PILOT_PENDING_REVIEWS.map(review => ({
+    severity: 'warning',
+    code: 'evidence_locator_missing_page',
+    message: 'Exact PDF locator missing; unsafe_locator / no exact locator.',
+    target_type: review.target_type,
+    target_id: review.target_id,
+    field: review.field_name,
+  })),
+  results: {
+    CatalystSample: [
+      {
+        target_id: '11111111-1111-4111-8111-111111111111',
+        target_type: 'CatalystSample',
+        name: reviewToField(PILOT_PENDING_REVIEWS[0]),
+        catalyst_type: reviewToField(PILOT_PENDING_REVIEWS[1]),
+        metal_centers: reviewToField(PILOT_PENDING_REVIEWS[2], 'Co-N4'),
+      },
+    ],
+    DFTSetting: [
+      {
+        target_id: '22222222-2222-4222-8222-222222222222',
+        target_type: 'DFTSetting',
+        convergence_settings: reviewToField(PILOT_PENDING_REVIEWS[3], 'force 0.02 eV/A'),
+      },
+    ],
+    ElectrochemicalPerformance: [
+      {
+        target_id: '33333333-3333-4333-8333-333333333333',
+        target_type: 'ElectrochemicalPerformance',
+        rate: reviewToField(PILOT_PENDING_REVIEWS[4]),
+      },
+    ],
+    DFTResult: [],
+    MechanismClaim: [],
+  },
+};
+
+const PILOT_AUDIT = {
+  paper_id: PILOT_PAPER_ID,
+  total_reviews: 5,
+  active: 5,
+  remapped: 0,
+  stale: 0,
+  ambiguous: 0,
+  unresolved: 0,
+  items: PILOT_PENDING_REVIEWS,
+};
+
 const EXTRACTION_RESULTS = {
   paper_id: 'paper-1',
   schemas: { DFTResult: { title: 'DFTResult' } },
@@ -715,7 +942,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#schemaForm')).toContainText('Fe-N4');
     await expect(page.locator('#schemaForm')).toContainText('Energy value seems unusually high');
-    await expect(page.locator('#schemaForm')).toContainText('已生成待确认记录');
+    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
 
     const evidenceBtn = page.locator('button:has-text("原文证据 ▾")').first();
     await evidenceBtn.click();
@@ -754,6 +981,68 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('.footer-actions button:has-text("人工确认校验")');
     await expect(page.locator('#toast')).toContainText('批量人工确认通过成功');
     expect(verifyCalled).toBe(true);
+  });
+
+  test('D4-3C: pilot pending reviews stay visible, unverified, and blocked on workbench open', async ({ page }) => {
+    const apiRequests = [];
+    page.on('request', request => {
+      const url = request.url();
+      if (url.includes('/api/')) {
+        apiRequests.push({
+          method: request.method(),
+          url,
+          body: request.postData() || '',
+        });
+      }
+    });
+
+    await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/audit$`), route => jsonResponse(route, PILOT_AUDIT));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/evidence-locators$`), route => jsonResponse(route, []));
+
+    await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=${PILOT_PAPER_ID}`);
+    await page.waitForTimeout(800);
+
+    await expect(page.locator('#paperMeta')).toContainText(PILOT_PAPER_ID);
+    await expect(page.locator('#stabilitySummaryBox')).toContainText('5');
+
+    await page.locator('#schemaSelect').selectOption('CatalystSample');
+    await expect(page.locator('#schemaForm')).toContainText('name');
+    await expect(page.locator('#schemaForm')).toContainText('catalyst_type');
+    await expect(page.locator('#schemaForm')).toContainText('metal_centers');
+    await expect(page.locator('#schemaForm .status-chip')).toHaveCount(3);
+    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
+    await expect(page.locator('#schemaForm')).toContainText('Evidence text for the heterogeneous catalyst is present.');
+    await expect(page.locator('#schemaForm')).toContainText('missing_page');
+    await expect(page.locator('#schemaForm')).toContainText('Exact PDF locator missing');
+    await expect(page.locator('#schemaForm')).toContainText('Blocked from export/writing until exact locator + human verification');
+    await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
+
+    await page.locator('#schemaSelect').selectOption('DFTSetting');
+    await expect(page.locator('#schemaForm')).toContainText('convergence_settings');
+    await expect(page.locator('#schemaForm')).toContainText('DFT convergence evidence text is visible.');
+    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
+    await expect(page.locator('#schemaForm')).toContainText('unsafe_locator / no exact locator');
+    await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
+
+    await page.locator('#schemaSelect').selectOption('ElectrochemicalPerformance');
+    await expect(page.locator('#schemaForm')).toContainText('rate');
+    await expect(page.locator('#schemaForm')).toContainText('Rate-performance evidence text is visible.');
+    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
+    await expect(page.locator('#schemaForm')).toContainText('Blocked from export/writing until exact locator + human verification');
+    await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
+
+    const schemaText = await page.locator('#schemaForm').innerText();
+    expect(schemaText).not.toMatch(/Human verified|Ready for export|Ready for writing|export-ready|writing-ready|AI approved|auto verified/i);
+
+    const openingRequests = apiRequests.filter(request => request.url.includes(PILOT_PAPER_ID));
+    expect(openingRequests.some(request => request.url.includes('/reviews/prepare'))).toBe(false);
+    expect(openingRequests.some(request => request.url.includes('/reviews/mark-verified'))).toBe(false);
+    expect(openingRequests.some(request => /reviewer_status"\s*:\s*"verified"|verified"\s*:\s*true/i.test(request.body))).toBe(false);
+    expect(openingRequests.some(request => request.url.includes('/export') || request.url.includes('/writer/'))).toBe(false);
   });
 
   test('business flow: view DFT extraction results and evidence link', async ({ page }) => {
