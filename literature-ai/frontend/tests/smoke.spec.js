@@ -341,6 +341,51 @@ const PILOT_AUDIT = {
   items: PILOT_PENDING_REVIEWS,
 };
 
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function makePilotExtractionWithoutPendingReviews() {
+  const extraction = cloneJson(PILOT_EXTRACTION_RESULTS);
+  extraction.field_reviews = [];
+  extraction.validation_warnings = [];
+  Object.values(extraction.results).forEach(records => {
+    records.forEach(record => {
+      Object.keys(record).forEach(key => {
+        if (key === 'target_id' || key === 'target_type') return;
+        if (record[key] && typeof record[key] === 'object') {
+          delete record[key].review;
+        }
+      });
+    });
+  });
+  return extraction;
+}
+
+const PILOT_EMPTY_AUDIT = {
+  paper_id: PILOT_PAPER_ID,
+  total_reviews: 0,
+  active: 0,
+  remapped: 0,
+  stale: 0,
+  ambiguous: 0,
+  unresolved: 0,
+  items: [],
+};
+
+function makePrepareSummary(overrides = {}) {
+  return {
+    created_count: 5,
+    existing_count: 0,
+    skipped_count: 0,
+    verified_count: 0,
+    safe_verified_count: 0,
+    review_ids: PILOT_PENDING_REVIEW_IDS,
+    items: PILOT_PENDING_REVIEWS,
+    ...overrides,
+  };
+}
+
 const EXTRACTION_RESULTS = {
   paper_id: 'paper-1',
   schemas: { DFTResult: { title: 'DFTResult' } },
@@ -1043,6 +1088,109 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(openingRequests.some(request => request.url.includes('/reviews/mark-verified'))).toBe(false);
     expect(openingRequests.some(request => /reviewer_status"\s*:\s*"verified"|verified"\s*:\s*true/i.test(request.body))).toBe(false);
     expect(openingRequests.some(request => request.url.includes('/export') || request.url.includes('/writer/'))).toBe(false);
+  });
+
+  test('D4-3D.2: prepare queue is user-gated, cancel-safe, and sends no verified-like payload', async ({ page }) => {
+    let prepareCalls = 0;
+    let prepared = false;
+    const preparePayloads = [];
+
+    await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => {
+      return jsonResponse(route, prepared ? PILOT_EXTRACTION_RESULTS : makePilotExtractionWithoutPendingReviews());
+    });
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/audit$`), route => {
+      return jsonResponse(route, prepared ? PILOT_AUDIT : PILOT_EMPTY_AUDIT);
+    });
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/validate$`), route => {
+      return jsonResponse(route, { paper_id: PILOT_PAPER_ID, validation_warnings: [] });
+    });
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/evidence-locators$`), route => jsonResponse(route, []));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/prepare$`), route => {
+      prepareCalls += 1;
+      preparePayloads.push(route.request().postData() || '');
+      prepared = true;
+      return jsonResponse(route, makePrepareSummary());
+    });
+
+    await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=${PILOT_PAPER_ID}`);
+    await expect(page.locator('#prepareReviewPanel')).toContainText('Prepare review queue');
+    await expect(page.locator('#prepareReviewsButton')).toBeEnabled();
+    expect(prepareCalls).toBe(0);
+
+    page.once('dialog', async dialog => {
+      expect(dialog.message()).toContain('will not mark anything verified');
+      expect(dialog.message()).toContain('will not export data');
+      expect(dialog.message()).toContain('will not unlock writing');
+      expect(dialog.message()).toContain('extraction/reprocessing/materialize/migration');
+      await dialog.dismiss();
+    });
+    await page.locator('#prepareReviewsButton').click();
+    await page.waitForTimeout(200);
+    expect(prepareCalls).toBe(0);
+    await expect(page.locator('#prepareReviewPanel')).not.toContainText('Created pending rows: 5');
+
+    page.once('dialog', async dialog => {
+      expect(dialog.message()).toContain('will not mark anything verified');
+      await dialog.accept();
+    });
+    await page.locator('#prepareReviewsButton').click();
+    await expect(page.locator('#prepareSummary')).toContainText('Created pending rows: 5');
+    expect(prepareCalls).toBe(1);
+
+    const preparePayload = preparePayloads.join('\n');
+    expect(preparePayload).not.toMatch(/reviewer_status\s*[:=]\s*["']?verified/i);
+    expect(preparePayload).not.toMatch(/verified\s*[:=]\s*true/i);
+    expect(preparePayload).not.toMatch(/safe_verified\s*[:=]\s*true/i);
+    expect(preparePayload).not.toMatch(/mark_verified|export|writing|materialize|reprocess|migration/i);
+
+    const preparePanel = page.locator('#prepareReviewPanel');
+    await expect(preparePanel).toContainText('Existing pending rows reused: 0');
+    await expect(preparePanel).toContainText('Skipped: 0');
+    await expect(preparePanel).toContainText('Verified rows created: 0');
+    await expect(preparePanel).toContainText('Safe verified rows: 0');
+    await expect(preparePanel).toContainText('Review items returned: 5');
+    await expect(page.locator('#prepareReviewsButton')).toBeDisabled();
+    await expect(page.locator('#prepareReviewsButton')).toContainText('Pending queue already prepared');
+
+    await page.locator('#schemaSelect').selectOption('CatalystSample');
+    const reviewQueue = page.locator('#schemaForm');
+    await expect(reviewQueue).toContainText('Pending human review / Not verified');
+    await expect(reviewQueue).toContainText('missing_page');
+    await expect(reviewQueue).toContainText('Exact PDF locator missing');
+    await expect(reviewQueue).toContainText('unsafe_locator / no exact locator');
+    await expect(reviewQueue).toContainText('Blocked from export/writing until exact locator + human verification');
+    await expect(reviewQueue.locator('button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
+
+    const scopedText = `${await preparePanel.innerText()}\n${await reviewQueue.innerText()}`;
+    expect(scopedText).not.toMatch(/Human verified|Export ready|Writing ready|已验证|可导出|可写作|一键写回数据库|自动验证|AI 审核通过|Export final|Final conclusion|Direct export/i);
+  });
+
+  test('D4-3D.2: existing pending rows disable prepare and do not auto-post', async ({ page }) => {
+    let prepareCalls = 0;
+
+    await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/audit$`), route => jsonResponse(route, PILOT_AUDIT));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/evidence-locators$`), route => jsonResponse(route, []));
+    await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/prepare$`), route => {
+      prepareCalls += 1;
+      return jsonResponse(route, makePrepareSummary({ created_count: 0, existing_count: 5 }));
+    });
+
+    await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=${PILOT_PAPER_ID}`);
+    await expect(page.locator('#prepareReviewPanel')).toContainText('Pending queue already prepared: 5 pending, unverified rows');
+    await expect(page.locator('#prepareReviewsButton')).toBeDisabled();
+    await expect(page.locator('#prepareReviewsButton')).toContainText('Pending queue already prepared');
+    expect(prepareCalls).toBe(0);
+
+    await page.locator('#schemaSelect').selectOption('CatalystSample');
+    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
+    await expect(page.locator('#schemaForm')).toContainText('Exact PDF locator missing');
+    await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
   });
 
   test('business flow: view DFT extraction results and evidence link', async ({ page }) => {

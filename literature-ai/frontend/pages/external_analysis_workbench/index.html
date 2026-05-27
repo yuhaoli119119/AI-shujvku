@@ -30,6 +30,8 @@
     .field-name { font-weight: 800; font-size: 13px; }
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
     .warning-row { border-left: 4px solid var(--color-warning); padding: 8px 10px; background: var(--color-warning-bg); border-radius: var(--radius); margin-bottom: 8px; }
+    .prepare-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-top: 12px; }
+    .prepare-summary-item { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 12px; }
     .footer-actions { position: sticky; bottom: 0; display: flex; gap: 10px; justify-content: flex-end; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px; box-shadow: var(--shadow-card); margin-top: 16px; }
     .action-scope { margin-right: auto; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .empty-state { text-align: center; color: var(--color-text-secondary); padding: 36px 12px; }
@@ -66,6 +68,8 @@
       <button class="btn primary" onclick="validateCurrent()">Validate</button>
       <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
     </section>
+
+    <section class="panel-card" id="prepareReviewPanel" style="display:none;"></section>
 
     <section class="panel-card" id="stabilitySummaryBox" style="display:none; margin-bottom:16px; padding:16px;"></section>
 
@@ -121,7 +125,7 @@
     </div>
   </div>
   <script>
-    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null, locatorCache: {} };
+    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null, locatorCache: {}, prepareSummary: null, preparingReviews: false };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function escAttr(value) { return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
     function ellipsis(text, limit) { var t = String(text || ""); return t.length > limit ? t.slice(0, limit) + "…" : t; }
@@ -150,6 +154,7 @@
       const paperId = document.getElementById("paperSelect").value;
       if (!paperId) return;
       try {
+        state.prepareSummary = null;
         state.paper = await fetchJSON(`/api/papers/${paperId}`);
         state.extraction = await fetchJSON(`/api/extraction/results/${paperId}`);
         
@@ -164,9 +169,130 @@
         renderWarnings(state.extraction.validation_warnings || []);
         renderSchemaForm();
         renderStabilitySummary();
+        renderPrepareReviewPanel();
         loadExtractionLocators();
       } catch (error) {
         showToast("Failed to load extraction results: " + error.message);
+      }
+    }
+
+    function getPendingReviewRows() {
+      const rows = [];
+      const seen = new Set();
+      function addRows(items) {
+        if (!Array.isArray(items)) return;
+        items.forEach(item => {
+          if (!item) return;
+          const status = String(item.reviewer_status || "").toLowerCase();
+          const verified = item.verified === true || status === "verified";
+          if (verified || status !== "pending") return;
+          const key = item.id || [item.target_type, item.target_id, item.field_name].join(":");
+          if (seen.has(key)) return;
+          seen.add(key);
+          rows.push(item);
+        });
+      }
+      addRows(state.audit && state.audit.items);
+      addRows(state.extraction && state.extraction.field_reviews);
+      return rows;
+    }
+
+    function renderPrepareReviewPanel() {
+      const box = document.getElementById("prepareReviewPanel");
+      if (!box) return;
+      box.style.display = "block";
+
+      const pendingRows = getPendingReviewRows();
+      const hasPaper = !!(state.paper && state.paper.id);
+      const hasPending = pendingRows.length > 0;
+      const isBusy = !!state.preparingReviews;
+      const disabled = !hasPaper || hasPending || isBusy;
+      const buttonLabel = isBusy ? "Preparing..." : hasPending ? "Pending queue already prepared" : "Prepare pending human reviews";
+      const disabledAttr = disabled ? "disabled" : "";
+      const summary = state.prepareSummary;
+
+      let summaryHtml = "";
+      if (summary) {
+        const verifiedCount = Number(summary.verified_count || 0);
+        const safeVerifiedCount = Number(summary.safe_verified_count || 0);
+        const itemCount = Array.isArray(summary.items) ? summary.items.length : (Array.isArray(summary.review_ids) ? summary.review_ids.length : 0);
+        const warningHtml = (verifiedCount !== 0 || safeVerifiedCount !== 0) ? `
+          <div class="warning-row" style="margin-top:12px;border-left-color:var(--color-danger);background:var(--color-danger-bg);color:var(--color-danger);">
+            Unexpected unsafe state: prepare returned verified rows. Treat this queue as not export-ready and not writing-ready.
+          </div>
+        ` : "";
+        summaryHtml = `
+          <div id="prepareSummary" aria-live="polite">
+            <div class="prepare-summary-grid">
+              <div class="prepare-summary-item">Created pending rows: <strong>${Number(summary.created_count || 0)}</strong></div>
+              <div class="prepare-summary-item">Existing pending rows reused: <strong>${Number(summary.existing_count || 0)}</strong></div>
+              <div class="prepare-summary-item">Skipped: <strong>${Number(summary.skipped_count || 0)}</strong></div>
+              <div class="prepare-summary-item">Verified rows created: <strong>${verifiedCount}</strong></div>
+              <div class="prepare-summary-item">Safe verified rows: <strong>${safeVerifiedCount}</strong></div>
+              <div class="prepare-summary-item">Review items returned: <strong>${itemCount}</strong></div>
+            </div>
+            ${warningHtml}
+          </div>
+        `;
+      }
+
+      const pendingHtml = hasPending ? `
+        <div style="margin-top:10px;font-size:12px;color:var(--color-warning);font-weight:800;">
+          Pending queue already prepared: ${pendingRows.length} pending, unverified row${pendingRows.length === 1 ? "" : "s"}.
+        </div>
+      ` : "";
+
+      box.innerHTML = `
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+          <div style="max-width:760px;">
+            <h3 style="margin:0 0 6px;">Prepare review queue</h3>
+            <p style="margin:0;color:var(--color-text-secondary);font-size:13px;line-height:1.5;">
+              Creates pending, unverified review rows from extraction output. This does not verify, export, unlock writing, reprocess, materialize, or run migrations.
+            </p>
+            ${pendingHtml}
+          </div>
+          <button id="prepareReviewsButton" class="btn primary" ${disabledAttr} onclick="preparePendingHumanReviews()">${buttonLabel}</button>
+        </div>
+        ${summaryHtml}
+      `;
+    }
+
+    async function preparePendingHumanReviews() {
+      if (!state.paper || !state.paper.id || state.preparingReviews || getPendingReviewRows().length > 0) {
+        renderPrepareReviewPanel();
+        return;
+      }
+      const confirmed = confirm("Prepare pending human review rows from extraction output? This will not mark anything verified, will not export data, will not unlock writing, and will not run extraction/reprocessing/materialize/migration.");
+      if (!confirmed) return;
+
+      state.preparingReviews = true;
+      renderPrepareReviewPanel();
+      try {
+        const paperId = state.paper.id;
+        const summary = await fetchJSON(`/api/extraction/results/${encodeURIComponent(paperId)}/reviews/prepare`, {
+          method: "POST"
+        });
+        state.prepareSummary = summary || {};
+        if (summary && Array.isArray(summary.items)) {
+          state.audit = {
+            ...(state.audit || {}),
+            paper_id: paperId,
+            total_reviews: summary.items.length,
+            items: summary.items
+          };
+          if (state.extraction) {
+            state.extraction.field_reviews = summary.items;
+          }
+        }
+        await refreshAllData();
+        renderPrepareReviewPanel();
+      } catch (error) {
+        state.prepareSummary = null;
+        renderPrepareReviewPanel();
+        showToast("Prepare pending reviews failed: " + error.message);
+      } finally {
+        state.preparingReviews = false;
+        renderPrepareReviewPanel();
       }
     }
 
@@ -1015,6 +1141,7 @@
         renderWarnings(state.extraction.validation_warnings || []);
         renderSchemaForm();
         renderStabilitySummary();
+        renderPrepareReviewPanel();
       } catch (error) {
         console.error("refreshReviewStateAfterMutation failed", error);
         showToast("Refresh failed: " + error.message);
