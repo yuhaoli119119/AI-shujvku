@@ -178,3 +178,14 @@ class ExtractionReviewAuditResponse(BaseModel):
     ambiguous: int = 0
     unresolved: int = 0
     items: list[ExtractionFieldReviewResponse] = Field(default_factory=list)
+
+
+class ExtractionReviewPrepareResponse(BaseModel):
+    paper_id: UUID
+    created_count: int = 0
+    existing_count: int = 0
+    skipped_count: int = 0
+    verified_count: int = 0
+    safe_verified_count: int = 0
+    review_ids: list[UUID] = Field(default_factory=list)
+    items: list[ExtractionFieldReviewResponse] = Field(default_factory=list)

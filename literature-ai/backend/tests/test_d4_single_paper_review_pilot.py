@@ -145,7 +145,7 @@ def test_d4_extraction_candidate_can_be_prepared_as_pending_unverified(tmp_path)
             prepared = ExtractionReviewService(session).prepare_pending_reviews(paper.id)
             session.refresh(paper)
 
-            value_review = next(item for item in prepared if item.target_id == str(row.id) and item.field_name == "value")
+            value_review = next(item for item in prepared.items if item.target_id == str(row.id) and item.field_name == "value")
             assert value_review.reviewer_status == "pending"
             assert value_review.verified is False
             assert value_review.original_value == -1.23
@@ -172,10 +172,11 @@ def test_d4_prepare_review_endpoint_is_pending_only(tmp_path):
 
             prepared = asyncio.run(prepare_extraction_field_reviews(paper.id, session=session))
 
-            assert prepared
-            assert any(item.target_id == str(row.id) and item.field_name == "value" for item in prepared)
-            assert {item.reviewer_status for item in prepared} == {"pending"}
-            assert all(item.verified is False for item in prepared)
+            assert prepared.items
+            assert prepared.created_count > 0
+            assert any(item.target_id == str(row.id) and item.field_name == "value" for item in prepared.items)
+            assert {item.reviewer_status for item in prepared.items} == {"pending"}
+            assert all(item.verified is False for item in prepared.items)
     finally:
         engine.dispose()
 

@@ -20,6 +20,7 @@ from app.schemas.extraction import (
     ExtractionFieldReviewResponse,
     ExtractionFieldReviewSaveItem,
     ExtractionReviewMarkVerifiedRequest,
+    ExtractionReviewPrepareResponse,
 )
 from app.services.review_target_resolver import (
     ACTIVE_REVIEW_STATUSES,
@@ -123,8 +124,11 @@ class ExtractionReviewService:
             items=items,
         )
 
-    def prepare_pending_reviews(self, paper_id: UUID) -> list[ExtractionFieldReviewResponse]:
+    def prepare_pending_reviews(self, paper_id: UUID) -> ExtractionReviewPrepareResponse:
         prepared: list[ExtractionFieldReviewResponse] = []
+        created_count = 0
+        existing_count = 0
+        skipped_count = 0
         for canonical_type, model in TARGET_TYPE_MODELS.items():
             rows = self.session.scalars(select(model).where(model.paper_id == paper_id)).all()
             for target in rows:
@@ -133,9 +137,16 @@ class ExtractionReviewService:
                     if self._is_blank(field_snapshot["value"]):
                         continue
                     review = self._get_or_create_review(paper_id, canonical_type, str(target.id), field_name)
-                    if review.id is not None and review.reviewer_status == "verified":
+                    if review.id is not None:
+                        existing_count += 1
+                        if review.reviewer_status == "verified":
+                            skipped_count += 1
+                            prepared.append(self._serialize(review))
+                            continue
+                        self._fill_missing_prepare_fields(review, field_snapshot, str(target.id))
                         prepared.append(self._serialize(review))
                         continue
+                    created_count += 1
                     review.original_value = field_snapshot["value"]
                     review.reviewed_value = None
                     review.unit = field_snapshot["unit"]
@@ -151,7 +162,16 @@ class ExtractionReviewService:
                     self.session.flush()
                     prepared.append(self._serialize(review))
         self.session.commit()
-        return prepared
+        return ExtractionReviewPrepareResponse(
+            paper_id=paper_id,
+            created_count=created_count,
+            existing_count=existing_count,
+            skipped_count=skipped_count,
+            verified_count=sum(1 for item in prepared if item.reviewer_status == "verified"),
+            safe_verified_count=sum(1 for item in prepared if item.verified),
+            review_ids=[item.id for item in prepared],
+            items=prepared,
+        )
 
     def save_reviews(self, paper_id: UUID, items: list[ExtractionFieldReviewSaveItem]) -> list[ExtractionFieldReviewResponse]:
         saved: list[ExtractionFieldReviewResponse] = []
@@ -283,6 +303,25 @@ class ExtractionReviewService:
             target_resolution_status="active",
             last_resolved_target_id=target_id,
         )
+
+    @staticmethod
+    def _fill_missing_prepare_fields(
+        review: ExtractionFieldReview,
+        field_snapshot: dict[str, Any],
+        target_id: str,
+    ) -> None:
+        if review.original_value is None:
+            review.original_value = field_snapshot["value"]
+        if review.unit is None:
+            review.unit = field_snapshot["unit"]
+        if not review.evidence_text:
+            review.evidence_text = field_snapshot["evidence_text"]
+        if not review.reviewer_note:
+            review.reviewer_note = "prepared_from_extraction"
+        if not review.target_resolution_status:
+            review.target_resolution_status = "active"
+        if not review.last_resolved_target_id:
+            review.last_resolved_target_id = target_id
 
     @staticmethod
     def _is_blank(value: Any) -> bool:
