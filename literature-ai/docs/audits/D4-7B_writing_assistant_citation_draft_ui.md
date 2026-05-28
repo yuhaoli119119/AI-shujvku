@@ -198,3 +198,93 @@
 - New commit: yes, this round should be committed after this document update.
 - Push: no.
 - Residual risk: real backend smoke remains blocked until the actual active DB with `papers_total=15` and `total reviews=5` is available at the canonical project path or the correct runtime environment is restored.
+
+## D4-7B.3 Canonical Active DB Environment Recovery / Real Backend Smoke Gate (2026-05-28)
+
+### Canonical Repository Gate
+- Requested canonical repo path: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai`
+- Result: not found on this machine.
+- Parent path `D:\Desktop\03_代码与开发` is also not present.
+- Actual repo path available in this workspace: `D:\Desktop\代码开发\AI-shujvku\literature-ai`
+- Opening gate commands in the available repo:
+  - `git status --short`: clean
+  - `git log -1 --oneline`: `9fab5bd fix d4 citation draft ui validation`
+  - `git rev-parse HEAD`: `9fab5bd5d8d79e8e23ca569988ee93fec2ea6cf6`
+  - `git branch -vv`: `master 9fab5bd [origin/master: ahead 3] fix d4 citation draft ui validation`
+  - `git fetch origin`: succeeded
+  - `git ls-remote origin refs/heads/master`: `e08066fd3c383e49b42074348283bc00e8d0a092 refs/heads/master`
+
+### Canonical DB Search
+- Requested canonical DB path: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai\data\libraries\default\database.sqlite`
+- Requested canonical registry path: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai\data\library_registry.json`
+- Result: neither path exists because the canonical repo path does not exist.
+- Full search under `D:\Desktop` found only these registry / DB candidates:
+  - `D:\Desktop\代码开发\AI-shujvku\literature-ai\backend\data\library_registry.json`
+  - `D:\Desktop\代码开发\AI-shujvku\literature-ai\backend\data_backup_20260522_193027\library_registry.json`
+  - `D:\Desktop\代码开发\AI-shujvku\literature-ai\backend\data\libraries\default\database.sqlite`
+  - `D:\Desktop\代码开发\AI-shujvku\literature-ai\backend\data_backup_20260522_193027\libraries\default\database.sqlite`
+  - `D:\Desktop\代码开发\AI-shujvku\literature-ai\backend\data_backup_20260522_193027\libraries\共享库\database.sqlite`
+  - `D:\Desktop\代码开发\AI-shujvku\literature-ai\backend\data_backup_20260522_193027\libraries\石墨烯基单、双原子\database.sqlite`
+
+### Baseline Check
+- Required D4-7B.3 canonical baseline was not found.
+- Read-only counts for the best available active candidate `backend\data\libraries\default\database.sqlite`:
+  - `papers_total = 4`
+  - `pilot_exists = 0`
+  - `pilot_title = None`
+  - `total_reviews = MISSING_TABLE`
+  - `pending_reviews = MISSING_TABLE`
+  - `verified_reviews = MISSING_TABLE`
+  - `safe_verified_reviews = MISSING_TABLE`
+  - `paper_impact_metadata_rows = MISSING_TABLE`
+  - `paper_citation_eligibility_rows = MISSING_TABLE`
+  - `evidence_locators = MISSING_TABLE`
+  - `export_eligible = MISSING_TABLE`
+  - `writing_eligible = MISSING_TABLE`
+- Other discovered DB candidates also failed the required baseline:
+  - backup `default`: `papers_total = 0`
+  - backup `共享库`: `papers_total = 0`
+  - backup `石墨烯基单、双原子`: `papers_total = 5`, `total_reviews = 0`, `evidence_locators = 0`
+
+### Backend Smoke Decision
+- Real backend was not started.
+- No `localhost:8000` real smoke was attempted.
+- Reason: the required canonical repo and canonical active DB were not recoverable from the current machine state, and the available DB candidates do not satisfy the required read-only baseline.
+- Additional safety reason: this codebase initializes schema on startup, so launching FastAPI against the wrong SQLite candidate could perform `create_all` / auto-init and violate the no-write constraint.
+
+### Network Safety Check
+- No real backend network traffic was generated in this round.
+- Therefore no dangerous interface was called and no dangerous field was sent:
+  - no `mark_verified`
+  - no `save_reviews`
+  - no `verified=true`
+  - no `safe_verified=true`
+  - no `reviewer_status=verified`
+  - no citation eligibility write
+  - no impact metadata import
+  - no export unlock
+  - no writing unlock
+  - no materialize
+  - no extraction/reprocessing apply
+  - no registry write
+  - no artifact cleanup
+  - no paper delete
+  - no migration
+
+### Active DB Before/After
+- All DB inspection in this round used SQLite read-only access.
+- No backend process was started.
+- No write path was executed.
+- The available local DB state remained unchanged, but it does not match the expected D4-7B.3 canonical baseline.
+
+### Playwright Re-Run
+- Re-ran `npm.cmd test -- --project=chromium`: `91 passed`
+- Re-ran `npx.cmd playwright test -g "Writing Assistant"`: `1 passed`
+
+### Round Outcome
+- Code modified: no
+- Audit document modified: yes, this D4-7B.3 section
+- Backend modified: no
+- New commit: yes, this round should be committed after this documentation update
+- Push: no
+- Residual risk: D4-7B.3 cannot complete until the machine has the real canonical repo path and the expected 15-paper / 5-review active DB baseline
