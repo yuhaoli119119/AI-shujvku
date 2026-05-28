@@ -9,6 +9,7 @@ const PAGES = [
   { name: 'AI Writing Studio', path: '/pages/ai_writer/index.html', coreSelector: '#paperChecklist' },
   { name: 'Extraction Review Workbench', path: '/pages/external_analysis_workbench/index.html', coreSelector: '#schemaForm' },
   { name: 'Settings', path: '/pages/settings/index.html', coreSelector: '.field' },
+  { name: 'Literature Screening', path: '/pages/literature_screening/index.html', coreSelector: '.screening-table' },
 ];
 
 const VIEWPORTS = [
@@ -462,6 +463,10 @@ async function mockApi(route) {
 
   if (pathname === '/api/papers' && method === 'GET') {
     return jsonResponse(route, PAPERS);
+  }
+
+  if (pathname === '/api/library/papers/filter' && method === 'GET') {
+    return jsonResponse(route, { papers: PAPERS });
   }
 
   if (pathname === '/api/papers/paper-1' && method === 'DELETE') {
@@ -3093,5 +3098,121 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       expect(openingRequests.some(req => req.url.includes('/reviews/mark-verified'))).toBe(false);
       expect(openingRequests.some(req => /reviewer_status"\s*:\s*"verified"|verified"\s*:\s*true/i.test(req.body))).toBe(false);
     });
+  });
+
+  test('business flow: Literature Screening page loads and calls filter API', async ({ page }) => {
+    let filterCalled = false;
+    await page.route(/\/api\/library\/papers\/filter.*/, route => {
+      filterCalled = true;
+      return jsonResponse(route, { papers: PAPERS });
+    });
+    await page.goto(`${BASE_URL}/pages/literature_screening/index.html`);
+    await expect.poll(() => filterCalled).toBe(true);
+    await expect(page.locator('.screening-table')).toBeVisible();
+    await expect(page.locator('.screening-table')).toContainText('needs_metadata');
+  });
+
+  test('business flow: Literature Screening filter sends correct params', async ({ page }) => {
+    let lastUrl = '';
+    await page.route(/\/api\/library\/papers\/filter.*/, route => {
+      lastUrl = route.request().url();
+      return jsonResponse(route, { papers: PAPERS });
+    });
+    await page.goto(`${BASE_URL}/pages/literature_screening/index.html`);
+
+    await page.fill('#filterYearMin', '2020');
+    await page.fill('#filterIFMin', '5.0');
+    await page.check('#filterNeedsMetadata');
+    await page.click('button:has-text("Apply Filters")');
+
+    await expect.poll(() => lastUrl).toContain('year_min=2020');
+    await expect.poll(() => lastUrl).toContain('impact_factor_min=5');
+    await expect.poll(() => lastUrl).toContain('needs_metadata=true');
+  });
+
+  test('business flow: Literature Screening bulk Mark Do Not Cite', async ({ page }) => {
+    let bulkData = null;
+    await page.route(/\/api\/library\/papers\/filter.*/, route => jsonResponse(route, { papers: PAPERS }));
+    await page.route(/\/api\/library\/papers\/citation-eligibility\/bulk/, async route => {
+      bulkData = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, { ok: true });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_screening/index.html`);
+    await page.waitForTimeout(500);
+
+    await page.check('#selectAllCheckbox');
+    await page.click('button:has-text("Mark selected as Do Not Cite")');
+    await expect(page.locator('#confirmModalOverlay')).toBeVisible();
+    await page.click('#confirmModalActionBtn');
+
+    await expect.poll(() => bulkData !== null).toBe(true);
+    expect(bulkData.paper_ids).toContain('paper-1');
+    expect(bulkData.updates.exclude_from_citation).toBe(true);
+  });
+
+  test('business flow: Literature Screening bulk Set Priority', async ({ page }) => {
+    let bulkData = null;
+    await page.route(/\/api\/library\/papers\/filter.*/, route => jsonResponse(route, { papers: PAPERS }));
+    await page.route(/\/api\/library\/papers\/citation-eligibility\/bulk/, async route => {
+      bulkData = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, { ok: true });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_screening/index.html`);
+    await page.waitForTimeout(500);
+
+    await page.check('#selectAllCheckbox');
+    await page.selectOption('#bulkPrioritySelect', 'high');
+    await page.click('button:has-text("Set selected priority")');
+    await expect(page.locator('#confirmModalOverlay')).toBeVisible();
+    await page.click('#confirmModalActionBtn');
+
+    await expect.poll(() => bulkData !== null).toBe(true);
+    expect(bulkData.updates.citation_priority).toBe('high');
+  });
+
+  test('business flow: Literature Screening Import Impact Metadata Panel', async ({ page }) => {
+    let importUrl = '';
+    let importData = '';
+    await page.route(/\/api\/library\/papers\/filter.*/, route => jsonResponse(route, { papers: [] }));
+    await page.route(/\/api\/library\/impact-metadata\/import.*/, async route => {
+      importUrl = route.request().url();
+      importData = route.request().postData() || '';
+      return jsonResponse(route, {
+        imported_count: 1,
+        updated_count: 0,
+        matched_paper_count: 1,
+        unmatched_items: 0,
+        invalid_items: 0,
+        needs_metadata_remaining: 10
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_screening/index.html`);
+    await page.click('button:has-text("Import Impact Metadata")');
+    await expect(page.locator('#importPanelOverlay')).toBeVisible();
+    await expect(page.locator('#importDryRun')).toBeChecked();
+
+    await page.fill('#importTextarea', 'doi,if\n10.123/456,10.0');
+    await page.click('button:has-text("Execute Import")');
+
+    await expect.poll(() => importUrl).toContain('dry_run=true');
+    expect(importData).toContain('10.123/456');
+    await expect(page.locator('#importResImported')).toContainText('1');
+    await expect(page.locator('#importResMatched')).toContainText('1');
+
+    importUrl = '';
+    page.once('dialog', async dialog => {
+      expect(dialog.message()).toContain('dry_run = false');
+      await dialog.accept();
+    });
+    await page.uncheck('#importDryRun');
+    await page.click('button:has-text("Execute Import")');
+    await expect.poll(() => importUrl).toContain('dry_run=false');
+
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).not.toMatch(/delete paper/i);
+    expect(bodyText).not.toMatch(/Human verified/i);
   });
 });
