@@ -27,6 +27,9 @@ async function retrieveCandidates() {
     const excludedCollapsible = document.getElementById('excludedCollapsible');
     const excludedList = document.getElementById('excludedList');
     
+    // Clear previous proposals globally
+    window.currentDraftProposals = {};
+    
     alertDiv.style.display = 'none';
     alertDiv.innerText = '';
     
@@ -289,7 +292,10 @@ function renderResults(data) {
                     <strong>Reason:</strong> ${cand.reason || '-'}
                 </div>
                 
+                <div id="proposalContainer-${cand.paper_id}" class="proposal-container" style="display: none;"></div>
+                
                 <div class="card-actions">
+                    <button class="btn btn-sm btn-primary" onclick="generateDraftProposal(${JSON.stringify(cand).replace(/"/g, '&quot;')})">Generate Draft Citation Proposal</button>
                     <button class="btn btn-sm btn-ghost" onclick="copyCardTitle('${escapeJsString(cand.title)}')">Copy Title</button>
                     <button class="btn btn-sm btn-outline" onclick="copyCardInfo(${JSON.stringify(cand).replace(/"/g, '&quot;')})">Copy Candidate Info</button>
                 </div>
@@ -467,4 +473,185 @@ function showToast(message, type = 'success') {
  */
 function escapeJsString(str) {
     return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+/**
+ * Generate a draft citation proposal for a candidate.
+ */
+async function generateDraftProposal(cand) {
+    const textVal = document.getElementById('writingText').value.trim();
+    if (!textVal) {
+        showToast('Error: Please enter text context before generating a draft.', 'error');
+        return;
+    }
+    
+    if (!cand.paper_id) {
+        showToast('Error: Candidate missing paper_id. Safety violation.', 'error');
+        return;
+    }
+
+    const container = document.getElementById(`proposalContainer-${cand.paper_id}`);
+    if (!container) return;
+    
+    container.style.display = 'block';
+    container.innerHTML = '<div class="proposal-loading">Generating draft proposal...</div>';
+    
+    const payload = {
+        text: textVal,
+        selected_paper_id: cand.paper_id,
+        citation_marker: cand.citation_marker || `[Draft_${cand.paper_id.substring(0,6)}]`,
+        insertion_mode: "parenthetical",
+        citation_style: "draft_author_year",
+        candidate_evidence_status: cand.evidence_status || "unknown",
+        candidate_can_be_used_as_confirmed_citation: cand.can_be_used_as_confirmed_citation || false,
+        candidate_requires_human_verification: cand.requires_human_verification || false,
+        supporting_snippet: (cand.supporting_snippets && cand.supporting_snippets.length > 0) ? cand.supporting_snippets[0].text : "",
+        user_note: ""
+    };
+    
+    try {
+        const response = await fetch('/api/writing/citation-insertion-draft', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API Error: ${errText}`);
+        }
+        
+        const data = await response.json();
+        
+        // Store in global state for copying
+        if (!window.currentDraftProposals) window.currentDraftProposals = {};
+        window.currentDraftProposals[cand.paper_id] = data;
+        
+        renderDraftProposal(cand.paper_id, data);
+        
+    } catch(err) {
+        console.error('Draft generation error:', err);
+        container.innerHTML = `<div class="proposal-error">Failed to generate draft: ${err.message}</div>`;
+        showToast('Draft generation failed.', 'error');
+    }
+}
+
+/**
+ * Render the draft proposal result into the container.
+ */
+function renderDraftProposal(paperId, data) {
+    const container = document.getElementById(`proposalContainer-${paperId}`);
+    if (!container) return;
+    
+    if (data.proposal_status === 'blocked_excluded_from_citation') {
+        container.innerHTML = `
+            <div class="proposal-blocked">
+                <div class="blocked-icon">⛔</div>
+                <div class="blocked-text">
+                    <strong>Blocked</strong><br/>
+                    No draft citation generated because this paper is excluded from citation.
+                </div>
+            </div>
+            ${renderBlockedActions(data.blocked_actions)}
+        `;
+        return;
+    }
+    
+    let safetyBanner = '';
+    if (data.can_insert_as_confirmed_citation === true) {
+        safetyBanner = `<div class="proposal-banner banner-confirmed">Confirmed candidate draft — still review before final manuscript use</div>`;
+    } else if (data.requires_human_verification === true) {
+        safetyBanner = `<div class="proposal-banner banner-warning">Needs human verification before citation use</div>`;
+    } else if (data.evidence_status === 'metadata_only') {
+        safetyBanner = `<div class="proposal-banner banner-metadata">Metadata-only suggestion — cannot be used as evidence yet</div>`;
+    }
+    
+    let warningsHtml = '';
+    if (data.warnings && data.warnings.length > 0) {
+        warningsHtml = `
+            <div class="proposal-warnings">
+                <strong>Warnings:</strong>
+                <ul>
+                    ${data.warnings.map(w => `<li>${escapeJsString(w)}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    let checklistHtml = '';
+    if (data.human_review_checklist && data.human_review_checklist.length > 0) {
+        checklistHtml = `
+            <div class="proposal-checklist">
+                <strong>Human Review Checklist:</strong>
+                <ul>
+                    ${data.human_review_checklist.map(c => `<li><input type="checkbox" disabled> ${escapeJsString(c)}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    const draftText = data.draft_text || 'No draft text provided.';
+    
+    container.innerHTML = `
+        <div class="proposal-content">
+            ${safetyBanner}
+            ${warningsHtml}
+            
+            <div class="draft-text-box">
+                <div class="draft-label">Draft Citation Proposal:</div>
+                <div class="draft-text">${escapeJsString(draftText)}</div>
+                <div class="draft-marker">Marker: ${escapeJsString(data.citation_marker || '')}</div>
+            </div>
+            
+            ${checklistHtml}
+            ${renderBlockedActions(data.blocked_actions)}
+            
+            <div class="proposal-actions">
+                <button class="btn btn-sm btn-outline" onclick="copyDraftProposal('${paperId}')">Copy Draft Proposal</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderBlockedActions(blockedActions) {
+    if (!blockedActions || blockedActions.length === 0) return '';
+    return `
+        <div class="blocked-actions-audit">
+            <strong>Safety Audit Actions Blocked:</strong>
+            <ul>
+                ${blockedActions.map(a => `<li>${escapeJsString(a)}</li>`).join('')}
+            </ul>
+        </div>
+    `;
+}
+
+/**
+ * Copy the draft proposal text securely without offering final bibliographies.
+ */
+function copyDraftProposal(paperId) {
+    if (!window.currentDraftProposals) return;
+    const data = window.currentDraftProposals[paperId];
+    if (!data) return;
+    
+    const parts = [
+        `Proposal Status: ${data.proposal_status}`,
+        `Evidence Status: ${data.evidence_status}`,
+        `Requires Human Verification: ${data.requires_human_verification}`
+    ];
+    
+    if (data.warnings && data.warnings.length > 0) {
+        parts.push(`Warnings: ${data.warnings.join(' | ')}`);
+    }
+    
+    parts.push(`Draft Text: ${data.draft_text || ''}`);
+    
+    if (data.human_review_checklist && data.human_review_checklist.length > 0) {
+        parts.push(`Review Checklist: \n- ${data.human_review_checklist.join('\n- ')}`);
+    }
+    
+    navigator.clipboard.writeText(parts.join('\n\n')).then(() => {
+        showToast('Draft Proposal copied!', 'success');
+    }).catch(err => {
+        showToast('Failed to copy', 'error');
+    });
 }

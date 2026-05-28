@@ -874,6 +874,45 @@ async function mockApi(route) {
     });
   }
 
+  if (pathname === '/api/writing/citation-insertion-draft' && method === 'POST') {
+    const payload = JSON.parse(route.request().postData());
+    if (payload.selected_paper_id === 'paper-excluded') {
+      return jsonResponse(route, {
+        proposal_status: 'blocked_excluded_from_citation',
+        draft_text: null,
+        blocked_actions: ['no_database_write', 'no_verified_status_change', 'no_bibliography_generation', 'no_export_unlock']
+      });
+    }
+    
+    let draft_text = `(Draft Citation: ${payload.selected_paper_id})`;
+    let can_insert = false;
+    let requires_human = true;
+    let warnings = [];
+    let evidence_status = payload.candidate_evidence_status || 'unknown';
+    
+    if (payload.selected_paper_id === 'paper-confirmed') {
+      can_insert = true;
+      requires_human = false;
+    } else if (payload.selected_paper_id === 'paper-needs-verification') {
+      warnings.push('Needs manual verification before use');
+    } else if (payload.selected_paper_id === 'paper-metadata-only') {
+      warnings.push('Needs metadata and verification');
+      evidence_status = 'metadata_only';
+    }
+
+    return jsonResponse(route, {
+      proposal_status: evidence_status === 'metadata_only' ? 'metadata_only_draft' : (requires_human ? 'needs_human_verification' : 'can_insert'),
+      can_insert_as_confirmed_citation: can_insert,
+      requires_human_verification: requires_human,
+      evidence_status: evidence_status,
+      citation_marker: payload.citation_marker || `[1]`,
+      draft_text: draft_text,
+      warnings: warnings,
+      human_review_checklist: ['Verify evidence', 'Check claim'],
+      blocked_actions: ['no_database_write', 'no_verified_status_change', 'no_bibliography_generation', 'no_export_unlock']
+    });
+  }
+
   return route.fulfill({ status: 204, body: '' });
 }
 
@@ -3380,5 +3419,25 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(pageBody).not.toMatch(/automatically insert citation/i);
     expect(pageBody).not.toMatch(/save_reviews/i);
     expect(pageBody).not.toMatch(/mark_verified/i);
+    
+    // 7. Click Generate Draft Citation Proposal on Confirmed Candidate
+    await confirmedCard.locator('button:has-text("Generate Draft Citation Proposal")').click();
+    await expect(confirmedCard.locator('.proposal-container')).toBeVisible();
+    await expect(confirmedCard.locator('.proposal-banner')).toContainText('Confirmed candidate draft — still review before final manuscript use');
+    await expect(confirmedCard.locator('.draft-text')).toContainText('(Draft Citation: paper-confirmed)');
+    
+    // 8. Click Generate Draft on Needs Verification Candidate
+    await needsVerificationCard.locator('button:has-text("Generate Draft Citation Proposal")').click();
+    await expect(needsVerificationCard.locator('.proposal-container')).toBeVisible();
+    await expect(needsVerificationCard.locator('.proposal-banner')).toContainText('Needs human verification before citation use');
+    await expect(needsVerificationCard.locator('.proposal-warnings')).toContainText('Needs manual verification before use');
+    await expect(needsVerificationCard.locator('.proposal-checklist')).toContainText('Verify evidence');
+    await expect(needsVerificationCard.locator('.blocked-actions-audit')).toContainText('no_database_write');
+    
+    // 9. Verify Copy Draft Proposal
+    await needsVerificationCard.locator('button:has-text("Copy Draft Proposal")').click();
+    await expect(page.locator('#toastContainer')).toContainText('Draft Proposal copied!');
+    
+    // Note: To test clipboard we might need clipboard permissions, but we can just check the toast.
   });
 });
