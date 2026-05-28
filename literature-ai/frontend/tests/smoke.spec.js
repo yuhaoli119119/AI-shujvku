@@ -10,6 +10,7 @@ const PAGES = [
   { name: 'Extraction Review Workbench', path: '/pages/external_analysis_workbench/index.html', coreSelector: '#schemaForm' },
   { name: 'Settings', path: '/pages/settings/index.html', coreSelector: '.field' },
   { name: 'Literature Screening', path: '/pages/literature_screening/index.html', coreSelector: '.screening-table' },
+  { name: 'Writing Citation Assistant', path: '/pages/writing_assistant/index.html', coreSelector: '#writingText' },
 ];
 
 const VIEWPORTS = [
@@ -782,8 +783,95 @@ async function mockApi(route) {
     return route.fulfill({ status: 204, body: '' });
   }
 
-  if (pathname.match(/\/api\/papers\/[^/]+\/pdf$/) && method === 'HEAD') {
-    return route.fulfill({ status: 200, headers: { 'content-type': 'application/pdf' } });
+  if (pathname === '/api/writing/citation-candidates' && method === 'POST') {
+    const payload = JSON.parse(route.request().postData());
+    if (!payload.text || payload.text.trim().length === 0) {
+      return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ detail: 'text must contain at least two searchable terms' }) });
+    }
+    return jsonResponse(route, {
+      query_text: payload.text,
+      candidate_count: 3,
+      candidates: [
+        {
+          paper_id: 'paper-confirmed',
+          title: 'Confirmed Catalyst Discovery for Lithium-Sulfur batteries',
+          year: 2026,
+          journal: 'Journal of Energy Chemistry',
+          impact_factor: 15.6,
+          impact_factor_year: 2026,
+          impact_factor_status: 'available',
+          citation_priority: 'high',
+          exclude_from_citation: false,
+          recommendation_score: 0.95,
+          recommendation_tier: 'strong',
+          evidence_status: 'safe_verified',
+          can_be_used_as_confirmed_citation: true,
+          requires_human_verification: false,
+          matched_fields: ['title', 'abstract'],
+          supporting_snippets: [
+            { text: 'Single-atom catalysts can accelerate sulfur redox kinetics in lithium-sulfur batteries.', source: 'abstract', page: 2, locator_status: 'exact', verified: true, safe_verified: true }
+          ],
+          reason: 'Matches query terms; supporting review passed safe verified gate.',
+          warnings: []
+        },
+        {
+          paper_id: 'paper-needs-verification',
+          title: 'Unverified Heterogeneous Electrocatalyst Acceleration',
+          year: 2025,
+          journal: 'Nature Communications',
+          impact_factor: 16.2,
+          impact_factor_year: 2025,
+          impact_factor_status: 'available',
+          citation_priority: 'medium',
+          exclude_from_citation: false,
+          recommendation_score: 0.76,
+          recommendation_tier: 'strong',
+          evidence_status: 'pending_with_locator',
+          can_be_used_as_confirmed_citation: false,
+          requires_human_verification: true,
+          matched_fields: ['title', 'section'],
+          supporting_snippets: [
+            { text: 'Catalysts can accelerate sulfur redox reactions.', source: 'section', page: 4, locator_status: 'page_only', verified: false, safe_verified: false }
+          ],
+          reason: 'Matches query terms, but evidence is pending and requires human verification.',
+          warnings: ['suggestion_only_needs_human_verification']
+        },
+        {
+          paper_id: 'paper-metadata-only',
+          title: 'A Review on Lithium-Sulfur Batteries and Redox Kinetics',
+          year: 2024,
+          journal: 'Advanced Materials',
+          impact_factor: 29.4,
+          impact_factor_year: 2024,
+          impact_factor_status: 'available',
+          citation_priority: 'low',
+          exclude_from_citation: false,
+          recommendation_score: 0.42,
+          recommendation_tier: 'weak',
+          evidence_status: 'metadata_only',
+          can_be_used_as_confirmed_citation: false,
+          requires_human_verification: true,
+          matched_fields: ['title'],
+          supporting_snippets: [
+            { text: 'batteries redox kinetics in lithium-sulfur.', source: 'title', page: null, locator_status: 'missing', verified: false, safe_verified: false }
+          ],
+          reason: 'Matches metadata in title; metadata-only relevance cannot be used as direct evidence.',
+          warnings: ['suggestion_only_needs_human_verification', 'impact_factor_needs_metadata']
+        }
+      ],
+      excluded_count: 1,
+      excluded_reasons: [
+        { paper_id: 'paper-excluded', reason: 'exclude_from_citation=true' }
+      ],
+      warnings: [],
+      safety: {
+        read_only: true,
+        writes_db: false,
+        marks_verified: false,
+        unlocks_export_or_writing: false,
+        generates_bibliography: false
+      }
+    });
   }
 
   return route.fulfill({ status: 204, body: '' });
@@ -3214,5 +3302,83 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const bodyText = await page.locator('body').innerText();
     expect(bodyText).not.toMatch(/delete paper/i);
     expect(bodyText).not.toMatch(/Human verified/i);
+  });
+
+  test('business flow: Writing Assistant page operates correctly and safely', async ({ page }) => {
+    let apiPayload = null;
+    await page.route(/\/api\/writing\/citation-candidates/, async route => {
+      apiPayload = JSON.parse(route.request().postData() || '{}');
+      return mockApi(route);
+    });
+
+    await page.goto(`${BASE_URL}/pages/writing_assistant/index.html`);
+    await page.waitForTimeout(500);
+
+    // 1. Verify page layout & safety banner
+    await expect(page.locator('h2')).toContainText('Writing Citation Assistant');
+    await expect(page.locator('.safety-disclaimer-banner')).toBeVisible();
+    await expect(page.locator('.safety-disclaimer-banner')).toContainText(
+      'Only candidates marked as confirmed by the API can be treated as confirmed citation candidates.'
+    );
+
+    // 2. Empty text input click validation
+    await page.click('#btnSearch');
+    await expect(page.locator('#validationAlert')).toBeVisible();
+    await expect(page.locator('#validationAlert')).toContainText('Please enter sentences or paragraph context');
+    expect(apiPayload).toBeNull(); // Ensure no API was called
+
+    // 3. Populate text input and trigger search
+    await page.fill('#writingText', 'Single-atom catalysts can accelerate sulfur redox kinetics in lithium-sulfur batteries.');
+
+    // Set some advanced filters
+    await page.fill('#filterYearMin', '2022');
+    await page.fill('#filterIFMin', '10.0');
+    await page.selectOption('#filterCitationPriority', 'high');
+    await page.check('#filterHasPdf');
+
+    // Click search
+    await page.click('#btnSearch');
+
+    // Check loading indicator was triggered or results loaded
+    await expect(page.locator('#resultsCount')).toContainText('3');
+
+    // Verify correct API request payload
+    expect(apiPayload).not.toBeNull();
+    expect(apiPayload.text).toContain('Single-atom catalysts can accelerate');
+    expect(apiPayload.filters.year_min).toBe(2022);
+    expect(apiPayload.filters.impact_factor_min).toBe(10.0);
+    expect(apiPayload.filters.citation_priority).toBe('high');
+    expect(apiPayload.filters.has_pdf).toBe(true);
+    expect(apiPayload.include_unverified_suggestions).toBe(true);
+
+    // 4. Verify candidate cards and safety badges
+    const confirmedCard = page.locator('.candidate-card').filter({ hasText: 'Confirmed Catalyst Discovery' });
+    await expect(confirmedCard).toBeVisible();
+    await expect(confirmedCard.locator('.safety-badge')).toContainText('Confirmed citation candidate');
+    await expect(confirmedCard).toHaveClass(/border-confirmed/);
+
+    const needsVerificationCard = page.locator('.candidate-card').filter({ hasText: 'Unverified Heterogeneous' });
+    await expect(needsVerificationCard).toBeVisible();
+    await expect(needsVerificationCard.locator('.safety-badge')).toContainText('Needs human verification');
+    await expect(needsVerificationCard).toHaveClass(/border-needs-verification/);
+    await expect(needsVerificationCard.locator('.card-warning-box')).toContainText('Suggestion only — requires manual extraction review');
+
+    const metadataOnlyCard = page.locator('.candidate-card').filter({ hasText: 'A Review on Lithium-Sulfur' });
+    await expect(metadataOnlyCard).toBeVisible();
+    await expect(metadataOnlyCard.locator('.safety-badge')).toContainText('Metadata-only suggestion');
+    await expect(metadataOnlyCard).toHaveClass(/border-metadata-only/);
+    await expect(metadataOnlyCard.locator('.card-warning-box')).toContainText('Impact Factor is missing');
+
+    // 5. Verify excluded candidate collapsed listing
+    await expect(page.locator('#excludedCollapsible')).toBeVisible();
+    await expect(page.locator('#excludedCount')).toContainText('1');
+    await page.click('#excludedCollapsible summary');
+    await expect(page.locator('#excludedList')).toContainText('Marked as "Do Not Cite"');
+
+    // 6. Strict safety check: Ensure no DB writes or auto-inserters exist on page
+    const pageBody = await page.locator('body').innerText();
+    expect(pageBody).not.toMatch(/automatically insert citation/i);
+    expect(pageBody).not.toMatch(/save_reviews/i);
+    expect(pageBody).not.toMatch(/mark_verified/i);
   });
 });

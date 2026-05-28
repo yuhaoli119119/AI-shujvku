@@ -138,6 +138,7 @@ class TopNav {
     { id: 'dft-database', label: 'DFT 数据库', href: '../dft_database/index.html' },
     { id: 'mechanism', label: '机理知识', href: '../mechanism_knowledge/index.html' },
     { id: 'ai-writer', label: 'AI 写作', href: '../ai_writer/index.html' },
+    { id: 'writing-assistant', label: '写作辅助', href: '../writing_assistant/index.html' },
     { id: 'settings', label: '设置', href: '../settings/index.html' },
   ];
 

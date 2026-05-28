@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Writing Citation Assistant - Literature AI</title>
+    <link rel="stylesheet" href="../../shared/fonts.css">
+    <link rel="stylesheet" href="../../shared/tokens.css">
+    <link rel="stylesheet" href="../../shared/components.css">
+    <link rel="stylesheet" href="../../shared/topnav.css">
+    <link rel="stylesheet" href="./page.css">
+    <script src="../../shared/topnav.js"></script>
+    <script>ThemeManager.init();</script>
+</head>
+<body>
+    <div id="topnav-mount"></div>
+    <div class="shell">
+        <div class="header-container">
+            <h2>Writing Citation Assistant / 写作引用辅助</h2>
+            <p class="subtitle subtle">Paste sentences or paragraphs to search the literature library for matching evidence and citation recommendations.</p>
+        </div>
+
+        <div class="safety-disclaimer-banner">
+            <div class="disclaimer-icon">⚠️</div>
+            <div class="disclaimer-content">
+                <strong>Safety Disclaimer:</strong> Only candidates marked as confirmed by the API can be treated as confirmed citation candidates. Items requiring human verification or metadata-only suggestions must not be used as evidence until reviewed.
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <!-- Left Side: Input & Settings -->
+            <div class="input-panel card">
+                <div class="section-title">Writing Context</div>
+                <div class="field">
+                    <label for="writingText">Input Text <span class="required">*</span></label>
+                    <textarea id="writingText" class="input" rows="8" placeholder="Paste your manuscript sentences or paragraph here (e.g., 'Single-atom catalysts can accelerate sulfur redox kinetics in lithium-sulfur batteries.')."></textarea>
+                    <div id="validationAlert" class="validation-alert" style="display: none;"></div>
+                </div>
+
+                <div class="field-row">
+                    <div class="field">
+                        <label for="maxCandidates">Max Candidates</label>
+                        <input type="number" id="maxCandidates" class="input" value="10" min="1" max="50">
+                    </div>
+                </div>
+
+                <div class="field checkboxes-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="includeUnverifiedSuggestions" checked>
+                        <span>Include unverified suggestions</span>
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="includePendingReview" checked>
+                        <span>Include pending reviews</span>
+                    </label>
+                </div>
+
+                <!-- Collapsible Filters Section -->
+                <details class="filters-collapsible" open>
+                    <summary class="filters-summary">
+                        <span>Advanced Filters</span>
+                    </summary>
+                    <div class="filters-content">
+                        <div class="field-row">
+                            <div class="field">
+                                <label for="filterYearMin">Year Min</label>
+                                <input type="number" id="filterYearMin" class="input" placeholder="e.g. 2020">
+                            </div>
+                            <div class="field">
+                                <label for="filterYearMax">Year Max</label>
+                                <input type="number" id="filterYearMax" class="input" placeholder="e.g. 2026">
+                            </div>
+                        </div>
+
+                        <div class="field-row">
+                            <div class="field">
+                                <label for="filterIFMin">IF Min</label>
+                                <input type="number" id="filterIFMin" class="input" step="0.1" placeholder="e.g. 5.0">
+                            </div>
+                            <div class="field">
+                                <label for="filterIFMax">IF Max</label>
+                                <input type="number" id="filterIFMax" class="input" step="0.1" placeholder="e.g. 30.0">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="filterJournalInc">Journal Include <span class="hint">(Comma-separated)</span></label>
+                            <input type="text" id="filterJournalInc" class="input" placeholder="e.g. Nature, Science">
+                        </div>
+
+                        <div class="field">
+                            <label for="filterJournalExc">Journal Exclude <span class="hint">(Comma-separated)</span></label>
+                            <input type="text" id="filterJournalExc" class="input" placeholder="e.g. Advanced Materials">
+                        </div>
+
+                        <div class="field-row">
+                            <div class="field">
+                                <label for="filterCitationPriority">Citation Priority</label>
+                                <select id="filterCitationPriority" class="select">
+                                    <option value="">Any</option>
+                                    <option value="high">High</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="low">Low</option>
+                                    <option value="exclude">Exclude</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="filterExcludeFromCitation">Exclude From Citation</label>
+                                <select id="filterExcludeFromCitation" class="select">
+                                    <option value="">Any</option>
+                                    <option value="true">True</option>
+                                    <option value="false">False</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="checkbox-grid">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterNeedsMetadata">
+                                <span>Needs Metadata</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterHasPdf">
+                                <span>Has PDF</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterHasParsedText">
+                                <span>Has Parsed Text</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterHasExtractionOutput">
+                                <span>Has Extraction Output</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterHasVerifiedEvidence">
+                                <span>Has Verified Evidence</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="filterHasSafeVerifiedEvidence">
+                                <span>Has Safe Verified Evidence</span>
+                            </label>
+                        </div>
+                    </div>
+                </details>
+
+                <div class="panel-actions">
+                    <button id="btnClear" class="btn btn-ghost" onclick="clearFilters()">Clear Filters</button>
+                    <button id="btnSearch" class="btn btn-primary" onclick="retrieveCandidates()">Retrieve Candidates</button>
+                </div>
+            </div>
+
+            <!-- Right Side: Results & Detailed Display -->
+            <div class="results-panel">
+                <!-- Loading State -->
+                <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+                    <div class="spinner"></div>
+                    <div class="loading-text">Analyzing text and searching matching candidates...</div>
+                </div>
+
+                <div class="results-header-bar">
+                    <div class="results-count-title">
+                        Recommended Candidates (<span id="resultsCount">0</span>)
+                    </div>
+                </div>
+
+                <!-- Dynamic Candidates Container -->
+                <div id="candidatesContainer" class="candidates-container">
+                    <div class="empty-state">
+                        <div class="empty-icon">📝</div>
+                        <h3>No context entered yet</h3>
+                        <p>Paste a sentence or paragraph on the left and click "Retrieve Candidates" to find matching evidence papers.</p>
+                    </div>
+                </div>
+
+                <!-- Collapsible Excluded Reasons Section -->
+                <details id="excludedCollapsible" class="excluded-collapsible" style="display: none;">
+                    <summary class="excluded-summary">
+                        <span>Excluded / Not Recommended Candidates (<span id="excludedCount">0</span>)</span>
+                    </summary>
+                    <div id="excludedList" class="excluded-list">
+                        <!-- Excluded items render here -->
+                    </div>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="./page.js"></script>
+</body>
+</html>
