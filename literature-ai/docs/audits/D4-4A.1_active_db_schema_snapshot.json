@@ -1,0 +1,511 @@
+{
+  "manifest_type": "D4-4A.1_active_db_schema_snapshot",
+  "migration_file": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\app\\migrations\\002_paper_citation_eligibility.sql",
+  "migration_applied_at_utc": "2026-05-28T04:15:35.760655+00:00",
+  "backup": {
+    "path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\backups\\D4-4A.1_active_db_before_citation_eligibility_20260528T041535Z.sqlite.bak",
+    "size": 663552,
+    "sha256": "09ee867874dd7c6850aa5199aa08d288ea7f8d0d3bc2e78b66854803f1ee669d"
+  },
+  "before": {
+    "label": "before",
+    "captured_at_utc": "2026-05-28T04:15:35.735720+00:00",
+    "db_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\libraries\\default\\database.sqlite",
+    "db_size": 663552,
+    "db_sha256": "09ee867874dd7c6850aa5199aa08d288ea7f8d0d3bc2e78b66854803f1ee669d",
+    "papers_total": 15,
+    "pilot_exists": 1,
+    "review_rows": 5,
+    "pending_rows": 5,
+    "verified_rows": 0,
+    "safe_verified_rows": 0,
+    "export_eligible": 0,
+    "writing_eligible": 0,
+    "evidence_locators": 4,
+    "paper_citation_eligibility": {
+      "exists": true,
+      "columns": [
+        {
+          "cid": 0,
+          "name": "paper_id",
+          "type": "CHAR(32)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "included_for_writing",
+          "type": "BOOLEAN",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "exclude_from_citation",
+          "type": "BOOLEAN",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "exclude_reason",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "citation_priority",
+          "type": "VARCHAR(16)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "user_note",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "seq": 0,
+          "name": "ix_paper_citation_eligibility_exclude_from_citation",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 1,
+          "name": "ix_paper_citation_eligibility_citation_priority",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 2,
+          "name": "sqlite_autoindex_paper_citation_eligibility_1",
+          "unique": 1,
+          "origin": "pk",
+          "partial": 0
+        }
+      ],
+      "rows": 0
+    },
+    "paper_impact_metadata": {
+      "exists": true,
+      "columns": [
+        {
+          "cid": 0,
+          "name": "paper_id",
+          "type": "CHAR(32)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "impact_factor",
+          "type": "FLOAT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "impact_factor_source",
+          "type": "VARCHAR(64)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "impact_factor_year",
+          "type": "INTEGER",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "seq": 0,
+          "name": "ix_paper_impact_metadata_impact_factor",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 1,
+          "name": "sqlite_autoindex_paper_impact_metadata_1",
+          "unique": 1,
+          "origin": "pk",
+          "partial": 0
+        }
+      ],
+      "rows": 0
+    },
+    "protected_table_hashes": {
+      "papers": {
+        "exists": true,
+        "rows": 15,
+        "sha256": "ed83c38ef6b34973b9ac778d258764beeaf80e4b2d6eb241138a85fa4e864244"
+      },
+      "extraction_field_reviews": {
+        "exists": true,
+        "rows": 5,
+        "sha256": "e31cf0950207c0fa61f10e6400774b0bcb09c66260d69b479b4f5312f1cdc424"
+      },
+      "evidence_locators": {
+        "exists": true,
+        "rows": 4,
+        "sha256": "c89cbf0b41ad2a5e8534b53c6aef090d76ccc4b97abcf72aa582b8a3f7be3da8"
+      },
+      "evidence_claims": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "dft_results": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "dft_settings": {
+        "exists": true,
+        "rows": 6,
+        "sha256": "ab2cbc5642b09647334424ec0c1af60427d4f053e85c74396b782e9ccd950f2b"
+      },
+      "catalyst_samples": {
+        "exists": true,
+        "rows": 6,
+        "sha256": "c5c515337a62a3135854d6b34e438fffab6d8745d76276646e67ff1daaa5d06e"
+      },
+      "mechanism_claims": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "electrochemical_performance": {
+        "exists": true,
+        "rows": 1,
+        "sha256": "778df9b9195a5d73c9000532c5145c8a6446566a772ac29f3f0f59163e34db19"
+      },
+      "writing_cards": {
+        "exists": true,
+        "rows": 6,
+        "sha256": "63e8bbd727e9eab13a898c6f3f743e3e8a80088ef70c6d41b4b7ad468b1c3279"
+      },
+      "external_analysis_runs": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "external_analysis_candidates": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    }
+  },
+  "after": {
+    "label": "after",
+    "captured_at_utc": "2026-05-28T04:15:35.756955+00:00",
+    "db_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\libraries\\default\\database.sqlite",
+    "db_size": 663552,
+    "db_sha256": "46353bf9c2417064410533960a1e5d1ffe24bcecae20820b3d4d9aa620737e36",
+    "papers_total": 15,
+    "pilot_exists": 1,
+    "review_rows": 5,
+    "pending_rows": 5,
+    "verified_rows": 0,
+    "safe_verified_rows": 0,
+    "export_eligible": 0,
+    "writing_eligible": 0,
+    "evidence_locators": 4,
+    "paper_citation_eligibility": {
+      "exists": true,
+      "columns": [
+        {
+          "cid": 0,
+          "name": "paper_id",
+          "type": "CHAR(32)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "included_for_writing",
+          "type": "BOOLEAN",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "exclude_from_citation",
+          "type": "BOOLEAN",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "exclude_reason",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "citation_priority",
+          "type": "VARCHAR(16)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "user_note",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "seq": 0,
+          "name": "ix_paper_citation_eligibility_priority",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 1,
+          "name": "ix_paper_citation_eligibility_exclude",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 2,
+          "name": "ix_paper_citation_eligibility_exclude_from_citation",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 3,
+          "name": "ix_paper_citation_eligibility_citation_priority",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 4,
+          "name": "sqlite_autoindex_paper_citation_eligibility_1",
+          "unique": 1,
+          "origin": "pk",
+          "partial": 0
+        }
+      ],
+      "rows": 0
+    },
+    "paper_impact_metadata": {
+      "exists": true,
+      "columns": [
+        {
+          "cid": 0,
+          "name": "paper_id",
+          "type": "CHAR(32)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "impact_factor",
+          "type": "FLOAT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "impact_factor_source",
+          "type": "VARCHAR(64)",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "impact_factor_year",
+          "type": "INTEGER",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "updated_at",
+          "type": "DATETIME",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "indexes": [
+        {
+          "seq": 0,
+          "name": "ix_paper_impact_metadata_impact_factor",
+          "unique": 0,
+          "origin": "c",
+          "partial": 0
+        },
+        {
+          "seq": 1,
+          "name": "sqlite_autoindex_paper_impact_metadata_1",
+          "unique": 1,
+          "origin": "pk",
+          "partial": 0
+        }
+      ],
+      "rows": 0
+    },
+    "protected_table_hashes": {
+      "papers": {
+        "exists": true,
+        "rows": 15,
+        "sha256": "ed83c38ef6b34973b9ac778d258764beeaf80e4b2d6eb241138a85fa4e864244"
+      },
+      "extraction_field_reviews": {
+        "exists": true,
+        "rows": 5,
+        "sha256": "e31cf0950207c0fa61f10e6400774b0bcb09c66260d69b479b4f5312f1cdc424"
+      },
+      "evidence_locators": {
+        "exists": true,
+        "rows": 4,
+        "sha256": "c89cbf0b41ad2a5e8534b53c6aef090d76ccc4b97abcf72aa582b8a3f7be3da8"
+      },
+      "evidence_claims": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "dft_results": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "dft_settings": {
+        "exists": true,
+        "rows": 6,
+        "sha256": "ab2cbc5642b09647334424ec0c1af60427d4f053e85c74396b782e9ccd950f2b"
+      },
+      "catalyst_samples": {
+        "exists": true,
+        "rows": 6,
+        "sha256": "c5c515337a62a3135854d6b34e438fffab6d8745d76276646e67ff1daaa5d06e"
+      },
+      "mechanism_claims": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "electrochemical_performance": {
+        "exists": true,
+        "rows": 1,
+        "sha256": "778df9b9195a5d73c9000532c5145c8a6446566a772ac29f3f0f59163e34db19"
+      },
+      "writing_cards": {
+        "exists": true,
+        "rows": 6,
+        "sha256": "63e8bbd727e9eab13a898c6f3f743e3e8a80088ef70c6d41b4b7ad468b1c3279"
+      },
+      "external_analysis_runs": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "external_analysis_candidates": {
+        "exists": true,
+        "rows": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    }
+  },
+  "protected_table_changes": {},
+  "safety": {
+    "applied_only_migration_002": true,
+    "papers_deleted": false,
+    "papers_main_data_modified": true,
+    "review_rows_modified": true,
+    "evidence_locators_modified": true,
+    "mark_verified_called": false,
+    "extraction_or_reprocessing_apply": false,
+    "materialize": false,
+    "registry_write": false,
+    "artifact_cleanup": false,
+    "db_move_delete": false,
+    "export_or_writing_unlocked": false,
+    "impact_factor_data_imported": false,
+    "active_db_business_eligibility_rows_written": false
+  },
+  "api_smoke": {
+    "db_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\libraries\\default\\database.sqlite",
+    "default_filter": {
+      "status_code": 200,
+      "total": 15,
+      "first_ids": [
+        "b234de0a-6fff-43f1-aedb-5f691f76004f",
+        "38c0e8d0-4d65-45dc-adb5-ec32380caf21",
+        "3978dc79-f94f-4457-863f-d68449ae293d"
+      ],
+      "read_only_safety": true
+    },
+    "needs_metadata_filter": {
+      "status_code": 200,
+      "total": 15,
+      "all_need_metadata": true,
+      "read_only_safety": true
+    },
+    "active_db_business_eligibility_write": "skipped_by_design; write API covered by temp DB pytest only"
+  }
+}
