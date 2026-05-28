@@ -288,3 +288,124 @@
 - New commit: yes, this round should be committed after this documentation update
 - Push: no
 - Residual risk: D4-7B.3 cannot complete until the machine has the real canonical repo path and the expected 15-paper / 5-review active DB baseline
+
+## D4-7B.4 Canonical Real Backend Smoke / Citation Draft UI Final Validation (2026-05-28)
+
+### Canonical Repository Gate
+- Canonical repo path found: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai`
+- Opening gate commands:
+  - `git status --short`: clean
+  - `git log -1 --oneline`: `e08066f backend d4 citation insertion draft gate`
+  - `git rev-parse HEAD`: `e08066fd3c383e49b42074348283bc00e8d0a092`
+  - `git branch -vv`: `master e08066f [origin/master] backend d4 citation insertion draft gate`
+  - `git fetch origin`: succeeded
+  - `git ls-remote origin refs/heads/master`: `0ffe87a3d97fdeb45355144466c0e8f09222dfd3 refs/heads/master`
+- Note: remote `refs/heads/master` was already at D4-7B (`0ffe87a3d97fdeb45355144466c0e8f09222dfd3`), not the expected D4-7A baseline (`e08066fd3c383e49b42074348283bc00e8d0a092`). No push was performed in this round.
+- D4-7B commits were applied to the canonical machine by `git merge --ff-only origin/master` after verifying the remote range contained only the expected four D4-7B commits:
+  - `246c8cc frontend d4 citation draft proposal ui`
+  - `b51b750 docs d4 citation draft ui validation smoke`
+  - `9fab5bd fix d4 citation draft ui validation`
+  - `0ffe87a docs d4 citation draft ui canonical smoke`
+- HEAD after fast-forward: `0ffe87a3d97fdeb45355144466c0e8f09222dfd3`
+
+### Canonical Active DB Baseline
+- Canonical DB path found: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai\data\libraries\default\database.sqlite`
+- Canonical registry path found: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai\data\library_registry.json`
+- Read-only SQLite baseline before backend startup:
+  - `papers_total = 15`
+  - pilot paper exists: `3978dc79f94f4457863fd68449ae293d`
+  - pilot title: `锂硫电池非均相电催化剂`
+  - `total_reviews = 5`
+  - `pending_reviews = 5`
+  - `verified_reviews = 0`
+  - `safe_verified_reviews = 0`
+  - `paper_impact_metadata_rows = 0`
+  - `paper_citation_eligibility_rows = 0`
+  - `evidence_locators = 4`
+  - `export_eligible = 0`
+  - `writing_eligible = 0`
+
+### Real Backend Smoke
+- Real FastAPI backend was started with `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000` from `backend`.
+- Startup log confirmed effective DB: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai\data\libraries\default\database.sqlite`
+- UI opened: `http://localhost:8000/pages/writing_assistant/index.html`
+- Input text: `Single-atom catalysts can accelerate sulfur redox kinetics in lithium-sulfur batteries.`
+- `POST /api/writing/citation-candidates`:
+  - status: `200`
+  - `candidate_count = 4`
+  - first candidate `evidence_status = unverified_extraction`
+  - warnings visible: yes
+- Selected candidate:
+  - paper id: `b234de0a-6fff-43f1-aedb-5f691f76004f`
+  - title: `Revealing the 16-electron sulfur reduction reaction network in lithium sulfur (Li-S) batteries`
+  - evidence status: `unverified_extraction`
+  - `requires_human_verification = true`
+  - `can_be_used_as_confirmed_citation = false`
+- `POST /api/writing/citation-insertion-draft`:
+  - status: `200`
+  - `proposal_status = needs_human_verification`
+  - `can_insert_as_confirmed_citation = false`
+  - `requires_human_verification = true`
+  - `evidence_status = unverified_extraction`
+  - warnings visible: yes
+  - `human_review_checklist` visible: yes, 4 items
+  - `blocked_actions` visible: yes
+  - blocked actions returned: `no_database_write`, `no_verified_status_change`, `no_bibliography_generation`, `no_export_unlock`
+- Misleading final-action buttons were not present:
+  - no `Insert Citation`
+  - no `Generate Bibliography`
+  - no `Copy Final Citation`
+
+### Network Safety Check
+- Captured browser requests during the real UI smoke.
+- No dangerous request or dangerous payload field was observed:
+  - no `mark_verified`
+  - no `save_reviews`
+  - no `verified=true`
+  - no `safe_verified=true`
+  - no `reviewer_status=verified`
+  - no export unlock
+  - no writing unlock
+  - no citation eligibility write
+  - no impact metadata import
+  - no paper delete
+  - no migration
+  - no materialize
+  - no extraction/reprocessing apply
+  - no registry write
+  - no artifact cleanup
+
+### Active DB Before/After
+- Smoke after-counts matched the pre-smoke baseline:
+  - `papers_total = 15`
+  - `total_reviews = 5`
+  - `pending_reviews = 5`
+  - `verified_reviews = 0`
+  - `safe_verified_reviews = 0`
+  - `paper_impact_metadata_rows = 0`
+  - `paper_citation_eligibility_rows = 0`
+  - `evidence_locators = 4`
+  - `export_eligible = 0`
+  - `writing_eligible = 0`
+- Active DB state remained unchanged by the smoke flow.
+
+### Playwright Re-Run
+- Node version: `v24.15.0`
+- npm version: `11.12.1`
+- Python version: `Python 3.13.12`
+- Ran `npm test -- --project=chromium`: `91 passed`
+- Ran `npx playwright test -g "Writing Assistant"`: `1 passed`
+
+### Round Outcome
+- Code modified: no
+- Backend modified: no
+- Audit document modified: yes, this D4-7B.4 section
+- New commit: yes, documentation-only commit after this update
+- Push: no
+- Active DB touched: read by backend/API smoke, with before/after counts unchanged
+- Impact metadata / papers / reviews / locators / migration / registry / artifacts modified: no
+- Paper deletion: no
+- Export or writing unlock: no
+- Bibliography generation: no
+- Verified / safe_verified write: no
+- Residual risk: remote `master` had already advanced to D4-7B before this round, contrary to the expected D4-7A remote baseline; this round did not push and only fast-forwarded local canonical master to the already-remote D4-7B commit set.
