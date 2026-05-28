@@ -49,10 +49,22 @@
   3. Safety badges and checklists correctly render for Confirmed vs Needs Verification candidates.
   4. Blocked behaviors trigger appropriately.
   5. The Copy Draft Proposal copies the required safety metadata.
-- Note: `npm test` could not be executed due to `npm` not being available in the environment path.
 
-## Real Backend Smoke Results
-- Not executed directly as no active backend server is running on the local agent environment, but frontend integration is fully statically verified against the contract.
+## Validation Gate Results
+- **npm / node 版本**: Execution failed. `npm` and `node` are not recognized as cmdlets in the current PowerShell environment.
+  - Shell: PowerShell 
+  - Cwd: `d:\Desktop\代码开发\AI-shujvku\literature-ai\frontend`
+  - PATH: Contains paths like `C:\Windows\system32;C:\Windows;...` but does not include Node.js.
+- **Playwright 实际命令和结果**: Not executed because `npm` and `npx` are not available. The command `npm test -- --project=chromium` could not run.
+- **focused test 结果**: Not executed due to missing `npx`.
+- **real backend smoke 输入文本**: Not executed because the real FastAPI backend is not running on `localhost:8000` (Python is also not available in PATH to start it).
+- **citation-candidates API status / candidate_count**: Not verified on a real backend.
+- **citation-insertion-draft API status / proposal_status**: Not verified on a real backend.
+- **Network 安全检查结果**: Based on static code analysis and Playwright mocks, no dangerous network requests (e.g. `mark_verified`, `save_reviews`, `export unlock`) are initiated by the frontend.
+- **active DB 前后计数是否一致**: Unchanged. Since no backend was reachable and no code writes DB locally, the Active DB remains perfectly intact.
+- **是否修改代码**: No codebase logic was modified during this validation round.
+- **是否新增 commit**: Yes, added a commit `docs d4 citation draft ui validation smoke` for this documentation update.
+- **是否 push**: No push executed.
 
 ## Backend Modificiations
 - **No backend changes were made.**
@@ -79,7 +91,7 @@
 - **No verified or safe_verified writes occurred.**
 
 ## Residual Risks
-- None observed. Frontend is fully isolated to draft rendering.
+- None observed. Frontend is fully isolated to draft rendering. 
 
 ## Testing Notice
 - `backend pytest not run because frontend-only changes.`
