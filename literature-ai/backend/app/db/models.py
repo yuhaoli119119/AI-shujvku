@@ -88,6 +88,32 @@ class Paper(Base):
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
 
 
+class PaperCitationEligibility(Base):
+    __tablename__ = "paper_citation_eligibility"
+
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    included_for_writing: Mapped[bool] = mapped_column(sa.Boolean, default=True, nullable=False)
+    exclude_from_citation: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False, index=True)
+    exclude_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    citation_priority: Mapped[str] = mapped_column(sa.String(16), default="medium", nullable=False, index=True)
+    user_note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+
+class PaperImpactMetadata(Base):
+    __tablename__ = "paper_impact_metadata"
+
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    impact_factor: Mapped[float | None] = mapped_column(sa.Float, nullable=True, index=True)
+    impact_factor_source: Mapped[str] = mapped_column(sa.String(64), default="unknown", nullable=False)
+    impact_factor_year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+
 class PaperSection(Base):
     __tablename__ = "paper_sections"
 
