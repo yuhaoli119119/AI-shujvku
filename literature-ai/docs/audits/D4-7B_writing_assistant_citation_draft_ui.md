@@ -95,3 +95,106 @@
 
 ## Testing Notice
 - `backend pytest not run because frontend-only changes.`
+
+## D4-7B.2 Real Validation Attempt (2026-05-28)
+
+### Canonical Repository Gate
+- Requested canonical path: `D:\Desktop\03_代码与开发\AI-shujvku\literature-ai`
+- Actual available repo path used: `D:\Desktop\代码开发\AI-shujvku\literature-ai`
+- The requested `D:\Desktop\03_代码与开发\...` path does not exist on this machine.
+- Opening gate commands in the actual repo:
+  - `git status --short`: clean at the start of this round.
+  - `git log -1 --oneline`: `b51b750 docs d4 citation draft ui validation smoke`
+  - `git rev-parse HEAD`: `b51b750a7c4f4b4b49551b929a46f24dc32a20cb`
+  - `git branch -vv`: `master b51b750 [origin/master: ahead 2] docs d4 citation draft ui validation smoke`
+  - `git fetch origin`: succeeded.
+  - `git ls-remote origin refs/heads/master`: `e08066fd3c383e49b42074348283bc00e8d0a092 refs/heads/master`
+
+### Environment Versions
+- Direct PATH check:
+  - `node --version`: failed with `Access is denied` for the WindowsApps Codex node shim.
+  - `npm --version`: failed because `npm` was not in PATH.
+  - `py --version`: `Python 3.11.5`
+- Usable validation toolchain selected for this round:
+  - Node: `v22.12.0` from `C:\Users\zhaob\.workbuddy\binaries\node\versions\22.12.0`
+  - npm: `10.9.0` via `npm.cmd`
+  - Python for Playwright webServer: `Python 3.12.13` from the bundled Codex runtime, placed temporarily before the WindowsApps Python shim.
+  - Backend package availability: `uvicorn 0.34.2`, `fastapi 0.136.3`
+
+### Playwright Validation
+- Cwd: `D:\Desktop\代码开发\AI-shujvku\literature-ai\frontend`
+- Dependency setup: `npm.cmd ci` completed successfully from `package-lock.json`.
+- First required command before dependency/path fixes:
+  - `npm.cmd test -- --project=chromium`
+  - Result: failed because `playwright` was not installed.
+- Second run after `npm ci` but before fixing Python PATH:
+  - `npm.cmd test -- --project=chromium`
+  - Result: failed because Playwright `config.webServer` could not start; PATH `python` resolved to the WindowsApps shim.
+- Real Chromium run after setting Node/npm/Python PATH:
+  - Command: `npm.cmd test -- --project=chromium`
+  - Initial result: `90 passed, 1 failed`
+  - Failure: Writing Assistant `Copy Draft Proposal` displayed `Failed to copy` in Chromium when clipboard permission was unavailable.
+- Focused test before fix:
+  - Command: `npx.cmd playwright test -g "Writing Assistant"`
+  - Result: failed with the same `Copy Draft Proposal` clipboard failure.
+- Frontend bug fix:
+  - File: `frontend/pages/writing_assistant/page.js`
+  - Change: added a narrow clipboard fallback using a temporary readonly textarea and `document.execCommand("copy")` when `navigator.clipboard.writeText` is unavailable or rejected.
+  - Backend changed: no.
+  - Citation safety semantics changed: no.
+- Focused test after fix:
+  - Command: `npx.cmd playwright test -g "Writing Assistant"`
+  - Result: `1 passed`
+- Full Playwright test after fix:
+  - Command: `npm.cmd test -- --project=chromium`
+  - Result: `91 passed`
+
+### Real Backend Smoke
+- Required page: `http://localhost:8000/pages/writing_assistant/index.html`
+- Required input text: `Single-atom catalysts can accelerate sulfur redox kinetics in lithium-sulfur batteries.`
+- Result: not executed against a real backend in this round.
+- Reason: the available active SQLite candidate in this repo does not match the required validation gate counts. Read-only inspection showed:
+  - DB path inspected: `backend\data\libraries\default\database.sqlite`
+  - `papers_total = 4` instead of required `15`
+  - `paper_impact_metadata rows = 0` because the table is missing
+  - `paper_citation_eligibility rows = 0` because the table is missing
+  - `verified reviews = 0` because `extraction_field_reviews` is missing
+  - `safe verified reviews = 0` because `extraction_field_reviews` is missing
+  - `export eligible = 0` because `extraction_field_reviews` is missing
+  - `writing eligible = 0` because `extraction_field_reviews` is missing
+  - `total reviews = 0` instead of required `5`
+- Starting the FastAPI app would call startup database initialization / `create_all` against this mismatched active SQLite, which would violate the no-migration/no-active-DB-write constraint. Therefore the backend smoke was intentionally blocked rather than faked.
+- `citation-candidates` API status / candidate_count: not verified on real backend.
+- `citation-insertion-draft` API status / proposal_status: not verified on real backend.
+
+### Network Safety Check
+- Playwright mocked UI validation after the fix passed and continued to assert no `mark_verified` / `save_reviews` / auto-insert wording on the Writing Assistant page.
+- Real backend network capture was not performed because the active DB gate failed before server startup.
+- No dangerous request was made in this round:
+  - no `mark_verified`
+  - no `save_reviews`
+  - no `verified=true`
+  - no `safe_verified=true`
+  - no `reviewer_status=verified`
+  - no export or writing unlock
+  - no citation eligibility write
+  - no impact metadata import
+  - no paper delete
+  - no migration
+  - no materialize
+  - no extraction/reprocessing apply
+  - no registry write
+  - no artifact cleanup
+
+### Active DB Before/After
+- Read-only preflight count was performed with SQLite `mode=ro`.
+- No backend server was started and no DB write command was run.
+- Counts therefore remained unchanged during this round, but the available DB did not match the required D4-7B.2 active DB baseline.
+
+### Round Outcome
+- Code modified: yes, frontend-only clipboard fallback bug fix.
+- Audit document modified: yes, this D4-7B.2 section.
+- Backend modified: no.
+- New commit: yes, this round should be committed after this document update.
+- Push: no.
+- Residual risk: real backend smoke remains blocked until the actual active DB with `papers_total=15` and `total reviews=5` is available at the canonical project path or the correct runtime environment is restored.

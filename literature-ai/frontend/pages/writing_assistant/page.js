@@ -369,9 +369,9 @@ function clearFilters() {
  * Copy title to clipboard.
  */
 function copyCardTitle(title) {
-    navigator.clipboard.writeText(title).then(() => {
+    writeClipboardText(title).then(() => {
         showToast('Title copied to clipboard!', 'success');
-    }).catch(err => {
+    }).catch(() => {
         showToast('Failed to copy text', 'error');
     });
 }
@@ -403,9 +403,9 @@ function copyCardInfo(cand) {
         `Verification Warning: ${warningText}`
     ].join('\n');
     
-    navigator.clipboard.writeText(infoString).then(() => {
+    writeClipboardText(infoString).then(() => {
         showToast('Candidate metadata copied to clipboard!', 'success');
-    }).catch(err => {
+    }).catch(() => {
         showToast('Failed to copy metadata', 'error');
     });
 }
@@ -649,9 +649,40 @@ function copyDraftProposal(paperId) {
         parts.push(`Review Checklist: \n- ${data.human_review_checklist.join('\n- ')}`);
     }
     
-    navigator.clipboard.writeText(parts.join('\n\n')).then(() => {
+    writeClipboardText(parts.join('\n\n')).then(() => {
         showToast('Draft Proposal copied!', 'success');
-    }).catch(err => {
+    }).catch(() => {
         showToast('Failed to copy', 'error');
+    });
+}
+
+function writeClipboardText(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        return navigator.clipboard.writeText(text).catch(() => fallbackCopyText(text));
+    }
+    return fallbackCopyText(text);
+}
+
+function fallbackCopyText(text) {
+    return new Promise((resolve, reject) => {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+
+        try {
+            if (document.execCommand('copy')) {
+                resolve();
+            } else {
+                reject(new Error('Copy command failed'));
+            }
+        } catch (err) {
+            reject(err);
+        } finally {
+            textarea.remove();
+        }
     });
 }
