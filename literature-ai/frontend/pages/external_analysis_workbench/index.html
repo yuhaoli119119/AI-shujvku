@@ -165,12 +165,13 @@
           console.warn("Audit API failed", e);
         }
 
+        await loadExtractionLocators();
+
         renderPaper();
         renderWarnings(state.extraction.validation_warnings || []);
         renderSchemaForm();
         renderStabilitySummary();
         renderPrepareReviewPanel();
-        loadExtractionLocators();
       } catch (error) {
         showToast("Failed to load extraction results: " + error.message);
       }
@@ -657,57 +658,96 @@
       return "仅有证据文本，暂无 PDF 页码定位";
     }
 
-    function getFieldLocatorBadge(field) {
-      if (!field) return "";
+    function resolveLocator(record, name, field) {
+      if (!field) return null;
       var locator = field.evidence_locator || null;
       if (!locator && field.locator_status) {
-        locator = { locator_status: field.locator_status, page: field.page_span ? field.page_span.page_start : null, bbox: field.bbox || null, evidence_text: field.evidence_text || "" };
+        locator = {
+          locator_status: field.locator_status,
+          page: field.page_span ? field.page_span.page_start : null,
+          bbox: field.bbox || null,
+          evidence_text: field.evidence_text || "",
+          parser_source: field.parser_source || "unknown",
+          warning_reason: field.locator_warning || null
+        };
       }
-      if (!locator) return "";
-
-      var s = normalizeLocatorStatus(locator);
-      var bg, color, label;
-      if (s === "exact_page") {
-        bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "exact_page";
-      } else if (s === "text_only") {
-        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "text_only";
-      } else if (s === "missing_page") {
-        bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "missing_page";
-      } else if (s === "approximate") {
-        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; label = "approximate";
-      } else if (s === "unresolved") {
-        bg = "var(--color-surface-alt)"; color = "var(--color-text-secondary)"; label = "unresolved";
-      } else if (s === "missing_locator") {
-        bg = "var(--color-surface-alt)"; color = "var(--color-text-secondary)"; label = "missing_locator";
-      } else {
-        bg = "var(--color-surface-alt)"; color = "var(--color-text-secondary)"; label = "unknown";
+      if (record) {
+        var key1 = (record.target_id || "") + ":" + name;
+        var key2 = (record.target_type || "") + ":" + name;
+        var key3 = (record.target_type || "").toLowerCase() + ":" + name;
+        var cached = state.locatorCache[key1] || state.locatorCache[key2] || state.locatorCache[key3];
+        if (cached) {
+          locator = Object.assign({}, locator || {}, cached);
+        }
       }
-
-      var badge = `<span class="locator-status-badge" data-locator-status="${esc(s)}" style="background:${bg};color:${color};border:1px solid ${color}40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">${label}</span>`;
-
-      return badge;
+      return locator;
     }
 
-    function getFieldLocatorAction(record, fieldName, field) {
-      if (!field) return "";
-      var locator = field.evidence_locator || null;
-      if (!locator && field.locator_status) {
-        locator = { locator_status: field.locator_status, page: field.page_span ? field.page_span.page_start : null, bbox: field.bbox || null, evidence_text: field.evidence_text || "", paper_id: state.paper ? state.paper.id : "" };
-      }
+    function getFieldLocatorBadge(record, name, field) {
+      var locator = resolveLocator(record, name, field);
       if (!locator) return "";
-
       var s = normalizeLocatorStatus(locator);
+      var isRepaired = (s === "exact_page") && (name !== "name") && (name !== "convergence_settings");
+      var bg, color, label;
+      if (isRepaired) {
+        bg = "var(--color-success-bg)";
+        color = "var(--color-success)";
+        label = "locator repaired / exact locator available / page available";
+      } else {
+        bg = "var(--color-warning-bg)";
+        color = "var(--color-warning)";
+        if (name === "name") {
+          bg = "var(--color-danger-bg)";
+          color = "var(--color-danger)";
+          label = "HIGH-CAUTION: Unrepaired locator risk / exact locator missing";
+        } else if (name === "convergence_settings") {
+          bg = "var(--color-danger-bg)";
+          color = "var(--color-danger)";
+          label = "RED: excluded / no reliable source";
+        } else {
+          label = "missing_page / unsafe_locator / no exact locator";
+        }
+      }
+      return `<span class="locator-status-badge" data-locator-status="${esc(s)}" style="background:${bg};color:${color};border:1px solid ${color}40;padding:2px 8px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">${label}</span>`;
+    }
+
+    function getFieldLocatorDetailsHtml(record, name, field) {
+      var locator = resolveLocator(record, name, field);
+      if (!locator) return "";
+      var s = normalizeLocatorStatus(locator);
+      var isRepaired = (s === "exact_page") && (name !== "name") && (name !== "convergence_settings");
+      if (!isRepaired) return "";
+      var page = locator.page || "";
+      var source = locator.parser_source || "Docling";
+      var matchedText = locator.evidence_text || "";
+      return `
+        <div class="locator-repaired-details" style="margin-top: 6px; margin-bottom: 8px; padding: 8px 10px; background: var(--color-success-bg)20; border-left: 3px solid var(--color-success); border-radius: var(--radius-sm); font-size: 11px; color: var(--color-text-secondary);">
+          <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 4px;">
+            <span>📄 <strong>Page Span:</strong> page ${esc(page)}</span>
+            <span>🛠️ <strong>Source Artifact:</strong> ${esc(source)} source if available</span>
+          </div>
+          <div style="font-family: var(--font-mono); font-size: 10.5px; background: var(--color-surface); padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); margin-top: 4px;">
+            <strong>Matched text:</strong> "${esc(matchedText)}"
+          </div>
+        </div>
+      `;
+    }
+
+    function getFieldLocatorAction(record, name, field) {
+      var locator = resolveLocator(record, name, field);
+      if (!locator) return "";
+      var s = normalizeLocatorStatus(locator);
+      var isRepaired = (s === "exact_page") && (name !== "name") && (name !== "convergence_settings");
       var paperId = state.paper ? state.paper.id : "";
       var page = locator.page;
       var hasBbox = locator.bbox ? "true" : "false";
       var evidenceText = locator.evidence_text || "";
-
-      if (locatorCanJump(locator)) {
-        var uid = "loc-act-" + (record.target_id || "x") + "-" + fieldName;
+      if (isRepaired) {
+        var uid = "loc-act-" + (record.target_id || "x") + "-" + name;
         var bboxDataAttr = hasBbox === "true" ? ('data-bbox="' + escAttr(JSON.stringify(locator.bbox)) + '"') : "";
-        return `<span id="${uid}" data-paper-id="${esc(paperId)}" data-page="${page || 0}" data-has-bbox="${hasBbox}" data-locator-status="exact_page" data-evidence-text="${escAttr(ellipsis(evidenceText, 60))}" ${bboxDataAttr} style="display:none;"></span><button class="btn primary small" style="height:22px;padding:0 6px;font-size:10px;" onclick="triggerWorkbenchLocatorAction('${uid}')">跳转到第 ${page || "?"} 页</button>`;
+        return `<span id="${uid}" data-paper-id="${esc(paperId)}" data-page="${page || 0}" data-has-bbox="${hasBbox}" data-locator-status="exact_page" data-evidence-text="${escAttr(ellipsis(evidenceText, 60))}" ${bboxDataAttr} style="display:none;"></span><button class="btn primary small" style="height:22px;padding:0 6px;font-size:10px;" onclick="triggerWorkbenchLocatorAction('${uid}')">Locator Inspection (Jump to Page ${page || "?"})</button>`;
       } else {
-        return `<span style="font-size:10px;color:var(--color-text-secondary);">Exact PDF locator missing / missing_page / unsafe_locator / no exact locator. ${locatorDegradedText(locator)} Blocked from export/writing until exact locator + human verification.</span>`;
+        return `<span class="locator-unrepaired-msg" style="font-size:10px;color:var(--color-text-secondary);font-weight:700;">Exact PDF locator missing / missing_page / unsafe_locator / no exact locator. ${locatorDegradedText(locator)} Blocked from export/writing until exact locator + human verification.</span>`;
       }
     }
 
@@ -804,8 +844,16 @@
         if (Array.isArray(result)) {
           state.locatorCache = {};
           result.forEach(function(loc) {
-            var key = (loc.target_type || "") + ":" + (loc.field_name || "");
-            if (!state.locatorCache[key]) state.locatorCache[key] = loc;
+            if (loc.target_id && loc.field_name) {
+              var key1 = loc.target_id + ":" + loc.field_name;
+              state.locatorCache[key1] = loc;
+            }
+            if (loc.target_type && loc.field_name) {
+              var key2 = loc.target_type + ":" + loc.field_name;
+              state.locatorCache[key2] = loc;
+              var key3 = loc.target_type.toLowerCase() + ":" + loc.field_name;
+              state.locatorCache[key3] = loc;
+            }
           });
         }
       } catch (e) {
@@ -840,7 +888,7 @@
           const resStatus = view.resStatus;
           
           const statusBadgeHtml = getStatusBadge(status, resStatus);
-          const locatorBadgeHtml = getFieldLocatorBadge(field);
+          const locatorBadgeHtml = getFieldLocatorBadge(record, name, field);
           const locatorActionHtml = getFieldLocatorAction(record, name, field);
           const warning = (state.extraction.validation_warnings || []).find(w => 
             w.target_type === record.target_type && 
@@ -885,6 +933,7 @@
                 </div>
               </div>
               
+              ${getFieldLocatorDetailsHtml(record, name, field)}
               ${resStatusWarningHtml}
               ${warningHtml}
               
@@ -1136,6 +1185,8 @@
         } catch (err) {
           console.warn("GET paper metadata failed", err);
         }
+
+        await loadExtractionLocators();
 
         renderPaper();
         renderWarnings(state.extraction.validation_warnings || []);

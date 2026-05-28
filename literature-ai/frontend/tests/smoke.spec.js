@@ -2627,18 +2627,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       // Check locator status badges exist
       const exactBadge = page.locator('.locator-status-badge[data-locator-status="exact_page"]');
       await expect(exactBadge.first()).toBeVisible();
-      await expect(exactBadge.first()).toContainText('exact_page');
+      await expect(exactBadge.first()).toContainText('locator repaired / exact locator available / page available');
 
       const pageOnlyBadge = page.locator('.locator-status-badge[data-locator-status="exact_page"]');
       await expect(pageOnlyBadge.first()).toBeVisible();
-      await expect(pageOnlyBadge.first()).toContainText('exact_page');
+      await expect(pageOnlyBadge.first()).toContainText('locator repaired / exact locator available / page available');
 
       const needsReparseBadge = page.locator('.locator-status-badge[data-locator-status="missing_page"]');
       await expect(needsReparseBadge).toBeVisible();
-      await expect(needsReparseBadge).toContainText('missing_page');
+      await expect(needsReparseBadge).toContainText('missing_page / unsafe_locator / no exact locator');
 
       // exact_page: has page jump button
-      const viewOriginalBtn = page.locator('button:has-text("跳转到第 5 页")');
+      const viewOriginalBtn = page.locator('button:has-text("Locator Inspection (Jump to Page 5)")');
       await expect(viewOriginalBtn.first()).toBeAttached();
 
       // missing_page: no precise jump
@@ -2966,6 +2966,132 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       // G2B status badge must show "需重新确认" not "已校验"
       const fieldContainer = page.locator('.field-container:has-text("value")');
       await expect(fieldContainer).toContainText('需重新确认');
+    });
+
+    test('D4-3H.2: human workbench verification gate for repaired and unrepaired locators', async ({ page }) => {
+      const apiRequests = [];
+      page.on('request', request => {
+        const url = request.url();
+        if (url.includes('/api/')) {
+          apiRequests.push({
+            method: request.method(),
+            url,
+            body: request.postData() || '',
+          });
+        }
+      });
+
+      const mockRepairedLocators = [
+        {
+          paper_id: PILOT_PAPER_ID,
+          target_type: 'CatalystSample',
+          target_id: '11111111-1111-4111-8111-111111111111',
+          field_name: 'catalyst_type',
+          evidence_text: 'Catalyst type evidence text is visible to the reviewer.',
+          page: 7,
+          bbox: { x0: 53.858, y0: 477.052, x1: 287.155, y1: 359.672 },
+          parser_source: 'Docling',
+          locator_status: 'exact_page',
+          can_jump_to_pdf_page: true,
+          can_highlight_in_pdf: true,
+        },
+        {
+          paper_id: PILOT_PAPER_ID,
+          target_type: 'CatalystSample',
+          target_id: '11111111-1111-4111-8111-111111111111',
+          field_name: 'metal_centers',
+          evidence_text: 'Metal-center evidence text is visible.',
+          page: 7,
+          bbox: { x0: 53.859, y0: 356.594, x1: 287.167, y1: 70.085 },
+          parser_source: 'Docling',
+          locator_status: 'exact_page',
+          can_jump_to_pdf_page: true,
+          can_highlight_in_pdf: true,
+        },
+        {
+          paper_id: PILOT_PAPER_ID,
+          target_type: 'ElectrochemicalPerformance',
+          target_id: '33333333-3333-4333-8333-333333333333',
+          field_name: 'rate',
+          evidence_text: 'Rate-performance evidence text is visible.',
+          page: 6,
+          bbox: { x0: 53.858, y0: 125.995, x1: 541.43, y1: 71.087 },
+          parser_source: 'Docling',
+          locator_status: 'exact_page',
+          can_jump_to_pdf_page: true,
+          can_highlight_in_pdf: true,
+        }
+      ];
+
+      await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+      await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
+      await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
+      await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
+      await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/audit$`), route => jsonResponse(route, PILOT_AUDIT));
+      await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/evidence-locators$`), route => jsonResponse(route, mockRepairedLocators));
+
+      await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=${PILOT_PAPER_ID}`);
+      await page.waitForTimeout(1000);
+
+      // 1. Verify all 5 rows are unverified / pending review and no misleading words
+      const bodyText = await page.locator('body').innerText();
+      expect(bodyText).not.toMatch(/Human verified|Ready for export|Ready for writing|export-ready|writing-ready|AI approved|auto verified/i);
+      expect(bodyText).not.toMatch(/已验证|已校验|可导出|可写作|安全证据/i);
+
+      // 2. CatalystSample schema check: repaired catalyst_type and metal_centers, unrepaired name
+      await page.locator('#schemaSelect').selectOption('CatalystSample');
+      await page.waitForTimeout(200);
+
+      const form = page.locator('#schemaForm');
+
+      // Unrepaired name check (HIGH-CAUTION)
+      const nameField = form.locator('#field-11111111-1111-4111-8111-111111111111-name');
+      await expect(nameField).toContainText('Pending human review / Not verified');
+      await expect(nameField).toContainText('HIGH-CAUTION: Unrepaired locator risk / exact locator missing');
+      await expect(nameField.locator('button:has-text("Locator Inspection")')).toHaveCount(0);
+
+      // Repaired catalyst_type check
+      const catalystTypeField = form.locator('#field-11111111-1111-4111-8111-111111111111-catalyst_type');
+      await expect(catalystTypeField).toContainText('Pending human review / Not verified');
+      await expect(catalystTypeField).toContainText('locator repaired / exact locator available / page available');
+      await expect(catalystTypeField).toContainText('page 7');
+      await expect(catalystTypeField).toContainText('Docling source if available');
+      await expect(catalystTypeField).toContainText('Catalyst type evidence text is visible to the reviewer.');
+      await expect(catalystTypeField.locator('button:has-text("Locator Inspection (Jump to Page 7)")')).toHaveCount(1);
+
+      // Repaired metal_centers check
+      const metalCentersField = form.locator('#field-11111111-1111-4111-8111-111111111111-metal_centers');
+      await expect(metalCentersField).toContainText('Pending human review / Not verified');
+      await expect(metalCentersField).toContainText('locator repaired / exact locator available / page available');
+      await expect(metalCentersField).toContainText('page 7');
+      await expect(metalCentersField).toContainText('Docling source if available');
+      await expect(metalCentersField.locator('button:has-text("Locator Inspection (Jump to Page 7)")')).toHaveCount(1);
+
+      // 3. DFTSetting schema check: unrepaired convergence_settings (RED excluded)
+      await page.locator('#schemaSelect').selectOption('DFTSetting');
+      await page.waitForTimeout(200);
+
+      const convField = form.locator('#field-22222222-2222-4222-8222-222222222222-convergence_settings');
+      await expect(convField).toContainText('Pending human review / Not verified');
+      await expect(convField).toContainText('RED: excluded / no reliable source');
+      await expect(convField.locator('button:has-text("Locator Inspection")')).toHaveCount(0);
+
+      // 4. ElectrochemicalPerformance schema check: repaired rate
+      await page.locator('#schemaSelect').selectOption('ElectrochemicalPerformance');
+      await page.waitForTimeout(200);
+
+      const rateField = form.locator('#field-33333333-3333-4333-8333-333333333333-rate');
+      await expect(rateField).toContainText('Pending human review / Not verified');
+      await expect(rateField).toContainText('locator repaired / exact locator available / page available');
+      await expect(rateField).toContainText('page 6');
+      await expect(rateField).toContainText('Docling source if available');
+      await expect(rateField.locator('button:has-text("Locator Inspection (Jump to Page 6)")')).toHaveCount(1);
+
+      // 5. Verify no prepare or mark-verified API is called on page load
+      const openingRequests = apiRequests.filter(req => req.url.includes(PILOT_PAPER_ID));
+      expect(openingRequests.some(req => req.url.includes('/reviews/prepare'))).toBe(false);
+      expect(openingRequests.some(req => req.url.includes('/reviews/mark-verified'))).toBe(false);
+      expect(openingRequests.some(req => /reviewer_status"\s*:\s*"verified"|verified"\s*:\s*true/i.test(req.body))).toBe(false);
     });
   });
 });
