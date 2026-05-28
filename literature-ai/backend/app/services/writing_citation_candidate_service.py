@@ -206,6 +206,52 @@ class WritingCitationCandidateService:
             },
         }
 
+    def evaluate_selected_paper(self, *, paper_id: UUID, text: str) -> dict[str, Any] | None:
+        """Re-read current DB state for one selected paper without trusting client flags."""
+        query_tokens = tokenize(text)
+        paper = self.session.get(Paper, paper_id)
+        if paper is None:
+            return None
+
+        eligibility = self.session.get(PaperCitationEligibility, paper.id)
+        impact = self.session.get(PaperImpactMetadata, paper.id)
+        reviews = list(
+            self.session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == paper.id)).all()
+        )
+        locators = list(self.session.scalars(select(EvidenceLocator).where(EvidenceLocator.paper_id == paper.id)).all())
+        evidence_claims = list(
+            self.session.scalars(select(EvidenceClaim).where(EvidenceClaim.paper_id == paper.id)).all()
+        )
+        sections = list(self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper.id)).all())
+        extraction_rows = self._extraction_rows_by_paper().get(paper.id, [])
+        snippets = self._snippets(
+            paper=paper,
+            query_tokens=query_tokens,
+            reviews=reviews,
+            locators=locators,
+            evidence_claims=evidence_claims,
+            sections=sections,
+            extraction_rows=extraction_rows,
+        )
+        evidence_status = self._evidence_status(
+            snippets=snippets,
+            reviews=reviews,
+            locators=locators,
+            extraction_rows=extraction_rows,
+        )
+        priority = eligibility.citation_priority if eligibility else "medium"
+        return {
+            "paper": paper,
+            "eligibility": eligibility,
+            "impact": impact,
+            "evidence_status": evidence_status,
+            "can_be_used_as_confirmed_citation": evidence_status == "safe_verified",
+            "requires_human_verification": evidence_status != "safe_verified",
+            "citation_priority": priority,
+            "exclude_from_citation": bool(eligibility.exclude_from_citation) if eligibility else False,
+            "supporting_snippets": [item.response() for item in snippets],
+        }
+
     def _exclude_reason(
         self,
         paper: Paper,

@@ -3,8 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.db.session import get_db_session
+from app.services.writing_citation_insertion_service import (
+    CitationInsertionDraftRequest,
+    WritingCitationInsertionService,
+)
 from app.services.writing_citation_candidate_service import (
     CitationCandidateFilters,
     CitationCandidateRequest,
@@ -38,6 +43,19 @@ class CitationCandidatePayload(BaseModel):
     include_pending_review: bool = True
 
 
+class CitationInsertionDraftPayload(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+    selected_paper_id: UUID
+    citation_marker: str | None = None
+    insertion_mode: str = Field(default="parenthetical", pattern="^(parenthetical|narrative|comment_only)$")
+    citation_style: str = Field(default="draft_author_year", pattern="^(draft_author_year|placeholder)$")
+    candidate_evidence_status: str | None = None
+    candidate_can_be_used_as_confirmed_citation: bool | None = None
+    candidate_requires_human_verification: bool | None = None
+    supporting_snippet: str | None = None
+    user_note: str | None = None
+
+
 @router.post("/citation-candidates")
 async def citation_candidates(
     payload: CitationCandidatePayload,
@@ -59,3 +77,29 @@ async def citation_candidates(
         return WritingCitationCandidateService(session).recommend(request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/citation-insertion-draft")
+async def citation_insertion_draft(
+    payload: CitationInsertionDraftPayload,
+    session: Session = Depends(get_db_session),
+) -> dict:
+    if not payload.text.strip():
+        raise HTTPException(status_code=422, detail="text must not be blank")
+    result = WritingCitationInsertionService(session).draft(
+        CitationInsertionDraftRequest(
+            text=payload.text,
+            selected_paper_id=payload.selected_paper_id,
+            citation_marker=payload.citation_marker,
+            insertion_mode=payload.insertion_mode,
+            citation_style=payload.citation_style,
+            candidate_evidence_status=payload.candidate_evidence_status,
+            candidate_can_be_used_as_confirmed_citation=payload.candidate_can_be_used_as_confirmed_citation,
+            candidate_requires_human_verification=payload.candidate_requires_human_verification,
+            supporting_snippet=payload.supporting_snippet,
+            user_note=payload.user_note,
+        )
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return result
