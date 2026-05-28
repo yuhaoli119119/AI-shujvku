@@ -92,3 +92,54 @@ To satisfy the strict safety criteria, the writing assistant panel has zero-tole
 
 - **Remaining Risks**: None. Since the UI contains absolutely no buttons or scripts calling any state-modifying backend APIs, there is zero risk of database corruption, data leakages, or security-gate bypasses.
 - **Conclusion**: The Web Writing Assistant Panel meets all D4-6 UI/UX specifications, aligns with the theme styles, enforces robust safety tags, and has extensive mock smoke test coverage.
+
+---
+
+## 7. Real Backend Integration Smoke Test Results
+
+A live integration smoke test was conducted against the actual running backend uvicorn server.
+
+### Smoke Details:
+- **Input Text**: `"Single-atom catalysts can accelerate sulfur redox kinetics in lithium-sulfur batteries."`
+- **Page Visited**: `http://localhost:8000/pages/writing_assistant/index.html`
+- **API Invoked**: `POST /api/writing/citation-candidates` (real endpoint returning dynamic SQLite records)
+- **API Response Code**: `200 OK`
+- **Candidate Count Retrieved**: 4 candidates
+
+### Safety Tag Verification against live Database:
+1. **Candidate #1**: *“Revealing the 16-electron sulfur reduction reaction network...”*
+   - **Evidence Status**: `unverified_extraction`
+   - **Safety Classification**: `NEEDS HUMAN VERIFICATION` (Amber Badge - rendered correctly)
+   - **Warnings Visible**: `⚠️ Suggestion only — requires manual extraction review. Impact Factor is missing (requires metadata lookup).` (rendered correctly)
+2. **Candidate #2**: *“锂硫电池非均相电催化剂”*
+   - **Evidence Status**: `metadata_only`
+   - **Safety Classification**: `METADATA-ONLY SUGGESTION — CANNOT BE USED AS EVIDENCE YET` (Grey Badge - rendered correctly)
+   - **Warnings Visible**: `⚠️ Suggestion only — requires manual extraction review. Impact Factor is missing (requires metadata lookup).` (rendered correctly)
+3. **Candidate #3 & #4**: *“Advances in lithium–sulfur batteries...”* & *“Liquid electrolyte lithium/sulfur battery...”*
+   - **Evidence Status**: `metadata_only`
+   - **Safety Classification**: `METADATA-ONLY SUGGESTION — CANNOT BE USED AS EVIDENCE YET` (Grey Badge - rendered correctly)
+
+### Clipboard Security & Warning Propagation:
+- The "Copy Candidate Info" button was activated on the first card, producing:
+  ```
+  Title: Revealing the 16-electron sulfur reduction reaction network in lithium sulfur (Li-S) batteries
+  Journal: Chinese Science Bulletin (Chinese Version)
+  Year: 2024
+  Impact Factor: N/A
+  Recommendation Score: 0.6967 (moderate)
+  Safety Classification: Needs human verification
+  Evidence Status: unverified_extraction
+  Verification Warning: suggestion_only_needs_human_verification, impact_factor_needs_metadata
+  ```
+  *(Correctly contained the evidence status and safety warnings as required).*
+
+### Network Security & DB State Checks:
+- **Danger APIs**: No dangerous requests or fields (like `mark_verified`, `save_reviews`, etc.) were detected.
+- **Active DB Integrity**: Database row counts checked before and after the real integration smoke remain exactly identical:
+  - `papers_total` = 15
+  - `paper_impact_metadata` = 0
+  - `paper_citation_eligibility` = 0
+  - `verified reviews` = 0
+  - `total reviews` = 5
+- **Conclusion**: Integration smoke testing completed successfully with no active DB writes, correct visual elements, and perfect rule adherence.
+
