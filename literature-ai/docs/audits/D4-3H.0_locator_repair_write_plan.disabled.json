@@ -1,0 +1,201 @@
+{
+  "stage": "D4-3H.0",
+  "mode": "disabled_pre_write_plan",
+  "can_execute": false,
+  "requires_explicit_human_approval": true,
+  "active_db_write_performed": false,
+  "locator_write_performed": false,
+  "verified_write_performed": false,
+  "export_unlock_performed": false,
+  "writing_unlock_performed": false,
+  "baseline_commit": "3c24e4b21f43b5772876eef73168cb057202604f",
+  "paper_id": "3978dc79f94f4457863fd68449ae293d",
+  "paper_title": "锂硫电池非均相电催化剂",
+  "manifest_source_path": "docs/audits/D4-3G_read_only_locator_repair_proposal_manifest.json",
+  "audit_source_path": "docs/audits/D4-3G_read_only_proposal_manifest_runner.md",
+  "approval_scope": "future locator write candidates only; no verified review, export, or writing eligibility is authorized",
+  "items": [
+    {
+      "review_id": "e2c75b7f-2d9c-41ff-a6e1-e95e5d491896",
+      "paper_id": "3978dc79f94f4457863fd68449ae293d",
+      "field": "name",
+      "value": "Fe-Co-V",
+      "proposed_page": 7,
+      "proposed_bbox": {
+        "x0": 53.859,
+        "y0": 356.594,
+        "x1": 287.167,
+        "y1": 70.08500000000004,
+        "coordinate_system": "BOTTOMLEFT"
+      },
+      "source_artifact": "Docling #/texts/80",
+      "match_method": "target_token_match",
+      "confidence": 0.56,
+      "approval_status": "high_caution",
+      "default_recommendation": "do_not_write_until_human_confirms_normalized_aggregate",
+      "enabled": false,
+      "should_write_locator": false,
+      "requires_human_confirmation": true,
+      "safe_verified": false,
+      "export_eligible": false,
+      "writing_eligible": false,
+      "mark_verified": false,
+      "verified": false,
+      "warnings": [
+        "proposal_not_verified",
+        "does_not_unlock_export_or_writing",
+        "target_specific_evidence_span_used_for_locator_query",
+        "docling_candidates_narrowed_to_target_evidence_span",
+        "current_review_evidence_text_not_used_as_locator_query",
+        "normalized_aggregate_value_not_literal_source_phrase"
+      ],
+      "blockers": [
+        "requires_product_manager_confirmation_before_any_write"
+      ]
+    },
+    {
+      "review_id": "09f83676-8f13-4e82-a576-ab359b264933",
+      "paper_id": "3978dc79f94f4457863fd68449ae293d",
+      "field": "catalyst_type",
+      "value": "single_atom",
+      "proposed_page": 7,
+      "proposed_bbox": {
+        "x0": 53.858,
+        "y0": 477.052,
+        "x1": 287.155,
+        "y1": 359.672,
+        "coordinate_system": "BOTTOMLEFT"
+      },
+      "source_artifact": "Docling #/texts/79",
+      "match_method": "substring_match",
+      "confidence": 0.68,
+      "approval_status": "pending_human_decision",
+      "default_recommendation": "do_not_write_until_human_approves",
+      "enabled": false,
+      "should_write_locator": false,
+      "requires_human_confirmation": true,
+      "safe_verified": false,
+      "export_eligible": false,
+      "writing_eligible": false,
+      "mark_verified": false,
+      "verified": false,
+      "warnings": [
+        "proposal_not_verified",
+        "does_not_unlock_export_or_writing",
+        "target_specific_evidence_span_used_for_locator_query",
+        "docling_candidates_narrowed_to_target_evidence_span",
+        "current_review_evidence_text_not_used_as_locator_query"
+      ],
+      "blockers": [
+        "requires_product_manager_confirmation_before_any_write"
+      ]
+    },
+    {
+      "review_id": "280f2d9e-3ebb-4107-9702-f6ea6d645465",
+      "paper_id": "3978dc79f94f4457863fd68449ae293d",
+      "field": "metal_centers",
+      "value": [
+        "Fe",
+        "Co",
+        "V"
+      ],
+      "proposed_page": 7,
+      "proposed_bbox": {
+        "x0": 53.859,
+        "y0": 356.594,
+        "x1": 287.167,
+        "y1": 70.08500000000004,
+        "coordinate_system": "BOTTOMLEFT"
+      },
+      "source_artifact": "Docling #/texts/80",
+      "match_method": "substring_match",
+      "confidence": 0.68,
+      "approval_status": "pending_human_decision",
+      "default_recommendation": "do_not_write_until_human_approves",
+      "enabled": false,
+      "should_write_locator": false,
+      "requires_human_confirmation": true,
+      "safe_verified": false,
+      "export_eligible": false,
+      "writing_eligible": false,
+      "mark_verified": false,
+      "verified": false,
+      "warnings": [
+        "proposal_not_verified",
+        "does_not_unlock_export_or_writing",
+        "target_specific_evidence_span_used_for_locator_query",
+        "docling_candidates_narrowed_to_target_evidence_span",
+        "current_review_evidence_text_not_used_as_locator_query"
+      ],
+      "blockers": [
+        "requires_product_manager_confirmation_before_any_write"
+      ]
+    },
+    {
+      "review_id": "56f72584-45b3-465b-9a40-97ec60a2fabf",
+      "paper_id": "3978dc79f94f4457863fd68449ae293d",
+      "field": "rate",
+      "value": "0.2C",
+      "proposed_page": 6,
+      "proposed_bbox": {
+        "x0": 53.858,
+        "y0": 125.995,
+        "x1": 541.43,
+        "y1": 71.08699999999999,
+        "coordinate_system": "BOTTOMLEFT"
+      },
+      "source_artifact": "Docling #/texts/74",
+      "match_method": "substring_match",
+      "confidence": 0.68,
+      "approval_status": "pending_human_decision",
+      "default_recommendation": "do_not_write_until_human_approves",
+      "enabled": false,
+      "should_write_locator": false,
+      "requires_human_confirmation": true,
+      "safe_verified": false,
+      "export_eligible": false,
+      "writing_eligible": false,
+      "mark_verified": false,
+      "verified": false,
+      "warnings": [
+        "proposal_not_verified",
+        "does_not_unlock_export_or_writing",
+        "target_specific_evidence_span_used_for_locator_query",
+        "docling_candidates_narrowed_to_target_evidence_span",
+        "current_review_evidence_text_not_used_as_locator_query"
+      ],
+      "blockers": [
+        "requires_product_manager_confirmation_before_any_write"
+      ]
+    }
+  ],
+  "excluded_items": [
+    {
+      "review_id": "4ba0e490-5934-439c-8136-33a8ddf4e201",
+      "paper_id": "3978dc79f94f4457863fd68449ae293d",
+      "field": "convergence_settings",
+      "status": "RED",
+      "proposal": "none",
+      "reason": "no reliable source artifact / extracted empty-settings dict",
+      "enabled": false,
+      "should_write_locator": false,
+      "requires_human_confirmation": true,
+      "safe_verified": false,
+      "export_eligible": false,
+      "writing_eligible": false,
+      "write_plan_item_created": false
+    }
+  ],
+  "non_goals": [
+    "no active DB write",
+    "no locator write",
+    "no mark_verified",
+    "no verified review payload",
+    "no export or writing unlock",
+    "no migration apply",
+    "no extraction or reprocessing apply",
+    "no materialization",
+    "no registry write"
+  ],
+  "next_step_gate": "D4-3H.1 may start only after explicit human approval names exact review_id, field, page, bbox, and source artifact."
+}
