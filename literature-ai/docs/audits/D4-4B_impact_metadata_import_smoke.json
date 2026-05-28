@@ -1,0 +1,55 @@
+{
+  "task": "D4-4B Impact Metadata Import Gate / Journal Impact Factor CSV Import",
+  "smoke_type": "active_db_dry_run_only",
+  "active_db_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\libraries\\default\\database.sqlite",
+  "input": {
+    "format": "csv",
+    "journal": "Nature Energy",
+    "impact_factor": 1.0,
+    "impact_factor_year": 2099,
+    "impact_factor_source": "test_import",
+    "note": "dry run only"
+  },
+  "result": {
+    "imported_count": 1,
+    "updated_count": 0,
+    "matched_paper_count": 1,
+    "unmatched_items": [],
+    "invalid_items": [],
+    "needs_metadata_remaining": 15,
+    "source": "test_import",
+    "impact_factor_year": 2099,
+    "active_db_write_performed": false,
+    "dry_run": true
+  },
+  "before_snapshot": {
+    "papers_total": 15,
+    "paper_impact_metadata_rows": 0,
+    "paper_citation_eligibility_rows": 0,
+    "review_rows": 5,
+    "evidence_locator_rows": 4,
+    "verified_review_rows": 0,
+    "safe_verified_rows": 0,
+    "included_for_writing_rows": 0,
+    "tables": {
+      "papers": true,
+      "paper_impact_metadata": true,
+      "paper_citation_eligibility": true
+    }
+  },
+  "after_snapshot": {
+    "papers_total": 15,
+    "paper_impact_metadata_rows": 0,
+    "paper_citation_eligibility_rows": 0,
+    "review_rows": 5,
+    "evidence_locator_rows": 4,
+    "verified_review_rows": 0,
+    "safe_verified_rows": 0,
+    "included_for_writing_rows": 0,
+    "tables": {
+      "papers": true,
+      "paper_impact_metadata": true,
+      "paper_citation_eligibility": true
+    }
+  }
+}
