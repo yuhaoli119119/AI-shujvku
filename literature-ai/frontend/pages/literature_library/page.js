@@ -245,10 +245,10 @@ function openSelectedPdfEvidence() {
         return;
     }
     if (!paperHasPdf(state.selectedPaper)) {
-        showToast("PDF 未上传，请先上传 PDF。", "error");
+        showToast("当前文献尚未上传 PDF，暂时无法预览，也不能执行基于 PDF 页码的证据跳转。", "error");
         return;
     }
-    openPdfViewer(state.selectedPaper.id, 1, false, null, "exact_page", "从文献标题入口打开：PDF 预览，不代表证据精确定位。");
+    openPdfViewer(state.selectedPaper.id, 1, false, null, "exact_page", "这是从文献标题入口打开的 PDF 预览，不代表已定位到具体证据。请在“PDF 证据定位”卡片中使用可跳转页码的证据项。");
 }
 
 function openDeletePaperDialog(event) {

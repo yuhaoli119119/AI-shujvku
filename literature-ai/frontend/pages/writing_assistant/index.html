@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>写作辅助 - Literature AI</title>
+    <title>写作引用辅助 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
@@ -14,6 +14,7 @@
 </head>
 <body>
     <div id="topnav-mount"></div>
+
     <div class="shell">
         <div class="header-container">
             <h2>写作引用辅助</h2>
@@ -23,45 +24,75 @@
         <div class="safety-disclaimer-banner">
             <div class="disclaimer-icon">!</div>
             <div class="disclaimer-content">
-                <strong>安全提示：</strong>只有 API 明确标记为 confirmed 的候选，才可作为“已确认候选”查看。需要人工核验或仅含元数据的建议，在复核前都不能视为证据。
-                <span style="margin-left: 8px;"><strong>说明：</strong>本工具只生成引用建议草稿，不会验证证据、不写入数据库、不生成最终参考文献，也不会解锁写作或导出能力。</span>
+                <strong>安全提示：</strong>只有 API 明确标记为 <code>confirmed</code> 的候选，才可作为“已确认候选”查看。需要人工核验或仅含元数据的建议，在复核前都不能视为证据。
+                <span><strong>说明：</strong>本工具只生成引用建议草稿，不会验证证据、不写入数据库、不生成最终参考文献，也不会解锁写作或导出能力。</span>
             </div>
         </div>
 
-        <div class="main-layout">
-            <div class="input-panel card">
-                <div class="section-title">写作上下文</div>
-                <div class="field">
-                    <label for="writingText">输入文本 <span class="required">*</span></label>
-                    <textarea id="writingText" class="input" rows="8" placeholder="在此粘贴论文句子或段落，例如：单原子催化剂可加速锂硫电池中的硫氧化还原动力学。"></textarea>
-                    <div id="validationAlert" class="validation-alert" style="display: none;"></div>
-                </div>
-
-                <div class="field-row">
-                    <div class="field">
-                        <label for="maxCandidates">最多候选数</label>
-                        <input type="number" id="maxCandidates" class="input" value="10" min="1" max="50">
+        <div id="assistantLayout" class="main-layout">
+            <aside id="assistantSidebar" class="input-panel card" aria-label="写作辅助侧栏">
+                <div class="sidebar-header">
+                    <div>
+                        <div class="section-title">工作台</div>
+                        <p class="sidebar-description">在目录中切换“写作上下文”和“高级筛选”，为右侧候选检索提供条件。</p>
                     </div>
+                    <button id="sidebarToggleButton" type="button" class="panel-icon-button" aria-label="隐藏左侧栏">隐藏侧栏</button>
                 </div>
 
-                <div class="panel-actions" style="margin-top: 0;">
-                    <div class="field checkboxes-group" style="margin: 0; flex-direction: row; flex-wrap: wrap;">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="includeUnverifiedSuggestions" checked>
-                            <span>未核验建议</span>
-                        </label>
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="includePendingReview" checked>
-                            <span>待复核项</span>
-                        </label>
-                    </div>
+                <div class="panel-nav" role="tablist" aria-label="左侧目录">
+                    <button
+                        type="button"
+                        class="panel-nav-item active"
+                        data-panel-section="context"
+                        aria-selected="true"
+                        aria-controls="panelSection-context"
+                    >
+                        写作上下文
+                    </button>
+                    <button
+                        type="button"
+                        class="panel-nav-item"
+                        data-panel-section="filters"
+                        aria-selected="false"
+                        aria-controls="panelSection-filters"
+                    >
+                        高级筛选
+                    </button>
                 </div>
 
-                <details class="filters-collapsible">
-                    <summary class="filters-summary">
-                        <span>高级筛选</span>
-                    </summary>
-                    <div class="filters-content">
+                <div class="panel-sections">
+                    <section id="panelSection-context" class="panel-section active" data-panel-content="context">
+                        <div class="field field-grow">
+                            <label for="writingText">输入文本 <span class="required">*</span></label>
+                            <textarea
+                                id="writingText"
+                                class="input"
+                                rows="12"
+                                placeholder="在此粘贴论文句子或段落，例如：单原子催化剂可加速锂硫电池中的硫氧化还原动力学。"
+                            ></textarea>
+                            <div id="validationAlert" class="validation-alert" style="display: none;"></div>
+                        </div>
+
+                        <div class="field-row">
+                            <div class="field">
+                                <label for="maxCandidates">最多候选数</label>
+                                <input type="number" id="maxCandidates" class="input" value="10" min="1" max="50">
+                            </div>
+                        </div>
+
+                        <div class="checkboxes-group checkboxes-inline">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="includeUnverifiedSuggestions" checked>
+                                <span>包含未核验建议</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="includePendingReview" checked>
+                                <span>包含待复核项</span>
+                            </label>
+                        </div>
+                    </section>
+
+                    <section id="panelSection-filters" class="panel-section" data-panel-content="filters">
                         <div class="field-row">
                             <div class="field">
                                 <label for="filterYearMin">年份下限</label>
@@ -85,12 +116,12 @@
                         </div>
 
                         <div class="field">
-                            <label for="filterJournalInc">包含期刊 <span class="hint">（逗号分隔）</span></label>
+                            <label for="filterJournalInc">包含期刊 <span class="hint">使用逗号分隔</span></label>
                             <input type="text" id="filterJournalInc" class="input" placeholder="例如 Nature, Science">
                         </div>
 
                         <div class="field">
-                            <label for="filterJournalExc">排除期刊 <span class="hint">（逗号分隔）</span></label>
+                            <label for="filterJournalExc">排除期刊 <span class="hint">使用逗号分隔</span></label>
                             <input type="text" id="filterJournalExc" class="input" placeholder="例如 Advanced Materials">
                         </div>
 
@@ -118,7 +149,7 @@
                         <div class="checkbox-grid">
                             <label class="checkbox-label">
                                 <input type="checkbox" id="filterNeedsMetadata">
-                                <span>需补元数据</span>
+                                <span>需要补充元数据</span>
                             </label>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="filterHasPdf">
@@ -126,11 +157,11 @@
                             </label>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="filterHasParsedText">
-                                <span>已解析正文</span>
+                                <span>已有解析文本</span>
                             </label>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="filterHasExtractionOutput">
-                                <span>已有提取结果</span>
+                                <span>已有抽取结果</span>
                             </label>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="filterHasVerifiedEvidence">
@@ -141,14 +172,18 @@
                                 <span>已有 safe_verified 证据</span>
                             </label>
                         </div>
-                    </div>
-                </details>
+                    </section>
+                </div>
 
                 <div class="panel-actions">
-                    <button id="btnClear" class="btn btn-ghost" onclick="clearFilters()">清空筛选</button>
-                    <button id="btnSearch" class="btn btn-primary" onclick="retrieveCandidates()">检索候选</button>
+                    <button id="btnClear" class="btn btn-ghost" type="button" onclick="clearFilters()">清空筛选</button>
+                    <button id="btnSearch" class="btn btn-primary" type="button" onclick="retrieveCandidates()">检索候选</button>
                 </div>
-            </div>
+
+                <div id="panelResizer" class="panel-resizer" aria-hidden="true"></div>
+            </aside>
+
+            <button id="sidebarRestoreButton" type="button" class="sidebar-restore-button" hidden>显示左侧栏</button>
 
             <div class="results-panel">
                 <div id="loadingIndicator" class="loading-indicator" style="display: none;">
@@ -157,15 +192,13 @@
                 </div>
 
                 <div class="results-header-bar">
-                    <div class="results-count-title">
-                        推荐候选（<span id="resultsCount">0</span>）
-                    </div>
+                    <div class="results-count-title">推荐候选（<span id="resultsCount">0</span>）</div>
                 </div>
 
                 <div id="candidatesContainer" class="candidates-container">
-                    <div class="empty-state" style="padding: 40px 20px;">
-                        <h3 style="font-size: 16px; color: var(--color-text-secondary); margin-bottom: 8px;">暂无候选</h3>
-                        <p style="font-size: 13px;">请输入写作内容后点击「检索候选」。</p>
+                    <div class="empty-state">
+                        <h3>暂无候选</h3>
+                        <p>请输入写作内容后点击“检索候选”。</p>
                     </div>
                 </div>
 

@@ -13,14 +13,25 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1440px; margin: 0 auto; padding: 32px 24px 32px; }
+    .shell { max-width: 1600px; margin: 0 auto; padding: 32px 24px 32px; }
     .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 22px; }
     .page-head h1 { margin: 0 0 6px; font-size: 26px; }
     .page-head p { margin: 0; color: var(--color-text-secondary); font-size: 14px; }
-    .layout { display: grid; grid-template-columns: 310px minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+    .layout-shell { display: flex; flex-direction: column; gap: 12px; }
+    .layout-toolbar { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+    .panel-toggle { min-width: 148px; }
+    .panel-toggle.is-collapsed { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-bg); }
+    .layout { display: flex; align-items: stretch; gap: 12px; min-width: 0; }
     .panel-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-card); }
+    .side-panel { flex: 0 0 var(--panel-width, 320px); width: var(--panel-width, 320px); min-width: 220px; display: flex; flex-direction: column; min-height: 680px; overflow: hidden; }
+    .left-panel { --panel-width: 310px; }
+    .right-panel { --panel-width: 360px; }
+    .main-panel { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
     .panel-title { font-weight: 800; font-size: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-    .paper-checklist { display: flex; flex-direction: column; gap: 10px; max-height: 560px; overflow: auto; }
+    .panel-title-actions { display: flex; align-items: center; gap: 8px; }
+    .panel-collapse-btn { border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface-alt); color: var(--color-text-secondary); font: inherit; font-size: 12px; font-weight: 700; padding: 6px 10px; cursor: pointer; }
+    .panel-collapse-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+    .paper-checklist { display: flex; flex-direction: column; gap: 10px; max-height: 560px; overflow: auto; flex: 1; min-height: 0; }
     .checklist-item { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); cursor: pointer; }
     .checklist-item-title { font-size: 13px; font-weight: 700; line-height: 1.45; }
     .stepper { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
@@ -31,22 +42,42 @@
     input, textarea, select { width: 100%; border: 1px solid var(--color-border-strong); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); font: inherit; padding: 10px; }
     textarea { min-height: 94px; resize: vertical; }
     .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-    .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-border); margin: 16px 0; padding-bottom: 6px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-border); margin: 16px 0; padding-bottom: 6px; overflow-x: auto; scrollbar-width: thin; }
     .tab-btn { border: 0; background: transparent; color: var(--color-text-secondary); padding: 8px 10px; font-weight: 800; cursor: pointer; }
     .tab-btn.active { color: var(--color-primary); border-bottom: 2px solid var(--color-primary); }
-    .tab-pane { min-height: 180px; white-space: pre-wrap; line-height: 1.75; font-size: 14px; }
+    .tab-pane { min-height: 180px; white-space: pre-wrap; line-height: 1.75; font-size: 14px; overflow-wrap: anywhere; }
     .evidence-card, .audit-card { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; background: var(--color-surface-alt); }
     .evidence-card button { text-align: left; width: 100%; border: 0; background: transparent; color: var(--color-text); font-weight: 800; cursor: pointer; padding: 0; }
     .muted { color: var(--color-text-secondary); font-size: 12px; }
     .warning { color: var(--color-warning); font-weight: 800; }
     .mono { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
     .empty-state { color: var(--color-text-secondary); text-align: center; padding: 30px 12px; }
+    .resize-handle { flex: 0 0 10px; width: 10px; align-self: stretch; position: relative; border-radius: 999px; border: 1px solid var(--color-border); background: linear-gradient(180deg, var(--color-surface-alt) 0%, var(--color-surface) 100%); cursor: col-resize; opacity: 0.72; touch-action: none; }
+    .resize-handle::before { content: ""; position: absolute; inset: 50% 2px auto 2px; transform: translateY(-50%); height: 84px; border-radius: 999px; background: repeating-linear-gradient(180deg, var(--color-text-secondary), var(--color-text-secondary) 6px, transparent 6px, transparent 12px); opacity: 0.25; }
+    .resize-handle:hover { opacity: 1; }
+    .layout.left-collapsed .left-panel,
+    .layout.left-collapsed .left-handle,
+    .layout.right-collapsed .right-panel,
+    .layout.right-collapsed .right-handle { display: none; }
+    body.resizing-panels,
+    body.resizing-panels * { cursor: col-resize !important; user-select: none !important; }
     .toast, .progress-box { position: fixed; right: 24px; z-index: 3000; color: #fff; border-radius: var(--radius); box-shadow: var(--shadow-elevated); display: none; padding: 12px 18px; font-size: 14px; }
     .toast { top: 24px; background: var(--color-primary); }
     .progress-box { top: 78px; background: var(--color-success); }
     @media (max-width: 1120px) {
-      .layout { grid-template-columns: 1fr; }
+      .shell { padding-inline: 16px; }
+      .page-head { flex-direction: column; align-items: stretch; }
+      .layout-toolbar { justify-content: flex-start; }
+      .layout { flex-direction: column; }
+      .side-panel, .main-panel { width: 100%; min-width: 0; min-height: auto; flex-basis: auto; }
+      .resize-handle { display: none; }
       .stepper { grid-template-columns: 1fr 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .stepper { grid-template-columns: 1fr; }
+      .actions { flex-direction: column; }
+      .actions .btn, .page-head .btn, .layout-toolbar .btn { width: 100%; }
     }
   </style>
 </head>
@@ -61,15 +92,29 @@
       <button class="btn green" onclick="copyMarkdownText()">复制 Markdown</button>
     </header>
 
-    <section class="layout">
-      <aside class="panel-card">
-        <div class="panel-title"><span>已选文献</span><span id="selectedCount">0</span></div>
+    <section class="layout-shell">
+      <div class="layout-toolbar" aria-label="AI 写作布局控制">
+        <button class="btn ghost panel-toggle" type="button" id="toggleLeftPanelBtn" onclick="toggleWriterPanel('left')">隐藏已选文献</button>
+        <button class="btn ghost panel-toggle" type="button" id="toggleRightPanelBtn" onclick="toggleWriterPanel('right')">隐藏证据面板</button>
+      </div>
+
+      <section class="layout" id="writerLayout">
+      <aside class="panel-card side-panel left-panel" id="selectedPapersPanel">
+        <div class="panel-title">
+          <span>已选文献</span>
+          <span class="panel-title-actions">
+            <span id="selectedCount">0</span>
+            <button class="panel-collapse-btn" type="button" id="leftPanelActionBtn" onclick="toggleWriterPanel('left')">隐藏</button>
+          </span>
+        </div>
         <div id="paperChecklist" class="paper-checklist">
           <div class="empty-state">正在加载文献...</div>
         </div>
       </aside>
 
-      <section class="panel-card">
+      <div class="resize-handle left-handle" role="separator" aria-orientation="vertical" aria-label="调整已选文献面板宽度" onpointerdown="startPanelResize('left', event)"></div>
+
+      <section class="panel-card main-panel">
         <div class="stepper" id="stepper">
           <div class="step active">1 主题</div>
           <div class="step">2 检索证据</div>
@@ -114,12 +159,18 @@
         <div id="tab-audit" class="tab-pane" style="display:none;"></div>
       </section>
 
-      <aside class="panel-card">
-        <div class="panel-title">证据面板</div>
+      <div class="resize-handle right-handle" role="separator" aria-orientation="vertical" aria-label="调整证据面板宽度" onpointerdown="startPanelResize('right', event)"></div>
+
+      <aside class="panel-card side-panel right-panel" id="evidenceSidePanel">
+        <div class="panel-title">
+          <span>证据面板</span>
+          <button class="panel-collapse-btn" type="button" id="rightPanelActionBtn" onclick="toggleWriterPanel('right')">隐藏</button>
+        </div>
         <div id="evidencePanel"><div class="empty-state">暂未选择证据。</div></div>
         <div class="panel-title" style="margin-top:18px;">当前选中证据</div>
         <div id="evidenceDetail" class="mono">点击论断或证据项，可查看 paper_id、chunk_id、页码/片段、置信度与 evidence_text 原始内容。</div>
       </aside>
+      </section>
     </section>
   </main>
 
@@ -129,7 +180,21 @@
   <script>
     const API_BASE = "/api/papers";
     const WRITER_API = "/api/writer";
-    const state = { papers: [], selectedIds: [], retrieved: [], generatedData: null, activeTab: "outline" };
+    const WRITER_LAYOUT_STORAGE_KEY = "litai-ai-writer-layout-v1";
+    const state = {
+      papers: [],
+      selectedIds: [],
+      retrieved: [],
+      generatedData: null,
+      activeTab: "outline",
+      layout: {
+        leftWidth: 310,
+        rightWidth: 360,
+        leftCollapsed: false,
+        rightCollapsed: false,
+        resizing: null
+      }
+    };
 
     function showToast(msg) {
       const toast = document.getElementById("toast");
@@ -150,6 +215,114 @@
 
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(Math.max(value, min), max);
+    }
+
+    function persistWriterLayout() {
+      try {
+        localStorage.setItem(WRITER_LAYOUT_STORAGE_KEY, JSON.stringify({
+          leftWidth: state.layout.leftWidth,
+          rightWidth: state.layout.rightWidth,
+          leftCollapsed: state.layout.leftCollapsed,
+          rightCollapsed: state.layout.rightCollapsed
+        }));
+      } catch (_) {}
+    }
+
+    function restoreWriterLayout() {
+      try {
+        const raw = localStorage.getItem(WRITER_LAYOUT_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        state.layout.leftWidth = clamp(Number(parsed.leftWidth) || state.layout.leftWidth, 220, 520);
+        state.layout.rightWidth = clamp(Number(parsed.rightWidth) || state.layout.rightWidth, 260, 620);
+        state.layout.leftCollapsed = Boolean(parsed.leftCollapsed);
+        state.layout.rightCollapsed = Boolean(parsed.rightCollapsed);
+      } catch (_) {}
+    }
+
+    function updateLayoutButtons() {
+      const leftCollapsed = state.layout.leftCollapsed;
+      const rightCollapsed = state.layout.rightCollapsed;
+      const leftLabel = leftCollapsed ? "显示已选文献" : "隐藏已选文献";
+      const rightLabel = rightCollapsed ? "显示证据面板" : "隐藏证据面板";
+
+      const leftToggle = document.getElementById("toggleLeftPanelBtn");
+      const rightToggle = document.getElementById("toggleRightPanelBtn");
+      const leftAction = document.getElementById("leftPanelActionBtn");
+      const rightAction = document.getElementById("rightPanelActionBtn");
+
+      if (leftToggle) {
+        leftToggle.textContent = leftLabel;
+        leftToggle.classList.toggle("is-collapsed", leftCollapsed);
+        leftToggle.setAttribute("aria-pressed", String(leftCollapsed));
+      }
+      if (rightToggle) {
+        rightToggle.textContent = rightLabel;
+        rightToggle.classList.toggle("is-collapsed", rightCollapsed);
+        rightToggle.setAttribute("aria-pressed", String(rightCollapsed));
+      }
+      if (leftAction) leftAction.textContent = leftCollapsed ? "恢复" : "隐藏";
+      if (rightAction) rightAction.textContent = rightCollapsed ? "恢复" : "隐藏";
+    }
+
+    function applyWriterLayout() {
+      const layout = document.getElementById("writerLayout");
+      const leftPanel = document.getElementById("selectedPapersPanel");
+      const rightPanel = document.getElementById("evidenceSidePanel");
+      if (!layout || !leftPanel || !rightPanel) return;
+
+      leftPanel.style.setProperty("--panel-width", `${state.layout.leftWidth}px`);
+      rightPanel.style.setProperty("--panel-width", `${state.layout.rightWidth}px`);
+      layout.classList.toggle("left-collapsed", state.layout.leftCollapsed);
+      layout.classList.toggle("right-collapsed", state.layout.rightCollapsed);
+      updateLayoutButtons();
+    }
+
+    function toggleWriterPanel(side) {
+      const key = side === "left" ? "leftCollapsed" : "rightCollapsed";
+      state.layout[key] = !state.layout[key];
+      applyWriterLayout();
+      persistWriterLayout();
+    }
+
+    function startPanelResize(side, event) {
+      if (window.matchMedia("(max-width: 1120px)").matches) return;
+      if ((side === "left" && state.layout.leftCollapsed) || (side === "right" && state.layout.rightCollapsed)) return;
+
+      const panel = document.getElementById(side === "left" ? "selectedPapersPanel" : "evidenceSidePanel");
+      if (!panel) return;
+
+      state.layout.resizing = {
+        side,
+        startX: event.clientX,
+        startWidth: panel.getBoundingClientRect().width
+      };
+      document.body.classList.add("resizing-panels");
+      event.preventDefault();
+    }
+
+    function handlePanelResize(event) {
+      if (!state.layout.resizing) return;
+
+      const { side, startX, startWidth } = state.layout.resizing;
+      const delta = event.clientX - startX;
+      if (side === "left") {
+        state.layout.leftWidth = clamp(Math.round(startWidth + delta), 220, 520);
+      } else {
+        state.layout.rightWidth = clamp(Math.round(startWidth - delta), 260, 620);
+      }
+      applyWriterLayout();
+    }
+
+    function stopPanelResize() {
+      if (!state.layout.resizing) return;
+      state.layout.resizing = null;
+      document.body.classList.remove("resizing-panels");
+      persistWriterLayout();
     }
 
     function formatValidationStatus(status) {
@@ -375,6 +548,11 @@
 
     document.addEventListener("DOMContentLoaded", () => {
       TopNav.init({ currentPage: "ai-writer", mountId: "topnav-mount" });
+      restoreWriterLayout();
+      applyWriterLayout();
+      window.addEventListener("pointermove", handlePanelResize);
+      window.addEventListener("pointerup", stopPanelResize);
+      window.addEventListener("pointercancel", stopPanelResize);
       loadPapersChecklist();
     });
   </script>

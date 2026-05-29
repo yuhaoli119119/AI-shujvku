@@ -106,7 +106,7 @@
                             <div id="paperMeta" class="workspace-meta"></div>
                         </div>
                         <div class="paper-actionbar">
-                            <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF / 证据定位</button>
+                            <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
                             <button class="btn ghost small" onclick="openPaperDetailPage()">打开详情</button>
                             <button class="btn ghost small" onclick="rerunExtraction()">重新解析</button>
                             <div class="dropdown" id="paperMoreDropdown">
@@ -359,7 +359,8 @@
             <!-- PDF unavailable message -->
             <div id="pdfViewerUnavailable" style="display:none;padding:40px;text-align:center;border:1px dashed var(--color-warning);border-radius:var(--radius-lg);background:var(--color-warning-bg);">
                 <div style="font-size:16px;font-weight:700;color:var(--color-warning);margin-bottom:8px;">PDF 尚未上传或不可预览</div>
-                <div style="font-size:13px;color:var(--color-text-secondary);">该文献暂无 PDF 文件，无法在浏览器中预览。请先上传 PDF 后再使用此功能。</div>
+                <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:10px;">该文献暂无 PDF 文件，因此当前无法进行浏览器预览，也无法执行基于 PDF 页码的证据跳转。</div>
+                <div style="font-size:12px;color:var(--color-text-secondary);">请先上传 PDF；如果你想查看是否已有证据定位结果，请回到文献内容区的“PDF 证据定位”卡片查看。</div>
             </div>
             <!-- PDF content area with side panel -->
             <div id="pdfViewerContent" style="flex:1;display:flex;gap:12px;overflow:hidden;min-height:0;">

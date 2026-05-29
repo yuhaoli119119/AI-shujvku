@@ -1,25 +1,182 @@
+const SIDEBAR_STORAGE_KEY = "writing-assistant-layout";
+const SIDEBAR_DEFAULT_WIDTH = 420;
+const SIDEBAR_MIN_WIDTH = 320;
+const SIDEBAR_MAX_WIDTH = 640;
+
 document.addEventListener("DOMContentLoaded", () => {
     TopNav.init({ currentPage: "writing-assistant" });
+    initializeValidationBehavior();
+    initializeSidebarLayout();
+});
 
+function initializeValidationBehavior() {
     const writingText = document.getElementById("writingText");
-    if (writingText) {
-        writingText.addEventListener("input", () => {
-            const alertDiv = document.getElementById("validationAlert");
-            if (alertDiv) {
-                alertDiv.style.display = "none";
-                alertDiv.innerText = "";
-            }
+    if (!writingText) return;
+
+    writingText.addEventListener("input", () => {
+        const alertDiv = document.getElementById("validationAlert");
+        if (alertDiv) {
+            alertDiv.style.display = "none";
+            alertDiv.innerText = "";
+        }
+    });
+}
+
+function initializeSidebarLayout() {
+    const layout = document.getElementById("assistantLayout");
+    const toggleButton = document.getElementById("sidebarToggleButton");
+    const restoreButton = document.getElementById("sidebarRestoreButton");
+    const resizer = document.getElementById("panelResizer");
+    const navButtons = Array.from(document.querySelectorAll(".panel-nav-item"));
+    const sections = Array.from(document.querySelectorAll(".panel-section"));
+
+    if (!layout) return;
+
+    const stored = readSidebarState();
+    setSidebarWidth(stored.width || SIDEBAR_DEFAULT_WIDTH, false);
+    setSidebarHidden(Boolean(stored.hidden), false);
+    setActivePanelSection(stored.activeSection || "context", false);
+
+    navButtons.forEach(button => {
+        button.addEventListener("click", () => {
+            setActivePanelSection(button.dataset.panelSection || "context");
+        });
+    });
+
+    if (toggleButton) {
+        toggleButton.addEventListener("click", () => setSidebarHidden(true));
+    }
+
+    if (restoreButton) {
+        restoreButton.addEventListener("click", () => setSidebarHidden(false));
+    }
+
+    if (resizer) {
+        resizer.addEventListener("pointerdown", event => {
+            if (window.innerWidth <= 1024) return;
+            event.preventDefault();
+            document.body.classList.add("is-resizing-sidebar");
+
+            const onMove = moveEvent => {
+                const bounds = layout.getBoundingClientRect();
+                const nextWidth = clamp(moveEvent.clientX - bounds.left, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+                setSidebarWidth(nextWidth, false);
+            };
+
+            const onStop = () => {
+                document.body.classList.remove("is-resizing-sidebar");
+                document.removeEventListener("pointermove", onMove);
+                document.removeEventListener("pointerup", onStop);
+                document.removeEventListener("pointercancel", onStop);
+                persistSidebarState();
+            };
+
+            document.addEventListener("pointermove", onMove);
+            document.addEventListener("pointerup", onStop);
+            document.addEventListener("pointercancel", onStop);
         });
     }
-});
+
+    window.addEventListener("resize", () => {
+        if (window.innerWidth <= 1024) {
+            layout.style.removeProperty("--assistant-sidebar-width");
+        } else {
+            const state = readSidebarState();
+            setSidebarWidth(state.width || SIDEBAR_DEFAULT_WIDTH, false);
+        }
+    });
+
+    if (sections.length === 0) {
+        setSidebarHidden(false, false);
+    }
+}
+
+function readSidebarState() {
+    try {
+        const raw = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+        if (!raw) return {};
+        return JSON.parse(raw) || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function persistSidebarState() {
+    try {
+        const layout = document.getElementById("assistantLayout");
+        const hidden = layout ? layout.classList.contains("sidebar-hidden") : false;
+        const activeButton = document.querySelector(".panel-nav-item.active");
+        const widthValue = layout ? layout.style.getPropertyValue("--assistant-sidebar-width") : "";
+        const width = parseInt(widthValue, 10) || SIDEBAR_DEFAULT_WIDTH;
+        const activeSection = activeButton ? activeButton.dataset.panelSection : "context";
+
+        window.localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify({
+            hidden,
+            width,
+            activeSection
+        }));
+    } catch (_) {
+        // Ignore storage failures.
+    }
+}
+
+function setSidebarWidth(width, persist = true) {
+    const layout = document.getElementById("assistantLayout");
+    if (!layout || window.innerWidth <= 1024) return;
+    const nextWidth = clamp(width, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+    layout.style.setProperty("--assistant-sidebar-width", `${nextWidth}px`);
+    if (persist) persistSidebarState();
+}
+
+function setSidebarHidden(hidden, persist = true) {
+    const layout = document.getElementById("assistantLayout");
+    const toggleButton = document.getElementById("sidebarToggleButton");
+    const restoreButton = document.getElementById("sidebarRestoreButton");
+
+    if (!layout) return;
+    layout.classList.toggle("sidebar-hidden", hidden);
+
+    if (toggleButton) {
+        toggleButton.innerText = hidden ? "左侧栏已隐藏" : "隐藏侧栏";
+        toggleButton.disabled = hidden;
+    }
+
+    if (restoreButton) {
+        restoreButton.hidden = !hidden;
+    }
+
+    if (persist) persistSidebarState();
+}
+
+function setActivePanelSection(sectionName, persist = true) {
+    const navButtons = Array.from(document.querySelectorAll(".panel-nav-item"));
+    const sections = Array.from(document.querySelectorAll(".panel-section"));
+
+    navButtons.forEach(button => {
+        const isActive = button.dataset.panelSection === sectionName;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-selected", String(isActive));
+    });
+
+    sections.forEach(section => {
+        const isActive = section.dataset.panelContent === sectionName;
+        section.classList.toggle("active", isActive);
+    });
+
+    if (persist) persistSidebarState();
+}
+
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
 
 function formatTierLabel(tier) {
     const labels = {
-        strong: "强",
+        strong: "高",
         moderate: "中",
-        weak: "弱"
+        weak: "低"
     };
-    return labels[tier] || String(tier || "-").toUpperCase();
+    return labels[tier] || String(tier || "-");
 }
 
 function formatEvidenceStatus(status) {
@@ -36,8 +193,8 @@ function formatEvidenceStatus(status) {
 
 function formatWarningText(warning) {
     const map = {
-        suggestion_only_needs_human_verification: "仅为建议，需先完成人工提取核验。",
-        impact_factor_needs_metadata: "影响因子缺失，需补充元数据。",
+        suggestion_only_needs_human_verification: "仅为建议，需先完成人工核验。",
+        impact_factor_needs_metadata: "影响因子缺失，需要补充元数据。",
         needs_manual_verification_before_use: "使用前必须完成人工核验。"
     };
     return map[warning] || String(warning || "-");
@@ -47,20 +204,20 @@ function formatChecklistItem(item) {
     const map = {
         "Verify evidence": "核对证据原文",
         "Check metadata": "核对元数据",
-        "Confirm citation fit": "确认上下文是否适合引用"
+        "Confirm citation fit": "确认与当前上下文是否匹配"
     };
     return map[item] || String(item || "-");
 }
 
 function formatExcludedReason(reason) {
-    if (reason === "exclude_from_citation=true") return "已标记为“不可引用”";
+    if (reason === "exclude_from_citation=true") return "已标记为不可引用";
     if (reason === "citation_priority=exclude") return "引用优先级被排除";
     if (reason === "year_below_min" || reason === "year_above_max") return "年份不在筛选范围内";
     if (reason === "journal_include_filter_mismatch") return "不在包含期刊范围内";
     if (reason === "journal_exclude_filter_match") return "命中排除期刊条件";
     if (reason === "impact_factor_below_min" || reason === "impact_factor_above_max") return "影响因子不在筛选范围内";
     if (reason === "needs_metadata_excluded_by_impact_factor_min" || reason === "needs_metadata_excluded_by_impact_factor_max") return "缺少影响因子元数据";
-    if (String(reason || "").endsWith("filter_mismatch")) return "与筛选条件不匹配";
+    if (String(reason || "").endsWith("filter_mismatch")) return "与当前筛选条件不匹配";
     return String(reason || "已排除");
 }
 
@@ -72,6 +229,18 @@ function escapeHtml(value) {
         '"': "&quot;",
         "'": "&#39;"
     }[char]));
+}
+
+function encodeCandidate(cand) {
+    return encodeURIComponent(JSON.stringify(cand || {}));
+}
+
+function decodeCandidate(encoded) {
+    try {
+        return JSON.parse(decodeURIComponent(encoded));
+    } catch (_) {
+        return {};
+    }
 }
 
 async function retrieveCandidates() {
@@ -92,6 +261,7 @@ async function retrieveCandidates() {
     if (!textVal) {
         alertDiv.innerText = "请先输入句子或段落上下文，再检索候选。";
         alertDiv.style.display = "block";
+        setActivePanelSection("context");
         return;
     }
 
@@ -99,6 +269,7 @@ async function retrieveCandidates() {
     if (tokens.length < 2) {
         alertDiv.innerText = "输入文本至少需要包含两个可检索术语，例如关键词或非停用词。";
         alertDiv.style.display = "block";
+        setActivePanelSection("context");
         return;
     }
 
@@ -126,6 +297,7 @@ async function retrieveCandidates() {
     if (journalInc) filters.journal_include = journalInc.split(",").map(s => s.trim()).filter(Boolean);
     if (journalExc) filters.journal_exclude = journalExc.split(",").map(s => s.trim()).filter(Boolean);
     if (citPriority) filters.citation_priority = citPriority;
+    if (exclCitation) filters.exclude_from_citation = exclCitation === "true";
     if (document.getElementById("filterNeedsMetadata").checked) filters.needs_metadata = true;
     if (document.getElementById("filterHasPdf").checked) filters.has_pdf = true;
     if (document.getElementById("filterHasParsedText").checked) filters.has_parsed_text = true;
@@ -151,7 +323,11 @@ async function retrieveCandidates() {
         if (!response.ok) {
             const errText = await response.text();
             let parsedErr;
-            try { parsedErr = JSON.parse(errText); } catch (_) {}
+            try {
+                parsedErr = JSON.parse(errText);
+            } catch (_) {
+                parsedErr = null;
+            }
             const detailMsg = parsedErr && parsedErr.detail ? parsedErr.detail : errText;
             throw new Error(`API 错误：${detailMsg}`);
         }
@@ -167,7 +343,6 @@ async function retrieveCandidates() {
 
         container.innerHTML = `
             <div class="empty-state">
-                <div class="empty-icon">错</div>
                 <h3>检索失败</h3>
                 <p>${escapeHtml(err.message)}</p>
             </div>
@@ -187,14 +362,13 @@ function renderResults(data) {
     const candidates = data.candidates || [];
     const excludedReasons = data.excluded_reasons || [];
 
-    resultsCount.innerText = candidates.length;
+    resultsCount.innerText = String(candidates.length);
 
     if (candidates.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
-                <div class="empty-icon">空</div>
                 <h3>未找到候选</h3>
-                <p>当前写作上下文与筛选条件下没有匹配候选。请尝试调整文本或放宽筛选。</p>
+                <p>当前写作上下文与筛选条件下没有匹配候选。请尝试调整文本或放宽筛选条件。</p>
             </div>
         `;
     } else {
@@ -208,11 +382,11 @@ function renderResults(data) {
             let borderClass = "";
 
             if (cand.can_be_used_as_confirmed_citation === true) {
-                badgeText = "API 已确认候选";
+                badgeText = "API 明确允许作为已确认候选";
                 badgeClass = "badge-confirmed";
                 borderClass = "border-confirmed";
             } else if (cand.requires_human_verification === true && cand.evidence_status !== "metadata_only") {
-                badgeText = "需人工核验";
+                badgeText = "需要人工核验";
                 badgeClass = "badge-needs-verification";
                 borderClass = "border-needs-verification";
             } else {
@@ -264,6 +438,7 @@ function renderResults(data) {
             const journalStr = cand.journal || "-";
             const recTier = cand.recommendation_tier || "weak";
             const scoreVal = cand.recommendation_score !== undefined ? cand.recommendation_score : 0;
+            const encodedCandidate = encodeCandidate(cand);
 
             card.innerHTML = `
                 <div class="card-header">
@@ -304,22 +479,22 @@ function renderResults(data) {
                 ${snippetsHtml}
 
                 <div class="card-reason-box">
-                    <strong>推荐理由：</strong> ${escapeHtml(cand.reason || "-")}
+                    <strong>推荐理由：</strong>${escapeHtml(cand.reason || "-")}
                 </div>
 
                 <div id="proposalContainer-${escapeHtml(cand.paper_id)}" class="proposal-container" style="display: none;"></div>
 
                 <div class="card-actions">
-                    <button class="btn btn-sm btn-primary" onclick="generateDraftProposal(${JSON.stringify(cand).replace(/"/g, "&quot;")})">生成引用建议草稿</button>
-                    <button class="btn btn-sm btn-ghost" onclick="copyCardTitle('${escapeJsString(cand.title)}')">复制标题</button>
-                    <button class="btn btn-sm btn-outline" onclick="copyCardInfo(${JSON.stringify(cand).replace(/"/g, "&quot;")})">复制候选信息</button>
+                    <button class="btn btn-sm btn-primary" type="button" onclick="generateDraftProposalFromEncoded('${encodedCandidate}')">生成引用建议草稿</button>
+                    <button class="btn btn-sm btn-ghost" type="button" onclick="copyCardTitle('${escapeJsString(cand.title)}')">复制标题</button>
+                    <button class="btn btn-sm btn-outline" type="button" onclick="copyCardInfoFromEncoded('${encodedCandidate}')">复制候选信息</button>
                 </div>
             `;
             container.appendChild(card);
         });
     }
 
-    excludedCount.innerText = excludedReasons.length;
+    excludedCount.innerText = String(excludedReasons.length);
     if (excludedReasons.length > 0) {
         excludedCollapsible.style.display = "block";
         excludedList.innerHTML = excludedReasons.map(item => `
@@ -361,6 +536,10 @@ function copyCardTitle(title) {
     });
 }
 
+function copyCardInfoFromEncoded(encodedCand) {
+    copyCardInfo(decodeCandidate(encodedCand));
+}
+
 function copyCardInfo(cand) {
     let warningText = "无";
     if (cand.warnings && cand.warnings.length > 0) {
@@ -369,9 +548,9 @@ function copyCardInfo(cand) {
 
     let safetyLabel = "仅元数据建议";
     if (cand.can_be_used_as_confirmed_citation === true) {
-        safetyLabel = "API 已确认候选";
+        safetyLabel = "API 明确允许作为已确认候选";
     } else if (cand.requires_human_verification === true) {
-        safetyLabel = "需人工核验";
+        safetyLabel = "需要人工核验";
     }
 
     const infoString = [
@@ -379,7 +558,7 @@ function copyCardInfo(cand) {
         `期刊：${cand.journal || "未知"}`,
         `年份：${cand.year || "未知"}`,
         `影响因子：${cand.impact_factor !== null ? cand.impact_factor : "N/A"}`,
-        `推荐分：${cand.recommendation_score || 0} (${cand.recommendation_tier || "weak"})`,
+        `推荐分：${cand.recommendation_score || 0}（${cand.recommendation_tier || "weak"}）`,
         `安全分类：${safetyLabel}`,
         `证据状态：${cand.evidence_status || "unknown"}`,
         `警告：${warningText}`
@@ -409,7 +588,7 @@ function tokenizeText(text) {
 }
 
 function highlightQueryTerms(snippet, queryText) {
-    const queryTokens = tokenizeText(queryText);
+    const queryTokens = tokenizeText(queryText || "");
     if (queryTokens.length === 0) return escapeHtml(snippet);
 
     queryTokens.sort((a, b) => b.length - a.length);
@@ -436,13 +615,18 @@ function showToast(message, type = "success") {
 }
 
 function escapeJsString(str) {
-    return (str || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    return String(str || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function generateDraftProposalFromEncoded(encodedCand) {
+    generateDraftProposal(decodeCandidate(encodedCand));
 }
 
 async function generateDraftProposal(cand) {
     const textVal = document.getElementById("writingText").value.trim();
     if (!textVal) {
         showToast("请先输入文本上下文，再生成草稿。", "error");
+        setActivePanelSection("context");
         return;
     }
 
@@ -512,11 +696,11 @@ function renderDraftProposal(paperId, data) {
 
     let safetyBanner = "";
     if (data.can_insert_as_confirmed_citation === true) {
-        safetyBanner = '<div class="proposal-banner banner-confirmed">API 已确认候选生成稿，使用前仍需人工复核</div>';
+        safetyBanner = '<div class="proposal-banner banner-confirmed">该草稿基于 API 允许作为已确认候选的记录生成，使用前仍需人工复核。</div>';
     } else if (data.requires_human_verification === true) {
-        safetyBanner = '<div class="proposal-banner banner-warning">生成稿仅供参考，引用前需人工核验</div>';
+        safetyBanner = '<div class="proposal-banner banner-warning">该草稿仅供参考，引用前必须完成人工核验。</div>';
     } else if (data.evidence_status === "metadata_only") {
-        safetyBanner = '<div class="proposal-banner banner-metadata">仅元数据建议，暂不能作为证据使用</div>';
+        safetyBanner = '<div class="proposal-banner banner-metadata">该草稿仅基于元数据建议生成，暂不能作为证据使用。</div>';
     }
 
     let warningsHtml = "";
@@ -560,7 +744,7 @@ function renderDraftProposal(paperId, data) {
             ${renderBlockedActions(data.blocked_actions)}
 
             <div class="proposal-actions">
-                <button class="btn btn-sm btn-outline" onclick="copyDraftProposal('${paperId}')">复制建议草稿</button>
+                <button class="btn btn-sm btn-outline" type="button" onclick="copyDraftProposal('${paperId}')">复制建议草稿</button>
             </div>
         </div>
     `;
@@ -584,23 +768,23 @@ function copyDraftProposal(paperId) {
     if (!data) return;
 
     const parts = [
-        `Proposal Status: ${data.proposal_status}`,
-        `Evidence Status: ${data.evidence_status}`,
-        `Requires Human Verification: ${data.requires_human_verification}`
+        `草稿状态：${data.proposal_status}`,
+        `证据状态：${data.evidence_status}`,
+        `需要人工核验：${data.requires_human_verification}`
     ];
 
     if (data.warnings && data.warnings.length > 0) {
-        parts.push(`Warnings: ${data.warnings.map(formatWarningText).join(" | ")}`);
+        parts.push(`提示：${data.warnings.map(formatWarningText).join(" | ")}`);
     }
 
-    parts.push(`Draft Text: ${data.draft_text || ""}`);
+    parts.push(`草稿文本：${data.draft_text || ""}`);
 
     if (data.human_review_checklist && data.human_review_checklist.length > 0) {
-        parts.push(`Review Checklist:\n- ${data.human_review_checklist.map(formatChecklistItem).join("\n- ")}`);
+        parts.push(`复核清单：\n- ${data.human_review_checklist.map(formatChecklistItem).join("\n- ")}`);
     }
 
     writeClipboardText(parts.join("\n\n")).then(() => {
-        showToast("建议草稿已复制！", "success");
+        showToast("建议草稿已复制。", "success");
     }).catch(() => {
         showToast("复制建议草稿失败。", "error");
     });

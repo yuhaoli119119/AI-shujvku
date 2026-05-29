@@ -4,6 +4,7 @@ function renderWorkspaceHeader(paper) {
     const metaEl = $("paperMeta");
     const badgesEl = $("paperHeaderBadges");
     const topicEl = $("writerTopic");
+    const pdfBtn = $("pdfEvidenceHeaderBtn");
     if (titleEl) titleEl.textContent = paper.title || "未命名文献";
     if (metaEl) {
         metaEl.innerHTML = [
@@ -13,8 +14,14 @@ function renderWorkspaceHeader(paper) {
             renderDoiMeta(paper.doi)
         ].join(" | ");
     }
-    const pdfBtn = $("pdfEvidenceHeaderBtn");
-    if (pdfBtn) pdfBtn.textContent = paperHasPdf(paper) ? "查看 PDF / 证据定位" : "PDF 未上传";
+    if (pdfBtn) {
+        const hasPdf = paperHasPdf(paper);
+        pdfBtn.textContent = hasPdf ? "查看 PDF" : "PDF 未上传";
+        pdfBtn.disabled = !hasPdf;
+        pdfBtn.title = hasPdf
+            ? "打开当前文献的 PDF 预览。精确证据跳转请使用下方“PDF 证据定位”卡片。"
+            : "当前文献尚未上传 PDF，暂时无法预览或进行基于 PDF 页码的证据跳转。";
+    }
     if (badgesEl) {
         badgesEl.innerHTML =
             (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + "</span>" : "") +
@@ -114,19 +121,19 @@ function renderEvidenceLocators(locators) {
 
     if (!locators || locators._error) {
         if (locators && locators._error) {
-            panel.innerHTML = '<div class="section-card"><h3>PDF 证据定位</h3><div class="muted" style="color:var(--color-warning);">证据定位暂不可用</div></div>';
+            panel.innerHTML = '<div class="section-card"><h3>PDF 证据定位</h3><div class="muted" style="color:var(--color-warning);">证据定位暂不可用</div><div class="muted" style="margin-top:8px;">请稍后重试；如果当前文献没有 PDF，也无法执行页码跳转。</div></div>';
         } else {
-            panel.innerHTML = '<div class="section-card"><h3>PDF 证据定位</h3><div class="muted">暂无可定位证据</div></div>';
+            panel.innerHTML = '<div class="section-card"><h3>PDF 证据定位</h3><div class="muted">暂无可定位证据</div><div class="muted" style="margin-top:8px;">可能原因：未上传 PDF、尚未生成页码定位，或当前只有证据文本没有精确页码。</div></div>';
         }
         return;
     }
 
     if (!Array.isArray(locators) || locators.length === 0) {
-        panel.innerHTML = '<div class="section-card"><h3>PDF 证据定位</h3><div class="muted">暂无可定位证据</div></div>';
+        panel.innerHTML = '<div class="section-card"><h3>PDF 证据定位</h3><div class="muted">暂无可定位证据</div><div class="muted" style="margin-top:8px;">可能原因：未上传 PDF、尚未生成页码定位，或当前只有证据文本没有精确页码。</div></div>';
         return;
     }
 
-    var html = '<div class="section-card"><h3>PDF 证据定位</h3>';
+    var html = '<div class="section-card"><h3>PDF 证据定位</h3><div class="muted" style="margin:6px 0 10px;">只有带精确页码的证据才能跳转到 PDF；如果这里只显示说明文字，表示当前还没有可直接跳转的定位。</div>';
     locators.forEach(function(loc, idx) {
         html += '<div class="section-card" style="margin-bottom:8px;padding:10px;">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
@@ -205,7 +212,7 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
     // Build evidence panel content
     var evidenceHtml = "";
     evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">PDF 页码定位</div>' +
-        '<div style="font-size:11px;color:var(--color-text-secondary);">已跳转到证据页；当前版本不提供 PDF 页面内框选。</div>' +
+        '<div style="font-size:11px;color:var(--color-text-secondary);">这里只显示基于证据定位得到的 PDF 页码跳转。当前版本不提供 PDF 页面内框选高亮。</div>' +
         (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
     if (viewerEvidencePanel) viewerEvidencePanel.innerHTML = evidenceHtml;
 
