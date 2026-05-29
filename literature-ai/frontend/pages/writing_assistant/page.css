@@ -8,18 +8,18 @@ body {
 .shell {
     max-width: 1680px;
     margin: 0 auto;
-    padding: 20px 24px 24px;
+    padding: 32px 24px 24px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
     min-height: 100vh;
     box-sizing: border-box;
 }
 
 .header-container {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    align-items: baseline;
+    gap: 12px;
 }
 
 .header-container h2 {
@@ -38,23 +38,22 @@ body {
 
 .safety-disclaimer-banner {
     display: flex;
-    gap: 16px;
-    align-items: flex-start;
+    gap: 12px;
+    align-items: center;
     background: var(--color-warning-bg);
-    border: 1.5px solid var(--color-warning);
-    border-radius: var(--radius-lg);
-    padding: 16px var(--space-lg);
-    box-shadow: var(--shadow-card);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius);
+    padding: 8px 16px;
 }
 
 .safety-disclaimer-banner .disclaimer-icon {
-    width: 28px;
-    height: 28px;
+    width: 20px;
+    height: 20px;
     border-radius: 999px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 1;
     color: var(--color-warning);
     background: color-mix(in srgb, var(--color-warning) 12%, transparent);
@@ -63,9 +62,9 @@ body {
 }
 
 .safety-disclaimer-banner .disclaimer-content {
-    font-size: var(--font-size-sm);
+    font-size: 12px;
     color: var(--color-text);
-    line-height: 1.6;
+    line-height: 1.4;
 }
 
 .safety-disclaimer-banner .disclaimer-content strong {
@@ -75,7 +74,7 @@ body {
 
 .main-layout {
     display: grid;
-    grid-template-columns: 420px 1fr;
+    grid-template-columns: 380px 1fr;
     gap: 24px;
     align-items: start;
 }
@@ -139,7 +138,7 @@ body {
 
 textarea.input {
     resize: vertical;
-    min-height: 120px;
+    min-height: 90px;
     font-family: var(--font-body);
     line-height: 1.5;
 }

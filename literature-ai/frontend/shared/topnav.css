@@ -2,10 +2,13 @@
    topnav.css - Top Navigation Bar + Theme Panel Styles
    ============================================================ */
 
-.topnav {
+#topnav-mount {
   position: sticky;
   top: 0;
   z-index: 1600;
+}
+
+.topnav {
   display: flex;
   align-items: center;
   min-height: var(--nav-height);
