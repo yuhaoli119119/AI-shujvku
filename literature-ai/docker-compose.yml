@@ -43,7 +43,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0

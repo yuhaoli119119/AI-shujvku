@@ -18,7 +18,7 @@ if errorlevel 1 (
 )
 
 echo [2/4] Starting Literature AI services...
-docker compose up -d --build
+docker compose up -d
 if errorlevel 1 (
   echo.
   echo Failed to start services. Recent backend logs:
