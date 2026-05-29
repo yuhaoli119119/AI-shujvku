@@ -1,34 +1,24 @@
 /* ============================================================
-   topnav.css — Top Navigation Bar + Theme Panel Styles
-   ============================================================ */
-
-
-/* ============================================================
-   TOPNAV CONTAINER
+   topnav.css - Top Navigation Bar + Theme Panel Styles
    ============================================================ */
 
 .topnav {
   position: sticky;
   top: 0;
-  z-index: var(--z-nav);
+  z-index: 1600;
   display: flex;
   align-items: center;
-  height: var(--nav-height);
+  min-height: var(--nav-height);
   padding: 0 24px;
-  background: var(--color-bg-nav);
+  background: color-mix(in srgb, var(--color-bg-nav) 92%, transparent);
   border-bottom: 1px solid var(--color-border);
-  box-shadow: var(--shadow-card);
-  transition: all var(--transition);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(12px);
 }
 
 [data-theme="neumorphism"] .topnav {
   box-shadow: var(--shadow-elevated);
 }
-
-
-/* ============================================================
-   TOPNAV BRAND
-   ============================================================ */
 
 .topnav-brand {
   font-family: var(--font-display);
@@ -43,11 +33,6 @@
   user-select: none;
 }
 
-
-/* ============================================================
-   TOPNAV ITEMS
-   ============================================================ */
-
 .topnav-items {
   display: flex;
   align-items: center;
@@ -60,7 +45,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: var(--nav-height);
+  min-height: var(--nav-height);
   padding: 0 16px;
   font-family: var(--font-body);
   font-size: var(--font-size-sm);
@@ -84,11 +69,6 @@
   border-bottom-color: var(--color-primary);
   font-weight: var(--font-weight-btn);
 }
-
-
-/* ============================================================
-   TOPNAV THEME BUTTON
-   ============================================================ */
 
 .topnav-theme-btn {
   display: flex;
@@ -119,16 +99,11 @@
   fill: currentColor;
 }
 
-
-/* ============================================================
-   THEME PANEL (floating)
-   ============================================================ */
-
 .theme-panel {
   position: fixed;
-  top: calc(var(--nav-height) + 8px);
+  top: calc(var(--nav-height) + 10px);
   right: 24px;
-  z-index: var(--z-tooltip);
+  z-index: 1700;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -169,9 +144,6 @@
   margin-bottom: 10px;
 }
 
-
-/* ---- Theme Pills ---- */
-
 .theme-pills {
   display: flex;
   gap: 6px;
@@ -199,12 +171,9 @@
 
 .theme-pill.active {
   background: var(--color-primary);
-  color: #FFF;
+  color: #fff;
   border-color: var(--color-primary);
 }
-
-
-/* ---- Mode Toggle ---- */
 
 .mode-toggle {
   display: flex;
@@ -235,23 +204,16 @@
 
 .mode-btn.active {
   background: var(--color-primary);
-  color: #FFF;
+  color: #fff;
   box-shadow: var(--shadow-card);
 }
 
-
-/* ============================================================
-   RESPONSIVE
-   ============================================================ */
-
-/* 1280px+: full display */
 @media (min-width: 1280px) {
   .topnav-item {
     padding: 0 16px;
   }
 }
 
-/* 1024px–1280px: compressed nav items */
 @media (max-width: 1280px) {
   .topnav-item {
     padding: 0 10px;
@@ -263,7 +225,6 @@
   }
 }
 
-/* < 1024px: further compression */
 @media (max-width: 1024px) {
   .topnav {
     padding: 0 12px;
@@ -285,7 +246,6 @@
   }
 }
 
-/* < 768px: scrollable nav */
 @media (max-width: 768px) {
   .topnav-items {
     overflow-x: auto;

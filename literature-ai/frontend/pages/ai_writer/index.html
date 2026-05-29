@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Writing Studio - Literature AI</title>
+  <title>AI 写作 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
@@ -13,7 +13,7 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1440px; margin: 0 auto; padding: calc(var(--nav-height) + 28px) 24px 32px; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 20px 24px 32px; }
     .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 22px; }
     .page-head h1 { margin: 0 0 6px; font-size: 26px; }
     .page-head p { margin: 0; color: var(--color-text-secondary); font-size: 14px; }
@@ -44,7 +44,10 @@
     .toast, .progress-box { position: fixed; right: 24px; z-index: 3000; color: #fff; border-radius: var(--radius); box-shadow: var(--shadow-elevated); display: none; padding: 12px 18px; font-size: 14px; }
     .toast { top: 24px; background: var(--color-primary); }
     .progress-box { top: 78px; background: var(--color-success); }
-    @media (max-width: 1120px) { .layout { grid-template-columns: 1fr; } .stepper { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 1120px) {
+      .layout { grid-template-columns: 1fr; }
+      .stepper { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -52,58 +55,58 @@
   <main class="shell">
     <header class="page-head">
       <div>
-        <h1>AI Writing Studio</h1>
-        <p>Evidence-first writing workflow for outline, introduction, DFT results, and discussion.</p>
+        <h1>AI 写作</h1>
+        <p>基于证据优先的写作流程，用于生成提纲、引言、DFT 结果与讨论内容。</p>
       </div>
-      <button class="btn green" onclick="copyMarkdownText()">Copy Markdown</button>
+      <button class="btn green" onclick="copyMarkdownText()">复制 Markdown</button>
     </header>
 
     <section class="layout">
       <aside class="panel-card">
-        <div class="panel-title"><span>Selected papers</span><span id="selectedCount">0</span></div>
+        <div class="panel-title"><span>已选文献</span><span id="selectedCount">0</span></div>
         <div id="paperChecklist" class="paper-checklist">
-          <div class="empty-state">Loading papers...</div>
+          <div class="empty-state">正在加载文献...</div>
         </div>
       </aside>
 
       <section class="panel-card">
         <div class="stepper" id="stepper">
-          <div class="step active">1 Topic</div>
-          <div class="step">2 Evidence search</div>
-          <div class="step">3 Evidence pack</div>
-          <div class="step">4 Draft</div>
-          <div class="step">5 Citation audit</div>
+          <div class="step active">1 主题</div>
+          <div class="step">2 检索证据</div>
+          <div class="step">3 整理证据</div>
+          <div class="step">4 生成草稿</div>
+          <div class="step">5 引文核查</div>
         </div>
 
         <div class="form-grid">
           <div>
-            <label for="writingTopic">Topic / research claim</label>
-            <input id="writingTopic" placeholder="lithium sulfur battery CeO2 catalyst mechanism analysis">
+            <label for="writingTopic">主题 / 研究论点</label>
+            <input id="writingTopic" placeholder="锂硫电池 CeO2 催化机理分析">
           </div>
           <div>
-            <label for="writingLimit">Evidence limit</label>
+            <label for="writingLimit">证据条数</label>
             <input id="writingLimit" type="number" value="5" min="1" max="20">
           </div>
         </div>
         <div style="margin-top:12px;">
-          <label for="userNotes">Notes</label>
-          <textarea id="userNotes" placeholder="Focus on DFT descriptors, catalytic mechanism, and explicitly supported claims."></textarea>
+          <label for="userNotes">备注</label>
+          <textarea id="userNotes" placeholder="重点关注 DFT 描述符、催化机理，以及有明确证据支撑的论断。"></textarea>
         </div>
         <div class="actions">
-          <button class="btn ghost" onclick="retrieveEvidence()">Search evidence</button>
-          <button class="btn primary" onclick="generateAcademicDraft()">Generate draft</button>
-          <button class="btn ghost" onclick="runCitationAudit()">Run Citation Audit</button>
+          <button class="btn ghost" onclick="retrieveEvidence()">搜索证据</button>
+          <button class="btn primary" onclick="generateAcademicDraft()">生成草稿</button>
+          <button class="btn ghost" onclick="runCitationAudit()">运行引文核查</button>
         </div>
 
         <div class="tabs">
-          <button class="tab-btn active" onclick="switchWriteTab('outline', event)">Outline</button>
-          <button class="tab-btn" onclick="switchWriteTab('intro', event)">Introduction</button>
-          <button class="tab-btn" onclick="switchWriteTab('dft', event)">DFT results</button>
-          <button class="tab-btn" onclick="switchWriteTab('discussion', event)">Discussion</button>
-          <button class="tab-btn" onclick="switchWriteTab('storyline', event)">Storyline</button>
-          <button class="tab-btn" onclick="switchWriteTab('audit', event)">Citation Audit</button>
+          <button class="tab-btn active" onclick="switchWriteTab('outline', event)">提纲</button>
+          <button class="tab-btn" onclick="switchWriteTab('intro', event)">引言</button>
+          <button class="tab-btn" onclick="switchWriteTab('dft', event)">DFT 结果</button>
+          <button class="tab-btn" onclick="switchWriteTab('discussion', event)">讨论</button>
+          <button class="tab-btn" onclick="switchWriteTab('storyline', event)">叙事线</button>
+          <button class="tab-btn" onclick="switchWriteTab('audit', event)">引文核查</button>
         </div>
-        <div id="tab-outline" class="tab-pane"><div class="empty-state">Draft output will appear here.</div></div>
+        <div id="tab-outline" class="tab-pane"><div class="empty-state">草稿输出将在此显示。</div></div>
         <div id="tab-intro" class="tab-pane" style="display:none;"></div>
         <div id="tab-dft" class="tab-pane" style="display:none;"></div>
         <div id="tab-discussion" class="tab-pane" style="display:none;"></div>
@@ -112,10 +115,10 @@
       </section>
 
       <aside class="panel-card">
-        <div class="panel-title">Evidence Panel</div>
-        <div id="evidencePanel"><div class="empty-state">No evidence selected yet.</div></div>
-        <div class="panel-title" style="margin-top:18px;">Selected Evidence</div>
-        <div id="evidenceDetail" class="mono">Click a claim or evidence item to inspect paper_id, chunk_id, page/span, confidence, and evidence_text.</div>
+        <div class="panel-title">证据面板</div>
+        <div id="evidencePanel"><div class="empty-state">暂未选择证据。</div></div>
+        <div class="panel-title" style="margin-top:18px;">当前选中证据</div>
+        <div id="evidenceDetail" class="mono">点击论断或证据项，可查看 paper_id、chunk_id、页码/片段、置信度与 evidence_text 原始内容。</div>
       </aside>
     </section>
   </main>
@@ -134,15 +137,33 @@
       toast.style.display = "block";
       setTimeout(() => { toast.style.display = "none"; }, 2600);
     }
+
     function showProgress(msg) {
       const box = document.getElementById("progressBox");
       box.textContent = msg;
       box.style.display = "block";
     }
-    function hideProgress() { document.getElementById("progressBox").style.display = "none"; }
+
+    function hideProgress() {
+      document.getElementById("progressBox").style.display = "none";
+    }
+
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
     }
+
+    function formatValidationStatus(status) {
+      const labels = {
+        supported: "已支持",
+        confirmed: "已确认",
+        safe_verified: "安全核验",
+        unverified: "未核验",
+        unsupported: "未支持",
+        needs_review: "待复核"
+      };
+      return labels[status] || String(status || "未知状态");
+    }
+
     async function fetchJSON(url, options) {
       options = options || {};
       options.headers = options.headers || {};
@@ -155,6 +176,7 @@
       if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
       return data;
     }
+
     function setStep(index) {
       document.querySelectorAll(".step").forEach((step, i) => step.classList.toggle("active", i <= index));
     }
@@ -165,17 +187,17 @@
         state.papers = papers || [];
         const box = document.getElementById("paperChecklist");
         if (!state.papers.length) {
-          box.innerHTML = '<div class="empty-state">No papers in the library.</div>';
+          box.innerHTML = '<div class="empty-state">文献库中暂无文献。</div>';
           return;
         }
         box.innerHTML = state.papers.map(p => `
           <label class="checklist-item" id="chk-item-${esc(p.id)}">
             <input type="checkbox" value="${esc(p.id)}" onchange="toggleSelectPaper('${esc(p.id)}')">
-            <span class="checklist-item-title">${esc(p.title || "Untitled paper")}</span>
+            <span class="checklist-item-title">${esc(p.title || "未命名文献")}</span>
           </label>
         `).join("");
       } catch (error) {
-        showToast("Failed to load papers: " + error.message);
+        showToast("加载文献失败：" + error.message);
       }
     }
 
@@ -190,10 +212,10 @@
 
     async function retrieveEvidence() {
       const topic = document.getElementById("writingTopic").value.trim();
-      if (!topic) return showToast("Please enter a topic first.");
-      if (!state.selectedIds.length) return showToast("Select at least one paper.");
+      if (!topic) return showToast("请先输入主题。");
+      if (!state.selectedIds.length) return showToast("请至少选择一篇文献。");
       setStep(1);
-      showProgress("Retrieving hybrid evidence...");
+      showProgress("正在检索混合证据...");
       try {
         const data = await fetchJSON("/api/retrieval/search", {
           method: "POST",
@@ -211,7 +233,7 @@
         setStep(2);
         renderEvidencePack();
       } catch (error) {
-        showToast("Evidence retrieval failed: " + error.message);
+        showToast("证据检索失败：" + error.message);
       } finally {
         hideProgress();
       }
@@ -220,12 +242,12 @@
     function renderEvidencePack() {
       const panel = document.getElementById("evidencePanel");
       if (!state.retrieved.length) {
-        panel.innerHTML = '<div class="empty-state warning">No evidence found. Draft claims should not be treated as supported.</div>';
+        panel.innerHTML = '<div class="empty-state warning">未找到证据。草稿中的论断不得视为已被证据支持。</div>';
         return;
       }
       panel.innerHTML = state.retrieved.map((item, idx) => `
         <div class="evidence-card">
-          <button onclick="showEvidenceDetail(${idx})">${esc(item.section_title || item.source || "Evidence")} · score ${Number(item.score || 0).toFixed(2)}</button>
+          <button onclick="showEvidenceDetail(${idx})">${esc(item.section_title || item.source || "证据片段")} · 得分 ${Number(item.score || 0).toFixed(2)}</button>
           <div class="muted">paper_id ${esc(item.paper_id)} · chunk_id ${esc(item.chunk_id || "-")}</div>
           <div class="muted">${esc((item.text || "").slice(0, 160))}</div>
         </div>
@@ -239,11 +261,11 @@
 
     async function generateAcademicDraft() {
       const topic = document.getElementById("writingTopic").value.trim();
-      if (!topic) return showToast("Please enter a topic first.");
-      if (!state.selectedIds.length) return showToast("Select at least one paper.");
+      if (!topic) return showToast("请先输入主题。");
+      if (!state.selectedIds.length) return showToast("请至少选择一篇文献。");
       if (!state.retrieved.length) await retrieveEvidence();
       setStep(3);
-      showProgress("Generating evidence-grounded draft...");
+      showProgress("正在生成基于证据的草稿...");
       try {
         const data = await fetchJSON(`${WRITER_API}/draft`, {
           method: "POST",
@@ -261,17 +283,17 @@
         renderDraftOutput();
         renderAudit(data.citation_audit);
       } catch (error) {
-        showToast("Draft generation failed: " + error.message);
+        showToast("草稿生成失败：" + error.message);
       } finally {
         hideProgress();
       }
     }
 
     async function runCitationAudit() {
-      const d = state.generatedData;
-      if (!d) return showToast("Generate a draft before auditing.");
-      const text = [d.introduction, d.dft_results, d.discussion].filter(Boolean).join("\\n");
-      showProgress("Auditing claims against evidence...");
+      const draft = state.generatedData;
+      if (!draft) return showToast("请先生成草稿，再进行引文核查。");
+      const text = [draft.introduction, draft.dft_results, draft.discussion].filter(Boolean).join("\n");
+      showProgress("正在根据证据核查论断...");
       try {
         const data = await fetchJSON("/api/evidence/audit", {
           method: "POST",
@@ -283,7 +305,7 @@
         setStep(4);
         switchWriteTab("audit");
       } catch (error) {
-        showToast("Citation audit failed: " + error.message);
+        showToast("引文核查失败：" + error.message);
       } finally {
         hideProgress();
       }
@@ -299,18 +321,19 @@
     }
 
     function renderDraftOutput() {
-      const d = state.generatedData || {};
-      document.getElementById("tab-outline").textContent = (d.outline || []).join("\\n") || "No outline.";
-      document.getElementById("tab-intro").textContent = d.introduction || "No introduction.";
-      document.getElementById("tab-dft").textContent = d.dft_results || "No DFT result summary.";
-      document.getElementById("tab-discussion").textContent = d.discussion || "No discussion.";
-      document.getElementById("tab-storyline").textContent = (d.figure_storyline || []).join("\\n") || "No storyline.";
-      const claims = d.evidence_claims || [];
+      const draft = state.generatedData || {};
+      document.getElementById("tab-outline").textContent = (draft.outline || []).join("\n") || "暂无提纲。";
+      document.getElementById("tab-intro").textContent = draft.introduction || "暂无引言。";
+      document.getElementById("tab-dft").textContent = draft.dft_results || "暂无 DFT 结果摘要。";
+      document.getElementById("tab-discussion").textContent = draft.discussion || "暂无讨论内容。";
+      document.getElementById("tab-storyline").textContent = (draft.figure_storyline || []).join("\n") || "暂无叙事线。";
+
+      const claims = draft.evidence_claims || [];
       if (claims.length) {
         document.getElementById("evidencePanel").innerHTML = claims.map((claim, idx) => `
           <div class="evidence-card">
-            <button onclick="showClaimEvidence(${idx})">${esc(claim.validation_status || "unverified")} · ${esc(claim.claim_text.slice(0, 120))}</button>
-            <div class="muted">${claim.evidence && claim.evidence.length ? "Evidence linked" : "No evidence linked"}</div>
+            <button onclick="showClaimEvidence(${idx})">${esc(formatValidationStatus(claim.validation_status))} · ${esc((claim.claim_text || "").slice(0, 120))}</button>
+            <div class="muted">${claim.evidence && claim.evidence.length ? "已关联证据" : "未关联证据"}</div>
           </div>
         `).join("");
       }
@@ -324,18 +347,18 @@
     function renderAudit(audit) {
       const box = document.getElementById("tab-audit");
       if (!audit) {
-        box.innerHTML = '<div class="empty-state">No audit has been run.</div>';
+        box.innerHTML = '<div class="empty-state">尚未运行引文核查。</div>';
         return;
       }
       setStep(4);
       const claims = audit.claims || [];
       box.innerHTML = `
         <div class="audit-card ${audit.ok ? "" : "warning"}">
-          Citation Audit: ${audit.supported_claims || 0}/${audit.total_claims || 0} claims supported.
+          引文核查：已支持 ${audit.supported_claims || 0}/${audit.total_claims || 0} 条论断。
         </div>
         ${claims.map(item => `
           <div class="audit-card">
-            <strong>${esc(item.status)}</strong>
+            <strong>${esc(formatValidationStatus(item.status))}</strong>
             <div>${esc(item.claim_text)}</div>
             ${item.warning ? `<div class="warning">${esc(item.warning)}</div>` : ""}
           </div>
@@ -344,10 +367,10 @@
     }
 
     function copyMarkdownText() {
-      const d = state.generatedData;
-      if (!d) return showToast("Generate a draft first.");
-      const md = `# ${document.getElementById("writingTopic").value}\\n\\n## Outline\\n${(d.outline || []).join("\\n")}\\n\\n## Introduction\\n${d.introduction || ""}\\n\\n## DFT Results\\n${d.dft_results || ""}\\n\\n## Discussion\\n${d.discussion || ""}`;
-      navigator.clipboard.writeText(md).then(() => showToast("Markdown copied."));
+      const draft = state.generatedData;
+      if (!draft) return showToast("请先生成草稿。");
+      const md = `# ${document.getElementById("writingTopic").value}\n\n## Outline\n${(draft.outline || []).join("\n")}\n\n## Introduction\n${draft.introduction || ""}\n\n## DFT Results\n${draft.dft_results || ""}\n\n## Discussion\n${draft.discussion || ""}`;
+      navigator.clipboard.writeText(md).then(() => showToast("Markdown 已复制。"));
     }
 
     document.addEventListener("DOMContentLoaded", () => {

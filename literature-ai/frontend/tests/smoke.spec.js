@@ -894,7 +894,7 @@ async function mockApi(route) {
       can_insert = true;
       requires_human = false;
     } else if (payload.selected_paper_id === 'paper-needs-verification') {
-      warnings.push('Needs manual verification before use');
+      warnings.push('使用前必须完成人工核验');
     } else if (payload.selected_paper_id === 'paper-metadata-only') {
       warnings.push('Needs metadata and verification');
       evidence_status = 'metadata_only';
@@ -1019,28 +1019,39 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: open Writing Studio, add evidence, generate draft, and view Citation Audit', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/ai_writer/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.step')).toContainText(['1 Topic', '2 Evidence search', '3 Evidence pack', '4 Draft', '5 Citation audit']);
-    await expect(page.locator('button:has-text("Search evidence")')).toBeVisible();
-    await expect(page.locator('button:has-text("Run Citation Audit")')).toBeVisible();
+    await expect(page.locator('.step')).toContainText(['1 主题', '2 检索证据', '3 整理证据', '4 生成草稿', '5 引文核查']);
+    await expect(page.locator('button:has-text("搜索证据")')).toBeVisible();
+    await expect(page.locator('button:has-text("运行引文核查")')).toBeVisible();
     await expect(page.locator('#evidencePanel')).toBeVisible();
     await expect(page.locator('body')).not.toContainText(/Export final|Final conclusion|Direct export/i);
     await page.fill('#writingTopic', 'Li2S4 adsorption energy Fe-N4');
     await page.check('#paperChecklist input[type="checkbox"]');
-    await page.click('button:has-text("Search evidence")');
-    await expect(page.locator('#evidencePanel')).toContainText('score');
+    await page.click('button:has-text("搜索证据")');
+    await expect(page.locator('#evidencePanel')).toContainText('得分');
     await page.click('button[onclick="generateAcademicDraft()"]');
     await expect(page.locator('#tab-outline')).toContainText('Intro');
-    await page.click('button:has-text("Run Citation Audit")');
-    await expect(page.locator('#tab-audit')).toContainText('Citation Audit');
+    await page.click('button:has-text("运行引文核查")');
+    await expect(page.locator('#tab-audit')).toContainText('引文核查');
   });
 
   test('business flow: Paper Detail shows evidence panel and claim detail', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/paper_detail/index.html?paper_id=paper-1`);
     await page.waitForTimeout(500);
-    await expect(page.locator('#evidencePanel')).toContainText('supported');
+    await expect(page.locator('#evidencePanel')).toContainText('已支持');
+    await page.click('button:has-text("DFT 与性能")');
+    await expect(page.locator('#dftSettings')).toContainText('查看原始 JSON');
+    await page.locator('#dftSettings summary').first().click();
+    await expect(page.locator('#dftSettings')).toContainText('原始数据');
     await page.click('#evidencePanel button');
     await expect(page.locator('#evidenceDetail')).toContainText('paper_id');
     await expect(page.locator('#evidenceDetail')).toContainText('chunk_id');
+  });
+
+  test('business flow: Paper Detail without id shows localized empty state and hidden nav entry', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/paper_detail/index.html`);
+    await page.waitForTimeout(300);
+    await expect(page.locator('#fallbackState')).toContainText('请先从文献库选择一篇文献查看详情。');
+    await expect(page.locator('.topnav')).not.toContainText('论文详情');
   });
 
   test('business flow: open manual validation workbench and validate extraction results', async ({ page }) => {
@@ -3354,16 +3365,16 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
 
     // 1. Verify page layout & safety banner
-    await expect(page.locator('h2')).toContainText('Writing Citation Assistant');
+    await expect(page.locator('h2')).toContainText('写作引用辅助');
     await expect(page.locator('.safety-disclaimer-banner')).toBeVisible();
     await expect(page.locator('.safety-disclaimer-banner')).toContainText(
-      'Only candidates marked as confirmed by the API can be treated as confirmed citation candidates.'
+      '只有 API 明确标记为 confirmed 的候选'
     );
 
     // 2. Empty text input click validation
     await page.click('#btnSearch');
     await expect(page.locator('#validationAlert')).toBeVisible();
-    await expect(page.locator('#validationAlert')).toContainText('Please enter sentences or paragraph context');
+    await expect(page.locator('#validationAlert')).toContainText('请先输入句子或段落上下文');
     expect(apiPayload).toBeNull(); // Ensure no API was called
 
     // 3. Populate text input and trigger search
@@ -3393,50 +3404,53 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     // 4. Verify candidate cards and safety badges
     const confirmedCard = page.locator('.candidate-card').filter({ hasText: 'Confirmed Catalyst Discovery' });
     await expect(confirmedCard).toBeVisible();
-    await expect(confirmedCard.locator('.safety-badge')).toContainText('Confirmed citation candidate');
+    await expect(confirmedCard.locator('.safety-badge')).toContainText('API 已确认候选');
     await expect(confirmedCard).toHaveClass(/border-confirmed/);
 
     const needsVerificationCard = page.locator('.candidate-card').filter({ hasText: 'Unverified Heterogeneous' });
     await expect(needsVerificationCard).toBeVisible();
-    await expect(needsVerificationCard.locator('.safety-badge')).toContainText('Needs human verification');
+    await expect(needsVerificationCard.locator('.safety-badge')).toContainText('需人工核验');
     await expect(needsVerificationCard).toHaveClass(/border-needs-verification/);
-    await expect(needsVerificationCard.locator('.card-warning-box')).toContainText('Suggestion only — requires manual extraction review');
+    await expect(needsVerificationCard.locator('.card-warning-box')).toContainText('仅为建议，需先完成人工提取核验');
 
     const metadataOnlyCard = page.locator('.candidate-card').filter({ hasText: 'A Review on Lithium-Sulfur' });
     await expect(metadataOnlyCard).toBeVisible();
-    await expect(metadataOnlyCard.locator('.safety-badge')).toContainText('Metadata-only suggestion');
+    await expect(metadataOnlyCard.locator('.safety-badge')).toContainText('仅元数据建议');
     await expect(metadataOnlyCard).toHaveClass(/border-metadata-only/);
-    await expect(metadataOnlyCard.locator('.card-warning-box')).toContainText('Impact Factor is missing');
+    await expect(metadataOnlyCard.locator('.card-warning-box')).toContainText('影响因子缺失');
 
     // 5. Verify excluded candidate collapsed listing
     await expect(page.locator('#excludedCollapsible')).toBeVisible();
     await expect(page.locator('#excludedCount')).toContainText('1');
     await page.click('#excludedCollapsible summary');
-    await expect(page.locator('#excludedList')).toContainText('Marked as "Do Not Cite"');
+    await expect(page.locator('#excludedList')).toContainText('已标记为“不可引用”');
 
     // 6. Strict safety check: Ensure no DB writes or auto-inserters exist on page
     const pageBody = await page.locator('body').innerText();
     expect(pageBody).not.toMatch(/automatically insert citation/i);
     expect(pageBody).not.toMatch(/save_reviews/i);
     expect(pageBody).not.toMatch(/mark_verified/i);
+    expect(pageBody).not.toMatch(/Insert Citation/i);
+    expect(pageBody).not.toMatch(/Generate Bibliography/i);
+    expect(pageBody).not.toMatch(/Final Citation/i);
     
     // 7. Click Generate Draft Citation Proposal on Confirmed Candidate
-    await confirmedCard.locator('button:has-text("Generate Draft Citation Proposal")').click();
+    await confirmedCard.locator('button:has-text("生成引用建议草稿")').click();
     await expect(confirmedCard.locator('.proposal-container')).toBeVisible();
-    await expect(confirmedCard.locator('.proposal-banner')).toContainText('Confirmed candidate draft — still review before final manuscript use');
+    await expect(confirmedCard.locator('.proposal-banner')).toContainText('API 已确认候选生成稿，使用前仍需人工复核');
     await expect(confirmedCard.locator('.draft-text')).toContainText('(Draft Citation: paper-confirmed)');
     
     // 8. Click Generate Draft on Needs Verification Candidate
-    await needsVerificationCard.locator('button:has-text("Generate Draft Citation Proposal")').click();
+    await needsVerificationCard.locator('button:has-text("生成引用建议草稿")').click();
     await expect(needsVerificationCard.locator('.proposal-container')).toBeVisible();
-    await expect(needsVerificationCard.locator('.proposal-banner')).toContainText('Needs human verification before citation use');
-    await expect(needsVerificationCard.locator('.proposal-warnings')).toContainText('Needs manual verification before use');
-    await expect(needsVerificationCard.locator('.proposal-checklist')).toContainText('Verify evidence');
+    await expect(needsVerificationCard.locator('.proposal-banner')).toContainText('生成稿仅供参考，引用前需人工核验');
+    await expect(needsVerificationCard.locator('.proposal-warnings')).toContainText('使用前必须完成人工核验');
+    await expect(needsVerificationCard.locator('.proposal-checklist')).toContainText('核对证据原文');
     await expect(needsVerificationCard.locator('.blocked-actions-audit')).toContainText('no_database_write');
     
     // 9. Verify Copy Draft Proposal
-    await needsVerificationCard.locator('button:has-text("Copy Draft Proposal")').click();
-    await expect(page.locator('#toastContainer')).toContainText('Draft Proposal copied!');
+    await needsVerificationCard.locator('button:has-text("复制建议草稿")').click();
+    await expect(page.locator('#toastContainer')).toContainText('建议草稿已复制');
     
     // Note: To test clipboard we might need clipboard permissions, but we can just check the toast.
   });
