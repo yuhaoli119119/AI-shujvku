@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DFT Database - Literature AI</title>
+  <title>DFT 数据库 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
@@ -49,11 +49,11 @@
   <main class="shell">
     <header class="page-head">
       <div>
-        <h1>DFT Database</h1>
-        <p>Schema extraction results with catalyst, adsorbate, energy type, confidence, validation status, and evidence links.</p>
+        <h1>DFT 数据库</h1>
+        <p>基于预定模式提取的催化剂、吸附物、能量类型、置信度、核验状态以及证据链接结果。</p>
       </div>
       <div class="export-panel">
-        <button class="btn green" onclick="exportCSV()">Export CSV</button>
+        <button class="btn green" onclick="exportCSV()">导出 CSV</button>
         <div class="export-note">默认仅导出 Human verified + required evidence；blocked rows 不会导出。</div>
         <div id="exportSafetyStatus" class="export-status">等待导出。</div>
       </div>
@@ -61,11 +61,11 @@
 
     <section class="filter-panel">
       <div class="filter-grid">
-        <div><label for="propertyType">energy_type</label><select id="propertyType" onchange="queryDFT()"><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="d_band_center">d_band_center</option><option value="">all</option></select></div>
-        <div><label for="adsorbate">adsorbate</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
-        <div><label for="catalystType">catalyst</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
-        <div><label for="minConfidence">min confidence</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
-        <div><label for="validationStatus">validation_status</label><select id="validationStatus" onchange="queryDFT()"><option value="">all</option><option value="validated">validated</option><option value="needs_review">needs_review</option></select></div>
+        <div><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="d_band_center">d_band_center</option><option value="">all</option></select></div>
+        <div><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
+        <div><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
+        <div><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
+        <div><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="">all</option><option value="validated">validated</option><option value="needs_review">needs_review</option></select></div>
       </div>
     </section>
 
@@ -78,24 +78,24 @@
 
     <section class="data-panel">
       <div class="panel-actions">
-        <strong id="resultSummary">0 DFT records</strong>
-        <button class="btn ghost small" onclick="queryDFT()">Refresh</button>
+        <strong id="resultSummary">0 条 DFT 记录</strong>
+        <button class="btn ghost small" onclick="queryDFT()">刷新</button>
       </div>
       <div class="table-container">
         <table id="dftTable">
           <thead>
             <tr>
-              <th>Catalyst</th><th>Adsorbate</th><th>Energy type</th><th>Value</th><th>Section / step</th><th>Confidence</th><th>Evidence</th><th>Source paper</th>
+              <th>催化剂</th><th>吸附物</th><th>能量类型</th><th>数值</th><th>章节 / 步骤</th><th>置信度</th><th>证据</th><th>来源文献</th>
             </tr>
           </thead>
-          <tbody id="dftList"><tr><td colspan="8" class="empty-state">Loading DFT records...</td></tr></tbody>
+          <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载 DFT 记录中...</td></tr></tbody>
         </table>
       </div>
     </section>
 
     <section class="panel-card">
-      <div class="panel-actions"><strong>Evidence detail</strong><span id="validationSummary" class="muted"></span></div>
-      <div id="evidenceDetail" class="mono">Click an evidence link to inspect evidence_text and source metadata.</div>
+      <div class="panel-actions"><strong>证据详情</strong><span id="validationSummary" class="muted"></span></div>
+      <div id="evidenceDetail" class="mono">点击证据链接以查看原始证据文本及来源元数据。</div>
     </section>
   </main>
   <div id="toast" class="toast"></div>
@@ -142,12 +142,12 @@
       document.getElementById("statMin").textContent = stats.min != null ? `${stats.min} ${stats.unit || ""}` : "-";
       document.getElementById("statMax").textContent = stats.max != null ? `${stats.max} ${stats.unit || ""}` : "-";
       document.getElementById("statMean").textContent = stats.mean != null ? `${stats.mean} ${stats.unit || ""}` : "-";
-      document.getElementById("resultSummary").textContent = `${count} DFT records`;
+      document.getElementById("resultSummary").textContent = `${count} 条 DFT 记录`;
     }
     function renderRows(items) {
       const list = document.getElementById("dftList");
       if (!items.length) {
-        list.innerHTML = '<tr><td colspan="8" class="empty-state">No DFT results under current filters.</td></tr>';
+        list.innerHTML = '<tr><td colspan="8" class="empty-state">当前筛选条件下暂无 DFT 结果。</td></tr>';
         return;
       }
       list.innerHTML = items.map((item, idx) => {
@@ -161,7 +161,7 @@
           <td><strong>${item.value != null ? Number(item.value).toFixed(4) : "-"}</strong> ${esc(item.unit || "")}</td>
           <td>${esc(item.reaction_step || "-")}<div class="muted">${esc(item.source_section || "-")}</div></td>
           <td><span class="confidence-badge ${cls}">${Math.round(conf * 100)}%</span></td>
-          <td><button class="evidence-link" onclick="showEvidence(${idx})">evidence link</button></td>
+          <td><button class="evidence-link" onclick="showEvidence(${idx})">证据链接</button></td>
           <td><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}">${esc((item.title || "Paper").slice(0, 42))}</a><div class="muted">${esc(item.doi || "no DOI")}</div></td>
         </tr>`;
       }).join("");

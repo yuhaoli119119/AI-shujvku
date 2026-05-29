@@ -44,18 +44,20 @@
                     </div>
                 </div>
 
-                <div class="field checkboxes-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="includeUnverifiedSuggestions" checked>
-                        <span>包含未核验建议</span>
-                    </label>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="includePendingReview" checked>
-                        <span>包含待复核项</span>
-                    </label>
+                <div class="panel-actions" style="margin-top: 0;">
+                    <div class="field checkboxes-group" style="margin: 0; flex-direction: row; flex-wrap: wrap;">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="includeUnverifiedSuggestions" checked>
+                            <span>未核验建议</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="includePendingReview" checked>
+                            <span>待复核项</span>
+                        </label>
+                    </div>
                 </div>
 
-                <details class="filters-collapsible" open>
+                <details class="filters-collapsible">
                     <summary class="filters-summary">
                         <span>高级筛选</span>
                     </summary>
@@ -161,10 +163,9 @@
                 </div>
 
                 <div id="candidatesContainer" class="candidates-container">
-                    <div class="empty-state">
-                        <div class="empty-icon">文</div>
-                        <h3>尚未输入上下文</h3>
-                        <p>请先在左侧粘贴句子或段落，再点击“检索候选”查找匹配证据文献。</p>
+                    <div class="empty-state" style="padding: 40px 20px;">
+                        <h3 style="font-size: 16px; color: var(--color-text-secondary); margin-bottom: 8px;">暂无候选</h3>
+                        <p style="font-size: 13px;">请输入写作内容后点击「检索候选」。</p>
                     </div>
                 </div>
 
