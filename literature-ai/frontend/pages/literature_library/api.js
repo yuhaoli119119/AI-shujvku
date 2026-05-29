@@ -29,9 +29,13 @@ function showProgress(message, color) {
     el.style.background = color || "";
 }
 
-function hideProgress() {
+function hideProgress(immediate) {
     const el = $("progressBox");
     if (!el) return;
+    if (immediate) {
+        el.remove();
+        return;
+    }
     setTimeout(function() {
         const box = $("progressBox");
         if (box) box.remove();

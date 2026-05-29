@@ -306,3 +306,90 @@ def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
             app.dependency_overrides.clear()
             engine.dispose()
             get_settings.cache_clear()
+
+
+def test_internal_ai_parse_uses_persisted_writer_settings(monkeypatch):
+    with TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "persisted_settings.sqlite"
+        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+        monkeypatch.delenv("LITAI_WRITER_API_KEY", raising=False)
+        monkeypatch.delenv("LITAI_WRITER_API_BASE", raising=False)
+        monkeypatch.delenv("LITAI_WRITER_MODEL", raising=False)
+        get_settings.cache_clear()
+
+        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            Base.metadata.create_all(connection)
+            connection.execute(
+                text(
+                    "CREATE TABLE app_settings ("
+                    "  key   VARCHAR(255) PRIMARY KEY,"
+                    "  value TEXT"
+                    ")"
+                )
+            )
+            connection.execute(
+                text("INSERT INTO app_settings (key, value) VALUES (:key, :value)"),
+                [
+                    {"key": "writer_api_key", "value": "persisted-secret-key"},
+                    {"key": "writer_api_base", "value": "https://writer.example.test"},
+                    {"key": "writer_model", "value": "persisted-model"},
+                ],
+            )
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(
+                    title="Persisted Settings Paper",
+                    doi="10.1000/persisted",
+                    pdf_path="persisted.pdf",
+                    abstract="A parsed paper that relies on persisted writer settings.",
+                    authors=["Reviewer A"],
+                )
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+
+            monkeypatch.setattr(
+                "app.services.llm_service.LLMService.structured_extract",
+                lambda self, system_prompt, user_prompt, response_format: ExternalAnalysisNormalizedModel.model_validate(
+                    {
+                        "review_notes": [{"content": "Persisted config note.", "field_name": "abstract"}],
+                        "correction_proposals": [],
+                        "supporting_papers": [],
+                    }
+                ),
+            )
+
+            client = TestClient(app)
+            response = client.post(
+                f"/api/external-analysis/papers/{paper.id}/internal-parse",
+                json={"source_label": "持久化配置解析", "auto_apply": False},
+            )
+
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["mapping_status"] in {"normalized", "heuristic", "normalized_with_llm"}
+            assert payload["created_notes"] == 0
+            assert payload["auto_applied_corrections"] == 0
+
+            settings = get_settings()
+            assert settings.writer_api_key == "persisted-secret-key"
+            assert settings.writer_api_base == "https://writer.example.test"
+            assert settings.writer_model == "persisted-model"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+            get_settings.cache_clear()

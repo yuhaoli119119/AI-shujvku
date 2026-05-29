@@ -56,8 +56,13 @@ class LLMService:
         )
 
     def is_configured(self) -> bool:
-        """Returns True if a real API key is configured."""
-        return bool(self.settings.writer_api_key) and self.settings.writer_api_key != "sk-dummy"
+        """Return True only when the Writer LLM has the fields needed to call an API."""
+        return (
+            bool(self.settings.writer_api_key)
+            and self.settings.writer_api_key != "sk-dummy"
+            and bool(self.settings.writer_api_base)
+            and bool(self.model)
+        )
 
     def structured_extract(self, system_prompt: str, user_prompt: str, response_format: Type[T]) -> T | None:
         """Calls the LLM with structured output parsing (JSON schema)."""
@@ -98,4 +103,32 @@ class LLMService:
 
         except Exception as e:
             logger.error(f"LLM extraction failed: {e}", exc_info=True)
+            return None
+
+    def complete_text(self, system_prompt: str, user_prompt: str) -> str | None:
+        """Call the Writer LLM for plain text output without changing application state."""
+        if not self.is_configured():
+            logger.warning("LLMService is not configured (missing Writer API fields).")
+            return None
+
+        try:
+            global_cost_tracker.pre_check()
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                timeout=self.settings.writer_timeout_seconds or 60.0,
+            )
+
+            usage = response.usage
+            if usage:
+                global_cost_tracker.account(usage.prompt_tokens, usage.completion_tokens)
+
+            content = response.choices[0].message.content
+            return content.strip() if content else None
+        except Exception as e:
+            logger.error(f"LLM text completion failed: {e}", exc_info=True)
             return None

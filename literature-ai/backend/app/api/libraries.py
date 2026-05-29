@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.config import get_settings
 from app.schemas.api import LibraryCreateRequest, LibraryImportRequest, LibraryInfoResponse
 from app.services.library_manager import LibraryManager
+from app.utils.active_database import activate_active_library_database, get_active_database_info
 
 router = APIRouter()
 
@@ -18,6 +19,23 @@ def _get_manager() -> LibraryManager:
     if _manager is None:
         _manager = LibraryManager()
     return _manager
+
+
+def _effective_active_library_response(lib) -> LibraryInfoResponse:
+    payload = lib.model_dump()
+    info = get_active_database_info()
+    effective_db_path = info.get("effective_db_path")
+    effective_total = info.get("effective_db_papers_total")
+    active_name = info.get("active_library")
+
+    if payload.get("is_active") and effective_db_path:
+        payload["root_path"] = str(Path(str(effective_db_path)).resolve().parent)
+        payload["paper_count"] = int(effective_total or 0)
+    elif active_name and payload.get("name") == active_name and effective_db_path:
+        payload["is_active"] = True
+        payload["root_path"] = str(Path(str(effective_db_path)).resolve().parent)
+        payload["paper_count"] = int(effective_total or 0)
+    return LibraryInfoResponse(**payload)
 
 
 def _browse_roots() -> list[Path]:
@@ -112,7 +130,7 @@ async def list_browse_roots() -> list[dict]:
 async def list_libraries() -> list[LibraryInfoResponse]:
     mgr = _get_manager()
     libs = mgr.list_libraries()
-    return [LibraryInfoResponse(**lib.model_dump()) for lib in libs]
+    return [_effective_active_library_response(lib) for lib in libs]
 
 
 @router.post("", response_model=LibraryInfoResponse, status_code=201)
@@ -136,7 +154,8 @@ async def activate_library(name: str) -> LibraryInfoResponse:
         lib = mgr.activate_library(name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return LibraryInfoResponse(**lib.model_dump())
+    activate_active_library_database()
+    return _effective_active_library_response(lib)
 
 
 @router.post("/import", response_model=LibraryInfoResponse, status_code=201)

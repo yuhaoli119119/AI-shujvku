@@ -47,7 +47,16 @@
     .raw-data-toggle { margin-top: 12px; border-top: 1px dashed var(--color-border-strong); padding-top: 12px; }
     .raw-data-toggle summary { cursor: pointer; font-weight: 700; color: var(--color-primary); }
     .raw-data-title { margin: 10px 0 6px; font-size: 12px; color: var(--color-text-secondary); }
+    .translation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .translation-actions p { margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
+    .translation-card { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-alt); padding: 16px; margin-bottom: 14px; }
+    .translation-card-title { font-weight: 800; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .translation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .translation-block { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); padding: 12px; min-width: 0; }
+    .translation-block h4 { margin: 0 0 8px; font-size: 13px; color: var(--color-text-secondary); }
+    .translation-status { border: 1px solid var(--color-warning); background: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface)); border-radius: var(--radius); color: var(--color-text); padding: 12px; line-height: 1.7; }
     @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .translation-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -83,6 +92,7 @@
             <button class="tab-btn" onclick="switchDetailTab('figures', event)">图表</button>
             <button class="tab-btn" onclick="switchDetailTab('dft', event)">DFT 与性能</button>
             <button class="tab-btn" onclick="switchDetailTab('cards', event)">机理与写作</button>
+            <button class="tab-btn" onclick="switchDetailTab('translation', event)">中文译文</button>
           </div>
 
           <div id="tab-summary" class="tab-pane active">
@@ -100,6 +110,16 @@
             <div class="panel-card"><div class="panel-title">机理论断</div><div id="mechanismClaims"></div></div>
             <div class="panel-card"><div class="panel-title">写作卡片</div><div id="writingCards"></div></div>
           </div>
+          <div id="tab-translation" class="tab-pane">
+            <div class="panel-card">
+              <div class="panel-title">中文译文预览</div>
+              <div class="translation-actions">
+                <p>生成摘要和前几段解析章节的中文译文，仅供阅读理解；不会写入数据库，也不会改变原始解析结果。</p>
+                <button class="btn primary" id="translationBtn" type="button" onclick="generateTranslationPreview()">生成中文译文预览</button>
+              </div>
+              <div id="translationPanel" class="empty-state">点击按钮后将在这里显示中文译文预览。</div>
+            </div>
+          </div>
         </div>
 
         <aside class="panel-card">
@@ -114,7 +134,7 @@
   <div id="toast" class="toast"></div>
   <script>
     const API_BASE = "/api/papers";
-    const state = { paperId: null, paper: null, claims: [] };
+    const state = { paperId: null, paper: null, claims: [], translation: null };
 
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
@@ -238,6 +258,74 @@
           </div>
         `;
       }).join("");
+    }
+
+    function setTranslationLoading(isLoading) {
+      const button = document.getElementById("translationBtn");
+      if (!button) return;
+      button.disabled = isLoading;
+      button.textContent = isLoading ? "正在生成译文..." : "生成中文译文预览";
+    }
+
+    function renderTranslationPreview(data) {
+      const panel = document.getElementById("translationPanel");
+      const items = data && data.items ? data.items : [];
+      if (!items.length) {
+        panel.innerHTML = '<div class="empty-state">暂无可显示的中文译文。</div>';
+        return;
+      }
+      panel.innerHTML = items.map(item => {
+        const pageText = item.page_start || item.page_end
+          ? `页码：${esc(item.page_start || "-")} - ${esc(item.page_end || "-")}`
+          : "摘要";
+        return `
+          <article class="translation-card">
+            <div class="translation-card-title">
+              <span>${esc(item.title || "未命名片段")}</span>
+              <span class="muted">${pageText}</span>
+            </div>
+            <div class="translation-grid">
+              <div class="translation-block">
+                <h4>原文</h4>
+                <div class="prewrap">${esc(item.source_text || "")}</div>
+              </div>
+              <div class="translation-block">
+                <h4>中文译文</h4>
+                <div class="prewrap">${esc(item.translated_text || "")}</div>
+              </div>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function generateTranslationPreview() {
+      if (!state.paperId) return showToast("请先从文献库选择一篇文献。");
+      const panel = document.getElementById("translationPanel");
+      panel.innerHTML = '<div class="empty-state">正在调用 Writer LLM 生成中文译文预览...</div>';
+      setTranslationLoading(true);
+      try {
+        state.translation = await fetchJSON(`${API_BASE}/${state.paperId}/translation/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            include_abstract: true,
+            max_sections: 3,
+            max_chars_per_item: 3500
+          })
+        });
+        renderTranslationPreview(state.translation);
+        showToast("中文译文预览已生成。");
+      } catch (error) {
+        panel.innerHTML = `
+          <div class="translation-status">
+            中文译文生成失败：${esc(error.message)}
+            <div style="margin-top:10px;"><a class="btn primary" href="../settings/index.html">打开设置页</a></div>
+          </div>
+        `;
+      } finally {
+        setTranslationLoading(false);
+      }
     }
 
     async function loadPaperData() {

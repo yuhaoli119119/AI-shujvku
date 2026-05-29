@@ -103,6 +103,32 @@ class PaperSectionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PaperTranslationPreviewRequest(BaseModel):
+    include_abstract: bool = True
+    section_ids: list[UUID] = Field(default_factory=list)
+    max_sections: int = Field(default=3, ge=1, le=8)
+    max_chars_per_item: int = Field(default=3500, ge=300, le=8000)
+
+
+class PaperTranslationItemResponse(BaseModel):
+    source_type: str
+    section_id: UUID | None = None
+    title: str
+    page_start: int | None = None
+    page_end: int | None = None
+    source_text: str
+    translated_text: str
+
+
+class PaperTranslationPreviewResponse(BaseModel):
+    paper_id: UUID
+    title: str | None = None
+    target_language: str = "zh-CN"
+    backend_used: str = "writer_llm"
+    llm_status: str = "preview"
+    items: list[PaperTranslationItemResponse] = Field(default_factory=list)
+
+
 class PaperTableResponse(BaseModel):
     id: UUID
     caption: str | None = None

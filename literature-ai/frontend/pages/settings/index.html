@@ -304,7 +304,7 @@
                     </div>
                     <div class="field">
                         <label>API Key</label>
-                        <input type="password" id="writer_api_key" placeholder="sk-...">
+                        <input type="password" id="writer_api_key" placeholder="填写 Writer API Key；已保存时会显示掩码">
                     </div>
                 </div>
                 <div class="field-row">
@@ -615,9 +615,15 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             try {
                 const data = await fetchSettingsJSON(`${API_BASE}/api/settings/status`);
 
+                const writerMissing = data.writer.missing && data.writer.missing.length
+                    ? '缺少 ' + data.writer.missing.join(' / ')
+                    : '';
+                const writerDetail = data.writer.configured
+                    ? data.writer.backend + ' / ' + data.writer.model
+                    : (data.writer.message || 'Writer LLM 尚未配置完整') + (writerMissing ? ' · ' + writerMissing : '');
                 const html = [
                     makeBadge('Embedding', data.embedding.configured, data.embedding.provider + ' / ' + data.embedding.model),
-                    makeBadge('Writer', data.writer.configured, data.writer.backend + ' / ' + data.writer.model),
+                    makeBadge('Writer', data.writer.configured, writerDetail),
                     makeBadge('MCP', data.mcp.has_keys, data.mcp.enabled ? '已启用' : '未启用'),
                 ].join(' ');
                 document.getElementById('status-content').innerHTML = html;
@@ -658,7 +664,8 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                     body: JSON.stringify({ settings }),
                 });
                 showToast(`配置已保存（更新 ${result.updated} 项）`);
-                loadStatus();
+                await loadSettings();
+                await loadStatus();
             } catch (e) {
                 showToast('保存失败: ' + e.message, 'error');
             }

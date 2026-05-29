@@ -64,15 +64,13 @@ class SettingsUpdateRequest(BaseModel):
 def _get_active_engine():
     """Return the currently active database engine.
 
-    Tries the session module's cached engines first (set by lifespan /
-    library_manager).  Falls back to ``get_settings().database_url``.
+    Use ``get_settings().database_url`` as the source of truth.  The active
+    library recovery path updates this value via ``switch_database``; picking an
+    arbitrary cached engine can otherwise read settings from a stale shadow DB.
     """
-    from app.db.session import _engines, get_engine
-
-    if _engines:
-        # Return the most recently created engine (there should be only one)
-        return next(iter(_engines.values()))
     from app.config import get_settings
+    from app.db.session import get_engine
+
     return get_engine(get_settings().database_url)
 
 
@@ -99,6 +97,43 @@ def _read_persisted_settings() -> dict[str, str]:
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT key, value FROM app_settings")).fetchall()
     return {row[0]: row[1] for row in rows}
+
+
+def _read_persisted_settings_from_session(session) -> dict[str, str]:
+    """Read persisted settings from the database bound to the current session."""
+    from sqlalchemy import text
+
+    try:
+        rows = session.execute(text("SELECT key, value FROM app_settings")).fetchall()
+    except Exception:
+        return {}
+    return {row[0]: row[1] for row in rows}
+
+
+def _writer_status_from_values(
+    *,
+    backend: str | None,
+    api_base: str | None,
+    api_key: str | None,
+    model: str | None,
+) -> dict[str, Any]:
+    missing = []
+    if not api_base:
+        missing.append("writer_api_base")
+    if not api_key:
+        missing.append("writer_api_key")
+    if not model:
+        missing.append("writer_model")
+    configured = not missing
+    return {
+        "backend": backend or "rule",
+        "model": model or "N/A",
+        "configured": configured,
+        "has_api_base": bool(api_base),
+        "has_api_key": bool(api_key),
+        "missing": missing,
+        "message": "Writer LLM 已配置" if configured else "Writer LLM 尚未配置完整",
+    }
 
 
 def _write_persisted_settings(kv_pairs: dict[str, str | None]) -> None:
@@ -156,6 +191,23 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
                 object.__setattr__(settings, field_name, value)
         else:
             os.environ.pop(env_key, None)
+
+
+def sync_writer_settings_from_session(session, settings) -> dict[str, str]:
+    """Apply persisted Writer settings from the current session's database."""
+    persisted = _read_persisted_settings_from_session(session)
+    if not persisted:
+        return {}
+
+    writer_keys = ("writer_backend", "writer_model", "writer_api_base", "writer_api_key")
+    overrides = {key: persisted[key] for key in writer_keys if key in persisted}
+    if not overrides:
+        return {}
+
+    _apply_settings_to_runtime(overrides)
+    for key, value in overrides.items():
+        object.__setattr__(settings, key, value)
+    return overrides
 
 
 # ---------------------------------------------------------------------------
@@ -293,11 +345,12 @@ async def get_services_status() -> dict[str, Any]:
     writer_api_key = persisted.get("writer_api_key") or settings.writer_api_key
     writer_model = persisted.get("writer_model") or settings.writer_model
 
-    writer_status = {
-        "backend": persisted.get("writer_backend") or settings.writer_backend,
-        "model": writer_model or "N/A",
-        "configured": bool(writer_api_base and writer_api_key),
-    }
+    writer_status = _writer_status_from_values(
+        backend=persisted.get("writer_backend") or settings.writer_backend,
+        api_base=writer_api_base,
+        api_key=writer_api_key,
+        model=writer_model,
+    )
 
     # MCP status
     mcp_status = {

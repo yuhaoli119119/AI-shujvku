@@ -1,10 +1,53 @@
+function renderInternalAIConfigGuide(message, status) {
+    const guide = $("internalAIConfigGuide");
+    const missingMap = {
+        writer_api_base: "Writer API Base URL",
+        writer_api_key: "Writer API Key",
+        writer_model: "Writer Model"
+    };
+    const missing = status && status.missing ? status.missing.map(function(item) {
+        return missingMap[item] || item;
+    }) : [];
+    const detail = missing.length ? "缺少：" + missing.join(" / ") + "。" : "";
+    if (guide) {
+        guide.innerHTML =
+            '<div class="section-card" style="border-color:var(--color-warning);background:var(--color-warning-bg);">' +
+            '<div class="subtle" style="color:var(--color-warning);">' + esc(message) + "</div>" +
+            (detail ? '<div class="subtle" style="margin-top:8px;">' + esc(detail) + "</div>" : "") +
+            '<div class="modal-actions" style="justify-content:flex-start;">' +
+            '<button class="btn primary small" onclick="window.location.href=\'../settings/index.html\'">打开设置页</button>' +
+            "</div></div>";
+    }
+}
+
+async function ensureInternalAIConfigured() {
+    try {
+        const status = await fetchJSON("/api/settings/status");
+        if (status && status.writer && status.writer.configured) {
+            return true;
+        }
+        const message = "网页内 AI 尚未配置完整，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
+        renderInternalAIConfigGuide(message, status ? status.writer : null);
+        showToast(message, "error");
+        return false;
+    } catch (error) {
+        showToast("无法确认 Writer 配置状态：" + error.message, "error");
+        return false;
+    }
+}
+
 async function runInternalAIParse() {
     if (!state.selectedPaperId) {
         showToast("请先选择一篇文献。", "error");
         return;
     }
     switchTab("review");
+    if (!(await ensureInternalAIConfigured())) {
+        hideProgress(true);
+        return;
+    }
     showProgress("网页内 AI 正在生成候选项，完成后可生成待确认记录。");
+    let hideImmediately = false;
     try {
         const data = await fetchJSON(EXTERNAL_API + "/papers/" + state.selectedPaperId + "/internal-parse", {
             method: "POST",
@@ -19,24 +62,37 @@ async function runInternalAIParse() {
         showToast("网页内 AI 建议候选已生成，请人工确认后再处理。", "success");
         const extRuns = $("externalRuns");
         if (extRuns) {
-            extRuns.insertAdjacentHTML("afterbegin",
-                '<div class="section-card"><h3>最近一次网页内 AI 建议候选</h3><div class="subtle">默认只生成候选，不会生成待确认记录。</div><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
+            extRuns.insertAdjacentHTML(
+                "afterbegin",
+                '<div class="section-card"><h3>最近一次网页内 AI 建议候选</h3><div class="subtle">默认只生成候选，不会生成待确认记录。</div><div class="mono">' +
+                    esc(JSON.stringify(data, null, 2)) +
+                    "</div></div>"
             );
         }
         await loadExternalRuns();
     } catch (error) {
+        hideImmediately = true;
         const guide = $("internalAIConfigGuide");
         const message = "网页内 AI 尚未配置，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
         if (error.status === 400 && String(error.message || "").includes("Internal AI is not configured")) {
-            if (guide) guide.innerHTML = '<div class="section-card" style="border-color:var(--color-warning);background:var(--color-warning-bg);"><div class="subtle" style="color:var(--color-warning);">' + message + '</div><div class="modal-actions" style="justify-content:flex-start;"><button class="btn primary small" onclick="window.location.href=\'../settings/index.html\'">打开设置页</button></div></div>';
+            if (guide) {
+                guide.innerHTML =
+                    '<div class="section-card" style="border-color:var(--color-warning);background:var(--color-warning-bg);">' +
+                    '<div class="subtle" style="color:var(--color-warning);">' + message + "</div>" +
+                    '<div class="modal-actions" style="justify-content:flex-start;">' +
+                    '<button class="btn primary small" onclick="window.location.href=\'../settings/index.html\'">打开设置页</button>' +
+                    "</div></div>";
+            }
             showToast(message, "error");
         } else {
             const extRuns = $("externalRuns");
-            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">网页内 AI 建议候选生成失败：' + esc(error.message) + "</div>";
+            if (extRuns) {
+                extRuns.innerHTML = '<div class="workspace-empty">网页内 AI 建议候选生成失败：' + esc(error.message) + "</div>";
+            }
             showToast("网页内 AI 建议候选生成失败：" + error.message, "error");
         }
     }
-    hideProgress();
+    hideProgress(hideImmediately);
 }
 
 async function loadAgentGuide() {
@@ -82,7 +138,7 @@ async function importExternalAnalysis() {
             body: JSON.stringify({
                 paper_id: state.selectedPaperId,
                 source: normalizeExternalSourceForApi(extSource ? extSource.value : "manual"),
-                source_label: extSourceLabel ? extSourceLabel.value.trim() || "外部 AI 候选建议" : "外部 AI 候选建议",
+                source_label: extSourceLabel ? (extSourceLabel.value.trim() || "外部 AI 候选建议") : "外部 AI 候选建议",
                 raw_text: typeof rawPayload === "string" ? rawPayload : null,
                 raw_payload: rawPayload
             })
@@ -122,11 +178,13 @@ async function loadExternalRuns() {
                             '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量生成待确认记录</button>' +
                             '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中生成待确认记录</button>' +
                             '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开候选项（' + (run.candidates || []).length + "）</button>" +
-                        '</div>' +
+                        "</div>" +
                         '<div id="run-candidates-' + run.id + '" style="display:none;">' +
                             renderCandidates(run.id, run.candidates || []) +
-                        '</div>' +
-                        (pending.length ? '<div class="subtle" style="margin-top:10px;">待处理候选项：' + pending.length + " 个</div>" : '<div class="subtle" style="margin-top:10px;">当前 run 没有待处理候选项。</div>') +
+                        "</div>" +
+                        (pending.length
+                            ? '<div class="subtle" style="margin-top:10px;">待处理候选项：' + pending.length + " 个</div>"
+                            : '<div class="subtle" style="margin-top:10px;">当前 run 没有待处理候选项。</div>') +
                     "</div>"
                 );
             }).join("");
@@ -151,20 +209,20 @@ function renderCandidates(runId, candidates) {
             : "";
         var candidateLabel = "";
         if (item.candidate_type === "correction") {
-            candidateLabel = '<span style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 建议 · 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 建议 / 待生成记录</span>';
         } else if (item.candidate_type === "note") {
-            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 笔记建议 · 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 笔记建议 / 待生成记录</span>';
         } else if (item.candidate_type === "relationship") {
-            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 关联建议 · 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 关联建议 / 待生成记录</span>';
         } else {
-            candidateLabel = '<span style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">候选建议 · 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">候选建议 / 待生成记录</span>';
         }
         return (
             '<div class="candidate-card">' +
                 '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">' +
                     '<h4>' + esc(item.candidate_type || "候选建议") + candidateLabel + " | 状态：" + esc(uiLabel("candidate_status", item.status || "-")) + "</h4>" +
-                    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + checkbox + singleAction + '</div>' +
-                '</div>' +
+                    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + checkbox + singleAction + "</div>" +
+                "</div>" +
                 '<div class="subtle">置信度：' + esc(item.confidence == null ? "-" : item.confidence) + " | 目标类型：" + esc(item.materialized_target_type || "-") + "</div>" +
                 '<div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(item.normalized_payload || {}, null, 2)) + "</div>" +
             "</div>"
@@ -187,7 +245,11 @@ async function materializeRun(runId) {
         showToast("当前 run 没有可生成的候选建议。", "error");
         return;
     }
-    var ok = confirm("将处理 " + pendingCount + " 个 AI 建议候选，生成待确认记录。\n\n这不是人工 verified，只是生成待确认记录；仍需在人工确认工作台核对证据并确认。\n\n是否继续？");
+    var ok = confirm(
+        "将处理 " + pendingCount + " 个 AI 建议候选，生成待确认记录。\n\n" +
+        "这不是人工 verified，只是生成待确认记录；仍需在人工确认工作台核对证据并确认。\n\n" +
+        "是否继续？"
+    );
     if (!ok) return;
     showProgress("正在生成待确认记录...");
     try {
@@ -222,7 +284,11 @@ async function materializeSelectedCandidates(runId) {
 
 async function materializeCandidateIds(runId, candidateIds) {
     if (!candidateIds.length) return;
-    var ok = confirm("将处理 " + candidateIds.length + " 个 AI 建议候选，生成待确认记录。\n\n这不是人工 verified，只是生成待确认记录；仍需在人工确认工作台核对证据并确认。\n\n是否继续？");
+    var ok = confirm(
+        "将处理 " + candidateIds.length + " 个 AI 建议候选，生成待确认记录。\n\n" +
+        "这不是人工 verified，只是生成待确认记录；仍需在人工确认工作台核对证据并确认。\n\n" +
+        "是否继续？"
+    );
     if (!ok) return;
     showProgress("正在生成待确认记录...");
     try {

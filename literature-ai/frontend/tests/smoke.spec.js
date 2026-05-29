@@ -671,6 +671,27 @@ async function mockApi(route) {
     return route.fulfill({ status: 204, body: '' });
   }
 
+  if (pathname === '/api/papers/paper-1/translation/preview' && method === 'POST') {
+    return jsonResponse(route, {
+      paper_id: 'paper-1',
+      title: PAPER_DETAIL.title,
+      target_language: 'zh-CN',
+      backend_used: 'writer_llm',
+      llm_status: 'preview',
+      items: [
+        {
+          source_type: 'abstract',
+          section_id: null,
+          title: '摘要',
+          page_start: null,
+          page_end: null,
+          source_text: PAPER_DETAIL.abstract,
+          translated_text: '这是用于验收测试的中文译文预览。',
+        },
+      ],
+    });
+  }
+
   if (pathname.startsWith('/api/papers/') && method === 'GET') {
     return jsonResponse(route, PAPER_DETAIL);
   }
@@ -1042,6 +1063,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#dftSettings')).toContainText('查看原始 JSON');
     await page.locator('#dftSettings summary').first().click();
     await expect(page.locator('#dftSettings')).toContainText('原始数据');
+    await page.click('button:has-text("中文译文")');
+    await page.click('button:has-text("生成中文译文预览")');
+    await expect(page.locator('#translationPanel')).toContainText('这是用于验收测试的中文译文预览');
     await page.click('#evidencePanel button');
     await expect(page.locator('#evidenceDetail')).toContainText('paper_id');
     await expect(page.locator('#evidenceDetail')).toContainText('chunk_id');
@@ -1530,6 +1554,23 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: unconfigured internal AI shows Chinese settings guide', async ({ page }) => {
+    await page.route(/\/api\/settings\/status$/, route => {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          embedding: { configured: true, provider: 'deterministic', model: 'text-embedding-3-small' },
+          writer: {
+            configured: false,
+            backend: 'rule',
+            model: 'gpt-4.1-mini',
+            missing: ['writer_api_base', 'writer_api_key'],
+            message: 'Writer LLM 尚未配置完整',
+          },
+          mcp: { has_keys: false, enabled: false },
+        }),
+      });
+    });
     await page.route(/\/api\/external-analysis\/papers\/paper-1\/internal-parse$/, route => {
       return route.fulfill({
         status: 400,
@@ -1544,8 +1585,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('button[data-tab="review"]');
     await page.click('button:has-text("生成 AI 候选项")');
 
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('网页内 AI 尚未配置，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('网页内 AI 尚未配置完整，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('缺少：Writer API Base URL / Writer API Key。');
     await expect(page.locator('#internalAIConfigGuide button:has-text("打开设置页")')).toBeVisible();
+    await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 
   test('business flow: delete current paper opens confirmation and clears selection', async ({ page }) => {

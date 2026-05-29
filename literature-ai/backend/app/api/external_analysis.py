@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.api.settings import sync_writer_settings_from_session
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.schemas.api import InternalAIParseRequest, InternalAIParseResponse
@@ -117,6 +118,7 @@ async def internal_ai_parse_paper(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> InternalAIParseResponse:
+    sync_writer_settings_from_session(session, settings)
     service = ExternalAnalysisService(session=session, settings=settings)
     detail = PaperQueryService(session).get_paper_detail(paper_id)
     if not detail:
