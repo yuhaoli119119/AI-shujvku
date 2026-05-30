@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -14,12 +15,60 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample as CS
 from app.db.models import DFTResult as DR
+from app.db.models import DFTSetting as DS
 from app.db.models import Paper as P
 from app.db.session import get_db_session
 from app.utils.review_safety import is_export_eligible_extraction, summarize_gate_results
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _authors_text(authors) -> str:
+    if isinstance(authors, list):
+        return ", ".join(str(author) for author in authors if author)
+    return authors or ""
+
+
+def _paper_payload(paper: P) -> dict:
+    return {
+        "paper_id": str(paper.id),
+        "title": paper.title,
+        "doi": paper.doi,
+        "journal": paper.journal,
+        "year": paper.year,
+        "authors": paper.authors if isinstance(paper.authors, list) else _authors_text(paper.authors),
+    }
+
+
+def _catalyst_payload(catalyst: CS | None) -> dict | None:
+    if catalyst is None:
+        return None
+    return {
+        "catalyst_sample_id": str(catalyst.id),
+        "name": catalyst.name,
+        "catalyst_type": catalyst.catalyst_type,
+        "metal_centers": catalyst.metal_centers,
+        "coordination": catalyst.coordination,
+        "support": catalyst.support,
+        "synthesis_method": catalyst.synthesis_method,
+        "evidence_strength": catalyst.evidence_strength,
+    }
+
+
+def _dft_setting_payload(setting: DS) -> dict:
+    return {
+        "dft_setting_id": str(setting.id),
+        "software": setting.software,
+        "functional": setting.functional,
+        "dispersion_correction": setting.dispersion_correction,
+        "pseudopotential": setting.pseudopotential,
+        "cutoff_energy_ev": setting.cutoff_energy_ev,
+        "k_points": setting.k_points,
+        "convergence_settings": setting.convergence_settings,
+        "vacuum_thickness_a": setting.vacuum_thickness_a,
+        "raw_json": setting.raw_json,
+    }
 
 
 @router.get("/export/csv")
@@ -113,6 +162,121 @@ async def export_dft_results_csv(
             "X-D1-Blocked-Reasons": json.dumps(gate_summary["blocked_reasons"], sort_keys=True),
         },
     )
+
+
+@router.get("/export/dft-dataset")
+async def export_dft_dataset(
+    property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
+    adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
+    year_min: int | None = Query(default=None, description="Minimum publication year"),
+    year_max: int | None = Query(default=None, description="Maximum publication year"),
+    session: Session = Depends(get_db_session),
+):
+    stmt = select(DR, P).join(P, DR.paper_id == P.id).order_by(P.year.desc().nulls_last(), P.title)
+    if property_type:
+        stmt = stmt.where(DR.property_type.ilike(f"%{property_type}%"))
+    if adsorbate:
+        stmt = stmt.where(DR.adsorbate.ilike(f"%{adsorbate}%"))
+    if year_min:
+        stmt = stmt.where(P.year >= year_min)
+    if year_max:
+        stmt = stmt.where(P.year <= year_max)
+
+    rows = session.execute(stmt).all()
+    gate_results = []
+    eligible_rows = []
+    paper_ids = set()
+    catalyst_sample_ids = set()
+
+    for dr, paper in rows:
+        gate = is_export_eligible_extraction(session, dr, target_type="dft_results")
+        gate_results.append(gate)
+        if not gate.eligible:
+            continue
+        eligible_rows.append((dr, paper, gate))
+        paper_ids.add(paper.id)
+        if dr.catalyst_sample_id:
+            catalyst_sample_ids.add(dr.catalyst_sample_id)
+
+    catalyst_by_id: dict[str, CS] = {}
+    catalysts_by_paper: dict[str, list[CS]] = defaultdict(list)
+    settings_by_paper: dict[str, list[DS]] = defaultdict(list)
+
+    if paper_ids:
+        catalysts = session.scalars(select(CS).where(CS.paper_id.in_(paper_ids))).all()
+        for catalyst in catalysts:
+            catalyst_by_id[str(catalyst.id)] = catalyst
+            catalysts_by_paper[str(catalyst.paper_id)].append(catalyst)
+
+        settings = session.scalars(select(DS).where(DS.paper_id.in_(paper_ids))).all()
+        for setting in settings:
+            settings_by_paper[str(setting.paper_id)].append(setting)
+
+    if catalyst_sample_ids:
+        direct_catalysts = session.scalars(select(CS).where(CS.id.in_(catalyst_sample_ids))).all()
+        for catalyst in direct_catalysts:
+            catalyst_by_id[str(catalyst.id)] = catalyst
+
+    records = []
+    for dr, paper, gate in eligible_rows:
+        paper_id = str(paper.id)
+        direct_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
+        fallback_catalyst = catalysts_by_paper.get(paper_id, [None])[0]
+        primary_catalyst = direct_catalyst or fallback_catalyst
+        paper_settings = settings_by_paper.get(paper_id, [])
+
+        records.append(
+            {
+                "record_id": str(dr.id),
+                "paper": _paper_payload(paper),
+                "target": {
+                    "property_type": dr.property_type,
+                    "adsorbate": dr.adsorbate,
+                    "value": dr.value,
+                    "unit": dr.unit,
+                    "reaction_step": dr.reaction_step,
+                },
+                "catalyst": _catalyst_payload(primary_catalyst),
+                "catalyst_candidates": [
+                    payload
+                    for payload in (_catalyst_payload(catalyst) for catalyst in catalysts_by_paper.get(paper_id, []))
+                    if payload is not None
+                ],
+                "dft_settings": [_dft_setting_payload(setting) for setting in paper_settings],
+                "provenance": {
+                    "source_section": dr.source_section,
+                    "source_figure": dr.source_figure,
+                    "evidence_text": dr.evidence_text,
+                    "confidence": dr.confidence,
+                    "review_status": gate.review_status,
+                    "review_gate_status": gate.review_gate_status,
+                    "provenance_level": gate.provenance_level,
+                    "locator_status": gate.locator_status,
+                },
+            }
+        )
+
+    gate_summary = summarize_gate_results(gate_results)
+    logger.info("DFT ML dataset export safety gate summary: %s", gate_summary)
+    return {
+        "metadata": {
+            "dataset_version": "dft-ml-dataset-v0.1",
+            "schema_version": "dft_results_ml_v1",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "filters": {
+                "property_type": property_type,
+                "adsorbate": adsorbate,
+                "year_min": year_min,
+                "year_max": year_max,
+            },
+            "safety_gate": "safe_verified_with_required_evidence",
+            "eligible_count": gate_summary["eligible"],
+            "blocked_count": gate_summary["blocked"],
+            "blocked_reasons": gate_summary["blocked_reasons"],
+            "total_candidates": gate_summary["total_candidates"],
+        },
+        "records": records,
+    }
 
 
 @router.get("/compare")

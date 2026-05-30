@@ -7,8 +7,8 @@ import io
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api.papers.aggregation import export_dft_results_csv
-from app.db.models import Base, DFTResult, EvidenceSpan, ExtractionFieldReview, Paper
+from app.api.papers.aggregation import export_dft_dataset, export_dft_results_csv
+from app.db.models import Base, CatalystSample, DFTResult, DFTSetting, EvidenceSpan, ExtractionFieldReview, Paper
 
 
 def _session(tmp_path):
@@ -217,5 +217,64 @@ def test_dft_export_blocks_missing_page_and_does_not_fabricate_page_or_bbox(tmp_
             assert response.headers["x-d3-export-count"] == "0"
             assert response.headers["x-d3-block-count"] == "1"
             assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
+def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name="Fe-N-C",
+                catalyst_type="single_atom",
+                metal_centers=["Fe"],
+                coordination="Fe-N4",
+                support="carbon",
+            )
+            session.add(catalyst)
+            session.flush()
+            setting = DFTSetting(
+                paper_id=paper.id,
+                software="VASP",
+                functional="PBE",
+                cutoff_energy_ev=500,
+                k_points="3x3x1",
+                raw_json={"software": "VASP", "functional": "PBE"},
+            )
+            session.add(setting)
+            safe_row = _dft(session, paper)
+            safe_row.catalyst_sample_id = catalyst.id
+            blocked_row = _dft(session, paper)
+            _safe_review(session, paper, safe_row)
+            _evidence_ref(session, paper, safe_row, page=1)
+            _evidence_ref(session, paper, blocked_row, page=1)
+            session.commit()
+
+            payload = asyncio.run(
+                export_dft_dataset(
+                    property_type=None,
+                    adsorbate=None,
+                    year_min=None,
+                    year_max=None,
+                    session=session,
+                )
+            )
+
+            assert payload["metadata"]["safety_gate"] == "safe_verified_with_required_evidence"
+            assert payload["metadata"]["eligible_count"] == 1
+            assert payload["metadata"]["blocked_count"] == 1
+            assert payload["metadata"]["blocked_reasons"]["missing_review"] == 1
+            assert len(payload["records"]) == 1
+            record = payload["records"][0]
+            assert record["record_id"] == str(safe_row.id)
+            assert record["paper"]["paper_id"] == str(paper.id)
+            assert record["target"]["value"] == -1.23
+            assert record["catalyst"]["name"] == "Fe-N-C"
+            assert record["dft_settings"][0]["functional"] == "PBE"
+            assert record["provenance"]["review_gate_status"] == "safe_verified"
+            assert record["provenance"]["locator_status"] == "exact_page"
     finally:
         engine.dispose()

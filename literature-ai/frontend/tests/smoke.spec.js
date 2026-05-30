@@ -523,6 +523,30 @@ async function mockApi(route) {
     });
   }
 
+  if (pathname === '/api/papers/export/dft-dataset') {
+    return jsonResponse(route, {
+      metadata: {
+        dataset_version: 'dft-ml-dataset-v0.1',
+        schema_version: 'dft_results_ml_v1',
+        safety_gate: 'safe_verified_with_required_evidence',
+        eligible_count: 1,
+        blocked_count: 2,
+        blocked_reasons: { missing_review: 2 },
+        total_candidates: 3,
+      },
+      records: [
+        {
+          record_id: 'dft-1',
+          paper: { paper_id: 'paper-1', title: 'Test Paper for Smoke Validation' },
+          target: { property_type: 'adsorption_energy', adsorbate: 'Li2S4', value: -1.23, unit: 'eV' },
+          catalyst: { name: 'Fe-N-C', catalyst_type: 'single_atom' },
+          dft_settings: [{ functional: 'PBE' }],
+          provenance: { review_gate_status: 'safe_verified', locator_status: 'exact_page' },
+        },
+      ],
+    });
+  }
+
   if (pathname === '/api/papers/stream') {
     return route.fulfill({
       status: 200,
@@ -1408,6 +1432,20 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#exportSafetyStatus')).toContainText('safe_verified_with_required_evidence');
     await expect(page.locator('#exportSafetyStatus')).toContainText('exported: 1');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 2');
+  });
+
+  test('business flow: DFT ML dataset export keeps safety summary', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await page.waitForTimeout(500);
+    await expect(page.locator('button[onclick="exportMLDataset()"]')).toContainText('导出 ML JSON');
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.click('button[onclick="exportMLDataset()"]');
+    await downloadPromise;
+
+    await expect(page.locator('#exportSafetyStatus')).toContainText('safe_verified_with_required_evidence');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('records: 1');
     await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 2');
   });
 
