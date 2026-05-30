@@ -621,9 +621,17 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                 const writerDetail = data.writer.configured
                     ? data.writer.backend + ' / ' + data.writer.model
                     : (data.writer.message || 'Writer LLM 尚未配置完整') + (writerMissing ? ' · ' + writerMissing : '');
+                const parser = data.internal_parser || data.writer;
+                const parserMissing = parser.missing && parser.missing.length
+                    ? '缺少 ' + parser.missing.join(' / ')
+                    : '';
+                const parserDetail = parser.configured
+                    ? '复用 Writer LLM / ' + parser.model
+                    : (parser.message || '内部解析配置未完成；复用 Writer LLM，不使用 Embedding') + (parserMissing ? ' · ' + parserMissing : '');
                 const html = [
                     makeBadge('Embedding', data.embedding.configured, data.embedding.provider + ' / ' + data.embedding.model),
                     makeBadge('Writer', data.writer.configured, writerDetail),
+                    makeBadge('内部解析', parser.configured, parserDetail),
                     makeBadge('MCP', data.mcp.has_keys, data.mcp.enabled ? '已启用' : '未启用'),
                 ].join(' ');
                 document.getElementById('status-content').innerHTML = html;

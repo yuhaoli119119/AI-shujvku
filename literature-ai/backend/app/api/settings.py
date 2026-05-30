@@ -136,6 +136,28 @@ def _writer_status_from_values(
     }
 
 
+def _internal_parser_status_from_writer(writer_status: dict[str, Any]) -> dict[str, Any]:
+    missing_map = {
+        "writer_api_base": "internal_parser_api_base",
+        "writer_api_key": "internal_parser_api_key",
+        "writer_model": "internal_parser_model",
+    }
+    missing = [missing_map.get(item, item) for item in writer_status.get("missing", [])]
+    configured = bool(writer_status.get("configured"))
+    return {
+        "configured": configured,
+        "backend": writer_status.get("backend", "rule"),
+        "model": writer_status.get("model", "N/A"),
+        "uses": "writer_llm",
+        "missing": missing,
+        "message": (
+            "Internal parser LLM configured"
+            if configured
+            else "Internal AI parsing is not configured; it uses the Writer LLM connection, not Embedding."
+        ),
+    }
+
+
 def _write_persisted_settings(kv_pairs: dict[str, str | None]) -> None:
     """Upsert key-value pairs into the database."""
     from sqlalchemy import text
@@ -362,6 +384,7 @@ async def get_services_status() -> dict[str, Any]:
     return {
         "embedding": embedding_status,
         "writer": writer_status,
+        "internal_parser": _internal_parser_status_from_writer(writer_status),
         "mcp": mcp_status,
     }
 

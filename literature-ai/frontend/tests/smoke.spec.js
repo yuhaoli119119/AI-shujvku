@@ -547,6 +547,39 @@ async function mockApi(route) {
     });
   }
 
+  if (pathname === '/api/papers/export/dft-quality') {
+    return jsonResponse(route, {
+      metadata: {
+        schema_version: 'dft_quality_v1',
+        safety_gate: 'safe_verified_with_required_evidence',
+        eligible_count: 1,
+        blocked_count: 2,
+        blocked_reasons: { missing_review: 1, unsafe_locator: 1 },
+        total_candidates: 3,
+      },
+      rows: [
+        {
+          record_id: 'dft-blocked-1',
+          paper_id: 'paper-1',
+          title: 'Test Paper for Smoke Validation',
+          property_type: 'adsorption_energy',
+          adsorbate: 'Li2S4',
+          value: -1.23,
+          unit: 'eV',
+          review_status: 'missing',
+          review_gate_status: 'blocked',
+          provenance_level: 'text_evidence_only',
+          locator_status: 'missing_locator',
+          blocked_reasons: ['missing_review'],
+          is_exportable: false,
+          library_detail_url: '../literature_library/index.html?paper_id=paper-1&tab=dft',
+          review_workbench_url: '../external_analysis_workbench/index.html?paper_id=paper-1',
+        },
+      ],
+      paper_completeness: [],
+    });
+  }
+
   if (pathname === '/api/papers/stream') {
     return route.fulfill({
       status: 200,
@@ -1449,6 +1482,17 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 2');
   });
 
+  test('business flow: DFT quality panel shows blocked reasons and review links', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#qualityExportable')).toContainText('1');
+    await expect(page.locator('#qualityBlocked')).toContainText('2');
+    await expect(page.locator('#qualityReasonChips')).toContainText('missing_review');
+    await expect(page.locator('#qualityRows')).toContainText('blocked_reasons: missing_review');
+    await expect(page.locator('#qualityRows a:has-text("Review workbench")')).toHaveAttribute('href', /external_analysis_workbench/);
+  });
+
   test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {
     await page.route(/\/api\/papers\/export\/csv/, route => {
       return route.fulfill({
@@ -1618,7 +1662,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(visibleText).not.toMatch(/Extraction Jobs|Extraction Job Center|source label|manual|unknown/);
   });
 
-  test('business flow: unconfigured internal AI shows Chinese settings guide', async ({ page }) => {
+  test.skip('business flow: unconfigured internal AI shows legacy Chinese settings guide', async ({ page }) => {
     await page.route(/\/api\/settings\/status$/, route => {
       return route.fulfill({
         status: 200,
@@ -1653,6 +1697,46 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#internalAIConfigGuide')).toContainText('网页内 AI 尚未配置完整，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。');
     await expect(page.locator('#internalAIConfigGuide')).toContainText('缺少：Writer API Base URL / Writer API Key。');
     await expect(page.locator('#internalAIConfigGuide button:has-text("打开设置页")')).toBeVisible();
+    await expect(page.locator('#progressBox')).toHaveCount(0);
+  });
+
+  test('business flow: unconfigured internal AI separates parser, writer, and embedding guidance', async ({ page }) => {
+    await page.route(/\/api\/settings\/status$/, route => {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          embedding: { configured: true, provider: 'deterministic', model: 'text-embedding-3-small' },
+          writer: {
+            configured: false,
+            backend: 'rule',
+            model: 'gpt-4.1-mini',
+            missing: ['writer_api_base', 'writer_api_key'],
+            message: 'Writer LLM is not configured',
+          },
+          internal_parser: {
+            configured: false,
+            backend: 'rule',
+            model: 'gpt-4.1-mini',
+            uses: 'writer_llm',
+            missing: ['internal_parser_api_base', 'internal_parser_api_key'],
+            message: 'Internal AI parsing is not configured; it uses the Writer LLM connection, not Embedding.',
+          },
+          mcp: { has_keys: false, enabled: false },
+        }),
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-card');
+    await page.click('button[data-tab="review"]');
+    await page.click('#tab-review button[onclick="runInternalAIParse()"]');
+
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('内部解析配置未完成');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('复用 Writer LLM');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('不使用 Embedding');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('内部解析 API Base URL');
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 

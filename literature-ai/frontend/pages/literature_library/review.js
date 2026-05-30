@@ -1,6 +1,9 @@
 function renderInternalAIConfigGuide(message, status) {
     const guide = $("internalAIConfigGuide");
     const missingMap = {
+        internal_parser_api_base: "内部解析 API Base URL（复用 Writer LLM）",
+        internal_parser_api_key: "内部解析 API Key（复用 Writer LLM）",
+        internal_parser_model: "内部解析 Model（复用 Writer LLM）",
         writer_api_base: "Writer API Base URL",
         writer_api_key: "Writer API Key",
         writer_model: "Writer Model"
@@ -32,6 +35,23 @@ async function ensureInternalAIConfigured() {
         return false;
     } catch (error) {
         showToast("无法确认 Writer 配置状态：" + error.message, "error");
+        return false;
+    }
+}
+
+async function ensureInternalAIConfigured() {
+    try {
+        const status = await fetchJSON("/api/settings/status");
+        const internalParser = status && (status.internal_parser || status.writer);
+        if (internalParser && internalParser.configured) {
+            return true;
+        }
+        const message = "内部解析配置未完成：它复用 Writer LLM 连接，不使用 Embedding 配置。请在设置 -> API 配置中补 Writer LLM 的 Base URL / API Key / Model。";
+        renderInternalAIConfigGuide(message, internalParser || null);
+        showToast(message, "error");
+        return false;
+    } catch (error) {
+        showToast("无法确认内部解析配置状态：" + error.message, "error");
         return false;
     }
 }
@@ -73,17 +93,19 @@ async function runInternalAIParse() {
     } catch (error) {
         hideImmediately = true;
         const guide = $("internalAIConfigGuide");
+        const internalParserMessage = "内部解析配置未完成：它复用 Writer LLM 连接，不使用 Embedding 配置。请在设置 -> API 配置中补 Writer LLM 的 Base URL / API Key / Model。";
         const message = "网页内 AI 尚未配置，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
         if (error.status === 400 && String(error.message || "").includes("Internal AI is not configured")) {
+            hideProgress(true);
             if (guide) {
                 guide.innerHTML =
                     '<div class="section-card" style="border-color:var(--color-warning);background:var(--color-warning-bg);">' +
-                    '<div class="subtle" style="color:var(--color-warning);">' + message + "</div>" +
+                    '<div class="subtle" style="color:var(--color-warning);">' + internalParserMessage + "</div>" +
                     '<div class="modal-actions" style="justify-content:flex-start;">' +
                     '<button class="btn primary small" onclick="window.location.href=\'../settings/index.html\'">打开设置页</button>' +
                     "</div></div>";
             }
-            showToast(message, "error");
+            showToast(internalParserMessage, "error");
         } else {
             const extRuns = $("externalRuns");
             if (extRuns) {

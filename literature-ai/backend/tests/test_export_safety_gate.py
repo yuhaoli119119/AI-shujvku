@@ -7,7 +7,7 @@ import io
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api.papers.aggregation import export_dft_dataset, export_dft_results_csv
+from app.api.papers.aggregation import dft_dataset_quality, export_dft_dataset, export_dft_results_csv
 from app.db.models import Base, CatalystSample, DFTResult, DFTSetting, EvidenceSpan, ExtractionFieldReview, Paper
 
 
@@ -276,5 +276,42 @@ def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
             assert record["dft_settings"][0]["functional"] == "PBE"
             assert record["provenance"]["review_gate_status"] == "safe_verified"
             assert record["provenance"]["locator_status"] == "exact_page"
+    finally:
+        engine.dispose()
+
+
+def test_dft_quality_panel_reports_blocked_rows_and_links(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            safe_row = _dft(session, paper)
+            blocked_row = _dft(session, paper)
+            _safe_review(session, paper, safe_row)
+            _evidence_ref(session, paper, safe_row, page=1)
+            _evidence_ref(session, paper, blocked_row, page=1)
+            session.commit()
+
+            payload = asyncio.run(
+                dft_dataset_quality(
+                    property_type=None,
+                    adsorbate=None,
+                    year_min=None,
+                    year_max=None,
+                    reason=None,
+                    limit=100,
+                    session=session,
+                )
+            )
+
+            assert payload["metadata"]["safety_gate"] == "safe_verified_with_required_evidence"
+            assert payload["metadata"]["eligible_count"] == 1
+            assert payload["metadata"]["blocked_count"] == 1
+            assert payload["metadata"]["blocked_reasons"]["missing_review"] == 1
+            blocked = [row for row in payload["rows"] if not row["is_exportable"]][0]
+            assert blocked["record_id"] == str(blocked_row.id)
+            assert blocked["blocked_reasons"] == ["missing_review"]
+            assert "paper_id=" + str(paper.id) in blocked["library_detail_url"]
+            assert "external_analysis_workbench" in blocked["review_workbench_url"]
     finally:
         engine.dispose()
