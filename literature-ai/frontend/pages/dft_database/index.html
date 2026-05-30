@@ -41,6 +41,8 @@
     .quality-row h4 { margin: 0 0 6px; font-size: 14px; }
     .quality-meta { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .completeness-list { display: grid; gap: 8px; margin-top: 12px; }
+    .completeness-row { border: 1px dashed var(--color-border-strong); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
     .table-container { width: 100%; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 12px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
@@ -113,6 +115,7 @@
         <div id="qualityRows" class="quality-list">
           <div class="empty-state">Loading quality summary...</div>
         </div>
+        <div id="qualityCompleteness" class="completeness-list"></div>
       </div>
     </section>
 
@@ -196,6 +199,7 @@
         document.getElementById("qualityGateLabel").textContent = metadata.safety_gate || "safe_verified_with_required_evidence";
         renderReasonChips(metadata.blocked_reasons || {});
         renderQualityRows(data.rows || []);
+        renderCompletenessHints(data.paper_completeness || []);
       } catch (error) {
         if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">Quality panel failed: ' + esc(error.message) + '</div>';
       }
@@ -237,6 +241,22 @@
             '<a class="btn ghost small" href="' + esc(row.library_detail_url || row.paper_detail_url || "#") + '">论文详情</a>' +
             '<a class="btn primary small" href="' + esc(row.review_workbench_url || row.library_detail_url || "#") + '">Review workbench</a>' +
           '</div>' +
+        '</div>';
+      }).join("");
+    }
+    function renderCompletenessHints(items) {
+      const el = document.getElementById("qualityCompleteness");
+      if (!el) return;
+      const flagged = (items || []).filter(item => (item.hints || []).length);
+      if (!flagged.length) {
+        el.innerHTML = '<div class="quality-meta">Completeness hints: no missing catalyst/settings hints in current candidates.</div>';
+        return;
+      }
+      el.innerHTML = '<div class="quality-meta"><strong>Completeness hints</strong></div>' + flagged.slice(0, 8).map(item => {
+        return '<div class="completeness-row">' +
+          '<div class="quality-meta"><a href="' + esc(item.library_detail_url || "#") + '">' + esc(item.title || item.paper_id || "Paper") + '</a></div>' +
+          '<div class="quality-meta">DFT results exportable/blocked: ' + esc(item.exportable_dft_results || 0) + '/' + esc(item.blocked_dft_results || 0) + ' | catalyst_samples: ' + esc(item.catalyst_samples || 0) + ' | dft_settings: ' + esc(item.dft_settings || 0) + '</div>' +
+          '<div class="quality-meta">hints: ' + esc((item.hints || []).join(", ")) + '</div>' +
         '</div>';
       }).join("");
     }

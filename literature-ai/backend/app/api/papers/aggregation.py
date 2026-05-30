@@ -345,6 +345,7 @@ async def dft_dataset_quality(
     gate_results = []
     quality_rows = []
     paper_ids = set()
+    paper_meta_by_id = {}
     exportable_by_paper: dict[str, int] = defaultdict(int)
     blocked_by_paper: dict[str, int] = defaultdict(int)
 
@@ -353,6 +354,12 @@ async def dft_dataset_quality(
         gate_results.append(gate)
         paper_id = str(paper.id)
         paper_ids.add(paper.id)
+        paper_meta_by_id[paper_id] = {
+            "title": paper.title,
+            "doi": paper.doi,
+            "library_detail_url": f"../literature_library/index.html?paper_id={paper_id}&tab=dft",
+            "review_workbench_url": f"../external_analysis_workbench/index.html?paper_id={paper_id}",
+        }
         if gate.eligible:
             exportable_by_paper[paper_id] += 1
         else:
@@ -371,9 +378,14 @@ async def dft_dataset_quality(
 
     paper_completeness = []
     for paper_id in sorted({str(pid) for pid in paper_ids}):
+        meta = paper_meta_by_id.get(paper_id, {})
         paper_completeness.append(
             {
                 "paper_id": paper_id,
+                "title": meta.get("title"),
+                "doi": meta.get("doi"),
+                "library_detail_url": meta.get("library_detail_url"),
+                "review_workbench_url": meta.get("review_workbench_url"),
                 "exportable_dft_results": exportable_by_paper.get(paper_id, 0),
                 "blocked_dft_results": blocked_by_paper.get(paper_id, 0),
                 "catalyst_samples": catalyst_counts.get(paper_id, 0),

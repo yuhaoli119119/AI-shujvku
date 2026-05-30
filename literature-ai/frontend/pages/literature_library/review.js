@@ -26,22 +26,6 @@ function renderInternalAIConfigGuide(message, status) {
 async function ensureInternalAIConfigured() {
     try {
         const status = await fetchJSON("/api/settings/status");
-        if (status && status.writer && status.writer.configured) {
-            return true;
-        }
-        const message = "网页内 AI 尚未配置完整，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
-        renderInternalAIConfigGuide(message, status ? status.writer : null);
-        showToast(message, "error");
-        return false;
-    } catch (error) {
-        showToast("无法确认 Writer 配置状态：" + error.message, "error");
-        return false;
-    }
-}
-
-async function ensureInternalAIConfigured() {
-    try {
-        const status = await fetchJSON("/api/settings/status");
         const internalParser = status && (status.internal_parser || status.writer);
         if (internalParser && internalParser.configured) {
             return true;

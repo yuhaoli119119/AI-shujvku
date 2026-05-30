@@ -576,7 +576,18 @@ async function mockApi(route) {
           review_workbench_url: '../external_analysis_workbench/index.html?paper_id=paper-1',
         },
       ],
-      paper_completeness: [],
+      paper_completeness: [
+        {
+          paper_id: 'paper-1',
+          title: 'Test Paper for Smoke Validation',
+          library_detail_url: '../literature_library/index.html?paper_id=paper-1&tab=dft',
+          exportable_dft_results: 1,
+          blocked_dft_results: 2,
+          catalyst_samples: 0,
+          dft_settings: 0,
+          hints: ['missing_catalyst_sample', 'missing_dft_setting', 'has_blocked_dft_results'],
+        },
+      ],
     });
   }
 
@@ -1490,6 +1501,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityBlocked')).toContainText('2');
     await expect(page.locator('#qualityReasonChips')).toContainText('missing_review');
     await expect(page.locator('#qualityRows')).toContainText('blocked_reasons: missing_review');
+    await expect(page.locator('#qualityCompleteness')).toContainText('missing_catalyst_sample');
+    await expect(page.locator('#qualityCompleteness')).toContainText('missing_dft_setting');
     await expect(page.locator('#qualityRows a:has-text("Review workbench")')).toHaveAttribute('href', /external_analysis_workbench/);
   });
 
@@ -1662,7 +1675,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(visibleText).not.toMatch(/Extraction Jobs|Extraction Job Center|source label|manual|unknown/);
   });
 
-  test.skip('business flow: unconfigured internal AI shows legacy Chinese settings guide', async ({ page }) => {
+  test('business flow: unconfigured internal AI shows parser settings guide with writer fallback', async ({ page }) => {
     await page.route(/\/api\/settings\/status$/, route => {
       return route.fulfill({
         status: 200,
@@ -1694,8 +1707,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('button[data-tab="review"]');
     await page.click('button:has-text("生成 AI 候选项")');
 
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('网页内 AI 尚未配置完整，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。');
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('缺少：Writer API Base URL / Writer API Key。');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('内部解析配置未完成');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('复用 Writer LLM');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('不使用 Embedding');
+    await expect(page.locator('#internalAIConfigGuide')).toContainText('Writer API Base URL / Writer API Key');
     await expect(page.locator('#internalAIConfigGuide button:has-text("打开设置页")')).toBeVisible();
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
