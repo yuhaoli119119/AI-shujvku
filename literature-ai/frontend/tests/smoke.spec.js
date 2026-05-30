@@ -57,7 +57,10 @@ const PAPER_DETAIL = {
   journal: 'Journal of Testing',
   pdf_path: 'test.pdf',
   abstract: 'Synthetic paper detail payload used by Playwright smoke tests.',
-  sections: [{ id: 'chunk-1', section_title: 'Introduction', section_type: 'introduction', text: 'Smoke-test content.', page_start: 1, page_end: 1 }],
+  sections: [
+    { id: 'chunk-1', section_title: 'Introduction', section_type: 'introduction', text: 'Smoke-test content.', page_start: 1, page_end: 1 },
+    { id: 'chunk-2', section_title: 'Results', section_type: 'results', text: 'Selected section translation content.', page_start: 3, page_end: 4 }
+  ],
   figures: [],
   tables: [],
   dft_settings_items: [{ code: 'PBE', kpoints: '3x3x1' }],
@@ -672,23 +675,40 @@ async function mockApi(route) {
   }
 
   if (pathname === '/api/papers/paper-1/translation/preview' && method === 'POST') {
+    const payload = JSON.parse(route.request().postData() || '{}');
+    const items = [];
+    if (payload.include_abstract) {
+      items.push({
+        source_type: 'abstract',
+        section_id: null,
+        title: '摘要',
+        page_start: null,
+        page_end: null,
+        source_text: PAPER_DETAIL.abstract,
+        translated_text: '这是用于验收测试的摘要译文预览。',
+      });
+    }
+    const selectedSections = Array.isArray(payload.section_ids) && payload.section_ids.length
+      ? PAPER_DETAIL.sections.filter(item => payload.section_ids.includes(item.id))
+      : PAPER_DETAIL.sections.slice(0, Math.min(payload.max_sections || 3, PAPER_DETAIL.sections.length));
+    selectedSections.forEach(section => {
+      items.push({
+        source_type: 'section',
+        section_id: section.id,
+        title: section.section_title,
+        page_start: section.page_start,
+        page_end: section.page_end,
+        source_text: section.text,
+        translated_text: `这是 ${section.section_title} 的中文译文预览。`,
+      });
+    });
     return jsonResponse(route, {
       paper_id: 'paper-1',
       title: PAPER_DETAIL.title,
       target_language: 'zh-CN',
       backend_used: 'writer_llm',
       llm_status: 'preview',
-      items: [
-        {
-          source_type: 'abstract',
-          section_id: null,
-          title: '摘要',
-          page_start: null,
-          page_end: null,
-          source_text: PAPER_DETAIL.abstract,
-          translated_text: '这是用于验收测试的中文译文预览。',
-        },
-      ],
+      items,
     });
   }
 
@@ -1064,8 +1084,15 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('#dftSettings summary').first().click();
     await expect(page.locator('#dftSettings')).toContainText('原始数据');
     await page.click('button:has-text("中文译文")');
+    await expect(page.locator('#translationSections')).toContainText('Introduction');
+    await expect(page.locator('#translationSections')).toContainText('Results');
+    await page.uncheck('#translationIncludeAbstract');
+    await page.uncheck('.translation-section-checkbox[value="chunk-1"]');
     await page.click('button:has-text("生成中文译文预览")');
-    await expect(page.locator('#translationPanel')).toContainText('这是用于验收测试的中文译文预览');
+    await expect(page.locator('#translationPanel')).toContainText('这是 Results 的中文译文预览');
+    await expect(page.locator('#translationPanel')).not.toContainText('摘要译文预览');
+    await page.click('button:has-text("仅看译文")');
+    await expect(page.locator('#translationPanel')).toContainText('复制译文');
     await page.click('#evidencePanel button');
     await expect(page.locator('#evidenceDetail')).toContainText('paper_id');
     await expect(page.locator('#evidenceDetail')).toContainText('chunk_id');
