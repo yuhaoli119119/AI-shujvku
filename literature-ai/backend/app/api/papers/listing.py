@@ -23,7 +23,8 @@ from app.schemas.api import (
 )
 from app.services.paper_query import PaperQueryService
 from app.services.paper_reprocessing import PaperReprocessingService
-from app.services.workflow_jobs import DEFAULT_LIBRARY_NAME, normalize_library_name
+from app.services.workflow_jobs import DEFAULT_LIBRARY_NAME
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 
 router = APIRouter()
 
@@ -62,9 +63,13 @@ async def list_libraries(session: Session = Depends(get_db_session)) -> list[Pap
         .group_by(Paper.library_name)
         .order_by(Paper.library_name.asc())
     ).all()
+    totals: dict[str, int] = {}
+    for name, count in rows:
+        normalized = normalize_library_name(name)
+        totals[normalized] = totals.get(normalized, 0) + int(count or 0)
     libraries = [
-        PaperLibraryResponse(name=normalize_library_name(name), paper_count=count)
-        for name, count in rows
+        PaperLibraryResponse(name=name, paper_count=count)
+        for name, count in sorted(totals.items(), key=lambda item: item[0])
     ]
     if not any(item.name == DEFAULT_LIBRARY_NAME for item in libraries):
         libraries.insert(0, PaperLibraryResponse(name=DEFAULT_LIBRARY_NAME, paper_count=0))
@@ -78,7 +83,7 @@ async def delete_library(library_name: str, session: Session = Depends(get_db_se
         raise HTTPException(status_code=400, detail="Cannot delete the default library")
     from sqlalchemy import delete as sa_delete
 
-    result = session.execute(sa_delete(Paper).where(Paper.library_name == target))
+    result = session.execute(sa_delete(Paper).where(build_library_name_clause(Paper.library_name, target)))
     session.commit()
     return {"status": "deleted", "library_name": target, "deleted_count": result.rowcount}
 
@@ -112,7 +117,7 @@ async def stream_papers(
             papers = PaperQueryService(poll_session).list_papers(filters=filters)
             total_stmt = select(func.count(Paper.id))
             if library_name is not None:
-                total_stmt = total_stmt.where(Paper.library_name == normalize_library_name(library_name))
+                total_stmt = total_stmt.where(build_library_name_clause(Paper.library_name, library_name))
             total_papers = poll_session.scalar(total_stmt) or 0
             return [paper.model_dump(mode="json") for paper in papers], total_papers
 
@@ -163,4 +168,3 @@ async def get_papers_status(session: Session = Depends(get_db_session)):
         if last_paper
         else None,
     }
-

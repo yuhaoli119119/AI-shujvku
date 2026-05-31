@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -24,7 +25,7 @@ def _write_sqlite(path: Path, *, paper_count: int) -> None:
     engine.dispose()
 
 
-def test_activate_active_library_database_recovers_populated_mirror_sqlite(tmp_path, monkeypatch):
+def test_activate_active_library_database_repairs_empty_default_sqlite_from_populated_mirror(tmp_path, monkeypatch):
     workspace_root = tmp_path
     backend_root = workspace_root / "backend"
     backend_root.mkdir(parents=True, exist_ok=True)
@@ -63,15 +64,21 @@ def test_activate_active_library_database_recovers_populated_mirror_sqlite(tmp_p
     monkeypatch.setattr(library_manager_module.LibraryManager, "REGISTRY_PATH", registry_path)
     monkeypatch.setattr(library_manager_module.LibraryManager, "DEFAULT_LIBRARY_ROOT", library_root)
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
+    monkeypatch.setattr(active_database_module, "default_library_root", lambda: library_root.resolve())
     monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
     monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
 
     info = active_database_module.activate_active_library_database()
 
     assert info["db_kind"] == "sqlite"
-    assert Path(info["db_path"]) == (mirrored_root / "database.sqlite").resolve()
+    assert Path(info["db_path"]) == (library_root / "database.sqlite").resolve()
     assert info["effective_db_papers_total"] == 1
-    assert info["recovered_from_candidate_scan"] is True
+    assert info["recovered_from_candidate_scan"] is False
+    repaired = sqlite3.connect(str((library_root / "database.sqlite").resolve()))
+    try:
+        assert repaired.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
+    finally:
+        repaired.close()
 
 
 def test_get_active_database_info_prefers_registered_active_sqlite_without_candidate_recovery(tmp_path, monkeypatch):

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from app.utils.project_paths import BACKEND_ROOT, WORKSPACE_ROOT, canonical_registry_path
+from app.utils.project_paths import BACKEND_ROOT, WORKSPACE_ROOT, canonical_registry_path, default_library_root
+from app.utils.library_names import DEFAULT_LIBRARY_NAME, normalize_library_name
 
 WINDOWS_MIRROR_COLON = "\uf03a"
 WINDOWS_MIRROR_SEP = "\uf05c"
@@ -52,7 +54,7 @@ def _registry_entry(payload: dict[str, Any] | None, active_library: str | None) 
     if payload is None or not active_library:
         return None
     for entry in payload.get("libraries", []):
-        if entry.get("name") == active_library:
+        if normalize_library_name(entry.get("name")) == normalize_library_name(active_library):
             return entry
     return None
 
@@ -91,9 +93,9 @@ def _sqlite_candidate_summary(path: Path) -> dict[str, Any]:
 def get_registered_active_library_info() -> dict[str, Any]:
     registry_path = canonical_registry_path().resolve()
     payload = _load_json(registry_path)
-    active_library = payload.get("active_library") if payload else None
+    active_library = normalize_library_name(payload.get("active_library")) if payload else None
     if not isinstance(active_library, str) or not active_library.strip():
-        active_library = None
+        active_library = DEFAULT_LIBRARY_NAME
     entry = _registry_entry(payload, active_library)
     active_library_root = None
     active_library_db_path = None
@@ -184,6 +186,28 @@ def _effective_storage_root(effective_db_path: Path | None) -> str | None:
     if fallback.exists():
         return str(fallback.resolve())
     return str(preferred.resolve())
+
+
+def _maybe_repair_registered_default_sqlite(info: dict[str, Any]) -> bool:
+    active_library = normalize_library_name(info.get("active_library"))
+    registered_path_raw = info.get("active_library_db_path")
+    effective_path_raw = info.get("effective_db_path")
+    if active_library != DEFAULT_LIBRARY_NAME or not registered_path_raw or not effective_path_raw:
+        return False
+
+    registered_path = Path(str(registered_path_raw)).resolve()
+    effective_path = Path(str(effective_path_raw)).resolve()
+    if registered_path == effective_path or registered_path.parent != default_library_root().resolve():
+        return False
+
+    registered_summary = _sqlite_candidate_summary(registered_path)
+    effective_summary = _sqlite_candidate_summary(effective_path)
+    if int(registered_summary["papers_total"]) > 0 or int(effective_summary["papers_total"]) <= 0:
+        return False
+
+    registered_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(effective_path, registered_path)
+    return True
 
 
 def get_active_database_info() -> dict[str, Any]:
@@ -279,6 +303,8 @@ def activate_active_library_database() -> dict[str, Any]:
             activation_error = f"{type(exc).__name__}: {exc}"
 
     info = get_active_database_info()
+    if _maybe_repair_registered_default_sqlite(info):
+        info = get_active_database_info()
     effective_path = info.get("effective_db_path")
     configured_path = info.get("configured_db_path")
     if effective_path and (configured_path is None or Path(effective_path) != Path(configured_path)):

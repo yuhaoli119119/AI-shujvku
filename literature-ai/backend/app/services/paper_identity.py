@@ -9,9 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import Paper
-
-
-DEFAULT_LIBRARY_NAME = "\u9ed8\u8ba4\u6587\u732e\u5e93"
+from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
 
 
 class PaperIdentityService:
@@ -135,7 +133,7 @@ class PaperIdentityService:
         }
         stmt = select(Paper)
         if library_name:
-            stmt = stmt.where(Paper.library_name == library_name)
+            stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
 
         best_match: Paper | None = None
         best_score = 0.0
@@ -167,7 +165,7 @@ class PaperIdentityService:
         }
         stmt = select(Paper).where(Paper.oa_status == "metadata_only")
         if library_name:
-            stmt = stmt.where(Paper.library_name == library_name)
+            stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
 
         best_match: Paper | None = None
         best_score = 0.0
@@ -192,7 +190,7 @@ class PaperIdentityService:
         source_reference: str | None = None,
         classify_callback: Callable[[str, str | None], dict[str, Any]] | None = None,
     ) -> Paper:
-        library = library_name or DEFAULT_LIBRARY_NAME
+        library = normalize_library_name(library_name or DEFAULT_LIBRARY_NAME)
         metadata = dict(external_metadata or {})
         doi = cls.normalize_doi(cls._string(metadata.get("doi")))
         title = cls._string(metadata.get("title")) or identifier or "Untitled paper"
@@ -244,7 +242,7 @@ class PaperIdentityService:
 
         classification = classify_callback(title, cls._string(metadata.get("journal"))) if classify_callback else {}
         max_serial = session.execute(
-            select(func.max(Paper.serial_number)).where(Paper.library_name == library)
+            select(func.max(Paper.serial_number)).where(build_library_name_clause(Paper.library_name, library))
         ).scalar_one()
         paper = Paper(
             serial_number=(max_serial or 0) + 1,

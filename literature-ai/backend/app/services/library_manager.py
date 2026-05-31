@@ -8,12 +8,16 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.utils.library_names import (
+    DEFAULT_LIBRARY_ALIASES,
+    DEFAULT_LIBRARY_NAME,
+    normalize_library_name as normalize_shared_library_name,
+)
 from app.utils.project_paths import DEFAULT_LIBRARY_ROOT as CANONICAL_DEFAULT_LIBRARY_ROOT
 from app.utils.project_paths import PROJECT_ROOT as CANONICAL_PROJECT_ROOT
 from app.utils.project_paths import canonical_registry_path
 
 
-DEFAULT_LIBRARY_NAME = "默认文献库"
 LEGACY_STORAGE_MODE = "storage"
 SHARED_STORAGE_MODE = "papers"
 LEGACY_LIBRARY_KIND = "web_library"
@@ -53,41 +57,50 @@ class LibraryManager:
     def default_library_root(cls) -> Path:
         return Path(cls.DEFAULT_LIBRARY_ROOT).resolve()
 
+    @classmethod
+    def normalize_library_name(cls, value: Any) -> str:
+        return normalize_shared_library_name(None if value is None else str(value))
+
+    @classmethod
+    def library_name_variants(cls, value: Any) -> tuple[str, ...]:
+        normalized = cls.normalize_library_name(value)
+        if normalized == DEFAULT_LIBRARY_NAME:
+            return tuple(sorted(DEFAULT_LIBRARY_ALIASES))
+        return (normalized,)
+
     def list_libraries(self) -> list[LibraryInfo]:
         registry = self._read_registry()
-        active_name = registry.get("active_library", DEFAULT_LIBRARY_NAME)
+        active_name = self.normalize_library_name(registry.get("active_library"))
         result: list[LibraryInfo] = []
         for entry in registry.get("libraries", []):
             root = Path(entry["root_path"])
+            name = self.normalize_library_name(entry.get("name"))
             result.append(
                 LibraryInfo(
-                    name=entry["name"],
+                    name=name,
                     root_path=entry["root_path"],
-                    description=entry.get("description", ""),
+                    description=str(entry.get("description") or ""),
                     paper_count=self._count_papers(root),
-                    is_active=entry["name"] == active_name,
+                    is_active=name == active_name,
                     created_at=entry.get("created_at"),
                 )
             )
         return result
 
     def create_library(self, name: str, root_path: str = "", description: str = "") -> LibraryInfo:
-        library_name = name.strip()
+        library_name = self.normalize_library_name(name)
         if not library_name:
-            raise ValueError("库名称不能为空")
+            raise ValueError("Library name cannot be empty")
 
         root = self._resolve_create_root(library_name, root_path)
         self._validate_path_safety(root)
 
         registry = self._read_registry()
         if self._find_entry(registry, library_name) is not None:
-            raise ValueError(f"库“{library_name}”已存在")
+            raise ValueError(f"Library '{library_name}' already exists")
 
         now_iso = datetime.utcnow().isoformat()
-        storage_mode = SHARED_STORAGE_MODE
-        library_kind = SHARED_LIBRARY_KIND
-
-        self.init_library_structure(root, storage_mode=storage_mode)
+        self.init_library_structure(root, storage_mode=SHARED_STORAGE_MODE)
         self.init_library_db(root)
         self._write_library_meta(
             root=root,
@@ -95,8 +108,8 @@ class LibraryManager:
                 name=library_name,
                 description=description,
                 created_at=now_iso,
-                storage_mode=storage_mode,
-                library_kind=library_kind,
+                storage_mode=SHARED_STORAGE_MODE,
+                library_kind=SHARED_LIBRARY_KIND,
             ),
         )
         self._ensure_shared_project_config(root, library_name)
@@ -104,7 +117,7 @@ class LibraryManager:
         registry.setdefault("libraries", []).append(
             {
                 "name": library_name,
-                "root_path": str(root),
+                "root_path": str(root.resolve()),
                 "description": description,
                 "created_at": now_iso,
             }
@@ -112,7 +125,7 @@ class LibraryManager:
         self._write_registry(registry)
         return LibraryInfo(
             name=library_name,
-            root_path=str(root),
+            root_path=str(root.resolve()),
             description=description,
             paper_count=0,
             is_active=False,
@@ -121,13 +134,14 @@ class LibraryManager:
 
     def activate_library(self, name: str) -> LibraryInfo:
         registry = self._read_registry()
-        entry = self._find_entry(registry, name)
+        normalized_name = self.normalize_library_name(name)
+        entry = self._find_entry(registry, normalized_name)
         if entry is None:
-            raise ValueError(f"库“{name}”不存在")
+            raise ValueError(f"Library '{normalized_name}' does not exist")
 
         root = Path(entry["root_path"]).resolve()
         if not root.exists():
-            raise ValueError(f"库路径不存在: {root}")
+            raise ValueError(f"Library path does not exist: {root}")
 
         meta = self._load_library_meta(root)
         storage_mode = self._resolve_storage_mode(root, meta)
@@ -136,19 +150,19 @@ class LibraryManager:
         if not db_path.exists():
             self.init_library_db(root)
 
-        storage_root = self._storage_root_for_mode(root, storage_mode)
-        database_url = f"sqlite:///{db_path.as_posix()}"
-
         from app.db.session import switch_database
 
-        switch_database(database_url, storage_root=str(storage_root))
+        switch_database(
+            f"sqlite:///{db_path.as_posix()}",
+            storage_root=str(self._storage_root_for_mode(root, storage_mode)),
+        )
 
-        registry["active_library"] = name
+        registry["active_library"] = normalized_name
         self._write_registry(registry)
 
         updated_meta = self._build_library_meta(
-            name=name,
-            description=entry.get("description", ""),
+            name=normalized_name,
+            description=str(entry.get("description") or ""),
             created_at=entry.get("created_at"),
             storage_mode=storage_mode,
             library_kind=self._resolve_library_kind(root, meta, storage_mode),
@@ -157,37 +171,42 @@ class LibraryManager:
         updated_meta["last_accessed"] = datetime.utcnow().isoformat()
         self._write_library_meta(root, updated_meta)
         if storage_mode == SHARED_STORAGE_MODE:
-            self._ensure_shared_project_config(root, name)
+            self._ensure_shared_project_config(root, normalized_name)
 
         return LibraryInfo(
-            name=name,
+            name=normalized_name,
             root_path=str(root),
-            description=entry.get("description", ""),
+            description=str(entry.get("description") or ""),
             paper_count=self._count_papers(root),
             is_active=True,
             created_at=entry.get("created_at"),
         )
 
     def unregister_library(self, name: str) -> LibraryInfo:
-        if name == DEFAULT_LIBRARY_NAME:
-            raise ValueError("默认文献库不能移除")
+        normalized_name = self.normalize_library_name(name)
+        if normalized_name == DEFAULT_LIBRARY_NAME:
+            raise ValueError("Default library cannot be removed")
 
         registry = self._read_registry()
-        entry = self._find_entry(registry, name)
+        entry = self._find_entry(registry, normalized_name)
         if entry is None:
-            raise ValueError(f"库“{name}”不存在")
+            raise ValueError(f"Library '{normalized_name}' does not exist")
 
         info = LibraryInfo(
-            name=name,
+            name=normalized_name,
             root_path=entry["root_path"],
-            description=entry.get("description", ""),
+            description=str(entry.get("description") or ""),
             paper_count=self._count_papers(Path(entry["root_path"])),
             is_active=False,
             created_at=entry.get("created_at"),
         )
-        registry["libraries"] = [item for item in registry.get("libraries", []) if item["name"] != name]
+        registry["libraries"] = [
+            item
+            for item in registry.get("libraries", [])
+            if self.normalize_library_name(item.get("name")) != normalized_name
+        ]
 
-        if registry.get("active_library") == name:
+        if self.normalize_library_name(registry.get("active_library")) == normalized_name:
             registry["active_library"] = DEFAULT_LIBRARY_NAME
             default_entry = self._find_entry(registry, DEFAULT_LIBRARY_NAME)
             if default_entry:
@@ -212,7 +231,7 @@ class LibraryManager:
         root = Path(root_path).resolve()
         self._validate_path_safety(root)
         if not root.exists():
-            raise ValueError(f"路径不存在: {root}")
+            raise ValueError(f"Path does not exist: {root}")
 
         meta = self._load_library_meta(root)
         project_config = self._load_project_config(root)
@@ -225,12 +244,13 @@ class LibraryManager:
             or str(project_config.get("project_name") or "").strip()
             or root.name
         )
+        name = self.normalize_library_name(name)
         if not name:
-            raise ValueError("无法从目标文件夹识别库名称")
+            raise ValueError("Unable to infer library name from the target folder")
 
         registry = self._read_registry()
         if self._find_entry(registry, name) is not None:
-            raise ValueError(f"库“{name}”已存在（路径: {root}）。若要重新导入请先移除现有注册。")
+            raise ValueError(f"Library '{name}' already exists for path {root}")
 
         self.init_library_structure(root, storage_mode=storage_mode)
         if not (root / "database.sqlite").exists():
@@ -271,7 +291,7 @@ class LibraryManager:
 
     def get_active_library(self) -> LibraryInfo | None:
         registry = self._read_registry()
-        active_name = registry.get("active_library", DEFAULT_LIBRARY_NAME)
+        active_name = self.normalize_library_name(registry.get("active_library"))
         entry = self._find_entry(registry, active_name)
         if entry is None:
             return None
@@ -279,7 +299,7 @@ class LibraryManager:
         return LibraryInfo(
             name=active_name,
             root_path=entry["root_path"],
-            description=entry.get("description", ""),
+            description=str(entry.get("description") or ""),
             paper_count=self._count_papers(root),
             is_active=True,
             created_at=entry.get("created_at"),
@@ -300,53 +320,53 @@ class LibraryManager:
     @staticmethod
     def init_library_db(root: Path) -> None:
         db_path = root / "database.sqlite"
-        database_url = f"sqlite:///{db_path.as_posix()}"
         from app.db.session import init_db
 
-        init_db(database_url)
+        init_db(f"sqlite:///{db_path.as_posix()}")
 
     def _ensure_registry(self) -> None:
         registry_path = self.registry_path()
-        default_library_root = self.default_library_root()
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         if not registry_path.exists():
-            now_iso = datetime.utcnow().isoformat()
-            registry: dict[str, Any] = {
-                "version": REGISTRY_VERSION,
-                "active_library": DEFAULT_LIBRARY_NAME,
-                "libraries": [
-                    {
-                        "name": DEFAULT_LIBRARY_NAME,
-                        "root_path": str(default_library_root),
-                        "description": DEFAULT_LIBRARY_NAME,
-                        "created_at": now_iso,
-                    }
-                ],
-            }
-            self._write_registry(registry)
+            self._write_registry(
+                {
+                    "version": REGISTRY_VERSION,
+                    "active_library": DEFAULT_LIBRARY_NAME,
+                    "libraries": [
+                        {
+                            "name": DEFAULT_LIBRARY_NAME,
+                            "root_path": str(self.default_library_root()),
+                            "description": DEFAULT_LIBRARY_NAME,
+                            "created_at": datetime.utcnow().isoformat(),
+                        }
+                    ],
+                }
+            )
 
         registry = self._read_registry()
         default_entry = self._find_entry(registry, DEFAULT_LIBRARY_NAME)
         if default_entry is None:
-            now_iso = datetime.utcnow().isoformat()
-            default_entry = {
-                "name": DEFAULT_LIBRARY_NAME,
-                "root_path": str(default_library_root),
-                "description": DEFAULT_LIBRARY_NAME,
-                "created_at": now_iso,
-            }
-            registry.setdefault("libraries", []).append(default_entry)
-            if not registry.get("active_library"):
-                registry["active_library"] = DEFAULT_LIBRARY_NAME
+            registry.setdefault("libraries", []).insert(
+                0,
+                {
+                    "name": DEFAULT_LIBRARY_NAME,
+                    "root_path": str(self.default_library_root()),
+                    "description": DEFAULT_LIBRARY_NAME,
+                    "created_at": datetime.utcnow().isoformat(),
+                },
+            )
+            registry["active_library"] = DEFAULT_LIBRARY_NAME
             self._write_registry(registry)
+            default_entry = self._find_entry(registry, DEFAULT_LIBRARY_NAME)
 
+        assert default_entry is not None
         default_root = Path(default_entry["root_path"]).resolve()
         self.init_library_structure(default_root, storage_mode=LEGACY_STORAGE_MODE)
         if not (default_root / "database.sqlite").exists():
             self.init_library_db(default_root)
         default_meta = self._build_library_meta(
             name=DEFAULT_LIBRARY_NAME,
-            description=default_entry.get("description", DEFAULT_LIBRARY_NAME),
+            description=str(default_entry.get("description") or DEFAULT_LIBRARY_NAME),
             created_at=default_entry.get("created_at"),
             storage_mode=LEGACY_STORAGE_MODE,
             library_kind=LEGACY_LIBRARY_KIND,
@@ -368,23 +388,108 @@ class LibraryManager:
             data = json.loads(registry_path.read_text(encoding="utf-8"))
         except Exception:
             return {"version": REGISTRY_VERSION, "active_library": DEFAULT_LIBRARY_NAME, "libraries": []}
-        data.setdefault("version", REGISTRY_VERSION)
-        data.setdefault("active_library", DEFAULT_LIBRARY_NAME)
-        data.setdefault("libraries", [])
-        return data
+        if not isinstance(data, dict):
+            return {"version": REGISTRY_VERSION, "active_library": DEFAULT_LIBRARY_NAME, "libraries": []}
+        normalized = self._normalize_registry_payload(data)
+        if normalized != data:
+            self._write_registry(normalized)
+        return normalized
 
     def _write_registry(self, registry: dict[str, Any]) -> None:
         registry_path = self.registry_path()
-        registry["version"] = REGISTRY_VERSION
+        normalized = self._normalize_registry_payload(registry)
+        normalized["version"] = REGISTRY_VERSION
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = registry_path.with_suffix(".json.tmp")
-        tmp_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp_path.replace(registry_path)
 
+    @classmethod
+    def _normalize_registry_payload(cls, registry: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {
+            "version": int(registry.get("version") or REGISTRY_VERSION),
+            "active_library": cls.normalize_library_name(registry.get("active_library")),
+            "libraries": [],
+        }
+        seen: set[str] = set()
+        for raw_entry in registry.get("libraries", []):
+            if not isinstance(raw_entry, dict):
+                continue
+            name = cls.normalize_library_name(raw_entry.get("name"))
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized["libraries"].append(
+                {
+                    "name": name,
+                    "root_path": cls._normalize_registry_root_path(name, raw_entry.get("root_path")),
+                    "description": str(raw_entry.get("description") or name),
+                    "created_at": raw_entry.get("created_at"),
+                }
+            )
+        if cls._find_entry(normalized, DEFAULT_LIBRARY_NAME) is None:
+            normalized["libraries"].insert(
+                0,
+                {
+                    "name": DEFAULT_LIBRARY_NAME,
+                    "root_path": str(cls.default_library_root()),
+                    "description": DEFAULT_LIBRARY_NAME,
+                    "created_at": datetime.utcnow().isoformat(),
+                },
+            )
+        if cls._find_entry(normalized, normalized.get("active_library")) is None:
+            normalized["active_library"] = DEFAULT_LIBRARY_NAME
+        return normalized
+
+    @classmethod
+    def _normalize_registry_root_path(cls, library_name: str, root_path: Any) -> str:
+        text = str(root_path or "").strip()
+        if cls.normalize_library_name(library_name) == DEFAULT_LIBRARY_NAME and cls._is_default_library_root_residue(text):
+            return str(cls.default_library_root())
+        if not text:
+            return str(cls.default_library_root() if cls.normalize_library_name(library_name) == DEFAULT_LIBRARY_NAME else "")
+        return str(Path(text).resolve())
+
+    @classmethod
+    def _is_default_library_root_residue(cls, root_path: str) -> bool:
+        text = str(root_path or "").strip()
+        if not text:
+            return True
+
+        normalized = text.replace("\\", "/").lower()
+        historical_markers = (
+            "backend/data/libraries/default",
+            "literature-ai/backend/data/libraries/default",
+            "ai-shujvku/literature-ai/backend/data/libraries/default",
+            "ai检索数据库/literature-ai/backend/data/libraries/default",
+            "/app/d:",
+            "d:/desktop/",
+            "\uf03a",
+            "\uf05c",
+            "娴狅絿",
+            "瀵偓",
+        )
+        if any(marker in normalized for marker in historical_markers):
+            return True
+
+        try:
+            resolved = Path(text).resolve()
+        except OSError:
+            return True
+
+        if resolved == cls.default_library_root().resolve():
+            return True
+
+        resolved_parts = [part.lower() for part in resolved.parts]
+        suffix = ["data", "libraries", "default"]
+        return len(resolved_parts) >= len(suffix) and resolved_parts[-len(suffix) :] == suffix
+
     @staticmethod
-    def _find_entry(registry: dict[str, Any], name: str) -> dict[str, Any] | None:
+    def _find_entry(registry: dict[str, Any], name: str | None) -> dict[str, Any] | None:
+        target = LibraryManager.normalize_library_name(name)
         for entry in registry.get("libraries", []):
-            if entry.get("name") == name:
+            if LibraryManager.normalize_library_name(entry.get("name")) == target:
                 return entry
         return None
 
@@ -402,9 +507,9 @@ class LibraryManager:
             return {}
         try:
             payload = json.loads(meta_path.read_text(encoding="utf-8"))
-            return payload if isinstance(payload, dict) else {}
         except Exception:
             return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _write_library_meta(self, root: Path, payload: dict[str, Any]) -> None:
         self._meta_path(root).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -416,9 +521,9 @@ class LibraryManager:
             return {}
         try:
             payload = json.loads(config_path.read_text(encoding="utf-8"))
-            return payload if isinstance(payload, dict) else {}
         except Exception:
             return {}
+        return payload if isinstance(payload, dict) else {}
 
     @staticmethod
     def _resolve_storage_mode(root: Path, meta: dict[str, Any] | None = None) -> str:
@@ -504,4 +609,4 @@ class LibraryManager:
         dangerous = ["/", "C:\\", "C:/", os.path.expanduser("~")]
         for danger in dangerous:
             if resolved.rstrip("/\\") == danger.rstrip("/\\"):
-                raise ValueError(f"路径 {path} 是系统目录，拒绝操作")
+                raise ValueError(f"Refusing to operate on system path: {path}")

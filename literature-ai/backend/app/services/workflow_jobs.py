@@ -28,10 +28,16 @@ from app.services.paper_identity import PaperIdentityService
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.library_names import (
+    DEFAULT_LIBRARY_ALIASES,
+    DEFAULT_LIBRARY_NAME,
+    build_library_name_clause,
+    library_name_variants,
+    normalize_library_name,
+)
 
 
 logger = logging.getLogger(__name__)
-DEFAULT_LIBRARY_NAME = "\u9ed8\u8ba4\u6587\u732e\u5e93"
 JOB_TYPE_AI_WORKFLOW = "ai_workflow"
 JOB_TYPE_CLASSIFY_BATCH = "classify_batch"
 JOB_TYPE_EXTRACTION = "extraction"
@@ -65,10 +71,6 @@ class JobPreflightError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
         super().__init__(message)
-
-
-def normalize_library_name(library_name: str | None) -> str:
-    return (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
 
 
 def validate_job_status(status: str) -> str:
@@ -107,7 +109,7 @@ def serialize_job(job: WorkflowJob) -> dict[str, Any]:
         "failure_explanation": build_job_failure_explanation(job, summary),
         "created_at": job.created_at.replace(tzinfo=timezone.utc).isoformat() if job.created_at else None,
         "updated_at": job.updated_at.replace(tzinfo=timezone.utc).isoformat() if job.updated_at else None,
-        "library_name": job.library_name,
+        "library_name": normalize_library_name(job.library_name),
     }
 
 
@@ -366,7 +368,7 @@ def find_active_equivalent_job(
     stmt = (
         select(WorkflowJob)
         .where(WorkflowJob.type == job_type)
-        .where(WorkflowJob.library_name == normalize_library_name(library_name))
+        .where(build_library_name_clause(WorkflowJob.library_name, library_name))
         .where(WorkflowJob.status.in_(ACTIVE_JOB_STATUSES))
         .order_by(desc(WorkflowJob.created_at))
         .limit(100)
@@ -421,7 +423,7 @@ def list_jobs(
     if job_type:
         stmt = stmt.where(WorkflowJob.type == job_type)
     if library_name:
-        stmt = stmt.where(WorkflowJob.library_name == normalize_library_name(library_name))
+        stmt = stmt.where(build_library_name_clause(WorkflowJob.library_name, library_name))
     if status:
         stmt = stmt.where(WorkflowJob.status == validate_job_status(status))
     stmt = stmt.order_by(desc(WorkflowJob.created_at)).limit(limit)
@@ -901,7 +903,7 @@ def run_classify_batch_sync(
     settings: Settings,
 ) -> dict[str, Any]:
     target_library = normalize_library_name(payload.library_name)
-    stmt = select(Paper).where(Paper.library_name == target_library)
+    stmt = select(Paper).where(build_library_name_clause(Paper.library_name, target_library))
     if not payload.overwrite:
         stmt = stmt.where((Paper.paper_type.is_(None)) | (Paper.paper_type == "Unknown"))
 
@@ -954,7 +956,7 @@ def run_classify_batch_job(job_id: str, control_database_url: str | None = None)
         with session_scope(runtime_settings.database_url) as job_session:
             assert_job_not_cancelled(job_session, job_id)
             target_library = normalize_library_name(payload.library_name)
-            stmt = select(Paper).where(Paper.library_name == target_library)
+            stmt = select(Paper).where(build_library_name_clause(Paper.library_name, target_library))
             if not payload.overwrite:
                 stmt = stmt.where((Paper.paper_type.is_(None)) | (Paper.paper_type == "Unknown"))
 

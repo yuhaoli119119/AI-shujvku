@@ -387,6 +387,32 @@ def test_list_papers_filters_by_library_and_lists_libraries(setup_test_db):
     assert libraries["库B"] == 1
 
 
+def test_default_library_aliases_are_merged_in_listing(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        session.add_all(
+            [
+                Paper(title="Default Paper", pdf_path="a.pdf", library_name="默认文献库"),
+                Paper(title="Alias Paper", pdf_path="b.pdf", library_name="?????"),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/papers", params={"library_name": "默认文献库"})
+    assert response.status_code == 200
+    data = response.json()
+    assert {item["title"] for item in data} == {"Default Paper", "Alias Paper"}
+    assert {item["library_name"] for item in data} == {"默认文献库"}
+
+    response = client.get("/api/papers/libraries")
+    assert response.status_code == 200
+    libraries = {item["name"]: item["paper_count"] for item in response.json()}
+    assert libraries["默认文献库"] == 2
+
+
 def test_ai_workflow_downloads_and_ingests_results(setup_test_db, monkeypatch):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)

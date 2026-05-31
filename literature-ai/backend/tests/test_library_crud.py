@@ -93,3 +93,80 @@ def test_library_manager():
         shutil.rmtree(tmp_dir, ignore_errors=True)
         if original_data is not None:
             original_registry.write_text(original_data, encoding="utf-8")
+
+
+def test_library_manager_normalizes_mojibake_default_registry(tmp_path):
+    registry_path = tmp_path / "library_registry.json"
+    default_root = tmp_path / "libraries" / "default"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "榛樿鏂囩尞搴?",
+                "libraries": [
+                    {
+                        "name": "?????",
+                        "root_path": str(default_root),
+                        "description": "榛樿鏂囩尞搴?",
+                        "created_at": "2026-05-31T00:00:00",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    original_registry = LibraryManager.REGISTRY_PATH
+    original_default_root = LibraryManager.DEFAULT_LIBRARY_ROOT
+    try:
+        LibraryManager.REGISTRY_PATH = registry_path
+        LibraryManager.DEFAULT_LIBRARY_ROOT = default_root
+        manager = LibraryManager()
+        active = manager.get_active_library()
+        assert active is not None
+        assert active.name == DEFAULT_LIBRARY_NAME
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        assert payload["active_library"] == DEFAULT_LIBRARY_NAME
+        assert payload["libraries"][0]["name"] == DEFAULT_LIBRARY_NAME
+    finally:
+        LibraryManager.REGISTRY_PATH = original_registry
+        LibraryManager.DEFAULT_LIBRARY_ROOT = original_default_root
+
+
+def test_library_manager_normalizes_historical_windows_default_root(tmp_path):
+    registry_path = tmp_path / "library_registry.json"
+    default_root = tmp_path / "libraries" / "default"
+    historical_root = r"D:\Desktop\代码开发\AI检索数据库\literature-ai\backend\data\libraries\default"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": DEFAULT_LIBRARY_NAME,
+                "libraries": [
+                    {
+                        "name": DEFAULT_LIBRARY_NAME,
+                        "root_path": historical_root,
+                        "description": DEFAULT_LIBRARY_NAME,
+                        "created_at": "2026-05-31T00:00:00",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    original_registry = LibraryManager.REGISTRY_PATH
+    original_default_root = LibraryManager.DEFAULT_LIBRARY_ROOT
+    try:
+        LibraryManager.REGISTRY_PATH = registry_path
+        LibraryManager.DEFAULT_LIBRARY_ROOT = default_root
+        LibraryManager()
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        assert payload["libraries"][0]["root_path"] == str(default_root.resolve())
+    finally:
+        LibraryManager.REGISTRY_PATH = original_registry
+        LibraryManager.DEFAULT_LIBRARY_ROOT = original_default_root

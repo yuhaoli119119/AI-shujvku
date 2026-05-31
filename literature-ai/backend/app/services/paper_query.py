@@ -39,6 +39,7 @@ from app.schemas.api import (
     WritingCardResponse,
     FigureDataPointResponse,
 )
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import writing_card_gate
 
 
@@ -51,7 +52,7 @@ class PaperQueryService:
         query = select(Paper).order_by(Paper.created_at.desc())
 
         if filters.library_name:
-            query = query.where(Paper.library_name == filters.library_name)
+            query = query.where(build_library_name_clause(Paper.library_name, filters.library_name))
         if filters.q:
             for kw in filters.q.strip().split():
                 keyword = f"%{kw}%"
@@ -248,7 +249,7 @@ class PaperQueryService:
         return PaperListItemResponse(
             id=paper.id,
             serial_number=paper.serial_number,
-            library_name=paper.library_name or "\u9ed8\u8ba4\u6587\u732e\u5e93",
+            library_name=normalize_library_name(paper.library_name),
             doi=paper.doi,
             title=paper.title,
             year=paper.year,
