@@ -364,20 +364,25 @@ class DFTResultsExtractor:
         logger.info("Running rule-based DFT extraction")
         all_results: list[DFTResultItem] = []
 
-        full_text_parts: list[str] = [abstract]
+        full_text_parts: list[str] = []
+        if abstract:
+            full_text_parts.append(abstract)
+            
         sec_text_map: dict[int, tuple[str, int | None]] = {}
-        offset = 0
+        offset = len(abstract) + 2 if abstract else 0
+        
         for sec in sections:
             txt = getattr(sec, "text", "") or ""
             title = getattr(sec, "section_title", "") or None
             ps = getattr(sec, "page_start", None)
             if txt:
                 sec_text_map[offset] = (title, ps)
-                full_text_parts.append(f"\n\n{txt}")
-                offset += len(txt) + 2
+                full_text_parts.append(txt)
+                offset += len(txt) + 2  # +2 for the '\n\n' from join
         if markdown:
             sec_text_map[offset] = ("markdown", None)
-            full_text_parts.append(f"\n\n{markdown}")
+            full_text_parts.append(markdown)
+            
         full_text = "\n\n".join(full_text_parts)
 
         for cat in self.categories:
