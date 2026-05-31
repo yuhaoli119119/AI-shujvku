@@ -13,6 +13,7 @@ from app.rag.backends import resolve_writer_backend
 from app.rag.citation_guard import CitationGuard
 from app.rag.prompt_builder import PaperWriterPromptBuilder
 from app.rag.retriever import Retriever
+from app.utils.paper_type import normalize_paper_type_filter
 from app.services.evidence_service import EvidenceService
 
 
@@ -43,7 +44,7 @@ class Writer:
         requested = sections or ["outline", "introduction", "dft_results", "discussion", "figure_storyline"]
         query = " ".join(part for part in [topic, user_notes or ""] if part)
         
-        paper_type_filter = [target_paper_type[0]] if target_paper_type else None
+        paper_type_filter = normalize_paper_type_filter(target_paper_type)
         
         retrieved = self.retriever.retrieve(
             query=query, 

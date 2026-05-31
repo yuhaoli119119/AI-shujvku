@@ -8,32 +8,6 @@ class DFTSettingsExtractor:
     Extracts DFT computational settings from paper documents using rule-based/regex techniques.
     """
     def __init__(self, config_path: str = None):
-        self.rules = {}
-        # Try to load rules from YAML configuration
-        if not config_path:
-            possible_paths = [
-                Path(__file__).resolve().parents[3] / "prompts" / "dft_settings.yaml",
-                Path(__file__).resolve().parents[2] / "prompts" / "dft_settings.yaml",
-                Path("prompts/dft_settings.yaml"),
-                Path("../prompts/dft_settings.yaml"),
-            ]
-            for p in possible_paths:
-                if p.exists():
-                    try:
-                        with open(p, "r", encoding="utf-8") as f:
-                            self.rules = yaml.safe_load(f) or {}
-                        break
-                    except Exception:
-                        pass
-        else:
-            p = Path(config_path)
-            if p.exists():
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        self.rules = yaml.safe_load(f) or {}
-                except Exception:
-                    pass
-
         # Priority section names for extraction (case-insensitive substring match)
         self.priority_sections = [
             "computational details",
@@ -65,13 +39,13 @@ class DFTSettingsExtractor:
 
         # 3. Dispersion Correction
         self.dispersion_pattern = re.compile(
-            r"\b(DFT-D3\(BJ\)|DFT-D3|D3\(BJ\)|D3|DFT-D2|D2|DFT-D|Grimme(?:\'s)?\s*(?:D3|D2|dispersion)|Tkatchenko-Scheffler|TS\s+dispersion|vdW-DF2|vdW-DF)\b",
+            r"\b(DFT-D3\(BJ\)|DFT-D3|D3\(BJ\)|D3|DFT-D2|D2|DFT-D|Grimme(?:\'s)?\s*(?:D3|D2|dispersion)|Tkatchenko-Scheffler|TS\s+dispersion|vdW-DF2|vdW-DF)(?![A-Za-z0-9])",
             re.IGNORECASE
         )
 
         # 4. Pseudopotential / Basis Set
         self.basis_pattern = re.compile(
-            r"\b(PAW|Projector\s+Augmented\s+Wave|USPP|ultrasoft\s+pseudopotential|norm-conserving|6-31G\(d\)|6-31G\*|6-31\+G\*|6-311\+G\(d,p\)|6-31\+G\(d,p\)|6-311G\*\*|def2-SVP|def2-TZVP|def2SVP|def2TZVP|LANL2DZ|double-zeta|triple-zeta|DZVP|TZVP|cc-pVDZ|cc-pVTZ)\b",
+            r"\b(PAW|Projector\s+Augmented\s+Wave|USPP|ultrasoft\s+pseudopotential|norm-conserving|6-31G\(d\)|6-31G\*|6-31\+G\*|6-311\+G\(d,p\)|6-31\+G\(d,p\)|6-311G\*\*|def2-SVP|def2-TZVP|def2SVP|def2TZVP|LANL2DZ|double-zeta|triple-zeta|DZVP|TZVP|cc-pVDZ|cc-pVTZ)(?![A-Za-z0-9])",
             re.IGNORECASE
         )
 

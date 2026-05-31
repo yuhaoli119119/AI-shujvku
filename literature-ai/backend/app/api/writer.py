@@ -24,21 +24,10 @@ def update_env_file(
     writer_api_key: str | None,
     writer_fallback_backend: str,
 ):
-    from pathlib import Path
+    from app.utils.project_paths import BACKEND_ROOT
 
-    # 查找 env 路径
-    env_paths = [
-        Path(".env"),
-        Path(__file__).resolve().parents[2] / ".env",  # literature-ai/.env
-        Path(__file__).resolve().parents[3] / ".env",  # 根目录/.env
-    ]
-    env_path = None
-    for p in env_paths:
-        if p.exists():
-            env_path = p
-            break
-    if not env_path:
-        env_path = Path(".env")
+    # Determine deterministic env path
+    env_path = BACKEND_ROOT / ".env"
 
     lines = []
     if env_path.exists():

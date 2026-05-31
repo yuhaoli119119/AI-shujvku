@@ -38,19 +38,27 @@ class GrobidParser:
             "teiCoordinates": "head,ref,biblStruct,figure,formula",
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            with pdf_path.open("rb") as handle:
-                response = await client.post(
-                    endpoint,
-                    data=data,
-                    files={"input": (pdf_path.name, handle, "application/pdf")},
-                )
-            response.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                with pdf_path.open("rb") as handle:
+                    response = await client.post(
+                        endpoint,
+                        data=data,
+                        files={"input": (pdf_path.name, handle, "application/pdf")},
+                    )
+                response.raise_for_status()
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Grobid network request failed: {e}") from e
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"Grobid returned HTTP error: {e.response.status_code}") from e
         tei_xml = response.text
         return self._parse_tei(tei_xml)
 
     def _parse_tei(self, tei_xml: str) -> GrobidParseResult:
-        root = etree.fromstring(tei_xml.encode("utf-8"))
+        try:
+            root = etree.fromstring(tei_xml.encode("utf-8"))
+        except etree.XMLSyntaxError as e:
+            raise RuntimeError(f"Failed to parse TEI XML: {e}") from e
 
         title = self._join_text(root.xpath("//tei:titleStmt/tei:title/text()", namespaces=NS))
         abstract = self._join_text(

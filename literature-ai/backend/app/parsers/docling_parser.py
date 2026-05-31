@@ -184,8 +184,11 @@ class DoclingParser:
             reader = PdfReader(str(pdf_path))
             for page in reader.pages:
                 text_pages.append(page.extract_text() or "")
-        except Exception:
-            text_pages = []
+        except Exception as e:
+            raise RuntimeError(f"Failed to read PDF file {pdf_path}: {e}") from e
+
+        if not text_pages:
+            raise RuntimeError(f"No pages extracted from PDF file {pdf_path}. The file may be empty or corrupted.")
 
         markdown_parts = []
         page_blocks = []

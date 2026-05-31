@@ -299,17 +299,16 @@ class Retriever:
         paper_type_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         from app.db.models import PaperFigure
-        query = select(FigureDataPoint)
+        query = select(FigureDataPoint, PaperFigure.caption).outerjoin(
+            PaperFigure, FigureDataPoint.figure_id == PaperFigure.id
+        )
         if paper_ids:
             query = query.where(FigureDataPoint.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, FigureDataPoint, paper_type_filter)
-        rows = self.session.scalars(query).all()
+        rows = self.session.execute(query).all()
         results = []
-        for row in rows:
-            fig_caption = ""
-            fig_obj = self.session.scalar(select(PaperFigure).where(PaperFigure.id == row.figure_id))
-            if fig_obj and fig_obj.caption:
-                fig_caption = fig_obj.caption
+        for row, caption in rows:
+            fig_caption = caption or ""
 
             haystack = " ".join(
                 filter(
@@ -397,7 +396,7 @@ class Retriever:
         best_scores: dict[str, float] = {}
         for items in retrieved.values():
             for item in items:
-                text_content = item.get("text", "") or item.get("evidence_text", "")
+                text_content = str(item.get("text") or item.get("evidence_text") or "")
                 fingerprint = text_content.strip().lower()[:80]
                 dedup_key = f"{item.get('paper_id', '')}::{fingerprint}"
                 score = item.get("score", 0.0)
@@ -409,7 +408,7 @@ class Retriever:
         for type_name, items in retrieved.items():
             filtered: list[dict[str, Any]] = []
             for item in items:
-                text_content = item.get("text", "") or item.get("evidence_text", "")
+                text_content = str(item.get("text") or item.get("evidence_text") or "")
                 fingerprint = text_content.strip().lower()[:80]
                 dedup_key = f"{item.get('paper_id', '')}::{fingerprint}"
                 score = item.get("score", 0.0)

@@ -63,12 +63,15 @@ class EvidenceService:
             meta=payload.metadata,
         )
         self.session.add(row)
-        self.session.commit()
-        self.session.refresh(row)
-        self.locators.create_locator_for_claim(row, ev)
-        self.session.commit()
-        self.session.refresh(row)
-        return self._claim_row_to_schema(row)
+        self.session.flush()
+        try:
+            self.locators.create_locator_for_claim(row, ev)
+            self.session.commit()
+            self.session.refresh(row)
+            return self._claim_row_to_schema(row)
+        except Exception:
+            self.session.rollback()
+            raise
 
     def list_claims(
         self,
@@ -94,7 +97,7 @@ class EvidenceService:
     def evidence_refs_for_papers(self, paper_ids: list[UUID] | None = None, limit: int = 500) -> list[EvidenceRef]:
         refs: list[EvidenceRef] = []
 
-        span_stmt = select(EvidenceSpan)
+        span_stmt = select(EvidenceSpan).order_by(EvidenceSpan.id.asc())
         if paper_ids:
             span_stmt = span_stmt.where(EvidenceSpan.paper_id.in_(paper_ids))
         for span in self.session.scalars(span_stmt.limit(limit)).all():
@@ -232,18 +235,28 @@ class EvidenceService:
         if target_type and target_type not in {"dft_result", "mechanism_claim", "electrochemical_performance", "writing_card"}:
             return derived
 
+        valid_target_uuid = None
+        if target_id:
+            try:
+                valid_target_uuid = UUID(target_id)
+            except ValueError:
+                return []
+
         dft_stmt = select(DFTResult)
         mech_stmt = select(MechanismClaim)
         perf_stmt = select(ElectrochemicalPerformance)
         card_stmt = select(WritingCard)
+
         if paper_id:
             dft_stmt = dft_stmt.where(DFTResult.paper_id == paper_id)
             mech_stmt = mech_stmt.where(MechanismClaim.paper_id == paper_id)
             perf_stmt = perf_stmt.where(ElectrochemicalPerformance.paper_id == paper_id)
             card_stmt = card_stmt.where(WritingCard.paper_id == paper_id)
-        if target_id:
-            # UUID comparisons are fragile across SQLite/Postgres here; filter after fetch.
-            pass
+        if valid_target_uuid:
+            dft_stmt = dft_stmt.where(DFTResult.id == valid_target_uuid)
+            mech_stmt = mech_stmt.where(MechanismClaim.id == valid_target_uuid)
+            perf_stmt = perf_stmt.where(ElectrochemicalPerformance.id == valid_target_uuid)
+            card_stmt = card_stmt.where(WritingCard.id == valid_target_uuid)
 
         if not target_type or target_type == "dft_result":
             for row in self.session.scalars(dft_stmt).all():

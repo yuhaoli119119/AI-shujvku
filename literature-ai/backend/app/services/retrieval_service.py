@@ -10,6 +10,7 @@ from app.db.models import PaperSection
 from app.rag.retriever import Retriever
 from app.schemas.evidence import EvidenceRef, PageSpan
 from app.schemas.retrieval import RetrievalSearchRequest, RetrievalSearchResponse, RetrievalSearchResult
+from app.utils.paper_type import normalize_paper_type_filter
 
 
 class NoopReranker:
@@ -36,7 +37,7 @@ class RetrievalService:
                 paper_ids=payload.paper_ids or None,
                 limit_per_type=payload.limit_per_type,
                 target_paper_type=payload.target_paper_type,
-                paper_type_filter=[payload.target_paper_type[0]] if payload.target_paper_type else None,
+                paper_type_filter=normalize_paper_type_filter(payload.target_paper_type),
             )
             items = self._flatten_retrieved(retrieved)
 

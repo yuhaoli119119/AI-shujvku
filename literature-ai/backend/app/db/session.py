@@ -104,11 +104,11 @@ def init_db(database_url: str) -> None:
                         counters: dict[str, int] = {}
                         for row in rows:
                             lib = row[1] or "\u9ed8\u8ba4\u6587\u732e\u5e93"
-                            max_q = connection.execute(
-                                text("SELECT MAX(serial_number) FROM papers WHERE library_name = :lib AND serial_number IS NOT NULL"),
-                                {"lib": lib}
-                            ).scalar()
                             if lib not in counters:
+                                max_q = connection.execute(
+                                    text("SELECT MAX(serial_number) FROM papers WHERE library_name = :lib AND serial_number IS NOT NULL"),
+                                    {"lib": lib}
+                                ).scalar()
                                 counters[lib] = (max_q or 0)
                             counters[lib] += 1
                             connection.execute(

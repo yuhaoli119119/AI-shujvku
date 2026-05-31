@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import yaml
+
+from app.utils.paper_type import normalize_paper_type_filter
 
 
 class PaperWriterPromptBuilder:
@@ -68,8 +71,9 @@ class PaperWriterPromptBuilder:
 
         # 注入论文分类上下文到 system prompt
         target_paper_type = prompt_payload.get("target_paper_type")
+        normalized_filter = normalize_paper_type_filter(target_paper_type)
         if target_paper_type:
-            type_key = target_paper_type[0] if target_paper_type else None
+            type_key = normalized_filter[0] if normalized_filter else None
             hint = self._TYPE_HINTS.get(type_key, "")
             if hint:
                 system += f"\n\n[论文类型上下文] 本篇目标论文分类: {target_paper_type}。{hint}"
