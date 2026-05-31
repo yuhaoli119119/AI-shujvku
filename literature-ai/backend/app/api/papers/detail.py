@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -268,12 +268,7 @@ async def get_paper_evidence_locators(
     return EvidenceLocatorService(session).list_locators_for_paper(paper_id)
 
 
-@router.get("/{paper_id}/pdf")
-async def get_paper_pdf(
-    paper_id: UUID,
-    session: Session = Depends(get_db_session),
-):
-    """Serve the PDF file for a paper, for in-browser preview."""
+def _resolve_paper_pdf_path(paper_id: UUID, session: Session) -> Path:
     paper = session.get(Paper, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
@@ -283,4 +278,31 @@ async def get_paper_pdf(
     file_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
     if file_path is None or not file_path.exists():
         raise HTTPException(status_code=404, detail="PDF file missing on disk")
+    return file_path
+
+
+@router.head("/{paper_id}/pdf")
+async def head_paper_pdf(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+):
+    """Probe PDF availability without downloading it."""
+    file_path = _resolve_paper_pdf_path(paper_id, session)
+    return Response(
+        status_code=200,
+        media_type="application/pdf",
+        headers={
+            "Content-Length": str(file_path.stat().st_size),
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
+@router.get("/{paper_id}/pdf")
+async def get_paper_pdf(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+):
+    """Serve the PDF file for a paper, for in-browser preview."""
+    file_path = _resolve_paper_pdf_path(paper_id, session)
     return FileResponse(str(file_path), media_type="application/pdf")

@@ -225,7 +225,9 @@ function renderAIWorkflowJob(job) {
     setAcquisitionResult(
         '<div class="writer-block"><h3>AI 后台检索 / 收录任务</h3>' +
         '<div class="subtle">任务：' + esc(job.job_id || "-") + " | 状态：" + esc(job.status || "-") + " | 库：" + esc(job.library_name || getCurrentLibraryName() || "-") + "</div>" +
-        '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div>" +
+        renderAIWorkflowJobSummary(job) +
+        renderJobFailureExplanation(job) +
+        '<details style="margin-top:12px;"><summary class="subtle" style="cursor:pointer;">查看原始进度 JSON</summary><div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div></details>" +
         (job.error ? '<div class="subtle" style="margin-top:10px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
         "</div>" +
         (result.prompt_used ? '<div class="section-card"><h3>实际检索式</h3><div class="mono">' + esc(result.prompt_used) + "</div></div>" : "") +
@@ -257,6 +259,27 @@ function renderAIWorkflowJob(job) {
         }));
 }
 
+function renderAIWorkflowJobSummary(job) {
+    const summary = job.summary || {};
+    return (
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;">' +
+            renderJobMetric("检索", summary.searched_total) +
+            renderJobMetric("尝试下载", summary.attempted_downloads) +
+            renderJobMetric("成功", summary.completed_count == null ? summary.success_count : summary.completed_count) +
+            renderJobMetric("已存在", summary.already_exists_count) +
+            renderJobMetric("元数据", summary.metadata_only_count) +
+            renderJobMetric("失败", summary.failure_count) +
+        "</div>" +
+        '<div class="subtle">query：' + esc(summary.query || "-") +
+            " | 来源：" + esc(summary.source_label || summary.source || job.type || "-") +
+            " | 创建：" + esc(formatJobTime(summary.created_at || job.created_at)) +
+            " | 更新：" + esc(formatJobTime(summary.updated_at || job.updated_at)) +
+            " | 文献库：" + esc(summary.library_name || job.library_name || "-") +
+        "</div>" +
+        (summary.message ? '<div class="subtle" style="margin-top:8px;">状态说明：' + esc(summary.message) + "</div>" : "")
+    );
+}
+
 function renderWorkflowList(title, items, formatter) {
     if (!items.length) {
         return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">暂无。</div></div>';
@@ -267,13 +290,194 @@ function renderWorkflowList(title, items, formatter) {
 }
 
 async function openExtractionJobCenter() {
+    return openJobCenter();
+}
+
+function formatJobTime(value) {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+}
+
+function renderJobMetric(label, value) {
+    const text = value == null || value === "" ? "-" : value;
+    return '<div style="min-width:96px;"><div class="muted" style="font-size:12px;">' + esc(label) + '</div><div style="font-weight:800;font-size:18px;">' + esc(text) + '</div></div>';
+}
+
+function renderExtractionJobSummary(job) {
+    const summary = job.summary || {};
+    const schemas = Array.isArray(summary.schemas) ? summary.schemas.join(", ") : (summary.schemas || "-");
+    const counts = summary.extracted_counts || {};
+    const countRows = Object.keys(counts).length
+        ? '<div class="subtle" style="margin-top:10px;">解析产物：' + Object.keys(counts).map(function(key) {
+            return esc(key) + " " + esc(counts[key]);
+        }).join(" | ") + "</div>"
+        : "";
+    const paperLink = summary.paper_id
+        ? ' | <a href="#" style="color:var(--color-primary);text-decoration:underline;" onclick="loadPaperDetail(\'' + escAttr(summary.paper_id) + '\'); closeAddLiteraturePanel(); return false;">打开论文</a>'
+        : "";
+    return (
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;">' +
+            renderJobMetric("成功", summary.success_count) +
+            renderJobMetric("失败", summary.failure_count) +
+            renderJobMetric("阶段", summary.phase || job.status) +
+        "</div>" +
+        '<div class="subtle">来源：' + esc(summary.source_label || summary.source || job.type || "-") +
+            " | 创建：" + esc(formatJobTime(summary.created_at || job.created_at)) +
+            " | 更新：" + esc(formatJobTime(summary.updated_at || job.updated_at)) +
+            " | 文献库：" + esc(summary.library_name || job.library_name || "-") +
+            paperLink +
+        "</div>" +
+        '<div class="subtle" style="margin-top:8px;">paper_id：' + esc(summary.paper_id || "-") + " | schemas：" + esc(schemas) + "</div>" +
+        (summary.message ? '<div class="subtle" style="margin-top:8px;">状态说明：' + esc(summary.message) + "</div>" : "") +
+        countRows
+    );
+}
+
+function renderJobFailureExplanation(job) {
+    const explanation = job.failure_explanation;
+    if (!explanation) return "";
+    const reasons = explanation.reasons || [];
+    return (
+        '<div style="margin-top:12px;border-left:3px solid var(--color-danger);padding-left:12px;">' +
+            '<div class="subtle" style="color:var(--color-danger);font-weight:700;">' + esc(explanation.summary || "任务失败") + "</div>" +
+            reasons.map(function(reason) {
+                const examples = (reason.examples || []).slice(0, 3);
+                return '<div class="subtle" style="margin-top:8px;">' +
+                    '<span class="status-chip failed">' + esc(reason.code || "failed") + "</span> " +
+                    esc(reason.label || "-") + " x " + esc(reason.count || 1) +
+                    '<div class="muted" style="margin-top:4px;">建议：' + esc(reason.suggestion || "-") + "</div>" +
+                    (examples.length ? '<div class="muted" style="margin-top:4px;">示例：' + esc(examples.join("; ")) + "</div>" : "") +
+                "</div>";
+            }).join("") +
+        "</div>"
+    );
+}
+
+function jobCenterFiltersHtml() {
+    const status = state.jobCenterStatus || "";
+    const type = state.jobCenterType || "";
+    const statusItems = [
+        ["", "全部"],
+        ["active", "运行中"],
+        ["failed", "失败"],
+        ["completed", "完成"],
+        ["cancelled", "取消"]
+    ];
+    const typeItems = [
+        ["", "全部类型"],
+        ["ai_workflow", "检索入库"],
+        ["extraction", "结构化解析"],
+        ["classify_batch", "批量分类"]
+    ];
+    return '<div class="modal-actions" style="justify-content:flex-start;margin-top:12px;gap:8px;flex-wrap:wrap;">' +
+        statusItems.map(function(item) {
+            const active = status === item[0] ? " primary" : " ghost";
+            return '<button class="btn small' + active + '" onclick="setJobCenterStatus(' + JSON.stringify(item[0]).replace(/"/g, "&quot;") + ')">' + esc(item[1]) + '</button>';
+        }).join("") +
+        '<select style="width:auto;min-width:130px;height:32px;padding:4px 8px;" onchange="setJobCenterType(this.value)">' +
+            typeItems.map(function(item) {
+                return '<option value="' + esc(item[0]) + '"' + (type === item[0] ? " selected" : "") + '>' + esc(item[1]) + '</option>';
+            }).join("") +
+        "</select>" +
+    "</div>";
+}
+
+function setJobCenterStatus(status) {
+    state.jobCenterStatus = status || "";
+    openJobCenter();
+}
+
+function setJobCenterType(type) {
+    state.jobCenterType = type || "";
+    openJobCenter();
+}
+
+async function openJobCenter() {
     openAddLiteraturePanel("ai");
-    setAcquisitionResult('<div class="workspace-empty small-empty">正在加载解析任务...</div>');
+    setAcquisitionResult('<div class="workspace-empty small-empty">正在加载任务中心...</div>');
     try {
-        const jobs = await fetchJSON("/api/extraction/jobs?limit=30");
-        renderExtractionJobs(jobs || []);
+        const params = new URLSearchParams();
+        params.set("limit", "80");
+        if (state.jobCenterStatus) params.set("status", state.jobCenterStatus);
+        if (state.jobCenterType) params.set("type", state.jobCenterType);
+        const libraryName = getCurrentLibraryName();
+        if (libraryName) params.set("library_name", libraryName);
+        const jobs = await fetchJSON("/api/jobs?" + params.toString());
+        renderJobCenter(jobs || []);
     } catch (error) {
-        setAcquisitionResult('<div class="workspace-empty small-empty">解析任务中心加载失败：' + esc(error.message) + "</div>");
+        setAcquisitionResult('<div class="workspace-empty small-empty">任务中心加载失败：' + esc(error.message) + "</div>");
+    }
+}
+
+function renderJobCenter(jobs) {
+    const counts = jobs.reduce(function(acc, job) {
+        const status = job.status || "unknown";
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+    }, {});
+    setAcquisitionResult(
+        '<div class="writer-block"><h3>任务中心</h3>' +
+        '<div class="subtle">统一查看 AI 检索入库、结构化解析和批量分类任务；重试会复用正在运行的同类任务，避免重复入库或重复解析。</div>' +
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;">' +
+            renderJobMetric("总数", jobs.length) +
+            renderJobMetric("运行中", (counts.queued || 0) + (counts.running || 0)) +
+            renderJobMetric("失败", counts.failed || 0) +
+            renderJobMetric("完成", counts.completed || 0) +
+        "</div>" +
+        jobCenterFiltersHtml() +
+        "</div>" +
+        (jobs.length ? jobs.map(renderWorkflowJobCard).join("") : '<div class="section-card"><h3>暂无任务</h3><div class="muted">当前筛选下没有任务。</div></div>')
+    );
+}
+
+function renderWorkflowJobCard(job) {
+    const summary = job.summary || {};
+    const canRetry = job.status === "failed" || job.status === "cancelled";
+    const retryHint = canRetry ? '<div class="muted" style="margin-top:6px;">重试会复用 identity 去重与同一 paper_id 替换逻辑，不会重复写入同一篇论文。</div>' : "";
+    return '<div class="section-card">' +
+        '<h3>' + esc(summary.source_label || job.type || "job") + " · " + esc(job.status || "-") + "</h3>" +
+        '<div class="subtle">任务 ' + esc(job.job_id || "-") + " | 文献库 " + esc(job.library_name || "-") + (summary.retried_from_job_id ? " | 重试来源 " + esc(summary.retried_from_job_id) : "") + "</div>" +
+        renderJobSummaryByType(job) +
+        renderJobFailureExplanation(job) +
+        '<details style="margin-top:12px;"><summary class="subtle" style="cursor:pointer;">查看原始进度 JSON</summary><div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div></details>" +
+        (job.error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
+        (canRetry ? '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="retryWorkflowJob(' + JSON.stringify(job.job_id).replace(/"/g, "&quot;") + ')">重试</button></div>' + retryHint : "") +
+    "</div>";
+}
+
+function renderJobSummaryByType(job) {
+    if (job.type === "ai_workflow") return renderAIWorkflowJobSummary(job);
+    if (job.type === "extraction") return renderExtractionJobSummary(job);
+    return renderGenericJobSummary(job);
+}
+
+function renderGenericJobSummary(job) {
+    const summary = job.summary || {};
+    return '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;">' +
+            renderJobMetric("成功", summary.success_count) +
+            renderJobMetric("失败", summary.failure_count) +
+            renderJobMetric("总数", summary.total) +
+            renderJobMetric("阶段", summary.phase || job.status) +
+        "</div>" +
+        '<div class="subtle">来源：' + esc(summary.source_label || summary.source || job.type || "-") +
+            " | 创建：" + esc(formatJobTime(summary.created_at || job.created_at)) +
+            " | 更新：" + esc(formatJobTime(summary.updated_at || job.updated_at)) +
+            " | 文献库：" + esc(summary.library_name || job.library_name || "-") +
+        "</div>" +
+        (summary.message ? '<div class="subtle" style="margin-top:8px;">状态说明：' + esc(summary.message) + "</div>" : "");
+}
+
+async function retryWorkflowJob(jobId) {
+    if (!jobId) return;
+    try {
+        const job = await fetchJSON("/api/jobs/" + encodeURIComponent(jobId) + "/retry", { method: "POST" });
+        const prefix = job.deduplicated ? "已有同类任务在运行，已复用：" : "重试已入队：";
+        showToast(prefix + job.job_id, "success");
+        openJobCenter();
+    } catch (error) {
+        showToast("重试失败：" + error.message, "error");
     }
 }
 
@@ -290,7 +494,9 @@ function renderExtractionJobs(jobs) {
                 '<div class="section-card">' +
                     '<h3>' + esc(job.type || "extraction") + " · " + esc(job.status || "-") + "</h3>" +
                     '<div class="subtle">任务 ' + esc(job.job_id || "-") + " | 文献库 " + esc(job.library_name || "-") + "</div>" +
-                    '<div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div>" +
+                    renderExtractionJobSummary(job) +
+                    renderJobFailureExplanation(job) +
+                    '<details style="margin-top:12px;"><summary class="subtle" style="cursor:pointer;">查看原始进度 JSON</summary><div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div></details>" +
                     (job.error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
                     (canRetry ? '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="retryExtractionJob(' + JSON.stringify(job.job_id).replace(/"/g, "&quot;") + ')">重试</button></div>' : "") +
                 "</div>"
@@ -300,14 +506,7 @@ function renderExtractionJobs(jobs) {
 }
 
 async function retryExtractionJob(jobId) {
-    if (!jobId) return;
-    try {
-        const job = await fetchJSON("/api/extraction/jobs/" + encodeURIComponent(jobId) + "/retry", { method: "POST" });
-        showToast("解析重试已入队：" + job.job_id, "success");
-        openExtractionJobCenter();
-    } catch (error) {
-        showToast("解析重试失败：" + error.message, "error");
-    }
+    return retryWorkflowJob(jobId);
 }
 
 async function downloadIdentifier(identifier) {
@@ -694,6 +893,12 @@ async function loadMetadataOnlyPapers() {
 }
 
 Object.assign(window, {
+    openExtractionJobCenter: openJobCenter,
+    openJobCenter: openJobCenter,
+    setJobCenterStatus: setJobCenterStatus,
+    setJobCenterType: setJobCenterType,
+    retryWorkflowJob: retryWorkflowJob,
+    retryExtractionJob: retryWorkflowJob,
     triggerAttachPDF: triggerAttachPDF,
     uploadAttachPDFModal: uploadAttachPDFModal,
     attachPDFToPaperDetail: attachPDFToPaperDetail,

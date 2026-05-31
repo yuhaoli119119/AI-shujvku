@@ -23,6 +23,53 @@ function renderInternalAIConfigGuide(message, status) {
     }
 }
 
+function candidateTypeLabel(type) {
+    if (type === "correction") return "修正建议";
+    if (type === "note") return "阅读笔记";
+    if (type === "relationship") return "文献关系";
+    return "AI 审阅项";
+}
+
+function renderCandidatePayload(payload) {
+    payload = payload || {};
+    const fields = [
+        ["content", "内容"],
+        ["field_name", "字段"],
+        ["quoted_text", "原文依据"],
+        ["page", "页码"],
+        ["section_title", "章节"],
+        ["mapping_reason", "判断理由"],
+        ["reason", "原因"],
+        ["source_paper_id", "来源论文"],
+        ["target_paper_id", "目标论文"],
+        ["relationship_type", "关系类型"]
+    ];
+    const html = fields.map(function(pair) {
+        const value = payload[pair[0]];
+        if (value === null || value === undefined || value === "") return "";
+        return '<div class="readable-field"><div class="k">' + esc(pair[1]) + '</div><div class="v">' + esc(Array.isArray(value) ? value.join("；") : value) + '</div></div>';
+    }).filter(Boolean).join("");
+    return html
+        ? '<div class="readable-grid candidate-readable">' + html + '</div>'
+        : '<div class="muted">这个候选没有可展示的结构化字段。</div>';
+}
+
+function renderInternalParseSummary(data) {
+    const candidates = data && Array.isArray(data.candidates) ? data.candidates : [];
+    const pending = candidates.filter(function(item) {
+        return item.status === "pending" || item.status === "requires_resolution";
+    }).length;
+    return '<div class="section-card"><h3>最近一次 AI 详细审阅</h3>' +
+        '<div class="subtle">AI 会生成阅读笔记、修正建议和文献关联建议，但不会直接改库。需要在下方审阅记录里点“生成待确认记录”，再由人工核对证据并确认。</div>' +
+        '<div class="readable-grid" style="margin-top:10px;">' +
+            '<div class="readable-field"><div class="k">审阅项总数</div><div class="v">' + esc(candidates.length) + '</div></div>' +
+            '<div class="readable-field"><div class="k">待处理</div><div class="v">' + esc(pending) + '</div></div>' +
+            '<div class="readable-field"><div class="k">下一步</div><div class="v">展开审阅项，选择可信内容并生成待确认记录。</div></div>' +
+        '</div>' +
+        '<details class="debug-json"><summary>查看原始返回</summary><div class="mono">' + esc(JSON.stringify(data || {}, null, 2)) + '</div></details>' +
+    '</div>';
+}
+
 async function ensureInternalAIConfigured() {
     try {
         const status = await fetchJSON("/api/settings/status");
@@ -50,27 +97,25 @@ async function runInternalAIParse() {
         hideProgress(true);
         return;
     }
-    showProgress("网页内 AI 正在生成候选项，完成后可生成待确认记录。");
+    showProgress("网页内 AI 正在生成详细审阅，完成后可选择内容生成待确认记录。");
     let hideImmediately = false;
     try {
         const data = await fetchJSON(EXTERNAL_API + "/papers/" + state.selectedPaperId + "/internal-parse", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                source_label: "网页内 AI 建议候选",
+                source_label: "网页内 AI 详细审阅",
                 auto_apply: false
             })
         });
         const extRawText = $("externalRawText");
         if (extRawText) extRawText.value = "";
-        showToast("网页内 AI 建议候选已生成，请人工确认后再处理。", "success");
+        showToast("网页内 AI 详细审阅已生成，请人工确认后再处理。", "success");
         const extRuns = $("externalRuns");
         if (extRuns) {
             extRuns.insertAdjacentHTML(
                 "afterbegin",
-                '<div class="section-card"><h3>最近一次网页内 AI 建议候选</h3><div class="subtle">默认只生成候选，不会生成待确认记录。</div><div class="mono">' +
-                    esc(JSON.stringify(data, null, 2)) +
-                    "</div></div>"
+                renderInternalParseSummary(data)
             );
         }
         await loadExternalRuns();
@@ -93,9 +138,9 @@ async function runInternalAIParse() {
         } else {
             const extRuns = $("externalRuns");
             if (extRuns) {
-                extRuns.innerHTML = '<div class="workspace-empty">网页内 AI 建议候选生成失败：' + esc(error.message) + "</div>";
+                extRuns.innerHTML = '<div class="workspace-empty">网页内 AI 详细审阅生成失败：' + esc(error.message) + "</div>";
             }
-            showToast("网页内 AI 建议候选生成失败：" + error.message, "error");
+            showToast("网页内 AI 详细审阅生成失败：" + error.message, "error");
         }
     }
     hideProgress(hideImmediately);
@@ -109,10 +154,23 @@ async function loadAgentGuide() {
         const guide = await fetchJSON("/api/system/agent-guide");
         const mcpGuide = $("mcpGuideBox");
         if (mcpGuide) {
+            const entry = guide.recommended_entrypoint || {};
+            const endpoints = Array.isArray(guide.http_endpoints) ? guide.http_endpoints : [];
+            const tools = guide.mcp && Array.isArray(guide.mcp.common_tools) ? guide.mcp.common_tools : [];
             mcpGuide.innerHTML =
-                '<div class="section-card"><h3>IDE / MCP AI 建议指南</h3>' +
-                '<div class="subtle">外部 IDE / MCP AI 可以按这里的入口读取文献、追加 notes、提出 corrections 或触发 parse；本区只展示指南，不会生成待确认记录。</div>' +
-                '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(guide, null, 2)) + "</div></div>";
+                '<div class="section-card"><h3>IDE / MCP AI 审阅指南</h3>' +
+                '<div class="subtle">外部 IDE / MCP AI 可以读取文献、追加笔记、提出修正或触发解析；本区只展示入口，不会自动写入正式数据。</div>' +
+                '<div class="readable-grid" style="margin-top:10px;">' +
+                    '<div class="readable-field"><div class="k">推荐入口</div><div class="v">' + esc((entry.method || "") + " " + (entry.path || "")) + '</div></div>' +
+                    '<div class="readable-field"><div class="k">适用场景</div><div class="v">' + esc(entry.description || "通过外部工具读取和审阅文献。") + '</div></div>' +
+                    '<div class="readable-field"><div class="k">MCP 地址</div><div class="v">' + esc((guide.mcp && guide.mcp.url) || "/mcp") + '</div></div>' +
+                    '<div class="readable-field"><div class="k">常用工具</div><div class="v">' + esc(tools.join("、") || "-") + '</div></div>' +
+                '</div>' +
+                '<details class="debug-json"><summary>查看接口清单</summary>' +
+                    endpoints.map(function(item) {
+                        return '<div class="readable-field" style="margin-top:8px;"><div class="k">' + esc(item.name || item.path || "接口") + '</div><div class="v">' + esc((item.method || "") + " " + (item.path || "")) + '<br>' + esc(item.purpose || "") + '</div></div>';
+                    }).join("") +
+                '</details></div>';
         }
     } catch (error) {
         showToast("读取 IDE / MCP 指南失败：" + error.message, "error");
@@ -130,7 +188,7 @@ async function importExternalAnalysis() {
         showToast("请粘贴外部 AI 返回结果。", "error");
         return;
     }
-    showProgress("正在导入外部 AI 候选建议...");
+    showProgress("正在导入外部 AI 审阅结果...");
     let rawPayload = raw;
     try {
         rawPayload = JSON.parse(raw);
@@ -144,12 +202,12 @@ async function importExternalAnalysis() {
             body: JSON.stringify({
                 paper_id: state.selectedPaperId,
                 source: normalizeExternalSourceForApi(extSource ? extSource.value : "manual"),
-                source_label: extSourceLabel ? (extSourceLabel.value.trim() || "外部 AI 候选建议") : "外部 AI 候选建议",
+                source_label: extSourceLabel ? (extSourceLabel.value.trim() || "外部 AI 审阅结果") : "外部 AI 审阅结果",
                 raw_text: typeof rawPayload === "string" ? rawPayload : null,
                 raw_payload: rawPayload
             })
         });
-        showToast("外部 AI 候选建议已导入。", "success");
+        showToast("外部 AI 审阅结果已导入。", "success");
         if (extRawText) extRawText.value = "";
         await loadExternalRuns();
     } catch (error) {
@@ -161,12 +219,20 @@ async function importExternalAnalysis() {
 async function loadExternalRuns() {
     if (!state.selectedPaperId) return;
     const extRuns = $("externalRuns");
-    if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">正在加载 AI 候选记录...</div>';
+    const reasonBanner = state.qualityReasonContext
+        ? '<div class="section-card" style="border-color:var(--color-warning);"><h3>DFT 质量处理入口</h3><div class="subtle">来自 blocked reason：' + esc(state.qualityReasonContext) + '。请核对本论文的 review 状态、证据链和定位信息。</div></div>'
+        : "";
+    const contextGuide = $("internalAIConfigGuide");
+    if (reasonBanner && contextGuide && contextGuide.getAttribute("data-quality-reason") !== state.qualityReasonContext) {
+        contextGuide.setAttribute("data-quality-reason", state.qualityReasonContext);
+        contextGuide.insertAdjacentHTML("afterbegin", reasonBanner);
+    }
+    if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">正在加载 AI 审阅记录...</div>';
     try {
         const runs = await fetchJSON(EXTERNAL_API + "/runs?paper_id=" + encodeURIComponent(state.selectedPaperId));
         state.externalRuns = runs || [];
         if (!state.externalRuns.length) {
-            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 AI 候选记录。</div>';
+            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 AI 审阅记录。点“生成详细审阅”后，AI 会先产出阅读笔记、修正建议和关联建议；确认前不会写入正式数据。</div>';
             return;
         }
         if (extRuns) {
@@ -178,12 +244,14 @@ async function loadExternalRuns() {
                     '<div class="run-card">' +
                         '<h4>' + esc(run.source_label || uiLabel("source", run.source) || "未命名候选源") + "</h4>" +
                         '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(uiLabel("mapping_status", run.mapping_status || "-")) + "</div>" +
+                        '<div class="subtle" style="margin-top:8px;">用途：这里是 AI 的详细审阅草稿。阅读笔记用于快速理解论文；修正/关联建议用于补全或纠错。点击“生成待确认记录”后，还需要人工在 review 流程里确认，才算可靠数据。</div>' +
                         (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
                         (run.raw_text ? '<div class="mono" style="margin-top:10px;">' + esc(ellipsis(run.raw_text, 1200)) + "</div>" : "") +
                         '<div class="candidate-toolbar" style="margin-top:12px;">' +
                             '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量生成待确认记录</button>' +
                             '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中生成待确认记录</button>' +
-                            '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开候选项（' + (run.candidates || []).length + "）</button>" +
+                            '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开审阅项（' + (run.candidates || []).length + "）</button>" +
+                            '<a class="btn ghost small" style="text-decoration:none;" href="/pages/external_analysis_workbench/index.html?paper_id=' + encodeURIComponent(state.selectedPaperId) + '">人工确认工作台</a>' +
                         "</div>" +
                         '<div id="run-candidates-' + run.id + '" style="display:none;">' +
                             renderCandidates(run.id, run.candidates || []) +
@@ -196,13 +264,13 @@ async function loadExternalRuns() {
             }).join("");
         }
     } catch (error) {
-        if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">AI 候选记录加载失败：' + esc(error.message) + "</div>";
+        if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">AI 审阅记录加载失败：' + esc(error.message) + "</div>";
     }
 }
 
 function renderCandidates(runId, candidates) {
     if (!candidates.length) {
-        return '<div class="candidate-card"><div class="muted">没有候选项。</div></div>';
+        return '<div class="candidate-card"><div class="muted">没有审阅项。</div></div>';
     }
     return candidates.map(function(item) {
         var candidateId = String(item.id || "");
@@ -226,11 +294,12 @@ function renderCandidates(runId, candidates) {
         return (
             '<div class="candidate-card">' +
                 '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">' +
-                    '<h4>' + esc(item.candidate_type || "候选建议") + candidateLabel + " | 状态：" + esc(uiLabel("candidate_status", item.status || "-")) + "</h4>" +
+                    '<h4>' + esc(candidateTypeLabel(item.candidate_type)) + candidateLabel + " | 状态：" + esc(uiLabel("candidate_status", item.status || "-")) + "</h4>" +
                     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + checkbox + singleAction + "</div>" +
                 "</div>" +
                 '<div class="subtle">置信度：' + esc(item.confidence == null ? "-" : item.confidence) + " | 目标类型：" + esc(item.materialized_target_type || "-") + "</div>" +
-                '<div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(item.normalized_payload || {}, null, 2)) + "</div>" +
+                renderCandidatePayload(item.normalized_payload || {}) +
+                '<details class="debug-json"><summary>查看原始候选数据</summary><div class="mono">' + esc(JSON.stringify(item.normalized_payload || {}, null, 2)) + "</div></details>" +
             "</div>"
         );
     }).join("");
@@ -252,8 +321,8 @@ async function materializeRun(runId) {
         return;
     }
     var ok = confirm(
-        "将处理 " + pendingCount + " 个 AI 建议候选，生成待确认记录。\n\n" +
-        "这不是人工 verified，只是生成待确认记录；仍需在人工确认工作台核对证据并确认。\n\n" +
+        "将处理 " + pendingCount + " 个 AI 审阅项，生成待确认记录。\n\n" +
+        "这不是人工 verified，只是把 AI 草稿送进人工确认流程；请去“人工确认工作台”核对证据并确认。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
@@ -264,7 +333,7 @@ async function materializeRun(runId) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ explicit_all: true, created_by: "web_user" })
         });
-        showToast("已生成待确认记录。", "success");
+        showToast("已生成待确认记录，请在人工确认工作台核对证据。", "success");
         await loadExternalRuns();
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
@@ -291,8 +360,8 @@ async function materializeSelectedCandidates(runId) {
 async function materializeCandidateIds(runId, candidateIds) {
     if (!candidateIds.length) return;
     var ok = confirm(
-        "将处理 " + candidateIds.length + " 个 AI 建议候选，生成待确认记录。\n\n" +
-        "这不是人工 verified，只是生成待确认记录；仍需在人工确认工作台核对证据并确认。\n\n" +
+        "将处理 " + candidateIds.length + " 个 AI 审阅项，生成待确认记录。\n\n" +
+        "这不是人工 verified，只是把 AI 草稿送进人工确认流程；请去“人工确认工作台”核对证据并确认。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
@@ -303,13 +372,49 @@ async function materializeCandidateIds(runId, candidateIds) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ candidate_ids: candidateIds, created_by: "web_user" })
         });
-        showToast("已生成待确认记录。", "success");
+        showToast("已生成待确认记录，请在人工确认工作台核对证据。", "success");
         await loadExternalRuns();
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
         showToast("生成待确认记录失败：" + error.message, "error");
     }
     hideProgress();
+}
+
+function renderAggregateGroups(title, groups, emptyText) {
+    groups = groups || {};
+    const entries = Object.entries(groups);
+    if (!entries.length) {
+        return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">' + esc(emptyText || "暂无数据。") + '</div></div>';
+    }
+    return '<div class="section-card"><h3>' + esc(title) + '</h3>' + entries.map(function(pair) {
+        const name = pair[0];
+        const items = Array.isArray(pair[1]) ? pair[1] : [];
+        return '<div class="readable-card" style="margin-top:10px;">' +
+            '<h4>' + esc(name || "未命名") + ' <span class="muted">(' + esc(items.length) + ' 条)</span></h4>' +
+            '<div class="readable-grid">' + items.slice(0, 8).map(function(item) {
+                return '<div class="readable-field">' +
+                    '<div class="k">' + esc(item.name || item.catalyst_type || item.paper_id || "记录") + '</div>' +
+                    '<div class="v">' +
+                        (item.catalyst_type ? '类型：' + esc(item.catalyst_type) + '<br>' : '') +
+                        (item.metal_centers && item.metal_centers.length ? '金属中心：' + esc(item.metal_centers.join("、")) + '<br>' : '') +
+                        (item.support ? '载体：' + esc(item.support) + '<br>' : '') +
+                        (item.synthesis_method ? '合成：' + esc(item.synthesis_method) : '') +
+                    '</div>' +
+                '</div>';
+            }).join("") + '</div>' +
+        '</div>';
+    }).join("") + '</div>';
+}
+
+function renderAggregateAliases(items) {
+    items = items || [];
+    if (!items.length) {
+        return '<div class="section-card"><h3>可能别名</h3><div class="muted">暂无需要人工合并的别名。</div></div>';
+    }
+    return '<div class="section-card"><h3>可能别名</h3><div class="readable-grid">' + items.map(function(item) {
+        return '<div class="readable-field"><div class="k">' + esc(item.name || item.alias || "别名") + '</div><div class="v">' + esc(item.reason || item.note || JSON.stringify(item)) + '</div></div>';
+    }).join("") + '</div></div>';
 }
 
 async function loadAggregate() {
@@ -319,9 +424,9 @@ async function loadAggregate() {
         state.aggregateData = await fetchJSON(API_BASE + "/aggregate");
         if (aggResult) {
             aggResult.innerHTML =
-                '<div class="section-card"><h3>吸附物聚合</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.adsorbate_groups || {}, null, 2)) + "</div></div>" +
-                '<div class="section-card"><h3>催化剂聚合</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.catalyst_groups || {}, null, 2)) + "</div></div>" +
-                '<div class="section-card"><h3>可能别名</h3><div class="mono">' + esc(JSON.stringify(state.aggregateData.possible_name_aliases || [], null, 2)) + "</div></div>";
+                renderAggregateGroups("吸附物聚合", state.aggregateData.adsorbate_groups || {}, "暂无吸附物聚合结果。") +
+                renderAggregateGroups("催化剂聚合", state.aggregateData.catalyst_groups || {}, "暂无催化剂聚合结果。") +
+                renderAggregateAliases(state.aggregateData.possible_name_aliases || []);
         }
     } catch (error) {
         if (aggResult) aggResult.innerHTML = '<div class="workspace-empty">聚合视图加载失败：' + esc(error.message) + "</div>";

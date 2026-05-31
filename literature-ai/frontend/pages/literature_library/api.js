@@ -166,10 +166,54 @@ function getCurrentLibraryName() {
 
 async function loadLibraries() {
     try {
-        const libraries = await fetchJSON(LIB_API);
         const el = $("librarySelect");
+        const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "";
+        const quickLibraries = await fetchJSON(API_BASE + "/libraries");
+        const selectedName = previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
+            ? previousSelection
+            : ((quickLibraries || [])[0] ? quickLibraries[0].name : "");
         if (el) {
-            el.innerHTML = libraries.map(function(item) {
+            el.innerHTML = (quickLibraries || []).map(function(item) {
+                return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
+                    esc(item.name) + "（" + esc(item.paper_count || 0) + " 篇）" +
+                "</option>";
+            }).join("");
+        }
+        const selected = (quickLibraries || []).find(function(item) { return item.name === selectedName; });
+        state.currentLibrary = selected || null;
+        state.currentLibraryTotal = selected ? Number(selected.paper_count || 0) : 0;
+        const status = $("libStatus");
+        if (status) status.textContent = selected ? (selected.name + " | " + selected.paper_count + " 篇文献") : "";
+
+        fetchJSON(LIB_API).then(function(libraries) {
+            const fullEl = $("librarySelect");
+            const currentValue = fullEl ? fullEl.value : selectedName;
+            const active = (libraries || []).find(function(item) { return item.is_active; });
+            const keepName = currentValue || (active && active.name) || selectedName;
+            if (fullEl && libraries && libraries.length) {
+                fullEl.innerHTML = libraries.map(function(item) {
+                    const isSelected = item.name === keepName;
+                    return '<option value="' + esc(item.name) + '"' + (isSelected ? " selected" : "") + ">" +
+                        esc(item.name) + (item.is_active ? "（当前）" : "") +
+                    "</option>";
+                }).join("");
+            }
+            const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
+            if (selectedFull) {
+                state.currentLibrary = selectedFull;
+                state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
+                if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
+            }
+        }).catch(function(error) {
+            console.warn("full library metadata failed", error);
+        });
+    } catch (error) {
+        console.error("loadLibraries failed", error);
+        try {
+            const libraries = await fetchJSON(LIB_API);
+            const el = $("librarySelect");
+            if (el) {
+                el.innerHTML = libraries.map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.is_active ? " selected" : "") + ">" +
                     esc(item.name) + (item.is_active ? "（当前）" : "") +
                 "</option>";
@@ -180,8 +224,9 @@ async function loadLibraries() {
         state.currentLibraryTotal = active ? Number(active.paper_count || 0) : 0;
         const status = $("libStatus");
         if (status) status.textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
-    } catch (error) {
-        console.error("loadLibraries failed", error);
+        } catch (fallbackError) {
+            console.error("loadLibraries fallback failed", fallbackError);
+        }
     }
 }
 

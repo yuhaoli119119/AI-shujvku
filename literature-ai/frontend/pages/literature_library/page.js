@@ -76,6 +76,7 @@ function applyQueryParams() {
     const params = new URLSearchParams(window.location.search);
     const paperId = params.get("paper_id") || params.get("review_paper_id");
     const tab = params.get("tab");
+    state.qualityReasonContext = params.get("quality_reason") || "";
     if (paperId) state.selectedPaperId = paperId;
     if (params.get("review_paper_id")) state.currentTab = "review";
     const tabMap = {
@@ -419,11 +420,11 @@ initProtocolWarning();
 initSplitDrag();
 initActionMenus();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
-Promise.all([loadLibraries(), loadWriterSettings()]).then(function() {
-    fetchPapers();
-    initSSE();
-    switchTab(state.currentTab);
-    if (state.openAddOnLoad) {
-        openAddLiteraturePanel(state.openAddOnLoad);
-    }
-});
+fetchPapers();
+initSSE();
+switchTab(state.currentTab);
+if (state.openAddOnLoad) {
+    openAddLiteraturePanel(state.openAddOnLoad);
+}
+loadLibraries();
+loadWriterSettings();

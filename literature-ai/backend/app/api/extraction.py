@@ -27,8 +27,8 @@ from app.services.workflow_jobs import (
     JOB_TYPE_EXTRACTION,
     build_job_runtime_context,
     cancel_job,
-    clone_job_for_retry,
-    create_job,
+    clone_job_for_retry_with_status,
+    create_job_or_reuse_active,
     dispatch_job,
     get_job,
     list_jobs,
@@ -53,7 +53,7 @@ async def start_extraction_job(
     paper = session.get(Paper, payload.paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    job = create_job(
+    job, reused = create_job_or_reuse_active(
         session,
         job_type=JOB_TYPE_EXTRACTION,
         library_name=paper.library_name,
@@ -61,11 +61,14 @@ async def start_extraction_job(
         runtime_context=build_job_runtime_context(settings),
         progress={"phase": "queued", "paper_id": str(payload.paper_id), "schemas": payload.schemas},
     )
-    dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=settings.database_url)
-    if dispatch_mode != "celery":
-        session.refresh(job)
+    dispatch_mode = "reused_active"
+    if not reused:
+        dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=settings.database_url)
+        if dispatch_mode != "celery":
+            session.refresh(job)
     data = serialize_job(job)
     data["dispatch_mode"] = dispatch_mode
+    data["deduplicated"] = reused
     return data
 
 
@@ -101,15 +104,18 @@ async def retry_extraction_job(
     if not job or job.type != JOB_TYPE_EXTRACTION:
         raise HTTPException(status_code=404, detail="Extraction job not found")
     try:
-        retry_job = clone_job_for_retry(session, job_id)
+        retry_job, reused = clone_job_for_retry_with_status(session, job_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else None
-    dispatch_mode = dispatch_job(retry_job.job_id, background_tasks, control_database_url=db_url)
-    if dispatch_mode != "celery":
-        session.refresh(retry_job)
+    dispatch_mode = "reused_active"
+    if not reused:
+        dispatch_mode = dispatch_job(retry_job.job_id, background_tasks, control_database_url=db_url)
+        if dispatch_mode != "celery":
+            session.refresh(retry_job)
     data = serialize_job(retry_job)
     data["dispatch_mode"] = dispatch_mode
+    data["deduplicated"] = reused
     return data
 
 

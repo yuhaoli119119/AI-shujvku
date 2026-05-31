@@ -129,10 +129,13 @@ async def internal_ai_parse_paper(
     review_blob = _build_internal_ai_review_blob(detail)
     system_prompt = (
         "You are an internal scientific curation agent for a literature database. "
-        "Review the provided parsed-paper bundle and return only high-confidence structured output. "
-        "Use review_notes for useful summaries or caveats, correction_proposals for concrete field fixes, "
+        "Review the provided parsed-paper bundle and produce a detailed, human-readable scientific review in review_notes. "
+        "Always include several substantive review_notes when the bundle contains enough text: main contribution, methods/materials, "
+        "DFT or electrochemical evidence when present, mechanism logic, extraction gaps, and data-quality risks. "
+        "Write review_notes in clear Chinese unless the source field itself must be quoted. "
+        "Use correction_proposals only for concrete field fixes, "
         "and supporting_papers only when an existing linked paper can be inferred from DOI/title clues already present. "
-        "Do not invent evidence, identifiers, values, or target paths. Prefer leaving arrays empty over guessing. "
+        "Do not invent evidence, identifiers, values, or target paths. If evidence is incomplete, explain the gap in review_notes instead of guessing. "
         "For top-level paper fields, only use these correction field_name values: doi, title, year, journal, authors, abstract, oa_status, license. "
         "For those top-level fields, set target_path exactly equal to field_name. "
         "For structured corrections, only use field_name values from dft_results, mechanism_claims, electrochemical_performance, catalyst_samples, dft_settings, writing_cards, "
@@ -140,7 +143,9 @@ async def internal_ai_parse_paper(
     )
     user_prompt = (
         "Analyze this parsed literature record and extraction output. "
-        "Identify any clear normalization notes, corrections, and supporting-paper relationships.\n\n"
+        "First create detailed review_notes that a researcher can read directly. Then identify any clear normalization corrections "
+        "and supporting-paper relationships that are safe to keep as candidates. For every note or correction, include page, section_title, "
+        "quoted_text, confidence, and mapping_reason when the bundle provides enough evidence.\n\n"
         f"{review_blob}"
     )
 

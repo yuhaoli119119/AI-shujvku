@@ -15,6 +15,9 @@ const state = {
     discoveryCache: [],
     aiWorkflowJobId: null,
     writerSettings: null,
+    jobCenterStatus: "",
+    jobCenterType: "",
+    qualityReasonContext: "",
 };
 
 function $(id) { return document.getElementById(id); }

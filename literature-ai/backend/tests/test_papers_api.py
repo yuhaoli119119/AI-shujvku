@@ -123,6 +123,48 @@ def test_papers_status_and_stream(setup_test_db, monkeypatch):
         assert "event: heartbeat" in full_output
 
 
+def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    payload = {"paper_id": "paper-1", "schemas": ["DFTResult"]}
+    with Session() as session:
+        session.add_all(
+            [
+                WorkflowJob(
+                    job_id="failed-extraction",
+                    type="extraction",
+                    status="failed",
+                    library_name="默认文献库",
+                    payload=payload,
+                    progress={"phase": "failed", "paper_id": "paper-1"},
+                    runtime_context={},
+                ),
+                WorkflowJob(
+                    job_id="active-extraction",
+                    type="extraction",
+                    status="running",
+                    library_name="默认文献库",
+                    payload=payload,
+                    progress={"phase": "extraction", "paper_id": "paper-1"},
+                    runtime_context={},
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/jobs?type=extraction")
+    assert response.status_code == 200
+    jobs = response.json()
+    assert {job["job_id"] for job in jobs} >= {"failed-extraction", "active-extraction"}
+    assert jobs[0]["summary"]["source_label"] == "论文结构化解析"
+
+    retry_response = client.post("/api/jobs/failed-extraction/retry")
+    assert retry_response.status_code == 200
+    retry_data = retry_response.json()
+    assert retry_data["job_id"] == "active-extraction"
+    assert retry_data["deduplicated"] is True
+    assert retry_data["dispatch_mode"] == "reused_active"
 def test_delete_paper_default_keeps_files(setup_test_db, tmp_path, monkeypatch):
     engine = setup_test_db
     storage_root = tmp_path / "storage"

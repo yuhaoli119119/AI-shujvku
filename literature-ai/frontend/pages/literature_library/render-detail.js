@@ -45,9 +45,148 @@ function renderListBlock(title, items, formatter) {
 }
 
 function renderJSONCards(title, items) {
-    return renderListBlock(title, items, function(item) {
-        return '<div class="mono">' + esc(JSON.stringify(item, null, 2)) + "</div>";
+    return renderReadableCards(title, items);
+}
+
+const DETAIL_FIELD_LABELS = {
+    software: "计算软件",
+    functional: "泛函",
+    dispersion_correction: "色散校正",
+    pseudopotential: "赝势",
+    cutoff_energy_ev: "截断能",
+    cutoff_energy: "截断能",
+    k_points: "K 点",
+    convergence_settings: "收敛设置",
+    vacuum_thickness_a: "真空层厚度",
+    vacuum_thickness: "真空层厚度",
+    catalyst: "催化剂",
+    adsorbate: "吸附物",
+    energy_type: "能量类型",
+    property_type: "能量类型",
+    value: "数值",
+    unit: "单位",
+    reaction_step: "反应步骤",
+    source_section: "来源章节",
+    evidence_text: "证据原文",
+    confidence: "置信度",
+    name: "名称",
+    catalyst_type: "催化剂类型",
+    metal_centers: "金属中心",
+    coordination: "配位结构",
+    support: "载体",
+    synthesis_method: "合成方法",
+    sulfur_loading: "硫载量",
+    sulfur_content: "硫含量",
+    electrolyte_sulfur_ratio: "电解液/硫比",
+    capacity: "容量",
+    cycle_number: "循环圈数",
+    rate: "倍率",
+    decay_per_cycle: "容量衰减",
+    claim_type: "机理类型",
+    claim_text: "机理描述",
+    key_species: "关键物种",
+    mechanism_direction: "作用方向",
+    paper_type: "论文类型",
+    research_gap: "研究空白",
+    proposed_solution: "解决方案",
+    core_hypothesis: "核心假设",
+    title: "标题",
+    doi: "DOI",
+    authors: "作者",
+    year: "年份",
+    journal: "期刊",
+    one_sentence_takeaway: "一句话结论",
+    real_world_impact: "实际意义",
+    conclusion_mapping: "结论对应"
+};
+
+function readableFieldLabel(key) {
+    return DETAIL_FIELD_LABELS[key] || String(key || "").replace(/_/g, " ");
+}
+
+function unwrapEvidenceValue(value) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+        if ("value" in value || "unit" in value || "evidence_text" in value) {
+            const parts = [];
+            if (value.value !== null && value.value !== undefined && value.value !== "") parts.push(value.value);
+            if (value.unit) parts.push(value.unit);
+            if (!parts.length && value.evidence_text) parts.push(value.evidence_text);
+            return parts.join(" ");
+        }
+    }
+    return value;
+}
+
+function readableValue(value) {
+    value = unwrapEvidenceValue(value);
+    if (value === null || value === undefined || value === "") return "-";
+    if (Array.isArray(value)) {
+        if (!value.length) return "-";
+        return value.map(function(item) {
+            if (item && typeof item === "object") return readableValue(item.value || item.text || item.name || JSON.stringify(item));
+            return String(item);
+        }).join("；");
+    }
+    if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+    if (typeof value === "boolean") return value ? "是" : "否";
+    if (typeof value === "object") return "";
+    return String(value);
+}
+
+function renderReadableFields(item, keys) {
+    const fields = [];
+    keys.forEach(function(key) {
+        const value = readableValue(item ? item[key] : null);
+        if (value && value !== "-") {
+            fields.push('<div class="readable-field"><div class="k">' + esc(readableFieldLabel(key)) + '</div><div class="v">' + esc(value) + '</div></div>');
+        }
     });
+    return fields.length ? '<div class="readable-grid">' + fields.join("") + '</div>' : '<div class="muted">暂无可读字段。</div>';
+}
+
+function renderReadableCards(title, items) {
+    if (!items || !items.length) {
+        return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">暂无内容。</div></div>';
+    }
+    const keySets = {
+        "DFT 设置": ["software", "functional", "dispersion_correction", "pseudopotential", "cutoff_energy_ev", "cutoff_energy", "k_points", "convergence_settings", "vacuum_thickness_a", "vacuum_thickness"],
+        "催化剂样本": ["name", "catalyst_type", "metal_centers", "coordination", "support", "synthesis_method", "evidence_text", "confidence"],
+        "DFT 结果": ["catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "evidence_text", "confidence"],
+        "电化学性能": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
+        "机理声明": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
+        "写作卡片": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
+        "表格": ["caption", "page", "markdown_content"],
+        "出向关系": ["relationship_type", "target_title", "target_doi", "reason"],
+        "入向关系": ["relationship_type", "source_title", "source_doi", "reason"]
+    };
+    const keys = keySets[title] || Object.keys(items[0] || {}).filter(function(key) {
+        return !["id", "paper_id", "raw_json", "created_at", "updated_at"].includes(key);
+    }).slice(0, 10);
+    return items.map(function(item, index) {
+        const heading = title + (items.length > 1 ? " " + (index + 1) : "");
+        return '<div class="section-card readable-card"><h3>' + esc(heading) + '</h3>' +
+            renderReadableFields(item || {}, keys) +
+            '<details class="debug-json"><summary>查看原始数据</summary><div class="mono">' + esc(JSON.stringify(item || {}, null, 2)) + '</div></details>' +
+        '</div>';
+    }).join("");
+}
+
+function renderComprehensiveAnalysis(data) {
+    if (!data || !Object.keys(data).length) {
+        return '<div class="section-card"><h3>综合解析</h3><div class="muted">暂无综合解析。</div></div>';
+    }
+    const summary = data.layman_summary || {};
+    const logic = data.writing_logic || {};
+    return '<div class="section-card readable-card"><h3>综合解析</h3>' +
+        renderReadableFields({
+            one_sentence_takeaway: summary.one_sentence_takeaway,
+            real_world_impact: summary.real_world_impact,
+            research_gap: logic.research_gap_framing,
+            core_hypothesis: logic.core_hypothesis,
+            conclusion_mapping: logic.conclusion_mapping
+        }, ["one_sentence_takeaway", "real_world_impact", "research_gap", "core_hypothesis", "conclusion_mapping"]) +
+        '<details class="debug-json"><summary>查看原始综合解析</summary><div class="mono">' + esc(JSON.stringify(data, null, 2)) + '</div></details>' +
+    '</div>';
 }
 
 // ── G3B Evidence Locator Rendering ──
@@ -220,7 +359,7 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
     var pdfUrl = "/api/papers/" + encodeURIComponent(paperId) + "/pdf";
     try {
         var probeResp = await fetch(pdfUrl, { method: "HEAD" });
-        if (!probeResp.ok) {
+        if (!probeResp.ok && probeResp.status !== 405) {
             // PDF not available
             if (viewerPdfContent) viewerPdfContent.style.display = "none";
             if (viewerPdfUnavailable) viewerPdfUnavailable.style.display = "block";
@@ -282,10 +421,7 @@ function renderDetail(detail, audit) {
     const abstractCard =
         '<div class="section-card"><h3>摘要</h3><div class="prewrap">' + esc(detail.abstract || "暂无摘要。") + "</div></div>";
 
-    const comprehensiveCard =
-        '<div class="section-card"><h3>综合解析</h3><div class="mono">' +
-            esc(JSON.stringify(detail.comprehensive_analysis || {}, null, 2)) +
-        "</div></div>";
+    const comprehensiveCard = renderComprehensiveAnalysis(detail.comprehensive_analysis || {});
 
     const sectionCards = renderListBlock("正文节选", detail.sections ? detail.sections.slice(0, 8) : [], function(item) {
         return (
@@ -502,19 +638,21 @@ async function loadPaperDetail(paperId) {
         const detail = await fetchJSON(API_BASE + "/" + paperId);
         state.selectedPaperId = paperId;
         state.selectedPaper = detail;
-        
-        let audit = null;
-        try {
-            audit = await fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit");
-        } catch (e) {
-            console.warn("Audit API is not available or failed:", e);
-        }
-        
         renderPaperList();
         renderWorkspaceHeader(detail);
-        renderDetail(detail, audit);
+        renderDetail(detail, null);
         showWorkspace();
         syncQueryParams();
+        fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit")
+            .then(function(audit) {
+                if (state.selectedPaperId === paperId) {
+                    renderDetail(detail, audit);
+                    loadEvidenceLocators(paperId);
+                }
+            })
+            .catch(function(e) {
+                console.warn("Audit API is not available or failed:", e);
+            });
         loadEvidenceLocators(paperId);
         if (state.currentTab === "review") loadExternalRuns();
         if (state.currentTab === "aggregate") loadAggregate();

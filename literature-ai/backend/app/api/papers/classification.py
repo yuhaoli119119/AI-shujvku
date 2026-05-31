@@ -11,7 +11,7 @@ from app.schemas.api import ClassifyBatchPayload
 from app.services.workflow_jobs import (
     JOB_TYPE_CLASSIFY_BATCH,
     build_job_runtime_context,
-    create_job,
+    create_job_or_reuse_active,
     dispatch_job,
     run_classify_batch_sync as run_classify_batch_sync_service,
     serialize_job,
@@ -27,7 +27,7 @@ async def start_classify_batch_job(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    job = create_job(
+    job, reused = create_job_or_reuse_active(
         session,
         job_type=JOB_TYPE_CLASSIFY_BATCH,
         library_name=payload.library_name,
@@ -42,7 +42,8 @@ async def start_classify_batch_job(
         },
     )
     data = serialize_job(job)
-    data["dispatch_mode"] = dispatch_job(job.job_id, background_tasks)
+    data["dispatch_mode"] = "reused_active" if reused else dispatch_job(job.job_id, background_tasks)
+    data["deduplicated"] = reused
     return data
 
 

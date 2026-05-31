@@ -30,17 +30,24 @@
     .export-panel .btn + .btn { margin-left: 8px; }
     .export-panel .export-note { margin-top: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .export-panel .export-status { margin-top: 6px; color: var(--color-primary); font-size: 12px; font-weight: 700; }
-    .quality-panel { display: grid; grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.6fr); gap: 14px; }
+    .quality-panel { display: grid; grid-template-columns: 280px 1fr; gap: 18px; align-items: start; }
     .quality-summary { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; }
     .reason-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .reason-chip { border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 6px 10px; background: var(--color-surface-alt); cursor: pointer; font-size: 12px; font-weight: 800; color: var(--color-text-secondary); }
     .reason-chip.active { background: var(--color-primary-bg); border-color: var(--color-primary); color: var(--color-primary); }
-    .quality-list { display: grid; gap: 10px; max-height: 360px; overflow: auto; }
-    .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px; background: var(--color-surface-alt); }
+    .quality-list { display: grid; gap: 10px; max-height: 420px; overflow: auto; padding-right: 4px; }
+    .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px; background: var(--color-surface-alt); }
     .quality-row.exportable { border-color: var(--color-success); background: var(--color-success-bg); }
     .quality-row h4 { margin: 0 0 6px; font-size: 14px; }
     .quality-meta { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .quality-help { color: var(--color-text-secondary); font-size: 13px; line-height: 1.65; margin-top: 12px; }
+    .quality-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
+    .quality-pill { display: inline-flex; align-items: center; width: fit-content; border-radius: var(--radius-pill); padding: 4px 9px; background: var(--color-warning-bg); color: var(--color-warning); font-size: 12px; font-weight: 800; }
+    .quality-row.exportable .quality-pill { background: var(--color-success-bg); color: var(--color-success); }
+    .readable-field { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
+    .readable-field .k { color: var(--color-text-muted); font-size: 12px; font-weight: 800; margin-bottom: 4px; }
+    .readable-field .v { color: var(--color-text); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
     .completeness-list { display: grid; gap: 8px; margin-top: 12px; }
     .completeness-row { border: 1px dashed var(--color-border-strong); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
     .table-container { width: 100%; overflow-x: auto; }
@@ -72,7 +79,7 @@
       </div>
       <div class="export-panel">
         <button class="btn green" onclick="exportCSV()">导出 CSV</button>
-        <div class="export-note">默认仅导出 Human verified + required evidence；blocked rows 不会导出。</div>
+        <div class="export-note">默认只导出“人工已确认、证据完整、定位准确”的记录；需要处理的记录不会导出。</div>
         <div id="exportSafetyStatus" class="export-status">等待导出。</div>
       </div>
     </header>
@@ -102,10 +109,10 @@
         </div>
         <div class="quality-summary">
           <div class="stat-box"><div class="lbl">可导出</div><div id="qualityExportable" class="val">-</div></div>
-          <div class="stat-box"><div class="lbl">被阻止</div><div id="qualityBlocked" class="val">-</div></div>
+          <div class="stat-box"><div class="lbl">需处理</div><div id="qualityBlocked" class="val">-</div></div>
         </div>
         <div class="reason-chips" id="qualityReasonChips"></div>
-        <div class="quality-meta" style="margin-top:12px;">Only safe_verified + required evidence + exact locator records can enter ML export.</div>
+        <div class="quality-help">只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。</div>
       </div>
       <div>
         <div class="panel-actions" style="margin-bottom:10px;">
@@ -113,7 +120,7 @@
           <span id="qualityGateLabel" class="quality-meta"></span>
         </div>
         <div id="qualityRows" class="quality-list">
-          <div class="empty-state">Loading quality summary...</div>
+          <div class="empty-state">正在加载质量概览...</div>
         </div>
         <div id="qualityCompleteness" class="completeness-list"></div>
       </div>
@@ -146,6 +153,26 @@
     const API_BASE = "/api/papers";
     const state = { items: [], qualityReason: "" };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+    const REASON_LABELS = {
+      missing_review: "缺少人工确认",
+      unsafe_review: "人工确认未通过",
+      missing_required_evidence: "缺少必要证据",
+      missing_locator: "缺少 PDF 定位",
+      unsafe_locator: "PDF 定位不可靠",
+      low_confidence: "置信度偏低"
+    };
+    function reasonLabel(reason) { return REASON_LABELS[reason] || String(reason || "未知原因").replace(/_/g, " "); }
+    function reasonAction(reason) {
+      if (reason === "missing_review") return "到 review 页确认该条 DFT 数据是否可信。";
+      if (reason === "unsafe_review") return "检查被拒绝或需要修正的人工审核记录。";
+      if (reason === "missing_locator") return "补充或修复 PDF 页码定位。";
+      if (reason === "missing_required_evidence") return "补充证据原文、页码或来源章节。";
+      return "打开 review 页核对证据和状态。";
+    }
+    function gateLabel(gate) {
+      if (!gate || gate === "safe_verified_with_required_evidence") return "人工确认 + 必要证据 + 准确定位";
+      return String(gate || "").replace(/_/g, " ");
+    }
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
     async function fetchJSON(url, options) {
       options = options || {}; options.headers = options.headers || {};
@@ -176,7 +203,7 @@
         renderRows(items);
         loadQualityPanel();
       } catch (error) {
-        list.innerHTML = `<tr><td colspan="8" class="empty-state">Query failed: ${esc(error.message)}</td></tr>`;
+        list.innerHTML = `<tr><td colspan="8" class="empty-state">查询失败：${esc(error.message)}</td></tr>`;
       }
     }
     function qualityQueryUrl() {
@@ -190,28 +217,28 @@
     }
     async function loadQualityPanel() {
       const rowsEl = document.getElementById("qualityRows");
-      if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">Loading quality summary...</div>';
+      if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">正在加载质量概览...</div>';
       try {
         const data = await fetchJSON(qualityQueryUrl());
         const metadata = data.metadata || {};
         document.getElementById("qualityExportable").textContent = metadata.eligible_count == null ? "-" : metadata.eligible_count;
         document.getElementById("qualityBlocked").textContent = metadata.blocked_count == null ? "-" : metadata.blocked_count;
-        document.getElementById("qualityGateLabel").textContent = metadata.safety_gate || "safe_verified_with_required_evidence";
+        document.getElementById("qualityGateLabel").textContent = gateLabel(metadata.safety_gate);
         renderReasonChips(metadata.blocked_reasons || {});
         renderQualityRows(data.rows || []);
         renderCompletenessHints(data.paper_completeness || []);
       } catch (error) {
-        if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">Quality panel failed: ' + esc(error.message) + '</div>';
+        if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">质量面板加载失败：' + esc(error.message) + '</div>';
       }
     }
     function renderReasonChips(reasons) {
       const el = document.getElementById("qualityReasonChips");
       if (!el) return;
       const entries = Object.entries(reasons);
-      let html = '<button type="button" class="reason-chip ' + (!state.qualityReason ? "active" : "") + '" onclick="setQualityReason(\'\')">全部阻止原因</button>';
+      let html = '<button type="button" class="reason-chip ' + (!state.qualityReason ? "active" : "") + '" onclick="setQualityReason(\'\')">全部原因</button>';
       html += entries.map(([reason, count]) => {
         const active = state.qualityReason === reason ? " active" : "";
-        return '<button type="button" class="reason-chip' + active + '" onclick="setQualityReason(\'' + esc(reason) + '\')">' + esc(reason) + ' ' + esc(count) + '</button>';
+        return '<button type="button" class="reason-chip' + active + '" onclick="setQualityReason(\'' + esc(reason) + '\')">' + esc(reasonLabel(reason)) + ' ' + esc(count) + '</button>';
       }).join("");
       el.innerHTML = html;
     }
@@ -222,24 +249,33 @@
     function renderQualityRows(rows) {
       const el = document.getElementById("qualityRows");
       const title = document.getElementById("qualityListTitle");
-      if (title) title.textContent = state.qualityReason ? ("阻止原因: " + state.qualityReason) : "需要处理的记录";
+      if (title) title.textContent = state.qualityReason ? ("处理原因：" + reasonLabel(state.qualityReason)) : "需要处理的记录";
       if (!el) return;
       if (!rows.length) {
-        el.innerHTML = '<div class="empty-state">当前筛选下没有 blocked rows。</div>';
+        el.innerHTML = '<div class="empty-state">当前筛选下没有需要处理的 DFT 记录。</div>';
         return;
       }
       const blockedRows = rows.filter(row => !row.is_exportable);
       const visibleRows = blockedRows.length ? blockedRows : rows;
       el.innerHTML = visibleRows.map(row => {
-        const reasons = (row.blocked_reasons || []).join(", ") || "exportable";
+        const reasonsList = row.blocked_reasons || [];
+        const reasons = reasonsList.length ? reasonsList.map(reasonLabel).join("、") : "可导出";
+        const reviewReason = state.qualityReason || reasonsList[0] || "";
+        const reviewTabUrl = '../literature_library/index.html?paper_id=' + encodeURIComponent(row.paper_id || "") + '&tab=review' + (reviewReason ? '&quality_reason=' + encodeURIComponent(reviewReason) : '');
         const cls = row.is_exportable ? " exportable" : "";
         return '<div class="quality-row' + cls + '">' +
+          '<div class="quality-pill">' + esc(row.is_exportable ? "可导出" : "需要处理") + '</div>' +
           '<h4>' + esc(row.property_type || "DFT result") + ' / ' + esc(row.adsorbate || "-") + ' / ' + esc(row.value == null ? "-" : row.value) + ' ' + esc(row.unit || "") + '</h4>' +
           '<div class="quality-meta">' + esc(row.title || "Untitled paper") + '</div>' +
-          '<div class="quality-meta">blocked_reasons: ' + esc(reasons) + ' | review: ' + esc(row.review_status || "-") + ' | locator: ' + esc(row.locator_status || "-") + '</div>' +
+          '<div class="quality-status-grid">' +
+            '<div class="readable-field"><div class="k">原因</div><div class="v">' + esc(reasons) + '</div></div>' +
+            '<div class="readable-field"><div class="k">下一步</div><div class="v">' + esc(reasonAction(reviewReason)) + '</div></div>' +
+            '<div class="readable-field"><div class="k">人工确认</div><div class="v">' + esc(row.review_status || "-") + '</div></div>' +
+            '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(row.locator_status || "-") + '</div></div>' +
+          '</div>' +
           '<div class="quality-actions">' +
+            '<a class="btn primary small" href="' + esc(reviewTabUrl) + '">去文献库处理</a>' +
             '<a class="btn ghost small" href="' + esc(row.library_detail_url || row.paper_detail_url || "#") + '">论文详情</a>' +
-            '<a class="btn primary small" href="' + esc(row.review_workbench_url || row.library_detail_url || "#") + '">Review workbench</a>' +
           '</div>' +
         '</div>';
       }).join("");
@@ -249,14 +285,14 @@
       if (!el) return;
       const flagged = (items || []).filter(item => (item.hints || []).length);
       if (!flagged.length) {
-        el.innerHTML = '<div class="quality-meta">Completeness hints: no missing catalyst/settings hints in current candidates.</div>';
+        el.innerHTML = '<div class="quality-meta">完整性提示：当前筛选下没有发现催化剂或 DFT 设置缺失提示。</div>';
         return;
       }
-      el.innerHTML = '<div class="quality-meta"><strong>Completeness hints</strong></div>' + flagged.slice(0, 8).map(item => {
+      el.innerHTML = '<div class="quality-meta"><strong>完整性提示</strong></div>' + flagged.slice(0, 8).map(item => {
         return '<div class="completeness-row">' +
           '<div class="quality-meta"><a href="' + esc(item.library_detail_url || "#") + '">' + esc(item.title || item.paper_id || "Paper") + '</a></div>' +
-          '<div class="quality-meta">DFT results exportable/blocked: ' + esc(item.exportable_dft_results || 0) + '/' + esc(item.blocked_dft_results || 0) + ' | catalyst_samples: ' + esc(item.catalyst_samples || 0) + ' | dft_settings: ' + esc(item.dft_settings || 0) + '</div>' +
-          '<div class="quality-meta">hints: ' + esc((item.hints || []).join(", ")) + '</div>' +
+          '<div class="quality-meta">DFT 结果可导出/需处理：' + esc(item.exportable_dft_results || 0) + '/' + esc(item.blocked_dft_results || 0) + '；催化剂样本：' + esc(item.catalyst_samples || 0) + '；DFT 设置：' + esc(item.dft_settings || 0) + '</div>' +
+          '<div class="quality-meta">提示：' + esc((item.hints || []).join("；")) + '</div>' +
         '</div>';
       }).join("");
     }
@@ -293,16 +329,15 @@
     }
     function showEvidence(index) {
       const item = state.items[index];
-      document.getElementById("evidenceDetail").textContent = JSON.stringify({
-        paper_id: item.paper_id,
-        chunk_id: item.id || null,
-        section_title: item.source_section || null,
-        page_span: { page_start: item.page_start || null, page_end: item.page_end || null, span_start: null, span_end: null },
-        evidence_text: item.evidence_text || "",
-        confidence: item.confidence,
-        validation_status: item.validation_status || "validated"
-      }, null, 2);
-      document.getElementById("validationSummary").textContent = item.evidence_text ? "Evidence available" : "No evidence text for this record";
+      document.getElementById("evidenceDetail").innerHTML =
+        '<div class="quality-status-grid">' +
+          '<div class="readable-field"><div class="k">来源章节</div><div class="v">' + esc(item.source_section || "-") + '</div></div>' +
+          '<div class="readable-field"><div class="k">页码</div><div class="v">' + esc(item.page_start || "-") + '</div></div>' +
+          '<div class="readable-field"><div class="k">置信度</div><div class="v">' + esc(item.confidence == null ? "-" : item.confidence) + '</div></div>' +
+          '<div class="readable-field"><div class="k">校验状态</div><div class="v">' + esc(item.validation_status || "validated") + '</div></div>' +
+        '</div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">证据原文</div><div class="v">' + esc(item.evidence_text || "暂无证据原文") + '</div></div>';
+      document.getElementById("validationSummary").textContent = item.evidence_text ? "已显示证据" : "这条记录缺少证据原文";
     }
     function setExportSafetyStatus(message) {
       const el = document.getElementById("exportSafetyStatus");
@@ -328,19 +363,19 @@
           } catch (_) {}
           throw new Error(detail || "HTTP " + resp.status);
         }
-        const gate = resp.headers.get("X-D3-Export-Safety-Gate") || "not returned";
+        const gate = resp.headers.get("X-D3-Export-Safety-Gate") || "";
         const exported = parseInt(resp.headers.get("X-D3-Export-Count") || "0", 10);
         const blocked = parseInt(resp.headers.get("X-D3-Block-Count") || "0", 10);
         
-        let statusMessage = `Safety gate: ${gate} | exported: ${exported} | blocked: ${blocked}`;
-        let toastMessage = "CSV export completed.";
+        let statusMessage = `CSV 导出规则：${gateLabel(gate)}；已导出 ${exported} 条；需处理 ${blocked} 条。`;
+        let toastMessage = "CSV 导出完成。";
         
         if (exported === 0 && blocked === 0) {
-            statusMessage = `Safety gate: ${gate} | exported: 0 | blocked: 0 (没有可导出的 Human verified + required evidence 记录)`;
-            toastMessage = "0 rows exported / 没有记录被导出";
+            statusMessage = `CSV 导出规则：${gateLabel(gate)}；没有可导出的合格记录。`;
+            toastMessage = "没有记录被导出。";
         } else if (exported === 0 && blocked > 0) {
-            statusMessage = `Safety gate: ${gate} | exported: 0 | blocked: ${blocked} (没有 safe rows 被导出，因缺少 Human verified 或 required evidence)`;
-            toastMessage = `0 rows exported / 没有 safe rows 被导出 (${blocked} blocked)`;
+            statusMessage = `CSV 导出规则：${gateLabel(gate)}；0 条导出，${blocked} 条需要先处理。`;
+            toastMessage = `没有合格记录被导出，${blocked} 条需要处理。`;
         }
 
         setExportSafetyStatus(statusMessage);
@@ -394,7 +429,7 @@
         const exported = Number(metadata.eligible_count || 0);
         const blocked = Number(metadata.blocked_count || 0);
         const gate = metadata.safety_gate || "safe_verified_with_required_evidence";
-        setExportSafetyStatus(`ML JSON safety gate: ${gate} | records: ${exported} | blocked: ${blocked}`);
+        setExportSafetyStatus(`ML 导出规则：${gateLabel(gate)}；可导出 ${exported} 条；需处理 ${blocked} 条。`);
 
         const pretty = JSON.stringify(data || {}, null, 2);
         const blob = new Blob([pretty], { type: "application/json;charset=utf-8" });
