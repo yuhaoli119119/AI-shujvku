@@ -17,10 +17,30 @@ function renderWriterStatus() {
     const box = $("writerStatusBox");
     if (box) {
         box.innerHTML =
-            "后端：<strong>" + esc(state.writerStatus.backend_used || "-") + "</strong> | " +
-            "状态：<strong>" + esc(state.writerStatus.llm_status || "-") + "</strong> | " +
-            (state.writerStatus.llm_error ? "错误：" + esc(state.writerStatus.llm_error) : "LLM 已就绪");
+            '<strong>' + esc(state.writerStatus.llm_error ? "写作服务需要检查" : "写作服务已就绪") + '</strong>' +
+            '<span class="subtle" style="margin-left:8px;">' + esc(writerStatusText(state.writerStatus)) + '</span>';
     }
+}
+
+function writerStatusText(data) {
+    if (!data) return "未返回";
+    if (data.llm_status === "ok") return "AI 已完成生成";
+    if (data.llm_status === "fallback") return "已使用规则兜底生成，建议检查 API 设置";
+    if (data.llm_error) return "生成遇到问题：" + data.llm_error;
+    return data.llm_status || "已返回";
+}
+
+function renderWriterStatusSummary(data) {
+    const guardActions = data && data.guard_actions ? Object.keys(data.guard_actions).length : 0;
+    const citationGuard = data && data.citation_guard ? Object.values(data.citation_guard).filter(Boolean).length : 0;
+    return '<div class="writer-block"><h3>写作生成状态</h3>' +
+        '<div class="readable-grid">' +
+            '<div class="readable-field"><div class="k">生成方式</div><div class="v">' + esc(data && data.backend_used === "llm" ? "AI 生成" : "规则兜底") + '</div></div>' +
+            '<div class="readable-field"><div class="k">状态</div><div class="v">' + esc(writerStatusText(data)) + '</div></div>' +
+            '<div class="readable-field"><div class="k">引用检查</div><div class="v">' + esc(citationGuard ? "已检查引用证据" : "未发现可检查的引用证据") + '</div></div>' +
+            '<div class="readable-field"><div class="k">安全修正</div><div class="v">' + esc(guardActions ? "已自动移除或替换缺少证据的句子" : "未触发自动修正") + '</div></div>' +
+        '</div>' +
+    '</div>';
 }
 
 async function generateWriterDraft() {
@@ -52,19 +72,12 @@ async function generateWriterDraft() {
         const resultEl = $("writerResult");
         if (resultEl) {
             resultEl.innerHTML =
-                '<div class="writer-block"><h3>写作器返回状态</h3><div class="mono">' + esc(JSON.stringify({
-                    backend_used: data.backend_used,
-                    llm_status: data.llm_status,
-                    llm_error: data.llm_error,
-                    guard_actions: data.guard_actions,
-                    citation_guard: data.citation_guard
-                }, null, 2)) + "</div></div>" +
+                renderWriterStatusSummary(data) +
                 '<div class="section-card"><h3>提纲</h3><div class="prewrap">' + esc((data.outline || []).join("\n")) + "</div></div>" +
                 '<div class="section-card"><h3>引言</h3><div class="prewrap">' + esc(data.introduction || "") + "</div></div>" +
                 '<div class="section-card"><h3>DFT 结果整理</h3><div class="prewrap">' + esc(data.dft_results || "") + "</div></div>" +
                 '<div class="section-card"><h3>讨论</h3><div class="prewrap">' + esc(data.discussion || "") + "</div></div>" +
-                '<div class="section-card"><h3>图文叙事</h3><div class="prewrap">' + esc((data.figure_storyline || []).join("\n")) + "</div></div>" +
-                '<div class="section-card"><h3>Prompt 预览</h3><div class="mono">' + esc(data.prompt_preview || "") + "</div></div>";
+                '<div class="section-card"><h3>图文叙事</h3><div class="prewrap">' + esc((data.figure_storyline || []).join("\n")) + "</div></div>";
         }
         showToast("内部 AI 整理完成。", "success");
     } catch (error) {

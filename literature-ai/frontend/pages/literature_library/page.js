@@ -39,7 +39,11 @@ function badge(count) {
 function formatDate(value) {
     if (!value) return "-";
     try {
-        return new Date(value).toLocaleString("zh-CN");
+        let normalized = value;
+        if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)) {
+            normalized = value + "Z";
+        }
+        return new Date(normalized).toLocaleString("zh-CN");
     } catch (_) {
         return value;
     }
@@ -303,10 +307,16 @@ async function showFolderImportGuide() {
     setAcquisitionResult('<div class="workspace-empty small-empty">正在读取 MCP 批量导入指南...</div>');
     try {
         const guide = await fetchJSON("/api/system/agent-guide");
+        const entry = guide.recommended_entrypoint || {};
+        const tools = guide.mcp && Array.isArray(guide.mcp.common_tools) ? guide.mcp.common_tools : [];
         setAcquisitionResult(
             '<div class="section-card"><h3>本地文件夹批量导入指南</h3>' +
             '<div class="subtle">批量扫描文件夹由 MCP 工具 <strong>scan_local_pdfs</strong> 和 <strong>ingest_pdf_batch</strong> 执行；网页端请先前往 Ingestion Center 处理常规上传。</div>' +
-            '<div class="mono" style="margin-top:12px;">' + esc(JSON.stringify(guide, null, 2)) + "</div></div>"
+            '<div class="readable-grid" style="margin-top:12px;">' +
+                '<div class="readable-field"><div class="k">推荐入口</div><div class="v">' + esc((entry.method || "") + " " + (entry.path || "")) + '</div></div>' +
+                '<div class="readable-field"><div class="k">MCP 地址</div><div class="v">' + esc((guide.mcp && guide.mcp.url) || "/mcp") + '</div></div>' +
+                '<div class="readable-field"><div class="k">常用工具</div><div class="v">' + esc(tools.join("、") || "scan_local_pdfs、ingest_pdf_batch") + '</div></div>' +
+            "</div></div>"
         );
     } catch (error) {
         setAcquisitionResult('<div class="workspace-empty small-empty">指南读取失败：' + esc(error.message) + "</div>");

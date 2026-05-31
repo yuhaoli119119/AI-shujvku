@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鏈虹悊鐭ヨ瘑鑱氬悎 - Literature AI</title>
+    <title>鏈虹悊鐭ヨ瘑鑱氬�?- Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
@@ -174,7 +174,7 @@
         <div class="header-section">
             <div>
                 <h1>鏈虹悊涓庢潗鏂欑煡璇嗚埍</h1>
-                <p>姹囪仛璺ㄦ枃鐚彁鍙栫殑鐢靛偓鍖栧墏缁撴瀯鐗瑰緛銆佸惛闄勭墿绉嶇被浠ュ強鍚屼箟璇嶅埆鍚嶃€傚姪鍔涙彮绀哄井瑙傚弽搴旀満鐞嗚寰嬨€?/p>
+                <p>姹囪仛璺ㄦ枃鐚彁鍙栫殑鐢靛偓鍖栧墏缁撴瀯鐗瑰緛銆佸惛闄勭墿绉嶇被浠ュ強鍚屼箟璇嶅埆鍚嶃€傚姪鍔涙彮绢�哄井瑙傚弽搴既�溢�鐞嗚寰嬨€?/p>
             </div>
             <div>
                 <button class="btn ghost" onclick="loadAggregationData()">鍒锋柊鑱氬悎澶х洏</button>
@@ -183,7 +183,7 @@
 
         <!-- Navigation Tabs -->
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('catalysts', event)">鍌寲鏉愭枡鑱氬悎 (Catalysts)</button>
+            <button class="tab-btn active" onclick="switchTab('catalysts', event)">鍌寲鏉愭枡鑱氬�?(Catalysts)</button>
             <button class="tab-btn" onclick="switchTab('adsorbates', event)">鍚搁檮涓棿浣撹仛鍚?(Adsorbates)</button>
             <button class="tab-btn" onclick="switchTab('aliases', event)">鍚屼箟璇嶄笌鍙兘鍒悕 (Aliases)</button>
         </div>
@@ -201,7 +201,7 @@
         <!-- Tab 2: Adsorbates -->
         <div id="tab-adsorbates" class="tab-pane" style="display:none;">
             <div class="panel-card">
-                <div class="panel-title">鍚搁檮鐗╀腑闂翠綋鍙嶅簲鑳界骇鑱氬悎</div>
+                <div class="panel-title">鍚搁檮鐗╢�腑闂翠綋鍙嶅簲鑳界骇鑱氬�?/div>
                 <div class="aggregate-grid" id="adsorbatesBox">
                     <div class="empty-state">鏃犲惛闄勪腑闂翠綋鑱氬悎鏁版嵁銆?/div>
                 </div>
@@ -213,7 +213,7 @@
             <div class="panel-card">
                 <div class="panel-title">绯荤粺妫€娴嬪埌鐨勫鏈悕绉板彉浣?/ 鍙兘鍒悕</div>
                 <div class="aggregate-grid" id="aliasesBox">
-                    <div class="empty-state">鏃犲埆鍚嶆娴嬨€?/div>
+                    <div class="empty-state">鏃犲埆鍚嶆娴嬨�?/div>
                 </div>
             </div>
         </div>
@@ -240,22 +240,22 @@
 
         function materialLine(label, value) {
             if (!hasUsefulValue(value)) return "";
-            const displayValue = Array.isArray(value) ? value.join("銆?) : String(value);
-            return `<div class="material-line"><strong>${esc(label)}锛?/strong>${esc(displayValue)}</div>`;
+            const displayValue = Array.isArray(value) ? value.join("�?) : String(value);
+            return `<div class="material-line"><strong>${esc(label)}�?/strong>${esc(displayValue)}</div>`;
         }
 
         function renderCatalystMeta(item) {
             item = item || {};
             const rows = [
-                materialLine("杞戒綋", item.support),
+                materialLine("杞戒�?, item.support),
                 materialLine("鍚堟垚鏂规硶", item.synthesis_method ? String(item.synthesis_method).slice(0, 180) : ""),
-                materialLine("閰嶄綅缁撴瀯", item.coordination),
-                materialLine("娲绘€ч噾灞?, item.metal_centers || [])
+                materialLine("閰嶄綅缁撴��?, item.coordination),
+                materialLine("娲绘€ч噾�?, item.metal_centers || [])
             ].filter(Boolean);
             if (!rows.length) {
-                rows.push('<div class="missing-evidence">AI 鏈湪鍘熸枃涓壘鍒板彲闈犵殑杞戒綋銆佸悎鎴愭柟娉曟垨閰嶄綅缁撴瀯璇佹嵁銆傝鍥炲埌鏂囩尞搴撻噸鏂拌В鏋愶紝鎴栧湪浜哄伐纭宸ヤ綔鍙拌ˉ鍏呰瘉鎹€?/div>');
+                rows.push('<div class="missing-evidence">AI 鏈湪鍘熸枃涓壘鍒板彲闈犵殑杞戒綋銆佸悎鎴愭柟娉曟垨閰嶄綅缁撴瀯璇佹嵁銆傝鍥炲埌鏂囩尞搴撻噸鏂拌В鏋愶紝鎴栧湪浜哄伐纭宸ヤ綔鍙拌ˉ鍏呰瘉鎹�?/div>');
             } else if (!hasUsefulValue(item.support) || !hasUsefulValue(item.synthesis_method) || !hasUsefulValue(item.coordination)) {
-                rows.push('<div class="missing-evidence">閮ㄥ垎缁撴瀯瀛楁缂哄皯鍙潬璇佹嵁锛岀郴缁熶笉浼氭妸绌哄瓧娈靛綋浣滃凡纭缁撹銆?/div>');
+                rows.push('<div class="missing-evidence">閮ㄥ垎缁撴����楁缂哄皯鍙潬璇佹嵁锛岀郴缁熶笉浼氭妸绌哄瓧娈靛綋浣滃凡纭缁撹�?/div>');
             }
             return rows.join("");
         }
@@ -278,7 +278,7 @@
             }
             const resp = await fetch(url, options);
             if (resp.status === 403) {
-                showToast("鏃犳潈璁块棶璇ユ帴鍙ｃ€傝鍏堝湪[璁剧疆]涓厤缃鐞嗗憳 Token銆?);
+                showToast("鏃犳潈璁块棶璇ユ帴鍙ｃ€傝鍏堝湪[璁剧疆]涓厤缃鐞嗗�?Token�?);
                 throw new Error("403 Forbidden");
             }
             const text = await resp.text();
@@ -318,7 +318,7 @@
             const catBox = document.getElementById('catalystsBox');
             const catalysts = data.catalyst_groups || {};
             if (Object.keys(catalysts).length === 0) {
-                catBox.innerHTML = `<div class="empty-state">搴撲腑灏氭棤鍌寲鏉愭枡鏁版嵁銆傝鍦ㄥ叆搴撲腑蹇冨鍏ユ枃鐚悗鐢?AI 閲嶆柊鎶芥彁銆?/div>`;
+                catBox.innerHTML = `<div class="empty-state">搴撲腑灏氭棤鍌寲鏉愭枡鏁版嵁銆傝鍦ㄥ叆搴撲腑蹇冨鍏ユ枃鐚悗鐢?AI 閲嶆柊鎶芥彁�?/div>`;
             } else {
                 catBox.innerHTML = Object.entries(catalysts).map(([key, items]) => {
                     const canonicalName = items[0].name || key;
@@ -335,7 +335,7 @@
                             <div style="font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:6px;">鍑哄鍏宠仈鏂囩尞锛?/div>
                             ${items.slice(0, 3).map(item => `
                                 <div class="relation-item">
-                                    鍏宠仈搴擄細${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${esc(item.paper_id)}" style="color:var(--color-primary); text-decoration:none;">鎵撳紑鏂囩尞</a>` : '鏈煡'}
+                                    鍏宠仈搴擄細${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${esc(item.paper_id)}" style="color:var(--color-primary); text-decoration:none;">鎵撳紑鏂囩尞</a>` : '鏈�?}
                                 </div>
                             `).join('')}
                         </div>
@@ -347,7 +347,7 @@
             const adsBox = document.getElementById('adsorbatesBox');
             const adsorbates = data.adsorbate_groups || {};
             if (Object.keys(adsorbates).length === 0) {
-                adsBox.innerHTML = `<div class="empty-state">搴撲腑灏氭棤鍚搁檮鍒嗗瓙涓棿浣撴暟鎹€?/div>`;
+                adsBox.innerHTML = `<div class="empty-state">搴撲腑灏氭棤鍚搁檮鍒嗗瓙涓棿浣撴暟鎹�?/div>`;
             } else {
                 adsBox.innerHTML = Object.entries(adsorbates).map(([key, items]) => {
                     const canonicalName = items[0].adsorbate || key;
@@ -356,18 +356,18 @@
                         <div class="material-card">
                             <div class="material-header">
                                 <span style="font-family:var(--font-mono); font-weight:700;">${esc(canonicalName)}</span>
-                                <span class="tag adsorbate">鐩稿叧鑳界骇鏁?${count}</span>
+                                <span class="tag adsorbate">鐩�6�0叧鑳界骇�?${count}</span>
                             </div>
                             <div class="material-meta">
-                                ${materialLine("鐑姏瀛﹀睘鎬?, items[0].property_type) || '<div class="missing-evidence">缂哄皯鐑姏瀛﹀睘鎬ц瘉鎹€?/div>'}
-                                ${materialLine("涓昏鍙嶅簲姝ラ", items[0].reaction_step) || ''}
+                                ${materialLine("鐑姏��﹀睘鎬?, items[0].property_type) || '<div class="missing-evidence">缂哄皯鐑姏瀛﹀睘鎬ц瘉鎹€?/div>'}
+                                ${materialLine("涓昏鍙嶅簲姝ラ�?, items[0].reaction_step) || ''}
                             </div>
                             <div style="font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:6px;">鑳介噺璁＄畻鎶芥彁锛?/div>
                             ${items.slice(0, 3).map(item => `
                                 <div class="relation-item">
                                     <strong>鑳介噺鍊硷細</strong>${item.value !== null ? Number(item.value).toFixed(4) : '-'} ${esc(item.unit || 'eV')} <br>
-                                    <strong>缃俊搴︼細</strong>${item.confidence ? `${(item.confidence*100).toFixed(0)}%` : '-'}锛堟钀斤細${esc(item.source_section || '-')}锛?br>
-                                    ${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${esc(item.paper_id)}" style="color:var(--color-primary); text-decoration:none;">鏌ョ湅瀵瑰簲鏂囩尞璇︽儏</a>` : ''}
+                                    <strong>缃俊搴︼細</strong>${item.confidence ? `${(item.confidence*100).toFixed(0)}%` : '-'}锛堟钀斤細${esc(item.source_section || '-')}�?br>
+                                    ${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${esc(item.paper_id)}" style="color:var(--color-primary); text-decoration:none;">鏌ョ湅��瑰簲鏂囩尞璇︽�?/a>` : ''}
                                 </div>
                             `).join('')}
                         </div>
@@ -379,7 +379,7 @@
             const aliBox = document.getElementById('aliasesBox');
             const aliases = data.possible_name_aliases || [];
             if (!aliases.length) {
-                aliBox.innerHTML = `<div class="empty-state">鏈娴嬪埌浠讳綍鍛藉悕寮傚悕銆傚悕绉伴珮搴﹁鏁淬€?/div>`;
+                aliBox.innerHTML = `<div class="empty-state">鏈娴嬪埌浠讳綍鍛藉悕寮傚悕銆傚悕绉伴珮搴﹁鏁淬�?/div>`;
             } else {
                 aliBox.innerHTML = aliases.map(alias => {
                     const cls = alias.type === 'catalyst' ? 'catalyst' : 'adsorbate';
@@ -391,8 +391,8 @@
                                 <span class="tag ${cls}">${typeTxt}</span>
                             </div>
                             <div class="material-meta">
-                                <strong>绯荤粺鑱氬悎鍚嶇О锛?/strong><code style="font-family:var(--font-mono);">${esc(alias.canonical_key)}</code><br>
-                                <strong>娑夊強鏂囩尞鏁帮細</strong>${esc(alias.paper_count)} 绡囨枃鐚?                            </div>
+                                <strong>绯荤粺鑱氬悎鍚嶇О�?/strong><code style="font-family:var(--font-mono);">${esc(alias.canonical_key)}</code><br>
+                                <strong>娑夊強鏂囩尞鏁帮�?/strong>${esc(alias.paper_count)} 绡囨枃鐚?                            </div>
                             <div style="font-size:12px; color:var(--color-text-secondary);">
                                 <strong>鎻愮ず锛?/strong>鍙樹綋鍙兘鏉ヨ嚜鎺掔増銆佸甫鐢佃嵎鐘舵€佹垨涓嶅悓绠€鍐欍€傜郴缁熻繖閲屽彧鍋氳仛鍚堟彁绀猴紝鏈€缁堝悕绉颁粛寤鸿浜哄伐纭銆?                            </div>
                         </div>
@@ -408,3 +408,4 @@
     </script>
 </body>
 </html>
+

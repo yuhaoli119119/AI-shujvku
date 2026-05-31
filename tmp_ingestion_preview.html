@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -229,7 +229,7 @@
         <div class="header-section">
             <div>
                 <h1>Ingestion Center 鍏ュ簱涓績</h1>
-                <p>鍦ㄦ澶勫揩閫熷鍏ュ閮ㄧ鐮旀枃鐚€傛敮鎸?PDF 涓婁紶銆丏OI 褰曞叆銆佸湪绾挎暟鎹绱㈠強 AI 鎵归噺鍚庡彴鏀跺綍宸ヤ綔娴併€?/p>
+                <p>鍦ㄦ澶勫揩閫熷鍏ュ閮ㄧ鐮既�枃鐚€傛敮�?PDF 涓婁紶銆丏OI 褰曞叆銆佸湪绾挎暟鎹绱㈠�?AI 鎵归噺鍚庡彴鏢�跺綍宸ヤ綔娴併€?/p>
             </div>
             <div>
                 <select id="librarySelect" class="library-select btn" style="height:44px; padding:0 12px;" onchange="switchLibrary(this.value)">
@@ -244,8 +244,8 @@
                 <div class="panel-card">
                     <div class="ingest-tabs">
                         <button class="ingest-tab active" onclick="switchIngestTab('pdf', event)">鏈湴涓婁紶 PDF</button>
-                        <button class="ingest-tab" onclick="switchIngestTab('doi', event)">DOI / URL 鏀跺綍</button>
-                        <button class="ingest-tab" onclick="switchIngestTab('online', event)">鍦ㄧ嚎鏂囩尞妫€绱?/button>
+                        <button class="ingest-tab" onclick="switchIngestTab('doi', event)">DOI / URL 鏢�跺綍</button>
+                        <button class="ingest-tab" onclick="switchIngestTab('online', event)">鍦ㄧ嚎鏂囩尞妫€�?/button>
                         <button class="ingest-tab" onclick="switchIngestTab('ai', event)">AI 鑷姩鏀跺綍</button>
                     </div>
 
@@ -253,8 +253,8 @@
                     <div id="tab-pdf" class="tab-content">
                         <div class="dropzone" onclick="document.getElementById('pdfInput').click()">
                             <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-                            <h3>鎷栨嫿 PDF 鏂囦欢鑷虫鎴栫洿鎺ョ偣鍑讳笂浼?/h3>
-                            <p style="margin-top:6px; font-size:13px; color:var(--color-text-muted);">鏂囦欢澶у皬涓嶈秴杩?50MB銆備笂浼犲悗绯荤粺灏嗚嚜鍔ㄥ畬鎴愭枃鏈钀戒笌 DFT 鏁版嵁瑙ｆ瀽銆?/p>
+                            <h3>鎷栨�?PDF 鏂囦欢鑷虫鎴栫洿鎺ョ偣鍑讳笂浼?/h3>
+                            <p style="margin-top:6px; font-size:13px; color:var(--color-text-muted);">鏂囦欢澶у皬涓嶈秴�?50MB銆備笂浼犲悗绯荤粺灏嗚嚜鍔ㄥ畬鎴愭枃鏈钀戒笌 DFT 鏁版嵁瑙ｆ��銆?/p>
                             <input id="pdfInput" type="file" accept=".pdf" style="display:none;" onchange="handlePDFUpload(this)">
                         </div>
                     </div>
@@ -262,43 +262,43 @@
                     <!-- Method 2: DOI Input -->
                     <div id="tab-doi" class="tab-content" style="display:none;">
                         <div class="form-group">
-                            <label for="doiInput">DOI 鎴栧鏈枃鐚?URL</label>
-                            <input type="text" id="doiInput" class="form-control" placeholder="渚嬪锛?0.1016/j.ensm.2023.102875 鎴?https://arxiv.org/abs/2304.12345">
+                            <label for="doiInput">DOI 鎴栧鏈枃�?URL</label>
+                            <input type="text" id="doiInput" class="form-control" placeholder="渚嬪锛?0.1016/j.ensm.2023.102875 �?https://arxiv.org/abs/2304.12345">
                         </div>
-                        <button class="btn primary" onclick="submitDOI()">馃摜 涓€閿笅杞藉苟鏀跺綍</button>
+                        <button class="btn primary" onclick="submitDOI()">馃摜 涓€閿笅杞藉苟鏢�跺綍</button>
                     </div>
 
                     <!-- Method 3: Online Search -->
                     <div id="tab-online" class="tab-content" style="display:none;">
                         <div style="display:flex; gap:10px; margin-bottom:16px;">
-                            <input type="text" id="searchQuery" class="form-control" style="flex:1;" placeholder="杈撳叆妫€绱㈡枃鐚叧閿瘝銆丏OI銆佹湡鍒婃垨鏍囬">
+                            <input type="text" id="searchQuery" class="form-control" style="flex:1;" placeholder="杈撳叆妫€绱㈡枃鐚叧閿瘝銆丏OI銆佹湡鍒婃垨鏍囬�?>
                             <input type="number" id="searchLimit" class="form-control" style="width:100px;" value="10" min="1" max="100" title="妫€绱笂闄?>
-                            <button class="btn blue" onclick="runOnlineSearch()">馃攳 鎼滅储</button>
+                            <button class="btn blue" onclick="runOnlineSearch()">馃攳 鎼滅�?/button>
                         </div>
                         <div class="search-results" id="searchResults">
-                            <div class="empty-state" style="padding:10px 0;">杈撳叆鍏抽敭璇嶅悗鐐瑰嚮鎼滅储锛屾垜浠皢浠?OpenAlex / arXiv 鑷姩鍘婚噸鑾峰彇鏂囩尞銆?/div>
+                            <div class="empty-state" style="padding:10px 0;">杈撳叆鍏抽敭璇嶅悗鐐瑰嚮鎼滅储锛屾垜浠皢浠?OpenAlex / arXiv 鑷姩鍘婚噸鑾峰彇鏂囩尞�?/div>
                         </div>
                     </div>
 
                     <!-- Method 4: AI Ingestion Workflow -->
                     <div id="tab-ai" class="tab-content" style="display:none;">
                         <div class="form-group">
-                            <label for="aiQuery">AI 鏂囩尞鎵╁睍鏌ヨ鎻愮ず璇?/label>
+                            <label for="aiQuery">AI 鏂囩尞鎵╁睍鏌ヨ鎻愮ず�?/label>
                             <input type="text" id="aiQuery" class="form-control" placeholder="渚嬪锛歭ithium sulfur battery CeO2 catalyst energy mechanism">
                         </div>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
                             <div class="form-group">
-                                <label for="aiMaxResults">AI 妫€绱㈠苟鍘婚噸涓婇檺 (Max Results)</label>
+                                <label for="aiMaxResults">AI 妫€绱㈠苟鍘婚噸涓婇�?(Max Results)</label>
                                 <input type="number" id="aiMaxResults" class="form-control" value="20" min="1" max="100">
                             </div>
                             <div class="form-group">
-                                <label for="aiMaxDownloads">鏈€澶у悗鍙颁笅杞芥枃鐚暟 (Max Downloads)</label>
+                                <label for="aiMaxDownloads">鏈€澶у悗鍙颁笅杞芥枃鐚�?(Max Downloads)</label>
                                 <input type="number" id="aiMaxDownloads" class="form-control" value="5" min="1" max="100">
                             </div>
                         </div>
-                        <button class="btn purple" onclick="triggerAIWorkflow()">馃殌 瑙﹀彂鍚庡彴鑷姩鍖栨敹褰曢摼</button>
+                        <button class="btn purple" onclick="triggerAIWorkflow()">馃殌 瑙﹀彂鍚庡彴鑷姩鍖栨敹褰曢�?/button>
                         <p style="margin-top:10px; font-size:12px; color:var(--color-text-secondary);">
-                            AI 宸ヤ綔娴佸皢鍦ㄥ悗鍙板苟琛屾墽琛岋細鍦ㄧ嚎鎵╁睍鏌ヨ 鈫?鑾峰彇绮惧噯鍏冩暟鎹?鈫?鑷姩缁曡繃闄愬埗涓嬭浇 PDF 鈫?瑙ｆ瀽缁撴瀯鍖栨鏂?鈫?鑷姩鍐欏洖搴擄紝鏃犻渶鍋滅暀鍦ㄦ湰椤点€?                        </p>
+                            AI 宸ヤ綔娴佸皢鍦ㄥ悗鍙板苟琛屾墽琛岋細鍦ㄧ嚎鎵╁睍鏌ヨ�?�?鑾峰彇绮惧噯鍏冩暟鎹?�?鑷姩缁曡繃闄愬埗涓嬭浇 PDF �?瑙ｆ瀽缁撴��鍖栨�?�?鑷姩鍐欏洖搴擄紝鏃犻渶鍋滅暢�鍦ㄦ湰椤点€?                        </p>
                     </div>
                 </div>
             </div>
@@ -311,7 +311,7 @@
                         浠诲姟涓績 (Job Center)
                     </div>
                     <div style="margin-bottom:14px; display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="btn small primary" id="job-filter-all" onclick="filterJobs('all')">鍏ㄩ儴</button>
+                        <button class="btn small primary" id="job-filter-all" onclick="filterJobs('all')">鍏ㄩ�?/button>
                         <button class="btn small ghost" id="job-filter-running" onclick="filterJobs('running')">杩愯涓?/button>
                         <button class="btn small ghost" id="job-filter-completed" onclick="filterJobs('completed')">宸叉垚鍔?/button>
                         <button class="btn small ghost" id="job-filter-failed" onclick="filterJobs('failed')">宸插け璐?/button>
@@ -355,7 +355,7 @@
             }
             const resp = await fetch(url, options);
             if (resp.status === 403) {
-                showToast("鏃犳潈璁块棶姝?API銆傝鍏堝湪[璁剧疆]涓厤缃鐞嗗憳 Token銆?);
+                showToast("鏃犳潈璁块棶�?API銆傝鍏堝湪[璁剧疆]涓厤缃鐞嗗�?Token�?);
                 throw new Error("403 Forbidden");
             }
             const text = await resp.text();
@@ -375,7 +375,7 @@
                 
                 const select = document.getElementById('librarySelect');
                 select.innerHTML = libs.map(l => 
-                    `<option value="${l.name}" ${l.is_active ? 'selected' : ''}>${l.name}${l.is_active ? ' (褰撳墠)' : ''}</option>`
+                    `<option value="${l.name}" ${l.is_active ? 'selected' : ''}>${l.name}${l.is_active ? ' (褰撳�?' : ''}</option>`
                 ).join('');
 
                 if (active) {
@@ -391,11 +391,11 @@
             if (!name) return;
             try {
                 await fetchJSON(`${LIB_API}/${encodeURIComponent(name)}/activate`, { method: "POST" });
-                showToast("鍒囨崲搴撴垚鍔燂細" + name);
+                showToast("鍒囨崲搴撴垚鍔燂�? + name);
                 state.currentLibrary = name;
                 await loadLibraries();
             } catch (e) {
-                showToast("鍒囨崲搴撳け璐ワ細" + e.message);
+                showToast("鍒囨崲搴撳け璐ワ�? + e.message);
             }
         }
 
@@ -422,10 +422,10 @@
                     method: "POST",
                     body: formData
                 });
-                showToast("PDF 涓婁紶鎴愬姛锛屾枃鐚凡鏀跺綍锛佹爣棰橈細" + (data.title || file.name));
+                showToast("PDF 涓婁紶鎴愬姛锛屾枃鐚凡鏢�跺綍锛佹爣棰橈細" + (data.title || file.name));
                 pollJobs();
             } catch (e) {
-                showToast("涓婁紶瑙ｆ瀽澶辫触锛? + e.message);
+                showToast("涓婁紶瑙ｆ��澶辫触�? + e.message);
             } finally {
                 input.value = "";
             }
@@ -435,7 +435,7 @@
         async function submitDOI() {
             const val = document.getElementById('doiInput').value.trim();
             if (!val) {
-                showToast("璇疯緭鍏?DOI 鎴?URL锛?);
+                showToast("璇疯緭鍏?DOI �?URL�?);
                 return;
             }
             showToast("姝ｅ湪鍚庡彴涓嬭浇鏀跺綍锛岃鍕垮叧闂〉闈?..");
@@ -450,11 +450,11 @@
                     })
                 });
                 if (data.status === 'already_exists') {
-                    showToast("璇ユ枃鐚凡鍦ㄦ枃鐚簱涓紒鏍囬锛? + data.title);
+                    showToast("璇ユ枃鐚凡鍦ㄦ枃鐚簱涓紒鏍囬�? + data.title);
                 } else if (data.status === 'metadata_only') {
-                    showToast("涓嬭浇 PDF 闄愬埗锛屽凡鎸夊厓鏁版嵁鍏堟敹褰曘€傛爣棰橈細" + data.title);
+                    showToast("涓嬭�?PDF 闄愬埗锛屽凡鎸夊厓鏁版嵁鍏堟敹褰曘€傛爣棰橈�? + data.title);
                 } else {
-                    showToast("鏀跺綍涓嬭浇鎴愬姛锛佹爣棰橈細" + data.title);
+                    showToast("鏢�跺綍涓嬭浇鎴愬姛锛佹爣棰橈細" + data.title);
                 }
                 document.getElementById('doiInput').value = "";
                 pollJobs();
@@ -467,7 +467,7 @@
         async function runOnlineSearch() {
             const q = document.getElementById('searchQuery').value.trim();
             if (!q) {
-                showToast("璇疯緭鍏ユ悳绱㈠叧閿瘝锛?);
+                showToast("璇疯緭鍏ユ悳绱㈠叧閿瘝�?);
                 return;
             }
             const limit = document.getElementById('searchLimit').value || 10;
@@ -490,7 +490,7 @@
                                 ${item.year || '-'} | ${item.journal || '-'} | ${authors}
                             </p>
                             <div style="margin-top:10px; display:flex; justify-content:flex-end;">
-                                <button class="btn green small" onclick="ingestSearchResult('${identifier.replace(/'/g, "\\'")}')">馃摜 鏀跺綍姝ゆ枃鐚?/button>
+                                <button class="btn green small" onclick="ingestSearchResult('${identifier.replace(/'/g, "\\'")}')">馃摜 鏢�跺綍姝ゆ枃鐚?/button>
                             </div>
                         </div>
                     `;
@@ -502,7 +502,7 @@
 
         async function ingestSearchResult(identifier) {
             if (!identifier) return;
-            showToast("姝ｅ湪鏀跺綍鏂囩尞锛屼笅杞?PDF...");
+            showToast("姝ｅ湪鏀跺綍鏂囩尞锛屼笅�?PDF...");
             try {
                 const data = await fetchJSON(`${API_BASE}/discovery/download`, {
                     method: "POST",
@@ -513,10 +513,10 @@
                         library_name: state.currentLibrary || ""
                     })
                 });
-                showToast("鎴愬姛鏀跺綍鏂囩尞锛佹爣棰橈細" + (data.title || "瀛︽湳鏂囩尞"));
+                showToast("鎴愬姛鏀跺綍鏂囩尞锛佹爣棰橈�? + (data.title || "瀛︽湳鏂囩尞"));
                 pollJobs();
             } catch (e) {
-                showToast("鏀跺綍澶辫触锛? + e.message);
+                showToast("鏢�跺綍澶辫触锛? + e.message);
             }
         }
 
@@ -524,13 +524,13 @@
         async function triggerAIWorkflow() {
             const q = document.getElementById('aiQuery').value.trim();
             if (!q) {
-                showToast("璇疯緭鍏?AI 鑷姩妫€绱㈠紡锛?);
+                showToast("璇疯緭鍏?AI 鑷姩妫€绱㈠紡�?);
                 return;
             }
             const maxResults = document.getElementById('aiMaxResults').value || 20;
             const maxDownloads = document.getElementById('aiMaxDownloads').value || 5;
             
-            showToast("姝ｅ湪娲惧彂 AI 鏀跺綍宸ヤ綔娴侊紝绯荤粺宸茶浆鍏ュ悗鍙?..");
+            showToast("姝ｅ湪娲惧彂 AI 鏢�跺綍宸ヤ綔娴侊紝绯荤粺宸茶浆鍏ュ悗鍙?..");
             try {
                 const job = await fetchJSON(`${API_BASE}/ai_workflow/jobs`, {
                     method: "POST",
@@ -545,7 +545,7 @@
                         skip_existing: true
                     })
                 });
-                showToast("浠诲姟宸叉淳鍙戯紝浠诲姟 ID锛? + job.job_id);
+                showToast("浠诲姟宸叉淳鍙戯紝浠诲姟 ID�? + job.job_id);
                 document.getElementById('aiQuery').value = "";
                 await pollJobs();
             } catch (e) {
@@ -590,7 +590,7 @@
             }
             
             if (!filtered.length) {
-                container.innerHTML = `<div class="empty-state">褰撳墠娌℃湁璇ョ姸鎬佷笅鐨勪换鍔°€?/div>`;
+                container.innerHTML = `<div class="empty-state">褰撳墠娌℃湁璇ョ姸鎬佷笅鐨勪换鍔°�?/div>`;
                 return;
             }
             
@@ -599,22 +599,22 @@
                     queued: '鎺掗槦涓?,
                     running: '杩愯涓?,
                     completed: '宸插畬鎴?,
-                    failed: '澶辫触',
+                    failed: '澶辫�?,
                     cancelled: '宸插彇娑?
                 };
                 const statusText = statusLabels[job.status] || job.status;
                 
                 let errorSection = '';
                 if (job.status === 'failed') {
-                    errorSection = `<div class="job-error" style="color:var(--color-danger); margin-top:8px; font-size:12px; font-weight:500;">澶辫触鍘熷洜锛?{job.error || '鏈煡鍘熷洜'}</div>`;
+                    errorSection = `<div class="job-error" style="color:var(--color-danger); margin-top:8px; font-size:12px; font-weight:500;">澶辫触鍘熷洜�?{job.error || '鏈煡鍘熷洜'}</div>`;
                 } else if (job.status === 'cancelled') {
-                    errorSection = `<div class="job-error" style="color:var(--color-text-secondary); margin-top:8px; font-size:12px; font-style:italic;">浠诲姟宸茬敱鐢ㄦ埛涓诲姩鍙栨秷銆?/div>`;
+                    errorSection = `<div class="job-error" style="color:var(--color-text-secondary); margin-top:8px; font-size:12px; font-style:italic;">浠诲姟宸茬敱鐃6�9��埛涓诲姩鍙栨秷銆?/div>`;
                 }
                 
                 let progressSection = '';
                 if (job.status === 'running' || job.status === 'queued') {
-                    const phaseText = job.progress && job.progress.phase ? `闃舵: ${job.progress.phase}` : '鍒濆鍖栦腑...';
-                    const msgText = job.progress && job.progress.message ? job.progress.message : '姝ｅ湪鎵ц...';
+                    const phaseText = job.progress && job.progress.phase ? `闃舵�? ${job.progress.phase}` : '鍒濆鍖栦腑...';
+                    const msgText = job.progress && job.progress.message ? job.progress.message : '姝ｅ湪鎵ц�?..';
                     progressSection = `
                         <div class="job-progress">
                             <strong>${phaseText}</strong><br>
@@ -626,8 +626,8 @@
                     const failedCount = job.progress && job.progress.failed != null ? job.progress.failed : '-';
                     progressSection = `
                         <div class="job-progress" style="border-color: var(--color-success-border); background: var(--color-success-bg);">
-                            <span style="color:var(--color-success); font-weight:700;">鉁?鏀跺綍瀹屾垚</span><br>
-                            鎴愬姛鍏ュ簱: ${ingested} 绡?| 澶辫触鏁? ${failedCount} 绡?                        </div>
+                            <span style="color:var(--color-success); font-weight:700;">�?鏢�跺綍瀹屾�?/span><br>
+                            鎴愬姛鍏ュ簱: ${ingested} �?| 澶辫触鏁? ${failedCount} �?                        </div>
                     `;
                 }
                 
@@ -641,12 +641,12 @@
                 return `
                     <div class="job-item" id="job-card-${job.job_id}" style="margin-bottom: 10px;">
                         <div class="job-item-header">
-                            <strong style="font-size: 13px; font-family:var(--font-mono); color:var(--color-text);">浠诲姟 #${job.job_id.substring(0, 8)}</strong>
+                            <strong style="font-size: 13px; font-family:var(--font-mono); color:var(--color-text);">浠诲�?#${job.job_id.substring(0, 8)}</strong>
                             <span class="job-status ${job.status}">${statusText}</span>
                         </div>
                         <div class="job-meta">
                             绫诲瀷锛欳elery Workflow Ingestion<br>
-                            鏇存柊鏃堕棿锛?{job.updated_at ? new Date(job.updated_at).toLocaleTimeString() : '-'}
+                            鏇存柊鏃堕棿�?{job.updated_at ? new Date(job.updated_at).toLocaleTimeString() : '-'}
                         </div>
                         ${errorSection}
                         ${progressSection}
@@ -664,10 +664,10 @@
                 await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/retry`, {
                     method: 'POST'
                 });
-                showToast("閲嶈瘯浠诲姟宸叉垚鍔熸淳鍙戯紒");
+                showToast("閲嶈瘯浠诲姟宸叉垚鍔熸淳鍙戯�?);
                 await pollJobs();
             } catch (e) {
-                showToast("閲嶈瘯澶辫触锛? + e.message);
+                showToast("閲嶈瘯澶辫触�? + e.message);
             }
         }
 
@@ -677,10 +677,10 @@
                 await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/cancel`, {
                     method: 'POST'
                 });
-                showToast("浠诲姟鍙栨秷鎸囦护宸蹭笅鍙戯紒");
+                showToast("浠诲姟鍙栨秷鎸囦护宸蹭笅鍙戯�?);
                 await pollJobs();
             } catch (e) {
-                showToast("鍙栨秷澶辫触锛? + e.message);
+                showToast("鍙栨秷澶辫触�? + e.message);
             }
         }
 
@@ -694,3 +694,4 @@
     </script>
 </body>
 </html>
+

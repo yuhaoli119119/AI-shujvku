@@ -471,13 +471,30 @@ body.resizing iframe {
 .key-value .k { font-size: 12px; color: var(--color-text-muted); margin-bottom: 6px; }
 .key-value .v { font-size: 14px; line-height: 1.6; word-break: break-word; }
 .debug-json {
-    margin-top: 12px;
+    display: none !important;
 }
 .debug-json summary {
     cursor: pointer;
     color: var(--color-text-secondary);
     font-size: 12px;
     font-weight: 700;
+}
+.figure-warning, .figure-audit-note {
+    margin-top: 12px;
+    border: 1px dashed var(--color-warning);
+    background: var(--color-warning-bg);
+}
+.figure-warning {
+    padding: 12px;
+    border-radius: var(--radius);
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.6;
+}
+.figure-warning strong {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--color-warning);
 }
 .readable-grid {
     display: grid;

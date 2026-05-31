@@ -30,12 +30,14 @@
     .export-panel .btn + .btn { margin-left: 8px; }
     .export-panel .export-note { margin-top: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .export-panel .export-status { margin-top: 6px; color: var(--color-primary); font-size: 12px; font-weight: 700; }
-    .quality-panel { display: grid; grid-template-columns: 280px 1fr; gap: 18px; align-items: start; }
+    .quality-panel { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+    .quality-panel > div:first-child { border-right: 1px solid var(--color-border); padding-right: 18px; }
+    .quality-panel > div:last-child { min-width: 0; }
     .quality-summary { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; }
     .reason-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .reason-chip { border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 6px 10px; background: var(--color-surface-alt); cursor: pointer; font-size: 12px; font-weight: 800; color: var(--color-text-secondary); }
     .reason-chip.active { background: var(--color-primary-bg); border-color: var(--color-primary); color: var(--color-primary); }
-    .quality-list { display: grid; gap: 10px; max-height: 420px; overflow: auto; padding-right: 4px; }
+    .quality-list { display: grid; gap: 10px; max-height: 360px; overflow: auto; padding-right: 4px; }
     .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px; background: var(--color-surface-alt); }
     .quality-row.exportable { border-color: var(--color-success); background: var(--color-success-bg); }
     .quality-row h4 { margin: 0 0 6px; font-size: 14px; }
@@ -61,10 +63,11 @@
     .confidence-badge.low { background: var(--color-danger-bg); color: var(--color-danger); }
     .evidence-link { border: 0; background: transparent; color: var(--color-primary); font-weight: 800; cursor: pointer; padding: 0; }
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
-    .empty-state { text-align: center; color: var(--color-text-secondary); padding: 42px 12px; }
+    .empty-state { text-align: left; color: var(--color-text-secondary); padding: 18px; border: 1px dashed var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
     @media (max-width: 768px) {
       .quality-panel { grid-template-columns: 1fr; }
+      .quality-panel > div:first-child { border-right: 0; border-bottom: 1px solid var(--color-border); padding-right: 0; padding-bottom: 14px; }
       .export-panel { max-width: none; text-align: left; }
     }
   </style>
@@ -78,7 +81,7 @@
         <p>基于预定模式提取的催化剂、吸附物、能量类型、置信度、核验状态以及证据链接结果。</p>
       </div>
       <div class="export-panel">
-        <button class="btn green" onclick="exportCSV()">导出 CSV</button>
+      <button class="btn green" onclick="exportCSV()">导出 CSV</button>
         <div class="export-note">默认只导出“人工已确认、证据完整、定位准确”的记录；需要处理的记录不会导出。</div>
         <div id="exportSafetyStatus" class="export-status">等待导出。</div>
       </div>
@@ -95,10 +98,10 @@
     </section>
 
     <section class="stats-banner" id="statsBanner" style="display:none;">
-      <div class="stat-box"><div class="lbl">Count</div><div id="statCount" class="val">-</div></div>
-      <div class="stat-box"><div class="lbl">Min</div><div id="statMin" class="val">-</div></div>
-      <div class="stat-box"><div class="lbl">Max</div><div id="statMax" class="val">-</div></div>
-      <div class="stat-box"><div class="lbl">Mean</div><div id="statMean" class="val">-</div></div>
+      <div class="stat-box"><div class="lbl">记录数</div><div id="statCount" class="val">-</div></div>
+      <div class="stat-box"><div class="lbl">最小值</div><div id="statMin" class="val">-</div></div>
+      <div class="stat-box"><div class="lbl">最大值</div><div id="statMax" class="val">-</div></div>
+      <div class="stat-box"><div class="lbl">平均值</div><div id="statMean" class="val">-</div></div>
     </section>
 
     <section class="panel-card quality-panel" id="qualityPanel">
@@ -173,6 +176,37 @@
       if (!gate || gate === "safe_verified_with_required_evidence") return "人工确认 + 必要证据 + 准确定位";
       return String(gate || "").replace(/_/g, " ");
     }
+    function applyReadableDftLabels() {
+      const propertyLabels = {
+        adsorption_energy: "吸附能",
+        gibbs_free_energy_change: "Gibbs 自由能变化",
+        reaction_barrier: "反应能垒",
+        d_band_center: "d 带中心",
+        "": "全部"
+      };
+      const catalystLabels = {
+        "": "全部",
+        single_atom: "单原子催化剂",
+        dual_atom: "双原子催化剂",
+        SAC: "SAC",
+        DAC: "DAC"
+      };
+      const validationLabels = {
+        "": "全部",
+        validated: "已校验",
+        needs_review: "需要复核"
+      };
+      function setSelectLabels(id, labels) {
+        const select = document.getElementById(id);
+        if (!select) return;
+        Array.from(select.options).forEach(option => {
+          option.textContent = labels[option.value] || option.value || "全部";
+        });
+      }
+      setSelectLabels("propertyType", propertyLabels);
+      setSelectLabels("catalystType", catalystLabels);
+      setSelectLabels("validationStatus", validationLabels);
+    }
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
     async function fetchJSON(url, options) {
       options = options || {}; options.headers = options.headers || {};
@@ -191,7 +225,7 @@
       if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
       if (catalyst) url += `&catalyst_type=${encodeURIComponent(catalyst)}`;
       const list = document.getElementById("dftList");
-      list.innerHTML = '<tr><td colspan="8" class="empty-state">Querying records...</td></tr>';
+      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询 DFT 记录...</td></tr>';
       try {
         const data = await fetchJSON(url);
         let items = data.items || [];
@@ -223,7 +257,7 @@
         const metadata = data.metadata || {};
         document.getElementById("qualityExportable").textContent = metadata.eligible_count == null ? "-" : metadata.eligible_count;
         document.getElementById("qualityBlocked").textContent = metadata.blocked_count == null ? "-" : metadata.blocked_count;
-        document.getElementById("qualityGateLabel").textContent = gateLabel(metadata.safety_gate);
+        document.getElementById("qualityGateLabel").textContent = "导出门槛：" + gateLabel(metadata.safety_gate);
         renderReasonChips(metadata.blocked_reasons || {});
         renderQualityRows(data.rows || []);
         renderCompletenessHints(data.paper_completeness || []);
@@ -265,8 +299,8 @@
         const cls = row.is_exportable ? " exportable" : "";
         return '<div class="quality-row' + cls + '">' +
           '<div class="quality-pill">' + esc(row.is_exportable ? "可导出" : "需要处理") + '</div>' +
-          '<h4>' + esc(row.property_type || "DFT result") + ' / ' + esc(row.adsorbate || "-") + ' / ' + esc(row.value == null ? "-" : row.value) + ' ' + esc(row.unit || "") + '</h4>' +
-          '<div class="quality-meta">' + esc(row.title || "Untitled paper") + '</div>' +
+          '<h4>' + esc(row.property_type || "DFT 结果") + ' / ' + esc(row.adsorbate || "-") + ' / ' + esc(row.value == null ? "-" : row.value) + ' ' + esc(row.unit || "") + '</h4>' +
+          '<div class="quality-meta">' + esc(row.title || "未命名文献") + '</div>' +
           '<div class="quality-status-grid">' +
             '<div class="readable-field"><div class="k">原因</div><div class="v">' + esc(reasons) + '</div></div>' +
             '<div class="readable-field"><div class="k">下一步</div><div class="v">' + esc(reasonAction(reviewReason)) + '</div></div>' +
@@ -323,7 +357,7 @@
           <td>${esc(item.reaction_step || "-")}<div class="muted">${esc(item.source_section || "-")}</div></td>
           <td><span class="confidence-badge ${cls}">${Math.round(conf * 100)}%</span></td>
           <td><button class="evidence-link" onclick="showEvidence(${idx})">证据链接</button></td>
-          <td><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}">${esc((item.title || "Paper").slice(0, 42))}</a><div class="muted">${esc(item.doi || "no DOI")}</div></td>
+          <td><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}">${esc((item.title || "文献").slice(0, 42))}</a><div class="muted">${esc(item.doi || "无 DOI")}</div></td>
         </tr>`;
       }).join("");
     }
@@ -392,7 +426,7 @@
         showToast(toastMessage);
       } catch (error) {
         setExportSafetyStatus("导出失败：" + error.message);
-        showToast("CSV export failed: " + error.message);
+        showToast("CSV 导出失败：" + error.message);
       }
     }
     function ensureMLExportButton() {
@@ -402,7 +436,7 @@
       const button = document.createElement("button");
       button.className = "btn ghost";
       button.type = "button";
-      button.textContent = "导出 ML JSON";
+      button.textContent = "导出 ML 数据集";
       button.setAttribute("onclick", "exportMLDataset()");
       if (csvButton) {
         csvButton.insertAdjacentElement("afterend", button);
@@ -444,11 +478,12 @@
         showToast(`ML 数据集导出完成：${exported} 条可用，${blocked} 条被安全门阻止`);
       } catch (error) {
         setExportSafetyStatus("ML 数据集导出失败：" + error.message);
-        showToast("ML dataset export failed: " + error.message);
+        showToast("ML 数据集导出失败：" + error.message);
       }
     }
     document.addEventListener("DOMContentLoaded", () => {
       ensureMLExportButton();
+      applyReadableDftLabels();
       TopNav.init({ currentPage: "dft-database", mountId: "topnav-mount" });
       queryDFT();
     });

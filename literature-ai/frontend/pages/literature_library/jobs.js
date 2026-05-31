@@ -61,6 +61,17 @@ function setAcquisitionResult(html) {
     if (el) el.innerHTML = html;
 }
 
+function renderJobProgressNotice(job) {
+    const progress = job && job.progress ? job.progress : {};
+    const phase = progress.phase || (job && job.status) || "-";
+    const current = progress.current || progress.current_item || progress.message || "";
+    const total = progress.total || progress.total_items || "";
+    const bits = ["阶段：" + phase];
+    if (current) bits.push("当前：" + current);
+    if (total) bits.push("总数：" + total);
+    return '<div class="subtle" style="margin-top:10px;">' + esc(bits.join(" | ")) + '</div>';
+}
+
 async function searchOnline() {
     const onlineQuery = $("onlineSearchQuery");
     const searchInput = $("searchInput");
@@ -154,7 +165,7 @@ async function runAISearch() {
             return;
         }
         const stats = mergeDiscoveryResults(papers);
-        const prefix = '<div class="writer-block"><h3>AI 自动搜索结果</h3><div class="subtle">模型状态：' + esc(uiLabel("mapping_status", data.llm_status || "unknown")) + " | 注释状态：" + esc(data.result_annotation_status || "-") + '</div><div class="mono" style="margin-top:12px;">' + esc(data.prompt_used || "") + "</div></div>";
+        const prefix = '<div class="writer-block"><h3>AI 自动搜索结果</h3><div class="subtle">已根据你的检索词扩展候选文献；结果会自动去重，下载失败也会先保留元数据，之后可以补 PDF。</div></div>';
         renderDiscoveryResults({ items: state.discoveryCache }, stats, "AI 自动搜索结果", prefix);
     } catch (error) {
         setAcquisitionResult('<div class="workspace-empty small-empty">AI 搜索失败：' + esc(error.message) + "</div>");
@@ -227,7 +238,7 @@ function renderAIWorkflowJob(job) {
         '<div class="subtle">任务：' + esc(job.job_id || "-") + " | 状态：" + esc(job.status || "-") + " | 库：" + esc(job.library_name || getCurrentLibraryName() || "-") + "</div>" +
         renderAIWorkflowJobSummary(job) +
         renderJobFailureExplanation(job) +
-        '<details style="margin-top:12px;"><summary class="subtle" style="cursor:pointer;">查看原始进度 JSON</summary><div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div></details>" +
+        renderJobProgressNotice(job) +
         (job.error ? '<div class="subtle" style="margin-top:10px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
         "</div>" +
         (result.prompt_used ? '<div class="section-card"><h3>实际检索式</h3><div class="mono">' + esc(result.prompt_used) + "</div></div>" : "") +
@@ -441,7 +452,7 @@ function renderWorkflowJobCard(job) {
         '<div class="subtle">任务 ' + esc(job.job_id || "-") + " | 文献库 " + esc(job.library_name || "-") + (summary.retried_from_job_id ? " | 重试来源 " + esc(summary.retried_from_job_id) : "") + "</div>" +
         renderJobSummaryByType(job) +
         renderJobFailureExplanation(job) +
-        '<details style="margin-top:12px;"><summary class="subtle" style="cursor:pointer;">查看原始进度 JSON</summary><div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div></details>" +
+        renderJobProgressNotice(job) +
         (job.error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
         (canRetry ? '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="retryWorkflowJob(' + JSON.stringify(job.job_id).replace(/"/g, "&quot;") + ')">重试</button></div>' + retryHint : "") +
     "</div>";
@@ -496,7 +507,7 @@ function renderExtractionJobs(jobs) {
                     '<div class="subtle">任务 ' + esc(job.job_id || "-") + " | 文献库 " + esc(job.library_name || "-") + "</div>" +
                     renderExtractionJobSummary(job) +
                     renderJobFailureExplanation(job) +
-                    '<details style="margin-top:12px;"><summary class="subtle" style="cursor:pointer;">查看原始进度 JSON</summary><div class="mono" style="margin-top:10px;">' + esc(JSON.stringify(job.progress || {}, null, 2)) + "</div></details>" +
+                    renderJobProgressNotice(job) +
                     (job.error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
                     (canRetry ? '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="retryExtractionJob(' + JSON.stringify(job.job_id).replace(/"/g, "&quot;") + ')">重试</button></div>' : "") +
                 "</div>"
@@ -598,7 +609,7 @@ async function rerunExtraction() {
         const summary = $("summaryContent");
         if (summary) {
             summary.insertAdjacentHTML("afterbegin",
-                '<div class="section-card"><h3>最近一次重解析结果</h3><div class="mono">' + esc(JSON.stringify(data, null, 2)) + "</div></div>"
+                '<div class="section-card"><h3>最近一次重解析结果</h3><div class="subtle">任务已创建或完成。状态：' + esc(data.status || data.job_status || "已提交") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
             );
         }
         await loadPaperDetail(state.selectedPaperId);

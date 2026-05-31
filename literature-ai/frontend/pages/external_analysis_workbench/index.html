@@ -21,6 +21,9 @@
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
     label { display: block; font-size: 12px; font-weight: 800; color: var(--color-text-secondary); margin-bottom: 6px; }
     input, select, textarea { border: 1px solid var(--color-border-strong); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); font: inherit; padding: 10px; }
+    .btn { white-space: nowrap; min-width: 96px; justify-content: center; }
+    .toolbar > div { min-width: 180px; flex: 1 1 220px; }
+    .toolbar > button { flex: 0 0 auto; }
     textarea { width: 100%; min-height: 86px; resize: vertical; }
     .layout { display: grid; grid-template-columns: 42% minmax(0, 1fr); gap: 16px; align-items: start; }
     .section-card { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
@@ -32,11 +35,11 @@
     .warning-row { border-left: 4px solid var(--color-warning); padding: 8px 10px; background: var(--color-warning-bg); border-radius: var(--radius); margin-bottom: 8px; }
     .prepare-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-top: 12px; }
     .prepare-summary-item { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 12px; }
-    .footer-actions { position: sticky; bottom: 0; display: flex; gap: 10px; justify-content: flex-end; align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px; box-shadow: var(--shadow-card); margin-top: 16px; }
+    .footer-actions { position: sticky; bottom: 0; display: flex; gap: 10px; justify-content: flex-end; align-items: center; flex-wrap: wrap; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 12px; box-shadow: var(--shadow-card); margin-top: 16px; }
     .action-scope { margin-right: auto; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .empty-state { text-align: center; color: var(--color-text-secondary); padding: 36px 12px; }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
-    @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } .field-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } .field-grid { grid-template-columns: 1fr; } .footer-actions .btn { flex: 1 1 180px; } }
   </style>
 </head>
 <body>
@@ -45,14 +48,14 @@
     <header class="page-head">
       <div>
         <h1>人工确认工作台</h1>
-        <p>Human verification for DFT/catalysis schema extraction. Evidence stays visible while fields are manually corrected or confirmed.</p>
+        <p>把 AI/自动抽取结果变成可导出数据前，先在这里核对字段、证据和 PDF 定位；保存草稿不会自动通过，人工确认后才进入可靠数据。</p>
       </div>
-      <a class="btn ghost" href="../dft_database/index.html">Open DFT Database</a>
+      <a class="btn ghost" href="../dft_database/index.html">打开 DFT 数据库</a>
     </header>
 
     <section class="toolbar">
-      <div><label for="paperSelect">Paper</label><select id="paperSelect" onchange="loadSelectedPaper()"><option value="">Loading...</option></select></div>
-      <div><label for="schemaSelect">Schema</label><select id="schemaSelect" onchange="renderSchemaForm()"><option>CatalystSample</option><option>DFTSetting</option><option selected>DFTResult</option><option>MechanismClaim</option><option>ElectrochemicalPerformance</option></select></div>
+      <div><label for="paperSelect">文献</label><select id="paperSelect" onchange="loadSelectedPaper()"><option value="">正在加载...</option></select></div>
+      <div><label for="schemaSelect">数据类型</label><select id="schemaSelect" onchange="renderSchemaForm()"><option>CatalystSample</option><option>DFTSetting</option><option selected>DFTResult</option><option>MechanismClaim</option><option>ElectrochemicalPerformance</option></select></div>
       <div>
         <label for="filterSelect">人工确认过滤</label>
         <select id="filterSelect" onchange="renderSchemaForm()" style="height: 38px; min-width: 160px;">
@@ -65,35 +68,35 @@
           <option value="needs_reconfirmation">仅需重新确认 (only needs reconfirmation)</option>
         </select>
       </div>
-      <button class="btn primary" onclick="validateCurrent()">Validate</button>
-      <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
+      <button class="btn primary" onclick="validateCurrent()">检查当前结果</button>
+      <button class="btn ghost" onclick="startExtractionJob()">重新解析</button>
     </section>
 
     <section class="panel-card" id="prepareReviewPanel" style="display:none;"></section>
 
     <section class="panel-card" id="stabilitySummaryBox" style="display:none; margin-bottom:16px; padding:16px;"></section>
 
-    <section class="warnings" id="warningsBox"><div class="empty-state">Validation warnings will appear here.</div></section>
+    <section class="warnings" id="warningsBox"><div class="empty-state">当前没有需要处理的校验提醒。</div></section>
 
     <section class="layout">
       <aside class="panel-card">
-        <h3>Paper / Section / Evidence</h3>
-        <div id="paperMeta" class="mono">Select a paper.</div>
+        <h3>文献 / 章节 / 证据</h3>
+        <div id="paperMeta" class="mono">请选择文献。</div>
         <div id="sectionList" style="margin-top:12px;"></div>
-        <h3>Selected Evidence</h3>
-        <div id="evidenceText" class="mono">No evidence selected.</div>
+        <h3>已选证据</h3>
+        <div id="evidenceText" class="mono">尚未选择证据。</div>
       </aside>
       <section class="panel-card">
-        <h3>Schema Field Form</h3>
-        <div id="schemaForm"><div class="empty-state">Load extraction results to edit fields.</div></div>
+        <h3>字段确认表</h3>
+        <div id="schemaForm"><div class="empty-state">加载抽取结果后，可以在这里修改或确认字段。</div></div>
       </section>
     </section>
 
     <section class="footer-actions">
       <div id="actionScopeSummary" class="action-scope">作用域：请选择文献。</div>
-      <button class="btn ghost" onclick="saveDraft()">Save</button>
+      <button class="btn ghost" onclick="saveDraft()">保存修改</button>
       <button class="btn primary" onclick="markVerified()">人工确认校验</button>
-      <button class="btn ghost" onclick="startExtractionJob()">Re-extract</button>
+      <button class="btn ghost" onclick="startExtractionJob()">重新解析</button>
     </section>
   </main>
   <div id="toast" class="toast"></div>
@@ -130,6 +133,26 @@
     function escAttr(value) { return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
     function ellipsis(text, limit) { var t = String(text || ""); return t.length > limit ? t.slice(0, limit) + "…" : t; }
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
+    function applyReadableWorkbenchLabels() {
+      const schemaLabels = {
+        CatalystSample: "催化剂样本",
+        DFTSetting: "DFT 设置",
+        DFTResult: "DFT 结果",
+        MechanismClaim: "机理声明",
+        ElectrochemicalPerformance: "电化学性能"
+      };
+      const schemaSelect = document.getElementById("schemaSelect");
+      if (schemaSelect) {
+        Array.from(schemaSelect.options).forEach(option => {
+          option.textContent = schemaLabels[option.value || option.textContent] || option.textContent;
+        });
+      }
+      const filterSelect = document.getElementById("filterSelect");
+      if (filterSelect) {
+        const labels = ["全部字段", "只看有提醒", "只看未确认", "只看低置信度", "只看已重新映射", "只看失效/歧义/未解析", "只看需要重新确认"];
+        Array.from(filterSelect.options).forEach((option, index) => { option.textContent = labels[index] || option.textContent; });
+      }
+    }
     async function fetchJSON(url, options) {
       options = options || {}; options.headers = options.headers || {};
       const token = sessionStorage.getItem("litai-settings-token"); if (token) options.headers["X-Settings-Token"] = token;
@@ -147,7 +170,7 @@
         if (params.get("paper_id")) select.value = params.get("paper_id");
         await loadSelectedPaper();
       } catch (error) {
-        showToast("Failed to load papers: " + error.message);
+        showToast("文献加载失败：" + error.message);
       }
     }
     async function loadSelectedPaper() {
@@ -173,7 +196,7 @@
         renderStabilitySummary();
         renderPrepareReviewPanel();
       } catch (error) {
-        showToast("Failed to load extraction results: " + error.message);
+        showToast("抽取结果加载失败：" + error.message);
       }
     }
 
@@ -208,7 +231,7 @@
       const hasPending = pendingRows.length > 0;
       const isBusy = !!state.preparingReviews;
       const disabled = !hasPaper || hasPending || isBusy;
-      const buttonLabel = isBusy ? "Preparing..." : hasPending ? "Pending queue already prepared" : "Prepare pending human reviews";
+      const buttonLabel = isBusy ? "正在生成..." : hasPending ? "待确认清单已生成" : "生成待确认清单";
       const disabledAttr = disabled ? "disabled" : "";
       const summary = state.prepareSummary;
 
@@ -219,18 +242,18 @@
         const itemCount = Array.isArray(summary.items) ? summary.items.length : (Array.isArray(summary.review_ids) ? summary.review_ids.length : 0);
         const warningHtml = (verifiedCount !== 0 || safeVerifiedCount !== 0) ? `
           <div class="warning-row" style="margin-top:12px;border-left-color:var(--color-danger);background:var(--color-danger-bg);color:var(--color-danger);">
-            Unexpected unsafe state: prepare returned verified rows. Treat this queue as not export-ready and not writing-ready.
+            系统发现异常：生成清单时返回了已确认记录。请先不要导出，回到文献库检查这些记录。
           </div>
         ` : "";
         summaryHtml = `
           <div id="prepareSummary" aria-live="polite">
             <div class="prepare-summary-grid">
-              <div class="prepare-summary-item">Created pending rows: <strong>${Number(summary.created_count || 0)}</strong></div>
-              <div class="prepare-summary-item">Existing pending rows reused: <strong>${Number(summary.existing_count || 0)}</strong></div>
-              <div class="prepare-summary-item">Skipped: <strong>${Number(summary.skipped_count || 0)}</strong></div>
-              <div class="prepare-summary-item">Verified rows created: <strong>${verifiedCount}</strong></div>
-              <div class="prepare-summary-item">Safe verified rows: <strong>${safeVerifiedCount}</strong></div>
-              <div class="prepare-summary-item">Review items returned: <strong>${itemCount}</strong></div>
+              <div class="prepare-summary-item">新建待确认：<strong>${Number(summary.created_count || 0)}</strong></div>
+              <div class="prepare-summary-item">复用已有待确认：<strong>${Number(summary.existing_count || 0)}</strong></div>
+              <div class="prepare-summary-item">跳过：<strong>${Number(summary.skipped_count || 0)}</strong></div>
+              <div class="prepare-summary-item">误生成已确认：<strong>${verifiedCount}</strong></div>
+              <div class="prepare-summary-item">可安全导出：<strong>${safeVerifiedCount}</strong></div>
+              <div class="prepare-summary-item">返回记录：<strong>${itemCount}</strong></div>
             </div>
             ${warningHtml}
           </div>
@@ -239,16 +262,16 @@
 
       const pendingHtml = hasPending ? `
         <div style="margin-top:10px;font-size:12px;color:var(--color-warning);font-weight:800;">
-          Pending queue already prepared: ${pendingRows.length} pending, unverified row${pendingRows.length === 1 ? "" : "s"}.
+          已有 ${pendingRows.length} 条待确认记录。请在下方逐项核对证据后保存或人工确认。
         </div>
       ` : "";
 
       box.innerHTML = `
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
           <div style="max-width:760px;">
-            <h3 style="margin:0 0 6px;">Prepare review queue</h3>
+            <h3 style="margin:0 0 6px;">生成待确认清单</h3>
             <p style="margin:0;color:var(--color-text-secondary);font-size:13px;line-height:1.5;">
-              Creates pending, unverified review rows from extraction output. This does not verify, export, unlock writing, reprocess, materialize, or run migrations.
+              把 AI/自动抽取字段放进人工确认队列。它不会自动通过、不会导出、不会解锁写作，也不会重新解析论文。
             </p>
             ${pendingHtml}
           </div>
@@ -263,7 +286,7 @@
         renderPrepareReviewPanel();
         return;
       }
-      const confirmed = confirm("Prepare pending human review rows from extraction output? This will not mark anything verified, will not export data, will not unlock writing, and will not run extraction/reprocessing/materialize/migration.");
+      const confirmed = confirm("是否根据当前抽取结果生成待确认清单？这不会自动通过、不会导出，也不会重新解析论文。");
       if (!confirmed) return;
 
       state.preparingReviews = true;
@@ -290,7 +313,7 @@
       } catch (error) {
         state.prepareSummary = null;
         renderPrepareReviewPanel();
-        showToast("Prepare pending reviews failed: " + error.message);
+        showToast("生成待确认清单失败：" + error.message);
       } finally {
         state.preparingReviews = false;
         renderPrepareReviewPanel();
@@ -388,21 +411,27 @@
 
     function renderPaper() {
       const p = state.paper || {};
-      document.getElementById("paperMeta").textContent = JSON.stringify({ id: p.id, title: p.title, year: p.year, journal: p.journal, doi: p.doi }, null, 2);
+      document.getElementById("paperMeta").innerHTML =
+        '<div><strong>标题：</strong>' + esc(p.title || "未命名文献") + '</div>' +
+        '<div><strong>年份：</strong>' + esc(p.year || "-") + '　<strong>期刊：</strong>' + esc(p.journal || "-") + '</div>' +
+        '<div><strong>DOI：</strong>' + esc(p.doi || "无 DOI") + '</div>';
       const sections = p.sections || [];
-      document.getElementById("sectionList").innerHTML = sections.length ? sections.slice(0, 16).map((s, idx) => `<div class="section-card"><button onclick="selectSection(${idx})">${esc(s.section_title || s.section_type || "Section")}</button><div class="muted">page ${esc(s.page_start || "-")}</div></div>`).join("") : '<div class="empty-state">No sections.</div>';
+      document.getElementById("sectionList").innerHTML = sections.length ? sections.slice(0, 16).map((s, idx) => `<div class="section-card"><button onclick="selectSection(${idx})">${esc(s.section_title || s.section_type || "章节")}</button><div class="muted">页码 ${esc(s.page_start || "-")}</div></div>`).join("") : '<div class="empty-state">暂无章节文本。</div>';
     }
 
     function selectSection(index) {
       const s = (state.paper.sections || [])[index];
       state.selectedEvidence = { paper_id: state.paper.id, chunk_id: s.id, section_title: s.section_title, page_span: { page_start: s.page_start, page_end: s.page_end }, evidence_text: s.text };
-      document.getElementById("evidenceText").textContent = JSON.stringify(state.selectedEvidence, null, 2);
+      document.getElementById("evidenceText").innerHTML =
+        '<div><strong>章节：</strong>' + esc(s.section_title || s.section_type || "未命名章节") + '</div>' +
+        '<div><strong>页码：</strong>' + esc(s.page_start || "-") + '</div>' +
+        '<div style="margin-top:8px;white-space:pre-wrap;">' + esc(s.text || "暂无证据文本") + '</div>';
     }
 
     function renderWarnings(warnings) {
       const box = document.getElementById("warningsBox");
       if (!warnings.length) {
-        box.innerHTML = '<div class="empty-state">No validation warnings.</div>';
+        box.innerHTML = '<div class="empty-state">当前没有校验提醒。</div>';
         return;
       }
       box.innerHTML = warnings.map(w => {
@@ -410,9 +439,49 @@
         var isLocatorWarning = w.code && w.code.startsWith("evidence_locator_");
         var borderColor = isReviewTargetWarning ? "var(--color-danger)" : isLocatorWarning ? "var(--color-warning)" : "var(--color-warning)";
         var bgColor = isReviewTargetWarning ? "var(--color-danger-bg)" : isLocatorWarning ? "var(--color-warning-bg)" : "var(--color-warning-bg)";
-        var label = isReviewTargetWarning ? "需重新确认" : isLocatorWarning ? "定位降级" : esc(w.severity || "warning");
-        return `<div class="warning-row" style="border-left-color:${borderColor};background:${bgColor};"><strong>${esc(label)} · ${esc(w.code)}</strong><div>${esc(w.message)}</div><div class="muted">${esc(w.target_type)} ${esc(w.field || "")}</div></div>`;
+        var label = isReviewTargetWarning ? "需要重新确认" : isLocatorWarning ? "PDF 定位需要补全" : "校验提醒";
+        return `<div class="warning-row" style="border-left-color:${borderColor};background:${bgColor};"><strong>${esc(label)}</strong><div>${esc(friendlyWarningMessage(w))}</div><div class="muted">${esc(friendlyTargetLabel(w.target_type))} · ${esc(friendlyFieldLabel(w.field || ""))}</div></div>`;
       }).join("");
+    }
+
+    function friendlyTargetLabel(targetType) {
+      const labels = {
+        CatalystSample: "催化剂样本",
+        DFTSetting: "DFT 设置",
+        DFTResult: "DFT 结果",
+        MechanismClaim: "机理声明",
+        ElectrochemicalPerformance: "电化学性能"
+      };
+      return labels[targetType] || targetType || "记录";
+    }
+
+    function friendlyFieldLabel(field) {
+      const labels = {
+        name: "名称",
+        metal_centers: "活性金属",
+        support: "载体",
+        synthesis_method: "合成方法",
+        coordination: "配位结构",
+        convergence_settings: "收敛设置",
+        software: "计算软件",
+        functional: "泛函",
+        adsorbate: "吸附物",
+        property_type: "能量类型",
+        value: "数值",
+        evidence_text: "证据文本"
+      };
+      return labels[field] || String(field || "字段").replace(/_/g, " ");
+    }
+
+    function friendlyWarningMessage(w) {
+      const code = String((w && w.code) || "");
+      const field = friendlyFieldLabel(w && w.field);
+      if (code === "evidence_locator_text_only") return `“${field}”目前只有文本证据，还缺少准确 PDF 页码定位。`;
+      if (code === "evidence_locator_missing_page") return `“${field}”缺少 PDF 页码，无法直接跳转核对原文。`;
+      if (code === "evidence_locator_missing_locator") return `“${field}”还没有可用的 PDF 定位结果。`;
+      if (code === "evidence_locator_unsafe_locator") return `“${field}”的 PDF 定位不够可靠，需要人工核对。`;
+      if (code.startsWith("review_target_")) return `这条记录对应的抽取目标发生变化，需要重新确认“${field}”。`;
+      return (w && w.message) || "该字段需要人工核对。";
     }
 
     function getFieldStatus(field) {
@@ -441,7 +510,7 @@
         bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "已生成待确认记录";
       }
       if (status === "pending") {
-        label = "Pending human review / Not verified";
+        label = "待人工确认";
       }
       return `<span class="status-chip" style="background:${bg}; color:${color}; border:1px solid ${color}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">${label}</span>`;
     }
@@ -539,8 +608,15 @@
         return;
       }
       const scope = getVisibleReviewScope();
+      const schemaLabels = {
+        CatalystSample: "催化剂样本",
+        DFTSetting: "DFT 设置",
+        DFTResult: "DFT 结果",
+        MechanismClaim: "机理声明",
+        ElectrochemicalPerformance: "电化学性能"
+      };
       box.innerHTML =
-        '<strong>作用域</strong>：当前 schema <strong>' + esc(scope.schema) + '</strong> · 当前过滤 <strong>' + esc(scope.filterLabel) + '</strong> · 当前可见记录 <strong>' + scope.visibleRecordCount + '</strong> / 全部记录 <strong>' + scope.totalRecords + '</strong> · 即将处理字段 <strong>' + scope.visibleFieldCount + '</strong>';
+        '<strong>作用域</strong>：当前数据类型 <strong>' + esc(schemaLabels[scope.schema] || scope.schema) + '</strong> · 当前过滤 <strong>' + esc(scope.filterLabel) + '</strong> · 当前可见记录 <strong>' + scope.visibleRecordCount + '</strong> / 全部记录 <strong>' + scope.totalRecords + '</strong> · 即将处理字段 <strong>' + scope.visibleFieldCount + '</strong>';
     }
 
     function getResolutionBadgeHtml(field) {
@@ -692,20 +768,20 @@
       if (isRepaired) {
         bg = "var(--color-success-bg)";
         color = "var(--color-success)";
-        label = "locator repaired / exact locator available / page available";
+        label = "PDF 定位准确，可核对原文";
       } else {
         bg = "var(--color-warning-bg)";
         color = "var(--color-warning)";
         if (name === "name") {
           bg = "var(--color-danger-bg)";
           color = "var(--color-danger)";
-          label = "HIGH-CAUTION: Unrepaired locator risk / exact locator missing";
+          label = "高风险：缺少准确 PDF 定位";
         } else if (name === "convergence_settings") {
           bg = "var(--color-danger-bg)";
           color = "var(--color-danger)";
-          label = "RED: excluded / no reliable source";
+          label = "不导出：缺少可靠来源";
         } else {
-          label = "missing_page / unsafe_locator / no exact locator";
+          label = "缺少准确 PDF 定位";
         }
       }
       return `<span class="locator-status-badge" data-locator-status="${esc(s)}" style="background:${bg};color:${color};border:1px solid ${color}40;padding:2px 8px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">${label}</span>`;
@@ -745,9 +821,9 @@
       if (isRepaired) {
         var uid = "loc-act-" + (record.target_id || "x") + "-" + name;
         var bboxDataAttr = hasBbox === "true" ? ('data-bbox="' + escAttr(JSON.stringify(locator.bbox)) + '"') : "";
-        return `<span id="${uid}" data-paper-id="${esc(paperId)}" data-page="${page || 0}" data-has-bbox="${hasBbox}" data-locator-status="exact_page" data-evidence-text="${escAttr(ellipsis(evidenceText, 60))}" ${bboxDataAttr} style="display:none;"></span><button class="btn primary small" style="height:22px;padding:0 6px;font-size:10px;" onclick="triggerWorkbenchLocatorAction('${uid}')">Locator Inspection (Jump to Page ${page || "?"})</button>`;
+        return `<span id="${uid}" data-paper-id="${esc(paperId)}" data-page="${page || 0}" data-has-bbox="${hasBbox}" data-locator-status="exact_page" data-evidence-text="${escAttr(ellipsis(evidenceText, 60))}" ${bboxDataAttr} style="display:none;"></span><button class="btn primary small" style="height:24px;padding:0 8px;font-size:11px;" onclick="triggerWorkbenchLocatorAction('${uid}')">查看 PDF 第 ${page || "?"} 页</button>`;
       } else {
-        return `<span class="locator-unrepaired-msg" style="font-size:10px;color:var(--color-text-secondary);font-weight:700;">Exact PDF locator missing / missing_page / unsafe_locator / no exact locator. ${locatorDegradedText(locator)} Blocked from export/writing until exact locator + human verification.</span>`;
+        return `<span class="locator-unrepaired-msg" style="font-size:11px;color:var(--color-text-secondary);font-weight:700;">缺少准确 PDF 定位。${locatorDegradedText(locator)} 需要补全定位并人工确认后，才能导出或用于写作。</span>`;
       }
     }
 
@@ -821,7 +897,7 @@
       if (viewerStatus) viewerStatus.textContent = "";
 
       if (iframe) {
-        iframe.src = pdfUrl + "#page=" + Math.max(1, page || 1);
+        iframe.src = pdfUrl + "#page=" + Math.max(1, page || 1) + "&toolbar=0&navpanes=0";
         iframe.style.display = "block";
       }
 
@@ -867,7 +943,7 @@
       const form = document.getElementById("schemaForm");
       
       if (!results.length && (!state.audit || !state.audit.items)) {
-        form.innerHTML = '<div class="empty-state">No extracted records for this schema yet.</div>';
+        form.innerHTML = '<div class="empty-state">当前数据类型还没有抽取记录。</div>';
         updateActionScopeSummary();
         return;
       }
@@ -1195,7 +1271,7 @@
         renderPrepareReviewPanel();
       } catch (error) {
         console.error("refreshReviewStateAfterMutation failed", error);
-        showToast("Refresh failed: " + error.message);
+        showToast("刷新失败：" + error.message);
       }
     }
 
@@ -1403,9 +1479,9 @@
         renderWarnings(resp.validation_warnings || []);
         renderSchemaForm();
         renderStabilitySummary();
-        showToast("Validation completed successfully!");
+        showToast("当前结果检查完成。");
       } catch (error) {
-        showToast("Validation failed: " + error.message);
+        showToast("当前结果检查失败：" + error.message);
       }
     }
 
@@ -1423,11 +1499,12 @@
         });
         showToast(`Extraction job queued successfully! Job ID: ${job.job_id}`);
       } catch (error) {
-        showToast("Failed to queue extraction job: " + error.message);
+        showToast("重新解析任务创建失败：" + error.message);
       }
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+      applyReadableWorkbenchLabels();
       TopNav.init({ currentPage: "external", mountId: "topnav-mount" });
       loadPapers();
     });

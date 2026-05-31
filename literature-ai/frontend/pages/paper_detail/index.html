@@ -257,7 +257,13 @@
     function formatValue(value) {
       if (value == null || value === "") return "-";
       if (Array.isArray(value)) return value.length ? value.map(formatValue).join("、") : "-";
-      if (typeof value === "object") return JSON.stringify(value, null, 2);
+      if (typeof value === "object") {
+        return Object.entries(value)
+          .filter(([, v]) => v != null && v !== "" && !(Array.isArray(v) && !v.length))
+          .slice(0, 4)
+          .map(([k, v]) => `${formatFieldLabel(k)}：${Array.isArray(v) ? v.join("、") : String(v)}`)
+          .join("；") || "-";
+      }
       return String(value);
     }
 
@@ -279,11 +285,6 @@
           <div class="structured-card">
             <div class="structured-card-title">记录 ${index + 1}</div>
             <div class="kv-grid">${grid}</div>
-            <details class="raw-data-toggle">
-              <summary>查看原始 JSON</summary>
-              <div class="raw-data-title">原始数据</div>
-              <div class="mono">${esc(JSON.stringify(item || {}, null, 2))}</div>
-            </details>
           </div>
         `;
       }).join("");
@@ -473,7 +474,16 @@
       renderTranslationSectionOptions();
 
       document.getElementById("paperAbstract").textContent = paper.abstract || "暂无摘要。";
-      document.getElementById("comprehensiveJSON").textContent = JSON.stringify(paper.comprehensive_analysis || {}, null, 2);
+      const analysis = paper.comprehensive_analysis || {};
+      const layman = analysis.layman_summary || {};
+      const logic = analysis.writing_logic || {};
+      document.getElementById("comprehensiveJSON").innerHTML =
+        '<div class="kv-grid">' +
+          '<div class="kv-item"><div class="kv-label">一句话结论</div><div class="kv-value">' + esc(layman.one_sentence_takeaway || "-") + '</div></div>' +
+          '<div class="kv-item"><div class="kv-label">研究意义</div><div class="kv-value">' + esc(layman.real_world_impact || "-") + '</div></div>' +
+          '<div class="kv-item"><div class="kv-label">研究空白</div><div class="kv-value">' + esc(logic.research_gap_framing || "-") + '</div></div>' +
+          '<div class="kv-item"><div class="kv-label">核心假设</div><div class="kv-value">' + esc(logic.core_hypothesis || "-") + '</div></div>' +
+        '</div>';
 
       document.getElementById("sectionsList").innerHTML = (paper.sections || []).length
         ? (paper.sections || []).map((section, index) => `
@@ -531,7 +541,12 @@
 
     function showClaim(index) {
       const claim = state.claims[index];
-      document.getElementById("evidenceDetail").textContent = JSON.stringify(claim, null, 2);
+      const evidence = (claim && claim.evidence || [])[0] || {};
+      document.getElementById("evidenceDetail").innerHTML =
+        '<div><strong>论断：</strong>' + esc(claim && claim.claim_text || "-") + '</div>' +
+        '<div><strong>状态：</strong>' + esc(formatValidationStatus(claim && claim.validation_status)) + '</div>' +
+        '<div><strong>置信度：</strong>' + esc(claim && claim.confidence == null ? "-" : Number(claim.confidence).toFixed(2)) + '</div>' +
+        '<div style="margin-top:8px;white-space:pre-wrap;">' + esc(evidence.evidence_text || evidence.text || "暂无证据文本") + '</div>';
     }
 
     function switchDetailTab(tab, event) {

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -178,6 +179,61 @@ def test_external_analysis_materialize_rejects_empty_or_implicit_all():
 
             with Session(engine) as session:
                 assert session.query(PaperNote).count() == 0
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_delete_post_alias_and_utc_created_at():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_delete.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Delete Contract Paper", pdf_path="delete.pdf", authors=[])
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper.id),
+                    "source": "chatgpt_web",
+                    "raw_payload": {
+                        "review_notes": [{"content": "Candidate note.", "field_name": "abstract"}],
+                    },
+                },
+            )
+            assert imported.status_code == 200
+            payload = imported.json()
+            assert payload["created_at"].endswith(("Z", "+00:00"))
+            assert payload["candidates"][0]["created_at"].endswith(("Z", "+00:00"))
+            assert datetime.fromisoformat(payload["created_at"].replace("Z", "+00:00")).tzinfo == UTC
+
+            run_id = payload["id"]
+            deleted = client.post(f"/api/external-analysis/runs/{run_id}/delete")
+            assert deleted.status_code == 200
+            assert deleted.json() == {"deleted": True, "run_id": run_id}
+
+            listed = client.get(f"/api/external-analysis/runs?paper_id={paper.id}")
+            assert listed.status_code == 200
+            assert listed.json() == []
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

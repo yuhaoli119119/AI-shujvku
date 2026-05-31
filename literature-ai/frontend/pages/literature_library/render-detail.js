@@ -123,7 +123,7 @@ function readableValue(value) {
     if (Array.isArray(value)) {
         if (!value.length) return "-";
         return value.map(function(item) {
-            if (item && typeof item === "object") return readableValue(item.value || item.text || item.name || JSON.stringify(item));
+            if (item && typeof item === "object") return readableValue(item.value || item.text || item.name || item.title || item.caption || item.reason || "");
             return String(item);
         }).join("；");
     }
@@ -162,11 +162,13 @@ function renderReadableCards(title, items) {
     const keys = keySets[title] || Object.keys(items[0] || {}).filter(function(key) {
         return !["id", "paper_id", "raw_json", "created_at", "updated_at"].includes(key);
     }).slice(0, 10);
-    return items.map(function(item, index) {
+    const intro = title === "写作卡片"
+        ? '<div class="section-card figure-audit-note"><h3>写作卡片说明</h3><div class="subtle">这里是自动生成的写作草稿，不是最终论文结论。若内容和你的理解不一致，请先用“AI 建议候选”生成详细审阅，再进入人工确认工作台确认证据。</div></div>'
+        : "";
+    return intro + items.map(function(item, index) {
         const heading = title + (items.length > 1 ? " " + (index + 1) : "");
         return '<div class="section-card readable-card"><h3>' + esc(heading) + '</h3>' +
             renderReadableFields(item || {}, keys) +
-            '<details class="debug-json"><summary>查看原始数据</summary><div class="mono">' + esc(JSON.stringify(item || {}, null, 2)) + '</div></details>' +
         '</div>';
     }).join("");
 }
@@ -185,8 +187,22 @@ function renderComprehensiveAnalysis(data) {
             core_hypothesis: logic.core_hypothesis,
             conclusion_mapping: logic.conclusion_mapping
         }, ["one_sentence_takeaway", "real_world_impact", "research_gap", "core_hypothesis", "conclusion_mapping"]) +
-        '<details class="debug-json"><summary>查看原始综合解析</summary><div class="mono">' + esc(JSON.stringify(data, null, 2)) + '</div></details>' +
     '</div>';
+}
+
+function isLikelyNoisyFigure(item) {
+    item = item || {};
+    var caption = String(item.caption || "").trim();
+    var text = [
+        caption,
+        item.figure_role || "",
+        item.content_summary || "",
+        Array.isArray(item.key_elements) ? item.key_elements.join(" ") : ""
+    ].join(" ").toLowerCase();
+    var sparseCaption = /^(figure|fig\.?|scheme)\s*\d+\.?$/i.test(caption);
+    var hasScientificSummary = !!(item.content_summary || (Array.isArray(item.key_elements) && item.key_elements.length));
+    return /crossmark|science china press|publisher|logo|header|footer/.test(text) ||
+        (sparseCaption && !hasScientificSummary);
 }
 
 // ── G3B Evidence Locator Rendering ──
@@ -351,7 +367,7 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
     // Build evidence panel content
     var evidenceHtml = "";
     evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">PDF 页码定位</div>' +
-        '<div style="font-size:11px;color:var(--color-text-secondary);">这里只显示基于证据定位得到的 PDF 页码跳转。当前版本不提供 PDF 页面内框选高亮。</div>' +
+        '<div style="font-size:11px;color:var(--color-text-secondary);">这里用于查看原文页和核对证据。浏览器 PDF 工具栏里的临时高亮/绘制不会写回系统；需要保存结论时，请在 AI 建议候选或人工确认工作台里保存。</div>' +
         (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
     if (viewerEvidencePanel) viewerEvidencePanel.innerHTML = evidenceHtml;
 
@@ -378,7 +394,7 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
 
     // Load PDF in iframe with page fragment
     if (iframe) {
-        iframe.src = pdfUrl + "#page=" + Math.max(1, page || 1);
+        iframe.src = pdfUrl + "#page=" + Math.max(1, page || 1) + "&toolbar=0&navpanes=0";
         iframe.style.display = "block";
     }
 
@@ -453,10 +469,21 @@ function renderDetail(detail, audit) {
             return m ? parseInt(m[1], 10) : null;
         }
 
+        const noisyCount = detail.figures.filter(isLikelyNoisyFigure).length;
         const cardsHtml = detail.figures.slice(0, 15).map(function(item, index) {
             let imgHtml = "";
-            if (item.image_path) {
+            const noisyFigure = isLikelyNoisyFigure(item);
+            if (item.image_path && !noisyFigure) {
                 imgHtml = '<div style="margin-top: 12px; text-align: center;"><img src="/api/papers/assets/' + esc(item.image_path) + '" style="max-width: 100%; max-height: 400px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); object-fit: contain;" alt="提取的文献图片" /></div>';
+            } else if (noisyFigure) {
+                var pageLink = item.page
+                    ? '<a class="btn ghost small" style="text-decoration:none;" target="_blank" href="/api/papers/' + escAttr(detail.id) + '/pdf#page=' + Number(item.page || 1) + '&toolbar=0">打开 PDF 原页</a>'
+                    : "";
+                imgHtml = '<div class="figure-warning">' +
+                    '<strong>自动截图疑似不是有效论文图。</strong>' +
+                    '<div>这类图片通常是页眉、出版社标志或 CrossMark，不会作为可靠图表使用。请以 PDF 原页、图注和正文证据为准。</div>' +
+                    (pageLink ? '<div style="margin-top:8px;">' + pageLink + '</div>' : '') +
+                '</div>';
             }
 
             let metaHtml = "";
@@ -485,7 +512,10 @@ function renderDetail(detail, audit) {
                    summaryHtml + metaHtml + imgHtml + '</div>';
         }).join("");
         
-        figureCards = filterHtml + cardsHtml;
+        const figureNotice = noisyCount
+            ? '<div class="section-card figure-audit-note"><h3>图表抽取提示</h3><div class="subtle">检测到 ' + noisyCount + ' 张自动截图疑似无效。AI 审阅会把这些当作抽取噪声处理，不再把出版社标志、CrossMark 或页眉图片当作科学图表。</div></div>'
+            : "";
+        figureCards = figureNotice + filterHtml + cardsHtml;
     } else {
         figureCards = '<div class="section-card"><h3>图片</h3><div class="muted">暂无内容。</div></div>';
     }

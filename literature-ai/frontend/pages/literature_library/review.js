@@ -66,7 +66,6 @@ function renderInternalParseSummary(data) {
             '<div class="readable-field"><div class="k">待处理</div><div class="v">' + esc(pending) + '</div></div>' +
             '<div class="readable-field"><div class="k">下一步</div><div class="v">展开审阅项，选择可信内容并生成待确认记录。</div></div>' +
         '</div>' +
-        '<details class="debug-json"><summary>查看原始返回</summary><div class="mono">' + esc(JSON.stringify(data || {}, null, 2)) + '</div></details>' +
     '</div>';
 }
 
@@ -166,7 +165,7 @@ async function loadAgentGuide() {
                     '<div class="readable-field"><div class="k">MCP 地址</div><div class="v">' + esc((guide.mcp && guide.mcp.url) || "/mcp") + '</div></div>' +
                     '<div class="readable-field"><div class="k">常用工具</div><div class="v">' + esc(tools.join("、") || "-") + '</div></div>' +
                 '</div>' +
-                '<details class="debug-json"><summary>查看接口清单</summary>' +
+                '<details><summary>查看可用入口</summary>' +
                     endpoints.map(function(item) {
                         return '<div class="readable-field" style="margin-top:8px;"><div class="k">' + esc(item.name || item.path || "接口") + '</div><div class="v">' + esc((item.method || "") + " " + (item.path || "")) + '<br>' + esc(item.purpose || "") + '</div></div>';
                     }).join("") +
@@ -246,12 +245,12 @@ async function loadExternalRuns() {
                         '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(uiLabel("mapping_status", run.mapping_status || "-")) + "</div>" +
                         '<div class="subtle" style="margin-top:8px;">用途：这里是 AI 的详细审阅草稿。阅读笔记用于快速理解论文；修正/关联建议用于补全或纠错。点击“生成待确认记录”后，还需要人工在 review 流程里确认，才算可靠数据。</div>' +
                         (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
-                        (run.raw_text ? '<div class="mono" style="margin-top:10px;">' + esc(ellipsis(run.raw_text, 1200)) + "</div>" : "") +
                         '<div class="candidate-toolbar" style="margin-top:12px;">' +
                             '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量生成待确认记录</button>' +
                             '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中生成待确认记录</button>' +
                             '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开审阅项（' + (run.candidates || []).length + "）</button>" +
                             '<a class="btn ghost small" style="text-decoration:none;" href="/pages/external_analysis_workbench/index.html?paper_id=' + encodeURIComponent(state.selectedPaperId) + '">人工确认工作台</a>' +
+                            '<button class="btn ghost small" onclick="deleteExternalRun(\'' + run.id + '\')">删除记录</button>' +
                         "</div>" +
                         '<div id="run-candidates-' + run.id + '" style="display:none;">' +
                             renderCandidates(run.id, run.candidates || []) +
@@ -299,7 +298,6 @@ function renderCandidates(runId, candidates) {
                 "</div>" +
                 '<div class="subtle">置信度：' + esc(item.confidence == null ? "-" : item.confidence) + " | 目标类型：" + esc(item.materialized_target_type || "-") + "</div>" +
                 renderCandidatePayload(item.normalized_payload || {}) +
-                '<details class="debug-json"><summary>查看原始候选数据</summary><div class="mono">' + esc(JSON.stringify(item.normalized_payload || {}, null, 2)) + "</div></details>" +
             "</div>"
         );
     }).join("");
@@ -338,6 +336,20 @@ async function materializeRun(runId) {
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
         showToast("生成待确认记录失败：" + error.message, "error");
+    }
+    hideProgress();
+}
+
+async function deleteExternalRun(runId) {
+    var ok = confirm("删除这条 AI 审阅记录？已生成的人工确认记录不会被删除。");
+    if (!ok) return;
+    showProgress("正在删除 AI 审阅记录...");
+    try {
+        await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/delete", { method: "POST" });
+        showToast("AI 审阅记录已删除。", "success");
+        await loadExternalRuns();
+    } catch (error) {
+        showToast("删除失败：" + error.message, "error");
     }
     hideProgress();
 }
@@ -413,7 +425,7 @@ function renderAggregateAliases(items) {
         return '<div class="section-card"><h3>可能别名</h3><div class="muted">暂无需要人工合并的别名。</div></div>';
     }
     return '<div class="section-card"><h3>可能别名</h3><div class="readable-grid">' + items.map(function(item) {
-        return '<div class="readable-field"><div class="k">' + esc(item.name || item.alias || "别名") + '</div><div class="v">' + esc(item.reason || item.note || JSON.stringify(item)) + '</div></div>';
+        return '<div class="readable-field"><div class="k">' + esc(item.name || item.alias || "别名") + '</div><div class="v">' + esc(item.reason || item.note || "需要人工确认是否为同一名称。") + '</div></div>';
     }).join("") + '</div></div>';
 }
 

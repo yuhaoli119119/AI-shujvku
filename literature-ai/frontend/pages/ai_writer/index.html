@@ -429,7 +429,13 @@
 
     function showEvidenceDetail(index) {
       const item = state.retrieved[index];
-      document.getElementById("evidenceDetail").textContent = JSON.stringify(item.evidence || item, null, 2);
+      const evidence = item.evidence || item || {};
+      document.getElementById("evidenceDetail").innerHTML =
+        '<div><strong>文献：</strong>' + esc(evidence.paper_id || item.paper_id || "-") + '</div>' +
+        '<div><strong>章节：</strong>' + esc(evidence.section_title || item.section_title || item.source || "-") + '</div>' +
+        '<div><strong>页码：</strong>' + esc(evidence.page || evidence.page_start || "-") + '</div>' +
+        '<div><strong>置信度：</strong>' + esc(evidence.confidence || item.score || "-") + '</div>' +
+        '<div style="margin-top:8px;white-space:pre-wrap;">' + esc(evidence.evidence_text || item.text || "暂无证据文本") + '</div>';
     }
 
     async function generateAcademicDraft() {
@@ -514,7 +520,14 @@
 
     function showClaimEvidence(index) {
       const claim = (state.generatedData && state.generatedData.evidence_claims || [])[index];
-      document.getElementById("evidenceDetail").textContent = JSON.stringify(claim || {}, null, 2);
+      const evidenceList = Array.isArray(claim && claim.evidence) ? claim.evidence : [];
+      document.getElementById("evidenceDetail").innerHTML =
+        '<div><strong>论断：</strong>' + esc(claim && claim.claim_text || "-") + '</div>' +
+        '<div><strong>状态：</strong>' + esc(formatValidationStatus(claim && claim.validation_status)) + '</div>' +
+        '<div style="margin-top:8px;"><strong>证据：</strong></div>' +
+        (evidenceList.length
+          ? evidenceList.map(item => '<div style="margin-top:6px;white-space:pre-wrap;">' + esc(item.evidence_text || item.text || item) + '</div>').join("")
+          : '<div class="muted">暂无关联证据。</div>');
     }
 
     function renderAudit(audit) {

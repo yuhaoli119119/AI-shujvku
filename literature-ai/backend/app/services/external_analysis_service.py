@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -135,6 +135,31 @@ class ExternalAnalysisService:
         if not run:
             raise ValueError("External analysis run not found")
         return run
+
+    def delete_run(self, run_id: UUID) -> ExternalAnalysisRun:
+        run = self.get_run(run_id)
+        self.session.execute(
+            delete(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id == run.id)
+        )
+        self.session.delete(run)
+        self.session.flush()
+        return run
+
+    def delete_runs_for_paper_source(self, paper_id: UUID, source: str) -> int:
+        run_ids = self.session.scalars(
+            select(ExternalAnalysisRun.id).where(
+                ExternalAnalysisRun.paper_id == paper_id,
+                ExternalAnalysisRun.source == source,
+            )
+        ).all()
+        if not run_ids:
+            return 0
+        self.session.execute(
+            delete(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id.in_(run_ids))
+        )
+        self.session.execute(delete(ExternalAnalysisRun).where(ExternalAnalysisRun.id.in_(run_ids)))
+        self.session.flush()
+        return len(run_ids)
 
     def list_candidates(self, run_id: UUID) -> list[ExternalAnalysisCandidate]:
         return self.session.scalars(
@@ -455,6 +480,31 @@ def build_internal_ai_review_blob(detail) -> str:
                 "text_excerpt": _truncate(item.text, 1400),
             }
         )
+    figures = []
+    for item in detail.figures[:30]:
+        figures.append(
+            {
+                "id": str(item.id),
+                "caption": item.caption,
+                "page": item.page,
+                "figure_role": item.figure_role,
+                "role_confidence": item.role_confidence,
+                "content_summary": item.content_summary,
+                "key_elements": item.key_elements,
+                "has_image_crop": bool(item.image_path),
+            }
+        )
+    tables = []
+    for item in detail.tables[:20]:
+        tables.append(
+            {
+                "id": str(item.id),
+                "caption": item.caption,
+                "page": item.page,
+                "extraction_source": item.extraction_source,
+                "markdown_excerpt": _truncate(item.markdown_content, 1600),
+            }
+        )
 
     bundle = {
         "paper": {
@@ -477,6 +527,8 @@ def build_internal_ai_review_blob(detail) -> str:
         ],
         "mechanism_claims_items": [item.model_dump(mode="json") for item in detail.mechanism_claims_items[:30]],
         "writing_cards_items": [item.model_dump(mode="json") for item in detail.writing_cards_items[:20]],
+        "figures": figures,
+        "tables": tables,
         "references": [item.model_dump(mode="json") for item in detail.references[:40]],
         "outgoing_relationships": [item.model_dump(mode="json") for item in detail.outgoing_relationships[:20]],
         "incoming_relationships": [item.model_dump(mode="json") for item in detail.incoming_relationships[:20]],
