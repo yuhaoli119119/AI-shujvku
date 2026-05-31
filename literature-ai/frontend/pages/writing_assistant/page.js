@@ -243,6 +243,256 @@ function decodeCandidate(encoded) {
     }
 }
 
+async function suggestComments() {
+    const alertDiv = document.getElementById("validationAlert");
+    const container = document.getElementById("candidatesContainer");
+    const loading = document.getElementById("loadingIndicator");
+    const resultsCount = document.getElementById("resultsCount");
+    
+    alertDiv.style.display = "none";
+    alertDiv.innerText = "";
+    
+    const textVal = document.getElementById("writingText").value.trim();
+    if (!textVal) {
+        alertDiv.innerText = "请先输入句子或段落上下文，再生成 Comment Suggestions。";
+        alertDiv.style.display = "block";
+        setActivePanelSection("context");
+        return;
+    }
+    
+    loading.style.display = "flex";
+    container.innerHTML = "";
+    resultsCount.innerText = "0";
+    
+    const payload = {
+        paragraph_text: textVal,
+        max_candidates_per_suggestion: 3
+    };
+    
+    try {
+        const response = await fetch("/api/writing/manuscript-comment-suggestions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API 错误：${errText}`);
+        }
+        
+        const data = await response.json();
+        renderCommentSuggestions(data);
+        showToast("Comment Suggestions 生成完成。", "success");
+    } catch (err) {
+        console.error("Suggestion error:", err);
+        alertDiv.innerText = err.message || "获取 Suggestions 失败。";
+        alertDiv.style.display = "block";
+        showToast("检索失败", "error");
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>获取失败</h3>
+                <p>${escapeHtml(err.message)}</p>
+            </div>
+        `;
+    } finally {
+        loading.style.display = "none";
+    }
+}
+
+function renderCommentSuggestions(data) {
+    const container = document.getElementById("candidatesContainer");
+    const resultsCount = document.getElementById("resultsCount");
+    
+    const suggestions = data.suggestions || [];
+    resultsCount.innerText = String(suggestions.length);
+    
+    if (suggestions.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>未找到 Suggestions</h3>
+                <p>当前上下文未匹配到建议。</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = "";
+    suggestions.forEach(sug => {
+        const card = document.createElement("div");
+        card.className = "candidate-card border-needs-verification";
+        
+        let warningsHtml = "";
+        if (sug.warnings && sug.warnings.length > 0) {
+            const warningItems = sug.warnings.map(w => `<div class="card-warning-message">${escapeHtml(formatWarningText(w))}</div>`).join("");
+            warningsHtml = `
+                <div class="card-warning-box">
+                    <div class="card-warning-icon">!</div>
+                    <div class="card-warning-list">${warningItems}</div>
+                </div>
+            `;
+        }
+        
+        let candsHtml = "";
+        if (sug.candidate_papers && sug.candidate_papers.length > 0) {
+            candsHtml = sug.candidate_papers.map(c => `
+                <div style="margin-top: 10px; padding: 10px; border-left: 3px solid #ccc; background-color: #fafafa;">
+                    <div><strong>文献:</strong> ${escapeHtml(c.title)}</div>
+                    <div><strong>证据状态:</strong> ${escapeHtml(formatEvidenceStatus(c.evidence_status))}</div>
+                </div>
+            `).join("");
+        }
+        
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="card-title-area">
+                    <h4 class="card-title">Comment Suggestion (Draft)</h4>
+                </div>
+                <div class="safety-badge badge-needs-verification">Needs Human Verification</div>
+            </div>
+            ${warningsHtml}
+            <div style="margin-top: 15px; font-size: 14px;">
+                <strong>建议:</strong> ${escapeHtml(sug.text)}
+            </div>
+            ${candsHtml}
+        `;
+        
+        container.appendChild(card);
+    });
+}
+
+async function reviseDraft() {
+    const alertDiv = document.getElementById("validationAlert");
+    const container = document.getElementById("candidatesContainer");
+    const loading = document.getElementById("loadingIndicator");
+    const resultsCount = document.getElementById("resultsCount");
+    
+    alertDiv.style.display = "none";
+    alertDiv.innerText = "";
+    
+    const textVal = document.getElementById("writingText").value.trim();
+    if (!textVal) {
+        alertDiv.innerText = "请先输入句子或段落上下文，再生成 Draft Revisions。";
+        alertDiv.style.display = "block";
+        setActivePanelSection("context");
+        return;
+    }
+    
+    loading.style.display = "flex";
+    container.innerHTML = "";
+    resultsCount.innerText = "0";
+    
+    const payload = {
+        draft_text: textVal,
+        candidate_papers: []
+    };
+    
+    try {
+        const response = await fetch("/api/writing/draft-revisions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API 错误：${errText}`);
+        }
+        
+        const data = await response.json();
+        renderDraftRevisions(data);
+        showToast("Draft Revisions 生成完成。", "success");
+    } catch (err) {
+        console.error("Revision error:", err);
+        alertDiv.innerText = err.message || "获取 Revisions 失败。";
+        alertDiv.style.display = "block";
+        showToast("检索失败", "error");
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>获取失败</h3>
+                <p>${escapeHtml(err.message)}</p>
+            </div>
+        `;
+    } finally {
+        loading.style.display = "none";
+    }
+}
+
+function renderDraftRevisions(data) {
+    const container = document.getElementById("candidatesContainer");
+    const resultsCount = document.getElementById("resultsCount");
+    
+    const suggestions = data.revision_suggestions || [];
+    resultsCount.innerText = String(suggestions.length);
+    
+    if (suggestions.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>未找到 Revisions</h3>
+                <p>当前上下文无需改写建议。</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = "";
+    suggestions.forEach(sug => {
+        const card = document.createElement("div");
+        card.className = "candidate-card border-needs-verification";
+        
+        let warningsHtml = "";
+        if (sug.warnings && sug.warnings.length > 0) {
+            const warningItems = sug.warnings.map(w => `<div class="card-warning-message">${escapeHtml(w)}</div>`).join("");
+            warningsHtml = `
+                <div class="card-warning-box">
+                    <div class="card-warning-icon">!</div>
+                    <div class="card-warning-list">${warningItems}</div>
+                </div>
+            `;
+        }
+        
+        let candsHtml = "";
+        if (sug.candidate_papers && sug.candidate_papers.length > 0) {
+            candsHtml = sug.candidate_papers.map(c => {
+                let cWarningsHtml = "";
+                if (c.warnings && c.warnings.length > 0) {
+                     cWarningsHtml = c.warnings.map(w => `<div><small style="color:red;">Warning: ${escapeHtml(w)}</small></div>`).join("");
+                }
+                return `
+                <div style="margin-top: 10px; padding: 10px; border-left: 3px solid #ccc; background-color: #fafafa;">
+                    <div><strong>文献:</strong> ${escapeHtml(c.title)}</div>
+                    <div><strong>证据状态:</strong> ${escapeHtml(formatEvidenceStatus(c.evidence_status))}</div>
+                    ${cWarningsHtml}
+                </div>
+                `;
+            }).join("");
+        }
+        
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="card-title-area">
+                    <h4 class="card-title">Draft Revision Suggestion</h4>
+                    <div>类型: ${escapeHtml(sug.suggestion_type)}</div>
+                </div>
+                <div class="safety-badge badge-needs-verification">Needs Human Verification</div>
+            </div>
+            ${warningsHtml}
+            <div style="margin-top: 15px; font-size: 14px;">
+                <strong>原文摘录:</strong> <span style="background-color: #ffe6e6;">${escapeHtml(sug.original_excerpt)}</span>
+            </div>
+            <div style="margin-top: 5px; font-size: 14px;">
+                <strong>建议改写:</strong> <span style="background-color: #e6ffe6;">${escapeHtml(sug.suggested_revision)}</span>
+            </div>
+            ${candsHtml}
+            <div class="card-actions" style="margin-top: 15px;">
+                <button class="btn btn-sm btn-ghost" type="button" onclick="copyCardTitle('${escapeJsString(sug.suggested_revision)}')">Copy Draft Suggestion</button>
+            </div>
+        `;
+        
+        container.appendChild(card);
+    });
+}
+
 async function retrieveCandidates() {
     const alertDiv = document.getElementById("validationAlert");
     const container = document.getElementById("candidatesContainer");
@@ -361,6 +611,8 @@ function renderResults(data) {
 
     const candidates = data.candidates || [];
     const excludedReasons = data.excluded_reasons || [];
+    
+    window.currentCandidates = candidates;
 
     resultsCount.innerText = String(candidates.length);
 
@@ -382,7 +634,7 @@ function renderResults(data) {
             let borderClass = "";
 
             if (cand.can_be_used_as_confirmed_citation === true) {
-                badgeText = "API 明确允许作为已确认候选";
+                badgeText = "高置信度候选 (建议核对)";
                 badgeClass = "badge-confirmed";
                 borderClass = "border-confirmed";
             } else if (cand.requires_human_verification === true && cand.evidence_status !== "metadata_only") {
@@ -548,7 +800,7 @@ function copyCardInfo(cand) {
 
     let safetyLabel = "仅元数据建议";
     if (cand.can_be_used_as_confirmed_citation === true) {
-        safetyLabel = "API 明确允许作为已确认候选";
+        safetyLabel = "高置信度候选";
     } else if (cand.requires_human_verification === true) {
         safetyLabel = "需要人工核验";
     }
@@ -696,7 +948,7 @@ function renderDraftProposal(paperId, data) {
 
     let safetyBanner = "";
     if (data.can_insert_as_confirmed_citation === true) {
-        safetyBanner = '<div class="proposal-banner banner-confirmed">该草稿基于 API 允许作为已确认候选的记录生成，使用前仍需人工复核。</div>';
+        safetyBanner = '<div class="proposal-banner banner-confirmed">该草稿基于高置信度证据生成，但作为严谨学术引用，使用前仍建议进行人工核对。</div>';
     } else if (data.requires_human_verification === true) {
         safetyBanner = '<div class="proposal-banner banner-warning">该草稿仅供参考，引用前必须完成人工核验。</div>';
     } else if (data.evidence_status === "metadata_only") {
@@ -819,4 +1071,207 @@ function fallbackCopyText(text) {
             textarea.remove();
         }
     });
+}
+
+async function generateEvidenceCards() {
+    const alertDiv = document.getElementById("validationAlert");
+    const container = document.getElementById("writingCardsContainer");
+    const section = document.getElementById("writingCardsSection");
+    const loading = document.getElementById("loadingIndicator");
+    
+    alertDiv.style.display = "none";
+    alertDiv.innerText = "";
+    
+    const textVal = document.getElementById("writingText").value.trim();
+    if (!textVal) {
+        alertDiv.innerText = "请先输入句子或段落上下文，再生成 Evidence Cards。";
+        alertDiv.style.display = "block";
+        setActivePanelSection("context");
+        return;
+    }
+    
+    section.style.display = "block";
+    loading.style.display = "flex";
+    container.innerHTML = "";
+    
+    const cands = window.currentCandidates || [];
+    
+    const payload = {
+        candidates: cands.map(c => ({
+            title: c.title,
+            evidence_status: c.evidence_status,
+            draft_text: textVal,
+            warnings: c.warnings || [],
+            source_locator: ""
+        }))
+    };
+    
+    try {
+        const response = await fetch("/api/writing/evidence-backed-cards", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API 错误：${errText}`);
+        }
+        
+        const data = await response.json();
+        renderEvidenceBackedCards(data);
+        showToast("Evidence Cards 生成完成。", "success");
+    } catch (err) {
+        console.error("Card generation error:", err);
+        alertDiv.innerText = err.message || "生成 Evidence Cards 失败。";
+        alertDiv.style.display = "block";
+        showToast("生成失败", "error");
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>生成失败</h3>
+                <p>${escapeHtml(err.message)}</p>
+            </div>
+        `;
+    } finally {
+        loading.style.display = "none";
+    }
+}
+
+function renderEvidenceBackedCards(data) {
+    const container = document.getElementById("writingCardsContainer");
+    
+    const cards = data.writing_cards || [];
+    window.currentWritingCards = cards;
+    
+    if (cards.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>未生成卡片</h3>
+                <p>当前没有候选可用于生成 Evidence Card，请先检索候选。</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = "";
+    cards.forEach(cardData => {
+        const card = document.createElement("div");
+        card.className = "candidate-card";
+        
+        const isConfirmed = cardData.card_type === "confirmed_writing_card";
+        if (isConfirmed) {
+            card.classList.add("border-confirmed");
+        } else {
+            card.classList.add("border-needs-verification");
+        }
+        
+        let warningsHtml = "";
+        if (cardData.warnings && cardData.warnings.length > 0) {
+            const warningItems = cardData.warnings.map(w => `<div class="card-warning-message">${escapeHtml(w)}</div>`).join("");
+            warningsHtml = `
+                <div class="card-warning-box">
+                    <div class="card-warning-icon">!</div>
+                    <div class="card-warning-list">${warningItems}</div>
+                </div>
+            `;
+        }
+        
+        let safetyBanner = "";
+        if (isConfirmed) {
+            safetyBanner = '<div class="proposal-banner banner-confirmed"><strong>Confirmed writing card 仅代表 safe_verified 来源。建议核对原文。</strong></div>';
+        } else {
+            safetyBanner = '<div class="proposal-banner banner-warning"><strong>suggestion-only / needs human verification 不可直接作为事实。</strong></div>';
+        }
+        
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="card-title-area">
+                    <h4 class="card-title">${escapeHtml(cardData.source_title || "未命名文献")}</h4>
+                    <div>类型: ${escapeHtml(cardData.card_type)} | 证据状态: ${escapeHtml(cardData.evidence_status)}</div>
+                </div>
+                <div class="safety-badge ${isConfirmed ? 'badge-confirmed' : 'badge-needs-verification'}">
+                    ${isConfirmed ? 'Confirmed Fact' : 'Suggestion Only'}
+                </div>
+            </div>
+            ${safetyBanner}
+            ${warningsHtml}
+            <div style="margin-top: 15px; font-size: 14px;">
+                <strong>草稿内容:</strong> ${escapeHtml(cardData.draft_text)}
+            </div>
+            <div class="card-actions" style="margin-top: 15px;">
+                <button class="btn btn-sm btn-ghost" type="button" onclick="copyCardTitle('${escapeJsString(cardData.draft_text)}')">
+                    ${isConfirmed ? 'Copy Draft Card' : 'Copy Suggestion Draft'}
+                </button>
+            </div>
+        `;
+        
+        container.appendChild(card);
+    });
+}
+
+async function exportWritingCards() {
+    const alertDiv = document.getElementById("validationAlert");
+    const exportSection = document.getElementById("exportResultSection");
+    const mdArea = document.getElementById("exportedMarkdown");
+    const bibArea = document.getElementById("exportedBibtex");
+    const safetyWarning = document.getElementById("exportSafetyWarning");
+    const loading = document.getElementById("loadingIndicator");
+    
+    const cards = window.currentWritingCards || [];
+    if (cards.length === 0) {
+        alertDiv.innerText = "没有可导出的草稿卡片，请先生成 Evidence Cards。";
+        alertDiv.style.display = "block";
+        window.scrollTo(0, 0);
+        return;
+    }
+    
+    loading.style.display = "flex";
+    exportSection.style.display = "none";
+    
+    const cands = window.currentCandidates || [];
+    const payloadCards = cards.map(c => {
+        const matchedCand = cands.find(cand => cand.title === c.source_title);
+        return {
+            draft_text: c.draft_text,
+            evidence_status: c.evidence_status,
+            paper_id: matchedCand ? matchedCand.paper_id : null
+        };
+    });
+    
+    const payload = {
+        cards: payloadCards,
+        export_format: "markdown",
+        include_bibliography: true
+    };
+    
+    try {
+        const response = await fetch("/api/writing/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API 错误：${errText}`);
+        }
+        
+        const data = await response.json();
+        mdArea.value = data.compiled_markdown || "";
+        bibArea.value = (data.bibliography && data.bibliography.bibtex) ? data.bibliography.bibtex : "";
+        
+        if (data.safety && data.safety.contains_unverified) {
+            safetyWarning.style.display = "flex";
+        } else {
+            safetyWarning.style.display = "none";
+        }
+        
+        exportSection.style.display = "block";
+        showToast("导出完成。", "success");
+    } catch (err) {
+        console.error("Export error:", err);
+        showToast("导出失败：" + err.message, "error");
+    } finally {
+        loading.style.display = "none";
+    }
 }

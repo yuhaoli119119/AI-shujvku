@@ -1023,6 +1023,27 @@ async function mockApi(route) {
     });
   }
 
+  if (pathname === '/api/writing/evidence-backed-cards' && method === 'POST') {
+    const payload = JSON.parse(route.request().postData());
+    const cards = payload.candidates.map(cand => {
+      const isConfirmed = cand.evidence_status === 'safe_verified';
+      return {
+        card_type: isConfirmed ? 'confirmed_writing_card' : 'suggestion_only',
+        status: isConfirmed ? 'confirmed_writing_card' : 'suggestion_only',
+        can_be_used_as_confirmed_fact: isConfirmed,
+        draft_text: cand.draft_text,
+        source_title: cand.title,
+        evidence_status: cand.evidence_status,
+        warnings: cand.warnings || [],
+        safety_guardrails: { writes_db: false, auto_insert: false, generates_bibliography: false, export_unlocked: false, verified_status_changed: false }
+      };
+    });
+    return jsonResponse(route, {
+      writing_cards: cards,
+      safety_guardrails: { writes_db: false, auto_insert: false, generates_bibliography: false, export_unlocked: false, verified_status_changed: false }
+    });
+  }
+
   return route.fulfill({ status: 204, body: '' });
 }
 
@@ -3693,7 +3714,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const confirmedCard = page.locator('.candidate-card').filter({ hasText: 'Confirmed Catalyst Discovery' });
     await expect(confirmedCard).toBeVisible();
     // legacy assertion replaced by localized check
-    await expect(confirmedCard.locator('.safety-badge')).toContainText('已确认候选');
+    await expect(confirmedCard.locator('.safety-badge')).toContainText('高置信度候选');
 
     const needsVerificationCard = page.locator('.candidate-card').filter({ hasText: 'Unverified Heterogeneous' });
     await expect(needsVerificationCard).toBeVisible();
@@ -3726,7 +3747,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     // legacy assertion replaced by localized check
     await confirmedCard.locator('button:has-text("生成引用建议草稿")').click();
     // legacy assertion replaced by localized check
-    await expect(confirmedCard.locator('.proposal-banner')).toContainText('使用前仍需人工复核');
+    await expect(confirmedCard.locator('.proposal-banner')).toContainText('使用前仍建议进行人工核对');
     
     // 8. Click Generate Draft on Needs Verification Candidate
     // legacy assertion replaced by localized check
@@ -3741,5 +3762,197 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await needsVerificationCard.locator('button:has-text("复制建议草稿")').click();
     // legacy assertion replaced by localized check
     // Note: To test clipboard we might need clipboard permissions, but we can just check the toast.
+  });
+
+  test('business flow: D5-3B Evidence-backed Writing Cards operate safely', async ({ page }) => {
+    let apiPayload = null;
+    await page.route(/\/api\/writing\/citation-candidates/, async route => mockApi(route));
+    await page.route(/\/api\/writing\/evidence-backed-cards/, async route => {
+      apiPayload = JSON.parse(route.request().postData() || '{}');
+      return mockApi(route);
+    });
+
+    await page.goto(`${BASE_URL}/pages/writing_assistant/index.html`);
+    await page.waitForTimeout(500);
+
+    // Populate and search candidates first to get window.currentCandidates
+    await page.fill('#writingText', 'Testing evidence cards');
+    await page.click('#btnSearch');
+    await expect(page.locator('#resultsCount')).toContainText('3');
+
+    // Click Generate Evidence Cards
+    await page.click('#btnGenerateCards');
+
+    // Assert cards generated
+    await expect(page.locator('#writingCardsSection')).toBeVisible();
+    
+    // Confirmed card
+    const confirmedCard = page.locator('#writingCardsContainer .candidate-card').filter({ hasText: 'Confirmed Catalyst Discovery' });
+    await expect(confirmedCard).toBeVisible();
+    await expect(confirmedCard.locator('.badge-confirmed')).toContainText('Confirmed Fact');
+    await expect(confirmedCard.locator('.banner-confirmed')).toContainText('Confirmed writing card 仅代表 safe_verified 来源。建议核对原文。');
+    await expect(confirmedCard.locator('button')).toContainText('Copy Draft Card');
+
+    // Suggestion card
+    const suggestionCard = page.locator('#writingCardsContainer .candidate-card').filter({ hasText: 'Unverified Heterogeneous Electrocatalyst' });
+    await expect(suggestionCard).toBeVisible();
+    await expect(suggestionCard.locator('.badge-needs-verification')).toContainText('Suggestion Only');
+    await expect(suggestionCard.locator('.banner-warning')).toContainText('suggestion-only / needs human verification 不可直接作为事实。');
+    await expect(suggestionCard.locator('button')).toContainText('Copy Suggestion Draft');
+    
+    // Assert dangerous text absent
+    const pageBody = await page.locator('#writingCardsSection').innerText();
+    expect(pageBody).not.toMatch(/Accept & Insert/i);
+    expect(pageBody).not.toMatch(/Apply/i);
+    expect(pageBody).not.toMatch(/Use as Final/i);
+    expect(pageBody).not.toMatch(/Insert Card/i);
+    expect(pageBody).not.toMatch(/Final Citation/i);
+    expect(pageBody).not.toMatch(/Generate Bibliography/i);
+    expect(pageBody).not.toMatch(/Export Final/i);
+    expect(pageBody).not.toMatch(/Auto Apply/i);
+  });
+
+  test('business flow: D5-1 Manuscript Comment Assistant operates safely', async ({ page }) => {
+    let apiPayload = null;
+    await page.route(/\/api\/writing\/manuscript-comment-suggestions/, async route => {
+      apiPayload = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          paragraph_text: apiPayload.paragraph_text,
+          suggestions: [
+            {
+              type: "draft_comment_suggestion",
+              text: "Consider citing evidence for the claims in this paragraph.",
+              candidate_papers: [
+                { title: "Mock Paper 1", evidence_status: "metadata_only" }
+              ],
+              warnings: [
+                "suggestion_only_needs_human_verification",
+                "draft_do_not_use_as_final_fact"
+              ]
+            }
+          ],
+          safety_guardrails: {
+            is_suggestion_only: true,
+            writes_db: false,
+            auto_insert: false,
+            generates_bibliography: false,
+            export_unlocked: false,
+            verified_status_changed: false
+          }
+        })
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/writing_assistant/index.html`);
+    await page.waitForTimeout(500);
+
+    // Click Suggest Comments button without text
+    await page.click('#btnSuggestComments');
+    await expect(page.locator('#validationAlert')).toBeVisible();
+    await expect(page.locator('#validationAlert')).toContainText('请先输入句子或段落上下文');
+
+    // Fill text and click Suggest Comments
+    await page.fill('#writingText', 'This is a test paragraph.');
+    await page.click('#btnSuggestComments');
+
+    // Verify API payload
+    await expect.poll(() => apiPayload && apiPayload.paragraph_text).toBe('This is a test paragraph.');
+
+    // Verify suggestions are rendered
+    const card = page.locator('.candidate-card').filter({ hasText: 'Comment Suggestion' });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Consider citing evidence');
+    await expect(card).toContainText('Mock Paper 1');
+    await expect(card).toContainText('metadata_only');
+    
+    // Check warnings
+    await expect(card.locator('.card-warning-message').first()).toContainText('仅为建议，需先完成人工核验。');
+
+    // Strict safety check for this feature: no dangerous buttons
+    const pageBody = await page.locator('body').innerText();
+    expect(pageBody).not.toMatch(/Accept & Insert/i);
+    expect(pageBody).not.toMatch(/Final Citation/i);
+    expect(pageBody).not.toMatch(/Generate Bibliography/i);
+    expect(pageBody).not.toMatch(/Export Final/i);
+  });
+
+  test('business flow: D5-2B Draft Revision Assistant operates safely', async ({ page }) => {
+    let apiPayload = null;
+    await page.route(/\/api\/writing\/draft-revisions/, async route => {
+      apiPayload = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          draft_text: apiPayload.draft_text,
+          revision_suggestions: [
+            {
+              suggestion_type: "unsupported_claim",
+              original_excerpt: "Test draft.",
+              suggested_revision: "Test draft (revised).",
+              warnings: ["draft_do_not_use_as_final_fact"],
+              candidate_papers: [
+                {
+                  title: "Mock Paper 1",
+                  evidence_status: "metadata_only",
+                  warnings: ["suggestion_only_needs_human_verification"]
+                }
+              ]
+            }
+          ],
+          safety_guardrails: {
+            is_suggestion_only: true,
+            writes_db: false,
+            auto_apply: false,
+            generates_bibliography: false,
+            export_unlocked: false,
+            verified_status_changed: false
+          }
+        })
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/writing_assistant/index.html`);
+    await page.waitForTimeout(500);
+
+    // Click Revise Draft button without text
+    await page.click('#btnReviseDraft');
+    await expect(page.locator('#validationAlert')).toBeVisible();
+    await expect(page.locator('#validationAlert')).toContainText('请先输入句子或段落上下文');
+
+    // Fill text and click Revise Draft
+    await page.fill('#writingText', 'Test draft.');
+    await page.click('#btnReviseDraft');
+
+    // Verify API payload
+    await expect.poll(() => apiPayload && apiPayload.draft_text).toBe('Test draft.');
+
+    // Verify suggestions are rendered
+    const card = page.locator('.candidate-card').filter({ hasText: 'Draft Revision Suggestion' });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Test draft (revised).');
+    await expect(card).toContainText('Mock Paper 1');
+    await expect(card).toContainText('metadata_only');
+    
+    // Check warnings
+    await expect(card.locator('.card-warning-message').first()).toContainText('draft_do_not_use_as_final_fact');
+    await expect(card).toContainText('Warning: suggestion_only_needs_human_verification');
+
+    // Check button is named appropriately
+    await expect(card.locator('button')).toContainText('Copy Draft Suggestion');
+
+    // Strict safety check for this feature: no dangerous buttons
+    const pageBody = await page.locator('body').innerText();
+    expect(pageBody).not.toMatch(/Accept & Insert/i);
+    expect(pageBody).not.toMatch(/Apply Changes/i);
+    expect(pageBody).not.toMatch(/Auto Apply/i);
+    expect(pageBody).not.toMatch(/Rewrite File/i);
+    expect(pageBody).not.toMatch(/Final Citation/i);
+    expect(pageBody).not.toMatch(/Generate Bibliography/i);
+    expect(pageBody).not.toMatch(/Export Final/i);
+    expect(pageBody).not.toMatch(/Verified Fact/i);
   });
 });

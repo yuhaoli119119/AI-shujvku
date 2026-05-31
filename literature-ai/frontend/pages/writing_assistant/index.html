@@ -24,7 +24,7 @@
         <div class="safety-disclaimer-banner">
             <div class="disclaimer-icon">!</div>
             <div class="disclaimer-content">
-                <strong>安全提示：</strong>只有 API 明确标记为 <code>confirmed</code> 的候选，才可作为“已确认候选”查看。需要人工核验或仅含元数据的建议，在复核前都不能视为证据。
+                <strong>安全提示：</strong>即使是系统评估的高置信度候选，在作为学术引用前也建议人工核对原文。需要补充元数据的建议，在复核前绝对不能作为证据使用。
                 <span><strong>说明：</strong>本工具只生成引用建议草稿，不会验证证据、不写入数据库、不生成最终参考文献，也不会解锁写作或导出能力。</span>
             </div>
         </div>
@@ -177,6 +177,9 @@
 
                 <div class="panel-actions">
                     <button id="btnClear" class="btn btn-ghost" type="button" onclick="clearFilters()">清空筛选</button>
+                    <button id="btnSuggestComments" class="btn btn-secondary" type="button" onclick="suggestComments()">获取 Comment Suggestions</button>
+                    <button id="btnReviseDraft" class="btn btn-secondary" type="button" onclick="reviseDraft()">Revise Draft</button>
+                    <button id="btnGenerateCards" class="btn btn-secondary" type="button" onclick="generateEvidenceCards()">Generate Evidence Cards</button>
                     <button id="btnSearch" class="btn btn-primary" type="button" onclick="retrieveCandidates()">检索候选</button>
                 </div>
 
@@ -193,6 +196,28 @@
 
                 <div class="results-header-bar">
                     <div class="results-count-title">推荐候选（<span id="resultsCount">0</span>）</div>
+                </div>
+
+                <div id="writingCardsSection" class="cards-section" style="display: none; margin-bottom: 24px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3>Evidence-backed Writing Cards (Drafts)</h3>
+                        <button id="btnExportCards" class="btn btn-primary" type="button" onclick="exportWritingCards()">最终导出 (编译参考文献)</button>
+                    </div>
+                    <div id="writingCardsContainer" class="cards-container"></div>
+                </div>
+
+                <div id="exportResultSection" class="export-section" style="display: none; margin-bottom: 24px;">
+                    <h3>最终导出文档 (Markdown & Bibliography)</h3>
+                    <div id="exportSafetyWarning" class="safety-disclaimer-banner" style="display: none; margin-bottom: 16px;">
+                        <div class="disclaimer-icon">!</div>
+                        <div class="disclaimer-content">
+                            <strong>[警告] 包含未核验内容：</strong>
+                            本次导出的草稿中包含尚未经过提权（safe_verified）的证据。请注意甄别并在正式发表前复核所有标记内容。
+                        </div>
+                    </div>
+                    <textarea id="exportedMarkdown" class="input" rows="12" readonly style="margin-bottom: 16px; font-family: monospace;"></textarea>
+                    <h4>参考文献 (BibTeX)</h4>
+                    <textarea id="exportedBibtex" class="input" rows="8" readonly style="font-family: monospace;"></textarea>
                 </div>
 
                 <div id="candidatesContainer" class="candidates-container">

@@ -109,6 +109,16 @@
           <div id="tab-summary" class="tab-pane active">
             <div class="panel-card"><div class="panel-title">摘要</div><div id="paperAbstract" class="prewrap"></div></div>
             <div class="panel-card"><div class="panel-title">综合分析</div><div id="comprehensiveJSON" class="mono">{}</div></div>
+            
+            <div class="panel-card">
+              <div class="panel-title">引用元数据预览 (Citation Metadata Preview)</div>
+              <div class="raw-data-toggle">
+                <summary onclick="toggleCitationPreview(event)">点击展开预览</summary>
+                <div id="citationPreviewContainer" style="display:none; margin-top: 12px;">
+                  <div class="empty-state">正在加载...</div>
+                </div>
+              </div>
+            </div>
           </div>
           <div id="tab-sections" class="tab-pane"><div class="panel-card"><div class="panel-title">解析章节</div><div id="sectionsList"></div></div></div>
           <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">图表内容</div><div id="figuresList"></div><div id="tablesList" style="margin-top:12px;"></div></div></div>
@@ -565,6 +575,53 @@
       document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.remove("active"));
       if (event && event.target) event.target.classList.add("active");
       document.getElementById("tab-" + tab).classList.add("active");
+    }
+
+    async function toggleCitationPreview(event) {
+      const container = document.getElementById("citationPreviewContainer");
+      if (container.style.display === "none") {
+        container.style.display = "block";
+        if (!state.citationPreviewLoaded) {
+          container.innerHTML = '<div class="empty-state">加载中...</div>';
+          try {
+            const data = await fetchJSON(`/api/library/papers/${state.paperId}/citation-metadata-preview`);
+            state.citationPreviewLoaded = true;
+            renderCitationPreview(data, container);
+          } catch (error) {
+            container.innerHTML = `<div class="empty-state warning">加载失败：${esc(error.message)}</div>`;
+          }
+        }
+      } else {
+        container.style.display = "none";
+      }
+    }
+
+    function renderCitationPreview(data, container) {
+      const warningsHtml = (data.missing_metadata_warnings || []).map(w => `<div class="warning" style="margin-bottom:4px;">⚠️ ${esc(w)}</div>`).join("");
+      const bibtex = esc(data.bibtex_draft || "");
+      const csl = esc(JSON.stringify(data.csl_json_draft || {}, null, 2));
+      
+      container.innerHTML = `
+        <div style="margin-bottom:12px;">
+          <span class="tag" style="background:var(--color-warning);color:#fff;">${esc(data.warning_banner)}</span>
+          <span class="tag">状态: ${esc(data.citation_safety_status)}</span>
+        </div>
+        ${warningsHtml ? `<div class="panel-card" style="border-color:var(--color-warning);">${warningsHtml}</div>` : ""}
+        <div class="kv-grid" style="margin-bottom:12px;">
+          ${Object.entries(data.metadata_preview || {}).map(([k, v]) => `
+            <div class="kv-item">
+              <div class="kv-label">${esc(k)}</div>
+              <div class="kv-value">${v ? esc(v) : '<span class="muted">缺失</span>'}</div>
+            </div>
+          `).join("")}
+        </div>
+        <div>
+          <div class="panel-title">BibTeX 草稿</div>
+          <div class="mono" style="margin-bottom:12px;">${bibtex}</div>
+          <div class="panel-title">CSL JSON 草稿</div>
+          <div class="mono">${csl}</div>
+        </div>
+      `;
     }
 
     document.addEventListener("DOMContentLoaded", () => {

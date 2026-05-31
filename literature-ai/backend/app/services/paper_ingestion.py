@@ -119,8 +119,26 @@ class PaperIngestionService:
                 references=[],
                 tei_xml="",
             )
-        docling_result = await self.docling_parser.parse_pdf(stored_pdf)
-        unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
+        try:
+            docling_result = await self.docling_parser.parse_pdf(stored_pdf)
+            unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
+        except Exception as exc:
+            logger.error("Docling parsing or unified building failed for %s: %s", original_filename, exc, exc_info=True)
+            library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
+            ext = external_metadata or {"title": original_filename}
+            paper = Paper(
+                library_name=library,
+                doi=self.identity.normalize_doi(ext.get("doi")),
+                title=ext.get("title") or original_filename,
+                year=ext.get("year"),
+                pdf_path=self._artifact_ref(stored_pdf, category="pdf") or str(stored_pdf),
+                source_path=source_reference,
+                oa_status="parse_failed",
+            )
+            self.session.add(paper)
+            self.session.commit()
+            self.session.refresh(paper)
+            raise RuntimeError(f"docling_parse_failed:{paper.id} {exc}") from exc
 
         if not external_metadata:
             doi = unified.metadata.get("doi")

@@ -13,7 +13,7 @@ from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
 from app.services.discovery_service import DiscoveryService
 from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
-from app.services.workflow_jobs import normalize_library_name
+from app.services.workflow_jobs import create_job, update_job, build_job_runtime_context, normalize_library_name
 
 router = APIRouter()
 
@@ -112,14 +112,39 @@ async def ingest_upload(
             logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
 
     service = PaperIngestionService(session=session, settings=settings)
+    job = create_job(
+        session=session,
+        job_type="local_pdf_upload",
+        library_name=normalize_library_name(library_name),
+        payload={"filename": file.filename, "identifier": identifier},
+        runtime_context=build_job_runtime_context(settings),
+        progress={"phase": "running", "message": "正在解析上传的 PDF 文件"},
+    )
+    
     try:
         paper = await service.ingest_upload(
             file=file,
             external_metadata=external_metadata,
             library_name=normalize_library_name(library_name),
         )
+        update_job(session, job.job_id, status="completed", progress={"phase": "completed", "message": "PDF 收录成功", "ingested": 1})
     except PaperConflictError as exc:
+        update_job(session, job.job_id, status="failed", error=f"doi_conflict: {exc}")
         _raise_already_exists(exc)
+    except Exception as exc:
+        err_str = str(exc)
+        if "docling_parse_failed:" in err_str:
+            try:
+                parts = err_str.split(":", 2)
+                paper_id_str = parts[1].split()[0].strip()
+                job.payload = {**job.payload, "paper_id": paper_id_str}
+                session.add(job)
+                session.commit()
+            except Exception:
+                pass
+        update_job(session, job.job_id, status="failed", error=err_str)
+        raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
+        
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
 
 
@@ -154,6 +179,15 @@ async def attach_pdf_to_existing_paper(
             logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
 
     service = PaperIngestionService(session=session, settings=settings)
+    job = create_job(
+        session=session,
+        job_type="local_pdf_upload",
+        library_name=target.library_name,
+        payload={"filename": file.filename, "identifier": identifier, "attach_to_paper_id": str(target.id)},
+        runtime_context=build_job_runtime_context(settings),
+        progress={"phase": "running", "message": "正在附加 PDF 文件"},
+    )
+    
     try:
         paper = await service.ingest_upload(
             file=file,
@@ -162,8 +196,25 @@ async def attach_pdf_to_existing_paper(
             attach_to_paper_id=target.id,
             confirm_identity_mismatch=confirm_identity_mismatch,
         )
+        update_job(session, job.job_id, status="completed", progress={"phase": "completed", "message": "PDF 附加成功", "ingested": 1})
     except PaperIdentityMismatchError as exc:
+        update_job(session, job.job_id, status="failed", error=f"identity_mismatch: {exc}")
         _raise_identity_guard(exc)
     except PaperConflictError as exc:
+        update_job(session, job.job_id, status="failed", error=f"doi_conflict: {exc}")
         _raise_already_exists(exc)
+    except Exception as exc:
+        err_str = str(exc)
+        if "docling_parse_failed:" in err_str:
+            try:
+                parts = err_str.split(":", 2)
+                paper_id_str = parts[1].split()[0].strip()
+                job.payload = {**job.payload, "paper_id": paper_id_str}
+                session.add(job)
+                session.commit()
+            except Exception:
+                pass
+        update_job(session, job.job_id, status="failed", error=err_str)
+        raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
+        
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))

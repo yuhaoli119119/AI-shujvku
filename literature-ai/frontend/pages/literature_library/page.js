@@ -449,6 +449,66 @@ function initActionMenus() {
     });
 }
 
+async function openMetadataDiagnostics() {
+    const dialog = $("metadataDiagnosticsDialog");
+    const container = $("metadataDiagnosticsContent");
+    if (dialog) dialog.style.display = "flex";
+    if (container) {
+        container.innerHTML = '<div class="empty-state">正在加载报告...</div>';
+        try {
+            const data = await fetchJSON("/api/library/papers/metadata-diagnostics");
+            renderMetadataDiagnostics(data, container);
+        } catch (error) {
+            container.innerHTML = `<div class="empty-state warning">加载失败：${esc(error.message)}</div>`;
+        }
+    }
+}
+
+function closeMetadataDiagnostics() {
+    const dialog = $("metadataDiagnosticsDialog");
+    if (dialog) dialog.style.display = "none";
+}
+
+function renderMetadataDiagnostics(data, container) {
+    if (!data.items || data.items.length === 0) {
+        container.innerHTML = '<div class="empty-state">当前没有任何文献缺少必须的元数据字段。</div>';
+        return;
+    }
+
+    let html = `
+        <div style="margin-bottom:16px;">
+            <p><strong>需完善元数据的文献总数: ${data.total_papers_needing_metadata} 篇</strong></p>
+            <div class="panel-card" style="border-color:var(--color-warning);">
+                <span style="color:var(--color-warning);font-weight:700;">安全护栏说明:</span><br/>
+                ${esc(data.safety_guardrails.message)}<br/>
+                在线自动补全: ${data.safety_guardrails.auto_completion_enabled ? '允许' : '禁止'}<br/>
+                安全等级自动提升: ${data.safety_guardrails.safety_upgrade_on_completion ? '允许' : '禁止'}
+            </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);">
+            <thead>
+                <tr style="border-bottom:1px solid var(--color-border);background:var(--color-surface-alt);">
+                    <th style="text-align:left;padding:10px;">文献标题</th>
+                    <th style="text-align:left;padding:10px;">缺失字段</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    data.items.forEach(item => {
+        const missingList = item.missing_fields.map(m => `<span class="tag" style="background:var(--color-warning-bg);color:var(--color-warning);">${esc(m)}</span>`).join(" ");
+        html += `
+            <tr style="border-bottom:1px solid var(--color-border-subtle);">
+                <td style="padding:10px;vertical-align:top;">${esc(item.title)}<div class="muted" style="margin-top:4px;">${esc(item.evidence_status_disclaimer)}</div></td>
+                <td style="padding:10px;vertical-align:top;">${missingList}</td>
+            </tr>
+        `;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
 Object.assign(window, {
     openAddLiteraturePanel: openAddLiteraturePanel,
     closeAddLiteraturePanel: closeAddLiteraturePanel,
@@ -463,7 +523,9 @@ Object.assign(window, {
     confirmDeleteCurrentPaper: confirmDeleteCurrentPaper,
     classifyUnknownTypes: classifyUnknownTypes,
     showFolderImportGuide: showFolderImportGuide,
-    switchTab: switchTab
+    switchTab: switchTab,
+    openMetadataDiagnostics: openMetadataDiagnostics,
+    closeMetadataDiagnostics: closeMetadataDiagnostics
 });
 
 window.addEventListener("beforeunload", disconnectSSE);

@@ -21,6 +21,7 @@ from app.api.settings import router as settings_router
 from app.api.system import router as system_router
 from app.api.writing import router as writing_router
 from app.api.writer import router as writer_router
+from app.api.verification import router as verification_router
 from app.config import get_settings
 from app.mcp import mcp_http_app, mcp_server
 from app.mcp.auth import enforce_mcp_auth
@@ -63,6 +64,7 @@ app.include_router(papers_router, prefix="/api/papers", tags=["papers"])
 app.include_router(references_router, prefix="/api/papers", tags=["references"])
 app.include_router(writing_router, prefix="/api/writing", tags=["writing"])
 app.include_router(writer_router, prefix="/api/writer", tags=["writer"])
+app.include_router(verification_router, prefix="/api/reviews", tags=["verification"])
 app.include_router(corrections_router, prefix="/api/corrections", tags=["corrections"])
 app.include_router(external_analysis_router, prefix="/api/external-analysis", tags=["external-analysis"])
 app.include_router(settings_router, prefix="/api/settings", tags=["settings"])

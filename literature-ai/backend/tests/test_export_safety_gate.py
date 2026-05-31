@@ -272,10 +272,48 @@ def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
             assert record["record_id"] == str(safe_row.id)
             assert record["paper"]["paper_id"] == str(paper.id)
             assert record["target"]["value"] == -1.23
+            assert record["target"]["unit"] == "eV"
+            assert record["target"]["normalized_value"] == -1.23
+            assert record["target"]["normalized_unit"] == "eV"
             assert record["catalyst"]["name"] == "Fe-N-C"
             assert record["dft_settings"][0]["functional"] == "PBE"
             assert record["provenance"]["review_gate_status"] == "safe_verified"
             assert record["provenance"]["locator_status"] == "exact_page"
+
+            # Check normalization logic with other units
+            safe_row_mev = _dft(session, paper)
+            safe_row_mev.property_type = "reaction_barrier"
+            safe_row_mev.value = 500
+            safe_row_mev.unit = "meV"
+            _safe_review(session, paper, safe_row_mev)
+            _evidence_ref(session, paper, safe_row_mev, page=1)
+
+            safe_row_kj = _dft(session, paper)
+            safe_row_kj.property_type = "adsorption_energy"
+            safe_row_kj.value = -96.485
+            safe_row_kj.unit = "kJ/mol"
+            _safe_review(session, paper, safe_row_kj)
+            _evidence_ref(session, paper, safe_row_kj, page=1)
+
+            session.commit()
+
+            payload2 = asyncio.run(
+                export_dft_dataset(
+                    property_type=None,
+                    adsorbate=None,
+                    year_min=None,
+                    year_max=None,
+                    session=session,
+                )
+            )
+            # Find the new records
+            mev_record = next(r for r in payload2["records"] if r["record_id"] == str(safe_row_mev.id))
+            assert mev_record["target"]["normalized_value"] == 0.5
+            assert mev_record["target"]["normalized_unit"] == "eV"
+
+            kj_record = next(r for r in payload2["records"] if r["record_id"] == str(safe_row_kj.id))
+            assert kj_record["target"]["normalized_value"] == -1.0
+            assert kj_record["target"]["normalized_unit"] == "eV"
     finally:
         engine.dispose()
 

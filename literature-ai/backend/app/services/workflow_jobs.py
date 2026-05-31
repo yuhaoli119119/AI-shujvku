@@ -530,7 +530,16 @@ def clone_job_for_retry_with_status(session: Session, job_id: str) -> tuple[Work
         "message": f"Retry queued from job {source.job_id}.",
         "retried_from_job_id": source.job_id,
     }
-    if source.type == JOB_TYPE_AI_WORKFLOW:
+    source_type = source.type
+    if source_type == "local_pdf_upload":
+        if retry_payload.get("paper_id"):
+            source_type = JOB_TYPE_EXTRACTION
+            retry_payload = {"paper_id": retry_payload["paper_id"], "schemas": []}
+            retry_progress.update({"message": "Retry parse from previous failed upload."})
+        else:
+            raise ValueError("Direct file uploads without saved references cannot be retried. Please upload the file again.")
+
+    if source_type == JOB_TYPE_AI_WORKFLOW:
         retry_payload["skip_existing"] = True
         retry_progress.update(
             {
@@ -538,12 +547,12 @@ def clone_job_for_retry_with_status(session: Session, job_id: str) -> tuple[Work
                 "max_downloads": retry_payload.get("max_downloads"),
             }
         )
-    if source.type == JOB_TYPE_EXTRACTION:
+    if source_type == JOB_TYPE_EXTRACTION:
         retry_progress.update({"paper_id": retry_payload.get("paper_id"), "schemas": retry_payload.get("schemas")})
 
     retry = create_job(
         session,
-        job_type=source.type,
+        job_type=source_type,
         library_name=source.library_name,
         payload=retry_payload,
         runtime_context=dict(source.runtime_context or {}),

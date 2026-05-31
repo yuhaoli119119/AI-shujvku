@@ -270,6 +270,24 @@ async def export_dft_dataset(
         primary_catalyst = direct_catalyst or fallback_catalyst
         paper_settings = settings_by_paper.get(paper_id, [])
 
+        norm_val = None
+        norm_unit = None
+        if dr.value is not None and dr.unit:
+            unit_lower = dr.unit.strip().lower()
+            if dr.property_type in ["adsorption_energy", "formation_energy", "binding_energy", "reaction_energy", "reaction_barrier", "gibbs_free_energy_change"]:
+                if unit_lower in ["kj/mol", "kj mol-1", "kjmol-1"]:
+                    norm_val = dr.value / 96.485
+                    norm_unit = "eV"
+                elif unit_lower in ["kcal/mol", "kcal mol-1"]:
+                    norm_val = dr.value / 23.06
+                    norm_unit = "eV"
+                elif unit_lower == "mev":
+                    norm_val = dr.value / 1000.0
+                    norm_unit = "eV"
+                elif unit_lower == "ev":
+                    norm_val = dr.value
+                    norm_unit = "eV"
+
         records.append(
             {
                 "record_id": str(dr.id),
@@ -280,6 +298,8 @@ async def export_dft_dataset(
                     "value": dr.value,
                     "unit": dr.unit,
                     "reaction_step": dr.reaction_step,
+                    "normalized_value": norm_val,
+                    "normalized_unit": norm_unit,
                 },
                 "catalyst": _catalyst_payload(primary_catalyst),
                 "catalyst_candidates": [

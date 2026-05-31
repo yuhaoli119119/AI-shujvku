@@ -310,13 +310,13 @@ textarea.input {
 
 .panel-actions {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     gap: 12px;
     margin-top: auto;
 }
 
 .panel-actions .btn {
-    flex: 1;
+    width: 100%;
 }
 
 .validation-alert {
