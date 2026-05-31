@@ -199,15 +199,28 @@
         .empty-state p { margin-top: 8px; font-size: 14px; }
 
         .badge-type {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             padding: 4px 8px;
             border-radius: var(--radius-sm);
             font-size: 11px;
             font-weight: 700;
+            white-space: nowrap;
+            min-width: 44px;
         }
         .badge-type.A { background: var(--color-primary-bg); color: var(--color-primary); }
         .badge-type.B { background: var(--color-success-bg); color: var(--color-success); }
         .badge-type.C { background: var(--color-warning-bg); color: var(--color-warning); }
         .badge-type.R { background: var(--color-danger-bg); color: var(--color-danger); }
+        .badge-type.Unknown { background: var(--color-surface-alt); color: var(--color-text-secondary); }
+        #recentTable th:nth-child(4),
+        #recentTable td:nth-child(4) {
+            width: 92px;
+            min-width: 92px;
+            white-space: nowrap;
+            text-align: center;
+        }
 
         .toast {
             position: fixed;
@@ -333,6 +346,22 @@
         const API_BASE = "/api/papers";
         const LIB_API = "/api/libraries";
 
+        function paperTypeLabel(value) {
+            const raw = String(value || '').trim();
+            if (!raw) return '未知类型';
+            const key = raw.toLowerCase();
+            if (key === 'unknown' || key === 'null' || key === 'none') return '未知类型';
+            if (/^[abc]\d?$/i.test(raw)) return raw.toUpperCase() + '类';
+            if (/^r\d?$/i.test(raw) || key === 'review') return '综述';
+            if (key === 'research') return '研究论文';
+            return raw;
+        }
+
+        function paperTypeBadgeClass(value) {
+            const raw = String(value || '').trim().toUpperCase();
+            return /^[ABCR]/.test(raw) ? raw.charAt(0) : 'Unknown';
+        }
+
         function showToast(msg) {
             const toast = document.getElementById('toast');
             toast.textContent = msg;
@@ -432,8 +461,8 @@
                 } else {
                     const sorted = [...papers].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, 7);
                     recentList.innerHTML = sorted.map(p => {
-                        const typeLabel = p.paper_type || 'Unknown';
-                        const typeCls = ['A', 'B', 'C', 'R'].includes(typeLabel) ? typeLabel : 'Unknown';
+                        const typeLabel = paperTypeLabel(p.paper_type);
+                        const typeCls = paperTypeBadgeClass(p.paper_type);
                         const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString() : '-';
                         return `
                             <tr>
@@ -444,7 +473,7 @@
                                 </td>
                                 <td>${p.year || '-'}</td>
                                 <td>${p.journal || '-'}</td>
-                                <td><span class="badge-type ${typeCls}">${typeLabel}类</span></td>
+                                <td><span class="badge-type ${typeCls}">${typeLabel}</span></td>
                                 <td style="color: var(--color-text-muted); font-size:13px;">${dateStr}</td>
                             </tr>
                         `;
@@ -465,7 +494,7 @@
                     <div style="display:flex; flex-direction:column; gap:10px;">
                         ${Object.entries(types).map(([k, v]) => {
                             const pct = ((v / totalTypes) * 100).toFixed(0);
-                            const kLabel = k === 'A' ? 'A类 (计算模型)' : k === 'B' ? 'B类 (计算+实验)' : k === 'C' ? 'C类 (纯实验)' : k === 'R' ? 'R类 (文献综述)' : '未知类型';
+                            const kLabel = k === 'A' ? 'A类（计算）' : k === 'B' ? 'B类（计算+实验）' : k === 'C' ? 'C类（实验）' : k === 'R' ? '综述' : '未知类型';
                             return `
                                 <div>
                                     <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">

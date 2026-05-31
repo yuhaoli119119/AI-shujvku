@@ -10,7 +10,7 @@ function renderWorkspaceHeader(paper) {
         metaEl.innerHTML = [
             esc(paper.year || "-"),
             esc(paper.journal || "-"),
-            esc(paper.paper_type ? paper.paper_type : "未知类型"),
+            esc(paperTypeLabel(paper.paper_type)),
             renderDoiMeta(paper.doi)
         ].join(" | ");
     }
@@ -426,7 +426,7 @@ function renderDetail(detail, audit) {
         '<div class="section-card"><h3>基础信息</h3>' +
             '<div class="inline-grid">' +
                 '<div class="key-value"><div class="k">文献库</div><div class="v">' + esc(detail.library_name || "-") + '</div></div>' +
-                '<div class="key-value"><div class="k">文献类型</div><div class="v">' + esc(detail.paper_type || "未知") + (detail.type_confidence ? ' (置信度 ' + detail.type_confidence + ')' : '') + '</div></div>' +
+                '<div class="key-value"><div class="k">文献类型</div><div class="v">' + esc(paperTypeLabel(detail.paper_type)) + (detail.type_confidence ? ' (置信度 ' + detail.type_confidence + ')' : '') + '</div></div>' +
                 '<div class="key-value"><div class="k">分类来源</div><div class="v">' + esc(detail.classification_source || "-") + '</div></div>' +
                 '<div class="key-value"><div class="k">创建时间</div><div class="v">' + esc(formatDate(detail.created_at)) + '</div></div>' +
                 '<div class="key-value"><div class="k">PDF 路径</div><div class="v">' + esc(detail.pdf_path || "-") + '</div></div>' +

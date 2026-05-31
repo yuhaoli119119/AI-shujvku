@@ -190,10 +190,57 @@ function togglePaperMoreMenu(event) {
     toggleDropdown("paperMoreMenu", event);
 }
 
+function ensureClassificationToolbarButton() {
+    const toolbarRows = document.querySelectorAll(".toolbar .toolbar-row");
+    const targetRow = toolbarRows && toolbarRows[1];
+    if (!targetRow || targetRow.querySelector("[data-role='classify-unknown-btn']")) return;
+    const refreshBtn = Array.from(targetRow.querySelectorAll("button")).find(function(btn) {
+        return btn.getAttribute("onclick") === "refreshCurrentPage()";
+    });
+    const button = document.createElement("button");
+    button.className = "btn ghost";
+    button.dataset.role = "classify-unknown-btn";
+    button.textContent = "重分类未知类型";
+    button.addEventListener("click", classifyUnknownTypes);
+    if (refreshBtn && refreshBtn.nextSibling) {
+        targetRow.insertBefore(button, refreshBtn.nextSibling);
+    } else {
+        targetRow.appendChild(button);
+    }
+}
+
 function closeDropdowns() {
     document.querySelectorAll(".dropdown-menu.open").forEach(function(menu) {
         menu.classList.remove("open");
     });
+}
+
+async function classifyUnknownTypes() {
+    const libraryName = getCurrentLibraryName();
+    if (!libraryName) {
+        showToast("请先选择文献库。", "error");
+        return;
+    }
+    try {
+        showProgress("正在提交未知类型重分类任务...");
+        const job = await fetchJSON(API_BASE + "/classify-batch/jobs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                library_name: libraryName,
+                overwrite: false,
+                interval: 0,
+                batch_size: 50
+            })
+        });
+        const jobId = job && job.job_id ? String(job.job_id).slice(0, 8) : "queued";
+        showToast("已发起重分类任务 #" + jobId, "success");
+        hideProgress(true);
+        setTimeout(function() { refreshCurrentPage(); }, 2000);
+    } catch (error) {
+        hideProgress(true);
+        showToast("重分类提交失败：" + error.message, "error");
+    }
 }
 
 function openAddLiteraturePanel(mode) {
@@ -414,6 +461,7 @@ Object.assign(window, {
     openDeletePaperDialog: openDeletePaperDialog,
     closeDeletePaperDialog: closeDeletePaperDialog,
     confirmDeleteCurrentPaper: confirmDeleteCurrentPaper,
+    classifyUnknownTypes: classifyUnknownTypes,
     showFolderImportGuide: showFolderImportGuide,
     switchTab: switchTab
 });
@@ -429,6 +477,7 @@ applyQueryParams();
 initProtocolWarning();
 initSplitDrag();
 initActionMenus();
+ensureClassificationToolbarButton();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
 fetchPapers();
 initSSE();

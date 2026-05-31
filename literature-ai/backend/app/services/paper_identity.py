@@ -254,7 +254,7 @@ class PaperIdentityService:
             source_path=source_path,
             pdf_path="",
             doi=doi,
-            paper_type=classification.get("paper_type", "research"),
+            paper_type=classification.get("paper_type", "Unknown"),
             type_confidence=classification.get("type_confidence"),
             classification_source=classification.get("classification_source"),
             library_name=library,
@@ -303,7 +303,7 @@ class PaperIdentityService:
         cls._fill_if_empty(paper, "license", cls._string(metadata.get("license")))
         if not paper.paper_type and classify_callback:
             classification = classify_callback(paper.title or title or "Untitled paper", paper.journal)
-            paper.paper_type = classification.get("paper_type", "research")
+            paper.paper_type = classification.get("paper_type", "Unknown")
             paper.type_confidence = paper.type_confidence or classification.get("type_confidence")
             paper.classification_source = paper.classification_source or classification.get("classification_source")
 

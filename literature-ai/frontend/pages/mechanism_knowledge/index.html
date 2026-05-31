@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鏈虹悊鐭ヨ瘑鑱氬悎 - Literature AI</title>
+    <title>机理知识聚合 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
@@ -11,398 +11,674 @@
     <script src="../../shared/topnav.js"></script>
     <script>ThemeManager.init();</script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * { box-sizing: border-box; }
         body {
-            font-family: var(--font-body);
-            color: var(--color-text);
-            background: var(--color-bg);
+            margin: 0;
             min-height: 100vh;
+            background: var(--color-bg);
+            color: var(--color-text);
+            font-family: var(--font-body);
         }
-        .shell {
-            max-width: 1440px;
+        .knowledge-shell {
+            width: min(1440px, calc(100% - 48px));
             margin: 0 auto;
-            padding: 20px 24px 32px;
+            padding: 28px 0 44px;
         }
-        .header-section {
-            margin-bottom: 24px;
+        .hero {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
-        .header-section h1 { font-size: 26px; font-weight: 800; }
-        .header-section p { font-size: 14px; color: var(--color-text-secondary); margin-top: 4px; }
-
-        .tabs {
-            display: flex;
-            gap: 8px;
-            border-bottom: 1.5px solid var(--color-border);
+            gap: 18px;
+            align-items: flex-end;
             margin-bottom: 24px;
         }
-        .tab-btn {
-            background: transparent;
-            border: none;
+        .eyebrow {
+            margin: 0 0 8px;
+            color: var(--color-primary);
+            font-size: var(--font-size-xs);
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        h1 {
+            margin: 0;
+            font-size: clamp(28px, 4vw, 42px);
+            font-weight: 850;
+            letter-spacing: -0.04em;
+        }
+        .hero p {
+            max-width: 840px;
+            margin: 10px 0 0;
             color: var(--color-text-secondary);
-            padding: 12px 18px;
-            font-size: 14px;
-            font-weight: 700;
+            font-size: var(--font-size-sm);
+            line-height: 1.8;
+        }
+        .tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 18px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .tab-btn {
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-pill);
+            background: var(--color-surface-alt);
+            color: var(--color-text-secondary);
             cursor: pointer;
-            border-radius: var(--radius) var(--radius) 0 0;
-            transition: var(--transition);
+            font: inherit;
+            font-size: var(--font-size-sm);
+            font-weight: 800;
+            padding: 9px 15px;
+            transition: all var(--transition);
+        }
+        .tab-btn:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
         }
         .tab-btn.active {
-            color: var(--color-primary);
-            border-bottom: 2px solid var(--color-primary);
+            background: var(--color-primary);
+            border-color: var(--color-primary);
+            color: #fff;
         }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
 
-        .panel-layout {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 20px;
+        .status-area {
+            margin-bottom: 18px;
+        }
+        .state-card {
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            background: var(--color-surface);
+            box-shadow: var(--shadow-card);
+            padding: 18px;
+            color: var(--color-text-secondary);
+            line-height: 1.8;
+        }
+        .state-card.error {
+            border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+            background: var(--color-danger-bg);
+            color: var(--color-danger);
+        }
+        .state-card.loading {
+            background:
+                linear-gradient(90deg, var(--color-surface), var(--color-surface-alt), var(--color-surface));
+            background-size: 200% 100%;
+            animation: shimmer 1.3s linear infinite;
+        }
+        @keyframes shimmer {
+            from { background-position: 200% 0; }
+            to { background-position: -200% 0; }
         }
 
         .panel-card {
-            background: var(--color-surface);
+            padding: 22px;
             border: 1px solid var(--color-border);
             border-radius: var(--radius-lg);
-            padding: 24px;
+            background: var(--color-surface);
             box-shadow: var(--shadow-card);
         }
-        .panel-title {
-            font-size: 16px;
-            font-weight: 800;
-            margin-bottom: 18px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        /* Material List cards */
-        .aggregate-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-            gap: 20px;
-        }
-        .material-card {
-            border: 1.5px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            background: var(--color-surface);
-            padding: 20px;
-            transition: var(--transition);
-        }
-        .material-card:hover {
-            border-color: var(--color-primary);
-            box-shadow: var(--shadow-elevated);
-        }
-        .material-header {
-            font-size: 16px;
-            font-weight: 800;
-            color: var(--color-primary);
-            margin-bottom: 12px;
+        .panel-heading {
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 18px;
         }
-        .material-meta {
-            display: grid;
-            gap: 8px;
-            font-size: 13px;
+        .panel-title {
+            margin: 0;
+            font-size: var(--font-size-lg);
+            font-weight: 850;
+        }
+        .panel-desc {
+            margin: 6px 0 0;
             color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
             line-height: 1.7;
-            margin-bottom: 12px;
         }
-        .material-line {
+        .aggregate-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+            gap: 16px;
+        }
+        .material-card {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 100%;
+            padding: 18px;
             border: 1px solid var(--color-border);
-            border-radius: var(--radius);
+            border-radius: var(--radius-lg);
             background: var(--color-surface-alt);
-            padding: 8px 10px;
         }
-        .material-line strong { color: var(--color-text); }
-        .missing-evidence {
-            border: 1px dashed var(--color-warning);
-            border-radius: var(--radius);
-            background: var(--color-warning-bg);
-            color: var(--color-warning);
-            padding: 8px 10px;
-            font-weight: 700;
+        .material-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: flex-start;
         }
-
-        .relation-item {
-            background: var(--color-surface-alt);
-            border-radius: var(--radius);
-            padding: 10px 12px;
-            font-size: 12px;
-            margin-top: 8px;
-            border: 1px solid var(--color-border);
+        .material-name {
+            font-size: var(--font-size-md);
+            font-weight: 850;
+            color: var(--color-text);
+            line-height: 1.5;
+            word-break: break-word;
         }
-
         .tag {
-            font-size: 10px;
-            font-weight: 700;
-            padding: 2px 8px;
+            display: inline-flex;
+            align-items: center;
+            white-space: nowrap;
             border-radius: var(--radius-pill);
-            text-transform: uppercase;
+            padding: 4px 10px;
+            font-size: var(--font-size-xs);
+            font-weight: 800;
         }
         .tag.catalyst { background: var(--color-primary-bg); color: var(--color-primary); }
         .tag.adsorbate { background: var(--color-success-bg); color: var(--color-success); }
+        .tag.alias { background: var(--color-warning-bg); color: var(--color-warning); }
+        .tag.gap { background: var(--color-danger-bg); color: var(--color-danger); }
 
-        .empty-state {
-            text-align: center;
-            padding: 60px 24px;
+        .meta-list {
+            display: grid;
+            gap: 8px;
+        }
+        .meta-row {
+            padding: 10px 12px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            background: var(--color-surface);
             color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
+            line-height: 1.7;
+        }
+        .meta-row strong {
+            color: var(--color-text);
+        }
+        .state-chip {
+            display: inline-flex;
+            align-items: center;
+            border-radius: var(--radius-pill);
+            padding: 3px 9px;
+            font-size: var(--font-size-xs);
+            font-weight: 800;
+        }
+        .state-chip.missing {
+            background: var(--color-warning-bg);
+            color: var(--color-warning);
+        }
+        .state-chip.needs-review {
+            background: var(--color-danger-bg);
+            color: var(--color-danger);
+        }
+        .relation-list {
+            display: grid;
+            gap: 8px;
+            margin-top: auto;
+        }
+        .relation-item {
+            padding: 9px 10px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            background: var(--color-surface);
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-xs);
+            line-height: 1.6;
+        }
+        a {
+            color: var(--color-primary);
+            text-decoration: none;
+            font-weight: 700;
+        }
+        a:hover { text-decoration: underline; }
+        .empty-state {
+            grid-column: 1 / -1;
+            padding: 34px 22px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            background: var(--color-surface-alt);
+            color: var(--color-text-secondary);
+            text-align: center;
+            line-height: 1.8;
+        }
+        .toast-container {
+            position: fixed;
+            top: calc(var(--nav-height) + 16px);
+            right: 22px;
+            z-index: 2000;
+            display: grid;
+            gap: 8px;
+            width: min(360px, calc(100vw - 32px));
+        }
+        .local-toast {
+            padding: 12px 14px;
+            border-radius: var(--radius);
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            box-shadow: var(--shadow-elevated);
+            color: var(--color-text);
+            font-size: var(--font-size-sm);
+            line-height: 1.6;
+        }
+        .local-toast.error {
+            border-left: 4px solid var(--color-danger);
         }
 
-        .toast {
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            background: var(--color-primary);
-            color: white;
-            padding: 12px 24px;
-            border-radius: var(--radius);
-            font-weight: 600;
-            box-shadow: var(--shadow-elevated);
-            z-index: 1000;
-            display: none;
+        @media (max-width: 860px) {
+            .knowledge-shell {
+                width: min(100% - 28px, 1440px);
+                padding-top: 20px;
+            }
+            .hero,
+            .panel-heading {
+                display: block;
+            }
+            .hero .btn {
+                margin-top: 14px;
+            }
         }
     </style>
 </head>
 <body>
     <div id="topnav-mount"></div>
-    <div class="shell">
-        <div class="header-section">
+
+    <main class="knowledge-shell">
+        <section class="hero">
             <div>
-                <h1>鏈虹悊涓庢潗鏂欑煡璇嗚埍</h1>
-                <p>姹囪仛璺ㄦ枃鐚彁鍙栫殑鐢靛偓鍖栧墏缁撴瀯鐗瑰緛銆佸惛闄勭墿绉嶇被浠ュ強鍚屼箟璇嶅埆鍚嶃€傚姪鍔涙彮绀哄井瑙傚弽搴旀満鐞嗚寰嬨€?/p>
+                <p class="eyebrow">Mechanism Knowledge</p>
+                <h1>机理知识聚合</h1>
+                <p>汇总跨文献抽取出的催化剂、吸附物 / 中间体、命名别名与证据缺口。空字段会明确标记为“未解析、缺少证据、需重新解析或需人工确认”，避免把空白误读成已确认结论。</p>
             </div>
-            <div>
-                <button class="btn ghost" onclick="loadAggregationData()">鍒锋柊鑱氬悎澶х洏</button>
-            </div>
+            <button class="btn btn-primary" onclick="loadAggregationData()">刷新聚合数据</button>
+        </section>
+
+        <div class="tabs" id="mechanismTabs" role="tablist" aria-label="机理知识分区">
+            <button class="tab-btn active" data-tab="catalysts" onclick="switchTab('catalysts')">催化剂聚合</button>
+            <button class="tab-btn" data-tab="adsorbates" onclick="switchTab('adsorbates')">吸附物/中间体</button>
+            <button class="tab-btn" data-tab="aliases" onclick="switchTab('aliases')">别名/命名</button>
+            <button class="tab-btn" data-tab="gaps" onclick="switchTab('gaps')">证据缺口</button>
         </div>
 
-        <!-- Navigation Tabs -->
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('catalysts', event)">鍌寲鏉愭枡鑱氬悎 (Catalysts)</button>
-            <button class="tab-btn" onclick="switchTab('adsorbates', event)">鍚搁檮涓棿浣撹仛鍚?(Adsorbates)</button>
-            <button class="tab-btn" onclick="switchTab('aliases', event)">鍚屼箟璇嶄笌鍙兘鍒悕 (Aliases)</button>
-        </div>
+        <div class="status-area" id="pageStatus"></div>
 
-        <!-- Tab 1: Catalysts -->
-        <div id="tab-catalysts" class="tab-pane">
+        <section id="tab-catalysts" class="tab-pane active">
             <div class="panel-card">
-                <div class="panel-title">鍌寲鍓傛潗鏂欏井瑙傜粨鏋勫綊绾?/div>
+                <div class="panel-heading">
+                    <div>
+                        <h2 class="panel-title">催化剂材料与结构线索</h2>
+                        <p class="panel-desc">按规范化名称聚合同类催化剂，并展示载体、金属中心、配位结构、合成方法和证据状态。</p>
+                    </div>
+                </div>
                 <div class="aggregate-grid" id="catalystsBox">
-                    <div class="empty-state">姝ｅ湪鎷夊彇澶х洏鑱氬悎鏁版嵁...</div>
+                    <div class="empty-state">正在加载催化剂聚合数据...</div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- Tab 2: Adsorbates -->
-        <div id="tab-adsorbates" class="tab-pane" style="display:none;">
+        <section id="tab-adsorbates" class="tab-pane">
             <div class="panel-card">
-                <div class="panel-title">鍚搁檮鐗╀腑闂翠綋鍙嶅簲鑳界骇鑱氬悎</div>
+                <div class="panel-heading">
+                    <div>
+                        <h2 class="panel-title">吸附物 / 中间体与反应步骤</h2>
+                        <p class="panel-desc">聚合吸附能、反应步骤、单位和置信度，帮助快速发现同一中间体的趋势。</p>
+                    </div>
+                </div>
                 <div class="aggregate-grid" id="adsorbatesBox">
-                    <div class="empty-state">鏃犲惛闄勪腑闂翠綋鑱氬悎鏁版嵁銆?/div>
+                    <div class="empty-state">正在加载吸附物与中间体数据...</div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- Tab 3: Aliases -->
-        <div id="tab-aliases" class="tab-pane" style="display:none;">
+        <section id="tab-aliases" class="tab-pane">
             <div class="panel-card">
-                <div class="panel-title">绯荤粺妫€娴嬪埌鐨勫鏈悕绉板彉浣?/ 鍙兘鍒悕</div>
+                <div class="panel-heading">
+                    <div>
+                        <h2 class="panel-title">别名与命名变化</h2>
+                        <p class="panel-desc">展示系统检测到的可能同义词、缩写、表面符号或带电状态变体。这里只做提示，最终合并仍建议人工确认。</p>
+                    </div>
+                </div>
                 <div class="aggregate-grid" id="aliasesBox">
-                    <div class="empty-state">鏃犲埆鍚嶆娴嬨€?/div>
+                    <div class="empty-state">正在加载别名数据...</div>
                 </div>
             </div>
-        </div>
-    </div>
+        </section>
 
-    <div id="toast" class="toast"></div>
+        <section id="tab-gaps" class="tab-pane">
+            <div class="panel-card">
+                <div class="panel-heading">
+                    <div>
+                        <h2 class="panel-title">证据缺口与重解析提示</h2>
+                        <p class="panel-desc">列出关键结构字段、反应字段或证据字段缺失的位置，方便回到文献详情或人工确认工作台补证据。</p>
+                    </div>
+                </div>
+                <div class="aggregate-grid" id="gapsBox">
+                    <div class="empty-state">正在诊断证据缺口...</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast-container" id="toast-container"></div>
 
     <script>
         const API_BASE = "/api/papers";
         const state = {
-            activeTab: 'catalysts',
-            aggregateData: null
+            activeTab: "catalysts",
+            aggregateData: null,
         };
 
         function esc(value) {
-            return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+            return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+            }[c]));
         }
 
-        function hasUsefulValue(value) {
-            if (value == null) return false;
-            if (Array.isArray(value)) return value.length > 0;
-            return String(value).trim() !== "" && String(value).trim() !== "-";
-        }
-
-        function materialLine(label, value) {
-            if (!hasUsefulValue(value)) return "";
-            const displayValue = Array.isArray(value) ? value.join("銆?) : String(value);
-            return `<div class="material-line"><strong>${esc(label)}锛?/strong>${esc(displayValue)}</div>`;
-        }
-
-        function renderCatalystMeta(item) {
-            item = item || {};
-            const rows = [
-                materialLine("杞戒綋", item.support),
-                materialLine("鍚堟垚鏂规硶", item.synthesis_method ? String(item.synthesis_method).slice(0, 180) : ""),
-                materialLine("閰嶄綅缁撴瀯", item.coordination),
-                materialLine("娲绘€ч噾灞?, item.metal_centers || [])
-            ].filter(Boolean);
-            if (!rows.length) {
-                rows.push('<div class="missing-evidence">AI 鏈湪鍘熸枃涓壘鍒板彲闈犵殑杞戒綋銆佸悎鎴愭柟娉曟垨閰嶄綅缁撴瀯璇佹嵁銆傝鍥炲埌鏂囩尞搴撻噸鏂拌В鏋愶紝鎴栧湪浜哄伐纭宸ヤ綔鍙拌ˉ鍏呰瘉鎹€?/div>');
-            } else if (!hasUsefulValue(item.support) || !hasUsefulValue(item.synthesis_method) || !hasUsefulValue(item.coordination)) {
-                rows.push('<div class="missing-evidence">閮ㄥ垎缁撴瀯瀛楁缂哄皯鍙潬璇佹嵁锛岀郴缁熶笉浼氭妸绌哄瓧娈靛綋浣滃凡纭缁撹銆?/div>');
-            }
-            return rows.join("");
-        }
-
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.style.display = 'block';
-            setTimeout(() => {
-                toast.style.display = 'none';
-            }, 3000);
+        function showToast(message, type = "success") {
+            const container = document.getElementById("toast-container");
+            const toast = document.createElement("div");
+            toast.className = `local-toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4200);
         }
 
         async function fetchJSON(url, options) {
-            options = options || {};
-            options.headers = options.headers || {};
+            const requestOptions = options || {};
+            requestOptions.headers = requestOptions.headers || {};
             const token = sessionStorage.getItem("litai-settings-token");
-            if (token) {
-                options.headers["X-Settings-Token"] = token;
-            }
-            const resp = await fetch(url, options);
-            if (resp.status === 403) {
-                showToast("鏃犳潈璁块棶璇ユ帴鍙ｃ€傝鍏堝湪[璁剧疆]涓厤缃鐞嗗憳 Token銆?);
-                throw new Error("403 Forbidden");
-            }
+            if (token) requestOptions.headers["X-Settings-Token"] = token;
+
+            const resp = await fetch(url, requestOptions);
             const text = await resp.text();
             let data = null;
             try { data = text ? JSON.parse(text) : null; } catch (_) {}
+            if (resp.status === 403) {
+                throw new Error("无权访问该接口，请先在设置页确认管理员 Token。");
+            }
             if (!resp.ok) {
-                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
-                throw new Error(detail);
+                throw new Error((data && data.detail) || (`HTTP ${resp.status}`));
             }
             return data;
         }
 
-        function switchTab(tab, evt) {
+        function switchTab(tab) {
             state.activeTab = tab;
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+            document.querySelectorAll(".tab-btn").forEach(btn => {
+                btn.classList.toggle("active", btn.dataset.tab === tab);
+            });
+            document.querySelectorAll(".tab-pane").forEach(pane => {
+                pane.classList.toggle("active", pane.id === `tab-${tab}`);
+            });
+        }
 
-            if (evt && evt.target) evt.target.classList.add('active');
-            document.getElementById('tab-' + tab).style.display = 'block';
+        function setStatus(kind, message) {
+            const status = document.getElementById("pageStatus");
+            if (!message) {
+                status.innerHTML = "";
+                return;
+            }
+            const cls = kind === "error" ? "state-card error" : kind === "loading" ? "state-card loading" : "state-card";
+            const retry = kind === "error" ? '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="loadAggregationData()">重试</button></div>' : "";
+            status.innerHTML = `<div class="${cls}">${esc(message)}${retry}</div>`;
+        }
+
+        function hasUsefulValue(value) {
+            if (value == null) return false;
+            if (Array.isArray(value)) return value.some(hasUsefulValue);
+            if (typeof value === "object") return Object.keys(value).length > 0;
+            const text = String(value).trim();
+            return text !== "" && text !== "-" && text.toLowerCase() !== "null" && text.toLowerCase() !== "unknown";
+        }
+
+        function valueText(value) {
+            if (Array.isArray(value)) return value.filter(hasUsefulValue).map(valueText).join("、");
+            if (typeof value === "object" && value !== null) return JSON.stringify(value);
+            return String(value == null ? "" : value).trim();
+        }
+
+        function statusChip(label, type = "missing") {
+            return `<span class="state-chip ${type}">${esc(label)}</span>`;
+        }
+
+        function fieldRow(label, value, missingText = "未解析") {
+            const display = hasUsefulValue(value)
+                ? esc(valueText(value))
+                : statusChip(missingText, missingText === "需人工确认" ? "needs-review" : "missing");
+            return `<div class="meta-row"><strong>${esc(label)}：</strong>${display}</div>`;
+        }
+
+        function normalizeGroupMap(map, fallbackField) {
+            if (!map || typeof map !== "object") return [];
+            return Object.entries(map).map(([key, rawItems]) => {
+                const items = Array.isArray(rawItems) ? rawItems : [rawItems];
+                return {
+                    key,
+                    items: items.filter(item => item != null).map(item => {
+                        if (typeof item === "object" && !Array.isArray(item)) {
+                            return { ...item };
+                        }
+                        return {
+                            [fallbackField]: key,
+                            paper_id: String(item),
+                        };
+                    }),
+                };
+            });
+        }
+
+        function firstUseful() {
+            for (const value of arguments) {
+                if (hasUsefulValue(value)) return value;
+            }
+            return "";
+        }
+
+        function paperLink(paperId) {
+            if (!paperId) return "关联文献未解析";
+            return `<a href="../literature_library/index.html?paper_id=${encodeURIComponent(paperId)}">打开文献</a>`;
         }
 
         async function loadAggregationData() {
+            setStatus("loading", "正在加载机理知识聚合数据...");
             try {
                 const data = await fetchJSON(`${API_BASE}/aggregate`);
-                state.aggregateData = data;
+                state.aggregateData = data || {};
+                setStatus("", "");
                 renderAggregation();
-            } catch (e) {
-                showToast("鍔犺浇鑱氬悎澶х洏澶辫触锛? + e.message);
+            } catch (error) {
+                state.aggregateData = null;
+                clearBoxes();
+                setStatus("error", `加载失败：${error.message}`);
+                showToast(`加载失败：${error.message}`, "error");
             }
+        }
+
+        function clearBoxes() {
+            document.getElementById("catalystsBox").innerHTML = '<div class="empty-state">加载失败，暂时无法展示催化剂聚合。</div>';
+            document.getElementById("adsorbatesBox").innerHTML = '<div class="empty-state">加载失败，暂时无法展示吸附物 / 中间体。</div>';
+            document.getElementById("aliasesBox").innerHTML = '<div class="empty-state">加载失败，暂时无法展示别名 / 命名。</div>';
+            document.getElementById("gapsBox").innerHTML = '<div class="empty-state">加载失败，暂时无法诊断证据缺口。</div>';
         }
 
         function renderAggregation() {
-            const data = state.aggregateData;
-            if (!data) return;
-
-            // 1. Render Catalysts
-            const catBox = document.getElementById('catalystsBox');
-            const catalysts = data.catalyst_groups || {};
-            if (Object.keys(catalysts).length === 0) {
-                catBox.innerHTML = `<div class="empty-state">搴撲腑灏氭棤鍌寲鏉愭枡鏁版嵁銆傝鍦ㄥ叆搴撲腑蹇冨鍏ユ枃鐚悗鐢?AI 閲嶆柊鎶芥彁銆?/div>`;
-            } else {
-                catBox.innerHTML = Object.entries(catalysts).map(([key, items]) => {
-                    const canonicalName = items[0].name || key;
-                    const count = items.length;
-                    return `
-                        <div class="material-card">
-                            <div class="material-header">
-                                <span>${esc(canonicalName)}</span>
-                                <span class="tag catalyst">鑱氬悎鏁?${count}</span>
-                            </div>
-                            <div class="material-meta">
-                                ${renderCatalystMeta(items[0])}
-                            </div>
-                            <div style="font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:6px;">鍑哄鍏宠仈鏂囩尞锛?/div>
-                            ${items.slice(0, 3).map(item => `
-                                <div class="relation-item">
-                                    鍏宠仈搴擄細${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${esc(item.paper_id)}" style="color:var(--color-primary); text-decoration:none;">鎵撳紑鏂囩尞</a>` : '鏈煡'}
-                                </div>
-                            `).join('')}
-                        </div>
-                    `;
-                }).join('');
-            }
-
-            // 2. Render Adsorbates
-            const adsBox = document.getElementById('adsorbatesBox');
-            const adsorbates = data.adsorbate_groups || {};
-            if (Object.keys(adsorbates).length === 0) {
-                adsBox.innerHTML = `<div class="empty-state">搴撲腑灏氭棤鍚搁檮鍒嗗瓙涓棿浣撴暟鎹€?/div>`;
-            } else {
-                adsBox.innerHTML = Object.entries(adsorbates).map(([key, items]) => {
-                    const canonicalName = items[0].adsorbate || key;
-                    const count = items.length;
-                    return `
-                        <div class="material-card">
-                            <div class="material-header">
-                                <span style="font-family:var(--font-mono); font-weight:700;">${esc(canonicalName)}</span>
-                                <span class="tag adsorbate">鐩稿叧鑳界骇鏁?${count}</span>
-                            </div>
-                            <div class="material-meta">
-                                ${materialLine("鐑姏瀛﹀睘鎬?, items[0].property_type) || '<div class="missing-evidence">缂哄皯鐑姏瀛﹀睘鎬ц瘉鎹€?/div>'}
-                                ${materialLine("涓昏鍙嶅簲姝ラ", items[0].reaction_step) || ''}
-                            </div>
-                            <div style="font-size:12px; font-weight:700; color:var(--color-text-secondary); margin-bottom:6px;">鑳介噺璁＄畻鎶芥彁锛?/div>
-                            ${items.slice(0, 3).map(item => `
-                                <div class="relation-item">
-                                    <strong>鑳介噺鍊硷細</strong>${item.value !== null ? Number(item.value).toFixed(4) : '-'} ${esc(item.unit || 'eV')} <br>
-                                    <strong>缃俊搴︼細</strong>${item.confidence ? `${(item.confidence*100).toFixed(0)}%` : '-'}锛堟钀斤細${esc(item.source_section || '-')}锛?br>
-                                    ${item.paper_id ? `<a href="../literature_library/index.html?paper_id=${esc(item.paper_id)}" style="color:var(--color-primary); text-decoration:none;">鏌ョ湅瀵瑰簲鏂囩尞璇︽儏</a>` : ''}
-                                </div>
-                            `).join('')}
-                        </div>
-                    `;
-                }).join('');
-            }
-
-            // 3. Render Aliases
-            const aliBox = document.getElementById('aliasesBox');
-            const aliases = data.possible_name_aliases || [];
-            if (!aliases.length) {
-                aliBox.innerHTML = `<div class="empty-state">鏈娴嬪埌浠讳綍鍛藉悕寮傚悕銆傚悕绉伴珮搴﹁鏁淬€?/div>`;
-            } else {
-                aliBox.innerHTML = aliases.map(alias => {
-                    const cls = alias.type === 'catalyst' ? 'catalyst' : 'adsorbate';
-                    const typeTxt = alias.type === 'catalyst' ? '鍌寲鍓? : '鍚搁檮鍒嗗瓙';
-                    return `
-                        <div class="material-card">
-                            <div class="material-header">
-                                <span>鍙樹綋锛?{(alias.variants || []).map(esc).join(' / ')}</span>
-                                <span class="tag ${cls}">${typeTxt}</span>
-                            </div>
-                            <div class="material-meta">
-                                <strong>绯荤粺鑱氬悎鍚嶇О锛?/strong><code style="font-family:var(--font-mono);">${esc(alias.canonical_key)}</code><br>
-                                <strong>娑夊強鏂囩尞鏁帮細</strong>${esc(alias.paper_count)} 绡囨枃鐚?                            </div>
-                            <div style="font-size:12px; color:var(--color-text-secondary);">
-                                <strong>鎻愮ず锛?/strong>鍙樹綋鍙兘鏉ヨ嚜鎺掔増銆佸甫鐢佃嵎鐘舵€佹垨涓嶅悓绠€鍐欍€傜郴缁熻繖閲屽彧鍋氳仛鍚堟彁绀猴紝鏈€缁堝悕绉颁粛寤鸿浜哄伐纭銆?                            </div>
-                        </div>
-                    `;
-                }).join('');
-            }
+            const data = state.aggregateData || {};
+            const catalystGroups = normalizeGroupMap(data.catalyst_groups, "name");
+            const adsorbateGroups = normalizeGroupMap(data.adsorbate_groups, "adsorbate");
+            renderCatalysts(catalystGroups);
+            renderAdsorbates(adsorbateGroups);
+            renderAliases(data.possible_name_aliases || []);
+            renderGaps(catalystGroups, adsorbateGroups);
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            TopNav.init({ currentPage: 'mechanism', mountId: 'topnav-mount' });
+        function renderCatalysts(groups) {
+            const box = document.getElementById("catalystsBox");
+            if (!groups.length) {
+                box.innerHTML = '<div class="empty-state">暂无催化剂聚合数据。请先在入库中心导入并解析文献，或在人工确认工作台补充证据。</div>';
+                return;
+            }
+            box.innerHTML = groups.map(group => {
+                const primary = group.items[0] || {};
+                const name = firstUseful(primary.name, group.key, "未解析催化剂");
+                return `
+                    <article class="material-card">
+                        <div class="material-header">
+                            <div class="material-name">${esc(name)}</div>
+                            <span class="tag catalyst">聚合 ${group.items.length}</span>
+                        </div>
+                        <div class="meta-list">
+                            ${fieldRow("催化剂类型", primary.catalyst_type, "未解析")}
+                            ${fieldRow("金属中心", primary.metal_centers, "需重新解析")}
+                            ${fieldRow("配位结构", primary.coordination, "缺少证据")}
+                            ${fieldRow("载体", primary.support, "缺少证据")}
+                            ${fieldRow("合成方法", primary.synthesis_method, "需人工确认")}
+                            ${fieldRow("证据强度", primary.evidence_strength, "缺少证据")}
+                        </div>
+                        <div class="relation-list">
+                            ${group.items.slice(0, 3).map(item => `<div class="relation-item">${paperLink(item.paper_id)}</div>`).join("")}
+                        </div>
+                    </article>
+                `;
+            }).join("");
+        }
+
+        function renderAdsorbates(groups) {
+            const box = document.getElementById("adsorbatesBox");
+            if (!groups.length) {
+                box.innerHTML = '<div class="empty-state">暂无吸附物 / 中间体聚合数据。请先完成 DFT 结果抽取，或检查是否只有元数据而缺少 PDF 正文。</div>';
+                return;
+            }
+            box.innerHTML = groups.map(group => {
+                const primary = group.items[0] || {};
+                const name = firstUseful(primary.adsorbate, group.key, "未解析中间体");
+                const value = hasUsefulValue(primary.value)
+                    ? `${valueText(primary.value)} ${valueText(primary.unit || "")}`.trim()
+                    : "";
+                const confidence = hasUsefulValue(primary.confidence)
+                    ? `${Math.round(Number(primary.confidence) * 100)}%`
+                    : "";
+                return `
+                    <article class="material-card">
+                        <div class="material-header">
+                            <div class="material-name">${esc(name)}</div>
+                            <span class="tag adsorbate">记录 ${group.items.length}</span>
+                        </div>
+                        <div class="meta-list">
+                            ${fieldRow("性质类型", primary.property_type, "未解析")}
+                            ${fieldRow("能量 / 数值", value, "缺少证据")}
+                            ${fieldRow("反应步骤", primary.reaction_step, "需重新解析")}
+                            ${fieldRow("来源章节", primary.source_section, "未解析")}
+                            ${fieldRow("置信度", confidence, "需人工确认")}
+                        </div>
+                        <div class="relation-list">
+                            ${group.items.slice(0, 3).map(item => `<div class="relation-item">${paperLink(item.paper_id)}</div>`).join("")}
+                        </div>
+                    </article>
+                `;
+            }).join("");
+        }
+
+        function renderAliases(rawAliases) {
+            const box = document.getElementById("aliasesBox");
+            const aliases = Array.isArray(rawAliases) ? rawAliases : [];
+            if (!aliases.length) {
+                box.innerHTML = '<div class="empty-state">未检测到别名 / 命名变化。若你预期有同义词，建议重新解析相关论文或在人工确认工作台补充标准名。</div>';
+                return;
+            }
+            box.innerHTML = aliases.map(alias => {
+                const item = typeof alias === "object" && alias !== null ? alias : { canonical_key: alias, variants: [alias], type: "unknown" };
+                const variants = Array.isArray(item.variants) ? item.variants : [item.variants || item.canonical_key];
+                const typeLabel = item.type === "catalyst" ? "催化剂" : item.type === "adsorbate" ? "吸附物" : "命名提示";
+                return `
+                    <article class="material-card">
+                        <div class="material-header">
+                            <div class="material-name">${esc(variants.filter(hasUsefulValue).join(" / ") || "未解析别名")}</div>
+                            <span class="tag alias">${esc(typeLabel)}</span>
+                        </div>
+                        <div class="meta-list">
+                            ${fieldRow("规范化键", item.canonical_key, "未解析")}
+                            ${fieldRow("涉及文献数", item.paper_count, "需人工确认")}
+                            ${fieldRow("处理建议", "仅作为命名变体提示；合并前请人工确认。", "需人工确认")}
+                        </div>
+                    </article>
+                `;
+            }).join("");
+        }
+
+        function renderGaps(catalystGroups, adsorbateGroups) {
+            const box = document.getElementById("gapsBox");
+            const gaps = [];
+
+            catalystGroups.forEach(group => {
+                const primary = group.items[0] || {};
+                const missing = [];
+                if (!hasUsefulValue(primary.support)) missing.push("载体缺少证据");
+                if (!hasUsefulValue(primary.coordination)) missing.push("配位结构未解析");
+                if (!hasUsefulValue(primary.synthesis_method)) missing.push("合成方法需人工确认");
+                if (!hasUsefulValue(primary.metal_centers)) missing.push("金属中心需重新解析");
+                if (missing.length) {
+                    gaps.push({
+                        name: firstUseful(primary.name, group.key, "未解析催化剂"),
+                        type: "催化剂聚合",
+                        missing,
+                        paper_id: primary.paper_id,
+                    });
+                }
+            });
+
+            adsorbateGroups.forEach(group => {
+                const primary = group.items[0] || {};
+                const missing = [];
+                if (!hasUsefulValue(primary.property_type)) missing.push("性质类型未解析");
+                if (!hasUsefulValue(primary.value)) missing.push("能量 / 数值缺少证据");
+                if (!hasUsefulValue(primary.reaction_step)) missing.push("反应步骤需重新解析");
+                if (!hasUsefulValue(primary.source_section)) missing.push("来源章节未解析");
+                if (missing.length) {
+                    gaps.push({
+                        name: firstUseful(primary.adsorbate, group.key, "未解析中间体"),
+                        type: "吸附物 / 中间体",
+                        missing,
+                        paper_id: primary.paper_id,
+                    });
+                }
+            });
+
+            if (!catalystGroups.length && !adsorbateGroups.length) {
+                gaps.push({
+                    name: "当前库暂无机理聚合数据",
+                    type: "全局缺口",
+                    missing: ["请先导入 PDF", "请完成正文解析", "请运行结构化抽取", "请人工确认关键证据"],
+                    paper_id: null,
+                });
+            }
+
+            if (!gaps.length) {
+                box.innerHTML = '<div class="empty-state">当前聚合数据没有明显空字段。仍建议在导出或写作前检查人工确认状态。</div>';
+                return;
+            }
+
+            box.innerHTML = gaps.map(gap => `
+                <article class="material-card">
+                    <div class="material-header">
+                        <div class="material-name">${esc(gap.name)}</div>
+                        <span class="tag gap">${esc(gap.type)}</span>
+                    </div>
+                    <div class="meta-list">
+                        ${fieldRow("缺口", gap.missing.join("、"), "缺少证据")}
+                        ${fieldRow("建议动作", "回到文献详情重新解析，或在人工确认工作台补充证据。", "需人工确认")}
+                    </div>
+                    <div class="relation-list">
+                        <div class="relation-item">${paperLink(gap.paper_id)}</div>
+                    </div>
+                </article>
+            `).join("");
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            TopNav.init({ currentPage: "mechanism", mountId: "topnav-mount" });
             loadAggregationData();
         });
     </script>

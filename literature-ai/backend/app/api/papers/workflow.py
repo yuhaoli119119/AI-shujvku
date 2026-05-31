@@ -12,6 +12,7 @@ from app.services.workflow_jobs import (
     JOB_TYPE_AI_WORKFLOW,
     build_job_runtime_context,
     cancel_job,
+    delete_job,
     clone_job_for_retry_with_status,
     create_job_or_reuse_active,
     dispatch_job,
@@ -127,3 +128,15 @@ async def cancel_ai_workflow_job(job_id: str, session: Session = Depends(get_db_
     data = serialize_job(cancelled)
     data["cancel_mode"] = "soft"
     return data
+
+
+@router.delete("/ai_workflow/jobs/{job_id}")
+async def delete_ai_workflow_job(job_id: str, session: Session = Depends(get_db_session)) -> dict[str, Any]:
+    job = get_job(session, job_id)
+    if not job or job.type != JOB_TYPE_AI_WORKFLOW:
+        raise HTTPException(status_code=404, detail="AI workflow job not found")
+    try:
+        delete_job(session, job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "job_id": job_id}

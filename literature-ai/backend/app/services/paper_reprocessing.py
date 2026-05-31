@@ -49,9 +49,9 @@ class PaperReprocessingService:
         # 1. Check if metadata_only paper
         is_metadata_only = not paper.pdf_path or paper.oa_status == "metadata_only"
         
-        # 2. If metadata_only, fallback directly to rule heuristic
+        # 2. Metadata-only papers still get an AI-assisted attempt when title/abstract is available.
         if is_metadata_only:
-            res = self.pipeline._rule_based_classify(paper.title, paper.journal)
+            res = self._classify_with_ai_or_rules(paper)
             paper.paper_type = res["paper_type"]
             paper.type_confidence = res["type_confidence"]
             paper.classification_source = res["classification_source"]
@@ -63,8 +63,8 @@ class PaperReprocessingService:
         try:
             document = self._rebuild_document(paper)
         except Exception:
-            # Rebuild document failed, fallback to rules
-            res = self.pipeline._rule_based_classify(paper.title, paper.journal)
+            # Rebuild document failed, fallback to AI-assisted metadata classification and then rules.
+            res = self._classify_with_ai_or_rules(paper)
             paper.paper_type = res["paper_type"]
             paper.type_confidence = res["type_confidence"]
             paper.classification_source = res["classification_source"]
@@ -74,7 +74,7 @@ class PaperReprocessingService:
             
         # 4. Fallback if document has no valid text content
         if not document.sections and not document.abstract:
-            res = self.pipeline._rule_based_classify(paper.title, paper.journal)
+            res = self._classify_with_ai_or_rules(paper)
         else:
             try:
                 quick_class = self.pipeline.comprehensive_extractor.extract_quick_classification(document)
@@ -85,11 +85,13 @@ class PaperReprocessingService:
                         "classification_source": "quick"
                     }
                 else:
-                    res = self.pipeline._rule_based_classify(paper.title, paper.journal)
+                    sections_text = "\n".join(section.text or "" for section in (document.sections or [])[:12])
+                    res = self.pipeline._rule_based_classify(paper.title, paper.journal, document.abstract, sections_text)
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning("LLM classification failed for paper %s, falling back to rules: %s", paper_id, e)
-                res = self.pipeline._rule_based_classify(paper.title, paper.journal)
+                sections_text = "\n".join(section.text or "" for section in (document.sections or [])[:12])
+                res = self.pipeline._rule_based_classify(paper.title, paper.journal, document.abstract, sections_text)
                 
         paper.paper_type = res["paper_type"]
         paper.type_confidence = res["type_confidence"]
@@ -97,6 +99,60 @@ class PaperReprocessingService:
         self.session.add(paper)
         self.session.commit()
         return res
+
+    def _classify_with_ai_or_rules(self, paper: Paper) -> dict[str, Any]:
+        synthetic_doc = self._build_classification_stub(paper)
+        try:
+            quick_class = self.pipeline.comprehensive_extractor.extract_quick_classification(synthetic_doc)
+        except Exception:
+            quick_class = None
+        if quick_class and quick_class.get("paper_type") and quick_class.get("paper_type") != "Unknown":
+            return {
+                "paper_type": quick_class.get("paper_type"),
+                "type_confidence": quick_class.get("type_confidence", 0.0),
+                "classification_source": quick_class.get("classification_source", "quick"),
+            }
+        return self.pipeline._rule_based_classify(paper.title, paper.journal, paper.abstract)
+
+    def _build_classification_stub(self, paper: Paper) -> UnifiedPaperDocument:
+        summary_lines = [
+            f"Title: {paper.title or ''}",
+            f"Journal: {paper.journal or ''}",
+            f"Year: {paper.year or ''}",
+        ]
+        if paper.abstract:
+            summary_lines.append(f"Abstract: {paper.abstract}")
+        pseudo_summary = "\n".join(line for line in summary_lines if line.strip())
+        sections = [
+            UnifiedSection(
+                section_title="Metadata Summary",
+                section_type="metadata",
+                text=pseudo_summary,
+                page_start=None,
+                page_end=None,
+            )
+        ] if pseudo_summary else []
+        return UnifiedPaperDocument(
+            metadata={
+                "doi": paper.doi,
+                "title": paper.title,
+                "year": paper.year,
+                "journal": paper.journal,
+                "authors": paper.authors or [],
+            },
+            abstract=paper.abstract or pseudo_summary,
+            sections=sections,
+            tables=[],
+            figures=[],
+            references=[],
+            markdown=pseudo_summary,
+            tei_xml="",
+            docling_json={},
+            source_pdf_path=Path(paper.pdf_path or ""),
+            tei_path=None,
+            markdown_path=None,
+            docling_json_path=None,
+        )
 
     def _rebuild_document(self, paper: Paper) -> UnifiedPaperDocument:
         section_rows = self.session.scalars(

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鍏ュ簱涓績 - Literature AI</title>
+    <title>入库中心 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
@@ -11,379 +11,840 @@
     <script src="../../shared/topnav.js"></script>
     <script>ThemeManager.init();</script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * { box-sizing: border-box; }
         body {
-            font-family: var(--font-body);
-            color: var(--color-text);
-            background: var(--color-bg);
+            margin: 0;
             min-height: 100vh;
+            background: var(--color-bg);
+            color: var(--color-text);
+            font-family: var(--font-body);
         }
+
         .shell {
-            max-width: 1400px;
+            width: min(1440px, calc(100% - 48px));
             margin: 0 auto;
-            padding: 32px 24px;
-            padding-top: calc(var(--nav-height) + 32px);
+            padding: 24px 0 36px;
         }
-        .header-section {
-            margin-bottom: 28px;
+
+        .page-toolbar {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+            gap: 18px;
+            align-items: center;
+            margin-bottom: 18px;
+            padding: 18px 20px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            background:
+                linear-gradient(135deg, color-mix(in srgb, var(--color-primary-bg) 65%, transparent), transparent 52%),
+                var(--color-surface);
+            box-shadow: var(--shadow-card);
+        }
+        .toolbar-title {
             display: flex;
-            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px 16px;
             align-items: center;
         }
-        .header-section h1 {
-            font-size: 28px;
+        .toolbar-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: var(--radius-pill);
+            background: var(--color-primary-bg);
+            color: var(--color-primary);
+            font-size: var(--font-size-xs);
             font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
-        .header-section p {
+        .toolbar-title h1 {
+            margin: 0;
+            font-size: clamp(24px, 3vw, 34px);
+            font-weight: 900;
+            letter-spacing: -0.04em;
+        }
+        .toolbar-summary {
+            margin: 8px 0 0;
             color: var(--color-text-secondary);
-            font-size: 14px;
-            margin-top: 4px;
+            font-size: var(--font-size-sm);
+            line-height: 1.7;
+        }
+        .toolbar-controls {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        .toolbar-controls label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-xs);
+            font-weight: 700;
         }
 
         .workspace-grid {
             display: grid;
-            grid-template-columns: 3fr 2fr;
-            gap: 24px;
+            grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.9fr);
+            gap: 22px;
+            align-items: start;
         }
-        @media (max-width: 1024px) {
-            .workspace-grid { grid-template-columns: 1fr; }
+        .left-stack,
+        .right-stack {
+            display: grid;
+            gap: 18px;
+            align-content: start;
         }
-
         .panel-card {
-            background: var(--color-surface);
+            padding: 22px;
             border: 1px solid var(--color-border);
             border-radius: var(--radius-lg);
-            padding: 24px;
+            background: var(--color-surface);
             box-shadow: var(--shadow-card);
-            margin-bottom: 24px;
+        }
+        .panel-heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 18px;
         }
         .panel-title {
-            font-size: 16px;
+            margin: 0;
+            font-size: var(--font-size-lg);
             font-weight: 800;
-            margin-bottom: 18px;
-            color: var(--color-text);
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
-        .panel-title svg {
-            width: 18px;
-            height: 18px;
-            fill: var(--color-primary);
-        }
-
-        /* Ingestion Tabs */
-        .ingest-tabs {
-            display: flex;
-            gap: 8px;
-            border-bottom: 1.5px solid var(--color-border);
-            margin-bottom: 20px;
-            padding-bottom: 4px;
-        }
-        .ingest-tab {
-            background: transparent;
-            border: none;
+        .panel-desc {
+            margin: 6px 0 0;
             color: var(--color-text-secondary);
-            padding: 10px 16px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            border-radius: var(--radius) var(--radius) 0 0;
-            transition: var(--transition);
+            font-size: var(--font-size-sm);
+            line-height: 1.7;
         }
-        .ingest-tab.active {
-            color: var(--color-primary);
-            border-bottom: 2px solid var(--color-primary);
+        .info-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.15fr) minmax(240px, 0.85fr);
+            gap: 18px;
         }
-
-        /* Drag & Drop PDF */
-        .dropzone {
-            border: 2px dashed var(--color-border-strong);
-            border-radius: var(--radius-lg);
-            padding: 48px 24px;
-            text-align: center;
-            cursor: pointer;
-            transition: var(--transition);
-            background: var(--color-surface-alt);
-        }
-        .dropzone:hover {
-            border-color: var(--color-primary);
-            background: var(--color-primary-bg);
-        }
-        .dropzone svg {
-            width: 48px;
-            height: 48px;
-            fill: var(--color-text-secondary);
-            margin-bottom: 14px;
-        }
-
-        /* Forms */
-        .form-group {
-            margin-bottom: 16px;
-        }
-        .form-group label {
-            display: block;
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--color-text-secondary);
-            margin-bottom: 6px;
-        }
-        .form-control {
-            width: 100%;
-            height: 44px;
-            padding: 0 14px;
-            border-radius: var(--radius);
-            border: 1px solid var(--color-border-strong);
-            background: var(--color-surface);
-            color: var(--color-text);
-            outline: none;
-            font-family: var(--font-body);
-            font-size: 14px;
-        }
-        .form-control:focus {
-            border-color: var(--color-primary);
-            box-shadow: 0 0 0 4px var(--color-primary-bg);
-        }
-
-        /* Job Center / Job List */
-        .job-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            max-height: 520px;
-            overflow-y: auto;
-            padding-right: 4px;
-        }
-        .job-item {
+        .subpanel {
             padding: 16px;
             border: 1px solid var(--color-border);
             border-radius: var(--radius-lg);
             background: var(--color-surface-alt);
-            transition: var(--transition);
         }
-        .job-item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
+        .subpanel h3 {
+            margin: 0 0 12px;
+            font-size: var(--font-size-md);
+            font-weight: 800;
         }
-        .job-status {
-            font-size: 11px;
-            font-weight: 700;
-            padding: 3px 8px;
-            border-radius: var(--radius-pill);
-            text-transform: uppercase;
+        .mini-list {
+            display: grid;
+            gap: 10px;
         }
-        .job-status.queued { background: var(--color-primary-bg); color: var(--color-primary); }
-        .job-status.running { background: var(--color-warning-bg); color: var(--color-warning); }
-        .job-status.completed { background: var(--color-success-bg); color: var(--color-success); }
-        .job-status.failed { background: var(--color-danger-bg); color: var(--color-danger); }
-        
-        .job-meta {
-            font-size: 12px;
-            color: var(--color-text-secondary);
-            line-height: 1.6;
-        }
-        .job-progress {
-            margin-top: 10px;
-            background: var(--color-surface);
-            border: 1.5px solid var(--color-border);
-            border-radius: var(--radius-sm);
-            padding: 8px 12px;
-            font-size: 12px;
-            font-family: var(--font-mono);
-        }
-
-        /* Search List */
-        .search-results {
-            margin-top: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-        .search-item {
-            padding: 14px;
+        .mini-item {
+            padding: 12px 13px;
             border: 1px solid var(--color-border);
             border-radius: var(--radius);
             background: var(--color-surface);
         }
+        .mini-item-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+        .mini-item-title {
+            margin: 0;
+            font-size: var(--font-size-sm);
+            font-weight: 800;
+        }
+        .quick-actions {
+            display: grid;
+            gap: 10px;
+        }
+        .quick-actions .btn {
+            justify-content: flex-start;
+        }
+        .quick-note {
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-xs);
+            line-height: 1.7;
+        }
 
-        .toast {
-            position: fixed;
-            top: 24px;
-            right: 24px;
+        .ingest-tabs,
+        .job-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .ingest-tabs {
+            margin-bottom: 18px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .ingest-tab,
+        .chip-btn {
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-pill);
+            background: var(--color-surface-alt);
+            color: var(--color-text-secondary);
+            cursor: pointer;
+            font: inherit;
+            font-size: var(--font-size-sm);
+            font-weight: 700;
+            padding: 8px 14px;
+            transition: all var(--transition);
+        }
+        .ingest-tab:hover,
+        .chip-btn:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+        .ingest-tab.active,
+        .chip-btn.active {
             background: var(--color-primary);
-            color: white;
-            padding: 12px 24px;
+            border-color: var(--color-primary);
+            color: #fff;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .dropzone {
+            display: grid;
+            place-items: center;
+            min-height: 260px;
+            padding: 28px;
+            border: 2px dashed var(--color-border-strong);
+            border-radius: calc(var(--radius-lg) + 4px);
+            background:
+                radial-gradient(circle at 20% 20%, var(--color-primary-bg), transparent 28%),
+                var(--color-surface-alt);
+            color: var(--color-text);
+            text-align: center;
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .dropzone:hover,
+        .dropzone.drag-over {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 4px var(--color-primary-bg);
+            transform: translateY(-1px);
+        }
+        .dropzone-mark {
+            display: inline-grid;
+            place-items: center;
+            width: 62px;
+            height: 62px;
+            margin-bottom: 16px;
+            border-radius: 22px;
+            background: var(--color-primary-bg);
+            color: var(--color-primary);
+        }
+        .dropzone-mark svg {
+            width: 32px;
+            height: 32px;
+            fill: currentColor;
+        }
+        .dropzone h3 {
+            margin: 0;
+            font-size: 20px;
+        }
+        .dropzone p {
+            max-width: 520px;
+            margin: 10px auto 0;
+            color: var(--color-text-secondary);
+            line-height: 1.8;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+        .form-group { margin-bottom: 14px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 7px;
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
+            font-weight: 700;
+        }
+        .form-control {
+            width: 100%;
+            min-height: 44px;
+            padding: 10px 12px;
+            border: var(--input-border);
             border-radius: var(--radius);
-            font-weight: 600;
+            background: var(--color-surface-alt);
+            color: var(--color-text);
+            font: inherit;
+            outline: none;
+        }
+        textarea.form-control {
+            min-height: 96px;
+            resize: vertical;
+        }
+        .form-control:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px var(--color-primary-bg);
+        }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .help-note {
+            margin: 10px 0 0;
+            color: var(--color-text-muted);
+            font-size: var(--font-size-xs);
+            line-height: 1.7;
+        }
+
+        .search-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 110px auto;
+            gap: 10px;
+            align-items: start;
+        }
+        .search-results {
+            display: grid;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .search-item,
+        .job-card,
+        .empty-state,
+        .error-state {
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            background: var(--color-surface-alt);
+        }
+        .search-item {
+            padding: 15px;
+        }
+        .search-item h4 {
+            margin: 0;
+            font-size: var(--font-size-md);
+            line-height: 1.5;
+        }
+        .muted {
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
+            line-height: 1.7;
+        }
+
+        .job-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+        .calendar-shell {
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            background: var(--color-surface-alt);
+        }
+        .calendar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            background: var(--color-surface);
+            border-bottom: 1px solid var(--color-border);
+        }
+        .calendar-title {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 850;
+            letter-spacing: -0.04em;
+        }
+        .calendar-title .year {
+            color: var(--color-primary);
+        }
+        .calendar-controls {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .calendar-btn {
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            background: var(--color-surface-alt);
+            color: var(--color-text-secondary);
+            cursor: pointer;
+            font: inherit;
+            font-weight: 800;
+            padding: 7px 10px;
+        }
+        .calendar-btn:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            gap: 1px;
+            background: var(--color-border);
+        }
+        .calendar-weekday,
+        .calendar-day {
+            background: var(--color-surface);
+        }
+        .calendar-weekday {
+            padding: 8px 4px;
+            color: var(--color-text-muted);
+            font-size: 11px;
+            font-weight: 800;
+            text-align: center;
+            letter-spacing: 0.08em;
+        }
+        .calendar-day {
+            min-height: 56px;
+            padding: 6px 7px;
+            border: none;
+            color: var(--color-text);
+            cursor: pointer;
+            text-align: left;
+        }
+        .calendar-day:hover {
+            background: var(--color-primary-bg);
+        }
+        .calendar-day.outside {
+            color: var(--color-text-muted);
+            opacity: 0.5;
+        }
+        .calendar-day.selected {
+            outline: 2px solid var(--color-primary);
+            outline-offset: -2px;
+            background: var(--color-primary-bg);
+        }
+        .calendar-day.today .day-number {
+            color: var(--color-primary);
+            font-weight: 900;
+        }
+        .day-number {
+            display: block;
+            font-weight: 750;
+        }
+        .job-dots {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 8px;
+        }
+        .job-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--color-text-muted);
+        }
+        .job-dot.queued { background: var(--color-primary); }
+        .job-dot.running { background: var(--color-warning); }
+        .job-dot.completed { background: var(--color-success); }
+        .job-dot.failed { background: var(--color-danger); }
+        .job-dot.cancelled { background: var(--color-text-muted); }
+        .job-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            margin-left: 4px;
+            border-radius: 999px;
+            background: var(--color-surface-alt);
+            color: var(--color-text-secondary);
+            font-size: 11px;
+            font-weight: 800;
+        }
+
+        .selected-date-title {
+            margin: 14px 0 10px;
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-sm);
+            font-weight: 800;
+        }
+        .job-list {
+            display: grid;
+            gap: 10px;
+            max-height: 520px;
+            overflow: auto;
+            padding-right: 2px;
+        }
+        .job-card {
+            padding: 14px;
+        }
+        .job-card-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .job-id {
+            font-family: var(--font-mono);
+            font-size: var(--font-size-sm);
+            font-weight: 800;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: var(--radius-pill);
+            padding: 4px 9px;
+            font-size: var(--font-size-xs);
+            font-weight: 800;
+        }
+        .status-pill.queued { background: var(--color-primary-bg); color: var(--color-primary); }
+        .status-pill.running { background: var(--color-warning-bg); color: var(--color-warning); }
+        .status-pill.completed { background: var(--color-success-bg); color: var(--color-success); }
+        .status-pill.failed { background: var(--color-danger-bg); color: var(--color-danger); }
+        .status-pill.cancelled { background: var(--color-surface); color: var(--color-text-secondary); }
+        .job-progress {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            background: var(--color-surface);
+            color: var(--color-text-secondary);
+            font-size: var(--font-size-xs);
+            line-height: 1.7;
+        }
+        .job-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .empty-state,
+        .error-state {
+            padding: 18px;
+            color: var(--color-text-secondary);
+            line-height: 1.7;
+        }
+        .error-state {
+            border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+            background: var(--color-danger-bg);
+            color: var(--color-danger);
+        }
+
+        .toast-container {
+            position: fixed;
+            top: calc(var(--nav-height) + 16px);
+            right: 22px;
+            z-index: 2000;
+            display: grid;
+            gap: 8px;
+            width: min(360px, calc(100vw - 32px));
+        }
+        .local-toast {
+            padding: 12px 14px;
+            border-radius: var(--radius);
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
             box-shadow: var(--shadow-elevated);
-            z-index: 1000;
-            display: none;
+            color: var(--color-text);
+            font-size: var(--font-size-sm);
+            line-height: 1.6;
+        }
+        .local-toast.error {
+            border-left: 4px solid var(--color-danger);
+        }
+        .local-toast.success {
+            border-left: 4px solid var(--color-success);
+        }
+
+        @media (max-width: 1080px) {
+            .page-toolbar,
+            .info-grid,
+            .workspace-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 720px) {
+            .shell {
+                width: min(100% - 28px, 1440px);
+                padding-top: 20px;
+            }
+            .panel-card {
+                padding: 16px;
+            }
+            .form-grid,
+            .search-row {
+                grid-template-columns: 1fr;
+            }
+            .calendar-day {
+                min-height: 52px;
+                padding: 6px;
+            }
         }
     </style>
 </head>
 <body>
     <div id="topnav-mount"></div>
-    <div class="shell">
-        <div class="header-section">
+
+    <main class="shell">
+        <section class="page-toolbar">
             <div>
-                <h1>Ingestion Center 鍏ュ簱涓績</h1>
-                <p>鍦ㄦ澶勫揩閫熷鍏ュ閮ㄧ鐮旀枃鐚€傛敮鎸?PDF 涓婁紶銆丏OI 褰曞叆銆佸湪绾挎暟鎹绱㈠強 AI 鎵归噺鍚庡彴鏀跺綍宸ヤ綔娴併€?/p>
+                <p class="eyebrow">Ingestion Center</p>
+                <h1>入库中心</h1>
+                <p>把本地 PDF、DOI / URL、在线检索结果和 AI 批量检索统一放进当前文献库。页面只负责发起任务和展示状态，不会删除论文、PDF 或解析产物。</p>
             </div>
-            <div>
-                <select id="librarySelect" class="library-select btn" style="height:44px; padding:0 12px;" onchange="switchLibrary(this.value)">
-                    <option value="">鍔犺浇涓?..</option>
+            <div class="toolbar-controls">
+                <label for="librarySelect">当前文献库</label>
+                <select id="librarySelect" class="form-control" onchange="switchLibrary(this.value)">
+                    <option value="">加载中...</option>
                 </select>
             </div>
-        </div>
+        </section>
 
-        <div class="workspace-grid">
-            <!-- Left Side: Ingesting Methods -->
-            <div class="main-col">
+        <section class="workspace-grid">
+            <div class="left-stack">
                 <div class="panel-card">
-                    <div class="ingest-tabs">
-                        <button class="ingest-tab active" onclick="switchIngestTab('pdf', event)">鏈湴涓婁紶 PDF</button>
-                        <button class="ingest-tab" onclick="switchIngestTab('doi', event)">DOI / URL 鏀跺綍</button>
-                        <button class="ingest-tab" onclick="switchIngestTab('online', event)">鍦ㄧ嚎鏂囩尞妫€绱?/button>
-                        <button class="ingest-tab" onclick="switchIngestTab('ai', event)">AI 鑷姩鏀跺綍</button>
-                    </div>
-
-                    <!-- Method 1: PDF Upload -->
-                    <div id="tab-pdf" class="tab-content">
-                        <div class="dropzone" onclick="document.getElementById('pdfInput').click()">
-                            <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-                            <h3>鎷栨嫿 PDF 鏂囦欢鑷虫鎴栫洿鎺ョ偣鍑讳笂浼?/h3>
-                            <p style="margin-top:6px; font-size:13px; color:var(--color-text-muted);">鏂囦欢澶у皬涓嶈秴杩?50MB銆備笂浼犲悗绯荤粺灏嗚嚜鍔ㄥ畬鎴愭枃鏈钀戒笌 DFT 鏁版嵁瑙ｆ瀽銆?/p>
-                            <input id="pdfInput" type="file" accept=".pdf" style="display:none;" onchange="handlePDFUpload(this)">
+                    <div class="panel-heading">
+                        <div>
+                            <h2 class="panel-title">选择入库方式</h2>
+                            <p class="panel-desc">推荐先使用 PDF 上传或 DOI / URL 收录；AI 自动收录适合批量扩展主题词后再人工筛选。</p>
                         </div>
                     </div>
 
-                    <!-- Method 2: DOI Input -->
-                    <div id="tab-doi" class="tab-content" style="display:none;">
+                    <div class="ingest-tabs" role="tablist" aria-label="入库方式">
+                        <button class="ingest-tab active" data-tab="pdf" onclick="switchIngestTab('pdf')">本地上传 PDF</button>
+                        <button class="ingest-tab" data-tab="doi" onclick="switchIngestTab('doi')">DOI / URL 收录</button>
+                        <button class="ingest-tab" data-tab="online" onclick="switchIngestTab('online')">在线文献检索</button>
+                        <button class="ingest-tab" data-tab="ai" onclick="switchIngestTab('ai')">AI 自动收录</button>
+                    </div>
+
+                    <div id="tab-pdf" class="tab-content active">
+                        <div class="dropzone" id="pdfDropzone" onclick="document.getElementById('pdfInput').click()">
+                            <div>
+                                <div class="dropzone-mark" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                                </div>
+                                <h3>拖放 PDF 到这里，或点击选择文件</h3>
+                                <p>支持单个 PDF 上传，后端会完成保存、解析和结构化抽取。当前后端限制约 30 MB，超出时会给出明确错误。</p>
+                                <input id="pdfInput" type="file" accept=".pdf" style="display:none;" onchange="handlePDFUpload(this)">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-doi" class="tab-content">
                         <div class="form-group">
-                            <label for="doiInput">DOI 鎴栧鏈枃鐚?URL</label>
-                            <input type="text" id="doiInput" class="form-control" placeholder="渚嬪锛?0.1016/j.ensm.2023.102875 鎴?https://arxiv.org/abs/2304.12345">
+                            <label for="doiInput">DOI、arXiv ID 或论文 URL</label>
+                            <input type="text" id="doiInput" class="form-control" placeholder="例如 10.1016/j.ensm.2023.102875 或 https://arxiv.org/abs/2304.12345">
                         </div>
-                        <button class="btn primary" onclick="submitDOI()">馃摜 涓€閿笅杞藉苟鏀跺綍</button>
+                        <div class="actions">
+                            <button class="btn btn-primary" onclick="submitDOI()">下载并收录</button>
+                            <button class="btn btn-ghost" onclick="document.getElementById('doiInput').value = ''">清空</button>
+                        </div>
+                        <p class="help-note">如果 PDF 下载受限，系统会优先保留元数据，后续仍可补传 PDF。</p>
                     </div>
 
-                    <!-- Method 3: Online Search -->
-                    <div id="tab-online" class="tab-content" style="display:none;">
-                        <div style="display:flex; gap:10px; margin-bottom:16px;">
-                            <input type="text" id="searchQuery" class="form-control" style="flex:1;" placeholder="杈撳叆妫€绱㈡枃鐚叧閿瘝銆丏OI銆佹湡鍒婃垨鏍囬">
-                            <input type="number" id="searchLimit" class="form-control" style="width:100px;" value="10" min="1" max="100" title="妫€绱笂闄?>
-                            <button class="btn blue" onclick="runOnlineSearch()">馃攳 鎼滅储</button>
+                    <div id="tab-online" class="tab-content">
+                        <div class="search-row">
+                            <input type="text" id="searchQuery" class="form-control" placeholder="输入关键词、DOI、期刊名或论文标题">
+                            <input type="number" id="searchLimit" class="form-control" value="10" min="1" max="100" title="检索上限">
+                            <button class="btn btn-primary" onclick="runOnlineSearch()">检索</button>
                         </div>
                         <div class="search-results" id="searchResults">
-                            <div class="empty-state" style="padding:10px 0;">杈撳叆鍏抽敭璇嶅悗鐐瑰嚮鎼滅储锛屾垜浠皢浠?OpenAlex / arXiv 鑷姩鍘婚噸鑾峰彇鏂囩尞銆?/div>
+                            <div class="empty-state">输入关键词后点击检索。结果会从 OpenAlex、arXiv 等公开来源返回，收录前仍会走去重逻辑。</div>
                         </div>
                     </div>
 
-                    <!-- Method 4: AI Ingestion Workflow -->
-                    <div id="tab-ai" class="tab-content" style="display:none;">
+                    <div id="tab-ai" class="tab-content">
                         <div class="form-group">
-                            <label for="aiQuery">AI 鏂囩尞鎵╁睍鏌ヨ鎻愮ず璇?/label>
-                            <input type="text" id="aiQuery" class="form-control" placeholder="渚嬪锛歭ithium sulfur battery CeO2 catalyst energy mechanism">
+                            <label for="aiQuery">AI 文献扩展查询提示词</label>
+                            <textarea id="aiQuery" class="form-control" placeholder="例如 lithium sulfur battery single atom catalyst polysulfide adsorption mechanism"></textarea>
                         </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+                        <div class="form-grid">
                             <div class="form-group">
-                                <label for="aiMaxResults">AI 妫€绱㈠苟鍘婚噸涓婇檺 (Max Results)</label>
+                                <label for="aiMaxResults">检索并去重上限</label>
                                 <input type="number" id="aiMaxResults" class="form-control" value="20" min="1" max="100">
                             </div>
                             <div class="form-group">
-                                <label for="aiMaxDownloads">鏈€澶у悗鍙颁笅杞芥枃鐚暟 (Max Downloads)</label>
+                                <label for="aiMaxDownloads">最大下载 / 入库尝试数</label>
                                 <input type="number" id="aiMaxDownloads" class="form-control" value="5" min="1" max="100">
                             </div>
                         </div>
-                        <button class="btn purple" onclick="triggerAIWorkflow()">馃殌 瑙﹀彂鍚庡彴鑷姩鍖栨敹褰曢摼</button>
-                        <p style="margin-top:10px; font-size:12px; color:var(--color-text-secondary);">
-                            AI 宸ヤ綔娴佸皢鍦ㄥ悗鍙板苟琛屾墽琛岋細鍦ㄧ嚎鎵╁睍鏌ヨ 鈫?鑾峰彇绮惧噯鍏冩暟鎹?鈫?鑷姩缁曡繃闄愬埗涓嬭浇 PDF 鈫?瑙ｆ瀽缁撴瀯鍖栨鏂?鈫?鑷姩鍐欏洖搴擄紝鏃犻渶鍋滅暀鍦ㄦ湰椤点€?                        </p>
+                        <div class="actions">
+                            <button class="btn btn-primary" onclick="triggerAIWorkflow()">发起后台收录任务</button>
+                            <button class="btn btn-ghost" onclick="document.getElementById('aiQuery').value = ''">清空提示词</button>
+                        </div>
+                        <p class="help-note">后台任务会记录为 workflow job。下载失败不会自动删除已有文献，通常会保留为“仅元数据”。</p>
                     </div>
+                </div>
+
+                <div class="info-grid">
+                    <section class="subpanel">
+                        <h3>最近入库记录</h3>
+                        <div class="mini-list" id="recentActivity">
+                            <div class="empty-state">暂时还没有可展示的入库记录。</div>
+                        </div>
+                    </section>
+
+                    <section class="subpanel">
+                        <h3>快速操作</h3>
+                        <div class="quick-actions">
+                            <button class="btn btn-ghost btn-sm" onclick="goToday()">回到今天任务</button>
+                            <button class="btn btn-ghost btn-sm" onclick="pollJobs()">刷新任务队列</button>
+                            <button class="btn btn-ghost btn-sm" onclick="reuseLastQuery()">重用上次 AI 提示词</button>
+                            <button class="btn btn-ghost btn-sm" onclick="clearSearchResults()">清空搜索结果</button>
+                        </div>
+                        <p class="quick-note">删除任务记录只会清理 workflow job，不会删除论文、PDF 或解析产物。</p>
+                    </section>
                 </div>
             </div>
 
-            <!-- Right Side: Job Center / Task Queue -->
-            <div class="side-col">
+            <aside class="right-stack">
                 <div class="panel-card">
-                    <div class="panel-title" style="margin-bottom:12px;">
-                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2zm0 8H7v-2h10v2z"/></svg>
-                        浠诲姟涓績 (Job Center)
+                    <div class="panel-heading">
+                        <div>
+                            <h2 class="panel-title">任务中心</h2>
+                            <p class="panel-desc">按日期查看 AI 收录任务。运行中任务可取消，失败或已取消任务可重试。</p>
+                        </div>
                     </div>
-                    <div style="margin-bottom:14px; display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="btn small primary" id="job-filter-all" onclick="filterJobs('all')">鍏ㄩ儴</button>
-                        <button class="btn small ghost" id="job-filter-running" onclick="filterJobs('running')">杩愯涓?/button>
-                        <button class="btn small ghost" id="job-filter-completed" onclick="filterJobs('completed')">宸叉垚鍔?/button>
-                        <button class="btn small ghost" id="job-filter-failed" onclick="filterJobs('failed')">宸插け璐?/button>
+
+                    <div class="job-toolbar">
+                        <div class="job-filters">
+                            <button class="chip-btn active" id="job-filter-all" onclick="filterJobs('all')">全部</button>
+                            <button class="chip-btn" id="job-filter-running" onclick="filterJobs('running')">运行中</button>
+                            <button class="chip-btn" id="job-filter-completed" onclick="filterJobs('completed')">已完成</button>
+                            <button class="chip-btn" id="job-filter-failed" onclick="filterJobs('failed')">失败/取消</button>
+                        </div>
+                        <button class="btn btn-ghost btn-sm" onclick="pollJobs()">刷新</button>
                     </div>
+
+                    <div class="calendar-shell">
+                        <div class="calendar-header">
+                            <h3 class="calendar-title" id="calendarTitle">任务日历</h3>
+                            <div class="calendar-controls">
+                                <button class="calendar-btn" onclick="moveJobMonth(-1)" aria-label="上个月">&lt;</button>
+                                <button class="calendar-btn" onclick="goToday()">Today</button>
+                                <button class="calendar-btn" onclick="moveJobMonth(1)" aria-label="下个月">&gt;</button>
+                            </div>
+                        </div>
+                        <div class="calendar-grid" id="jobCalendar"></div>
+                    </div>
+
+                    <div class="selected-date-title" id="selectedDateTitle">当天任务</div>
                     <div class="job-list" id="jobQueue">
-                        <!-- Dynamically filled -->
-                        <div class="empty-state">褰撳墠娌℃湁鍚庡彴鏀跺綍浠诲姟銆?/div>
+                        <div class="empty-state">当前没有后台收录任务。</div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
+            </aside>
+        </section>
+    </main>
 
-    <div id="toast" class="toast"></div>
+    <div class="toast-container" id="toast-container"></div>
 
     <script>
         const API_BASE = "/api/papers";
         const LIB_API = "/api/libraries";
         const state = {
-            activeTab: 'pdf',
-            currentLibrary: '',
-            jobs: [] // Recent jobs list fetched from server
+            activeTab: "pdf",
+            currentLibrary: "",
+            jobs: [],
+            activeJobFilter: "all",
+            lastAiQuery: "",
+            selectedDate: toDateKey(new Date()),
+            calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+            pollTimer: null,
         };
-        let activeJobFilter = 'all';
 
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.style.display = 'block';
-            setTimeout(() => {
-                toast.style.display = 'none';
-            }, 3000);
+        function esc(value) {
+            return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+            }[c]));
+        }
+
+        function showToast(message, type = "success") {
+            const container = document.getElementById("toast-container");
+            const toast = document.createElement("div");
+            toast.className = `local-toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4200);
         }
 
         async function fetchJSON(url, options) {
-            options = options || {};
-            options.headers = options.headers || {};
+            const requestOptions = options || {};
+            requestOptions.headers = requestOptions.headers || {};
             const token = sessionStorage.getItem("litai-settings-token");
-            if (token) {
-                options.headers["X-Settings-Token"] = token;
-            }
-            const resp = await fetch(url, options);
-            if (resp.status === 403) {
-                showToast("鏃犳潈璁块棶姝?API銆傝鍏堝湪[璁剧疆]涓厤缃鐞嗗憳 Token銆?);
-                throw new Error("403 Forbidden");
-            }
+            if (token) requestOptions.headers["X-Settings-Token"] = token;
+
+            const resp = await fetch(url, requestOptions);
             const text = await resp.text();
             let data = null;
             try { data = text ? JSON.parse(text) : null; } catch (_) {}
+
+            if (resp.status === 403) {
+                throw new Error("无权访问该接口，请先在设置页确认管理员 Token。");
+            }
             if (!resp.ok) {
-                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
-                throw new Error(detail);
+                throw new Error((data && data.detail) || (`HTTP ${resp.status}`));
             }
             return data;
         }
 
-        async function loadLibraries() {
-            try {
-                const libs = await fetchJSON(LIB_API);
-                const active = libs.find(l => l.is_active);
-                
-                const select = document.getElementById('librarySelect');
-                select.innerHTML = libs.map(l => 
-                    `<option value="${l.name}" ${l.is_active ? 'selected' : ''}>${l.name}${l.is_active ? ' (褰撳墠)' : ''}</option>`
-                ).join('');
+        function switchIngestTab(tab) {
+            state.activeTab = tab;
+            document.querySelectorAll(".ingest-tab").forEach(btn => {
+                btn.classList.toggle("active", btn.dataset.tab === tab);
+            });
+            document.querySelectorAll(".tab-content").forEach(panel => {
+                panel.classList.toggle("active", panel.id === `tab-${tab}`);
+            });
+        }
 
-                if (active) {
-                    state.currentLibrary = active.name;
-                    await pollJobs();
+        function setupCompactToolbar() {
+            const toolbar = document.querySelector(".page-toolbar");
+            if (!toolbar) return;
+            const [left, right] = toolbar.children;
+            if (left) {
+                left.innerHTML = `
+                    <div class="toolbar-title">
+                        <span class="toolbar-badge">Workspace</span>
+                        <h1>入库中心</h1>
+                    </div>
+                    <p class="toolbar-summary">在这里发起 PDF、DOI / URL、在线检索和 AI 收录，右侧直接查看任务状态和历史记录。</p>
+                `;
+            }
+            const label = right ? right.querySelector("label") : null;
+            if (label) label.textContent = "当前文献库";
+        }
+
+        async function loadLibraries() {
+            const select = document.getElementById("librarySelect");
+            try {
+                const data = await fetchJSON(LIB_API);
+                const libs = Array.isArray(data) ? data : [];
+                if (!libs.length) {
+                    select.innerHTML = '<option value="">未发现可用文献库</option>';
+                    state.currentLibrary = "";
+                    renderAllJobs();
+                    return;
                 }
-            } catch (e) {
-                showToast("鍔犺浇搴撳垪琛ㄥけ璐ワ細" + e.message);
+
+                const active = libs.find(item => item.is_active) || libs[0];
+                select.innerHTML = libs.map(lib => {
+                    const name = lib.name || "未命名文献库";
+                    const label = `${name}${lib.is_active ? "（当前）" : ""}`;
+                    return `<option value="${esc(name)}" ${name === active.name ? "selected" : ""}>${esc(label)}</option>`;
+                }).join("");
+                state.currentLibrary = active.name || "";
+                await pollJobs();
+            } catch (error) {
+                select.innerHTML = '<option value="">文献库加载失败</option>';
+                showToast(`加载文献库失败：${error.message}`, "error");
+                renderAllJobs();
             }
         }
 
@@ -391,305 +852,491 @@
             if (!name) return;
             try {
                 await fetchJSON(`${LIB_API}/${encodeURIComponent(name)}/activate`, { method: "POST" });
-                showToast("鍒囨崲搴撴垚鍔燂細" + name);
                 state.currentLibrary = name;
+                showToast(`已切换到文献库：${name}`);
                 await loadLibraries();
-            } catch (e) {
-                showToast("鍒囨崲搴撳け璐ワ細" + e.message);
+            } catch (error) {
+                showToast(`切换文献库失败：${error.message}`, "error");
             }
         }
 
-        function switchIngestTab(tab, evt) {
-            state.activeTab = tab;
-            document.querySelectorAll('.ingest-tab').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-            
-            if (evt && evt.target) evt.target.classList.add('active');
-            document.getElementById('tab-' + tab).style.display = 'block';
+        function bindDropzone() {
+            const dropzone = document.getElementById("pdfDropzone");
+            const input = document.getElementById("pdfInput");
+            ["dragenter", "dragover"].forEach(eventName => {
+                dropzone.addEventListener(eventName, event => {
+                    event.preventDefault();
+                    dropzone.classList.add("drag-over");
+                });
+            });
+            ["dragleave", "drop"].forEach(eventName => {
+                dropzone.addEventListener(eventName, event => {
+                    event.preventDefault();
+                    dropzone.classList.remove("drag-over");
+                });
+            });
+            dropzone.addEventListener("drop", event => {
+                const files = event.dataTransfer && event.dataTransfer.files;
+                if (!files || !files.length) return;
+                input.files = files;
+                handlePDFUpload(input);
+            });
         }
 
-        // 1. PDF Upload
         async function handlePDFUpload(input) {
             if (!input.files || !input.files.length) return;
             const file = input.files[0];
+            if (!file.name.toLowerCase().endsWith(".pdf")) {
+                showToast("只支持上传 PDF 文件。", "error");
+                input.value = "";
+                return;
+            }
+
             const formData = new FormData();
             formData.append("file", file);
             formData.append("library_name", state.currentLibrary || "");
-            
-            showToast("姝ｅ湪涓婁紶骞舵彁鍙?PDF锛岃绋嶅€?..");
+
+            showToast("正在上传并解析 PDF，请稍候。");
             try {
                 const data = await fetchJSON(`${API_BASE}/ingest/upload`, {
                     method: "POST",
-                    body: formData
+                    body: formData,
                 });
-                showToast("PDF 涓婁紶鎴愬姛锛屾枃鐚凡鏀跺綍锛佹爣棰橈細" + (data.title || file.name));
-                pollJobs();
-            } catch (e) {
-                showToast("涓婁紶瑙ｆ瀽澶辫触锛? + e.message);
+                showToast(`PDF 已收录：${data && data.title ? data.title : file.name}`);
+                await pollJobs();
+            } catch (error) {
+                showToast(`上传或解析失败：${error.message}`, "error");
             } finally {
                 input.value = "";
             }
         }
 
-        // 2. DOI Submit
         async function submitDOI() {
-            const val = document.getElementById('doiInput').value.trim();
-            if (!val) {
-                showToast("璇疯緭鍏?DOI 鎴?URL锛?);
+            const input = document.getElementById("doiInput");
+            const identifier = input.value.trim();
+            if (!identifier) {
+                showToast("请先输入 DOI、arXiv ID 或 URL。", "error");
                 return;
             }
-            showToast("姝ｅ湪鍚庡彴涓嬭浇鏀跺綍锛岃鍕垮叧闂〉闈?..");
+
+            showToast("正在下载并收录文献。");
             try {
                 const data = await fetchJSON(`${API_BASE}/discovery/download`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        identifier: val,
+                        identifier,
                         providers: [],
-                        library_name: state.currentLibrary || ""
-                    })
+                        library_name: state.currentLibrary || "",
+                    }),
                 });
-                if (data.status === 'already_exists') {
-                    showToast("璇ユ枃鐚凡鍦ㄦ枃鐚簱涓紒鏍囬锛? + data.title);
-                } else if (data.status === 'metadata_only') {
-                    showToast("涓嬭浇 PDF 闄愬埗锛屽凡鎸夊厓鏁版嵁鍏堟敹褰曘€傛爣棰橈細" + data.title);
-                } else {
-                    showToast("鏀跺綍涓嬭浇鎴愬姛锛佹爣棰橈細" + data.title);
-                }
-                document.getElementById('doiInput').value = "";
-                pollJobs();
-            } catch (e) {
-                showToast("涓嬭浇鏀跺綍澶辫触锛? + e.message);
+                const title = data && data.title ? data.title : identifier;
+                const status = data && data.status ? data.status : "completed";
+                const statusText = status === "already_exists" ? "已存在" : status === "metadata_only" ? "仅元数据收录" : "收录完成";
+                showToast(`${statusText}：${title}`);
+                input.value = "";
+                await pollJobs();
+            } catch (error) {
+                showToast(`下载或收录失败：${error.message}`, "error");
             }
         }
 
-        // 3. Online Search
         async function runOnlineSearch() {
-            const q = document.getElementById('searchQuery').value.trim();
-            if (!q) {
-                showToast("璇疯緭鍏ユ悳绱㈠叧閿瘝锛?);
+            const query = document.getElementById("searchQuery").value.trim();
+            const limit = Number(document.getElementById("searchLimit").value || 10);
+            const container = document.getElementById("searchResults");
+            if (!query) {
+                showToast("请先输入检索关键词。", "error");
                 return;
             }
-            const limit = document.getElementById('searchLimit').value || 10;
-            const container = document.getElementById('searchResults');
-            container.innerHTML = `<div class="empty-state">姝ｅ湪鎷夊彇 OpenAlex / arXiv 绛夊叕寮€鏁版嵁搴撴枃鐚?..</div>`;
+
+            container.innerHTML = '<div class="empty-state">正在检索公开文献数据源...</div>';
             try {
-                const data = await fetchJSON(`${API_BASE}/discovery/search?q=${encodeURIComponent(q)}&limit=${limit}`);
-                const items = data.items || [];
+                const data = await fetchJSON(`${API_BASE}/discovery/search?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(limit)}`);
+                const items = Array.isArray(data && data.items) ? data.items : Array.isArray(data && data.papers) ? data.papers : [];
+                window.__lastSearchItems = items;
                 if (!items.length) {
-                    container.innerHTML = `<div class="empty-state">鏃犳悳绱㈢粨鏋溿€傝鏇存崲妫€绱㈣瘝銆?/div>`;
+                    container.innerHTML = '<div class="empty-state">没有检索结果。可以换一个关键词，或使用 DOI / URL 直接收录。</div>';
                     return;
                 }
-                container.innerHTML = items.map(item => {
-                    const identifier = item.identifier || item.doi || item.url || "";
-                    const authors = (item.authors || []).slice(0, 4).join(', ') || '-';
-                    return `
-                        <div class="search-item">
-                            <h4 style="font-size:14px; font-weight:700; color:var(--color-text);">${item.title || '鏃犳爣棰?}</h4>
-                            <p style="font-size:12px; color:var(--color-text-secondary); margin-top:4px;">
-                                ${item.year || '-'} | ${item.journal || '-'} | ${authors}
-                            </p>
-                            <div style="margin-top:10px; display:flex; justify-content:flex-end;">
-                                <button class="btn green small" onclick="ingestSearchResult('${identifier.replace(/'/g, "\\'")}')">馃摜 鏀跺綍姝ゆ枃鐚?/button>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            } catch (e) {
-                container.innerHTML = `<div class="empty-state" style="color:var(--color-danger);">妫€绱㈠け璐ワ細${e.message}</div>`;
+                container.innerHTML = items.map((item, index) => renderSearchItem(item, index)).join("");
+            } catch (error) {
+                window.__lastSearchItems = [];
+                container.innerHTML = `<div class="error-state">检索失败：${esc(error.message)}<br><button class="btn btn-ghost btn-sm" onclick="runOnlineSearch()">重试</button></div>`;
             }
         }
 
-        async function ingestSearchResult(identifier) {
-            if (!identifier) return;
-            showToast("姝ｅ湪鏀跺綍鏂囩尞锛屼笅杞?PDF...");
+        function clearSearchResults() {
+            window.__lastSearchItems = [];
+            const container = document.getElementById("searchResults");
+            if (container) {
+                container.innerHTML = '<div class="empty-state">输入关键词后点击搜索。结果会在这里显示。</div>';
+            }
+        }
+
+        function renderSearchItem(item, index) {
+            const authors = Array.isArray(item.authors) ? item.authors.slice(0, 4).join(", ") : (item.authors || "未解析作者");
+            const title = item.title || "未解析标题";
+            return `
+                <article class="search-item">
+                    <h4>${esc(title)}</h4>
+                    <div class="muted">${esc(item.year || "年份未解析")} · ${esc(item.journal || "期刊未解析")} · ${esc(authors)}</div>
+                    <div class="actions" style="justify-content:flex-end; margin-top:12px;">
+                        <button class="btn btn-primary btn-sm" onclick="ingestSearchResult(${index})">收录这篇文献</button>
+                    </div>
+                </article>
+            `;
+        }
+
+        async function ingestSearchResult(index) {
+            const resultsData = window.__lastSearchItems || [];
+            const item = resultsData[index] || {};
+            const identifier = item.identifier || item.doi || item.url || item.arxiv_id || item.title || "";
+            if (!identifier) {
+                showToast("该结果缺少可收录标识。", "error");
+                return;
+            }
+
+            showToast("正在收录检索结果。");
             try {
                 const data = await fetchJSON(`${API_BASE}/discovery/download`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        identifier: identifier,
+                        identifier,
                         providers: [],
-                        library_name: state.currentLibrary || ""
-                    })
+                        library_name: state.currentLibrary || "",
+                    }),
                 });
-                showToast("鎴愬姛鏀跺綍鏂囩尞锛佹爣棰橈細" + (data.title || "瀛︽湳鏂囩尞"));
-                pollJobs();
-            } catch (e) {
-                showToast("鏀跺綍澶辫触锛? + e.message);
+                showToast(`收录请求已完成：${data && data.title ? data.title : identifier}`);
+                await pollJobs();
+            } catch (error) {
+                showToast(`收录失败：${error.message}`, "error");
             }
         }
 
-        // 4. AI Ingestion Workflow
         async function triggerAIWorkflow() {
-            const q = document.getElementById('aiQuery').value.trim();
-            if (!q) {
-                showToast("璇疯緭鍏?AI 鑷姩妫€绱㈠紡锛?);
+            const query = document.getElementById("aiQuery").value.trim();
+            const maxResults = Number(document.getElementById("aiMaxResults").value || 20);
+            const maxDownloads = Number(document.getElementById("aiMaxDownloads").value || 5);
+            if (!query) {
+                showToast("请先输入 AI 自动收录提示词。", "error");
                 return;
             }
-            const maxResults = document.getElementById('aiMaxResults').value || 20;
-            const maxDownloads = document.getElementById('aiMaxDownloads').value || 5;
-            
-            showToast("姝ｅ湪娲惧彂 AI 鏀跺綍宸ヤ綔娴侊紝绯荤粺宸茶浆鍏ュ悗鍙?..");
+            state.lastAiQuery = query;
+
+            showToast("正在创建后台收录任务。");
             try {
                 const job = await fetchJSON(`${API_BASE}/ai_workflow/jobs`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        query: q,
+                        query,
                         library_name: state.currentLibrary || "",
                         model: "deepseek-chat",
-                        max_results: Number(maxResults),
-                        max_downloads: Number(maxDownloads),
+                        max_results: maxResults,
+                        max_downloads: maxDownloads,
                         providers: [],
-                        skip_existing: true
-                    })
+                        skip_existing: true,
+                    }),
                 });
-                showToast("浠诲姟宸叉淳鍙戯紝浠诲姟 ID锛? + job.job_id);
-                document.getElementById('aiQuery').value = "";
+                showToast(`任务已创建：${job && job.job_id ? job.job_id.slice(0, 8) : "queued"}`);
+                document.getElementById("aiQuery").value = "";
                 await pollJobs();
-            } catch (e) {
-                showToast("宸ヤ綔娴佹淳鍙戝け璐ワ細" + e.message);
+            } catch (error) {
+                showToast(`任务创建失败：${error.message}`, "error");
             }
-        }
-
-        // Job Filtering
-        function filterJobs(status) {
-            activeJobFilter = status;
-            document.querySelectorAll('[id^="job-filter-"]').forEach(btn => {
-                btn.className = 'btn small ghost';
-            });
-            const selectedBtn = document.getElementById('job-filter-' + status);
-            if (selectedBtn) {
-                selectedBtn.className = 'btn small primary';
-            }
-            renderJobsList();
         }
 
         async function pollJobs() {
-            if (!state.currentLibrary) return;
-            try {
-                const jobs = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=50`);
-                state.jobs = jobs || [];
-                renderJobsList();
-            } catch (e) {
-                console.warn("Poll jobs failed", e);
+            if (!state.currentLibrary) {
+                state.jobs = [];
+                renderAllJobs();
+                return;
             }
+            try {
+                const data = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
+            } catch (error) {
+                state.jobs = [];
+                showToast(`任务列表加载失败：${error.message}`, "error");
+            }
+            renderAllJobs();
+        }
+
+        function reuseLastQuery() {
+            if (!state.lastAiQuery) {
+                showToast("还没有可重用的 AI 提示词。", "error");
+                return;
+            }
+            switchIngestTab("ai");
+            document.getElementById("aiQuery").value = state.lastAiQuery;
+            showToast("已填入上次 AI 提示词。");
+        }
+
+        function filterJobs(status) {
+            state.activeJobFilter = status;
+            document.querySelectorAll("[id^='job-filter-']").forEach(btn => {
+                btn.classList.toggle("active", btn.id === `job-filter-${status}`);
+            });
+            renderAllJobs();
+        }
+
+        function filteredJobs() {
+            if (state.activeJobFilter === "running") {
+                return state.jobs.filter(job => ["queued", "running"].includes(job.status));
+            }
+            if (state.activeJobFilter === "completed") {
+                return state.jobs.filter(job => job.status === "completed");
+            }
+            if (state.activeJobFilter === "failed") {
+                return state.jobs.filter(job => ["failed", "cancelled"].includes(job.status));
+            }
+            return state.jobs;
+        }
+
+        function toDateKey(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        }
+
+        function jobDateKey(job) {
+            const raw = job.updated_at || job.created_at;
+            const date = raw ? new Date(raw) : new Date();
+            return toDateKey(Number.isNaN(date.getTime()) ? new Date() : date);
+        }
+
+        function renderAllJobs() {
+            renderJobCalendar();
+            renderJobsList();
+            renderRecentActivity();
+        }
+
+        function renderRecentActivity() {
+            const container = document.getElementById("recentActivity");
+            if (!container) return;
+            const items = [...state.jobs]
+                .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
+                .slice(0, 5);
+
+            if (!items.length) {
+                container.innerHTML = '<div class="empty-state">暂时还没有可展示的入库记录。</div>';
+                return;
+            }
+
+            container.innerHTML = items.map(job => {
+                const summary = job.summary || {};
+                const status = job.status || "queued";
+                const title = summary.query || summary.source_label || job.type || "后台任务";
+                const count = firstPresent(summary.success_count, job.progress && job.progress.ingested, 0);
+                return `
+                    <article class="mini-item">
+                        <div class="mini-item-head">
+                            <div class="mini-item-title">${esc(title)}</div>
+                            <span class="status-pill ${esc(status)}">${esc(status)}</span>
+                        </div>
+                        <div class="muted">更新于 ${esc(formatJobTime(job.updated_at || job.created_at))}</div>
+                        <div class="muted">已入库 ${esc(count)} 篇</div>
+                    </article>
+                `;
+            }).join("");
+        }
+
+        function renderJobCalendar() {
+            const calendar = document.getElementById("jobCalendar");
+            const month = state.calendarMonth;
+            const year = month.getFullYear();
+            const monthIndex = month.getMonth();
+            document.getElementById("calendarTitle").innerHTML = `${monthIndex + 1}月 <span class="year">${year}</span>`;
+
+            const weekdays = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+            const first = new Date(year, monthIndex, 1);
+            const startOffset = (first.getDay() + 6) % 7;
+            const start = new Date(year, monthIndex, 1 - startOffset);
+            const jobs = filteredJobs();
+            const byDate = {};
+            jobs.forEach(job => {
+                const key = jobDateKey(job);
+                byDate[key] = byDate[key] || [];
+                byDate[key].push(job);
+            });
+
+            const parts = weekdays.map(day => `<div class="calendar-weekday">${day}</div>`);
+            for (let i = 0; i < 42; i += 1) {
+                const date = new Date(start);
+                date.setDate(start.getDate() + i);
+                const key = toDateKey(date);
+                const dayJobs = byDate[key] || [];
+                const classes = [
+                    "calendar-day",
+                    date.getMonth() !== monthIndex ? "outside" : "",
+                    key === state.selectedDate ? "selected" : "",
+                    key === toDateKey(new Date()) ? "today" : "",
+                ].filter(Boolean).join(" ");
+                const dots = dayJobs.slice(0, 6).map(job => `<span class="job-dot ${esc(job.status || "queued")}"></span>`).join("");
+                const count = dayJobs.length ? `<span class="job-count">${dayJobs.length}</span>` : "";
+                parts.push(`
+                    <button class="${classes}" onclick="selectJobDate('${key}')">
+                        <span class="day-number">${date.getDate()}${count}</span>
+                        <span class="job-dots">${dots}</span>
+                    </button>
+                `);
+            }
+            calendar.innerHTML = parts.join("");
+        }
+
+        function selectJobDate(key) {
+            state.selectedDate = key;
+            renderAllJobs();
+        }
+
+        function moveJobMonth(delta) {
+            state.calendarMonth = new Date(state.calendarMonth.getFullYear(), state.calendarMonth.getMonth() + delta, 1);
+            renderAllJobs();
+        }
+
+        function goToday() {
+            const today = new Date();
+            state.calendarMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            state.selectedDate = toDateKey(today);
+            renderAllJobs();
         }
 
         function renderJobsList() {
-            const container = document.getElementById('jobQueue');
-            let filtered = state.jobs;
-            
-            if (activeJobFilter === 'running') {
-                filtered = state.jobs.filter(j => j.status === 'queued' || j.status === 'running');
-            } else if (activeJobFilter === 'completed') {
-                filtered = state.jobs.filter(j => j.status === 'completed');
-            } else if (activeJobFilter === 'failed') {
-                filtered = state.jobs.filter(j => j.status === 'failed' || j.status === 'cancelled');
-            }
-            
-            if (!filtered.length) {
-                container.innerHTML = `<div class="empty-state">褰撳墠娌℃湁璇ョ姸鎬佷笅鐨勪换鍔°€?/div>`;
+            const container = document.getElementById("jobQueue");
+            const jobs = filteredJobs().filter(job => jobDateKey(job) === state.selectedDate);
+            document.getElementById("selectedDateTitle").textContent = `${state.selectedDate} 的任务`;
+            if (!jobs.length) {
+                container.innerHTML = '<div class="empty-state">这一天没有匹配当前筛选条件的任务。</div>';
                 return;
             }
-            
-            container.innerHTML = filtered.map(job => {
-                const statusLabels = {
-                    queued: '鎺掗槦涓?,
-                    running: '杩愯涓?,
-                    completed: '宸插畬鎴?,
-                    failed: '澶辫触',
-                    cancelled: '宸插彇娑?
-                };
-                const statusText = statusLabels[job.status] || job.status;
-                
-                let errorSection = '';
-                if (job.status === 'failed') {
-                    errorSection = `<div class="job-error" style="color:var(--color-danger); margin-top:8px; font-size:12px; font-weight:500;">澶辫触鍘熷洜锛?{job.error || '鏈煡鍘熷洜'}</div>`;
-                } else if (job.status === 'cancelled') {
-                    errorSection = `<div class="job-error" style="color:var(--color-text-secondary); margin-top:8px; font-size:12px; font-style:italic;">浠诲姟宸茬敱鐢ㄦ埛涓诲姩鍙栨秷銆?/div>`;
-                }
-                
-                let progressSection = '';
-                if (job.status === 'running' || job.status === 'queued') {
-                    const phaseText = job.progress && job.progress.phase ? `闃舵: ${job.progress.phase}` : '鍒濆鍖栦腑...';
-                    const msgText = job.progress && job.progress.message ? job.progress.message : '姝ｅ湪鎵ц...';
-                    progressSection = `
-                        <div class="job-progress">
-                            <strong>${phaseText}</strong><br>
-                            <span style="font-size:11px; color:var(--color-text-secondary);">${msgText}</span>
-                        </div>
-                    `;
-                } else if (job.status === 'completed') {
-                    const ingested = job.progress && job.progress.ingested != null ? job.progress.ingested : '-';
-                    const failedCount = job.progress && job.progress.failed != null ? job.progress.failed : '-';
-                    progressSection = `
-                        <div class="job-progress" style="border-color: var(--color-success-border); background: var(--color-success-bg);">
-                            <span style="color:var(--color-success); font-weight:700;">鉁?鏀跺綍瀹屾垚</span><br>
-                            鎴愬姛鍏ュ簱: ${ingested} 绡?| 澶辫触鏁? ${failedCount} 绡?                        </div>
-                    `;
-                }
-                
-                let actionButtons = '';
-                if (job.status === 'queued' || job.status === 'running') {
-                    actionButtons = `<button class="btn danger small" onclick="cancelJobById('${job.job_id}')">馃洃 鍙栨秷浠诲姟</button>`;
-                } else if (job.status === 'failed' || job.status === 'cancelled') {
-                    actionButtons = `<button class="btn purple small" onclick="retryJobById('${job.job_id}')">馃攧 閲嶆柊杩愯</button>`;
-                }
-                
-                return `
-                    <div class="job-item" id="job-card-${job.job_id}" style="margin-bottom: 10px;">
-                        <div class="job-item-header">
-                            <strong style="font-size: 13px; font-family:var(--font-mono); color:var(--color-text);">浠诲姟 #${job.job_id.substring(0, 8)}</strong>
-                            <span class="job-status ${job.status}">${statusText}</span>
-                        </div>
-                        <div class="job-meta">
-                            绫诲瀷锛欳elery Workflow Ingestion<br>
-                            鏇存柊鏃堕棿锛?{job.updated_at ? new Date(job.updated_at).toLocaleTimeString() : '-'}
-                        </div>
-                        ${errorSection}
-                        ${progressSection}
-                        <div style="margin-top:10px; display:flex; justify-content:flex-end; gap:8px;">
-                            ${actionButtons}
-                        </div>
+            container.innerHTML = jobs.map(renderJobCard).join("");
+            appendDeleteButtons(jobs);
+        }
+
+        function renderJobCard(job) {
+            const labels = {
+                queued: "排队中",
+                running: "运行中",
+                completed: "已完成",
+                failed: "已失败",
+                cancelled: "已取消",
+            };
+            const progress = job.progress || {};
+            const summary = job.summary || {};
+            const failure = job.failure_explanation || null;
+            const status = job.status || "queued";
+            const successCount = firstPresent(summary.success_count, progress.ingested, "-");
+            const failureCount = firstPresent(summary.failure_count, progress.failed, "-");
+            const message = summary.message || progress.message || statusMessage(status);
+            const canCancel = status === "queued" || status === "running";
+            const canRetry = status === "failed" || status === "cancelled";
+            const canDelete = !canCancel;
+
+            return `
+                <article class="job-card" id="job-card-${esc(job.job_id)}">
+                    <div class="job-card-header">
+                        <span class="job-id">任务 #${esc(String(job.job_id || "").slice(0, 8) || "unknown")}</span>
+                        <span class="status-pill ${esc(status)}">${esc(labels[status] || status)}</span>
                     </div>
-                `;
-            }).join('');
+                    <div class="muted">
+                        类型：${esc(summary.source_label || job.type || "AI 文献检索与入库")}<br>
+                        更新时间：${esc(formatJobTime(job.updated_at || job.created_at))}
+                    </div>
+                    <div class="job-progress">
+                        <strong>${esc(message)}</strong><br>
+                        成功入库：${esc(successCount)} 篇 | 失败数：${esc(failureCount)} 篇
+                        ${failure ? `<br>失败说明：${esc(failure.summary || "请查看原始错误信息。")}` : ""}
+                    </div>
+                    <div class="job-actions">
+                        ${canCancel ? `<button class="btn btn-ghost btn-sm" onclick="cancelJobById('${esc(job.job_id)}')">取消任务</button>` : ""}
+                        ${canRetry ? `<button class="btn btn-primary btn-sm" onclick="retryJobById('${esc(job.job_id)}')">重试任务</button>` : ""}
+                    </div>
+                </article>
+            `;
+        }
+
+        function appendDeleteButtons(jobs) {
+            jobs.forEach(job => {
+                if (!job || ["queued", "running"].includes(job.status)) return;
+                const card = document.getElementById(`job-card-${job.job_id}`);
+                const actions = card ? card.querySelector(".job-actions") : null;
+                if (!actions || actions.querySelector(`[data-delete-job="${job.job_id}"]`)) return;
+                const button = document.createElement("button");
+                button.className = "btn btn-ghost btn-sm";
+                button.dataset.deleteJob = job.job_id;
+                button.textContent = "删除记录";
+                button.addEventListener("click", () => deleteJobById(job.job_id));
+                actions.appendChild(button);
+            });
+        }
+
+        function firstPresent() {
+            for (const value of arguments) {
+                if (value !== undefined && value !== null && value !== "") return value;
+            }
+            return "-";
+        }
+
+        function statusMessage(status) {
+            if (status === "completed") return "收录任务已完成。";
+            if (status === "failed") return "任务失败，请查看失败说明后重试。";
+            if (status === "cancelled") return "任务已取消。";
+            if (status === "running") return "任务正在执行。";
+            return "任务等待执行。";
+        }
+
+        function formatJobTime(value) {
+            if (!value) return "未记录";
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return "未记录";
+            return date.toLocaleString("zh-CN", { hour12: false });
         }
 
         async function retryJobById(jobId) {
-            showToast("姝ｅ湪璇锋眰閲嶈瘯浠诲姟...");
+            if (!jobId) return;
             try {
-                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/retry`, {
-                    method: 'POST'
-                });
-                showToast("閲嶈瘯浠诲姟宸叉垚鍔熸淳鍙戯紒");
+                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+                showToast("重试任务已发起。");
                 await pollJobs();
-            } catch (e) {
-                showToast("閲嶈瘯澶辫触锛? + e.message);
+            } catch (error) {
+                showToast(`重试失败：${error.message}`, "error");
             }
         }
 
         async function cancelJobById(jobId) {
-            showToast("姝ｅ湪璇锋眰鍙栨秷浠诲姟...");
+            if (!jobId) return;
             try {
-                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/cancel`, {
-                    method: 'POST'
-                });
-                showToast("浠诲姟鍙栨秷鎸囦护宸蹭笅鍙戯紒");
+                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+                showToast("取消请求已发送。");
                 await pollJobs();
-            } catch (e) {
-                showToast("鍙栨秷澶辫触锛? + e.message);
+            } catch (error) {
+                showToast(`取消失败：${error.message}`, "error");
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            TopNav.init({ currentPage: 'ingestion', mountId: 'topnav-mount' });
+        async function deleteJobById(jobId) {
+            if (!jobId) return;
+            const confirmed = window.confirm("删除后只会移除这条任务记录，不会删除论文和 PDF。是否继续？");
+            if (!confirmed) return;
+            try {
+                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+                showToast("任务记录已删除。");
+                await pollJobs();
+            } catch (error) {
+                showToast(`删除失败：${error.message}`, "error");
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            TopNav.init({ currentPage: "ingestion", mountId: "topnav-mount" });
+            setupCompactToolbar();
+            bindDropzone();
             loadLibraries();
-            
-            // Start polling timer
-            setInterval(pollJobs, 3000);
+            renderAllJobs();
+            state.pollTimer = setInterval(pollJobs, 5000);
         });
     </script>
 </body>

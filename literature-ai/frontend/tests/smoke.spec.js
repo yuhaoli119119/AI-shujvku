@@ -6,6 +6,7 @@ const PAGES = [
   { name: 'Literature Library', path: '/pages/literature_library/index.html', coreSelector: '#paperList' },
   { name: 'Paper Detail', path: '/pages/paper_detail/index.html', coreSelector: '.panel-card' },
   { name: 'DFT Database', path: '/pages/dft_database/index.html', coreSelector: '#dftTable' },
+  { name: 'Mechanism Knowledge', path: '/pages/mechanism_knowledge/index.html', coreSelector: '#mechanismTabs' },
   { name: 'AI Writing Studio', path: '/pages/ai_writer/index.html', coreSelector: '#paperChecklist' },
   { name: 'Extraction Review Workbench', path: '/pages/external_analysis_workbench/index.html', coreSelector: '#schemaForm' },
   { name: 'Settings', path: '/pages/settings/index.html', coreSelector: '.field' },
@@ -1124,6 +1125,86 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
     });
   }
+
+  test('business flow: Ingestion page is localized and renders calendar jobs safely', async ({ page }) => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).toISOString();
+    await page.route(/\/api\/papers\/ai_workflow\/jobs.*/, route => {
+      return jsonResponse(route, [
+        {
+          job_id: 'job-safe-1',
+          type: 'ai_workflow',
+          status: 'completed',
+          progress: { phase: 'completed', ingested: 5, failed: 0 },
+          summary: { source_label: 'AI 文献检索与入库', success_count: 5, failure_count: 0 },
+          result: null,
+          error: null,
+          created_at: today,
+          updated_at: today,
+          library_name: 'Default Library',
+        },
+      ]);
+    });
+
+    await page.goto(`${BASE_URL}/pages/ingestion/index.html`);
+    await page.waitForTimeout(600);
+
+    await expect(page.locator('#topnav-mount .topnav')).toBeVisible();
+    await expect(page.locator('h1')).toContainText('入库中心');
+    await expect(page.locator('#calendarTitle')).toBeVisible();
+    await expect(page.locator('#jobQueue')).toContainText('成功入库：5 篇');
+
+    await page.click('button[onclick="switchIngestTab(\'doi\')"]');
+    await expect(page.locator('#tab-doi')).toContainText('DOI、arXiv ID 或论文 URL');
+
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).not.toMatch(/[\uFFFD\u934F\u7C31\u93C8\u7EEF\u9983\u9286\u922B\u951B]/);
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test('business flow: Mechanism Knowledge page is localized and handles empty aggregate data', async ({ page }) => {
+    await page.route(/\/api\/papers\/aggregate/, route => {
+      return jsonResponse(route, {
+        catalyst_groups: {},
+        adsorbate_groups: {},
+        possible_name_aliases: [],
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/mechanism_knowledge/index.html`);
+    await page.waitForTimeout(600);
+
+    await expect(page.locator('#topnav-mount .topnav')).toBeVisible();
+    await expect(page.locator('h1')).toContainText('机理知识聚合');
+    await expect(page.locator('#mechanismTabs')).toContainText('催化剂聚合');
+    await expect(page.locator('#catalystsBox')).toContainText('暂无催化剂聚合数据');
+
+    await page.click('button:has-text("证据缺口")');
+    await expect(page.locator('#gapsBox')).toContainText('当前库暂无机理聚合数据');
+
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).not.toMatch(/[\uFFFD\u934F\u7C31\u93C8\u7EEF\u9983\u9286\u922B\u951B]/);
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test('business flow: Mechanism Knowledge page shows retry state when aggregate API fails', async ({ page }) => {
+    await page.route(/\/api\/papers\/aggregate/, route => {
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'aggregate unavailable' }),
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/mechanism_knowledge/index.html`);
+    await page.waitForTimeout(600);
+
+    await expect(page.locator('#pageStatus')).toContainText('加载失败');
+    await expect(page.locator('#pageStatus')).toContainText('aggregate unavailable');
+    await expect(page.locator('#pageStatus button:has-text("重试")')).toBeVisible();
+    await expect(page.locator('#catalystsBox')).toContainText('加载失败');
+    expect(consoleErrors.filter(msg => !msg.includes('Failed to load resource'))).toEqual([]);
+  });
 
   test('business flow: open Writing Studio, add evidence, generate draft, and view Citation Audit', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/ai_writer/index.html`);

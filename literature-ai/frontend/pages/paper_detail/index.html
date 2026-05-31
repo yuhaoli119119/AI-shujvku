@@ -267,6 +267,17 @@
       return String(value);
     }
 
+    function paperTypeLabel(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "未知类型";
+      const key = raw.toLowerCase();
+      if (key === "unknown" || key === "null" || key === "none") return "未知类型";
+      if (/^[abc]\d?$/i.test(raw)) return raw.toUpperCase() + "类";
+      if (/^r\d?$/i.test(raw) || key === "review") return "综述";
+      if (key === "research") return "研究论文";
+      return raw;
+    }
+
     function renderStructuredCollection(items, emptyText) {
       if (!items || !items.length) {
         return `<div class="empty-state">${esc(emptyText)}</div>`;
@@ -463,7 +474,7 @@
       document.getElementById("paperJournal").textContent = paper.journal || "-";
       document.getElementById("paperDoi").textContent = paper.doi ? "DOI: " + paper.doi : "暂无 DOI";
       document.getElementById("paperBadges").innerHTML = `
-        <span class="tag">${esc(paper.paper_type || "未知类型")}</span>
+        <span class="tag">${esc(paperTypeLabel(paper.paper_type))}</span>
         <span class="tag">${paper.pdf_path ? "已关联 PDF" : "仅元数据"}</span>
       `;
 

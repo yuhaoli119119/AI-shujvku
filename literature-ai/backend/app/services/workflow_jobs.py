@@ -501,6 +501,14 @@ def cancel_job(session: Session, job_id: str) -> WorkflowJob:
     return job
 
 
+def delete_job(session: Session, job_id: str) -> None:
+    job = get_job_or_raise(session, job_id)
+    if job.status in ACTIVE_JOB_STATUSES:
+        raise ValueError(f"Active jobs must be cancelled before deletion: {job.status}")
+    session.delete(job)
+    session.commit()
+
+
 def clone_job_for_retry_with_status(session: Session, job_id: str) -> tuple[WorkflowJob, bool]:
     source = get_job_or_raise(session, job_id)
     if source.status not in {"failed", "cancelled"}:

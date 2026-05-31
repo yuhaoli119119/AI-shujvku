@@ -108,11 +108,12 @@ class ComprehensiveExtractor:
         doc = self._coerce_input(unified_document)
         markdown = getattr(doc, "markdown", "") or ""
         abstract = getattr(doc, "abstract", "") or ""
+        sections = getattr(doc, "sections", []) or []
 
         if not self.llm or not self.llm.is_configured():
             return None
 
-        if not markdown and not abstract:
+        if not markdown and not abstract and not sections:
             return None
 
         type_options = (

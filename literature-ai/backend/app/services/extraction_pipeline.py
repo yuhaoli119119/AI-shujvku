@@ -81,35 +81,62 @@ class ExtractionPipelineService:
         self.embedding = DeterministicEmbeddingService(settings.embedding_dimension)
         self.locators = EvidenceLocatorService(session)
 
-    def _rule_based_classify(self, title: str | None, journal: str | None) -> dict[str, Any]:
-        """Heuristic rule-based fallback classification when LLM fails or for metadata-only papers."""
-        text = f"{title or ''} {journal or ''}".lower()
-        computational_kw = ["dft", "density functional", "ab initio", "first-principles", "molecular dynamics"]
-        experimental_kw = ["synthesis", "catalyst preparation", "in-situ", "operando"]
-        
+    def _rule_based_classify(
+        self,
+        title: str | None,
+        journal: str | None,
+        abstract: str | None = None,
+        sections_text: str | None = None,
+    ) -> dict[str, Any]:
+        """Heuristic fallback classification using title, journal, abstract, and body text."""
+        text = " ".join(part for part in [title, journal, abstract, sections_text] if part).lower()
+        review_kw = ["review", "perspective", "overview", "mini review", "综述", "进展", "述评", "总结"]
+        computational_kw = [
+            "dft", "density functional", "ab initio", "first-principles", "molecular dynamics",
+            "electronic structure", "band structure", "adsorption energy", "计算", "第一性原理",
+            "密度泛函", "分子动力学", "理论研究", "模拟", "电子结构",
+        ]
+        experimental_kw = [
+            "synthesis", "catalyst preparation", "in-situ", "operando", "experiment",
+            "electrochemical", "characterization", "fabrication", "测试", "表征", "合成",
+            "制备", "实验", "原位", "电化学", "循环性能",
+        ]
+
+        has_review = any(kw in text for kw in review_kw)
         has_comp = any(kw in text for kw in computational_kw)
         has_exp = any(kw in text for kw in experimental_kw)
-        
-        if has_comp and has_exp:
+
+        if has_review and not (has_comp or has_exp):
+            ptype = "R"
+            confidence = 0.72
+        elif has_comp and has_exp:
             ptype = "B"
+            confidence = 0.68
         elif has_comp:
             ptype = "A"
+            confidence = 0.64
         elif has_exp:
             ptype = "C"
+            confidence = 0.62
+        elif has_review:
+            ptype = "R"
+            confidence = 0.58
         else:
             ptype = "Unknown"
-            
+            confidence = 0.0
+
         return {
             "paper_type": ptype,
-            "type_confidence": 0.5 if ptype != "Unknown" else 0.0,
+            "type_confidence": confidence,
             "classification_source": "rule_heuristic"
         }
 
     def run_stage2(self, paper: Paper, document: UnifiedPaperDocument) -> dict[str, int]:
         # Stage 2a (快速分类)
         quick_class = None
+        sections_text = "\n".join(section.text or "" for section in (document.sections or [])[:12])
         if not document.sections and not document.abstract:
-            quick_class = self._rule_based_classify(paper.title, paper.journal)
+            quick_class = self._rule_based_classify(paper.title, paper.journal, paper.abstract, sections_text)
         else:
             try:
                 quick_class = self.comprehensive_extractor.extract_quick_classification(document)
@@ -118,7 +145,7 @@ class ExtractionPipelineService:
                 logging.getLogger(__name__).warning("LLM quick classification failed, falling back to rules: %s", exc)
             
             if not quick_class or quick_class.get("paper_type") == "Unknown":
-                quick_class = self._rule_based_classify(paper.title, paper.journal)
+                quick_class = self._rule_based_classify(paper.title, paper.journal, document.abstract, sections_text)
 
         paper_type = "Unknown"
         if quick_class:

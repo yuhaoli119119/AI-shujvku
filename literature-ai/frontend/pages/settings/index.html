@@ -97,12 +97,28 @@
         .field select,
         .field textarea {
             width: 100%;
-            border: 1px solid var(--color-border);
+            border: 1px solid color-mix(in srgb, var(--color-border) 55%, var(--color-text-secondary) 45%);
             border-radius: var(--radius);
-            background: var(--color-surface);
+            background: color-mix(in srgb, var(--color-surface-alt) 86%, white 14%);
             color: var(--color-text);
             font: inherit;
             padding: 10px 12px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+            transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+        }
+        .field input:hover,
+        .field select:hover,
+        .field textarea:hover {
+            border-color: color-mix(in srgb, var(--color-primary) 32%, var(--color-border));
+            background: color-mix(in srgb, var(--color-surface-alt) 78%, white 22%);
+        }
+        .field input:focus,
+        .field select:focus,
+        .field textarea:focus {
+            outline: none;
+            border-color: color-mix(in srgb, var(--color-primary) 72%, white 28%);
+            background: color-mix(in srgb, var(--color-surface) 72%, white 28%);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
         }
         .field textarea {
             resize: vertical;

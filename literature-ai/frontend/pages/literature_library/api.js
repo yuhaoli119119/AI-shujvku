@@ -122,6 +122,42 @@ function uiLabel(kind, value) {
     return (UI_LABELS[kind] && UI_LABELS[kind][key]) || (value ? String(value) : UI_LABELS[kind]?.unknown || "未识别");
 }
 
+const PAPER_TYPE_LABELS = {
+    a: "A类",
+    a1: "A1类",
+    a2: "A2类",
+    a3: "A3类",
+    a4: "A4类",
+    b: "B类",
+    b1: "B1类",
+    b2: "B2类",
+    b3: "B3类",
+    c: "C类",
+    c1: "C1类",
+    c2: "C2类",
+    c3: "C3类",
+    r: "综述",
+    review: "综述",
+    research: "研究论文",
+    unknown: "未知类型"
+};
+
+function paperTypeLabel(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return PAPER_TYPE_LABELS.unknown;
+    const key = raw.toLowerCase();
+    if (PAPER_TYPE_LABELS[key]) return PAPER_TYPE_LABELS[key];
+    if (/^[abc]\d?$/i.test(raw)) return raw.toUpperCase() + "类";
+    if (/^r\d?$/i.test(raw)) return "综述";
+    if (key === "null" || key === "none") return PAPER_TYPE_LABELS.unknown;
+    return raw;
+}
+
+function paperTypeBadgeClass(value) {
+    const raw = String(value || "").trim().toUpperCase();
+    return /^[ABCR]/.test(raw) ? raw.charAt(0) : "Unknown";
+}
+
 function normalizeExternalSourceForApi(value) {
     const raw = String(value || "").trim();
     if (!raw || raw === "手动导入") return "manual";
