@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -17,7 +18,9 @@ from app.db.models import (
     WritingCard,
 )
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
+from app.services.extraction_schema_service import ExtractionSchemaService
 from app.services.extraction_pipeline import ExtractionPipelineService
+from app.services.extraction_validator import ExtractionValidator
 
 
 def test_extraction_pipeline_persists_stage2_outputs():
@@ -53,7 +56,7 @@ def test_extraction_pipeline_persists_stage2_outputs():
                             section_type="computational",
                             text=(
                                 "The calculations were performed using VASP with PAW and the PBE functional. "
-                                "The cutoff energy was set to 400 eV. A 3 x 3 x 1 k-point grid was used. "
+                                "The cutoff energy was set to 30 Ry. A 3 x 3 x 1 k-point grid was used. "
                                 "EDIFF = 1e-5 eV. A vacuum layer of 15 A was added. DFT-D3 correction was applied. "
                                 "Atomic coordinates are provided in the Supplementary Information."
                             ),
@@ -94,6 +97,8 @@ def test_extraction_pipeline_persists_stage2_outputs():
                 assert summary["electrochemical_performance"] == 1
                 assert summary["writing_cards"] == 1
                 assert session.query(DFTSetting).count() == 1
+                setting = session.query(DFTSetting).one()
+                assert round(setting.cutoff_energy_ev, 2) == 408.17
                 assert session.query(CatalystSample).count() == 1
                 assert session.query(DFTResult).count() >= 1
                 assert session.query(ElectrochemicalPerformance).count() == 1
@@ -204,3 +209,74 @@ def test_extraction_pipeline_merges_computational_views_and_adds_quality_checks(
                 assert paper.comprehensive_analysis["writing_logic"]["evidence_chain"]
         finally:
             engine.dispose()
+
+
+def test_dft_validation_accepts_orr_potential_metrics():
+    validator = ExtractionValidator()
+
+    warnings = validator.validate_payload(
+        {
+            "DFTResult": [
+                {
+                    "energy_type": {
+                        "value": "limiting_potential",
+                        "evidence_text": "Table 1 reports limiting potential UL = 0.66 V.",
+                    },
+                    "value": {
+                        "value": 0.66,
+                        "unit": "V",
+                        "evidence_text": "Table 1 reports limiting potential UL = 0.66 V.",
+                    },
+                    "reaction_step": {
+                        "value": "Fe-N4-C / constant-Ne",
+                        "evidence_text": "Table 1 reports limiting potential UL = 0.66 V.",
+                    },
+                },
+                {
+                    "energy_type": {
+                        "value": "overpotential",
+                        "evidence_text": "Table 1 reports overpotential eta = 0.57 V.",
+                    },
+                    "value": {
+                        "value": 0.57,
+                        "unit": "V",
+                        "evidence_text": "Table 1 reports overpotential eta = 0.57 V.",
+                    },
+                },
+                {
+                    "energy_type": {
+                        "value": "potential_determining_step",
+                        "evidence_text": "The PDS is *O -> *OH.",
+                    },
+                    "reaction_step": {
+                        "value": "*O -> *OH",
+                        "evidence_text": "The PDS is *O -> *OH.",
+                    },
+                },
+            ]
+        }
+    )
+
+    assert [item.code for item in warnings if item.code == "unknown_energy_type"] == []
+
+
+def test_dft_setting_schema_excludes_reproducibility_from_review_field():
+    service = ExtractionSchemaService(session=None)  # type: ignore[arg-type]
+    setting = DFTSetting(
+        paper_id=uuid4(),
+        convergence_settings={
+            "convergence criteria": [{"value": "EDIFF = 1e-5 eV"}],
+            "reproducibility": {"score": 70, "risk_level": "medium"},
+        },
+        raw_json={"extracted": {"convergence criteria": [{"value": "EDIFF = 1e-5 eV"}]}},
+    )
+
+    schema = service._dft_setting(setting)
+
+    assert schema.convergence_settings.value == {
+        "convergence criteria": [{"value": "EDIFF = 1e-5 eV"}]
+    }
+
+    setting.convergence_settings = {"reproducibility": {"score": 0, "risk_level": "high"}}
+    schema = service._dft_setting(setting)
+    assert schema.convergence_settings.value is None

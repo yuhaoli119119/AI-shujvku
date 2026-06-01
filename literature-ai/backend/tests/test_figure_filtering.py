@@ -6,10 +6,28 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Base, Paper, PaperFigure
 from app.parsers.docling_parser import DoclingParser
+from app.services.paper_ingestion import PaperIngestionService
 from app.services.pdf_image_extractor import PdfImageExtractor
 from app.utils.figure_filtering import decorative_figure_reason, is_decorative_figure
 from scripts.repair_decorative_figures import repair_decorative_figures
 from scripts.repair_polluted_doi_metadata import repair_polluted_dois
+
+
+def test_ingestion_derives_title_and_doi_from_docling_markdown():
+    markdown = """
+<!-- image -->
+Article
+## Enhancing Lithium-Sulfur Battery Performance by MXene, Graphene, and Ionic Liquids: A DFT Investigation
+Jianghui Cao 1 , Sensen Xue 1 , Jian Zhang 1
+Abstract: The efficacy of lithium-sulfur batteries...
+Citation: Cao, J. Molecules 2024, 29, 2. https://doi.org/10.3390/molecules 29010002
+"""
+
+    assert PaperIngestionService._derive_title_from_docling(markdown, []) == (
+        "Enhancing Lithium-Sulfur Battery Performance by MXene, Graphene, and Ionic Liquids: "
+        "A DFT Investigation"
+    )
+    assert PaperIngestionService._derive_doi_from_text(markdown) == "10.3390/molecules29010002"
 
 
 class TestIsDecorativeFigure:
@@ -145,6 +163,7 @@ class TestExtractFiguresFiltersDecorative:
         result = DoclingParser._extract_figures(payload)
         assert len(result) == 1
         assert result[0]["caption"].startswith("Figure 2.")
+        assert result[0]["page"] == 2
 
     def test_all_decorative_returns_empty(self):
         """If all figures are decorative, result should be empty."""
@@ -156,6 +175,47 @@ class TestExtractFiguresFiltersDecorative:
         }
         result = DoclingParser._extract_figures(payload)
         assert len(result) == 0
+
+    def test_docling_table_cells_are_converted_to_markdown(self):
+        payload = {
+            "texts": [{"text": "Table 1: ORR metrics"}],
+            "tables": [
+                {
+                    "captions": [{"$ref": "#/texts/0"}],
+                    "prov": [{"page_no": 13}],
+                    "data": {
+                        "table_cells": [
+                            {"start_row_offset_idx": 0, "end_row_offset_idx": 1, "start_col_offset_idx": 0, "end_col_offset_idx": 1, "text": "metric"},
+                            {"start_row_offset_idx": 0, "end_row_offset_idx": 1, "start_col_offset_idx": 1, "end_col_offset_idx": 2, "text": "constant μe"},
+                            {"start_row_offset_idx": 1, "end_row_offset_idx": 2, "start_col_offset_idx": 0, "end_col_offset_idx": 1, "text": "UL"},
+                            {"start_row_offset_idx": 1, "end_row_offset_idx": 2, "start_col_offset_idx": 1, "end_col_offset_idx": 2, "text": "0.85 V"},
+                        ]
+                    },
+                }
+            ],
+        }
+
+        result = DoclingParser._extract_tables(payload)
+
+        assert result[0]["caption"] == "Table 1: ORR metrics"
+        assert result[0]["page"] == 13
+        assert "| metric | constant μe |" in result[0]["markdown_content"]
+        assert "| UL | 0.85 V |" in result[0]["markdown_content"]
+
+    def test_fallback_caption_extraction_finds_tables_and_figures(self):
+        page_blocks = [
+            {
+                "page": 4,
+                "text": "Table 1: The limiting potential UL is 0.85 V.\nPDS ∗O to ∗OH\nFigure 2. Free energy diagram for ORR.",
+            }
+        ]
+
+        tables = DoclingParser._extract_fallback_tables(page_blocks)
+        figures = DoclingParser._extract_fallback_figures(page_blocks)
+
+        assert tables[0]["page"] == 4
+        assert "limiting potential" in tables[0]["caption"]
+        assert figures[0]["caption"].startswith("Figure 2.")
 
 
 class TestRepairScripts:

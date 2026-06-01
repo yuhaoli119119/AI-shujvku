@@ -173,6 +173,104 @@ function renderNoSelectionState() {
     showEmptyWorkspace();
 }
 
+function normalizePaperListResponse(data) {
+    if (Array.isArray(data)) return { papers: data, total: null };
+    if (!data || typeof data !== "object") return { papers: [], total: null };
+    const papers = Array.isArray(data.papers) ? data.papers : (Array.isArray(data.items) ? data.items : []);
+    const total = Number(data.total ?? data.total_count ?? data.count ?? NaN);
+    return { papers: papers, total: Number.isFinite(total) ? total : null };
+}
+
+function updatePager() {
+    const pageInfo = $("pageInfo");
+    const prevBtn = $("prevBtn");
+    const nextBtn = $("nextBtn");
+    const page = Math.floor(state.currentOffset / PAGE_SIZE) + 1;
+    const shown = state.papers.length;
+    const total = Number(state.currentLibraryTotal || 0);
+    if (pageInfo) {
+        const rangeStart = shown ? state.currentOffset + 1 : 0;
+        const rangeEnd = state.currentOffset + shown;
+        pageInfo.textContent = total
+            ? "第 " + page + " 页（" + rangeStart + "-" + rangeEnd + " / " + total + "）"
+            : "第 " + page + " 页";
+    }
+    if (prevBtn) prevBtn.disabled = state.currentOffset <= 0;
+    if (nextBtn) {
+        nextBtn.disabled = total
+            ? state.currentOffset + shown >= total
+            : shown < PAGE_SIZE;
+    }
+}
+
+async function fetchPapers() {
+    try {
+        renderPaperListSkeleton();
+        const params = getFilters();
+        const data = await fetchJSON(API_BASE + "?" + params.toString());
+        const normalized = normalizePaperListResponse(data);
+        state.papers = normalized.papers;
+        if (normalized.total !== null) {
+            state.currentLibraryTotal = normalized.total;
+        } else if (state.currentOffset === 0 && state.papers.length > state.currentLibraryTotal) {
+            state.currentLibraryTotal = state.papers.length;
+        }
+        renderPaperList();
+        updatePager();
+
+        if (state.selectedPaperId) {
+            await loadPaperDetail(state.selectedPaperId);
+        } else if (!state.papers.length && state.currentLibraryTotal === 0) {
+            renderLibraryEmptyState();
+        } else {
+            renderNoSelectionState();
+        }
+    } catch (error) {
+        state.papers = [];
+        const container = $("paperList");
+        if (container) container.innerHTML = '<div class="list-empty error">文献列表加载失败：' + esc(error.message) + "</div>";
+        updatePager();
+        showToast("文献列表加载失败：" + error.message, "error");
+    }
+}
+
+function searchLocal() {
+    state.currentOffset = 0;
+    fetchPapers();
+}
+
+function refreshCurrentPage() {
+    fetchPapers();
+    loadLibraries();
+}
+
+function prevPage() {
+    if (state.currentOffset <= 0) return;
+    state.currentOffset = Math.max(0, state.currentOffset - PAGE_SIZE);
+    fetchPapers();
+}
+
+function nextPage() {
+    state.currentOffset += PAGE_SIZE;
+    fetchPapers();
+}
+
+function clearFilters() {
+    ["searchInput", "filterYear", "filterJournal", "filterPaperType", "filterDFT", "filterWC"].forEach(function(id) {
+        const el = $(id);
+        if (el) el.value = "";
+    });
+    searchLocal();
+}
+
+function selectPaperById(paperId) {
+    if (!paperId) return;
+    state.selectedPaperId = paperId;
+    state.selectedPaper = state.papers.find(function(paper) { return paper.id === paperId; }) || state.selectedPaper;
+    renderPaperList();
+    loadPaperDetail(paperId);
+}
+
 function toggleDropdown(menuId, event) {
     if (event) event.stopPropagation();
     document.querySelectorAll(".dropdown-menu.open").forEach(function(menu) {
@@ -525,7 +623,14 @@ Object.assign(window, {
     showFolderImportGuide: showFolderImportGuide,
     switchTab: switchTab,
     openMetadataDiagnostics: openMetadataDiagnostics,
-    closeMetadataDiagnostics: closeMetadataDiagnostics
+    closeMetadataDiagnostics: closeMetadataDiagnostics,
+    fetchPapers: fetchPapers,
+    searchLocal: searchLocal,
+    refreshCurrentPage: refreshCurrentPage,
+    prevPage: prevPage,
+    nextPage: nextPage,
+    clearFilters: clearFilters,
+    selectPaperById: selectPaperById
 });
 
 window.addEventListener("beforeunload", disconnectSSE);
@@ -541,11 +646,10 @@ initSplitDrag();
 initActionMenus();
 ensureClassificationToolbarButton();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
-fetchPapers();
+loadLibraries().finally(fetchPapers);
 initSSE();
 switchTab(state.currentTab);
 if (state.openAddOnLoad) {
     openAddLiteraturePanel(state.openAddOnLoad);
 }
-loadLibraries();
 loadWriterSettings();

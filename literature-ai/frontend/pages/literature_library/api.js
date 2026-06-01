@@ -200,11 +200,19 @@ function getCurrentLibraryName() {
     return el ? el.value || "" : "";
 }
 
+function normalizeLibraryListResponse(data) {
+    if (Array.isArray(data)) return data;
+    if (!data || typeof data !== "object") return [];
+    if (Array.isArray(data.libraries)) return data.libraries;
+    if (Array.isArray(data.items)) return data.items;
+    return [];
+}
+
 async function loadLibraries() {
     try {
         const el = $("librarySelect");
         const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "";
-        const quickLibraries = await fetchJSON(API_BASE + "/libraries");
+        const quickLibraries = normalizeLibraryListResponse(await fetchJSON(API_BASE + "/libraries"));
         const selectedName = previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
             ? previousSelection
             : ((quickLibraries || [])[0] ? quickLibraries[0].name : "");
@@ -221,7 +229,8 @@ async function loadLibraries() {
         const status = $("libStatus");
         if (status) status.textContent = selected ? (selected.name + " | " + selected.paper_count + " 篇文献") : "";
 
-        fetchJSON(LIB_API).then(function(libraries) {
+        fetchJSON(LIB_API).then(function(rawLibraries) {
+            const libraries = normalizeLibraryListResponse(rawLibraries);
             const fullEl = $("librarySelect");
             const currentValue = fullEl ? fullEl.value : selectedName;
             const active = (libraries || []).find(function(item) { return item.is_active; });
@@ -246,7 +255,7 @@ async function loadLibraries() {
     } catch (error) {
         console.error("loadLibraries failed", error);
         try {
-            const libraries = await fetchJSON(LIB_API);
+            const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
             const el = $("librarySelect");
             if (el) {
                 el.innerHTML = libraries.map(function(item) {

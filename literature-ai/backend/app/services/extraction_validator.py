@@ -18,6 +18,9 @@ DFT_ENERGY_TYPES = {
     "charge_transfer",
     "dos_claim",
     "charge_density_difference_claim",
+    "limiting_potential",
+    "overpotential",
+    "potential_determining_step",
 }
 
 

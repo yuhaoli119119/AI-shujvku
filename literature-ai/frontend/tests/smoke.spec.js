@@ -470,6 +470,10 @@ async function mockApi(route) {
     return jsonResponse(route, PAPERS);
   }
 
+  if (pathname === '/api/papers/libraries' && method === 'GET') {
+    return jsonResponse(route, [{ name: 'Default Library', paper_count: PAPERS.length }]);
+  }
+
   if (pathname === '/api/library/papers/filter' && method === 'GET') {
     return jsonResponse(route, { papers: PAPERS });
   }
@@ -1132,13 +1136,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await expect(page.locator('button[onclick="generateAcademicDraft()"]')).toBeVisible();
         } else if (pageInfo.name === 'Extraction Review Workbench') {
           await expect(page.locator('#schemaSelect')).toBeVisible();
-          await page.click('button:has-text("Validate")');
+          await page.click('button[onclick="validateCurrent()"]');
           await expect(page.locator('#warningsBox')).toBeVisible();
         } else if (pageInfo.name === 'Settings') {
-          await page.click('button[onclick="showSection(\'ide\')"]');
+          await page.click('button:has-text("IDE 连接")');
           await expect(page.locator('#section-ide')).toBeVisible();
 
-          await page.click('button[onclick="showSection(\'theme\')"]');
+          await page.click('button:has-text("主题外观")');
           await expect(page.locator('#section-theme')).toBeVisible();
         }
 
@@ -1264,8 +1268,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('button:has-text("仅看译文")');
     await expect(page.locator('#translationPanel')).toContainText('复制译文');
     await page.click('#evidencePanel button');
-    await expect(page.locator('#evidenceDetail')).toContainText('paper_id');
-    await expect(page.locator('#evidenceDetail')).toContainText('chunk_id');
+    await expect(page.locator('#evidenceDetail')).toContainText('论断');
+    await expect(page.locator('#evidenceDetail')).toContainText('已支持');
+    await expect(page.locator('#evidenceDetail')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.');
   });
 
   test('business flow: Paper Detail without id shows localized empty state and hidden nav entry', async ({ page }) => {
@@ -1279,8 +1284,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
     await page.waitForTimeout(500);
     await expect(page.locator('#schemaForm')).toContainText('value');
-    await page.click('button:has-text("Validate")');
-    await expect(page.locator('#warningsBox')).toContainText('No validation warnings');
+    await page.click('button[onclick="validateCurrent()"]');
+    await expect(page.locator('#warningsBox')).toContainText('当前没有校验提醒');
   });
 
   test('business flow: validation workbench editing, verifying, and warning filtering', async ({ page }) => {
@@ -1351,7 +1356,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#schemaForm')).toContainText('Fe-N4');
     await expect(page.locator('#schemaForm')).toContainText('Energy value seems unusually high');
-    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
+    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
 
     const evidenceBtn = page.locator('button:has-text("原文证据 ▾")').first();
     await evidenceBtn.click();
@@ -1379,12 +1384,12 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('input[data-field="catalyst"]')).toHaveCount(0);
 
     const scopeSummary = page.locator('#actionScopeSummary');
-    await expect(scopeSummary).toContainText('当前 schema');
-    await expect(scopeSummary).toContainText('DFTResult');
+    await expect(scopeSummary).toContainText('当前数据类型');
+    await expect(scopeSummary).toContainText('DFT 结果');
     await expect(scopeSummary).toContainText('当前过滤');
+    await expect(scopeSummary).toContainText('只看有提醒');
     await expect(scopeSummary).toContainText('当前可见记录');
     await expect(scopeSummary).toContainText('即将处理字段');
-    await expect(scopeSummary).toContainText(/警告|warnings/);
 
     verifyCalled = false;
     await page.click('.footer-actions button:has-text("人工确认校验")');
@@ -1423,25 +1428,26 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#schemaForm')).toContainText('catalyst_type');
     await expect(page.locator('#schemaForm')).toContainText('metal_centers');
     await expect(page.locator('#schemaForm .status-chip')).toHaveCount(3);
-    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
+    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
     await expect(page.locator('#schemaForm')).toContainText('Evidence text for the heterogeneous catalyst is present.');
-    await expect(page.locator('#schemaForm')).toContainText('missing_page');
-    await expect(page.locator('#schemaForm')).toContainText('Exact PDF locator missing');
-    await expect(page.locator('#schemaForm')).toContainText('Blocked from export/writing until exact locator + human verification');
+    await expect(page.locator('#schemaForm')).toContainText('缺少准确 PDF 定位');
+    await expect(page.locator('#schemaForm')).toContainText('仅有证据文本，暂无 PDF 页码定位');
+    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     await page.locator('#schemaSelect').selectOption('DFTSetting');
     await expect(page.locator('#schemaForm')).toContainText('convergence_settings');
     await expect(page.locator('#schemaForm')).toContainText('DFT convergence evidence text is visible.');
-    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
-    await expect(page.locator('#schemaForm')).toContainText('unsafe_locator / no exact locator');
+    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
+    await expect(page.locator('#schemaForm')).toContainText('缺少准确 PDF 定位');
+    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     await page.locator('#schemaSelect').selectOption('ElectrochemicalPerformance');
     await expect(page.locator('#schemaForm')).toContainText('rate');
     await expect(page.locator('#schemaForm')).toContainText('Rate-performance evidence text is visible.');
-    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
-    await expect(page.locator('#schemaForm')).toContainText('Blocked from export/writing until exact locator + human verification');
+    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
+    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     const schemaText = await page.locator('#schemaForm').innerText();
@@ -1479,28 +1485,28 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
 
     await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=${PILOT_PAPER_ID}`);
-    await expect(page.locator('#prepareReviewPanel')).toContainText('Prepare review queue');
+    await expect(page.locator('#prepareReviewPanel')).toContainText('生成待确认清单');
     await expect(page.locator('#prepareReviewsButton')).toBeEnabled();
     expect(prepareCalls).toBe(0);
 
     page.once('dialog', async dialog => {
-      expect(dialog.message()).toContain('will not mark anything verified');
-      expect(dialog.message()).toContain('will not export data');
-      expect(dialog.message()).toContain('will not unlock writing');
-      expect(dialog.message()).toContain('extraction/reprocessing/materialize/migration');
+      expect(dialog.message()).toContain('不会标记已确认');
+      expect(dialog.message()).toContain('不会导出');
+      expect(dialog.message()).toContain('不会解锁写作');
+      expect(dialog.message()).toContain('不会重新解析论文');
       await dialog.dismiss();
     });
     await page.locator('#prepareReviewsButton').click();
     await page.waitForTimeout(200);
     expect(prepareCalls).toBe(0);
-    await expect(page.locator('#prepareReviewPanel')).not.toContainText('Created pending rows: 5');
+    await expect(page.locator('#prepareReviewPanel')).not.toContainText('新建待确认：5');
 
     page.once('dialog', async dialog => {
-      expect(dialog.message()).toContain('will not mark anything verified');
+      expect(dialog.message()).toContain('不会标记已确认');
       await dialog.accept();
     });
     await page.locator('#prepareReviewsButton').click();
-    await expect(page.locator('#prepareSummary')).toContainText('Created pending rows: 5');
+    await expect(page.locator('#prepareSummary')).toContainText(/新建待确认：\s*5/);
     expect(prepareCalls).toBe(1);
 
     const preparePayload = preparePayloads.join('\n');
@@ -1510,21 +1516,20 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(preparePayload).not.toMatch(/mark_verified|export|writing|materialize|reprocess|migration/i);
 
     const preparePanel = page.locator('#prepareReviewPanel');
-    await expect(preparePanel).toContainText('Existing pending rows reused: 0');
-    await expect(preparePanel).toContainText('Skipped: 0');
-    await expect(preparePanel).toContainText('Verified rows created: 0');
-    await expect(preparePanel).toContainText('Safe verified rows: 0');
-    await expect(preparePanel).toContainText('Review items returned: 5');
+    await expect(preparePanel).toContainText(/复用已有待确认：\s*0/);
+    await expect(preparePanel).toContainText(/跳过：\s*0/);
+    await expect(preparePanel).toContainText(/误生成已确认：\s*0/);
+    await expect(preparePanel).toContainText(/可安全导出：\s*0/);
+    await expect(preparePanel).toContainText(/返回记录：\s*5/);
     await expect(page.locator('#prepareReviewsButton')).toBeDisabled();
-    await expect(page.locator('#prepareReviewsButton')).toContainText('Pending queue already prepared');
+    await expect(page.locator('#prepareReviewsButton')).toContainText('待确认清单已生成');
 
     await page.locator('#schemaSelect').selectOption('CatalystSample');
     const reviewQueue = page.locator('#schemaForm');
-    await expect(reviewQueue).toContainText('Pending human review / Not verified');
-    await expect(reviewQueue).toContainText('missing_page');
-    await expect(reviewQueue).toContainText('Exact PDF locator missing');
-    await expect(reviewQueue).toContainText('unsafe_locator / no exact locator');
-    await expect(reviewQueue).toContainText('Blocked from export/writing until exact locator + human verification');
+    await expect(reviewQueue).toContainText('待人工确认');
+    await expect(reviewQueue).toContainText('缺少准确 PDF 定位');
+    await expect(reviewQueue).toContainText('仅有证据文本，暂无 PDF 页码定位');
+    await expect(reviewQueue).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
     await expect(reviewQueue.locator('button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     const scopedText = `${await preparePanel.innerText()}\n${await reviewQueue.innerText()}`;
@@ -1546,14 +1551,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
 
     await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=${PILOT_PAPER_ID}`);
-    await expect(page.locator('#prepareReviewPanel')).toContainText('Pending queue already prepared: 5 pending, unverified rows');
+    await expect(page.locator('#prepareReviewPanel')).toContainText('已有 5 条待确认记录');
     await expect(page.locator('#prepareReviewsButton')).toBeDisabled();
-    await expect(page.locator('#prepareReviewsButton')).toContainText('Pending queue already prepared');
+    await expect(page.locator('#prepareReviewsButton')).toContainText('待确认清单已生成');
     expect(prepareCalls).toBe(0);
 
     await page.locator('#schemaSelect').selectOption('CatalystSample');
-    await expect(page.locator('#schemaForm')).toContainText('Pending human review / Not verified');
-    await expect(page.locator('#schemaForm')).toContainText('Exact PDF locator missing');
+    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
+    await expect(page.locator('#schemaForm')).toContainText('缺少准确 PDF 定位');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
   });
 
@@ -1562,37 +1567,38 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
     await expect(page.locator('#dftTable')).toContainText('Li2S4');
     await page.click('button:has-text("证据链接")');
-    await expect(page.locator('#evidenceDetail')).toContainText('evidence_text');
+    await expect(page.locator('#evidenceDetail')).toContainText('证据原文');
+    await expect(page.locator('#evidenceDetail')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.');
   });
 
   test('business flow: DFT export displays safety headers', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('Human verified + required evidence');
-    await expect(page.locator('.export-note')).toContainText('blocked rows 不会导出');
+    await expect(page.locator('.export-note')).toContainText('人工已确认、证据完整、定位准确');
+    await expect(page.locator('.export-note')).toContainText('需要处理的记录不会导出');
     await expect(page.locator('#dftTable')).toContainText('Li2S4');
 
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
     await downloadPromise;
 
-    await expect(page.locator('#exportSafetyStatus')).toContainText('safe_verified_with_required_evidence');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('exported: 1');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 2');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('人工确认 + 必要证据 + 准确定位');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('已导出 1 条');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('需处理 2 条');
   });
 
   test('business flow: DFT ML dataset export keeps safety summary', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('button[onclick="exportMLDataset()"]')).toContainText('导出 ML JSON');
+    await expect(page.locator('button[onclick="exportMLDataset()"]')).toContainText('导出 ML 数据集');
 
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportMLDataset()"]');
     await downloadPromise;
 
-    await expect(page.locator('#exportSafetyStatus')).toContainText('safe_verified_with_required_evidence');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('records: 1');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 2');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('人工确认 + 必要证据 + 准确定位');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('可导出 1 条');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('需处理 2 条');
   });
 
   test('business flow: DFT quality panel shows blocked reasons and review links', async ({ page }) => {
@@ -1601,11 +1607,12 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#qualityExportable')).toContainText('1');
     await expect(page.locator('#qualityBlocked')).toContainText('2');
-    await expect(page.locator('#qualityReasonChips')).toContainText('missing_review');
-    await expect(page.locator('#qualityRows')).toContainText('blocked_reasons: missing_review');
-    await expect(page.locator('#qualityCompleteness')).toContainText('missing_catalyst_sample');
-    await expect(page.locator('#qualityCompleteness')).toContainText('missing_dft_setting');
-    await expect(page.locator('#qualityRows a:has-text("Review workbench")')).toHaveAttribute('href', /external_analysis_workbench/);
+    await expect(page.locator('#qualityReasonChips')).toContainText('缺少人工确认');
+    await expect(page.locator('#qualityRows')).toContainText('原因');
+    await expect(page.locator('#qualityRows')).toContainText('缺少人工确认');
+    await expect(page.locator('#qualityCompleteness')).toContainText('缺少催化剂样本');
+    await expect(page.locator('#qualityCompleteness')).toContainText('缺少 DFT 设置');
+    await expect(page.locator('#qualityRows a:has-text("去文献库处理")')).toHaveAttribute('href', /literature_library/);
   });
 
   test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {
@@ -1624,19 +1631,17 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('Human verified + required evidence');
+    await expect(page.locator('.export-note')).toContainText('人工已确认、证据完整、定位准确');
     
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
     await downloadPromise;
 
     await expect(page.locator('#exportSafetyStatus')).toContainText('enforced');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('exported: 0');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 0');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('没有可导出的 Human verified + required evidence 记录');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('没有可导出的合格记录');
     
     // assert toast
-    await expect(page.locator('#toast')).toContainText('0 rows exported / 没有记录被导出');
+    await expect(page.locator('#toast')).toContainText('没有记录被导出');
     
     // check no misleading wording
     const bodyText = await page.locator('body').innerText();
@@ -1659,20 +1664,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('Human verified + required evidence');
+    await expect(page.locator('.export-note')).toContainText('人工已确认、证据完整、定位准确');
     
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
     await downloadPromise;
 
     await expect(page.locator('#exportSafetyStatus')).toContainText('enforced');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('exported: 0');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('blocked: 3');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('没有 safe rows 被导出');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('缺少 Human verified 或 required evidence');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('0 条导出');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('3 条需要先处理');
 
     // assert toast
-    await expect(page.locator('#toast')).toContainText('没有 safe rows 被导出 (3 blocked)');
+    await expect(page.locator('#toast')).toContainText('没有合格记录被导出，3 条需要处理');
     
     // check no misleading wording
     const bodyText = await page.locator('body').innerText();
@@ -1717,13 +1720,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.click('.paper-card');
       await page.click('button[data-tab="review"]');
       await expect(page.locator('#externalRuns')).toContainText('外部 AI 候选建议');
-      await page.click('button:has-text("展开候选项")');
+      await page.click('button:has-text("展开审阅项")');
       await expect(page.locator('.candidate-card').first()).toBeVisible();
     }
 
     await openReviewCandidates();
     const reviewAreaText = await page.locator('#tab-review').innerText();
-    expect(reviewAreaText).toMatch(/AI 建议候选/);
+    expect(reviewAreaText).toMatch(/外部 AI 候选建议/);
+    expect(reviewAreaText).toMatch(/AI 建议 \/ 待生成记录/);
     expect(reviewAreaText).toMatch(/生成待确认记录/);
     expect(reviewAreaText).not.toMatch(/写回数据库|一键全部写回数据库|AI 审核|AI 分析结果|审核结果|已验证|已校验/);
 
@@ -1755,7 +1759,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
     await page.click('button:has-text("解析任务")');
-    await expect(page.locator('#acquisitionResult')).toContainText('解析任务中心');
+    await expect(page.locator('#acquisitionResult')).toContainText('任务中心');
   });
 
   test('business flow: literature library UX is Chinese, clamps DOI, and exposes key entries', async ({ page }) => {
@@ -1807,7 +1811,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
     await page.click('.paper-card');
     await page.click('button[data-tab="review"]');
-    await page.click('button:has-text("生成 AI 候选项")');
+    await page.click('#tab-review button[onclick="runInternalAIParse()"]');
 
     await expect(page.locator('#internalAIConfigGuide')).toContainText('内部解析配置未完成');
     await expect(page.locator('#internalAIConfigGuide')).toContainText('复用 Writer LLM');
@@ -3079,18 +3083,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       // Check locator status badges exist
       const exactBadge = page.locator('.locator-status-badge[data-locator-status="exact_page"]');
       await expect(exactBadge.first()).toBeVisible();
-      await expect(exactBadge.first()).toContainText('locator repaired / exact locator available / page available');
+      await expect(exactBadge.first()).toContainText('PDF 定位准确');
 
       const pageOnlyBadge = page.locator('.locator-status-badge[data-locator-status="exact_page"]');
       await expect(pageOnlyBadge.first()).toBeVisible();
-      await expect(pageOnlyBadge.first()).toContainText('locator repaired / exact locator available / page available');
+      await expect(pageOnlyBadge.first()).toContainText('PDF 定位准确');
 
       const needsReparseBadge = page.locator('.locator-status-badge[data-locator-status="missing_page"]');
       await expect(needsReparseBadge).toBeVisible();
-      await expect(needsReparseBadge).toContainText('missing_page / unsafe_locator / no exact locator');
+      await expect(needsReparseBadge).toContainText('缺少准确 PDF 定位');
 
       // exact_page: has page jump button
-      const viewOriginalBtn = page.locator('button:has-text("Locator Inspection (Jump to Page 5)")');
+      const viewOriginalBtn = page.locator('button:has-text("查看 PDF 第 5 页")');
       await expect(viewOriginalBtn.first()).toBeAttached();
 
       // missing_page: no precise jump
@@ -3143,7 +3147,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       // Evidence panel must show page locator info
       const evidencePanel = page.locator('#pdfViewerEvidencePanel');
       await expect(evidencePanel).toContainText('PDF 页码定位');
-      await expect(evidencePanel).toContainText('当前版本不提供 PDF 页面内框选');
+      await expect(evidencePanel).toContainText('临时高亮/绘制不会写回系统');
 
       // PDF unavailable message must be hidden
       const unavailable = page.locator('#pdfViewerUnavailable');
@@ -3349,7 +3353,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(filterSelect).toBeVisible();
 
       // Save and verify buttons still exist
-      await expect(page.locator('.footer-actions button:has-text("Save")')).toBeVisible();
+      await expect(page.locator('.footer-actions button:has-text("保存修改")')).toBeVisible();
       await expect(page.locator('.footer-actions button:has-text("人工确认校验")')).toBeVisible();
     });
 
@@ -3498,46 +3502,46 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       // Unrepaired name check (HIGH-CAUTION)
       const nameField = form.locator('#field-11111111-1111-4111-8111-111111111111-name');
-      await expect(nameField).toContainText('Pending human review / Not verified');
-      await expect(nameField).toContainText('HIGH-CAUTION: Unrepaired locator risk / exact locator missing');
-      await expect(nameField.locator('button:has-text("Locator Inspection")')).toHaveCount(0);
+      await expect(nameField).toContainText('待人工确认');
+      await expect(nameField).toContainText('高风险：缺少准确 PDF 定位');
+      await expect(nameField.locator('button:has-text("查看 PDF")')).toHaveCount(0);
 
       // Repaired catalyst_type check
       const catalystTypeField = form.locator('#field-11111111-1111-4111-8111-111111111111-catalyst_type');
-      await expect(catalystTypeField).toContainText('Pending human review / Not verified');
-      await expect(catalystTypeField).toContainText('locator repaired / exact locator available / page available');
+      await expect(catalystTypeField).toContainText('待人工确认');
+      await expect(catalystTypeField).toContainText('PDF 定位准确');
       await expect(catalystTypeField).toContainText('page 7');
       await expect(catalystTypeField).toContainText('Docling source if available');
       await expect(catalystTypeField).toContainText('Catalyst type evidence text is visible to the reviewer.');
-      await expect(catalystTypeField.locator('button:has-text("Locator Inspection (Jump to Page 7)")')).toHaveCount(1);
+      await expect(catalystTypeField.locator('button:has-text("查看 PDF 第 7 页")')).toHaveCount(1);
 
       // Repaired metal_centers check
       const metalCentersField = form.locator('#field-11111111-1111-4111-8111-111111111111-metal_centers');
-      await expect(metalCentersField).toContainText('Pending human review / Not verified');
-      await expect(metalCentersField).toContainText('locator repaired / exact locator available / page available');
+      await expect(metalCentersField).toContainText('待人工确认');
+      await expect(metalCentersField).toContainText('PDF 定位准确');
       await expect(metalCentersField).toContainText('page 7');
       await expect(metalCentersField).toContainText('Docling source if available');
-      await expect(metalCentersField.locator('button:has-text("Locator Inspection (Jump to Page 7)")')).toHaveCount(1);
+      await expect(metalCentersField.locator('button:has-text("查看 PDF 第 7 页")')).toHaveCount(1);
 
       // 3. DFTSetting schema check: unrepaired convergence_settings (RED excluded)
       await page.locator('#schemaSelect').selectOption('DFTSetting');
       await page.waitForTimeout(200);
 
       const convField = form.locator('#field-22222222-2222-4222-8222-222222222222-convergence_settings');
-      await expect(convField).toContainText('Pending human review / Not verified');
-      await expect(convField).toContainText('RED: excluded / no reliable source');
-      await expect(convField.locator('button:has-text("Locator Inspection")')).toHaveCount(0);
+      await expect(convField).toContainText('待人工确认');
+      await expect(convField).toContainText('缺少准确 PDF 定位');
+      await expect(convField.locator('button:has-text("查看 PDF")')).toHaveCount(0);
 
       // 4. ElectrochemicalPerformance schema check: repaired rate
       await page.locator('#schemaSelect').selectOption('ElectrochemicalPerformance');
       await page.waitForTimeout(200);
 
       const rateField = form.locator('#field-33333333-3333-4333-8333-333333333333-rate');
-      await expect(rateField).toContainText('Pending human review / Not verified');
-      await expect(rateField).toContainText('locator repaired / exact locator available / page available');
+      await expect(rateField).toContainText('待人工确认');
+      await expect(rateField).toContainText('PDF 定位准确');
       await expect(rateField).toContainText('page 6');
       await expect(rateField).toContainText('Docling source if available');
-      await expect(rateField.locator('button:has-text("Locator Inspection (Jump to Page 6)")')).toHaveCount(1);
+      await expect(rateField.locator('button:has-text("查看 PDF 第 6 页")')).toHaveCount(1);
 
       // 5. Verify no prepare or mark-verified API is called on page load
       const openingRequests = apiRequests.filter(req => req.url.includes(PILOT_PAPER_ID));
@@ -3675,10 +3679,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     // 1. Verify page layout & safety banner
     await expect(page.locator('h2')).toContainText('写作引用辅助');
-    await expect(page.locator('.safety-disclaimer-banner')).toBeVisible();
-    await expect(page.locator('.safety-disclaimer-banner')).toContainText(
-      '只有 API 明确标记为 confirmed 的候选'
-    );
+    const mainSafetyBanner = page.locator('.safety-disclaimer-banner').first();
+    await expect(mainSafetyBanner).toBeVisible();
+    await expect(mainSafetyBanner).toContainText('系统评估的高置信度候选');
 
     // 2. Empty text input click validation
     await page.click('#btnSearch');

@@ -37,6 +37,7 @@ class DFTResultItem:
     adsorbate: str | None = None  # e.g. "Li2S4", "Li2S", None for generic
     value: float | None = None
     unit: str | None = None
+    reaction_step: str | None = None
     evidence_text: str = ""
     source_location: SourceLocation = field(default_factory=SourceLocation)
     confidence: float = 0.5  # 0.0 ~ 1.0
@@ -53,6 +54,7 @@ class DFTResultItemModel(BaseModel):
     adsorbate: str | None = Field(None, description="The adsorbate molecule/atom if applicable (e.g., Li2S4, S8)")
     value: float | None = Field(None, description="The numerical value extracted")
     unit: str | None = Field(None, description="Unit of the value (e.g., eV, meV)")
+    reaction_step: str | None = Field(None, description="Reaction step or table condition if applicable")
     evidence_text: str = Field(..., description="The exact sentence or table row text that serves as evidence")
     source_location: SourceLocationModel = Field(default_factory=SourceLocationModel)
     confidence: float = Field(..., description="Confidence score from 0.0 to 1.0")
@@ -74,14 +76,15 @@ ADSORBATE_MAP: dict[str, str] = {
     "li2s2": "Li2S2",
     "li2s": "Li2S",
     "sulfur": "S8",
-    "polysulfide": "LiPS(generic)",
-    "lips": "LiPS(generic)",
+    "polysulfide": "LiPS",
+    "lips": "LiPS",
 }
 
 # 能量单位标准化
 UNIT_ALIASES: dict[str, str] = {
     "ev": "eV",
     "ev/atom": "eV/atom",
+    "v": "V",
     "kcal/mol": "kcal/mol",
     "kj/mol": "kJ/mol",
     "mev": "meV",
@@ -94,6 +97,8 @@ TABLE_HEADER_CATEGORY_RULES: list[tuple[re.Pattern[str], str, str | None]] = [
     (re.compile(r"(bader).*(charge)|(^bader$)", re.IGNORECASE), "bader_charge", "e"),
     (re.compile(r"(charge transfer|electron transfer)", re.IGNORECASE), "charge_transfer", "e"),
     (re.compile(r"(d-?band|epsilon[_\-\s]*d|ε[_\-\s]*d)", re.IGNORECASE), "d_band_center", "eV"),
+    (re.compile(r"(limiting\s+potential|^u[_\-\s]*l$|u\s*l)", re.IGNORECASE), "limiting_potential", "V"),
+    (re.compile(r"(overpotential|η|eta)", re.IGNORECASE), "overpotential", "V"),
 ]
 
 NUMERIC_CATEGORIES = {
@@ -105,7 +110,10 @@ NUMERIC_CATEGORIES = {
     "bader_charge",
     "charge_transfer",
     "d_band_center",
+    "limiting_potential",
+    "overpotential",
 }
+TABLE_ONLY_NUMERIC_CATEGORIES = {"limiting_potential", "overpotential"}
 
 # 类别 → 正则模式列表 (每个模式: (pattern, value_group, unit_group))
 CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
@@ -149,6 +157,14 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
     "d_band_center": [
         r"(?:d-?band\s+center|\u03b5_d|epsilon_d).{0,40}?([-\+]?\d+[.]?\d*)\s*(eV|meV)",
         ],
+    "limiting_potential": [
+        r"(?:limiting\s+potential|U\s*[_\-\s]?\s*L|U\s*L).{0,80}?([\-\+]?\d+[.]?\d*)\s*(V|eV)",
+        r"([\-\+]?\d+[.]?\d*)\s*(V|eV).{0,60}(?:limiting\s+potential|U\s*[_\-\s]?\s*L)",
+        ],
+    "overpotential": [
+        r"(?:overpotential|\u03b7|eta).{0,80}?([\-\+]?\d+[.]?\d*)\s*(V|eV)",
+        r"([\-\+]?\d+[.]?\d*)\s*(V|eV).{0,60}(?:overpotential|\u03b7|eta)",
+        ],
     "dos_claim": [
         r"(?:DOS|density\s+of\s+states).{0,120}(?:enhanc|increas|reduc|shift|broaden|narrow)",
         r"(PDOS|projected\s+DOS).{0,120}(?:hybridiz|overlap|contribut)",
@@ -178,6 +194,49 @@ def _extract_context_around_match(text: str, match_start: int, match_end: int, w
     return snippet
 
 
+def _normalize_numeric_text(text: str) -> str:
+    """Normalize common PDF/OCR minus variants so signed values keep their sign."""
+    if not text:
+        return ""
+    return (
+        text.replace("\u2212", "-")
+        .replace("\u2010", "-")
+        .replace("\u2011", "-")
+        .replace("\u2012", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+
+
+def _parse_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    return float(_normalize_numeric_text(value).strip())
+
+
+def _parse_match_float(match: re.Match[str], group_index: int) -> float | None:
+    value = match.group(group_index)
+    if value is None:
+        return None
+    normalized = _normalize_numeric_text(value).strip()
+    start = match.start(group_index)
+    if normalized.startswith("-") and start > 0 and match.string[start - 1].isdigit():
+        normalized = normalized[1:]
+    return float(normalized)
+
+
+def _should_keep_result(category: str, adsorbate: str | None, value: float | None, evidence: str) -> bool:
+    if category in NUMERIC_CATEGORIES and value is None:
+        return False
+    if category == "adsorption_energy" and not adsorbate:
+        return False
+    if category == "adsorption_energy" and value is not None and value > 0:
+        lowered = evidence.lower()
+        if re.search(r"\d(?:\.\d+)?\s*-\s*\d", lowered) and "positive value" in lowered:
+            return False
+    return True
+
+
 def _guess_section_name(sections: list[Any], page: int | None) -> str | None:
     """根据页码推断章节名."""
     if page is None or not sections:
@@ -199,7 +258,9 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
     for tbl in tables:
         caption = getattr(tbl, "caption", "") or ""
         content = getattr(tbl, "markdown_content", "") or ""
-        combined = f"{caption}\n{content}"
+        if category in {"limiting_potential", "overpotential"} and _parse_markdown_table(content)[1]:
+            continue
+        combined = _normalize_numeric_text(f"{caption}\n{content}")
         for pat_tuple in patterns:
             if isinstance(pat_tuple, tuple):
                 pattern, vg, ug = pat_tuple
@@ -207,7 +268,7 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
                 pattern, vg, ug = pat_tuple, 1, 2
             for m in re.finditer(pattern, combined, re.IGNORECASE):
                 try:
-                    val = float(m.group(vg)) if vg else None
+                    val = _parse_match_float(m, vg) if vg else None
                     raw_unit = m.group(ug).strip() if ug and ug < len(m.groups()) + 1 else None
                     unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit) if raw_unit else None
                 except (ValueError, IndexError):
@@ -216,12 +277,16 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
                     table=caption[:80] if caption else None,
                     page=getattr(tbl, "page", None),
                 )
+                adsorbate = _resolve_adsorbate(combined)
+                evidence = _extract_context_around_match(combined, m.start(), m.end())
+                if not _should_keep_result(category, adsorbate, val, evidence):
+                    continue
                 results.append(DFTResultItem(
                     category=category,
-                    adsorbate=_resolve_adsorbate(combined),
+                    adsorbate=adsorbate,
                     value=val,
                     unit=unit,
-                    evidence_text=_extract_context_around_match(combined, m.start(), m.end()),
+                    evidence_text=evidence,
                     source_location=loc,
                     confidence=0.75 if val is not None else 0.45,
                 ))
@@ -267,11 +332,12 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
     results: list[DFTResultItem] = []
     for tbl in tables:
         caption = getattr(tbl, "caption", "") or ""
-        content = getattr(tbl, "markdown_content", "") or ""
+        content = _normalize_numeric_text(getattr(tbl, "markdown_content", "") or "")
         headers, rows = _parse_markdown_table(content)
         if not headers or not rows:
             continue
         category_columns, adsorbate_col = _infer_table_columns(headers)
+        results.extend(_scan_metric_rows(headers, rows, caption, getattr(tbl, "page", None)))
         if not category_columns:
             continue
         for row in rows:
@@ -285,10 +351,11 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                 cell = row[col_idx].strip()
                 if not cell:
                     continue
+                cell = _normalize_numeric_text(cell)
                 value_match = re.search(r"[-+]?\d*\.?\d+", cell)
                 if category in NUMERIC_CATEGORIES and not value_match:
                     continue
-                value = float(value_match.group(0)) if value_match else None
+                value = _parse_float(value_match.group(0)) if value_match else None
                 unit_match = re.search(r"(eV|meV|kJ/mol|kcal/mol|e[\u2212-]?|electrons?)", cell, re.IGNORECASE)
                 unit = None
                 if unit_match:
@@ -298,12 +365,16 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                     unit = default_unit
                 header = headers[col_idx]
                 evidence = f"{header}: {cell}; row: {row_text}"
+                adsorbate_value = adsorbate or _resolve_adsorbate(evidence)
+                if not _should_keep_result(category, adsorbate_value, value, evidence):
+                    continue
                 results.append(
                     DFTResultItem(
                         category=category,
-                        adsorbate=adsorbate or _resolve_adsorbate(evidence),
+                        adsorbate=adsorbate_value,
                         value=value,
                         unit=unit,
+                        reaction_step=header,
                         evidence_text=evidence[:450],
                         source_location=SourceLocation(
                             table=caption[:80] if caption else "Table",
@@ -312,6 +383,89 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                         confidence=0.82 if value is not None else 0.6,
                     )
                 )
+    return results
+
+
+def _normalize_metric_label(label: str) -> str:
+    return re.sub(r"[\s_\-()]+", "", (label or "").lower())
+
+
+def _category_from_metric_label(label: str) -> str | None:
+    compact = _normalize_metric_label(label)
+    lowered = (label or "").lower()
+    if compact in {"ul", "uₗ"} or "limiting potential" in lowered:
+        return "limiting_potential"
+    if compact in {"η", "eta"} or "overpotential" in lowered:
+        return "overpotential"
+    if compact == "pds" or "potential-determining" in lowered or "potential determining" in lowered:
+        return "potential_determining_step"
+    return None
+
+
+def _looks_like_table_section_label(row: list[str]) -> str | None:
+    non_empty = [cell for cell in row if cell.strip()]
+    if len(non_empty) != 1:
+        return None
+    label = non_empty[0].strip()
+    if re.search(r"\b(?:Fe|Co|Ni|Mn|Cu|TM)\s*[-–]?\s*N\s*\d\s*[-–]?\s*C\b", label, re.IGNORECASE):
+        return label
+    return None
+
+
+def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, page: int | None) -> list[DFTResultItem]:
+    results: list[DFTResultItem] = []
+    current_group: str | None = None
+    for row in rows:
+        row = [cell.strip() for cell in row]
+        section_label = _looks_like_table_section_label(row)
+        if section_label:
+            current_group = section_label
+            continue
+        if not row:
+            continue
+        category = _category_from_metric_label(row[0])
+        if not category:
+            continue
+        row_text = " | ".join(row)
+        for col_idx, cell in enumerate(row[1:], start=1):
+            cell = cell.strip()
+            if not cell:
+                continue
+            header = headers[col_idx] if col_idx < len(headers) else f"column {col_idx + 1}"
+            context = " / ".join(part for part in [current_group, header] if part)
+            evidence = f"{caption}; {context}; row: {row_text}" if caption else f"{context}; row: {row_text}"
+            if category == "potential_determining_step":
+                results.append(
+                    DFTResultItem(
+                        category=category,
+                        adsorbate=_resolve_adsorbate(evidence),
+                        value=None,
+                        unit=None,
+                        reaction_step=(context + ": " + cell) if context else cell,
+                        evidence_text=evidence[:450],
+                        source_location=SourceLocation(table=caption[:80] if caption else "Table", page=page),
+                        confidence=0.78,
+                    )
+                )
+                continue
+            value_match = re.search(r"[-+]?\d*\.?\d+", cell)
+            if not value_match:
+                continue
+            unit_match = re.search(r"(V|eV|meV)", cell, re.IGNORECASE)
+            raw_unit = unit_match.group(1).strip() if unit_match else ("V" if category in {"limiting_potential", "overpotential"} else None)
+            unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit) if raw_unit else None
+            results.append(
+                DFTResultItem(
+                    category=category,
+                    adsorbate=_resolve_adsorbate(evidence),
+                    value=_parse_float(value_match.group(0)),
+                    unit=unit,
+                    reaction_step=context,
+                    evidence_text=evidence[:450],
+                    source_location=SourceLocation(table=caption[:80] if caption else "Table", page=page),
+                    confidence=0.86,
+                )
+            )
     return results
 
 
@@ -379,13 +533,15 @@ class DFTResultsExtractor:
                 sec_text_map[offset] = (title, ps)
                 full_text_parts.append(txt)
                 offset += len(txt) + 2  # +2 for the '\n\n' from join
-        if markdown:
+        if markdown and not sections:
             sec_text_map[offset] = ("markdown", None)
             full_text_parts.append(markdown)
             
-        full_text = "\n\n".join(full_text_parts)
+        full_text = _normalize_numeric_text("\n\n".join(full_text_parts))
 
         for cat in self.categories:
+            if cat in TABLE_ONLY_NUMERIC_CATEGORIES:
+                continue
             all_results.extend(self._scan_text(full_text, cat, sec_text_map, sections))
         all_results.extend(_scan_structured_tables(tables))
         for cat in self.categories:
@@ -461,6 +617,7 @@ class DFTResultsExtractor:
                     adsorbate=clean.get("adsorbate"),
                     value=clean.get("value"),
                     unit=clean.get("unit"),
+                    reaction_step=clean.get("reaction_step"),
                     evidence_text=clean["evidence_text"],
                     source_location=SourceLocation(
                         section=location.get("section"),
@@ -511,6 +668,7 @@ class DFTResultsExtractor:
                 "figure": source_location.get("figure"),
                 "table": source_location.get("table"),
             },
+            "reaction_step": payload.get("reaction_step"),
             "confidence": confidence,
         }
 
@@ -524,6 +682,7 @@ class DFTResultsExtractor:
         sections: list[Any],
     ) -> list[DFTResultItem]:
         results: list[DFTResultItem] = []
+        text = _normalize_numeric_text(text)
         patterns = CATEGORY_RULES.get(category, [])
         for pat_tuple in patterns:
             if isinstance(pat_tuple, tuple):
@@ -532,7 +691,7 @@ class DFTResultsExtractor:
                 pattern, vg, ug = pat_tuple, 1, 2
             for m in re.finditer(pattern, text, re.IGNORECASE):
                 try:
-                    val = float(m.group(vg)) if vg else None
+                    val = _parse_match_float(m, vg) if vg else None
                     raw_unit = m.group(ug).strip() if ug and ug < len(m.groups()) + 1 else None
                     unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit) if raw_unit else None
                 except (ValueError, IndexError):
@@ -549,9 +708,12 @@ class DFTResultsExtractor:
                 loc = SourceLocation(section=best_sec, page=best_page)
 
                 evidence = _extract_context_around_match(text, m.start(), m.end())
+                adsorbate = _resolve_adsorbate(evidence)
+                if not _should_keep_result(category, adsorbate, val, evidence):
+                    continue
                 results.append(DFTResultItem(
                     category=category,
-                    adsorbate=_resolve_adsorbate(evidence),
+                    adsorbate=adsorbate,
                     value=val,
                     unit=unit,
                     evidence_text=evidence,
@@ -564,10 +726,12 @@ class DFTResultsExtractor:
         """图注也是高价值的数据源."""
         results: list[DFTResultItem] = []
         for fig in figures:
-            cap = getattr(fig, "caption", "") or ""
+            cap = _normalize_numeric_text(getattr(fig, "caption", "") or "")
             if not cap:
                 continue
             for cat, patterns in CATEGORY_RULES.items():
+                if cat in TABLE_ONLY_NUMERIC_CATEGORIES:
+                    continue
                 for pat_tuple in patterns:
                     if isinstance(pat_tuple, tuple):
                         pattern, vg, ug = pat_tuple
@@ -575,7 +739,7 @@ class DFTResultsExtractor:
                         pattern, vg, ug = pat_tuple, 1, 2
                     for m in re.finditer(pattern, cap, re.IGNORECASE):
                         try:
-                            val = float(m.group(vg)) if vg else None
+                            val = _parse_match_float(m, vg) if vg else None
                             raw_unit = m.group(ug).strip() if ug and ug < len(m.groups()) + 1 else None
                             unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit) if raw_unit else None
                         except (ValueError, IndexError):
@@ -584,12 +748,16 @@ class DFTResultsExtractor:
                             figure=cap[:100],
                             page=getattr(fig, "page", None),
                         )
+                        adsorbate = _resolve_adsorbate(cap)
+                        evidence = _extract_context_around_match(cap, m.start(), m.end())
+                        if not _should_keep_result(cat, adsorbate, val, evidence):
+                            continue
                         results.append(DFTResultItem(
                             category=cat,
-                            adsorbate=_resolve_adsorbate(cap),
+                            adsorbate=adsorbate,
                             value=val,
                             unit=unit,
-                            evidence_text=_extract_context_around_match(cap, m.start(), m.end()),
+                            evidence_text=evidence,
                             source_location=loc,
                             confidence=0.7,
                         ))
@@ -615,7 +783,8 @@ class DFTResultsExtractor:
         """简单去重：保留置信度最高的."""
         seen_keys: dict[str, DFTResultItem] = {}
         for item in items:
-            key = f"{item.category}:{item.value}:{item.unit or ''}:{item.adsorbate or ''}:{item.source_location.section or ''}:{item.source_location.table or ''}"
+            evidence_key = re.sub(r"\s+", " ", (item.evidence_text or "").lower()).strip()[:180]
+            key = f"{item.category}:{item.value}:{item.unit or ''}:{item.adsorbate or ''}:{item.reaction_step or ''}:{evidence_key}"
             if key not in seen_keys or item.confidence > seen_keys[key].confidence:
                 seen_keys[key] = item
         return list(seen_keys.values())
@@ -634,5 +803,6 @@ class DFTResultsExtractor:
                 "figure": item.source_location.figure,
                 "table": item.source_location.table,
             },
+            "reaction_step": item.reaction_step,
             "confidence": round(item.confidence, 2),
         }

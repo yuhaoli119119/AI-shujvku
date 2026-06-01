@@ -124,6 +124,9 @@ class ExtractionSchemaService:
     def _dft_setting(self, row: DFTSetting) -> DFTSettingSchema:
         raw = row.raw_json or {}
         ev = str(raw.get("supporting_text") or raw.get("extracted") or "")
+        convergence_settings = dict(row.convergence_settings or {})
+        # Reproducibility is a derived QA summary, not an extracted paper field.
+        convergence_settings.pop("reproducibility", None)
         return DFTSettingSchema(
             software=self._field(row.software, evidence_text=ev, confidence=0.65),
             functional=self._field(row.functional, evidence_text=ev, confidence=0.65),
@@ -131,7 +134,7 @@ class ExtractionSchemaService:
             pseudopotential=self._field(row.pseudopotential, evidence_text=ev, confidence=0.55),
             cutoff_energy=self._field(row.cutoff_energy_ev, unit="eV", evidence_text=ev, confidence=0.65),
             k_points=self._field(row.k_points, evidence_text=ev, confidence=0.65),
-            convergence_settings=self._field(row.convergence_settings or {}, evidence_text=ev, confidence=0.55),
+            convergence_settings=self._field(convergence_settings or None, evidence_text=ev, confidence=0.55),
             vacuum_thickness=self._field(row.vacuum_thickness_a, unit="A", evidence_text=ev, confidence=0.55),
         )
 

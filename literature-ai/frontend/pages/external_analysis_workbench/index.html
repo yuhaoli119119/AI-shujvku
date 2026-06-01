@@ -48,14 +48,14 @@
     <header class="page-head">
       <div>
         <h1>人工确认工作台</h1>
-        <p>把 AI/自动抽取结果变成可导出数据前，先在这里核对字段、证据和 PDF 定位；保存草稿不会自动通过，人工确认后才进入可靠数据。</p>
+        <p>把 AI/自动抽取结果纳入正式数据前，先在这里核对字段、证据和 PDF 定位；保存草稿不会自动通过，人工确认后才进入可靠数据。</p>
       </div>
       <a class="btn ghost" href="../dft_database/index.html">打开 DFT 数据库</a>
     </header>
 
     <section class="toolbar">
       <div><label for="paperSelect">文献</label><select id="paperSelect" onchange="loadSelectedPaper()"><option value="">正在加载...</option></select></div>
-      <div><label for="schemaSelect">数据类型</label><select id="schemaSelect" onchange="renderSchemaForm()"><option>CatalystSample</option><option>DFTSetting</option><option selected>DFTResult</option><option>MechanismClaim</option><option>ElectrochemicalPerformance</option></select></div>
+      <div><label for="schemaSelect">数据类型</label><select id="schemaSelect" onchange="renderSchemaForm()"><option value="CatalystSample">CatalystSample</option><option value="DFTSetting">DFTSetting</option><option value="DFTResult" selected>DFTResult</option><option value="MechanismClaim">MechanismClaim</option><option value="ElectrochemicalPerformance">ElectrochemicalPerformance</option></select></div>
       <div>
         <label for="filterSelect">人工确认过滤</label>
         <select id="filterSelect" onchange="renderSchemaForm()" style="height: 38px; min-width: 160px;">
@@ -286,7 +286,7 @@
         renderPrepareReviewPanel();
         return;
       }
-      const confirmed = confirm("是否根据当前抽取结果生成待确认清单？这不会自动通过、不会导出，也不会重新解析论文。");
+      const confirmed = confirm("是否根据当前抽取结果生成待确认清单？这不会自动通过、不会标记已确认、不会导出、不会解锁写作，也不会重新解析论文。");
       if (!confirmed) return;
 
       state.preparingReviews = true;
@@ -412,6 +412,7 @@
     function renderPaper() {
       const p = state.paper || {};
       document.getElementById("paperMeta").innerHTML =
+        '<div><strong>ID：</strong>' + esc(p.id || "-") + '</div>' +
         '<div><strong>标题：</strong>' + esc(p.title || "未命名文献") + '</div>' +
         '<div><strong>年份：</strong>' + esc(p.year || "-") + '　<strong>期刊：</strong>' + esc(p.journal || "-") + '</div>' +
         '<div><strong>DOI：</strong>' + esc(p.doi || "无 DOI") + '</div>';
@@ -440,7 +441,8 @@
         var borderColor = isReviewTargetWarning ? "var(--color-danger)" : isLocatorWarning ? "var(--color-warning)" : "var(--color-warning)";
         var bgColor = isReviewTargetWarning ? "var(--color-danger-bg)" : isLocatorWarning ? "var(--color-warning-bg)" : "var(--color-warning-bg)";
         var label = isReviewTargetWarning ? "需要重新确认" : isLocatorWarning ? "PDF 定位需要补全" : "校验提醒";
-        return `<div class="warning-row" style="border-left-color:${borderColor};background:${bgColor};"><strong>${esc(label)}</strong><div>${esc(friendlyWarningMessage(w))}</div><div class="muted">${esc(friendlyTargetLabel(w.target_type))} · ${esc(friendlyFieldLabel(w.field || ""))}</div></div>`;
+        const code = w.code ? `<span class="muted warning-code">[${esc(w.code)}]</span>` : "";
+        return `<div class="warning-row" data-warning-code="${esc(w.code || "")}" style="border-left-color:${borderColor};background:${bgColor};"><strong>${esc(label)}</strong> ${code}<div>${esc(friendlyWarningMessage(w))}</div><div class="muted">${esc(friendlyTargetLabel(w.target_type))} · ${esc(friendlyFieldLabel(w.field || ""))}</div></div>`;
       }).join("");
     }
 
