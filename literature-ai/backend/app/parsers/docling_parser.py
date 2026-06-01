@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
+import re
 from typing import Any
 
 from app.config import Settings
 from app.utils.figure_filtering import is_decorative_figure
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,7 +72,7 @@ class DoclingParser:
             payload = self._export_json(document)
             tables = self._extract_tables(payload)
             figures = self._extract_figures(payload)
-            page_blocks = payload.get("pages", [])
+            page_blocks = self._extract_page_blocks(payload)
             return DoclingParseResult(
                 markdown=markdown,
                 json_payload=payload,
@@ -76,7 +80,10 @@ class DoclingParser:
                 figures=figures,
                 page_blocks=page_blocks,
             )
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, FileNotFoundError):
+                raise
+            logger.warning("Docling parse failed for %s; falling back to pypdf text extraction: %s", pdf_path, exc)
             return self._fallback_parse(pdf_path)
 
     @staticmethod
@@ -132,6 +139,87 @@ class DoclingParser:
         return " ".join(resolved_texts) if resolved_texts else None
 
     @staticmethod
+    def _first_prov(item: dict[str, Any]) -> dict[str, Any]:
+        prov = item.get("prov") or []
+        return prov[0] if prov and isinstance(prov[0], dict) else {}
+
+    @staticmethod
+    def _resolve_page(item: dict[str, Any]) -> int | None:
+        page = item.get("page_no") or item.get("page")
+        if page is None:
+            page = DoclingParser._first_prov(item).get("page_no")
+        try:
+            return int(page) if page is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _table_cells_to_markdown(item: dict[str, Any]) -> str:
+        data = item.get("data") or {}
+        cells = data.get("table_cells") or item.get("table_cells") or []
+        if not cells:
+            return ""
+
+        max_row = 0
+        max_col = 0
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+            max_row = max(max_row, int(cell.get("end_row_offset_idx") or cell.get("row") or 0))
+            max_col = max(max_col, int(cell.get("end_col_offset_idx") or cell.get("col") or 0))
+        if max_row <= 0 or max_col <= 0:
+            return ""
+
+        grid = [["" for _ in range(max_col)] for _ in range(max_row)]
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+            text = re.sub(r"\s+", " ", str(cell.get("text") or "")).strip()
+            if not text:
+                continue
+            row = int(cell.get("start_row_offset_idx") or cell.get("row") or 0)
+            col = int(cell.get("start_col_offset_idx") or cell.get("col") or 0)
+            if 0 <= row < max_row and 0 <= col < max_col:
+                grid[row][col] = text if not grid[row][col] else grid[row][col] + " / " + text
+
+        rows = [[cell.strip() for cell in row] for row in grid if any(cell.strip() for cell in row)]
+        if not rows:
+            return ""
+        width = max(len(row) for row in rows)
+        rows = [row + [""] * (width - len(row)) for row in rows]
+        header = rows[0]
+        body = rows[1:] if len(rows) > 1 else []
+        lines = [
+            "| " + " | ".join(header) + " |",
+            "| " + " | ".join("---" for _ in header) + " |",
+        ]
+        lines.extend("| " + " | ".join(row) + " |" for row in body)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _extract_page_blocks(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        pages = payload.get("pages")
+        if isinstance(pages, list) and pages and isinstance(pages[0], dict) and pages[0].get("text"):
+            return pages
+
+        by_page: dict[int, list[str]] = {}
+        for item in payload.get("texts") or []:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if not text:
+                continue
+            page = DoclingParser._resolve_page(item)
+            if page is None:
+                continue
+            by_page.setdefault(page, []).append(str(text))
+        return [
+            {"page": page, "text": "\n".join(parts)}
+            for page, parts in sorted(by_page.items())
+            if any(part.strip() for part in parts)
+        ]
+
+    @staticmethod
     def _is_decorative_figure(caption: str | None, prov: list) -> bool:
         """Detect decorative figures such as CrossMark, publisher logos, and bare labels."""
         return is_decorative_figure(caption, prov)
@@ -143,11 +231,18 @@ class DoclingParser:
         for index, item in enumerate(tables, start=1):
             caption = DoclingParser._resolve_caption(item, payload) or f"Table {index}"
             prov = item.get("prov", [])
+            markdown_content = (
+                item.get("markdown")
+                or item.get("text")
+                or item.get("html")
+                or DoclingParser._table_cells_to_markdown(item)
+                or ""
+            )
             normalized.append(
                 {
                     "caption": caption,
-                    "markdown_content": item.get("markdown") or item.get("text") or "",
-                    "page": item.get("page_no") or item.get("page"),
+                    "markdown_content": markdown_content,
+                    "page": DoclingParser._resolve_page(item),
                     "extraction_source": "docling",
                     "prov": prov,
                 }
@@ -168,7 +263,7 @@ class DoclingParser:
             normalized.append(
                 {
                     "caption": caption,
-                    "page": item.get("page_no") or item.get("page"),
+                    "page": DoclingParser._resolve_page(item),
                     "figure_role": item.get("role") or "unknown",
                     "prov": prov,
                 }
@@ -176,7 +271,76 @@ class DoclingParser:
         return normalized
 
     @staticmethod
+    def _extract_caption_blocks(page_blocks: list[dict[str, Any]], label_regex: str, source: str) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        pattern = re.compile(label_regex, re.IGNORECASE)
+        stop_pattern = re.compile(r"^(?:figure|fig\.?|scheme|table)\s+\d+[\.:：-]?", re.IGNORECASE)
+        for block in page_blocks:
+            page = block.get("page")
+            lines = [line.strip() for line in (block.get("text") or "").splitlines()]
+            for index, line in enumerate(lines):
+                if not pattern.match(line):
+                    continue
+                parts = [line]
+                for next_line in lines[index + 1 : index + 12]:
+                    if not next_line:
+                        break
+                    if stop_pattern.match(next_line):
+                        break
+                    if re.match(r"^(?:references|acknowledg|associated content)\b", next_line, re.IGNORECASE):
+                        break
+                    parts.append(next_line)
+                    if len(" ".join(parts)) > 900:
+                        break
+                caption = re.sub(r"\s+", " ", " ".join(parts)).strip()
+                if caption:
+                    results.append(
+                        {
+                            "caption": caption,
+                            "markdown_content": "\n".join(parts) if source == "table" else None,
+                            "page": page,
+                            "extraction_source": "pypdf_caption_fallback",
+                            "prov": [{"page_no": page, "fallback": "pypdf_caption"}] if page else [],
+                        }
+                    )
+        return results
+
+    @staticmethod
+    def _extract_fallback_tables(page_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        tables = DoclingParser._extract_caption_blocks(page_blocks, r"^\s*table\s+\d+[\.:：-]?", "table")
+        return [
+            {
+                "caption": item["caption"],
+                "markdown_content": item.get("markdown_content") or item["caption"],
+                "page": item.get("page"),
+                "extraction_source": item["extraction_source"],
+                "prov": item.get("prov") or [],
+            }
+            for item in tables
+        ]
+
+    @staticmethod
+    def _extract_fallback_figures(page_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        figures = DoclingParser._extract_caption_blocks(page_blocks, r"^\s*(?:figure|fig\.?|scheme)\s+\d+[\.:：-]?", "figure")
+        normalized = []
+        for item in figures:
+            caption = item["caption"]
+            if DoclingParser._is_decorative_figure(caption, item.get("prov") or []):
+                continue
+            normalized.append(
+                {
+                    "caption": caption,
+                    "page": item.get("page"),
+                    "figure_role": "unknown",
+                    "prov": item.get("prov") or [],
+                }
+            )
+        return normalized
+
+    @staticmethod
     def _fallback_parse(pdf_path: Path) -> DoclingParseResult:
+        if not pdf_path.exists():
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
         text_pages: list[str] = []
         try:
             from pypdf import PdfReader
@@ -185,10 +349,14 @@ class DoclingParser:
             for page in reader.pages:
                 text_pages.append(page.extract_text() or "")
         except Exception as e:
-            raise RuntimeError(f"Failed to read PDF file {pdf_path}: {e}") from e
+            return DoclingParser._warning_fallback_result(
+                f"[Warning] Failed to read PDF text with pypdf: {e}"
+            )
 
         if not text_pages:
-            raise RuntimeError(f"No pages extracted from PDF file {pdf_path}. The file may be empty or corrupted.")
+            return DoclingParser._warning_fallback_result(
+                f"[Warning] No pages extracted from PDF file {pdf_path}. The file may be empty or corrupted."
+            )
 
         markdown_parts = []
         page_blocks = []
@@ -202,14 +370,34 @@ class DoclingParser:
                 markdown_parts.append(f"## Page {index}\n\n{text.strip()}\n")
                 page_blocks.append({"page": index, "text": text})
 
+        tables = DoclingParser._extract_fallback_tables(page_blocks)
+        figures = DoclingParser._extract_fallback_figures(page_blocks)
+        payload = {
+            "pages": page_blocks,
+            "tables": tables,
+            "figures": figures,
+            "fallback": True,
+        }
+        return DoclingParseResult(
+            markdown="\n".join(markdown_parts).strip(),
+            json_payload=payload,
+            tables=tables,
+            figures=figures,
+            page_blocks=page_blocks,
+        )
+
+    @staticmethod
+    def _warning_fallback_result(warning_msg: str) -> DoclingParseResult:
+        page_blocks = [{"page": 1, "text": warning_msg}]
         payload = {
             "pages": page_blocks,
             "tables": [],
             "figures": [],
             "fallback": True,
+            "parse_warning": warning_msg,
         }
         return DoclingParseResult(
-            markdown="\n".join(markdown_parts).strip(),
+            markdown=f"## Page 1\n\n{warning_msg}",
             json_payload=payload,
             tables=[],
             figures=[],

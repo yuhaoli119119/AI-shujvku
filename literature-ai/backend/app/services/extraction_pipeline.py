@@ -168,7 +168,7 @@ class ExtractionPipelineService:
             dft_settings = self.dft_settings_extractor.extract(document)
             dft_results = self._refine_evidence_items(self.dft_results_extractor.extract(document), "dft_result", paper_type)
             
-        if is_experimental:
+        if is_experimental or self._has_electrochemical_signal(document):
             electrochemical_items = self.electrochemical_extractor.extract(document)
             
         catalyst_data = self.catalyst_extractor.extract(document)
@@ -216,6 +216,31 @@ class ExtractionPipelineService:
             "writing_cards": writing_count,
             "comprehensive_analysis": 1 if comprehensive_data else 0,
         }
+
+    @staticmethod
+    def _has_electrochemical_signal(document: UnifiedPaperDocument) -> bool:
+        parts: list[str] = []
+        if document.abstract:
+            parts.append(document.abstract)
+        for section in document.sections or []:
+            parts.append(section.section_title or "")
+            parts.append(section.section_type or "")
+            parts.append(section.text or "")
+        for table in document.tables or []:
+            parts.append(table.caption or "")
+            parts.append(table.markdown_content or "")
+        text = "\n".join(parts)
+        if not text.strip():
+            return False
+        strong_patterns = [
+            r"\b\d+(?:\.\d+)?\s*mAh\s*/?\s*g(?:-1)?\b",
+            r"\b\d+(?:\.\d+)?\s*mg\s*/?\s*cm(?:-2|2)\b",
+            r"\b\d+(?:\.\d+)?\s*C\b",
+            r"\b\d{2,5}\s+cycles?\b",
+            r"\bsulfur\s+loading\b",
+            r"\belectrochemical\s+performance\b",
+        ]
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in strong_patterns)
 
     def _refine_evidence_items(self, items: list[dict[str, Any]] | None, item_type: str, paper_type: str | None = None) -> list[dict[str, Any]]:
         refined: list[dict[str, Any]] = []
@@ -428,8 +453,22 @@ class ExtractionPipelineService:
                 return None
             return entries[0].get("value")
 
-        cutoff_value = self._safe_float(first_value("cutoff energy"))
-        vacuum_value = self._safe_float(first_value("vacuum thickness"))
+        def first_entry(field: str) -> dict[str, Any] | None:
+            entries = payload.get(field) or []
+            return entries[0] if entries else None
+
+        def numeric_with_unit(field: str) -> tuple[float | None, str | None]:
+            entry = first_entry(field) or {}
+            value = self._safe_float(entry.get("value"))
+            unit = str(entry.get("unit") or "").strip()
+            return value, unit
+
+        cutoff_value, cutoff_unit = numeric_with_unit("cutoff energy")
+        if cutoff_value is not None and cutoff_unit.lower() in {"ry", "rydberg"}:
+            cutoff_value = cutoff_value * 13.605693122994
+        vacuum_value, vacuum_unit = numeric_with_unit("vacuum thickness")
+        if vacuum_value is not None and vacuum_unit.lower() == "nm":
+            vacuum_value = vacuum_value * 10.0
         normalization_payload: dict[str, Any] = {"extracted": payload}
         if document is not None:
             normalization_payload["supporting_text"] = self._collect_dft_context_text(document)
@@ -451,7 +490,11 @@ class ExtractionPipelineService:
                 },
             },
             vacuum_thickness_a=vacuum_value,
-            raw_json={"extracted": payload, "normalized": normalized},
+            raw_json={
+                "extracted": payload,
+                "normalized": normalized,
+                "supporting_text": normalization_payload.get("supporting_text"),
+            },
         )
         self.session.add(record)
         self.session.flush()

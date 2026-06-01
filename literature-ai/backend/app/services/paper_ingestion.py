@@ -30,6 +30,7 @@ from app.utils.text_cleaning import normalize_text_tree
 logger = logging.getLogger(__name__)
 
 DEFAULT_LIBRARY_NAME = "\u9ed8\u8ba4\u6587\u732e\u5e93"
+DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 
 
 class PaperConflictError(RuntimeError):
@@ -273,6 +274,15 @@ class PaperIngestionService:
         normalized_tables = normalize_text_tree(docling_result.tables) or []
         normalized_figures = normalize_text_tree(docling_result.figures) or []
         normalized_page_blocks = normalize_text_tree(docling_result.page_blocks) or []
+
+        if self._is_placeholder_title(normalized_metadata.get("title"), stored_pdf):
+            derived_title = self._derive_title_from_docling(normalized_markdown, normalized_page_blocks)
+            if derived_title:
+                normalized_metadata["title"] = derived_title
+        if not normalized_metadata.get("doi"):
+            derived_doi = self._derive_doi_from_text(normalized_markdown)
+            if derived_doi:
+                normalized_metadata["doi"] = derived_doi
 
         tei_name = f"{stored_pdf.stem}.tei.xml"
         json_name = f"{stored_pdf.stem}.docling.json"
@@ -631,6 +641,98 @@ class PaperIngestionService:
 
     def _artifact_ref(self, path: Path | None, *, category: str) -> str | None:
         return canonicalize_persisted_artifact_reference(path, category=category, settings=self.settings)
+
+    @staticmethod
+    def _is_placeholder_title(title: Any, pdf_path: Path) -> bool:
+        if not title:
+            return True
+        normalized = str(title).strip().lower()
+        if not normalized:
+            return True
+        return normalized in {pdf_path.name.lower(), pdf_path.stem.lower()} or normalized.endswith(".pdf")
+
+    @staticmethod
+    def _derive_title_from_docling(markdown: str, page_blocks: list[dict[str, Any]]) -> str | None:
+        lines: list[str] = []
+        if markdown:
+            lines.extend(markdown.splitlines()[:60])
+        for block in page_blocks:
+            if block.get("page") not in (None, 1):
+                continue
+            text = block.get("text") or ""
+            if text:
+                lines.extend(text.splitlines()[:60])
+                break
+
+        skip_prefixes = (
+            "abstract",
+            "keywords",
+            "citation:",
+            "received:",
+            "revised:",
+            "accepted:",
+            "published:",
+            "copyright",
+            "academic editor",
+            "e-mail",
+            "email:",
+            "department ",
+            "school ",
+            "state key",
+            "* correspondence",
+            "- * correspondence",
+            "arxiv:",
+        )
+        skip_exact = {"article", "review", "communication", "contents", "references"}
+        for raw in lines:
+            line = re.sub(r"^#+\s*", "", raw or "").strip()
+            line = re.sub(r"\s+", " ", line)
+            if not line or line.startswith("<!--"):
+                continue
+            lowered = line.lower()
+            if lowered in skip_exact or lowered.startswith(skip_prefixes):
+                continue
+            if "@" in line and len(line) < 180:
+                continue
+            if not (20 <= len(line) <= 280):
+                continue
+            if not re.search(r"[A-Za-z]", line):
+                continue
+            return line.rstrip(".")
+        return None
+
+    @staticmethod
+    def _derive_doi_from_text(text: str) -> str | None:
+        if not text:
+            return None
+        lines = [line.strip() for line in text.splitlines()[:120] if line.strip()]
+        priority_lines = [
+            line
+            for line in lines
+            if line.lower().startswith("citation:") or "doi.org/" in line.lower() or line.lower().startswith("doi:")
+        ]
+        for line in priority_lines + lines[:80]:
+            candidate = PaperIngestionService._extract_doi_candidate(line)
+            if candidate:
+                return candidate
+        return None
+
+    @staticmethod
+    def _extract_doi_candidate(text: str) -> str | None:
+        match = re.search(r"10\.\d{4,9}/(.+)$", text or "", flags=re.IGNORECASE)
+        if not match:
+            return None
+        candidate = re.sub(r"\s+", "", match.group(0)).rstrip(".,;:)")
+        candidate = re.sub(r"(?i)(?:academiceditor|received|revised|accepted|published).*$", "", candidate)
+        candidate = candidate.rstrip(".,;:)")
+        if candidate.lower().endswith("/s1"):
+            return None
+        if not DOI_RE.fullmatch(candidate):
+            return None
+        suffix = candidate.split("/", 1)[1]
+        if len(suffix) < 6 or not re.search(r"\d", suffix):
+            return None
+        return candidate.lower()
 
     def _find_conflicting_paper(
         self,

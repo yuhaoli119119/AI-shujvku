@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     tables_dir: str = "tables"
     markdown_dir: str = "markdown"
     docling_enabled: bool = True
-    docling_do_ocr: bool = True
+    docling_do_ocr: bool = False
     docling_force_full_page_ocr: bool = False
     docling_num_threads: int = 4
     docling_document_timeout: float | None = 120.0

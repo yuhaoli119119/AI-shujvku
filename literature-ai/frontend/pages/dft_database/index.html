@@ -172,6 +172,35 @@
       if (reason === "missing_required_evidence") return "补充证据原文、页码或来源章节。";
       return "打开 review 页核对证据和状态。";
     }
+    function reviewStatusLabel(status) {
+      const labels = {
+        missing: "缺少人工确认",
+        pending: "待人工确认",
+        verified: "人工已确认",
+        corrected: "人工已修正",
+        rejected: "人工已拒绝",
+      };
+      return labels[status] || String(status || "-").replace(/_/g, " ");
+    }
+    function locatorStatusLabel(status) {
+      const labels = {
+        exact_page: "PDF 页码准确",
+        exact_bbox: "PDF 区域准确",
+        missing_locator: "缺少 PDF 定位",
+        missing_page: "缺少页码定位",
+        text_only: "仅有文本证据",
+        unsafe_locator: "PDF 定位不可靠",
+      };
+      return labels[status] || String(status || "-").replace(/_/g, " ");
+    }
+    function completenessHintLabel(hint) {
+      const labels = {
+        missing_catalyst_sample: "缺少催化剂样本",
+        missing_dft_setting: "缺少 DFT 设置",
+        has_blocked_dft_results: "存在需处理的 DFT 结果",
+      };
+      return labels[hint] || String(hint || "未知提示").replace(/_/g, " ");
+    }
     function gateLabel(gate) {
       if (!gate || gate === "safe_verified_with_required_evidence") return "人工确认 + 必要证据 + 准确定位";
       return String(gate || "").replace(/_/g, " ");
@@ -304,8 +333,8 @@
           '<div class="quality-status-grid">' +
             '<div class="readable-field"><div class="k">原因</div><div class="v">' + esc(reasons) + '</div></div>' +
             '<div class="readable-field"><div class="k">下一步</div><div class="v">' + esc(reasonAction(reviewReason)) + '</div></div>' +
-            '<div class="readable-field"><div class="k">人工确认</div><div class="v">' + esc(row.review_status || "-") + '</div></div>' +
-            '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(row.locator_status || "-") + '</div></div>' +
+            '<div class="readable-field"><div class="k">人工确认</div><div class="v">' + esc(reviewStatusLabel(row.review_status)) + '</div></div>' +
+            '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(locatorStatusLabel(row.locator_status)) + '</div></div>' +
           '</div>' +
           '<div class="quality-actions">' +
             '<a class="btn primary small" href="' + esc(reviewTabUrl) + '">去文献库处理</a>' +
@@ -326,7 +355,7 @@
         return '<div class="completeness-row">' +
           '<div class="quality-meta"><a href="' + esc(item.library_detail_url || "#") + '">' + esc(item.title || item.paper_id || "Paper") + '</a></div>' +
           '<div class="quality-meta">DFT 结果可导出/需处理：' + esc(item.exportable_dft_results || 0) + '/' + esc(item.blocked_dft_results || 0) + '；催化剂样本：' + esc(item.catalyst_samples || 0) + '；DFT 设置：' + esc(item.dft_settings || 0) + '</div>' +
-          '<div class="quality-meta">提示：' + esc((item.hints || []).join("；")) + '</div>' +
+          '<div class="quality-meta">提示：' + esc((item.hints || []).map(completenessHintLabel).join("；")) + '</div>' +
         '</div>';
       }).join("");
     }

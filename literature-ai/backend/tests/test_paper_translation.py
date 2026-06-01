@@ -106,7 +106,7 @@ def test_paper_translation_preview_uses_persisted_writer_settings(monkeypatch):
             get_settings.cache_clear()
 
 
-def test_paper_translation_preview_requires_writer_configuration(monkeypatch):
+def test_paper_translation_preview_returns_source_only_fallback_without_writer_configuration(monkeypatch):
     with TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "translation_unconfigured.sqlite"
         monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
@@ -149,8 +149,13 @@ def test_paper_translation_preview_requires_writer_configuration(monkeypatch):
                 json={"include_abstract": True, "max_sections": 1},
             )
 
-            assert response.status_code == 400
-            assert "Writer LLM 尚未配置完整" in response.json()["detail"]
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["backend_used"] == "local_fallback"
+            assert payload["llm_status"] == "source_only_writer_llm_not_configured"
+            assert len(payload["items"]) == 1
+            assert "未配置 Writer LLM" in payload["items"][0]["translated_text"]
+            assert "This abstract needs translation." in payload["items"][0]["translated_text"]
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

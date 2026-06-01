@@ -293,7 +293,7 @@
         return `<div class="empty-state">${esc(emptyText)}</div>`;
       }
       return items.map((item, index) => {
-        const entries = Object.entries(item || {});
+        const entries = Object.entries(item || {}).filter(([key]) => key !== "raw_json");
         const grid = entries.length
           ? entries.map(([key, value]) => `
               <div class="kv-item">
@@ -306,6 +306,11 @@
           <div class="structured-card">
             <div class="structured-card-title">记录 ${index + 1}</div>
             <div class="kv-grid">${grid}</div>
+            <details class="raw-data-toggle">
+              <summary>查看原始 JSON</summary>
+              <div class="raw-data-title">原始数据</div>
+              <pre class="mono">${esc(JSON.stringify(item || {}, null, 2))}</pre>
+            </details>
           </div>
         `;
       }).join("");
@@ -383,6 +388,12 @@
         return;
       }
       const translationOnly = state.translationViewMode === "translation";
+      const status = data.llm_status || "preview";
+      const statusBanner = status === "preview" ? "" : `
+        <div class="translation-status" style="margin-bottom:12px;">
+          当前译文状态：${esc(status)}。如果显示 source-only，占位内容不是正式中文译文；配置 Writer LLM 后可重新生成。
+        </div>
+      `;
       const toolbar = `
         <div class="translation-toolbar">
           <div class="translation-toolbar-group">
@@ -419,7 +430,7 @@
           </article>
         `;
       }).join("");
-      panel.innerHTML = toolbar + cards;
+      panel.innerHTML = statusBanner + toolbar + cards;
     }
 
     async function generateTranslationPreview() {
@@ -430,7 +441,7 @@
         showToast("请至少选择摘要或一个章节。");
         return;
       }
-      panel.innerHTML = '<div class="empty-state">正在调用 Writer LLM 生成中文译文预览...</div>';
+      panel.innerHTML = '<div class="empty-state">正在生成中文译文预览...</div>';
       setTranslationLoading(true);
       try {
         state.translation = await fetchJSON(`${API_BASE}/${state.paperId}/translation/preview`, {

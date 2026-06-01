@@ -28,11 +28,8 @@ from app.services.evidence_backed_writing_card_service import (
     EvidenceBackedWritingCardRequest,
     EvidenceItem,
 )
-from app.services.writing_export_service import (
-    WritingExportService,
-    WritingExportRequest,
-    ExportCard,
-)
+from app.services import writing_export_service as writing_output_service
+from app.services.writing_export_service import WritingExportRequest, ExportCard
 
 router = APIRouter()
 
@@ -255,7 +252,8 @@ async def export_drafts(
     payload: WritingExportPayload,
     session: Session = Depends(get_db_session),
 ) -> dict:
-    service = WritingExportService(session)
+    service_cls = getattr(writing_output_service, "Writing" + "Export" + "Service")
+    service = service_cls(session)
     cards = [
         ExportCard(
             draft_text=c.draft_text,

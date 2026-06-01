@@ -190,6 +190,15 @@ def init_db(database_url: str) -> None:
                 ),
             )
             execute_migration_step(
+                "dft_results",
+                "reaction_step",
+                (
+                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_step VARCHAR(255)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE dft_results ADD COLUMN reaction_step VARCHAR(255)"
+                ),
+            )
+            execute_migration_step(
                 "evidence_locators",
                 "claim_id",
                 (

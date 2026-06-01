@@ -49,3 +49,9 @@ fix.py
 .workbuddy/
 111/
 backend.log
+
+# Local acceptance artifacts; keep only the reproducible runner script.
+test-artifacts/**
+!test-artifacts/
+!test-artifacts/pdf-regression/
+!test-artifacts/pdf-regression/run_new_real_papers_e2e.py

@@ -112,7 +112,10 @@ class PaperReprocessingService:
                 "type_confidence": quick_class.get("type_confidence", 0.0),
                 "classification_source": quick_class.get("classification_source", "quick"),
             }
-        return self.pipeline._rule_based_classify(paper.title, paper.journal, paper.abstract)
+        result = self.pipeline._rule_based_classify(paper.title, paper.journal, paper.abstract)
+        if (not paper.pdf_path or paper.oa_status == "metadata_only") and result.get("classification_source") == "rule_heuristic":
+            result["type_confidence"] = min(float(result.get("type_confidence") or 0.0), 0.5)
+        return result
 
     def _build_classification_stub(self, paper: Paper) -> UnifiedPaperDocument:
         summary_lines = [

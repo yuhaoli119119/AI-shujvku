@@ -51,6 +51,14 @@ def _build_translation_prompt(title: str, text: str) -> str:
     )
 
 
+def _source_only_translation_notice(text: str) -> str:
+    return (
+        "【未配置 Writer LLM，当前显示原文占位而非正式译文。"
+        "请在设置页配置 Writer API 后重新生成中文译文。】\n\n"
+        + text
+    )
+
+
 def _collect_translation_sources(
     detail: PaperDetailResponse,
     payload: PaperTranslationPreviewRequest,
@@ -137,26 +145,45 @@ async def preview_paper_translation(
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    sync_writer_settings_from_session(session, settings)
-    llm = LLMService(settings)
-    if not llm.is_configured():
-        raise HTTPException(
-            status_code=400,
-            detail="Writer LLM 尚未配置完整，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。",
-        )
-
     sources = _collect_translation_sources(detail, payload)
     if not sources:
         raise HTTPException(status_code=400, detail="暂无可翻译的摘要或章节内容。")
 
-    translated_items: list[PaperTranslationItemResponse] = []
-    for item in sources:
-        translated_text = llm.complete_text(
-            TRANSLATION_SYSTEM_PROMPT,
-            _build_translation_prompt(item["title"], item["text"]),
+    sync_writer_settings_from_session(session, settings)
+    llm = LLMService(settings)
+    if not llm.is_configured():
+        return PaperTranslationPreviewResponse(
+            paper_id=paper_id,
+            title=detail.title,
+            backend_used="local_fallback",
+            llm_status="source_only_writer_llm_not_configured",
+            items=[
+                PaperTranslationItemResponse(
+                    source_type=item["source_type"],
+                    section_id=item["section_id"],
+                    title=item["title"],
+                    page_start=item["page_start"],
+                    page_end=item["page_end"],
+                    source_text=item["text"],
+                    translated_text=_source_only_translation_notice(item["text"]),
+                )
+                for item in sources
+            ],
         )
+
+    translated_items: list[PaperTranslationItemResponse] = []
+    used_fallback = False
+    for item in sources:
+        try:
+            translated_text = llm.complete_text(
+                TRANSLATION_SYSTEM_PROMPT,
+                _build_translation_prompt(item["title"], item["text"]),
+            )
+        except Exception:
+            translated_text = None
         if not translated_text:
-            raise HTTPException(status_code=502, detail="中文译文生成失败，请稍后重试或检查 Writer LLM 配置。")
+            used_fallback = True
+            translated_text = _source_only_translation_notice(item["text"])
         translated_items.append(
             PaperTranslationItemResponse(
                 source_type=item["source_type"],
@@ -172,6 +199,8 @@ async def preview_paper_translation(
     return PaperTranslationPreviewResponse(
         paper_id=paper_id,
         title=detail.title,
+        backend_used="writer_llm" if not used_fallback else "writer_llm_with_source_fallback",
+        llm_status="preview" if not used_fallback else "partial_source_only_fallback",
         items=translated_items,
     )
 

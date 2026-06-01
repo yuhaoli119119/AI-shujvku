@@ -52,11 +52,11 @@ class DFTSettingsExtractor:
         # 5. Cutoff Energy
         # Matches e.g. "kinetic energy cutoff was set to 400 eV", "cutoff: 400 eV", "cutoff 400 eV"
         self.cutoff_pattern1 = re.compile(
-            r"\b(?:cut-off|cutoff|kinetic\s+energy|energy\s+cutoff|plane-wave\s+cutoff)\s*(?:energy|cutoff)?(?:\s*(?:is|was|of|set|to|at|be|value|valued|below|within|above|:|=))*\s*(\d+(?:\.\d+)?)\s*(eV|Ry|Rydberg)\b",
+            r"\b(?:cut-?offs?|kinetic\s+energy|energy\s+cut-?offs?|plane-wave\s+cut-?offs?)\s*(?:energy|cut-?offs?)?(?:\s*(?:is|was|of|set|to|at|be|value|valued|below|within|above|:|=))*\s*(\d+(?:\.\d+)?)\s*(eV|Ry|Rydberg)\b",
             re.IGNORECASE
         )
         self.cutoff_pattern2 = re.compile(
-            r"(\d+(?:\.\d+)?)\s*(eV|Ry|Rydberg)\s*(?:for\s+)?(?:the\s+)?(?:cut-off|cutoff|energy\s+cutoff)",
+            r"(\d+(?:\.\d+)?)\s*(eV|Ry|Rydberg)\s*(?:for\s+)?(?:the\s+)?(?:cut-?offs?|energy\s+cut-?offs?)",
             re.IGNORECASE
         )
 

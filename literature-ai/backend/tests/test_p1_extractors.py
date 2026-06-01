@@ -14,3 +14,13 @@ def test_dft_settings_extractor_regex_boundaries():
     assert "DFT-D3" in dispersion
     assert "6-31G*" in basis
     assert "6-311+G(d,p)" in basis
+
+
+def test_dft_settings_extractor_accepts_plural_ry_cutoffs():
+    extractor = DFTSettingsExtractor()
+    text = "The kinetic energy cutoffs of 80 Ry and 800 Ry were used for wavefunctions and charge density."
+
+    results = extractor.extract([{"text": text, "section_title": "Computational details"}])
+    cutoffs = results.get("cutoff energy", [])
+
+    assert any(item["value"] == "80" and item["unit"] == "Ry" for item in cutoffs)
