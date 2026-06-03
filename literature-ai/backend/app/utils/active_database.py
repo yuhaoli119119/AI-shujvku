@@ -6,7 +6,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from app.utils.project_paths import BACKEND_ROOT, WORKSPACE_ROOT, canonical_registry_path, default_library_root
+from app.utils.project_paths import (
+    BACKEND_ROOT,
+    WORKSPACE_ROOT,
+    canonical_registry_path,
+    default_library_root,
+)
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, normalize_library_name
 
 WINDOWS_MIRROR_COLON = "\uf03a"
@@ -48,6 +53,35 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _resolve_runtime_path(path: Any) -> Path:
+    text = str(path or "").strip()
+    data_suffix = _data_mount_suffix(text)
+    if data_suffix is None:
+        return Path(text).resolve()
+    if not data_suffix:
+        return canonical_registry_path().resolve().parent
+    return (canonical_registry_path().resolve().parent / data_suffix).resolve()
+
+
+def _data_mount_suffix(path: Any) -> str | None:
+    text = str(path or "").strip()
+    normalized = text.replace("\\", "/")
+    lowered = normalized.lower()
+    if normalized == "/data":
+        return ""
+    if normalized.startswith("/data/"):
+        return normalized.removeprefix("/data/").strip("/")
+    marker = "/literature-ai/data/"
+    marker_index = lowered.rfind(marker)
+    if marker_index >= 0:
+        return normalized[marker_index + len(marker) :].strip("/")
+    marker = "literature-ai/data/"
+    marker_index = lowered.rfind(marker)
+    if marker_index >= 0:
+        return normalized[marker_index + len(marker) :].strip("/")
+    return None
 
 
 def _registry_entry(payload: dict[str, Any] | None, active_library: str | None) -> dict[str, Any] | None:
@@ -100,7 +134,7 @@ def get_registered_active_library_info() -> dict[str, Any]:
     active_library_root = None
     active_library_db_path = None
     if entry and entry.get("root_path"):
-        active_library_root = str(Path(str(entry["root_path"])).resolve())
+        active_library_root = str(_resolve_runtime_path(entry["root_path"]))
         active_library_db_path = str((Path(active_library_root) / "database.sqlite").resolve())
 
     return {
@@ -128,6 +162,7 @@ def _candidate_sqlite_paths(active_library_root: Path | None, configured_sqlite_
         add(BACKEND_ROOT / _library_root_mirror_segment(active_library_root) / "database.sqlite")
 
     for root in (
+        canonical_registry_path().resolve().parent / "libraries",
         WORKSPACE_ROOT / "data" / "libraries",
         BACKEND_ROOT / "data" / "libraries",
         BACKEND_ROOT,
@@ -179,13 +214,16 @@ def _choose_effective_sqlite_candidate(
 def _effective_storage_root(effective_db_path: Path | None) -> str | None:
     if effective_db_path is None:
         return None
-    preferred = effective_db_path.parent / "storage"
-    if preferred.exists():
-        return str(preferred.resolve())
+    shared_project = effective_db_path.parent / "papers"
+    if shared_project.exists():
+        return str(shared_project.resolve())
+    legacy_storage = effective_db_path.parent / "storage"
+    if legacy_storage.exists():
+        return str(legacy_storage.resolve())
     fallback = WORKSPACE_ROOT / "storage"
     if fallback.exists():
         return str(fallback.resolve())
-    return str(preferred.resolve())
+    return str(shared_project.resolve())
 
 
 def _maybe_repair_registered_default_sqlite(info: dict[str, Any]) -> bool:

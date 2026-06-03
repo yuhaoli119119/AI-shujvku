@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.schemas.api import LibraryCreateRequest, LibraryImportRequest, LibraryInfoResponse
 from app.services.library_manager import LibraryManager
 from app.utils.active_database import activate_active_library_database, get_active_database_info
+from app.utils.project_paths import resolve_data_mount_path
 
 router = APIRouter()
 
@@ -39,16 +40,25 @@ def _effective_active_library_response(lib) -> LibraryInfoResponse:
 
 
 def _browse_roots() -> list[Path]:
+    roots: list[Path] = []
+
+    def add(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+
+    add(LibraryManager.default_library_root().parent)
+
     configured = [item.strip() for item in get_settings().browse_roots.split(",") if item.strip()]
-    roots = [Path(item).resolve() for item in configured]
-    home = Path.home().resolve()
-    if home not in roots:
-        roots.append(home)
+    for item in configured:
+        add(resolve_data_mount_path(item))
+
+    add(Path.home())
     return roots
 
 
 def _resolve_and_validate(path: str) -> Path:
-    resolved = Path(path).resolve()
+    resolved = resolve_data_mount_path(path)
     for root in _browse_roots():
         if root.exists():
             try:
@@ -144,6 +154,10 @@ async def create_library(payload: LibraryCreateRequest) -> LibraryInfoResponse:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {exc.filename or payload.root_path}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to create library at the selected location: {exc}") from exc
     return LibraryInfoResponse(**lib.model_dump())
 
 
@@ -165,6 +179,10 @@ async def import_library(payload: LibraryImportRequest) -> LibraryInfoResponse:
         lib = mgr.import_library(payload.root_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {exc.filename or payload.root_path}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to import library from the selected location: {exc}") from exc
     return LibraryInfoResponse(**lib.model_dump())
 
 

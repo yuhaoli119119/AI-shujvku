@@ -14,7 +14,8 @@
 - `backend/`：FastAPI 后端、解析管线、抽取服务、MCP 服务
 - `frontend/`：静态工作台页面
 - `prompts/`：抽取与写作相关提示词
-- `storage/`：本地 PDF、TEI、markdown、docling cache 等产物
+- `data/`：当前 Docker 默认宿主机数据目录，包含 `library_registry.json`、`libraries/`、`storage/`
+- `storage/`：历史目录；当前建议以 `data/storage/` 为准
 - `docs/`：当前文档、MCP 文档、历史归档
 
 ## 入口

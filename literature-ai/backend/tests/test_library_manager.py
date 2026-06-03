@@ -71,3 +71,63 @@ def test_default_library_stays_on_legacy_storage(isolated_manager, monkeypatch):
 
     assert calls
     assert calls[-1][1].endswith(str(Path(LEGACY_STORAGE_MODE)))
+
+
+def test_create_library_uses_selected_parent_directory(isolated_manager, tmp_path):
+    parent = tmp_path / "custom-parent"
+    parent.mkdir(parents=True, exist_ok=True)
+
+    created = isolated_manager.create_library("共享库", root_path=str(parent))
+
+    assert Path(created.root_path) == (parent / "共享库").resolve()
+    assert (parent / "共享库" / "database.sqlite").exists()
+
+
+def test_import_rejects_plain_directory_without_library_markers(isolated_manager, tmp_path):
+    plain_dir = tmp_path / "plain-folder"
+    plain_dir.mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(ValueError, match="not an existing library root"):
+        isolated_manager.import_library(str(plain_dir))
+
+
+def test_registry_maps_container_data_paths_to_manager_data_root(tmp_path, monkeypatch):
+    registry_path = tmp_path / "data" / "library_registry.json"
+    default_root = tmp_path / "data" / "libraries" / "default"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "graphdyne-dft",
+                "libraries": [
+                    {
+                        "name": DEFAULT_LIBRARY_NAME,
+                        "root_path": "/data/libraries/default",
+                        "description": DEFAULT_LIBRARY_NAME,
+                        "created_at": "2026-06-02T00:00:00",
+                    },
+                    {
+                        "name": "graphdyne-dft",
+                        "root_path": "/data/libraries/graphdyne-dft",
+                        "description": "graphdyne-dft",
+                        "created_at": "2026-06-02T00:00:00",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(LibraryManager, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(LibraryManager, "DEFAULT_LIBRARY_ROOT", default_root)
+
+    LibraryManager()
+
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    paths = {item["name"]: item["root_path"] for item in payload["libraries"]}
+    assert paths[DEFAULT_LIBRARY_NAME] == str(default_root.resolve())
+    assert paths["graphdyne-dft"] == "/data/libraries/graphdyne-dft"
+    listed = {item.name: item.root_path for item in LibraryManager().list_libraries()}
+    assert listed["graphdyne-dft"] == "/data/libraries/graphdyne-dft"

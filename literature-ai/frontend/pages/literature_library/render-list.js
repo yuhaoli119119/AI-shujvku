@@ -16,7 +16,8 @@ function renderPaperList() {
         const active = paper.id === state.selectedPaperId ? " active" : "";
         return (
             '<div class="paper-card' + active + '" onclick="selectPaperById(\'' + paper.id + '\')">' +
-                '<div class="paper-title">' + (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + '</span> ' : "") + esc(paper.title || "未命名文献") + "</div>" +
+                '<div class="paper-title">' + (paper.serial_number ? '<span class="serial-chip">' + formatSerialNumber(paper.serial_number) + '</span> ' : "") + esc(paper.title_zh || paper.title || "未命名文献") + "</div>" +
+                (paper.title_zh && paper.title ? '<div class="paper-original-title">' + esc(paper.title) + '</div>' : '') +
                 '<div class="paper-meta">' + esc(paper.year || "-") + " | " + esc(paper.journal || "-") + " | " + esc(paperTypeLabel(paper.paper_type)) + "<br>" + paperStatusChip(paper) + "</div>" +
                 '<div class="badge-row">' +
                     badge(paper.counts && paper.counts.sections) +

@@ -42,6 +42,18 @@ body {
     text-align: right;
     word-break: break-all;
 }
+.runtime-info-card {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, var(--color-surface-alt), var(--color-surface));
+    line-height: 1.7;
+    word-break: break-word;
+}
+.runtime-info-card code {
+    font-size: 12px;
+}
 select, input[type="text"], input[type="number"], textarea {
     border: 1px solid var(--color-border-strong);
     background: var(--color-surface);
@@ -263,6 +275,12 @@ body.resizing iframe {
     font-weight: 800;
     color: var(--color-text);
 }
+.paper-original-title {
+    margin-top: 4px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
 .paper-meta { margin-top: 6px; font-size: 13px; color: var(--color-text-secondary); line-height: 1.6; }
 .badge-row { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
 .tag, .count-badge, .status-chip, .serial-chip {
@@ -334,6 +352,34 @@ body.resizing iframe {
     font-size: 20px;
     line-height: 1.45;
     font-weight: 800;
+}
+.localized-summary-card .localized-title {
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.4;
+    margin-bottom: 8px;
+}
+.localized-summary-card h4 {
+    margin: 16px 0 8px;
+    font-size: 14px;
+}
+.localized-summary-card .original-abstract {
+    margin-top: 12px;
+}
+.full-translation-card .translation-body {
+    margin-top: 14px;
+    max-height: none;
+    line-height: 1.75;
+    white-space: pre-wrap;
+}
+.full-translation-card .translation-section {
+    border-top: 1px solid var(--color-border);
+    margin-top: 16px;
+    padding-top: 14px;
+}
+.full-translation-card .translation-section h4 {
+    margin: 0;
+    font-size: 14px;
 }
 .workspace-meta {
     margin-top: 6px;
@@ -627,6 +673,21 @@ body.resizing iframe {
     border-radius: var(--radius);
     font-size: 12px;
     margin-bottom: 8px;
+    word-break: break-all;
+}
+.dialog-hint,
+.path-preview {
+    margin-bottom: 8px;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+}
+.path-preview {
+    display: none;
+    padding: 10px 12px;
+    border: 1px dashed var(--color-border-strong);
+    border-radius: var(--radius);
+    background: var(--color-surface-alt);
     word-break: break-all;
 }
 .dir-browser {

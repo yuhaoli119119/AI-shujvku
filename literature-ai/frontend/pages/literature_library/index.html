@@ -2,13 +2,16 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>文献库 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
-    <link rel="stylesheet" href="./page.css?v=20260531-aiuxfix">
+    <link rel="stylesheet" href="./page.css?v=20260603-zhfix1">
     <script src="../../shared/topnav.js"></script>
     <script>ThemeManager.init();</script>
 </head>
@@ -31,6 +34,9 @@
                 <button class="btn ghost" onclick="openImportLibraryDialog()">导入已有库</button>
                 <button class="btn danger" onclick="removeCurrentLibrary()">移除库</button>
                 <span id="libStatus" class="status-line subtle"></span>
+            </div>
+            <div class="toolbar-row">
+                <div id="libraryRuntimeInfo" class="runtime-info-card subtle">正在读取当前文献库路径...</div>
             </div>
             <div class="toolbar-row">
                 <input id="searchInput" class="search-input" type="text" placeholder="搜索标题、DOI、作者、摘要、关键词">
@@ -132,6 +138,7 @@
                         <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
                         <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">DFT 数据</button>
                         <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
+                        <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
                         <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI 审阅与确认</button>
                     </div>
 
@@ -165,6 +172,10 @@
                             <textarea id="writerNotes" placeholder="给内部 AI 的补充要求，例如：重点整理机理链条、列出关键 DFT 结果、突出存在争议的数据。"></textarea>
                         </div>
                         <div id="writerResult"></div>
+                    </section>
+
+                    <section id="tab-translation" class="tab-panel">
+                        <div id="translationContent"></div>
                     </section>
 
                     <section id="tab-review" class="tab-panel">
@@ -288,7 +299,9 @@
             <label for="createLibName">库名称</label>
             <input id="createLibName" type="text" placeholder="例如：锂硫电池综述">
             <label>选择存储位置</label>
+            <p class="dialog-hint">这里选择的是父目录。系统会在该目录下自动新建一个与库名称同名的子目录。</p>
             <div id="createLibSelectedPath" class="selected-path"></div>
+            <div id="createLibResolvedPath" class="path-preview subtle"></div>
             <div id="createLibDirBrowser" class="dir-browser">加载中...</div>
             <div class="modal-actions">
                 <button class="btn ghost" onclick="setCreateDefaultLocation()">使用默认位置</button>
@@ -302,6 +315,7 @@
         <div class="modal">
             <h3>导入已有文献库</h3>
             <label>选择已有库目录</label>
+            <p class="dialog-hint">请选择已经存在的文献库根目录，而不是普通用户目录。目录内至少应已有 `database.sqlite`、`library.json`、`config/project_config.json`、`storage/` 或 `papers/` 之一。</p>
             <div id="importLibSelectedPath" class="selected-path"></div>
             <div id="importLibDirBrowser" class="dir-browser">加载中...</div>
             <div class="modal-actions">
@@ -388,12 +402,13 @@
     </div>
 
     <script src="./state.js?v=20260531-loadfix" defer></script>
-    <script src="./api.js?v=20260531-loadfix" defer></script>
-    <script src="./render-list.js?v=20260531-loadfix" defer></script>
-    <script src="./render-detail.js?v=20260531-aiuxfix" defer></script>
-    <script src="./jobs.js?v=20260531-loadfix" defer></script>
+    <script src="./api.js?v=20260603-zhfix1" defer></script>
+    <script src="./library_runtime_fix.js?v=20260603-zhfix1" defer></script>
+    <script src="./render-list.js?v=20260603-zhfix1" defer></script>
+    <script src="./render-detail.js?v=20260603-zhfix1" defer></script>
+    <script src="./jobs.js?v=20260603-zhfix1" defer></script>
     <script src="./writer.js?v=20260531-aiuxfix" defer></script>
     <script src="./review.js?v=20260531-aiuxfix" defer></script>
-    <script src="./page.js?v=20260531-aiuxfix" defer></script>
+    <script src="./page.js?v=20260603-zhfix1" defer></script>
 </body>
 </html>

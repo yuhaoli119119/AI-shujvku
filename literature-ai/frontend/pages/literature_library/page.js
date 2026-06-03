@@ -92,6 +92,7 @@ function applyQueryParams() {
         figures: "figures",
         dft: "dft",
         writing: "writing",
+        translation: "translation",
         review: "review"
     };
     if (tab === "ai-search") {
@@ -112,7 +113,7 @@ function syncQueryParams() {
 }
 
 function switchTab(tab) {
-    if (!["summary", "sections", "figures", "dft", "writing", "review"].includes(tab)) {
+    if (!["summary", "sections", "figures", "dft", "writing", "translation", "review"].includes(tab)) {
         tab = "summary";
     }
     state.currentTab = tab;

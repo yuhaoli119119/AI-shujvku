@@ -110,9 +110,9 @@ def test_paper_translation_preview_returns_source_only_fallback_without_writer_c
     with TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "translation_unconfigured.sqlite"
         monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
-        monkeypatch.delenv("LITAI_WRITER_API_KEY", raising=False)
-        monkeypatch.delenv("LITAI_WRITER_API_BASE", raising=False)
-        monkeypatch.delenv("LITAI_WRITER_MODEL", raising=False)
+        monkeypatch.setenv("LITAI_WRITER_API_KEY", "")
+        monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
+        monkeypatch.setenv("LITAI_WRITER_MODEL", "")
         get_settings.cache_clear()
 
         engine = create_engine(f"sqlite:///{db_path}", future=True)

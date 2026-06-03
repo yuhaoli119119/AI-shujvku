@@ -54,6 +54,19 @@ app = FastAPI(
 )
 
 app.middleware("http")(enforce_mcp_auth)
+
+
+@app.middleware("http")
+async def no_cache_frontend_assets(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith(("/pages/", "/shared/")):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 app.include_router(health_router, prefix="/api")
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])

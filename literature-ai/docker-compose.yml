@@ -53,8 +53,8 @@ services:
       LITAI_MINIO_ACCESS_KEY: minioadmin
       LITAI_MINIO_SECRET_KEY: minioadmin
       LITAI_STORAGE_ROOT: /data/storage
-      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
-      LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-true}
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-false}
+      LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-false}
       LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
       LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}
       LITAI_DOCLING_DOCUMENT_TIMEOUT: ${LITAI_DOCLING_DOCUMENT_TIMEOUT:-120}
@@ -80,8 +80,8 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
-      - ./storage:/data/storage
-      - ./storage/docling_cache:/root/.cache/docling
+      - ./data:/data
+      - ./data/docling_cache:/root/.cache/docling
       # Host user directory browsing is optional. Override LITAI_HOST_USERS_ROOT on macOS/Linux.
       # If you do not need host directory browsing, comment this line out.
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
@@ -100,8 +100,8 @@ services:
       LITAI_MINIO_ACCESS_KEY: minioadmin
       LITAI_MINIO_SECRET_KEY: minioadmin
       LITAI_STORAGE_ROOT: /data/storage
-      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
-      LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-true}
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-false}
+      LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-false}
       LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
       LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}
       LITAI_DOCLING_DOCUMENT_TIMEOUT: ${LITAI_DOCLING_DOCUMENT_TIMEOUT:-120}
@@ -124,8 +124,8 @@ services:
       - minio
     volumes:
       - ./backend:/app
-      - ./storage:/data/storage
-      - ./storage/docling_cache:/root/.cache/docling
+      - ./data:/data
+      - ./data/docling_cache:/root/.cache/docling
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
 
 volumes:

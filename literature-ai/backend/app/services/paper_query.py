@@ -15,6 +15,7 @@ from app.db.models import (
     Paper,
     PaperRelationship,
     PaperFigure,
+    PaperNote,
     PaperSection,
     PaperTable,
     ReferenceEntry,
@@ -191,6 +192,7 @@ class PaperQueryService:
         references = self.session.scalars(
             select(ReferenceEntry).where(ReferenceEntry.paper_id == paper_id).order_by(ReferenceEntry.reference_number.asc().nulls_last(), ReferenceEntry.created_at.asc())
         ).all()
+        full_translation = self._latest_full_translation(paper_id)
 
         base_counts = {
             "sections": len(sections),
@@ -216,8 +218,10 @@ class PaperQueryService:
                 item.id: item.title
                 for item in self.session.scalars(select(Paper).where(Paper.id.in_(list(related_paper_ids)))).all()
             }
+        base_payload = base.model_dump()
+        base_payload["full_translation_zh"] = full_translation
         return PaperDetailResponse(
-            **base.model_dump(),
+            **base_payload,
             sections=[PaperSectionResponse.model_validate(item) for item in sections],
             tables=[PaperTableResponse.model_validate(item) for item in tables],
             figures=[PaperFigureResponse.model_validate(item) for item in figures],
@@ -246,16 +250,20 @@ class PaperQueryService:
         relationship_summary: dict[str, int] | None = None,
     ) -> PaperListItemResponse:
         c = PaperCountsResponse(**counts)
+        localized = self._localized_metadata(paper)
         return PaperListItemResponse(
             id=paper.id,
             serial_number=paper.serial_number,
             library_name=normalize_library_name(paper.library_name),
             doi=paper.doi,
             title=paper.title,
+            title_zh=localized.get("title_zh"),
             year=paper.year,
             journal=paper.journal,
             authors=paper.authors or [],
             abstract=paper.abstract,
+            abstract_zh=localized.get("abstract_zh"),
+            full_translation_zh=localized.get("full_translation_zh"),
             pdf_path=paper.pdf_path,
             oa_status=paper.oa_status,
             license=paper.license,
@@ -270,6 +278,26 @@ class PaperQueryService:
             counts=c,
             relationship_summary=relationship_summary or {},
         )
+
+    def _localized_metadata(self, paper: Paper) -> dict[str, str | None]:
+        data = paper.comprehensive_analysis if isinstance(paper.comprehensive_analysis, dict) else {}
+        return {
+            "title_zh": data.get("title_zh") if isinstance(data.get("title_zh"), str) else None,
+            "abstract_zh": data.get("abstract_zh") if isinstance(data.get("abstract_zh"), str) else None,
+            "full_translation_zh": None,
+        }
+
+    def _latest_full_translation(self, paper_id: UUID) -> str | None:
+        note = self.session.scalars(
+            select(PaperNote)
+            .where(
+                PaperNote.paper_id == paper_id,
+                PaperNote.source == "translation_preview",
+                PaperNote.field_name == "full_translation_preview",
+            )
+            .order_by(PaperNote.created_at.desc())
+        ).first()
+        return note.content if note and note.content else None
 
     @staticmethod
     def _serialize_writing_card(item: WritingCard) -> WritingCardResponse:

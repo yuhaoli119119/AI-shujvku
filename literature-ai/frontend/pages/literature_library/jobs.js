@@ -13,7 +13,9 @@ function initSSE() {
         try {
             state.papers = JSON.parse(event.data) || [];
             renderPaperList();
-            updatePagination();
+            if (typeof updatePager === "function") {
+                updatePager();
+            }
         } catch (error) {
             console.error("SSE parse error", error);
         }

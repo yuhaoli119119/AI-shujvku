@@ -3,6 +3,7 @@ const LIB_API = "/api/libraries";
 const WRITER_API = "/api/writer";
 const EXTERNAL_API = "/api/external-analysis";
 const PAGE_SIZE = 20;
+const SYSTEM_API = "/api/system";
 
 function showToast(message, type) {
     const existing = document.querySelector(".toast");
@@ -198,6 +199,65 @@ function paperHasPdf(paper) {
 function getCurrentLibraryName() {
     const el = $("librarySelect");
     return el ? el.value || "" : "";
+}
+
+function safeLibraryFolderName(name) {
+    return String(name || "").trim().replace(/[\\/]/g, "_").replace(/\s+/g, "_");
+}
+
+function containerPathToHostHint(path) {
+    const value = String(path || "").trim();
+    if (!value) return "";
+    if (value === "/data") return "literature-ai/data";
+    if (value.startsWith("/data/")) return "literature-ai/data/" + value.slice("/data/".length);
+    if (value === "/host/users") return "宿主机用户目录映射";
+    if (value.startsWith("/host/users/")) return "宿主机用户目录: " + value.slice("/host/users/".length);
+    return "";
+}
+
+function setCreatePathPreview() {
+    const preview = $("createLibResolvedPath");
+    if (!preview) return;
+    const nameEl = $("createLibName");
+    const parent = window._selectedPath_createLib || "";
+    const safeName = safeLibraryFolderName(nameEl ? nameEl.value : "");
+    if (!parent) {
+        preview.style.display = "none";
+        preview.textContent = "";
+        return;
+    }
+    const finalPath = safeName ? parent.replace(/[\\/]$/, "") + "/" + safeName : parent;
+    const hostHint = containerPathToHostHint(finalPath);
+    preview.style.display = "block";
+    preview.textContent = "将创建到: " + finalPath + (hostHint ? " | 宿主机对应: " + hostHint : "");
+}
+
+async function loadLibraryRuntimeInfo() {
+    const el = $("libraryRuntimeInfo");
+    if (!el) return;
+    try {
+        const info = await fetchJSON(SYSTEM_API + "/db-info");
+        const activeDb = info.active_library_db_path || info.effective_db_path || "";
+        const storageRoot = info.effective_storage_root || info.storage_root || "";
+        const registryPath = "/data/library_registry.json";
+        const activeRoot = activeDb ? activeDb.replace(/\\/g, "/").replace(/\/database\.sqlite$/i, "") : "";
+        const hostDbHint = containerPathToHostHint(activeDb);
+        const hostRootHint = containerPathToHostHint(activeRoot);
+        const hostStorageHint = containerPathToHostHint(storageRoot);
+        const hostRegistryHint = containerPathToHostHint(registryPath);
+        el.innerHTML =
+            "当前库: <strong>" + esc(info.active_library || "未激活") + "</strong>" +
+            " | SQLite: <code>" + esc(activeDb || "-") + "</code>" +
+            (hostDbHint ? " | 宿主机: <code>" + esc(hostDbHint) + "</code>" : "") +
+            "<br>注册表: <code>" + esc(registryPath) + "</code>" +
+            (hostRegistryHint ? " | 宿主机: <code>" + esc(hostRegistryHint) + "</code>" : "") +
+            "<br>库目录: <code>" + esc(activeRoot || "-") + "</code>" +
+            (hostRootHint ? " | 宿主机: <code>" + esc(hostRootHint) + "</code>" : "") +
+            "<br>产物目录: <code>" + esc(storageRoot || "-") + "</code>" +
+            (hostStorageHint ? " | 宿主机: <code>" + esc(hostStorageHint) + "</code>" : "");
+    } catch (error) {
+        el.textContent = "当前文献库路径读取失败: " + error.message;
+    }
 }
 
 function normalizeLibraryListResponse(data) {
@@ -519,4 +579,208 @@ async function fetchClaimEvidenceLocator(claimId) {
         return { _error: true, status: 0, detail: error.message };
     }
 }
+
+loadLibraries = async function() {
+    try {
+        const el = $("librarySelect");
+        const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "";
+        const quickLibraries = normalizeLibraryListResponse(await fetchJSON(API_BASE + "/libraries"));
+        const selectedName = previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
+            ? previousSelection
+            : ((quickLibraries || [])[0] ? quickLibraries[0].name : "");
+        if (el) {
+            el.innerHTML = (quickLibraries || []).map(function(item) {
+                return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
+                    esc(item.name) + "（" + esc(item.paper_count || 0) + " 篇）" +
+                "</option>";
+            }).join("");
+        }
+        const selected = (quickLibraries || []).find(function(item) { return item.name === selectedName; });
+        state.currentLibrary = selected || null;
+        state.currentLibraryTotal = selected ? Number(selected.paper_count || 0) : 0;
+        const status = $("libStatus");
+        if (status) status.textContent = selected ? (selected.name + " | " + selected.paper_count + " 篇文献") : "";
+
+        fetchJSON(LIB_API).then(function(rawLibraries) {
+            const libraries = normalizeLibraryListResponse(rawLibraries);
+            const fullEl = $("librarySelect");
+            const currentValue = fullEl ? fullEl.value : selectedName;
+            const active = (libraries || []).find(function(item) { return item.is_active; });
+            const keepName = currentValue || (active && active.name) || selectedName;
+            if (fullEl && libraries && libraries.length) {
+                fullEl.innerHTML = libraries.map(function(item) {
+                    const isSelected = item.name === keepName;
+                    return '<option value="' + esc(item.name) + '"' + (isSelected ? " selected" : "") + ">" +
+                        esc(item.name) + (item.is_active ? "（当前）" : "") +
+                    "</option>";
+                }).join("");
+            }
+            const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
+            if (selectedFull) {
+                state.currentLibrary = selectedFull;
+                state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
+                if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
+            }
+            loadLibraryRuntimeInfo();
+        }).catch(function(error) {
+            console.warn("full library metadata failed", error);
+        });
+    } catch (error) {
+        console.error("loadLibraries failed", error);
+        try {
+            const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
+            const el = $("librarySelect");
+            if (el) {
+                el.innerHTML = libraries.map(function(item) {
+                    return '<option value="' + esc(item.name) + '"' + (item.is_active ? " selected" : "") + ">" +
+                        esc(item.name) + (item.is_active ? "（当前）" : "") +
+                    "</option>";
+                }).join("");
+            }
+            const active = (libraries || []).find(function(item) { return item.is_active; });
+            state.currentLibrary = active || null;
+            state.currentLibraryTotal = active ? Number(active.paper_count || 0) : 0;
+            const status = $("libStatus");
+            if (status) status.textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
+            loadLibraryRuntimeInfo();
+        } catch (fallbackError) {
+            console.error("loadLibraries fallback failed", fallbackError);
+        }
+    }
+};
+
+if (typeof refreshCurrentPage !== "function") {
+    refreshCurrentPage = function() {
+        if (typeof fetchPapers === "function") {
+            fetchPapers();
+        }
+        if (typeof loadLibraries === "function") {
+            loadLibraries();
+        }
+    };
+}
+
+selectDir = function(kind, path) {
+    const el = $(kind + "SelectedPath");
+    if (el) {
+        el.style.display = "block";
+        const hostHint = containerPathToHostHint(path);
+        el.textContent = hostHint ? (path + " | 宿主机对应: " + hostHint) : path;
+    }
+    window["_selectedPath_" + kind] = path;
+    if (kind === "createLib") setCreatePathPreview();
+    renderDirBrowser(kind, path);
+};
+
+openCreateLibraryDialog = function() {
+    const name = $("createLibName");
+    if (name) name.value = "";
+    const path = $("createLibSelectedPath");
+    if (path) path.style.display = "none";
+    const resolved = $("createLibResolvedPath");
+    if (resolved) {
+        resolved.style.display = "none";
+        resolved.textContent = "";
+    }
+    window._selectedPath_createLib = null;
+    const dialog = $("createLibDialog");
+    if (dialog) dialog.style.display = "flex";
+    loadDirBrowser("createLib");
+};
+
+setCreateDefaultLocation = async function() {
+    let path = "";
+    try {
+        const roots = await fetchJSON(`${LIB_API}/browse-roots`);
+        path = roots?.[0]?.path || "";
+    } catch (error) {
+        console.warn("Failed to load browse roots", error);
+    }
+    if (!path) return;
+    const pathEl = $("createLibSelectedPath");
+    if (pathEl) {
+        pathEl.style.display = "block";
+        const hostHint = containerPathToHostHint(path);
+        pathEl.textContent = hostHint ? (path + " | 宿主机对应: " + hostHint) : path;
+    }
+    window._selectedPath_createLib = path;
+    setCreatePathPreview();
+};
+
+openImportLibraryDialog = function() {
+    const path = $("importLibSelectedPath");
+    if (path) path.style.display = "none";
+    window._selectedPath_importLib = null;
+    const dialog = $("importLibDialog");
+    if (dialog) dialog.style.display = "flex";
+    loadDirBrowser("importLib");
+};
+
+document.addEventListener("DOMContentLoaded", function() {
+    const createName = $("createLibName");
+    if (createName) {
+        createName.addEventListener("input", setCreatePathPreview);
+    }
+    loadLibraryRuntimeInfo();
+});
+
+submitCreateLibrary = async function() {
+    const nameEl = $("createLibName");
+    const name = nameEl ? nameEl.value.trim() : "";
+    if (!name) {
+        showToast("请输入库名称。", "error");
+        return;
+    }
+    try {
+        await fetchJSON(LIB_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: name, root_path: window._selectedPath_createLib || "" })
+        });
+        closeCreateLibraryDialog();
+        showToast("库创建成功。", "success");
+        await loadLibraries();
+        refreshCurrentPage();
+    } catch (error) {
+        if (String(error.message || "").includes("already exists")) {
+            closeCreateLibraryDialog();
+            await activateLibraryByName(name);
+            showToast("同名文献库已经存在，已直接切换到该库。", "info");
+            return;
+        }
+        showToast("创建失败：" + error.message, "error");
+    }
+};
+
+submitImportLibrary = async function() {
+    if (!window._selectedPath_importLib) {
+        showToast("请选择已有库目录。", "error");
+        return;
+    }
+    try {
+        await fetchJSON(LIB_API + "/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ root_path: window._selectedPath_importLib })
+        });
+        closeImportLibraryDialog();
+        showToast("库导入成功。", "success");
+        await loadLibraries();
+        refreshCurrentPage();
+    } catch (error) {
+        if (String(error.message || "").includes("already exists")) {
+            const parts = String(window._selectedPath_importLib || "").replace(/\\/g, "/").split("/");
+            const fallbackName = parts.filter(Boolean).pop() || "";
+            closeImportLibraryDialog();
+            if (fallbackName) {
+                await activateLibraryByName(fallbackName);
+            } else {
+                await loadLibraries();
+            }
+            showToast("这个文献库已经导入过了，已直接切换到现有库。", "info");
+            return;
+        }
+        showToast("导入失败：" + error.message, "error");
+    }
+};
 

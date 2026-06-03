@@ -130,6 +130,53 @@ def test_get_active_database_info_prefers_registered_active_sqlite_without_candi
     assert info["recovered_from_candidate_scan"] is False
 
 
+def test_get_active_database_info_maps_container_path_to_registry_data_root(tmp_path, monkeypatch):
+    workspace_root = tmp_path
+    backend_root = workspace_root / "backend"
+    backend_root.mkdir(parents=True, exist_ok=True)
+
+    data_root = workspace_root / "data"
+    library_root = data_root / "libraries" / "graphdyne-dft"
+    (library_root / "papers").mkdir(parents=True, exist_ok=True)
+    _write_sqlite(library_root / "database.sqlite", paper_count=0)
+
+    registry_path = data_root / "library_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "graphdyne-dft",
+                "libraries": [
+                    {
+                        "name": "graphdyne-dft",
+                        "root_path": "/data/libraries/graphdyne-dft",
+                        "description": "graphdyne-dft",
+                        "created_at": "2026-06-02T00:00:00",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    get_settings.cache_clear()
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
+    monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
+
+    info = active_database_module.get_active_database_info()
+
+    assert info["db_kind"] == "sqlite"
+    assert Path(str(info["active_library_db_path"])) == (library_root / "database.sqlite").resolve()
+    assert Path(str(info["effective_db_path"])) == (library_root / "database.sqlite").resolve()
+    assert Path(str(info["effective_storage_root"])) == (library_root / "papers").resolve()
+    assert info["effective_matches_active_library_db_path"] is True
+    assert info["recovered_from_candidate_scan"] is False
+
+
 def test_resolve_persisted_artifact_path_finds_mirrored_file(tmp_path, monkeypatch):
     workspace_root = tmp_path
     backend_root = workspace_root / "backend"

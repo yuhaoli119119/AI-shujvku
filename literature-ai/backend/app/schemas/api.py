@@ -273,10 +273,13 @@ class PaperListItemResponse(BaseModel):
     library_name: str | None = None
     doi: str | None = None
     title: str | None = None
+    title_zh: str | None = None
     year: int | None = None
     journal: str | None = None
     authors: list = Field(default_factory=list)
     abstract: str | None = None
+    abstract_zh: str | None = None
+    full_translation_zh: str | None = None
     pdf_path: str
     oa_status: str | None = None
     license: str | None = None

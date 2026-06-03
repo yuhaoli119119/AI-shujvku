@@ -73,7 +73,7 @@ class LibraryManager:
         active_name = self.normalize_library_name(registry.get("active_library"))
         result: list[LibraryInfo] = []
         for entry in registry.get("libraries", []):
-            root = Path(entry["root_path"])
+            root = self._resolve_runtime_path(entry["root_path"])
             name = self.normalize_library_name(entry.get("name"))
             result.append(
                 LibraryInfo(
@@ -117,7 +117,7 @@ class LibraryManager:
         registry.setdefault("libraries", []).append(
             {
                 "name": library_name,
-                "root_path": str(root.resolve()),
+                "root_path": self._persisted_root_path(root),
                 "description": description,
                 "created_at": now_iso,
             }
@@ -140,6 +140,7 @@ class LibraryManager:
             raise ValueError(f"Library '{normalized_name}' does not exist")
 
         root = Path(entry["root_path"]).resolve()
+        root = self._resolve_runtime_path(entry["root_path"])
         if not root.exists():
             raise ValueError(f"Library path does not exist: {root}")
 
@@ -228,10 +229,17 @@ class LibraryManager:
         return info
 
     def import_library(self, root_path: str) -> LibraryInfo:
-        root = Path(root_path).resolve()
+        root = self._resolve_runtime_path(root_path)
         self._validate_path_safety(root)
         if not root.exists():
             raise ValueError(f"Path does not exist: {root}")
+        if not root.is_dir():
+            raise ValueError(f"Not a directory: {root}")
+        if not self._looks_like_existing_library_root(root):
+            raise ValueError(
+                "Selected path is not an existing library root. "
+                "Please choose a folder that already contains database.sqlite, library.json, config/project_config.json, storage/, or papers/."
+            )
 
         meta = self._load_library_meta(root)
         project_config = self._load_project_config(root)
@@ -252,29 +260,12 @@ class LibraryManager:
         if self._find_entry(registry, name) is not None:
             raise ValueError(f"Library '{name}' already exists for path {root}")
 
-        self.init_library_structure(root, storage_mode=storage_mode)
-        if not (root / "database.sqlite").exists():
-            self.init_library_db(root)
-
         now_iso = datetime.utcnow().isoformat()
-        self._write_library_meta(
-            root=root,
-            payload=self._build_library_meta(
-                name=name,
-                description=description,
-                created_at=created_at or now_iso,
-                storage_mode=storage_mode,
-                library_kind=library_kind,
-                meta=meta,
-            ),
-        )
-        if storage_mode == SHARED_STORAGE_MODE:
-            self._ensure_shared_project_config(root, name, project_config=project_config)
 
         registry.setdefault("libraries", []).append(
             {
                 "name": name,
-                "root_path": str(root),
+                "root_path": self._persisted_root_path(root),
                 "description": description,
                 "created_at": created_at or now_iso,
             }
@@ -375,10 +366,28 @@ class LibraryManager:
         self._write_library_meta(default_root, default_meta)
 
     def _resolve_create_root(self, name: str, root_path: str) -> Path:
+        safe_name = self._safe_library_dir_name(name)
         if root_path and root_path.strip():
-            return Path(root_path).resolve()
-        safe_name = name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+            selected_parent = self._resolve_runtime_path(root_path)
+            if selected_parent.name == safe_name:
+                return selected_parent
+            return (selected_parent / safe_name).resolve()
         return (self.default_library_root().parent / safe_name).resolve()
+
+    @staticmethod
+    def _safe_library_dir_name(name: str) -> str:
+        return name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+
+    @staticmethod
+    def _looks_like_existing_library_root(root: Path) -> bool:
+        markers = (
+            root / "database.sqlite",
+            root / "library.json",
+            root / "config" / "project_config.json",
+            root / LEGACY_STORAGE_MODE,
+            root / SHARED_STORAGE_MODE,
+        )
+        return any(path.exists() for path in markers)
 
     def _read_registry(self) -> dict[str, Any]:
         registry_path = self.registry_path()
@@ -449,7 +458,55 @@ class LibraryManager:
             return str(cls.default_library_root())
         if not text:
             return str(cls.default_library_root() if cls.normalize_library_name(library_name) == DEFAULT_LIBRARY_NAME else "")
-        return str(Path(text).resolve())
+        data_suffix = cls._data_mount_suffix(text)
+        if data_suffix is not None:
+            return cls._container_data_path(data_suffix)
+        return cls._persisted_root_path(Path(text).resolve())
+
+    @classmethod
+    def _resolve_runtime_path(cls, path: Any) -> Path:
+        text = str(path or "").strip()
+        data_suffix = cls._data_mount_suffix(text)
+        if data_suffix is not None:
+            return (cls._data_root() / data_suffix).resolve()
+        return Path(text).resolve()
+
+    @classmethod
+    def _data_root(cls) -> Path:
+        return cls.default_library_root().parent.parent.resolve()
+
+    @classmethod
+    def _data_mount_suffix(cls, path: Any) -> str | None:
+        text = str(path or "").strip()
+        normalized = text.replace("\\", "/")
+        lowered = normalized.lower()
+        if normalized == "/data":
+            return ""
+        if normalized.startswith("/data/"):
+            return normalized.removeprefix("/data/").strip("/")
+        marker = "/literature-ai/data/"
+        marker_index = lowered.rfind(marker)
+        if marker_index >= 0:
+            return normalized[marker_index + len(marker) :].strip("/")
+        marker = "literature-ai/data/"
+        marker_index = lowered.rfind(marker)
+        if marker_index >= 0:
+            return normalized[marker_index + len(marker) :].strip("/")
+        return None
+
+    @classmethod
+    def _container_data_path(cls, suffix: str) -> str:
+        suffix = suffix.strip("/")
+        return "/data" + (f"/{suffix}" if suffix else "")
+
+    @classmethod
+    def _persisted_root_path(cls, path: Path) -> str:
+        resolved = path.resolve()
+        try:
+            suffix = resolved.relative_to(cls._data_root()).as_posix()
+            return cls._container_data_path(suffix)
+        except ValueError:
+            return str(resolved)
 
     @classmethod
     def _is_default_library_root_residue(cls, root_path: str) -> bool:
