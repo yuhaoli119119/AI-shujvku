@@ -1,3 +1,4 @@
+from app.extractors.dft_settings_extractor import DFTSettingsExtractor
 from app.normalizers.dft_normalizer import DFTNormalizer
 
 
@@ -40,3 +41,43 @@ def test_normalize_exposes_cleaned_subfields():
     assert result["_normalized"]["cutoff"]["value"] == 450.0
     assert result["_normalized"]["kpoints"] == {"kx": 5, "ky": 5, "kz": 1}
     assert result["_normalized"]["vacuum"] == {"value": 20.0, "unit": "A"}
+
+
+def test_dft_settings_skip_gaussian_smearing_as_software():
+    extractor = DFTSettingsExtractor()
+    result = extractor.extract(
+        {
+            "sections": [
+                {
+                    "section_title": "Computational Methods",
+                    "text": (
+                        "The first-principles DFT calculations were performed using VASP. "
+                        "A cut-off energy of 600 eV and Gaussian smearing with a width of 0.025 eV were used."
+                    ),
+                    "page_start": 5,
+                }
+            ]
+        }
+    )
+
+    software = {item["value"] for item in result["software"]}
+    assert "VASP" in software
+    assert "Gaussian" not in software
+
+
+def test_dft_settings_keep_gaussian_software_versions():
+    extractor = DFTSettingsExtractor()
+    result = extractor.extract(
+        {
+            "sections": [
+                {
+                    "section_title": "Computational Methods",
+                    "text": "All molecular calculations were carried out with Gaussian 16 using the B3LYP functional.",
+                    "page_start": 3,
+                }
+            ]
+        }
+    )
+
+    software = {item["value"] for item in result["software"]}
+    assert "Gaussian 16" in software

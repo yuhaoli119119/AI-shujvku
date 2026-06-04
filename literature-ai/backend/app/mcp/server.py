@@ -16,6 +16,9 @@ from app.mcp.auth import require_mcp_capability
 from app.rag.retriever import Retriever
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
 from app.services.discovery_service import DiscoveryService
+from app.services.codex_context_service import CodexContextService
+from app.services.dft_review_queue_service import DFTReviewQueueService
+from app.services.dft_review_service import DFTResultReviewService
 from app.services.external_analysis_service import (
     ExternalAnalysisNormalizedModel,
     ExternalAnalysisService,
@@ -24,8 +27,10 @@ from app.services.external_analysis_service import (
 )
 from app.services.local_pdf_service import LocalPdfService
 from app.services.paper_ingestion import PaperIngestionService
+from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.services.review_service import ReviewService
+from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 
 mcp_server = FastMCP(
     get_settings().mcp_server_name,
@@ -146,6 +151,209 @@ def get_paper(paper_id: str) -> dict[str, Any]:
         payload = detail.model_dump(mode="json")
         payload["notes"] = [_serialize_note(note) for note in notes]
         return payload
+
+
+@mcp_server.tool(name="get_codex_context", description="Get a compact Codex-ready paper bundle with metadata, sections, figures, tables, candidates, warnings, notes, and Markdown.")
+def get_codex_context(
+    paper_id: str,
+    max_sections: int = 8,
+    max_chars_per_section: int = 1800,
+    max_figures: int = 12,
+    max_tables: int = 8,
+    max_candidates: int = 20,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        context = CodexContextService(session).build_context(
+            UUID(paper_id),
+            max_sections=max(1, min(max_sections, 20)),
+            max_chars_per_section=max(300, min(max_chars_per_section, 6000)),
+            max_figures=max(0, min(max_figures, 40)),
+            max_tables=max(0, min(max_tables, 30)),
+            max_candidates=max(1, min(max_candidates, 100)),
+        )
+        if context is None:
+            raise ValueError("Paper not found")
+        return context.model_dump(mode="json")
+
+
+@mcp_server.tool(name="get_codex_item", description="Get low-token, evidence-aware context for one section, figure, table, DFT candidate, mechanism claim, writing card, or other supported paper item.")
+def get_codex_item(
+    paper_id: str,
+    item_type: str,
+    item_id: str,
+    max_chars_per_section: int = 1600,
+    max_related_sections: int = 3,
+    max_locators: int = 12,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        context = CodexContextService(session).build_item_context(
+            UUID(paper_id),
+            item_type,
+            UUID(item_id),
+            max_chars_per_section=max(300, min(max_chars_per_section, 6000)),
+            max_related_sections=max(0, min(max_related_sections, 8)),
+            max_locators=max(0, min(max_locators, 40)),
+        )
+        if context is None:
+            raise ValueError("Paper or item not found")
+        return context.model_dump(mode="json")
+
+
+@mcp_server.tool(name="get_paper_knowledge", description="Get Codex-ready knowledge candidates from mechanism claims, writing cards, external AI imports, notes, and section fallbacks.")
+def get_paper_knowledge(
+    paper_id: str,
+    max_candidates: int = 60,
+    max_chars_per_candidate: int = 1200,
+    category: str | None = None,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        context = PaperKnowledgeService(session).build_context(
+            UUID(paper_id),
+            max_candidates=max(1, min(max_candidates, 120)),
+            max_chars_per_candidate=max(300, min(max_chars_per_candidate, 4000)),
+            category=category,
+        )
+        if context is None:
+            raise ValueError("Paper not found")
+        return context
+
+
+@mcp_server.tool(name="insert_word_citation", description="Insert a safe draft citation into a DOCX copy using the local literature database citation guardrails.")
+def insert_word_citation(
+    docx_path: str,
+    selected_paper_id: str,
+    text: str,
+    output_filename: str | None = None,
+    docx_insertion_mode: str = "append_paragraph",
+    placeholder: str | None = None,
+    citation_marker: str | None = None,
+    citation_insertion_mode: str = "parenthetical",
+    citation_style: str = "draft_author_year",
+    user_note: str | None = None,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    input_path = Path(docx_path).expanduser()
+    if not input_path.exists() or not input_path.is_file():
+        raise ValueError(f"DOCX file not found: {docx_path}")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        result = WordCitationInsertionService(session=session, settings=settings).insert(
+            WordCitationInsertRequest(
+                document_bytes=input_path.read_bytes(),
+                filename=input_path.name,
+                text=text,
+                selected_paper_id=UUID(selected_paper_id),
+                citation_marker=citation_marker,
+                docx_insertion_mode=docx_insertion_mode,
+                citation_insertion_mode=citation_insertion_mode,
+                citation_style=citation_style,
+                placeholder=placeholder,
+                output_filename=output_filename,
+                user_note=user_note,
+            )
+        )
+        if result is None:
+            raise ValueError("Paper not found")
+        return result
+
+
+@mcp_server.tool(name="verify_dft_result", description="Mark one evidence-backed DFT result candidate as reviewed after Codex/human PDF evidence verification.")
+def verify_dft_result(
+    paper_id: str,
+    dft_result_id: str,
+    confirm_reviewed_against_pdf: bool,
+    reviewer_note: str | None = None,
+    field_names: list[str] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTResultReviewService(session).verify_result(
+            paper_id=UUID(paper_id),
+            result_id=UUID(dft_result_id),
+            confirm_reviewed_against_pdf=confirm_reviewed_against_pdf,
+            reviewer=auth.source_prefix,
+            reviewer_note=reviewer_note,
+            field_names=field_names,
+        )
+
+
+@mcp_server.tool(name="reject_dft_result", description="Mark one DFT result candidate as rejected so it stays blocked from ML export and leaves the active review queue.")
+def reject_dft_result(
+    paper_id: str,
+    dft_result_id: str,
+    confirm_reject_candidate: bool,
+    reviewer_note: str | None = None,
+    field_names: list[str] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTResultReviewService(session).reject_result(
+            paper_id=UUID(paper_id),
+            result_id=UUID(dft_result_id),
+            confirm_reject_candidate=confirm_reject_candidate,
+            reviewer=auth.source_prefix,
+            reviewer_note=reviewer_note,
+            field_names=field_names,
+        )
+
+
+@mcp_server.tool(name="propose_dft_result_correction", description="Create a pending correction proposal for one DFT result field without applying it.")
+def propose_dft_result_correction(
+    paper_id: str,
+    dft_result_id: str,
+    field_name: str,
+    proposed_value: Any,
+    reason: str,
+    confirm_correction_proposal: bool,
+    evidence_payload: dict[str, Any] | list[Any] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTResultReviewService(session).propose_correction(
+            paper_id=UUID(paper_id),
+            result_id=UUID(dft_result_id),
+            confirm_correction_proposal=confirm_correction_proposal,
+            field_name=field_name,
+            proposed_value=proposed_value,
+            reason=reason,
+            reviewer=auth.source_prefix,
+            evidence_payload=evidence_payload,
+        )
+
+
+@mcp_server.tool(name="get_dft_review_queue", description="List DFT result candidates that need Codex/human verification before ML export.")
+def get_dft_review_queue(
+    property_type: str | None = None,
+    adsorbate: str | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    paper_id: str | None = None,
+    reason: str | None = None,
+    status: str = "needs_review",
+    limit: int = 50,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTReviewQueueService(session).list_queue(
+            property_type=property_type,
+            adsorbate=adsorbate,
+            year_min=year_min,
+            year_max=year_max,
+            paper_id=UUID(paper_id) if paper_id else None,
+            reason=reason,
+            status=status,
+            limit=max(1, min(limit, 200)),
+        )
 
 
 @mcp_server.tool(name="list_notes", description="List shared notes for a paper.")

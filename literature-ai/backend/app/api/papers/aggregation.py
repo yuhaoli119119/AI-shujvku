@@ -7,6 +7,7 @@ import logging
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -18,6 +19,7 @@ from app.db.models import DFTResult as DR
 from app.db.models import DFTSetting as DS
 from app.db.models import Paper as P
 from app.db.session import get_db_session
+from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.utils.review_safety import is_export_eligible_extraction, summarize_gate_results
 
 router = APIRouter()
@@ -443,6 +445,30 @@ async def dft_dataset_quality(
         "rows": quality_rows[:limit],
         "paper_completeness": paper_completeness[:limit],
     }
+
+
+@router.get("/export/dft-review-queue")
+async def dft_review_queue(
+    property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
+    adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
+    year_min: int | None = Query(default=None, description="Minimum publication year"),
+    year_max: int | None = Query(default=None, description="Maximum publication year"),
+    paper_id: UUID | None = Query(default=None, description="Restrict queue to one paper"),
+    reason: str | None = Query(default=None, description="Optional blocked reason filter"),
+    status: str = Query(default="needs_review", description="needs_review, exportable, all, or a blocked reason"),
+    limit: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_db_session),
+):
+    return DFTReviewQueueService(session).list_queue(
+        property_type=property_type,
+        adsorbate=adsorbate,
+        year_min=year_min,
+        year_max=year_max,
+        paper_id=paper_id,
+        reason=reason,
+        status=status,
+        limit=limit,
+    )
 
 
 @router.get("/compare")

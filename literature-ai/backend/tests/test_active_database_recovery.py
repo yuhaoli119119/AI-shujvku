@@ -130,6 +130,115 @@ def test_get_active_database_info_prefers_registered_active_sqlite_without_candi
     assert info["recovered_from_candidate_scan"] is False
 
 
+def test_force_configured_database_bypasses_registered_active_library(tmp_path, monkeypatch):
+    workspace_root = tmp_path
+    backend_root = workspace_root / "backend"
+    backend_root.mkdir(parents=True, exist_ok=True)
+
+    active_root = workspace_root / "data" / "libraries" / "default"
+    configured_root = workspace_root / "runtime" / "isolated"
+    (active_root / "storage").mkdir(parents=True, exist_ok=True)
+    (configured_root / "storage").mkdir(parents=True, exist_ok=True)
+    _write_sqlite(active_root / "database.sqlite", paper_count=15)
+    _write_sqlite(configured_root / "database.sqlite", paper_count=5)
+
+    registry_path = workspace_root / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "Default Library",
+                "libraries": [
+                    {
+                        "name": "Default Library",
+                        "root_path": str(active_root.resolve()),
+                        "description": "Default Library",
+                        "created_at": "2026-05-26T00:00:00",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{(configured_root / 'database.sqlite').as_posix()}")
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(configured_root / "storage"))
+    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
+    monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
+
+    info = active_database_module.activate_active_library_database()
+
+    assert info["force_configured_database"] is True
+    assert Path(str(info["db_path"])) == (configured_root / "database.sqlite").resolve()
+    assert Path(str(info["effective_db_path"])) == (configured_root / "database.sqlite").resolve()
+    assert Path(str(info["effective_storage_root"])) == (configured_root / "storage").resolve()
+    assert info["effective_db_papers_total"] == 5
+    assert info["effective_matches_active_library_db_path"] is False
+    assert info["recovered_from_candidate_scan"] is False
+
+
+def test_get_active_database_info_keeps_empty_non_default_active_library(tmp_path, monkeypatch):
+    workspace_root = tmp_path
+    backend_root = workspace_root / "backend"
+    backend_root.mkdir(parents=True, exist_ok=True)
+
+    data_root = workspace_root / "data"
+    default_root = data_root / "libraries" / "default"
+    active_root = data_root / "libraries" / "graphite-validation"
+    (default_root / "papers").mkdir(parents=True, exist_ok=True)
+    (active_root / "papers").mkdir(parents=True, exist_ok=True)
+    _write_sqlite(default_root / "database.sqlite", paper_count=15)
+    _write_sqlite(active_root / "database.sqlite", paper_count=0)
+
+    registry_path = data_root / "library_registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "graphite-validation",
+                "libraries": [
+                    {
+                        "name": "Default Library",
+                        "root_path": "/data/libraries/default",
+                        "description": "Default Library",
+                        "created_at": "2026-05-26T00:00:00",
+                    },
+                    {
+                        "name": "graphite-validation",
+                        "root_path": "/data/libraries/graphite-validation",
+                        "description": "empty validation library",
+                        "created_at": "2026-06-04T00:00:00",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    get_settings.cache_clear()
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
+    monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
+
+    info = active_database_module.get_active_database_info()
+
+    assert info["db_kind"] == "sqlite"
+    assert info["active_library"] == "graphite-validation"
+    assert Path(str(info["db_path"])) == (active_root / "database.sqlite").resolve()
+    assert Path(str(info["effective_db_path"])) == (active_root / "database.sqlite").resolve()
+    assert info["effective_db_papers_total"] == 0
+    assert info["effective_matches_active_library_db_path"] is True
+    assert info["recovered_from_candidate_scan"] is False
+
+
 def test_get_active_database_info_maps_container_path_to_registry_data_root(tmp_path, monkeypatch):
     workspace_root = tmp_path
     backend_root = workspace_root / "backend"

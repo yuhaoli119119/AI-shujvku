@@ -88,12 +88,10 @@ class ThemeManager {
 
 class TopNav {
   static NAV_ITEMS = [
-    { id: "dashboard", label: "总览", href: "../dashboard/index.html" },
-    { id: "ingestion", label: "入库中心", href: "../ingestion/index.html" },
     { id: "literature", label: "文献库", href: "../literature_library/index.html" },
+    { id: "ingestion", label: "入库", href: "../ingestion/index.html" },
     { id: "dft-database", label: "DFT 数据库", href: "../dft_database/index.html" },
-    { id: "mechanism", label: "机理知识", href: "../mechanism_knowledge/index.html" },
-    { id: "ai-writer", label: "AI 写作", href: "../ai_writer/index.html" },
+    { id: "review-center", label: "审核中心", href: "../review_center/index.html" },
     { id: "writing-assistant", label: "写作辅助", href: "../writing_assistant/index.html" },
     { id: "settings", label: "设置", href: "../settings/index.html" },
   ];
@@ -133,7 +131,7 @@ class TopNav {
 
     return (
       '<nav class="topnav" id="topnav">' +
-        '<a class="topnav-brand" href="../dashboard/index.html">LitAI</a>' +
+        '<a class="topnav-brand" href="../literature_library/index.html">LitAI · Codex</a>' +
         '<div class="topnav-items">' + items + "</div>" +
         '<button class="topnav-theme-btn" id="theme-toggle-btn" title="主题设置" aria-label="主题设置">' +
           '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +

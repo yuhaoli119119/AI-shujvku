@@ -43,6 +43,8 @@ class PaperListFilterParams(BaseModel):
     has_dft_results: bool | None = None
     has_writing_cards: bool | None = None
     paper_type: str | None = None
+    sort_by: str = Field(default="year_serial", pattern="^(year_serial|created_at|title)$")
+    sort_order: str = Field(default="asc", pattern="^(asc|desc)$")
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
 
@@ -148,6 +150,11 @@ class PaperFigureResponse(BaseModel):
     role_confidence: float | None = None
     content_summary: str | None = None
     key_elements: list[str] | None = None
+    prov: list[Any] | None = None
+    figure_label: str | None = None
+    crop_status: str = "candidate_crop"
+    crop_confidence: float | None = None
+    crop_source: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -192,6 +199,9 @@ class DFTResultResponse(BaseModel):
     source_figure: str | None = None
     evidence_text: str | None = None
     confidence: float | None = None
+    candidate_status: str = "Codex_Candidate"
+    evidence_payload: dict[str, Any] | None = None
+    extraction_protocol_version: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -290,6 +300,11 @@ class PaperListItemResponse(BaseModel):
     paper_type: str | None = None
     type_confidence: float | None = None
     classification_source: str | None = None
+    workflow_status: str = "Imported"
+    pdf_quality_status: str | None = None
+    pdf_quality_score: float | None = None
+    pdf_quality_report: dict[str, Any] | None = None
+    workspace_path: str | None = None
     created_at: datetime
     counts: PaperCountsResponse = Field(default_factory=PaperCountsResponse)
     serial_number: int | None = None
@@ -312,6 +327,100 @@ class PaperDetailResponse(PaperListItemResponse):
     outgoing_relationships: list[PaperRelationshipItemResponse] = Field(default_factory=list)
     incoming_relationships: list[PaperRelationshipItemResponse] = Field(default_factory=list)
     references: list[ReferenceEntryResponse] = Field(default_factory=list)
+
+
+class CodexContextResponse(BaseModel):
+    paper_id: UUID
+    title: str | None = None
+    schema_version: str = "codex_context_v1"
+    context: dict[str, Any] = Field(default_factory=dict)
+    markdown: str = ""
+    token_budget_hint: dict[str, Any] = Field(default_factory=dict)
+
+
+class CodexItemContextResponse(BaseModel):
+    paper_id: UUID
+    title: str | None = None
+    item_type: str
+    item_id: UUID
+    schema_version: str = "codex_item_context_v1"
+    context: dict[str, Any] = Field(default_factory=dict)
+    markdown: str = ""
+    token_budget_hint: dict[str, Any] = Field(default_factory=dict)
+
+
+class PaperKnowledgeCandidateResponse(BaseModel):
+    id: str
+    paper_id: str
+    category: str
+    title: str
+    content: str
+    source_type: str
+    source_id: str | None = None
+    evidence_text: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    section_title: str | None = None
+    confidence: float | None = None
+    candidate_status: str = "candidate_unverified"
+    evidence_state: str = "text_only_candidate"
+    recommended_action: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PaperKnowledgeContextResponse(BaseModel):
+    schema_version: str = "paper_knowledge_context_v1"
+    paper_id: str
+    title: str | None = None
+    reliability_policy: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    candidates: list[PaperKnowledgeCandidateResponse] = Field(default_factory=list)
+    markdown: str = ""
+
+
+class DFTResultVerifyRequest(BaseModel):
+    confirm_reviewed_against_pdf: bool = False
+    reviewer: str | None = "codex_review"
+    reviewer_note: str | None = None
+    field_names: list[str] = Field(default_factory=list)
+
+
+class DFTResultVerifyResponse(BaseModel):
+    paper_id: UUID
+    dft_result_id: UUID
+    field_names: list[str] = Field(default_factory=list)
+    reviews: list[dict[str, Any]] = Field(default_factory=list)
+    export_safety: dict[str, Any] = Field(default_factory=dict)
+    audit_log_id: UUID | None = None
+
+
+class DFTResultRejectRequest(BaseModel):
+    confirm_reject_candidate: bool = False
+    reviewer: str | None = "codex_review"
+    reviewer_note: str | None = None
+    field_names: list[str] = Field(default_factory=list)
+
+
+class DFTResultRejectResponse(BaseModel):
+    paper_id: UUID
+    dft_result_id: UUID
+    field_names: list[str] = Field(default_factory=list)
+    reviews: list[dict[str, Any]] = Field(default_factory=list)
+    export_safety: dict[str, Any] = Field(default_factory=dict)
+    audit_log_id: UUID | None = None
+
+
+class DFTResultCorrectionProposalRequest(BaseModel):
+    confirm_correction_proposal: bool = False
+    field_name: str
+    proposed_value: Any = None
+    reason: str
+    reviewer: str | None = "codex_review"
+    evidence_payload: dict[str, Any] | list[Any] | None = None
+
+
+class DFTResultCorrectionProposalResponse(BaseModel):
+    correction: dict[str, Any] = Field(default_factory=dict)
 
 
 class RAGWriteResponse(BaseModel):

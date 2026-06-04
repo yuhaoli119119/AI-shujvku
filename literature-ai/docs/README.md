@@ -7,6 +7,9 @@
 - [../使用说明.md](../%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)：中文使用说明
 - [mcp/MCP_API.md](./mcp/MCP_API.md)：当前 MCP 接口使用说明
 - [mcp/MCP_IMPLEMENTATION.md](./mcp/MCP_IMPLEMENTATION.md)：当前 MCP 实现与安全边界
+- [plans/codex_centered_refocus.md](./plans/codex_centered_refocus.md)：Codex 中心化减法改造方向
+- [plans/codex_centered_execution_plan.md](./plans/codex_centered_execution_plan.md)：Codex 中心化执行目标与验收标准
+- [plans/litai_extraction_review_protocol_v0_1.md](./plans/litai_extraction_review_protocol_v0_1.md)：LitAI 当前提取与审核协议草案
 
 ## 目录说明
 

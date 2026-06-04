@@ -83,32 +83,101 @@ async def upload_db(file: UploadFile = File(...)) -> dict:
 async def get_agent_guide() -> dict:
     return {
         "system_name": "Literature AI",
+        "positioning": (
+            "A local literature toolbench for Codex-centered workflows. "
+            "The system stores papers, parses PDFs into readable artifacts, exposes evidence and structured candidates, "
+            "and lets Codex or a human decide what is reliable."
+        ),
         "recommended_entrypoint": {
-            "mode": "http_workflow",
-            "description": "Use the one-shot AI workflow API for search, download, ingest, and parse.",
-            "method": "POST",
-            "path": "/api/papers/ai_workflow",
+            "mode": "codex_mcp_first",
+            "description": "Connect through MCP first so Codex can query papers, read full parsed records, retrieve evidence, append notes, and propose corrections. Use batch ingestion only as an optional acquisition helper.",
+            "method": "MCP",
+            "path": "/mcp",
             "json_schema_hint": {
-                "query": "string",
-                "model": "string",
-                "max_results": "int",
-                "max_downloads": "int",
-                "providers": ["openalex", "arxiv", "pubmed", "semantic_scholar"],
-                "skip_existing": "bool",
+                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "get_dft_review_queue", "retrieve_evidence", "compare_papers"],
+                "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result"],
+                "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper"],
+                "writing_tools": ["insert_word_citation"],
             },
         },
         "http_endpoints": [
             {
+                "name": "list_papers",
+                "method": "GET",
+                "path": "/api/papers",
+                "purpose": "List parsed papers already stored in the system.",
+            },
+            {
+                "name": "get_paper",
+                "method": "GET",
+                "path": "/api/papers/{paper_id}",
+                "purpose": "Get the full parsed detail for one paper.",
+            },
+            {
+                "name": "get_codex_context",
+                "method": "GET",
+                "path": "/api/papers/{paper_id}/codex-context",
+                "purpose": "Get a compact Codex-ready JSON and Markdown paper bundle.",
+            },
+            {
+                "name": "get_codex_item",
+                "method": "GET",
+                "path": "/api/papers/{paper_id}/codex-item/{item_type}/{item_id}",
+                "purpose": "Get low-token context, evidence locators, and safety state for one paper item.",
+            },
+            {
+                "name": "get_paper_knowledge",
+                "method": "GET",
+                "path": "/api/papers/{paper_id}/knowledge-context",
+                "purpose": "Get Codex-ready knowledge candidates from mechanism claims, writing cards, external AI imports, notes, and section fallbacks.",
+            },
+            {
+                "name": "verify_dft_result",
+                "method": "POST",
+                "path": "/api/papers/{paper_id}/dft-results/{result_id}/verify",
+                "purpose": "Promote one evidence-backed DFT candidate after explicit Codex/human PDF review confirmation.",
+            },
+            {
+                "name": "reject_dft_result",
+                "method": "POST",
+                "path": "/api/papers/{paper_id}/dft-results/{result_id}/reject",
+                "purpose": "Reject a bad DFT candidate after explicit Codex/human curation so it leaves the active review queue.",
+            },
+            {
+                "name": "propose_dft_result_correction",
+                "method": "POST",
+                "path": "/api/papers/{paper_id}/dft-results/{result_id}/corrections",
+                "purpose": "Create a pending correction proposal for one DFT result field without applying it.",
+            },
+            {
+                "name": "get_dft_review_queue",
+                "method": "GET",
+                "path": "/api/papers/export/dft-review-queue",
+                "purpose": "List DFT candidates that need evidence/locator/review work before ML export.",
+            },
+            {
+                "name": "retrieval_search",
+                "method": "POST",
+                "path": "/api/retrieval/search",
+                "purpose": "Retrieve relevant evidence from parsed papers for Codex review and writing support.",
+            },
+            {
+                "name": "insert_word_citation",
+                "method": "POST",
+                "path": "/api/writing/word/insert-citation",
+                "purpose": "Upload a DOCX and generate a copy with a guarded draft citation inserted from the local literature database.",
+            },
+            {
                 "name": "ai_workflow",
                 "method": "POST",
                 "path": "/api/papers/ai_workflow",
-                "purpose": "Rewrite query with LLM, search, download candidate PDFs, ingest, and parse.",
+                "purpose": "Optional batch acquisition helper: rewrite query with LLM, search, download candidate PDFs, ingest, and parse.",
             },
             {
                 "name": "ai_search",
                 "method": "POST",
                 "path": "/api/papers/ai_search",
-                "purpose": "Rewrite query with LLM and return discovery results without downloading.",
+                "purpose": "Optional discovery helper: rewrite query with LLM and return search results without downloading.",
             },
             {
                 "name": "discovery_search",
@@ -122,40 +191,41 @@ async def get_agent_guide() -> dict:
                 "path": "/api/papers/discovery/download",
                 "purpose": "Download one discovery result and ingest/parse it.",
             },
-            {
-                "name": "list_papers",
-                "method": "GET",
-                "path": "/api/papers",
-                "purpose": "List parsed papers already stored in the system.",
-            },
-            {
-                "name": "get_paper",
-                "method": "GET",
-                "path": "/api/papers/{paper_id}",
-                "purpose": "Get the full parsed detail for one paper.",
-            },
         ],
         "mcp": {
             "url": "/mcp",
             "transport": "streamable_http",
             "auth": "Authorization: Bearer <mcp_api_key>",
-            "recommended_when": "Use MCP when the client supports MCP tools and needs interactive paper reading, note taking, or correction proposals.",
+            "recommended_when": "Use MCP as the primary Codex interface for interactive paper reading, evidence retrieval, note taking, imported analysis, comparison, and correction proposals.",
             "common_tools": [
                 "query_papers",
                 "get_paper",
+                "get_codex_context",
+                "get_codex_item",
+                "get_paper_knowledge",
+                "get_dft_review_queue",
+                "retrieve_evidence",
+                "compare_papers",
+                "insert_word_citation",
                 "append_note",
                 "propose_correction",
+                "propose_dft_result_correction",
+                "import_analysis",
+                "verify_dft_result",
+                "reject_dft_result",
                 "parse_paper",
+                "scan_local_pdfs",
+                "ingest_pdf_batch",
                 "get_parse_status",
             ],
         },
         "desktop_sync": {
             "desktop_url_setting": "Literature AI URL",
             "desktop_actions": [
-                "AI自动查文献",
+                "辅助批量查文献",
                 "同步 LitAI 结果",
             ],
-            "purpose": "After HTTP or MCP work completes, the desktop client can sync results back into the local project library.",
+            "purpose": "After HTTP or MCP work completes, the desktop client can sync candidate results back into the local project library.",
         },
         "llm_configuration": {
             "env_prefix": "LITAI_",
@@ -168,7 +238,7 @@ async def get_agent_guide() -> dict:
         },
         "suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
-            "Then prefer POST /api/papers/ai_workflow for automatic literature search/download/parse. "
-            "After completion, inspect GET /api/papers or GET /api/papers/{paper_id}."
+            "Then connect to /mcp and prefer query_papers, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, and reject_dft_result for bad candidates. "
+            "Use /api/papers/ai_workflow only when batch acquisition is explicitly needed."
         ),
     }

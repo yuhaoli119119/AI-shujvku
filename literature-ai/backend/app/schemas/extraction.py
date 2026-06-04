@@ -9,7 +9,18 @@ from app.schemas.evidence import EvidenceLocatorResponse
 from app.schemas.evidence import PageSpan
 
 
-ReviewStatus = Literal["pending", "verified", "rejected", "corrected", "needs_check", "unknown"]
+ReviewStatus = Literal[
+    "pending",
+    "verified",
+    "rejected",
+    "corrected",
+    "needs_check",
+    "gemini_pass",
+    "gemini_revise",
+    "gemini_flagged",
+    "evidence_insufficient",
+    "unknown",
+]
 ReviewResolutionStatus = Literal["active", "remapped", "stale", "ambiguous", "unresolved", "unknown"]
 
 

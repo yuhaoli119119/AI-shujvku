@@ -34,6 +34,8 @@ from app.schemas.documents import UnifiedPaperDocument
 from app.services.embedding import DeterministicEmbeddingService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
+from app.services.paper_workbench_service import PaperWorkbenchService
+from app.utils.workbench_status import EXTRACTION_PROTOCOL_VERSION
 
 
 STAGE2_LOCATOR_TARGET_TYPES = [
@@ -570,6 +572,9 @@ class ExtractionPipelineService:
                 source_figure=location.get("figure"),
                 evidence_text=item.get("evidence_text"),
                 confidence=item.get("confidence"),
+                candidate_status="Codex_Candidate",
+                evidence_payload=PaperWorkbenchService.dft_evidence_payload(item),
+                extraction_protocol_version=EXTRACTION_PROTOCOL_VERSION,
             )
             self.session.add(record)
             self.session.flush()

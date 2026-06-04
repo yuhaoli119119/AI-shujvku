@@ -906,6 +906,35 @@ textarea.input {
 .proposal-actions {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.word-upload-control {
+    cursor: pointer;
+}
+
+.word-insert-result {
+    margin-top: 12px;
+}
+
+.word-result-card {
+    background: var(--color-surface-alt);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 12px;
+}
+
+.word-output-path {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 8px;
+    margin: 4px 0 10px;
+    overflow-wrap: anywhere;
 }
 
 @media (max-width: 1024px) {

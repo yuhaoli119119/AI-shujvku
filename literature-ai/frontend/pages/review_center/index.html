@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>审核中心 - Literature AI</title>
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--color-text);
+      background: var(--color-bg);
+      font-family: var(--font-body);
+    }
+    .shell {
+      width: min(1500px, 100%);
+      margin: 0 auto;
+      padding: calc(var(--nav-height) + 22px) 22px 36px;
+    }
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .subline {
+      margin-top: 7px;
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .hint {
+      margin-top: 10px;
+      max-width: 820px;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat {
+      min-height: 82px;
+      padding: 14px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+    }
+    .stat-label {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .stat-value {
+      margin-top: 7px;
+      font-size: 24px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .panel {
+      overflow: hidden;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      background: var(--color-surface);
+      box-shadow: var(--shadow-card);
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-alt);
+    }
+    .panel-title {
+      font-weight: 900;
+    }
+    .filterbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .filterbar select,
+    .filterbar input {
+      height: 34px;
+      min-width: 150px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-text);
+      padding: 0 10px;
+      font: inherit;
+      font-size: 13px;
+    }
+    .table-wrap {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      min-width: 1080px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th,
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--color-border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--color-text-secondary);
+      background: var(--color-surface-alt);
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .paper-title {
+      max-width: 390px;
+      font-weight: 900;
+      line-height: 1.45;
+    }
+    .muted {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .mono {
+      font-family: var(--font-mono);
+      word-break: break-all;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 9px;
+      border-radius: var(--radius-pill);
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .chip.ok {
+      background: var(--color-success-bg);
+      color: var(--color-success);
+    }
+    .chip.warn {
+      background: var(--color-warning-bg);
+      color: var(--color-warning);
+    }
+    .chip.bad {
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-width: 230px;
+    }
+    .action-note {
+      width: 100%;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .empty,
+    .error {
+      margin: 14px;
+      padding: 18px;
+      border: 1px dashed var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-text-secondary);
+      background: var(--color-surface-alt);
+    }
+    .error {
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+    }
+    .toast {
+      position: fixed;
+      top: calc(var(--nav-height) + 16px);
+      right: 22px;
+      z-index: 120;
+      display: none;
+      max-width: min(420px, calc(100vw - 44px));
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      background: var(--color-primary);
+      color: #fff;
+      box-shadow: var(--shadow-elevated);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    @media (max-width: 820px) {
+      .shell {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+      .page-head,
+      .panel-head {
+        display: block;
+      }
+      .toolbar,
+      .filterbar {
+        justify-content: flex-start;
+        margin-top: 12px;
+      }
+      .filterbar select,
+      .filterbar input {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="topnav-mount"></div>
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <h1>审核中心</h1>
+        <div class="subline">Codex 生成候选材料，Gemini 只做审核标记，最终确认仍由你决定。</div>
+        <div class="hint">“重建审核材料”会刷新这篇文献的标准工作目录、证据定位、图表索引和 DFT 候选包，本身不代表已经人工确认或正式入库。</div>
+      </div>
+      <div class="toolbar">
+        <button class="btn ghost" type="button" onclick="loadReviewCenter()">刷新</button>
+        <button class="btn primary" type="button" onclick="prepareLibrary()">重建当前库材料</button>
+      </div>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">文献审核队列</div>
+          <div class="muted" id="queueMeta">正在读取当前库...</div>
+        </div>
+        <div class="filterbar">
+          <select id="statusFilter" onchange="renderRows()">
+            <option value="">全部流程状态</option>
+            <option value="Needs_Human_Confirmation">待人工确认</option>
+            <option value="Codex_Candidate">Codex 候选</option>
+            <option value="Gemini_Flagged">Gemini 标红</option>
+            <option value="Evidence_Insufficient">证据不足</option>
+            <option value="Human_Confirmed">已人工确认</option>
+          </select>
+          <select id="qualityFilter" onchange="renderRows()">
+            <option value="">全部 PDF 质量</option>
+            <option value="A_text_readable">A 文本可读</option>
+            <option value="B_text_partial">B 部分可读</option>
+            <option value="C_scan_clear">C 扫描清晰</option>
+            <option value="D_scan_unclear">D 扫描不清</option>
+            <option value="Broken">Broken</option>
+          </select>
+          <input id="searchBox" type="search" placeholder="搜索标题 / 期刊 / 年份" oninput="renderRows()">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>文献</th>
+              <th>流程状态</th>
+              <th>PDF 质量</th>
+              <th>证据</th>
+              <th>DFT</th>
+              <th>工作目录</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td colspan="7"><div class="empty">正在加载...</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const state = { rows: [], metadata: {} };
+
+    function esc(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char];
+      });
+    }
+
+    function getValue(id) {
+      const el = document.getElementById(id);
+      return el ? el.value.trim() : "";
+    }
+
+    function toCount(value) {
+      const count = Number(value || 0);
+      return Number.isFinite(count) ? count : 0;
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.style.display = "block";
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(function () {
+        toast.style.display = "none";
+      }, 2800);
+    }
+
+    async function fetchJSON(url, options) {
+      const response = await fetch(url, options || {});
+      const text = await response.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch (_) {
+        data = null;
+      }
+      if (!response.ok) {
+        throw new Error((data && data.detail) || "HTTP " + response.status);
+      }
+      return data;
+    }
+
+    function workflowClass(status) {
+      if (["Human_Confirmed", "ML_Ready", "Citation_Ready", "Gemini_Verified", "Parsed_Material_Ready"].includes(status)) return "ok";
+      if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected"].includes(status)) return "bad";
+      return "warn";
+    }
+
+    function qualityClass(status) {
+      if (status === "A_text_readable") return "ok";
+      if (status === "B_text_partial" || status === "C_scan_clear") return "warn";
+      if (!status) return "";
+      return "bad";
+    }
+
+    function workflowMeta(status) {
+      const mapping = {
+        Imported: { label: "已导入", tip: "文献已进入当前库，但还没完成后续准备。" },
+        Quality_Checked: { label: "已检质量", tip: "已经做过 PDF 质量判断。" },
+        Parsed_Material_Ready: { label: "材料已就绪", tip: "标准工作目录、证据和图表材料已准备好。" },
+        Codex_Candidate: { label: "待审核候选", tip: "Codex 已抽出候选内容，下一步应该检查证据是否对得上。" },
+        Gemini_Verified: { label: "Gemini 已核验", tip: "Gemini 已通过证据核验，但还不等于最终正式确认。" },
+        Gemini_Revised: { label: "Gemini 已修订", tip: "Gemini 认为候选内容需要调整后再确认。" },
+        Gemini_Flagged: { label: "Gemini 标红", tip: "Gemini 发现明显疑点，建议优先人工复核。" },
+        Evidence_Insufficient: { label: "证据不足", tip: "当前材料不足以支持可靠判断。" },
+        Needs_Human_Confirmation: { label: "待人工确认", tip: "系统已把这篇文献留给你做最后拍板。" },
+        Human_Confirmed: { label: "已人工确认", tip: "这篇文献的当前候选内容已经过人工确认。" },
+        ML_Ready: { label: "可进机器学习", tip: "确认后的结构化数据已达到机器学习使用条件。" },
+        Citation_Ready: { label: "可用于引用", tip: "元数据和审核状态已足够支持写作引用。" },
+        Rejected: { label: "已拒绝", tip: "当前候选内容被判定不应进入正式库。" }
+      };
+      return mapping[status] || { label: status || "未知状态", tip: "这是系统内部状态码，后续可以继续细化说明。" };
+    }
+
+    function qualityMeta(status) {
+      const mapping = {
+        A_text_readable: { label: "A 可直接读", tip: "PDF 自带可读文字层，复制、检索和定位都比较可靠。" },
+        B_text_partial: { label: "B 部分可读", tip: "只有部分页面或部分区域文字可直接读取，后续要谨慎核对。" },
+        C_scan_clear: { label: "C 扫描清晰", tip: "是扫描版，但页面清晰，适合 OCR 辅助处理。" },
+        D_scan_unclear: { label: "D 扫描不清", tip: "扫描质量较差，自动解析很容易出错。" },
+        Broken: { label: "文件异常", tip: "PDF 本身存在损坏或无法稳定读取的问题。" }
+      };
+      return mapping[status] || { label: status || "未知", tip: "尚未获得明确的 PDF 质量判断。" };
+    }
+
+    function qualityReasonLabel(reason) {
+      const mapping = {
+        native_text_is_readable: "自带文字层，可直接检索",
+        partial_text_layer: "只有部分文字层可读",
+        scan_requires_ocr: "需要 OCR 辅读",
+        scan_unclear: "扫描不清，可靠性低",
+        file_broken_or_unreadable: "文件异常或无法读取"
+      };
+      return mapping[reason] || reason || "未提供原因说明";
+    }
+
+    function formatBibMeta(year, journal) {
+      const yearText = year ? esc(year) : '<span title="这篇文献当前没有写入出版年份，通常是导入元数据时没提取到。">年份待补</span>';
+      const journalText = journal ? esc(journal) : '<span title="这篇文献当前没有写入期刊名，通常是导入元数据时没提取到。">期刊待补</span>';
+      return yearText + " | " + journalText;
+    }
+
+    function getInspectTarget(row) {
+      const figureCount = toCount(row.figure_count);
+      const tableCount = toCount(row.table_count);
+      const evidenceCount = toCount(row.evidence_count);
+      if (row.has_dft_candidates) {
+        return { tab: "dft", label: "检查 DFT", note: "跳到 DFT 数据页，优先核对候选字段和证据。" };
+      }
+      if (figureCount > 0 || tableCount > 0) {
+        return { tab: "figures", label: "检查图表", note: "当前无 DFT 候选，先核对图表、图注和裁剪结果。" };
+      }
+      if (evidenceCount > 0) {
+        return { tab: "sections", label: "检查正文", note: "当前只有正文证据定位，跳到正文节选继续检查。" };
+      }
+      return { tab: "summary", label: "查看摘要", note: "这篇文献暂时没有更多候选材料，先看摘要和基础信息。" };
+    }
+
+    function renderStats() {
+      const qualityCounts = state.metadata.quality_counts || {};
+      const rows = state.rows || [];
+      const items = [
+        ["队列文献", rows.length],
+        ["待人工确认", rows.filter(function (row) { return row.needs_human_confirmation; }).length],
+        ["A/B 可读", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0)],
+        ["有 DFT 候选", rows.filter(function (row) { return row.has_dft_candidates; }).length],
+        ["证据定位", rows.reduce(function (sum, row) { return sum + Number(row.evidence_count || 0); }, 0)]
+      ];
+      document.getElementById("stats").innerHTML = items.map(function (item) {
+        return '<div class="stat"><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
+      }).join("");
+    }
+
+    function filteredRows() {
+      const status = getValue("statusFilter");
+      const quality = getValue("qualityFilter");
+      const q = getValue("searchBox").toLowerCase();
+      return state.rows.filter(function (row) {
+        if (status && row.workflow_status !== status) return false;
+        if (quality && row.pdf_quality_status !== quality) return false;
+        if (!q) return true;
+        const haystack = [row.title, row.journal, row.year, row.workflow_status, row.pdf_quality_status].join(" ").toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+
+    function renderRows() {
+      renderStats();
+      const rows = filteredRows();
+      document.getElementById("queueMeta").textContent = "显示 " + rows.length + " / " + state.rows.length + " 篇";
+      const tbody = document.getElementById("rows");
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7"><div class="empty">暂无匹配文献</div></td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(function (row) {
+        const inspectTarget = getInspectTarget(row);
+        const detailUrl = "../literature_library/index.html?paper_id=" + encodeURIComponent(row.paper_id) + "&tab=" + encodeURIComponent(inspectTarget.tab);
+        const evidence = toCount(row.evidence_count);
+        const figureCount = toCount(row.figure_count);
+        const tableCount = toCount(row.table_count);
+        const workspace = row.workspace_path || "-";
+        const workflow = workflowMeta(row.workflow_status);
+        const quality = qualityMeta(row.pdf_quality_status);
+        const qualityReasonText = qualityReasonLabel(row.quality_reason);
+        const candidateCell = row.has_dft_candidates
+          ? '<span class="chip warn" title="已检测到可进一步审核的 DFT 字段候选。">待审 DFT 候选</span><div class="muted">已抽出待核对的 DFT 字段</div>'
+          : '<span class="chip" title="当前轮次没有抽出可核对的 DFT 字段。">无 DFT 候选</span><div class="muted">当前轮次未抽出可核对的 DFT 字段</div>';
+        return '<tr>' +
+          '<td><div class="paper-title">' + esc(row.title || "未命名文献") + '</div><div class="muted">' + formatBibMeta(row.year, row.journal) + '</div></td>' +
+          '<td><span class="chip ' + workflowClass(row.workflow_status) + '" title="' + esc(workflow.tip + " 原始状态码: " + (row.workflow_status || "Imported")) + '">' + esc(workflow.label) + '</span><div class="muted">悬停可看说明</div></td>' +
+          '<td><span class="chip ' + qualityClass(row.pdf_quality_status) + '" title="' + esc(quality.tip + " 原始质量码: " + (row.pdf_quality_status || "unknown")) + '">' + esc(quality.label) + '</span><div class="muted">质量分: ' + esc(row.pdf_quality_score == null ? "-" : row.pdf_quality_score) + '</div><div class="muted" title="' + esc("原始原因码: " + (row.quality_reason || "")) + '">' + esc(qualityReasonText) + '</div></td>' +
+          '<td><div class="muted" title="证据定位条数，表示当前已经记录了多少条可回溯的正文、图表或表格定位。">证据定位: ' + esc(evidence) + ' 条</div><div class="muted" title="当前已索引的图片和表格数量。">图片: ' + esc(figureCount) + ' 张 / 表格: ' + esc(tableCount) + ' 个</div></td>' +
+          '<td>' + candidateCell + '</td>' +
+          '<td><div class="muted mono">' + esc(workspace) + '</div></td>' +
+          '<td><div class="actions">' +
+            '<a class="btn ghost small" href="' + esc(detailUrl) + '">' + esc(inspectTarget.label) + '</a>' +
+            '<button class="btn ghost small" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
+            '<button class="btn primary small" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">人工确认</button>' +
+            '<div class="action-note">' + esc(inspectTarget.note) + '</div>' +
+          '</div></td>' +
+        '</tr>';
+      }).join("");
+    }
+
+    async function loadReviewCenter() {
+      try {
+        const data = await fetchJSON("/api/workbench/review-center?limit=500");
+        state.rows = data.rows || [];
+        state.metadata = data.metadata || {};
+        renderRows();
+      } catch (error) {
+        document.getElementById("queueMeta").textContent = "读取失败";
+        document.getElementById("rows").innerHTML = '<tr><td colspan="7"><div class="error">加载失败：' + esc(error.message) + '</div></td></tr>';
+        showToast("审核中心加载失败：" + error.message);
+      }
+    }
+
+    async function preparePaper(paperId) {
+      try {
+        await fetchJSON("/api/workbench/papers/" + encodeURIComponent(paperId) + "/prepare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ render_pages: false })
+        });
+        showToast("已重建这篇文献的审核材料：工作目录、证据定位和候选包已刷新。");
+        await loadReviewCenter();
+      } catch (error) {
+        showToast("重建材料失败：" + error.message);
+      }
+    }
+
+    async function prepareLibrary() {
+      try {
+        const data = await fetchJSON("/api/workbench/prepare-active-library?render_pages=false&limit=500", { method: "POST" });
+        showToast("当前库材料重建完成：" + Number(data.prepared || 0) + " 篇。");
+        await loadReviewCenter();
+      } catch (error) {
+        showToast("批量重建材料失败：" + error.message);
+      }
+    }
+
+    async function humanConfirm(paperId) {
+      if (!window.confirm("确认你已经检查过这篇文献的证据链和风险状态？")) return;
+      try {
+        await fetchJSON("/api/workbench/papers/" + encodeURIComponent(paperId) + "/human-confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm_human_review: true, reviewer: "human", target_status: "Human_Confirmed" })
+        });
+        showToast("已记录人工确认");
+        await loadReviewCenter();
+      } catch (error) {
+        showToast("确认失败：" + error.message);
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      TopNav.init({ currentPage: "review-center", mountId: "topnav-mount" });
+      loadReviewCenter();
+    });
+  </script>
+</body>
+</html>

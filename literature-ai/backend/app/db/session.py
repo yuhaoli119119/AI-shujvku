@@ -145,6 +145,51 @@ def init_db(database_url: str) -> None:
                 ),
             )
             execute_migration_step(
+                "papers",
+                "workflow_status",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS workflow_status VARCHAR(64) NOT NULL DEFAULT 'Imported'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN workflow_status VARCHAR(64) NOT NULL DEFAULT 'Imported'"
+                ),
+            )
+            execute_migration_step(
+                "papers",
+                "pdf_quality_status",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_status VARCHAR(32)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN pdf_quality_status VARCHAR(32)"
+                ),
+            )
+            execute_migration_step(
+                "papers",
+                "pdf_quality_score",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_score DOUBLE PRECISION"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN pdf_quality_score FLOAT"
+                ),
+            )
+            execute_migration_step(
+                "papers",
+                "pdf_quality_report",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_report JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN pdf_quality_report JSON"
+                ),
+            )
+            execute_migration_step(
+                "papers",
+                "workspace_path",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS workspace_path TEXT"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN workspace_path TEXT"
+                ),
+            )
+            execute_migration_step(
                 "paper_tables",
                 "prov",
                 (
@@ -190,12 +235,75 @@ def init_db(database_url: str) -> None:
                 ),
             )
             execute_migration_step(
+                "paper_figures",
+                "figure_label",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS figure_label VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN figure_label VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
+                "paper_figures",
+                "crop_status",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_status VARCHAR(32) NOT NULL DEFAULT 'candidate_crop'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN crop_status VARCHAR(32) NOT NULL DEFAULT 'candidate_crop'"
+                ),
+            )
+            execute_migration_step(
+                "paper_figures",
+                "crop_confidence",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_confidence DOUBLE PRECISION"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN crop_confidence FLOAT"
+                ),
+            )
+            execute_migration_step(
+                "paper_figures",
+                "crop_source",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_source VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN crop_source VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
                 "dft_results",
                 "reaction_step",
                 (
                     "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_step VARCHAR(255)"
                     if engine.dialect.name == "postgresql"
                     else "ALTER TABLE dft_results ADD COLUMN reaction_step VARCHAR(255)"
+                ),
+            )
+            execute_migration_step(
+                "dft_results",
+                "candidate_status",
+                (
+                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_status VARCHAR(64) NOT NULL DEFAULT 'Codex_Candidate'"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE dft_results ADD COLUMN candidate_status VARCHAR(64) NOT NULL DEFAULT 'Codex_Candidate'"
+                ),
+            )
+            execute_migration_step(
+                "dft_results",
+                "evidence_payload",
+                (
+                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS evidence_payload JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE dft_results ADD COLUMN evidence_payload JSON"
+                ),
+            )
+            execute_migration_step(
+                "dft_results",
+                "extraction_protocol_version",
+                (
+                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS extraction_protocol_version VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE dft_results ADD COLUMN extraction_protocol_version VARCHAR(64)"
                 ),
             )
             execute_migration_step(

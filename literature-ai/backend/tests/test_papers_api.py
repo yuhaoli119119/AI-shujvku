@@ -1,4 +1,5 @@
 import os
+import base64
 import tempfile
 import pytest
 import asyncio
@@ -13,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import Base, EvidenceLocator, ExtractionFieldReview, Paper, PaperFigure, WorkflowJob
+from app.db.models import AuditLog, Base, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
@@ -123,6 +124,31 @@ def test_papers_status_and_stream(setup_test_db, monkeypatch):
         assert "event: heartbeat" in full_output
 
 
+def test_list_papers_api_supports_year_serial_sorting(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        session.add_all(
+            [
+                Paper(title="2019-003", year=2019, serial_number=3, pdf_path="a.pdf"),
+                Paper(title="2018-010", year=2018, serial_number=10, pdf_path="b.pdf"),
+                Paper(title="2019-001", year=2019, serial_number=1, pdf_path="c.pdf"),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/papers")
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload] == ["2018-010", "2019-001", "2019-003"]
+
+    response = client.get("/api/papers", params={"sort_by": "year_serial", "sort_order": "desc"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload] == ["2019-003", "2019-001", "2018-010"]
+
+
 def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -215,8 +241,553 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert response.status_code == 200
     data = response.json()
     assert data["system_name"] == "Literature AI"
-    assert data["recommended_entrypoint"]["path"] == "/api/papers/ai_workflow"
+    assert data["recommended_entrypoint"]["mode"] == "codex_mcp_first"
+    assert data["recommended_entrypoint"]["path"] == "/mcp"
+    assert "get_codex_context" in data["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
+    assert "get_codex_item" in data["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
+    assert "get_paper_knowledge" in data["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
+    assert "get_dft_review_queue" in data["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
+    assert "insert_word_citation" in data["recommended_entrypoint"]["json_schema_hint"]["writing_tools"]
     assert data["mcp"]["url"] == "/mcp"
+    assert "get_codex_context" in data["mcp"]["common_tools"]
+    assert "get_codex_item" in data["mcp"]["common_tools"]
+    assert "get_paper_knowledge" in data["mcp"]["common_tools"]
+    assert "get_dft_review_queue" in data["mcp"]["common_tools"]
+    assert "verify_dft_result" in data["mcp"]["common_tools"]
+    assert "reject_dft_result" in data["mcp"]["common_tools"]
+    assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
+    assert "retrieve_evidence" in data["mcp"]["common_tools"]
+    assert "insert_word_citation" in data["mcp"]["common_tools"]
+
+
+def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    figure_dir = get_settings().storage_paths["figures"]
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    (figure_dir / "fig1.png").write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        )
+    )
+    with Session() as session:
+        paper = Paper(
+            title="Graphene vacancy defect DFT test paper",
+            doi="10.1000/codex-context",
+            year=2026,
+            journal="Codex Test Journal",
+            authors=["A. Researcher"],
+            abstract="DFT calculations show that vacancy defects modify adsorption on graphene.",
+            pdf_path="graphene-vacancy.pdf",
+            paper_type="A",
+            type_confidence=0.91,
+            classification_source="test",
+        )
+        session.add(paper)
+        session.flush()
+        section = PaperSection(
+            paper_id=paper.id,
+            section_title="Computational Methods",
+            section_type="methods",
+            text="VASP and PBE were used to model a graphene single-vacancy defect supercell.",
+            page_start=2,
+            page_end=4,
+        )
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Figure 1. Optimized graphene vacancy defect structure.",
+            image_path="fig1.png",
+            page=3,
+            figure_role="structure",
+            role_confidence=0.8,
+            content_summary="Vacancy defect model.",
+            key_elements=["graphene", "vacancy"],
+            prov=[
+                {
+                    "page_no": 3,
+                    "bbox": {
+                        "l": 10,
+                        "t": 200,
+                        "r": 210,
+                        "b": 40,
+                        "coord_origin": "BOTTOMLEFT",
+                    },
+                }
+            ],
+        )
+        dft_result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li",
+            property_type="adsorption_energy",
+            value=-1.23,
+            unit="eV",
+            reaction_step="Li adsorption",
+            source_section="Computational Methods",
+            evidence_text="The Li adsorption energy on the vacancy defect is -1.23 eV.",
+            confidence=0.82,
+        )
+        session.add_all(
+            [
+                section,
+                figure,
+                dft_result,
+                MechanismClaim(
+                    paper_id=paper.id,
+                    claim_type="defect_adsorption",
+                    claim_text="Vacancy defects strengthen Li adsorption on graphene.",
+                    evidence_types=["DFT"],
+                    evidence_text="The vacancy defect strengthens Li adsorption.",
+                    confidence=0.76,
+                ),
+                PaperNote(
+                    paper_id=paper.id,
+                    source="codex_test",
+                    content="Treat this as an unverified DFT candidate until checked against the PDF.",
+                    field_name="dft_results",
+                ),
+            ]
+        )
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_result",
+                target_id=str(dft_result.id),
+                field_name="value",
+                page=4,
+                evidence_text="The Li adsorption energy on the vacancy defect is -1.23 eV.",
+                locator_status="exact_page",
+                locator_confidence=0.9,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = paper.id
+        figure_id = figure.id
+        dft_result_id = dft_result.id
+
+    client = TestClient(app)
+    response = client.get(f"/api/papers/{paper_id}/codex-context")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["schema_version"] == "codex_context_v1"
+    assert data["paper_id"] == str(paper_id)
+    assert data["context"]["reliability_policy"]["automatic_outputs_are_candidates"] is True
+    assert data["context"]["reliability_policy"]["figure_crops_are_candidates"] is True
+    assert data["context"]["content"]["sections"][0]["title"] == "Computational Methods"
+    figure = data["context"]["content"]["figures"][0]
+    assert figure["prov"][0]["bbox"]["l"] == 10
+    assert figure["image_review"]["bbox_size_points"] == {"width": 200.0, "height": 160.0}
+    assert figure["image_review"]["pixel_size"] == {"width": 1, "height": 1}
+    assert figure["image_review"]["review_required"] is True
+    assert "small_crop_or_subfigure" in figure["image_review"]["flags"]
+    assert data["context"]["structured_candidates"]["dft_results"][0]["candidate_status"] == "candidate_unverified"
+    dft_safety = data["context"]["structured_candidates"]["dft_results"][0]["export_safety"]
+    assert dft_safety["is_exportable"] is False
+    assert dft_safety["blocked_reasons"] == ["missing_review"]
+    readiness = data["context"]["dft_export_readiness"]
+    assert readiness["safety_gate"] == "safe_verified_with_required_evidence"
+    assert readiness["total_candidates"] == 1
+    assert readiness["eligible_count"] == 0
+    assert readiness["blocked_count"] == 1
+    assert readiness["blocked_reasons"] == {"missing_review": 1}
+    assert data["context"]["evidence_locators"]["status_counts"]["exact_page"] == 1
+    assert any(item["code"] == "dft_unverified" for item in data["context"]["warnings"])
+    assert any(item["code"] == "dft_export_blocked" for item in data["context"]["warnings"])
+    assert any(item["code"] == "figure_crop_review" for item in data["context"]["warnings"])
+    assert "Graphene vacancy defect DFT test paper" in data["markdown"]
+    assert "Automatic parser, extraction, and external analysis outputs are candidates" in data["markdown"]
+    assert "crop=needs_review" in data["markdown"]
+    assert "DFT Export Readiness" in data["markdown"]
+
+    item_response = client.get(f"/api/papers/{paper_id}/codex-item/dft_result/{dft_result_id}")
+    assert item_response.status_code == 200
+    item_data = item_response.json()
+    assert item_data["schema_version"] == "codex_item_context_v1"
+    assert item_data["item_type"] == "dft_result"
+    assert item_data["context"]["item"]["export_safety"]["blocked_reasons"] == ["missing_review"]
+    assert item_data["context"]["evidence_locators"]["items"][0]["page"] == 4
+    assert item_data["context"]["nearby_context"]["related_sections"][0]["title"] == "Computational Methods"
+    assert "Codex Item: dft_result" in item_data["markdown"]
+
+    figure_response = client.get(f"/api/papers/{paper_id}/codex-item/figure/{figure_id}")
+    assert figure_response.status_code == 200
+    figure_data = figure_response.json()
+    assert figure_data["context"]["item"]["image_review"]["review_required"] is True
+    assert figure_data["context"]["nearby_context"]["related_sections"][0]["title"] == "Computational Methods"
+
+    invalid_response = client.get(f"/api/papers/{paper_id}/codex-item/not_supported/{figure_id}")
+    assert invalid_response.status_code == 400
+
+
+def test_paper_knowledge_context_uses_section_fallback_and_external_candidates(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Graphene defect knowledge fallback paper",
+            year=2026,
+            journal="Codex Test Journal",
+            abstract="Vacancy and Stone-Wales defects alter graphene reactivity in density functional theory calculations.",
+            pdf_path="graphene-knowledge.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Introduction",
+                    section_type="introduction",
+                    text="However, the origin of defect-driven graphene reactivity remains difficult to organize across studies.",
+                    page_start=1,
+                    page_end=1,
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Computational Methods",
+                    section_type="methods",
+                    text="DFT calculations used PBE to model vacancy defects and Stone-Wales defects in graphene supercells.",
+                    page_start=2,
+                    page_end=3,
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Results and Discussion",
+                    section_type="results",
+                    text="The Stone-Wales defect changes adsorption and charge density around the defect site, suggesting a mechanism context for reactivity.",
+                    page_start=4,
+                    page_end=5,
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Conclusions",
+                    section_type="conclusion",
+                    text="The study concludes that graphene defect topology controls the calculated reactivity trends.",
+                    page_start=8,
+                    page_end=8,
+                ),
+                PaperNote(
+                    paper_id=paper.id,
+                    source="codex_test",
+                    field_name="mechanism",
+                    content="Codex note: compare defect topology, charge redistribution, and adsorption evidence.",
+                    quoted_text="defect topology controls the calculated reactivity trends",
+                    page=8,
+                    section_title="Conclusions",
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = paper.id
+
+    client = TestClient(app)
+    imported = client.post(
+        "/api/external-analysis/import",
+        json={
+            "paper_id": str(paper_id),
+            "source": "web_ai",
+            "source_label": "Web AI parsed summary",
+            "raw_payload": {
+                "review_notes": [
+                    {
+                        "content": "Web AI summary candidate: Stone-Wales strain and vacancy charge redistribution explain reactivity differences.",
+                        "field_name": "mechanism",
+                        "page": 4,
+                        "section_title": "Results and Discussion",
+                        "quoted_text": "Stone-Wales defect changes adsorption and charge density",
+                        "confidence": 0.72,
+                    }
+                ]
+            },
+        },
+    )
+    assert imported.status_code == 200
+    assert imported.json()["candidates"][0]["candidate_type"] == "note"
+
+    response = client.get(f"/api/papers/{paper_id}/knowledge-context", params={"max_candidates": 20})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "paper_knowledge_context_v1"
+    assert payload["metadata"]["has_mechanism_claims"] is False
+    assert payload["reliability_policy"]["section_fallbacks_are_not_final_claims"] is True
+    categories = {item["category"] for item in payload["candidates"]}
+    source_types = {item["source_type"] for item in payload["candidates"]}
+    assert "mechanism_context" in categories
+    assert "computational_method" in categories
+    assert "conclusion" in categories
+    assert "external_analysis_candidate" in source_types
+    assert "paper_note" in source_types
+    assert any(item["candidate_status"] == "section_candidate_unverified" for item in payload["candidates"])
+    assert "Paper Knowledge Candidates" in payload["markdown"]
+
+    codex_response = client.get(f"/api/papers/{paper_id}/codex-context", params={"max_candidates": 20})
+    assert codex_response.status_code == 200
+    codex = codex_response.json()["context"]
+    assert codex["knowledge_candidates"]["items"]
+    assert codex["structured_candidates"]["knowledge_candidates"]
+
+
+def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="DFT verification paper",
+            doi="10.1000/dft-verify",
+            year=2026,
+            journal="Codex Test Journal",
+            authors=["A. Curator"],
+            abstract="DFT verification test.",
+            pdf_path="dft-verify.pdf",
+            oa_status="arxiv_pdf",
+        )
+        session.add(paper)
+        session.flush()
+        dft_result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li",
+            property_type="adsorption_energy",
+            value=-1.23,
+            unit="eV",
+            reaction_step="Li adsorption",
+            source_section="Results",
+            evidence_text="The Li adsorption energy on the vacancy defect is -1.23 eV.",
+            confidence=0.9,
+        )
+        missing_locator_result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Na",
+            property_type="adsorption_energy",
+            value=-0.5,
+            unit="eV",
+            source_section="Results",
+            evidence_text="The Na adsorption energy is -0.5 eV.",
+            confidence=0.7,
+        )
+        session.add_all([dft_result, missing_locator_result])
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_result",
+                target_id=str(dft_result.id),
+                field_name="value",
+                page=4,
+                evidence_text="The Li adsorption energy on the vacancy defect is -1.23 eV.",
+                locator_status="exact_page",
+                locator_confidence=0.95,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = paper.id
+        dft_result_id = dft_result.id
+        missing_locator_result_id = missing_locator_result.id
+
+    client = TestClient(app)
+    not_confirmed = client.post(
+        f"/api/papers/{paper_id}/dft-results/{dft_result_id}/verify",
+        json={"confirm_reviewed_against_pdf": False},
+    )
+    assert not_confirmed.status_code == 400
+
+    missing_locator = client.post(
+        f"/api/papers/{paper_id}/dft-results/{missing_locator_result_id}/verify",
+        json={"confirm_reviewed_against_pdf": True, "reviewer": "codex_test"},
+    )
+    assert missing_locator.status_code == 400
+    assert "missing_evidence_reference" in missing_locator.json()["detail"]
+
+    verified = client.post(
+        f"/api/papers/{paper_id}/dft-results/{dft_result_id}/verify",
+        json={
+            "confirm_reviewed_against_pdf": True,
+            "reviewer": "codex_test",
+            "reviewer_note": "Checked PDF page and evidence text.",
+        },
+    )
+    assert verified.status_code == 200
+    payload = verified.json()
+    assert payload["dft_result_id"] == str(dft_result_id)
+    assert payload["export_safety"]["is_exportable"] is True
+    assert payload["export_safety"]["review_status"] == "verified"
+    assert payload["export_safety"]["locator_status"] == "exact_page"
+    assert payload["field_names"] == ["value", "adsorbate", "energy_type", "reaction_step"]
+    assert all(item["verified"] is True for item in payload["reviews"])
+
+    context_response = client.get(
+        f"/api/papers/{paper_id}/codex-context",
+        params={"max_candidates": 10},
+    )
+    assert context_response.status_code == 200
+    readiness = context_response.json()["context"]["dft_export_readiness"]
+    assert readiness["total_candidates"] == 2
+    assert readiness["eligible_count"] == 1
+    assert readiness["blocked_count"] == 1
+    assert readiness["blocked_reasons"] == {"missing_review": 1, "missing_evidence": 1}
+
+    dataset_response = client.get("/api/papers/export/dft-dataset")
+    assert dataset_response.status_code == 200
+    dataset = dataset_response.json()
+    assert dataset["metadata"]["eligible_count"] == 1
+    assert dataset["metadata"]["blocked_count"] == 1
+    assert len(dataset["records"]) == 1
+    assert dataset["records"][0]["record_id"] == str(dft_result_id)
+
+    queue_response = client.get("/api/papers/export/dft-review-queue")
+    assert queue_response.status_code == 200
+    queue = queue_response.json()
+    assert queue["metadata"]["schema_version"] == "dft_review_queue_v1"
+    assert queue["metadata"]["eligible_count"] == 1
+    assert queue["metadata"]["blocked_count"] == 1
+    assert len(queue["rows"]) == 1
+    assert queue["rows"][0]["record_id"] == str(missing_locator_result_id)
+    assert queue["rows"][0]["recommended_action"] == "repair_evidence_reference"
+    assert queue["rows"][0]["can_mark_verified"] is False
+    assert "verify_url" in queue["rows"][0]
+
+    exportable_queue_response = client.get("/api/papers/export/dft-review-queue", params={"status": "exportable"})
+    assert exportable_queue_response.status_code == 200
+    exportable_rows = exportable_queue_response.json()["rows"]
+    assert len(exportable_rows) == 1
+    assert exportable_rows[0]["record_id"] == str(dft_result_id)
+    assert exportable_rows[0]["recommended_action"] == "ready_for_ml_export"
+
+    with Session() as session:
+        reviews = session.scalars(
+            select(ExtractionFieldReview).where(ExtractionFieldReview.target_id == str(dft_result_id))
+        ).all()
+        assert {review.field_name for review in reviews} == {"value", "adsorbate", "energy_type", "reaction_step"}
+        assert all(review.reviewer_status == "verified" for review in reviews)
+        audit = session.scalar(select(AuditLog).where(AuditLog.action == "verify_dft_result"))
+        assert audit is not None
+        assert audit.target_id == str(dft_result_id)
+
+
+def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Suspicious DFT candidate paper", year=2025, pdf_path="suspicious.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="limiting_potential",
+            adsorbate="[22]",
+            value=436.0,
+            unit="e",
+            evidence_text="A sentence near reference [22] was incorrectly parsed as a DFT value.",
+            confidence=0.8,
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_result",
+                target_id=str(row.id),
+                field_name="value",
+                page=5,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.9,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    client = TestClient(app)
+    response = client.get("/api/papers/export/dft-review-queue")
+    assert response.status_code == 200
+    queue_row = response.json()["rows"][0]
+    assert queue_row["blocked_reasons"] == ["missing_review"]
+    assert queue_row["can_mark_verified"] is False
+    assert queue_row["recommended_action"] == "inspect_suspicious_candidate"
+    assert "adsorbate_looks_like_reference" in queue_row["sanity_flags"]
+    assert "unexpected_potential_unit:e" in queue_row["sanity_flags"]
+    assert queue_row["correction_url"].endswith(f"/api/papers/{paper_id}/dft-results/{row_id}/corrections")
+
+    unconfirmed_correction = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": False,
+            "field_name": "unit",
+            "proposed_value": "V",
+            "reason": "The source table uses potential units, not charge units.",
+        },
+    )
+    assert unconfirmed_correction.status_code == 400
+
+    correction_response = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": True,
+            "field_name": "unit",
+            "proposed_value": "V",
+            "reason": "The source table uses potential units, not charge units.",
+            "reviewer": "codex_test",
+            "evidence_payload": {"page": 5, "field": "unit"},
+        },
+    )
+    assert correction_response.status_code == 200
+    correction = correction_response.json()["correction"]
+    assert correction["status"] == "pending"
+    assert correction["field_name"] == "dft_results"
+    assert correction["target_path"] == f"dft_results:{row_id}:unit"
+    assert correction["proposed_value"] == "V"
+
+    not_confirmed = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/reject",
+        json={"confirm_reject_candidate": False},
+    )
+    assert not_confirmed.status_code == 400
+
+    rejected = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/reject",
+        json={
+            "confirm_reject_candidate": True,
+            "reviewer": "codex_test",
+            "reviewer_note": "Looks like a reference/citation artifact rather than a DFT row.",
+        },
+    )
+    assert rejected.status_code == 200
+    rejected_payload = rejected.json()
+    assert rejected_payload["dft_result_id"] == str(row_id)
+    assert rejected_payload["export_safety"]["is_exportable"] is False
+    assert rejected_payload["export_safety"]["review_status"] == "rejected"
+    assert rejected_payload["export_safety"]["blocked_reasons"] == ["unsafe_review"]
+    assert all(item["reviewer_status"] == "rejected" for item in rejected_payload["reviews"])
+
+    active_queue = client.get("/api/papers/export/dft-review-queue")
+    assert active_queue.status_code == 200
+    assert active_queue.json()["rows"] == []
+
+    rejected_queue = client.get("/api/papers/export/dft-review-queue", params={"status": "rejected"})
+    assert rejected_queue.status_code == 200
+    rejected_row = rejected_queue.json()["rows"][0]
+    assert rejected_row["record_id"] == str(row_id)
+    assert rejected_row["decision_status"] == "rejected"
+    assert rejected_row["recommended_action"] == "rejected_candidate"
+
+    dataset = client.get("/api/papers/export/dft-dataset").json()
+    assert dataset["metadata"]["eligible_count"] == 0
+    assert dataset["metadata"]["blocked_count"] == 1
+    assert dataset["metadata"]["blocked_reasons"] == {"unsafe_review": 1}
+
+    with Session() as session:
+        saved_correction = session.scalar(select(PaperCorrection).where(PaperCorrection.target_path == f"dft_results:{row_id}:unit"))
+        assert saved_correction is not None
+        assert saved_correction.status == "pending"
+        correction_audit = session.scalar(select(AuditLog).where(AuditLog.action == "propose_dft_result_correction"))
+        assert correction_audit is not None
+        assert correction_audit.target_id == str(saved_correction.id)
+        audit = session.scalar(select(AuditLog).where(AuditLog.action == "reject_dft_result"))
+        assert audit is not None
+        assert audit.target_id == str(row_id)
 
 
 def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, monkeypatch):

@@ -1,9 +1,12 @@
 ﻿# Literature AI
 
-`literature-ai` 是一个面向科研文献处理的本地化工作台，包含文献采集、PDF 解析、结构化抽取、外部 AI 审阅和 MCP 协作接口。
+`literature-ai` 是一个面向 Codex 的本地文献工具台，包含文献采集、PDF 解析、结构化候选抽取、外部解析导入和 MCP 协作接口。它不再以网页内 AI 自动给出最终结论为核心，而是为 Codex 提供可读、可查、可核对的文献资料底座。
 
 ## 当前定位
 
+- Codex 是主分析者：阅读、筛选、核对、归纳、写作和数据整理由 Codex 或人工完成
+- 软件是工具台：负责文献入库、PDF 转换、证据检索、候选结构化数据和导出
+- 网页内 AI / 自动解析：只作为辅助候选，不作为最终可信结论
 - 当前活跃业务数据库：每个文献库目录下的 `SQLite database.sqlite`
 - `PostgreSQL + pgvector`：保留为可选能力，不是默认活跃库
 - 当前阶段：`D2 数据底座 / migration readiness`
@@ -24,6 +27,7 @@
 - AI 协作规则：[AGENTS.md](./AGENTS.md)
 - 中文使用说明：[使用说明.md](./%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
 - 文档索引：[docs/README.md](./docs/README.md)
+- Codex 中心化重定位：[docs/plans/codex_centered_refocus.md](./docs/plans/codex_centered_refocus.md)
 
 ## 快速启动
 
@@ -35,6 +39,11 @@ curl http://localhost:8000/api/health
 主工作台：
 
 - <http://localhost:8000/pages/literature_library/index.html>
+
+Codex 文献包：
+
+- HTTP：`GET /api/papers/{paper_id}/codex-context`
+- MCP：`get_codex_context`
 
 ## 文档说明
 

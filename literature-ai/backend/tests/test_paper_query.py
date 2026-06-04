@@ -149,3 +149,57 @@ def test_list_papers_with_filters():
             assert result[0].title != service.list_papers(PaperListFilterParams(limit=1, offset=0))[0].title
 
         engine.dispose()
+
+
+def test_list_papers_defaults_to_year_then_serial_order():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'sort.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            p1 = Paper(title="Later serial", year=2019, serial_number=3, pdf_path="1.pdf", authors=["A"])
+            p2 = Paper(title="Earlier year", year=2018, serial_number=9, pdf_path="2.pdf", authors=["B"])
+            p3 = Paper(title="Earlier serial", year=2019, serial_number=1, pdf_path="3.pdf", authors=["C"])
+            p4 = Paper(title="Missing year", year=None, serial_number=2, pdf_path="4.pdf", authors=["D"])
+            session.add_all([p1, p2, p3, p4])
+            session.commit()
+
+            service = PaperQueryService(session)
+            result = service.list_papers()
+
+            assert [paper.title for paper in result] == [
+                "Earlier year",
+                "Earlier serial",
+                "Later serial",
+                "Missing year",
+            ]
+
+        engine.dispose()
+
+
+def test_list_papers_supports_descending_year_serial_order():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'sort_desc.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            p1 = Paper(title="Year 2019 serial 1", year=2019, serial_number=1, pdf_path="1.pdf", authors=["A"])
+            p2 = Paper(title="Year 2020 serial 2", year=2020, serial_number=2, pdf_path="2.pdf", authors=["B"])
+            p3 = Paper(title="Year 2020 serial 1", year=2020, serial_number=1, pdf_path="3.pdf", authors=["C"])
+            session.add_all([p1, p2, p3])
+            session.commit()
+
+            service = PaperQueryService(session)
+            result = service.list_papers(PaperListFilterParams(sort_by="year_serial", sort_order="desc"))
+
+            assert [paper.title for paper in result] == [
+                "Year 2020 serial 2",
+                "Year 2020 serial 1",
+                "Year 2019 serial 1",
+            ]
+
+        engine.dispose()

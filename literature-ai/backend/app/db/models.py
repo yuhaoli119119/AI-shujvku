@@ -85,6 +85,17 @@ class Paper(Base):
     paper_type: Mapped[str | None] = mapped_column(sa.String(20), nullable=True, index=True)
     type_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True, index=True)
     classification_source: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
+    workflow_status: Mapped[str] = mapped_column(
+        sa.String(64),
+        default="Imported",
+        server_default="Imported",
+        nullable=False,
+        index=True,
+    )
+    pdf_quality_status: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
+    pdf_quality_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    pdf_quality_report: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    workspace_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
 
 
@@ -152,6 +163,16 @@ class PaperFigure(Base):
     content_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     key_elements: Mapped[list | None] = mapped_column(json_type(), nullable=True)
     prov: Mapped[list | None] = mapped_column(json_type(), nullable=True)
+    figure_label: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    crop_status: Mapped[str] = mapped_column(
+        sa.String(32),
+        default="candidate_crop",
+        server_default="candidate_crop",
+        nullable=False,
+        index=True,
+    )
+    crop_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    crop_source: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
 
 
 class CatalystSample(Base):
@@ -199,6 +220,15 @@ class DFTResult(Base):
     source_figure: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    candidate_status: Mapped[str] = mapped_column(
+        sa.String(64),
+        default="Codex_Candidate",
+        server_default="Codex_Candidate",
+        nullable=False,
+        index=True,
+    )
+    evidence_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    extraction_protocol_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
 
 
 class MechanismClaim(Base):
