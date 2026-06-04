@@ -23,21 +23,21 @@
         .shell {
             width: min(1440px, calc(100% - 48px));
             margin: 0 auto;
-            padding: 24px 0 36px;
+            padding: 14px 0 28px;
         }
 
         .page-toolbar {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-            gap: 18px;
+            display: flex;
+            justify-content: flex-start;
+            width: fit-content;
+            max-width: 100%;
+            gap: 10px;
             align-items: center;
-            margin-bottom: 18px;
-            padding: 18px 20px;
+            margin-bottom: 12px;
+            padding: 10px 12px;
             border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            background:
-                linear-gradient(135deg, color-mix(in srgb, var(--color-primary-bg) 65%, transparent), transparent 52%),
-                var(--color-surface);
+            border-radius: var(--radius);
+            background: var(--color-surface);
             box-shadow: var(--shadow-card);
         }
         .toolbar-title {
@@ -71,13 +71,13 @@
             line-height: 1.7;
         }
         .toolbar-controls {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: min(760px, calc(100vw - 72px));
         }
         .toolbar-controls label {
-            display: block;
-            margin-bottom: 6px;
+            margin-bottom: 0;
             color: var(--color-text-secondary);
             font-size: var(--font-size-xs);
             font-weight: 700;
@@ -86,17 +86,17 @@
         .workspace-grid {
             display: grid;
             grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.9fr);
-            gap: 22px;
+            gap: 16px;
             align-items: start;
         }
         .left-stack,
         .right-stack {
             display: grid;
-            gap: 18px;
+            gap: 16px;
             align-content: start;
         }
         .panel-card {
-            padding: 22px;
+            padding: 16px;
             border: 1px solid var(--color-border);
             border-radius: var(--radius-lg);
             background: var(--color-surface);
@@ -107,7 +107,7 @@
             justify-content: space-between;
             gap: 16px;
             align-items: flex-start;
-            margin-bottom: 18px;
+            margin-bottom: 12px;
         }
         .panel-title {
             margin: 0;
@@ -162,6 +162,17 @@
             display: grid;
             gap: 10px;
         }
+        .btn {
+            min-height: 32px;
+            padding: 6px 11px;
+            font-size: 13px;
+            border-radius: var(--radius-sm);
+        }
+        .btn-sm {
+            min-height: 28px;
+            padding: 4px 9px;
+            font-size: 12px;
+        }
         .quick-actions .btn {
             justify-content: flex-start;
         }
@@ -178,8 +189,8 @@
             gap: 8px;
         }
         .ingest-tabs {
-            margin-bottom: 18px;
-            padding-bottom: 12px;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
             border-bottom: 1px solid var(--color-border);
         }
         .ingest-tab,
@@ -192,7 +203,7 @@
             font: inherit;
             font-size: var(--font-size-sm);
             font-weight: 700;
-            padding: 8px 14px;
+            padding: 6px 11px;
             transition: all var(--transition);
         }
         .ingest-tab:hover,
@@ -212,8 +223,8 @@
         .dropzone {
             display: grid;
             place-items: center;
-            min-height: 260px;
-            padding: 28px;
+            min-height: 190px;
+            padding: 18px;
             border: 2px dashed var(--color-border-strong);
             border-radius: calc(var(--radius-lg) + 4px);
             background:
@@ -233,25 +244,25 @@
         .dropzone-mark {
             display: inline-grid;
             place-items: center;
-            width: 62px;
-            height: 62px;
-            margin-bottom: 16px;
-            border-radius: 22px;
+            width: 48px;
+            height: 48px;
+            margin-bottom: 10px;
+            border-radius: 16px;
             background: var(--color-primary-bg);
             color: var(--color-primary);
         }
         .dropzone-mark svg {
-            width: 32px;
-            height: 32px;
+            width: 26px;
+            height: 26px;
             fill: currentColor;
         }
         .dropzone h3 {
             margin: 0;
-            font-size: 20px;
+            font-size: 16px;
         }
         .dropzone p {
             max-width: 520px;
-            margin: 10px auto 0;
+            margin: 6px auto 0;
             color: var(--color-text-secondary);
             line-height: 1.8;
         }
@@ -271,8 +282,8 @@
         }
         .form-control {
             width: 100%;
-            min-height: 44px;
-            padding: 10px 12px;
+            min-height: 34px;
+            padding: 7px 10px;
             border: var(--input-border);
             border-radius: var(--radius);
             background: var(--color-surface-alt);
@@ -281,7 +292,7 @@
             outline: none;
         }
         textarea.form-control {
-            min-height: 96px;
+            min-height: 80px;
             resize: vertical;
         }
         .form-control:focus {
@@ -291,7 +302,7 @@
         .actions {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
         }
         .help-note {
@@ -309,8 +320,8 @@
         }
         .search-results {
             display: grid;
-            gap: 12px;
-            margin-top: 16px;
+            gap: 10px;
+            margin-top: 12px;
         }
         .search-item,
         .job-card,
@@ -321,7 +332,7 @@
             background: var(--color-surface-alt);
         }
         .search-item {
-            padding: 15px;
+            padding: 12px;
         }
         .search-item h4 {
             margin: 0;
@@ -340,7 +351,7 @@
             justify-content: space-between;
             gap: 10px;
             align-items: center;
-            margin-bottom: 14px;
+            margin-bottom: 12px;
         }
         .calendar-shell {
             border: 1px solid var(--color-border);
@@ -470,13 +481,13 @@
         }
         .job-list {
             display: grid;
-            gap: 10px;
+            gap: 8px;
             max-height: 520px;
             overflow: auto;
             padding-right: 2px;
         }
         .job-card {
-            padding: 14px;
+            padding: 12px;
         }
         .job-card-header {
             display: flex;
@@ -589,11 +600,6 @@
 
     <main class="shell">
         <section class="page-toolbar">
-            <div>
-                <p class="eyebrow">Ingestion Center</p>
-                <h1>入库中心</h1>
-                <p>把本地 PDF、DOI / URL、在线检索结果和辅助批量检索统一放进当前文献库。页面只负责发起任务和展示状态，不会删除论文、PDF 或解析产物。</p>
-            </div>
             <div class="toolbar-controls">
                 <label for="librarySelect">当前文献库</label>
                 <select id="librarySelect" class="form-control" onchange="switchLibrary(this.value)">
@@ -816,17 +822,7 @@
         function setupCompactToolbar() {
             const toolbar = document.querySelector(".page-toolbar");
             if (!toolbar) return;
-            const [left, right] = toolbar.children;
-            if (left) {
-                left.innerHTML = `
-                    <div class="toolbar-title">
-                        <span class="toolbar-badge">Workspace</span>
-                        <h1>入库中心</h1>
-                    </div>
-                    <p class="toolbar-summary">在这里发起 PDF、DOI / URL、在线检索和辅助批量收录，右侧直接查看任务状态和历史记录。</p>
-                `;
-            }
-            const label = right ? right.querySelector("label") : null;
+            const label = toolbar.querySelector("label");
             if (label) label.textContent = "当前文献库";
         }
 
