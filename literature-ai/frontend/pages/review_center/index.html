@@ -237,16 +237,6 @@
         width: 100%;
       }
     }
-    .btn-tinted {
-      background: var(--color-primary-bg);
-      color: var(--color-primary);
-      border-color: transparent;
-      font-weight: 800;
-    }
-    .btn-tinted:hover {
-      background: color-mix(in srgb, var(--color-primary-bg) 85%, var(--color-primary));
-      color: var(--color-primary);
-    }
   </style>
 </head>
 <body>
@@ -255,8 +245,8 @@
     <div class="review-topline">
       <section class="stats" id="stats"></section>
       <div class="page-actions toolbar">
-        <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()">刷新</button>
-        <button class="btn btn-tinted" type="button" onclick="prepareLibrary()">重建当前库材料</button>
+        <button class="btn ghost" type="button" onclick="loadReviewCenter()">刷新</button>
+        <button class="btn primary" type="button" onclick="prepareLibrary()">重建当前库材料</button>
       </div>
     </div>
 
@@ -486,9 +476,9 @@
           '<td>' + candidateCell + '</td>' +
           '<td><div class="muted mono">' + esc(workspace) + '</div></td>' +
           '<td><div class="actions">' +
-            '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '">' + esc(inspectTarget.label) + '</a>' +
-            '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
-            '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">人工确认</button>' +
+            '<a class="btn ghost small" href="' + esc(detailUrl) + '">' + esc(inspectTarget.label) + '</a>' +
+            '<button class="btn ghost small" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
+            '<button class="btn primary small" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">人工确认</button>' +
             '<div class="action-note">' + esc(inspectTarget.note) + '</div>' +
           '</div></td>' +
         '</tr>';
