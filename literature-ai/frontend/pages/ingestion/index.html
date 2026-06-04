@@ -27,17 +27,14 @@
         }
 
         .page-toolbar {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-            gap: 18px;
+            display: flex;
+            justify-content: flex-end;
             align-items: center;
-            margin-bottom: 18px;
-            padding: 18px 20px;
+            margin-bottom: 12px;
+            padding: 10px 12px;
             border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            background:
-                linear-gradient(135deg, color-mix(in srgb, var(--color-primary-bg) 65%, transparent), transparent 52%),
-                var(--color-surface);
+            border-radius: var(--radius);
+            background: var(--color-surface);
             box-shadow: var(--shadow-card);
         }
         .toolbar-title {
@@ -71,13 +68,12 @@
             line-height: 1.7;
         }
         .toolbar-controls {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         .toolbar-controls label {
-            display: block;
-            margin-bottom: 6px;
+            margin-bottom: 0;
             color: var(--color-text-secondary);
             font-size: var(--font-size-xs);
             font-weight: 700;
@@ -589,11 +585,6 @@
 
     <main class="shell">
         <section class="page-toolbar">
-            <div>
-                <p class="eyebrow">Ingestion Center</p>
-                <h1>入库中心</h1>
-                <p>把本地 PDF、DOI / URL、在线检索结果和辅助批量检索统一放进当前文献库。页面只负责发起任务和展示状态，不会删除论文、PDF 或解析产物。</p>
-            </div>
             <div class="toolbar-controls">
                 <label for="librarySelect">当前文献库</label>
                 <select id="librarySelect" class="form-control" onchange="switchLibrary(this.value)">
@@ -816,17 +807,7 @@
         function setupCompactToolbar() {
             const toolbar = document.querySelector(".page-toolbar");
             if (!toolbar) return;
-            const [left, right] = toolbar.children;
-            if (left) {
-                left.innerHTML = `
-                    <div class="toolbar-title">
-                        <span class="toolbar-badge">Workspace</span>
-                        <h1>入库中心</h1>
-                    </div>
-                    <p class="toolbar-summary">在这里发起 PDF、DOI / URL、在线检索和辅助批量收录，右侧直接查看任务状态和历史记录。</p>
-                `;
-            }
-            const label = right ? right.querySelector("label") : null;
+            const label = toolbar.querySelector("label");
             if (label) label.textContent = "当前文献库";
         }
 
