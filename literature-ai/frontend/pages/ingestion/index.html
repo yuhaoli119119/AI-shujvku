@@ -26,20 +26,7 @@
             padding: 14px 0 28px;
         }
 
-        .page-toolbar {
-            display: flex;
-            justify-content: flex-start;
-            width: fit-content;
-            max-width: 100%;
-            gap: 10px;
-            align-items: center;
-            margin-bottom: 12px;
-            padding: 10px 12px;
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius);
-            background: var(--color-surface);
-            box-shadow: var(--shadow-card);
-        }
+        .page-toolbar { display: none; }
         .toolbar-title {
             display: flex;
             flex-wrap: wrap;
@@ -74,13 +61,19 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            max-width: min(760px, calc(100vw - 72px));
+            max-width: min(520px, 100%);
         }
         .toolbar-controls label {
             margin-bottom: 0;
             color: var(--color-text-secondary);
             font-size: var(--font-size-xs);
             font-weight: 700;
+            white-space: nowrap;
+        }
+        .toolbar-controls .form-control {
+            width: min(420px, 42vw);
+            min-width: 260px;
+            height: 34px;
         }
 
         .workspace-grid {
@@ -105,9 +98,14 @@
         .panel-heading {
             display: flex;
             justify-content: space-between;
-            gap: 16px;
-            align-items: flex-start;
+            gap: 14px;
+            align-items: center;
             margin-bottom: 12px;
+        }
+        .panel-library-switch {
+            margin-left: auto;
+            flex: 0 1 520px;
+            justify-content: flex-end;
         }
         .panel-title {
             margin: 0;
@@ -575,6 +573,19 @@
             .workspace-grid {
                 grid-template-columns: 1fr;
             }
+            .panel-heading {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+            .panel-library-switch {
+                margin-left: 0;
+                width: 100%;
+                justify-content: flex-start;
+            }
+            .toolbar-controls .form-control {
+                width: 100%;
+                min-width: 0;
+            }
         }
         @media (max-width: 720px) {
             .shell {
@@ -599,15 +610,6 @@
     <div id="topnav-mount"></div>
 
     <main class="shell">
-        <section class="page-toolbar">
-            <div class="toolbar-controls">
-                <label for="librarySelect">当前文献库</label>
-                <select id="librarySelect" class="form-control" onchange="switchLibrary(this.value)">
-                    <option value="">加载中...</option>
-                </select>
-            </div>
-        </section>
-
         <section class="workspace-grid">
             <div class="left-stack">
                 <div class="panel-card">
@@ -615,6 +617,12 @@
                         <div>
                             <h2 class="panel-title">选择入库方式</h2>
                             <p class="panel-desc">推荐先使用 PDF 上传或 DOI / URL 收录；辅助批量检索只用于扩展主题词和候选文献，后续由 Codex 或人工筛选。</p>
+                        </div>
+                        <div class="toolbar-controls panel-library-switch">
+                            <label for="librarySelect">当前文献库</label>
+                            <select id="librarySelect" class="form-control" onchange="switchLibrary(this.value)">
+                                <option value="">加载中...</option>
+                            </select>
                         </div>
                     </div>
 

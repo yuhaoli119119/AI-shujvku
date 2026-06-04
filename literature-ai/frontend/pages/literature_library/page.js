@@ -291,18 +291,18 @@ function togglePaperMoreMenu(event) {
 
 function ensureClassificationToolbarButton() {
     const toolbarRows = document.querySelectorAll(".toolbar .toolbar-row");
-    const targetRow = toolbarRows && toolbarRows[1];
+    const targetRow = toolbarRows && toolbarRows[2];
     if (!targetRow || targetRow.querySelector("[data-role='classify-unknown-btn']")) return;
-    const refreshBtn = Array.from(targetRow.querySelectorAll("button")).find(function(btn) {
-        return btn.getAttribute("onclick") === "refreshCurrentPage()";
+    const searchBtn = Array.from(targetRow.querySelectorAll("button")).find(function(btn) {
+        return btn.getAttribute("onclick") === "searchLocal()";
     });
     const button = document.createElement("button");
     button.className = "btn ghost";
     button.dataset.role = "classify-unknown-btn";
     button.textContent = "重分类未知类型";
     button.addEventListener("click", classifyUnknownTypes);
-    if (refreshBtn && refreshBtn.nextSibling) {
-        targetRow.insertBefore(button, refreshBtn.nextSibling);
+    if (searchBtn && searchBtn.nextSibling) {
+        targetRow.insertBefore(button, searchBtn.nextSibling);
     } else {
         targetRow.appendChild(button);
     }

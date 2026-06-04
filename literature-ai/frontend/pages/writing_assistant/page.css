@@ -13,16 +13,16 @@ body.is-resizing-sidebar {
 .shell {
     max-width: 1680px;
     margin: 0 auto;
-    padding: 24px 24px 28px;
+    padding: 12px 24px 28px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
     min-height: 100vh;
     box-sizing: border-box;
 }
 
 .header-container {
-    display: flex;
+    display: none;
     align-items: baseline;
     gap: 12px;
     flex-wrap: wrap;
