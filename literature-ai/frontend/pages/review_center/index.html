@@ -28,8 +28,8 @@
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 18px;
-      margin-bottom: 16px;
+      gap: 16px;
+      margin-bottom: 10px;
     }
     h1 {
       margin: 0;
@@ -38,17 +38,17 @@
       letter-spacing: 0;
     }
     .subline {
-      margin-top: 7px;
+      margin-top: 6px;
       color: var(--color-text-secondary);
       font-size: 13px;
       line-height: 1.5;
     }
     .hint {
-      margin-top: 10px;
+      margin-top: 6px;
       max-width: 820px;
       color: var(--color-text-secondary);
       font-size: 12px;
-      line-height: 1.6;
+      line-height: 1.5;
     }
     .toolbar {
       display: flex;
@@ -57,28 +57,32 @@
       gap: 8px;
     }
     .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 10px;
-      margin-bottom: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
     }
     .stat {
-      min-height: 82px;
-      padding: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 8px 12px;
       border: 1px solid var(--color-border);
-      border-radius: var(--radius);
+      border-radius: var(--radius-pill);
       background: var(--color-surface);
     }
     .stat-label {
       color: var(--color-text-secondary);
       font-size: 12px;
       font-weight: 800;
+      white-space: nowrap;
     }
     .stat-value {
-      margin-top: 7px;
-      font-size: 24px;
+      font-size: 16px;
       font-weight: 900;
       line-height: 1;
+      white-space: nowrap;
     }
     .panel {
       overflow: hidden;
@@ -243,8 +247,8 @@
     <header class="page-head">
       <div>
         <h1>审核中心</h1>
-        <div class="subline">Codex 生成候选材料，Gemini 只做审核标记，最终确认仍由你决定。</div>
-        <div class="hint">“重建审核材料”会刷新这篇文献的标准工作目录、证据定位、图表索引和 DFT 候选包，本身不代表已经人工确认或正式入库。</div>
+        <div class="subline">Codex 负责整理候选材料，Gemini 只做审核标记，最终确认仍由你决定。</div>
+        <div class="hint">“重建当前库材料”只刷新工作目录、证据定位、图表索引和 DFT 候选，不代表已正式确认。</div>
       </div>
       <div class="toolbar">
         <button class="btn ghost" type="button" onclick="loadReviewCenter()">刷新</button>
