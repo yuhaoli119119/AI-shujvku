@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import logging
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Base
@@ -30,10 +31,11 @@ def get_engine(database_url: str):
 def init_db(database_url: str) -> None:
     engine = get_engine(database_url)
     if engine.dialect.name == "postgresql":
-        with engine.begin() as connection:
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        for extension_name in ("vector", "pgcrypto", "pg_trgm"):
+            _ensure_postgresql_extension(engine, extension_name)
     Base.metadata.create_all(engine)
+    if engine.dialect.name == "postgresql":
+        _ensure_postgresql_indexes(engine)
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
 
@@ -531,6 +533,51 @@ def init_db(database_url: str) -> None:
                     else "ALTER TABLE extraction_field_reviews ADD COLUMN last_resolved_target_id VARCHAR(64)"
                 ),
             )
+
+
+def _ensure_postgresql_extension(engine, extension_name: str) -> None:
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension_name}"))
+        return
+    except SQLAlchemyError as exc:
+        if _postgresql_extension_exists(engine, extension_name):
+            logger.info(
+                "PostgreSQL extension %s already exists but CREATE EXTENSION was not permitted; continuing",
+                extension_name,
+            )
+            return
+        raise RuntimeError(
+            f"PostgreSQL extension {extension_name!r} is required but could not be created. "
+            "Create it with an admin role before starting the app."
+        ) from exc
+
+
+def _postgresql_extension_exists(engine, extension_name: str) -> bool:
+    with engine.connect() as connection:
+        exists = connection.execute(
+            text("SELECT 1 FROM pg_extension WHERE extname = :extension_name"),
+            {"extension_name": extension_name},
+        ).scalar()
+    return bool(exists)
+
+
+def _ensure_postgresql_indexes(engine) -> None:
+    statements = [
+        "CREATE INDEX IF NOT EXISTS ix_paper_chunks_paper_id ON paper_chunks(paper_id)",
+        "CREATE INDEX IF NOT EXISTS ix_paper_chunks_section_id ON paper_chunks(section_id)",
+        (
+            "CREATE INDEX IF NOT EXISTS paper_chunks_embedding_hnsw "
+            "ON paper_chunks USING hnsw (embedding vector_cosine_ops)"
+        ),
+        (
+            "CREATE INDEX IF NOT EXISTS paper_chunks_text_gin "
+            "ON paper_chunks USING gin (to_tsvector('simple', coalesce(text, '')))"
+        ),
+    ]
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
 
 
 def get_db_session():

@@ -13,17 +13,18 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import Paper, PaperFigure, PaperSection, PaperTable, FigureDataPoint, EvidenceSpan
+from app.db.models import Paper, PaperChunk, PaperFigure, PaperSection, PaperTable, FigureDataPoint, EvidenceSpan
 from app.parsers.docling_parser import DoclingParser
 from app.parsers.grobid_parser import GrobidParseResult, GrobidParser
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.artifact_store import ArtifactStore
 from app.services.pdf_image_extractor import PdfImageExtractor
 from app.services.vlm_service import VLMService
-from app.services.embedding import DeterministicEmbeddingService
+from app.services.embedding import get_embedding_service
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_identity import PaperIdentityService
+from app.services.paper_chunking import split_text_into_chunks
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
 from app.utils.text_cleaning import normalize_text_tree
@@ -64,7 +65,13 @@ class PaperIngestionService:
         self.artifacts = ArtifactStore(settings)
         self.grobid_parser = GrobidParser(settings.grobid_url)
         self.docling_parser = DoclingParser(settings)
-        self.embedding = DeterministicEmbeddingService(settings.embedding_dimension)
+        self.embedding = get_embedding_service(
+            provider=settings.embedding_provider,
+            api_base=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+        )
         self.identity = PaperIdentityService()
         self.extraction_pipeline = ExtractionPipelineService(
             session=session,
@@ -621,17 +628,16 @@ class PaperIngestionService:
         return total
 
     def _persist_document_entities(self, paper: Paper, document: UnifiedPaperDocument) -> None:
+        chunk_index = 0
         for section in document.sections:
-            self.session.add(
-                PaperSection(
-                    paper_id=paper.id,
-                    section_title=section.section_title,
-                    section_type=section.section_type,
-                    text=section.text,
-                    page_start=section.page_start,
-                    page_end=section.page_end,
-                    embedding=self.embedding.embed_text(section.text),
-                )
+            chunk_index = self._add_section_with_chunks(
+                paper_id=paper.id,
+                section_title=section.section_title,
+                section_type=section.section_type,
+                text=section.text,
+                page_start=section.page_start,
+                page_end=section.page_end,
+                chunk_index=chunk_index,
             )
 
         for table in document.tables:
@@ -648,16 +654,14 @@ class PaperIngestionService:
             )
             if table_text:
                 truncated_text = table_text[:2000] + ("..." if len(table_text) > 2000 else "")
-                self.session.add(
-                    PaperSection(
-                        paper_id=paper.id,
-                        section_title=table.caption or "Table",
-                        section_type="table",
-                        text=truncated_text,
-                        page_start=table.page,
-                        page_end=table.page,
-                        embedding=self.embedding.embed_text(truncated_text),
-                    )
+                chunk_index = self._add_section_with_chunks(
+                    paper_id=paper.id,
+                    section_title=table.caption or "Table",
+                    section_type="table",
+                    text=truncated_text,
+                    page_start=table.page,
+                    page_end=table.page,
+                    chunk_index=chunk_index,
                 )
 
         for figure in document.figures:
@@ -676,16 +680,14 @@ class PaperIngestionService:
             self.session.add(db_figure)
             self.session.flush()
 
-            self.session.add(
-                PaperSection(
-                    paper_id=paper.id,
-                    section_title=caption_text,
-                    section_type="figure_caption",
-                    text=caption_text,
-                    page_start=figure.page,
-                    page_end=figure.page,
-                    embedding=self.embedding.embed_text(caption_text),
-                )
+            chunk_index = self._add_section_with_chunks(
+                paper_id=paper.id,
+                section_title=caption_text,
+                section_type="figure_caption",
+                text=caption_text,
+                page_start=figure.page,
+                page_end=figure.page,
+                chunk_index=chunk_index,
             )
 
             if figure.numerical_data_points:
@@ -756,7 +758,59 @@ class PaperIngestionService:
                         parser_source="docling" if bbox else "fallback",
                     )
 
+    def _add_section_with_chunks(
+        self,
+        *,
+        paper_id: UUID,
+        section_title: str | None,
+        section_type: str | None,
+        text: str,
+        page_start: int | None,
+        page_end: int | None,
+        chunk_index: int,
+    ) -> int:
+        chunks = split_text_into_chunks(text)
+        chunk_embeddings = [self.embedding.embed_text(chunk.text) for chunk in chunks]
+        section_embedding = chunk_embeddings[0] if chunk_embeddings else None
+        section = PaperSection(
+            paper_id=paper_id,
+            section_title=section_title,
+            section_type=section_type,
+            text=text,
+            page_start=page_start,
+            page_end=page_end,
+            embedding=section_embedding,
+        )
+        self.session.add(section)
+        self.session.flush()
+
+        for chunk, embedding in zip(chunks, chunk_embeddings):
+            self.session.add(
+                PaperChunk(
+                    paper_id=paper_id,
+                    section_id=section.id,
+                    chunk_index=chunk_index,
+                    text=chunk.text,
+                    page_start=page_start,
+                    page_end=page_end,
+                    token_count=chunk.token_count,
+                    embedding=embedding,
+                    embedding_model=self._embedding_model_label(),
+                    embedding_dimension=self.settings.embedding_dimension,
+                    content_hash=chunk.content_hash,
+                )
+            )
+            chunk_index += 1
+        return chunk_index
+
+    def _embedding_model_label(self) -> str:
+        provider = (self.settings.embedding_provider or "deterministic").lower()
+        if provider == "openai_compatible":
+            return self.settings.embedding_model
+        return f"{provider}:{self.settings.embedding_dimension}"
+
     def _clear_document_entities(self, paper_id: UUID) -> None:
+        self.session.execute(delete(PaperChunk).where(PaperChunk.paper_id == paper_id))
         self.session.execute(
             delete(EvidenceSpan).where(
                 EvidenceSpan.paper_id == paper_id,

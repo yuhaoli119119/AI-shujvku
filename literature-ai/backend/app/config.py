@@ -10,9 +10,8 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    # NOTE: This default is overridden at startup by LibraryManager.activate_library(),
-    # which switches to the per-library SQLite database. The PostgreSQL URL is only
-    # used as a fallback when no active library exists in the registry.
+    # Production should set LITAI_FORCE_CONFIGURED_DATABASE=true so this URL is
+    # the source of truth and the per-library SQLite registry is bypassed.
     database_url: str = "postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai"
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
@@ -42,7 +41,7 @@ class Settings(BaseSettings):
     embedding_api_base: str | None = None
     embedding_api_key: str | None = None
     embedding_model: str = "text-embedding-3-small"
-    embedding_dimension: int = 64
+    embedding_dimension: int = 1536
     use_minio: bool = False
     writer_backend: str = "rule"
     writer_prompt_path: Path = Field(default=Path("prompts/paper_writer.yaml"))

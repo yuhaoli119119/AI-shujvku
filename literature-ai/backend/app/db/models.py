@@ -8,6 +8,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+EMBEDDING_DIMENSION = 1536
+
 
 def utcnow() -> datetime:
     return datetime.utcnow()
@@ -135,7 +137,31 @@ class PaperSection(Base):
     text: Mapped[str] = mapped_column(sa.Text)
     page_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
-    embedding: Mapped[list[float] | None] = mapped_column(VectorType(64), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(VectorType(EMBEDDING_DIMENSION), nullable=True)
+
+
+class PaperChunk(Base):
+    __tablename__ = "paper_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    section_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("paper_sections.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    text: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    page_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    token_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(VectorType(EMBEDDING_DIMENSION), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    embedding_dimension: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    content_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint("paper_id", "section_id", "chunk_index", name="uq_paper_chunks_section_index"),
+    )
 
 
 class PaperTable(Base):
@@ -275,7 +301,7 @@ class WritingCard(Base):
     abstract_logic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     introduction_logic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     discussion_logic: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    embedding: Mapped[list[float] | None] = mapped_column(VectorType(64), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(VectorType(EMBEDDING_DIMENSION), nullable=True)
 
 
 class EvidenceSpan(Base):

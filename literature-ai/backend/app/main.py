@@ -36,11 +36,12 @@ async def lifespan(_: FastAPI):
     # Log the actual active database after startup
     startup_logger = logging.getLogger("app.startup")
     startup_logger.info(
-        "Database source-of-truth: kind=%s, library=%s, configured=%s, effective=%s",
+        "Database source-of-truth: kind=%s, source=%s, library=%s, configured=%s, effective=%s",
         info["db_kind"],
+        info.get("source_of_truth"),
         info["active_library"] or "(none)",
+        info.get("configured_db_url_masked") or info["db_url_masked"],
         info["db_url_masked"],
-        info.get("effective_db_path"),
     )
 
     async with AsyncExitStack() as stack:

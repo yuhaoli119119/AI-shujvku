@@ -16,6 +16,7 @@ from app.mcp.auth import require_mcp_capability
 from app.rag.retriever import Retriever
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
 from app.services.discovery_service import DiscoveryService
+from app.services.embedding import get_embedding_service
 from app.services.codex_context_service import CodexContextService
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
@@ -664,7 +665,14 @@ def retrieve_evidence(
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        retriever = Retriever(session, embedding_dimension=settings.embedding_dimension)
+        embedding = get_embedding_service(
+            provider=settings.embedding_provider,
+            api_base=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+        )
+        retriever = Retriever(session, embedding=embedding)
         uuid_paper_ids = [UUID(pid) for pid in paper_ids] if paper_ids else None
         result = retriever.retrieve(
             query=query,

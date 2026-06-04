@@ -4,11 +4,12 @@ import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db.models import DFTResult, ElectrochemicalPerformance, MechanismClaim, PaperSection, WritingCard, Paper, FigureDataPoint
-from app.services.embedding import DeterministicEmbeddingService, get_embedding_service, EmbeddingService
+from app.services.embedding import get_embedding_service, EmbeddingService
 from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 
 
@@ -19,9 +20,19 @@ def _tokenize(text: str) -> set[str]:
 class Retriever:
     """Hybrid lexical + embedding retriever over sections, facts, claims, and writing cards."""
 
-    def __init__(self, session: Session, embedding_dimension: int = 64, embedding: EmbeddingService | None = None) -> None:
+    def __init__(self, session: Session, embedding_dimension: int = 1536, embedding: EmbeddingService | None = None) -> None:
         self.session = session
-        self.embedding = embedding or DeterministicEmbeddingService(embedding_dimension)
+        if embedding is not None:
+            self.embedding = embedding
+        else:
+            settings = get_settings()
+            self.embedding = get_embedding_service(
+                provider=settings.embedding_provider,
+                api_base=settings.embedding_api_base,
+                api_key=settings.embedding_api_key,
+                model=settings.embedding_model,
+                dimension=settings.embedding_dimension,
+            )
 
     def retrieve(
         self,
@@ -61,6 +72,17 @@ class Retriever:
         limit: int,
         paper_type_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            chunk_results = self._retrieve_chunks_postgresql(
+                tokens=tokens,
+                query_embedding=query_embedding,
+                paper_ids=paper_ids,
+                limit=limit,
+                paper_type_filter=paper_type_filter,
+            )
+            if chunk_results:
+                return chunk_results
+
         query = select(PaperSection)
         if paper_ids:
             query = query.where(PaperSection.paper_id.in_(paper_ids))
@@ -85,6 +107,96 @@ class Retriever:
                     "section_type": row.section_type,
                     "page_start": row.page_start,
                     "page_end": row.page_end,
+                }
+            )
+        return self._top_k(results, limit)
+
+    def _retrieve_chunks_postgresql(
+        self,
+        *,
+        tokens: set[str],
+        query_embedding: list[float],
+        paper_ids: list[UUID] | None,
+        limit: int,
+        paper_type_filter: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        where_clauses = ["pc.embedding IS NOT NULL"]
+        params: dict[str, Any] = {
+            "query_embedding": self._vector_literal(query_embedding),
+            "query_text": " ".join(sorted(tokens)) or "",
+            "candidate_limit": max(limit * 5, 25),
+        }
+        if paper_ids:
+            placeholders = []
+            for index, paper_id in enumerate(paper_ids):
+                key = f"paper_id_{index}"
+                placeholders.append(f"CAST(:{key} AS uuid)")
+                params[key] = str(paper_id)
+            where_clauses.append(f"pc.paper_id IN ({', '.join(placeholders)})")
+        if paper_type_filter:
+            placeholders = []
+            for index, paper_type in enumerate(paper_type_filter):
+                if not paper_type:
+                    continue
+                key = f"paper_type_{index}"
+                placeholders.append(f"p.paper_type LIKE :{key}")
+                params[key] = f"{paper_type}%"
+            if placeholders:
+                where_clauses.append("(" + " OR ".join(placeholders) + ")")
+
+        statement = text(
+            f"""
+            SELECT
+                pc.id AS chunk_id,
+                pc.paper_id AS paper_id,
+                pc.section_id AS section_id,
+                pc.chunk_index AS chunk_index,
+                pc.text AS text,
+                pc.page_start AS page_start,
+                pc.page_end AS page_end,
+                ps.section_title AS section_title,
+                ps.section_type AS section_type,
+                pc.embedding <=> CAST(:query_embedding AS vector) AS cosine_distance,
+                ts_rank_cd(
+                    to_tsvector('simple', coalesce(pc.text, '')),
+                    plainto_tsquery('simple', :query_text)
+                ) AS lexical_rank
+            FROM paper_chunks pc
+            LEFT JOIN paper_sections ps ON ps.id = pc.section_id
+            LEFT JOIN papers p ON p.id = pc.paper_id
+            WHERE {" AND ".join(where_clauses)}
+            ORDER BY pc.embedding <=> CAST(:query_embedding AS vector)
+            LIMIT :candidate_limit
+            """
+        )
+        rows = self.session.execute(statement, params).mappings().all()
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            haystack = " ".join(filter(None, [row["section_title"], row["section_type"], row["text"]]))
+            lexical = max(self._score_text(tokens, haystack), min(float(row["lexical_rank"] or 0.0), 1.0))
+            cosine_distance = float(row["cosine_distance"] or 1.0)
+            vector_score = max(0.0, min(1.0, 1.0 - cosine_distance))
+            hybrid = round((0.70 * vector_score) + (0.30 * lexical), 4)
+            if hybrid <= 0:
+                continue
+            results.append(
+                {
+                    "type": "section",
+                    "paper_id": row["paper_id"],
+                    "object_id": row["chunk_id"],
+                    "chunk_id": row["chunk_id"],
+                    "section_id": row["section_id"],
+                    "score": hybrid,
+                    "score_breakdown": {
+                        "lexical": round(lexical, 4),
+                        "semantic": round(vector_score, 4),
+                        "hybrid": hybrid,
+                    },
+                    "text": str(row["text"] or "")[:1200],
+                    "section_title": row["section_title"],
+                    "section_type": row["section_type"],
+                    "page_start": row["page_start"],
+                    "page_end": row["page_end"],
                 }
             )
         return self._top_k(results, limit)
@@ -380,6 +492,10 @@ class Retriever:
         if not overlap:
             return 0.0
         return round(len(overlap) / max(1, len(query_tokens)), 4)
+
+    @staticmethod
+    def _vector_literal(vector: list[float]) -> str:
+        return "[" + ",".join(f"{float(value):.8f}" for value in vector) + "]"
 
     @staticmethod
     def _global_dedup(

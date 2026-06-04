@@ -61,6 +61,21 @@ STRICT_FACT_CONTEXT_KEYWORDS = {
     "coordination",
     "mechanism",
 }
+CLAIM_STATUSES = {
+    "verified",
+    "numerical_error",
+    "unverified",
+    "hallucination",
+    "misleading",
+    "citation_not_found",
+    "not_in_source",
+    "citation_mismatch",
+}
+CITATION_PATTERN = re.compile(r"\[(?:\d+(?:\s*,\s*\d+)*)\]|\([A-Z][A-Za-z-]+(?:\s+et\s+al\.)?,\s*\d{4}\)")
+COMPARATIVE_PATTERN = re.compile(r"\b(better|higher|lower|superior|strongest|fastest|highest|lowest|outperform\w*)\b", re.IGNORECASE)
+ATTRIBUTION_PATTERN = re.compile(r"\b(reported|proposed|proved|proven|discovered|found|demonstrated|showed|according to)\b", re.IGNORECASE)
+CONSENSUS_PATTERN = re.compile(r"\b(widely accepted|generally recognized|most studies|consensus|well established)\b", re.IGNORECASE)
+MECHANISM_PATTERN = re.compile(r"\b(pathway|mechanism|adsorption|conversion|cataly\w*|intermediate|reaction route)\b", re.IGNORECASE)
 
 
 class CitationGuard:
@@ -88,6 +103,21 @@ class CitationGuard:
                 missing_textual.append(claim)
             else:
                 supported_textual.append({"claim": claim, "supported_by": match})
+        claim_audit = self.audit_claims(text, facts)
+        high_risk_failures = [
+            item
+            for item in claim_audit
+            if item["status"] != "verified"
+            and item.get("claim_type")
+            in {
+                "numerical_claim",
+                "comparative_claim",
+                "causal_claim",
+                "attribution_claim",
+                "consensus_claim",
+                "mechanism_claim",
+            }
+        ]
         return {
             "ok": not missing and not missing_textual,
             "supported_values": supported,
@@ -96,7 +126,82 @@ class CitationGuard:
             "missing_fact_claims": missing_textual,
             "checked_count": len(numeric_claims),
             "checked_fact_count": len(textual_claims),
+            "claim_audit": claim_audit,
+            "status_counts": self._status_counts(claim_audit),
+            "guard_failure": bool(high_risk_failures),
+            "guard_failure_claims": high_risk_failures,
         }
+
+    def audit_claims(
+        self,
+        text: str,
+        facts: dict[str, list[dict[str, Any]]] | list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        fact_claims = self._collect_fact_claims(facts)
+        evidence_items = self._collect_textual_evidence_items(facts, include_synthetic=True)
+        audit: list[dict[str, Any]] = []
+
+        for claim in self._extract_numeric_claims(text):
+            supported = self._find_supporting_claim(claim, fact_claims)
+            mismatch = self._find_numeric_mismatch(claim, fact_claims)
+            if supported is not None:
+                status = "verified"
+                evidence = [supported]
+                warning = None
+            elif mismatch is not None:
+                status = "numerical_error"
+                evidence = [mismatch]
+                warning = "Exact numerical value/unit does not match retrieved evidence"
+            else:
+                status = "unverified"
+                evidence = []
+                warning = "No retrieved evidence supports this numerical claim"
+            audit.append(
+                {
+                    "claim_text": claim["literal"],
+                    "claim_type": "numerical_claim",
+                    "status": status,
+                    "evidence": evidence,
+                    "warning": warning,
+                    "context": claim.get("context") or [],
+                }
+            )
+
+        for claim in self._extract_textual_claims(text, include_synthetic=True):
+            supported = self._find_supporting_textual_claim(claim, facts, include_synthetic=True)
+            claim_text = claim["sentence"]
+            if supported is not None:
+                status = "verified"
+                evidence = [supported]
+                warning = None
+            elif self._has_citation_marker(claim_text) and evidence_items:
+                status = "citation_mismatch"
+                evidence = []
+                warning = "Citation or retrieved evidence exists, but it does not support the claim"
+            elif self._has_citation_marker(claim_text):
+                status = "citation_not_found"
+                evidence = []
+                warning = "Claim includes a citation marker but no matching retrieved source was available"
+            elif evidence_items:
+                status = "unverified"
+                evidence = []
+                warning = "Retrieved evidence does not support this claim"
+            else:
+                status = "not_in_source"
+                evidence = []
+                warning = "Doc-only evidence set is empty for this claim"
+            audit.append(
+                {
+                    "claim_text": claim_text,
+                    "claim_type": self._classify_textual_claim(claim_text, claim),
+                    "status": status,
+                    "evidence": evidence,
+                    "warning": warning,
+                    "triggers": claim.get("triggers") or [],
+                    "context": claim.get("context") or [],
+                }
+            )
+        return audit
 
     def _extract_numeric_claims(self, text: str) -> list[dict[str, Any]]:
         claims = []
@@ -156,11 +261,24 @@ class CitationGuard:
                     return fact
         return None
 
-    def _extract_textual_claims(self, text: str) -> list[dict[str, Any]]:
+    def _find_numeric_mismatch(self, claim: dict[str, Any], facts: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for fact in facts:
+            if fact["unit"] != claim["unit"]:
+                continue
+            if not self._context_matches(claim, fact):
+                continue
+            if abs(fact["value"] - claim["value"]) > self._tolerance(claim["unit"]):
+                return fact
+        return None
+
+    def _extract_textual_claims(self, text: str, include_synthetic: bool = False) -> list[dict[str, Any]]:
         claims: list[dict[str, Any]] = []
         for sentence in self._split_sentences(text):
             tokens = self._tokenize(sentence)
-            triggers = self._extract_fact_triggers(tokens, sentence=sentence)
+            trigger_set = set(self._extract_fact_triggers(tokens, sentence=sentence))
+            if include_synthetic:
+                trigger_set |= self._synthetic_claim_triggers(sentence)
+            triggers = sorted(trigger_set)
             if not triggers:
                 continue
             context = sorted(tokens & FACT_CONTEXT_KEYWORDS)
@@ -173,12 +291,27 @@ class CitationGuard:
             )
         return claims
 
+    def _classify_textual_claim(self, sentence: str, claim: dict[str, Any]) -> str:
+        triggers = set(claim.get("triggers") or [])
+        if COMPARATIVE_PATTERN.search(sentence) or triggers & {"comparative", "superior", "strengthens", "weakens"}:
+            return "comparative_claim"
+        if triggers & {"accelerates", "suppresses", "causes", "infers_causality"}:
+            return "causal_claim"
+        if ATTRIBUTION_PATTERN.search(sentence) or "attribution" in triggers:
+            return "attribution_claim"
+        if CONSENSUS_PATTERN.search(sentence) or "consensus" in triggers:
+            return "consensus_claim"
+        if MECHANISM_PATTERN.search(sentence) or triggers & {"mechanism", "mediates"}:
+            return "mechanism_claim"
+        return "factual_claim"
+
     def _find_supporting_textual_claim(
         self,
         claim: dict[str, Any],
         facts: dict[str, list[dict[str, Any]]] | list[dict[str, Any]],
+        include_synthetic: bool = False,
     ) -> dict[str, Any] | None:
-        evidence_items = self._collect_textual_evidence_items(facts)
+        evidence_items = self._collect_textual_evidence_items(facts, include_synthetic=include_synthetic)
         supported_by: list[dict[str, Any]] = []
         for trigger in claim.get("triggers") or []:
             match = self._find_support_for_trigger(trigger, claim, evidence_items)
@@ -235,7 +368,9 @@ class CitationGuard:
         return sorted(self._tokenize(window))
 
     def _collect_textual_evidence_items(
-        self, facts: dict[str, list[dict[str, Any]]] | list[dict[str, Any]]
+        self,
+        facts: dict[str, list[dict[str, Any]]] | list[dict[str, Any]],
+        include_synthetic: bool = False,
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         if isinstance(facts, dict):
@@ -265,7 +400,10 @@ class CitationGuard:
             if not text:
                 continue
             tokens = self._tokenize(text)
-            triggers = self._extract_fact_triggers(tokens, sentence=text)
+            trigger_set = set(self._extract_fact_triggers(tokens, sentence=text))
+            if include_synthetic:
+                trigger_set |= self._synthetic_claim_triggers(text)
+            triggers = sorted(trigger_set)
             if not triggers:
                 continue
             evidence.append(
@@ -290,6 +428,31 @@ class CitationGuard:
                 if tokens & variants:
                     triggers.append(canonical)
         return sorted(triggers)
+
+    @staticmethod
+    def _synthetic_claim_triggers(sentence: str) -> set[str]:
+        triggers: set[str] = set()
+        if COMPARATIVE_PATTERN.search(sentence):
+            triggers.add("comparative")
+        if ATTRIBUTION_PATTERN.search(sentence):
+            triggers.add("attribution")
+        if CONSENSUS_PATTERN.search(sentence):
+            triggers.add("consensus")
+        if MECHANISM_PATTERN.search(sentence):
+            triggers.add("mechanism")
+        return triggers
+
+    @staticmethod
+    def _has_citation_marker(text: str) -> bool:
+        return bool(CITATION_PATTERN.search(text or ""))
+
+    @staticmethod
+    def _status_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+        counts = {status: 0 for status in sorted(CLAIM_STATUSES)}
+        for item in items:
+            status = str(item.get("status") or "unverified")
+            counts[status] = counts.get(status, 0) + 1
+        return counts
 
     @staticmethod
     def _split_sentences(text: str) -> list[str]:

@@ -182,6 +182,54 @@ def test_force_configured_database_bypasses_registered_active_library(tmp_path, 
     assert info["recovered_from_candidate_scan"] is False
 
 
+def test_force_configured_postgresql_does_not_scan_sqlite_candidates(tmp_path, monkeypatch):
+    registry_path = tmp_path / "library_registry.json"
+    active_root = tmp_path / "libraries" / "default"
+    active_root.mkdir(parents=True, exist_ok=True)
+    _write_sqlite(active_root / "database.sqlite", paper_count=15)
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "Default Library",
+                "libraries": [
+                    {
+                        "name": "Default Library",
+                        "root_path": str(active_root.resolve()),
+                        "description": "Default Library",
+                        "created_at": "2026-05-26T00:00:00",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://litai_app:secret@192.168.1.20:5432/literature_ai")
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
+    monkeypatch.setattr(
+        active_database_module,
+        "_choose_effective_sqlite_candidate",
+        lambda **_: (_ for _ in ()).throw(AssertionError("SQLite candidates must not be scanned")),
+    )
+
+    info = active_database_module.get_active_database_info()
+
+    assert info["db_kind"] == "postgresql"
+    assert info["source_of_truth"] == "configured_postgresql"
+    assert info["is_active_library_sqlite"] is False
+    assert info["effective_db_path"] is None
+    assert Path(str(info["effective_storage_root"])) == storage_root.resolve()
+    assert info["recovered_from_candidate_scan"] is False
+
+
 def test_get_active_database_info_keeps_empty_non_default_active_library(tmp_path, monkeypatch):
     workspace_root = tmp_path
     backend_root = workspace_root / "backend"

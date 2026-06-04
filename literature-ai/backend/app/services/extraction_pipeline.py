@@ -31,7 +31,7 @@ from app.extractors.comprehensive_extractor import ComprehensiveExtractor
 from app.normalizers.chemistry_normalizer import ChemistryNormalizer
 from app.normalizers.dft_normalizer import DFTNormalizer
 from app.schemas.documents import UnifiedPaperDocument
-from app.services.embedding import DeterministicEmbeddingService
+from app.services.embedding import get_embedding_service
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
 from app.services.paper_workbench_service import PaperWorkbenchService
@@ -80,7 +80,13 @@ class ExtractionPipelineService:
         self.comprehensive_extractor = ComprehensiveExtractor(settings)
         self.dft_normalizer = DFTNormalizer()
         self.chemistry_normalizer = ChemistryNormalizer()
-        self.embedding = DeterministicEmbeddingService(settings.embedding_dimension)
+        self.embedding = get_embedding_service(
+            provider=settings.embedding_provider,
+            api_base=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+        )
         self.locators = EvidenceLocatorService(session)
 
     def _rule_based_classify(

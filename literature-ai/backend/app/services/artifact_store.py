@@ -10,8 +10,17 @@ from app.config import Settings
 class ArtifactStore:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        for path in settings.storage_paths.values():
-            path.mkdir(parents=True, exist_ok=True)
+        root = settings.storage_paths["root"]
+        if settings.force_configured_database and not root.exists():
+            raise RuntimeError(
+                f"Configured storage root does not exist: {root}. "
+                "Mount the B-computer shared storage before ingesting files."
+            )
+        root.mkdir(parents=not settings.force_configured_database, exist_ok=True)
+        for key, path in settings.storage_paths.items():
+            if key == "root":
+                continue
+            path.mkdir(parents=False, exist_ok=True)
 
     def save_pdf_copy(self, source_path: Path, target_name: str) -> Path:
         destination = self.settings.storage_paths["pdf"] / target_name

@@ -6,10 +6,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db.models import PaperSection
 from app.rag.retriever import Retriever
 from app.schemas.evidence import EvidenceRef, PageSpan
 from app.schemas.retrieval import RetrievalSearchRequest, RetrievalSearchResponse, RetrievalSearchResult
+from app.services.embedding import get_embedding_service
 from app.utils.paper_type import normalize_paper_type_filter
 
 
@@ -25,7 +27,15 @@ class RetrievalService:
 
     def __init__(self, session: Session, reranker: NoopReranker | None = None) -> None:
         self.session = session
-        self.retriever = Retriever(session)
+        settings = get_settings()
+        embedding = get_embedding_service(
+            provider=settings.embedding_provider,
+            api_base=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+        )
+        self.retriever = Retriever(session, embedding=embedding)
         self.reranker = reranker or NoopReranker()
 
     def search(self, payload: RetrievalSearchRequest) -> RetrievalSearchResponse:
@@ -51,8 +61,8 @@ class RetrievalService:
             query=payload.query,
             mode=payload.mode,
             recall={
-                "bm25": "enabled: deterministic lexical overlap over section/fact/card text",
-                "vector": "enabled: deterministic embedding cosine fallback",
+                "bm25": "enabled: lexical overlap over section/fact/card text; PostgreSQL full-text rank for chunks",
+                "vector": "enabled: pgvector chunk retrieval when PostgreSQL paper_chunks are available",
             },
             reranker={
                 "enabled": payload.rerank,
@@ -115,7 +125,8 @@ class RetrievalService:
                     continue
                 paper_id = row.get("paper_id")
                 object_id = row.get("object_id")
-                section_id = object_id if row.get("type") == "section" else None
+                section_id = row.get("section_id") or (object_id if row.get("type") == "section" else None)
+                chunk_id = row.get("chunk_id") or (str(object_id) if object_id else None)
                 score_breakdown = row.get("score_breakdown") or {}
                 normalized_breakdown = {
                     "bm25": float(score_breakdown.get("lexical", score_breakdown.get("bm25", 0.0)) or 0.0),
@@ -127,7 +138,7 @@ class RetrievalService:
                         score=float(row.get("score") or 0.0),
                         source=source,
                         paper_id=paper_id,
-                        chunk_id=str(object_id) if object_id else None,
+                        chunk_id=str(chunk_id) if chunk_id else None,
                         section_id=section_id,
                         section_title=row.get("section_title") or row.get("source_section"),
                         text=text,
@@ -136,7 +147,7 @@ class RetrievalService:
                         score_breakdown=normalized_breakdown,
                         evidence=EvidenceRef(
                             paper_id=paper_id,
-                            chunk_id=str(object_id) if object_id else None,
+                            chunk_id=str(chunk_id) if chunk_id else None,
                             section_id=section_id,
                             page_span=PageSpan(page_start=row.get("page_start"), page_end=row.get("page_end")),
                             evidence_text=text,

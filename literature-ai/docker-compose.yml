@@ -1,10 +1,9 @@
 services:
-  # NOTE: PostgreSQL is started and initialized but NOT the default active database.
-  # The backend activates a per-library SQLite database via LibraryManager at startup.
-  # PostgreSQL is available for future use (e.g. pgvector retrieval) but sits idle unless
-  # the library system is bypassed (no active library in the registry).
+  # Optional local development database. Production should use the B-computer
+  # PostgreSQL/pgvector instance configured via LITAI_DATABASE_URL.
   postgres:
     image: pgvector/pgvector:pg16
+    profiles: ["local-db"]
     environment:
       # Dev-only defaults. Override in any shared or remote environment.
       POSTGRES_DB: literature_ai
@@ -45,15 +44,21 @@ services:
       dockerfile: backend/Dockerfile
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
-      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_DATABASE_URL: ${LITAI_DATABASE_URL:-postgresql+psycopg://litai_app:change_me_app_password@192.168.1.20:5432/literature_ai?sslmode=prefer}
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
       LITAI_MINIO_ENDPOINT: minio:9000
       LITAI_MINIO_ACCESS_KEY: minioadmin
       LITAI_MINIO_SECRET_KEY: minioadmin
-      LITAI_STORAGE_ROOT: /data/storage
-      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-false}
+      LITAI_STORAGE_ROOT: ${LITAI_STORAGE_ROOT:-/data/storage}
+      LITAI_EMBEDDING_PROVIDER: ${LITAI_EMBEDDING_PROVIDER:-openai_compatible}
+      LITAI_EMBEDDING_API_BASE: ${LITAI_EMBEDDING_API_BASE:-https://api.openai.com/v1}
+      LITAI_EMBEDDING_API_KEY: ${LITAI_EMBEDDING_API_KEY:-}
+      LITAI_EMBEDDING_MODEL: ${LITAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      LITAI_EMBEDDING_DIMENSION: ${LITAI_EMBEDDING_DIMENSION:-1536}
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
       LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-false}
       LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
       LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}
@@ -71,7 +76,6 @@ services:
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
     depends_on:
-      - postgres
       - redis
       - grobid
       - minio
@@ -80,8 +84,8 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
-      - ./data:/data
       - ./data/docling_cache:/root/.cache/docling
+      - ${LITAI_HOST_STORAGE_ROOT:-Z:/LitAIStorage}:/data/storage
       # Host user directory browsing is optional. Override LITAI_HOST_USERS_ROOT on macOS/Linux.
       # If you do not need host directory browsing, comment this line out.
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
@@ -92,15 +96,21 @@ services:
       dockerfile: backend/Dockerfile
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
     environment:
-      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_DATABASE_URL: ${LITAI_DATABASE_URL:-postgresql+psycopg://litai_app:change_me_app_password@192.168.1.20:5432/literature_ai?sslmode=prefer}
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
       LITAI_MINIO_ENDPOINT: minio:9000
       LITAI_MINIO_ACCESS_KEY: minioadmin
       LITAI_MINIO_SECRET_KEY: minioadmin
-      LITAI_STORAGE_ROOT: /data/storage
-      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-false}
+      LITAI_STORAGE_ROOT: ${LITAI_STORAGE_ROOT:-/data/storage}
+      LITAI_EMBEDDING_PROVIDER: ${LITAI_EMBEDDING_PROVIDER:-openai_compatible}
+      LITAI_EMBEDDING_API_BASE: ${LITAI_EMBEDDING_API_BASE:-https://api.openai.com/v1}
+      LITAI_EMBEDDING_API_KEY: ${LITAI_EMBEDDING_API_KEY:-}
+      LITAI_EMBEDDING_MODEL: ${LITAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      LITAI_EMBEDDING_DIMENSION: ${LITAI_EMBEDDING_DIMENSION:-1536}
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
       LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-false}
       LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
       LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}
@@ -118,14 +128,13 @@ services:
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
     depends_on:
-      - postgres
       - redis
       - grobid
       - minio
     volumes:
       - ./backend:/app
-      - ./data:/data
       - ./data/docling_cache:/root/.cache/docling
+      - ${LITAI_HOST_STORAGE_ROOT:-Z:/LitAIStorage}:/data/storage
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
 
 volumes:

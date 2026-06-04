@@ -7,6 +7,11 @@ import re
 from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
+DEFAULT_EMBEDDING_DIMENSION = 1536
+
+
+class EmbeddingUnavailableError(RuntimeError):
+    """Raised when a configured real embedding provider cannot produce a vector."""
 
 
 class EmbeddingService(Protocol):
@@ -56,10 +61,7 @@ class DeterministicEmbeddingService:
 
 
 class OpenAICompatibleEmbeddingService:
-    """Embedding service that calls OpenAI-compatible APIs (DeepSeek, OpenAI, etc.).
-
-    Falls back to DeterministicEmbeddingService when API is unavailable.
-    """
+    """Embedding service that calls OpenAI-compatible APIs (DeepSeek, OpenAI, etc.)."""
 
     dimension: int
 
@@ -68,7 +70,7 @@ class OpenAICompatibleEmbeddingService:
         api_base: str,
         api_key: str,
         model: str = "text-embedding-3-small",
-        dimension: int = 1536,
+        dimension: int = DEFAULT_EMBEDDING_DIMENSION,
         timeout_seconds: float = 30.0,
     ) -> None:
         self.api_base = api_base.rstrip("/")
@@ -76,12 +78,13 @@ class OpenAICompatibleEmbeddingService:
         self.model = model
         self.dimension = dimension
         self.timeout_seconds = timeout_seconds
-        self._fallback = DeterministicEmbeddingService(dimension=64)
 
     def embed_text(self, text: str) -> list[float]:
-        """Call the embedding API. Falls back to deterministic on failure."""
+        """Call the embedding API and fail strictly when real embeddings are unavailable."""
         if not self.api_base or not self.api_key:
-            return self._fallback.embed_text(text)
+            raise EmbeddingUnavailableError("Embedding API base/key is not configured")
+        if not (text or "").strip():
+            raise EmbeddingUnavailableError("Cannot embed empty text")
         try:
             import httpx
 
@@ -102,17 +105,19 @@ class OpenAICompatibleEmbeddingService:
             response.raise_for_status()
             data = response.json()
             embedding = self._extract_embedding(data)
-            if embedding and len(embedding) == self.dimension:
-                return embedding
-            logger.warning(
-                "Embedding dimension mismatch: expected %d, got %d; falling back",
-                self.dimension,
-                len(embedding) if embedding else 0,
-            )
-            return self._fallback.embed_text(text)
+            if not embedding:
+                raise EmbeddingUnavailableError("Embedding API response did not contain an embedding vector")
+            if len(embedding) != self.dimension:
+                raise EmbeddingUnavailableError(
+                    f"Embedding dimension mismatch: expected {self.dimension}, got {len(embedding)}"
+                )
+            return [float(value) for value in embedding]
+        except EmbeddingUnavailableError:
+            raise
         except Exception as exc:
-            logger.warning("Embedding API call failed (%s); falling back to deterministic", exc)
-            return self._fallback.embed_text(text)
+            raise EmbeddingUnavailableError(
+                f"Embedding API call failed for model {self.model!r}: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def cosine_similarity(self, left: list[float] | None, right: list[float] | None) -> float:
         if not left or not right or len(left) != len(right):
@@ -143,7 +148,7 @@ def get_embedding_service(
     api_base: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
-    dimension: int = 64,
+    dimension: int = DEFAULT_EMBEDDING_DIMENSION,
 ) -> EmbeddingService:
     """Factory: return the appropriate embedding service based on configuration.
 
@@ -152,12 +157,12 @@ def get_embedding_service(
     """
     provider = (provider or "deterministic").lower()
     if provider == "openai_compatible":
-        if api_base and api_key:
-            return OpenAICompatibleEmbeddingService(
-                api_base=api_base,
-                api_key=api_key,
-                model=model or "text-embedding-3-small",
-                dimension=dimension,
-            )
-        logger.warning("openai_compatible embedding requested but api_base/api_key missing; falling back")
+        if dimension != DEFAULT_EMBEDDING_DIMENSION:
+            raise ValueError(f"OpenAI-compatible embeddings must be {DEFAULT_EMBEDDING_DIMENSION} dimensions")
+        return OpenAICompatibleEmbeddingService(
+            api_base=api_base or "https://api.openai.com/v1",
+            api_key=api_key or "",
+            model=model or "text-embedding-3-small",
+            dimension=dimension,
+        )
     return DeterministicEmbeddingService(dimension=dimension)

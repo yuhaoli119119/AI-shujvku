@@ -45,6 +45,18 @@ class LibraryManager:
     def __init__(self) -> None:
         self._ensure_registry()
 
+    @staticmethod
+    def _force_configured_postgresql_enabled() -> bool:
+        try:
+            from app.config import get_settings
+
+            settings = get_settings()
+            return bool(getattr(settings, "force_configured_database", False)) and str(
+                settings.database_url
+            ).startswith("postgresql")
+        except Exception:
+            return False
+
     @classmethod
     def project_root(cls) -> Path:
         return Path(cls.PROJECT_ROOT).resolve()
@@ -88,6 +100,8 @@ class LibraryManager:
         return result
 
     def create_library(self, name: str, root_path: str = "", description: str = "") -> LibraryInfo:
+        if self._force_configured_postgresql_enabled():
+            raise RuntimeError("Per-library SQLite creation is disabled while the configured PostgreSQL database is forced")
         library_name = self.normalize_library_name(name)
         if not library_name:
             raise ValueError("Library name cannot be empty")
@@ -133,6 +147,8 @@ class LibraryManager:
         )
 
     def activate_library(self, name: str) -> LibraryInfo:
+        if self._force_configured_postgresql_enabled():
+            raise RuntimeError("Per-library SQLite activation is disabled while the configured PostgreSQL database is forced")
         registry = self._read_registry()
         normalized_name = self.normalize_library_name(name)
         entry = self._find_entry(registry, normalized_name)
@@ -184,6 +200,10 @@ class LibraryManager:
         )
 
     def unregister_library(self, name: str) -> LibraryInfo:
+        if self._force_configured_postgresql_enabled():
+            raise RuntimeError(
+                "Per-library SQLite registry mutation is disabled while the configured PostgreSQL database is forced"
+            )
         normalized_name = self.normalize_library_name(name)
         if normalized_name == DEFAULT_LIBRARY_NAME:
             raise ValueError("Default library cannot be removed")
@@ -351,6 +371,8 @@ class LibraryManager:
             default_entry = self._find_entry(registry, DEFAULT_LIBRARY_NAME)
 
         assert default_entry is not None
+        if self._force_configured_postgresql_enabled():
+            return
         default_root = Path(default_entry["root_path"]).resolve()
         self.init_library_structure(default_root, storage_mode=LEGACY_STORAGE_MODE)
         if not (default_root / "database.sqlite").exists():
