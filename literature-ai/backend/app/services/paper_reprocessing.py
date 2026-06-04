@@ -12,6 +12,7 @@ from app.config import Settings
 from app.db.models import Paper, PaperFigure, PaperSection, PaperTable
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.extraction_pipeline import ExtractionPipelineService
+from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 
@@ -22,14 +23,44 @@ class PaperReprocessingService:
         self.session = session
         self.settings = settings
         self.pipeline = ExtractionPipelineService(session, settings)
+        self.workbench = PaperWorkbenchService(session, settings)
 
     def rerun_stage2(self, paper_id: UUID) -> dict[str, int]:
         paper = self.session.get(Paper, paper_id)
         if not paper:
             raise ValueError("Paper not found")
+        raw_pdf_path = Path(paper.pdf_path) if paper.pdf_path else None
+        pdf_path = (
+            None
+            if raw_pdf_path is not None and raw_pdf_path.is_absolute() and not raw_pdf_path.exists()
+            else resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=self.settings)
+        )
+        if pdf_path is not None and pdf_path.exists():
+            quality = PaperWorkbenchService.assess_pdf_path(pdf_path, self.settings)
+            self.workbench.apply_quality_report(paper, quality)
+            if quality.get("needs_human_confirmation"):
+                self.pipeline._delete_existing_stage2(paper.id)
+                paper.comprehensive_analysis = None
+                self.session.add(paper)
+                self.session.commit()
+                self.workbench.prepare_paper_workspace(paper.id)
+                return {
+                    "dft_settings": 0,
+                    "catalyst_samples": 0,
+                    "dft_results": 0,
+                    "electrochemical_performance": 0,
+                    "mechanism_claims": 0,
+                    "writing_cards": 0,
+                    "skipped_quality_blocked": 1,
+                }
         document = self._rebuild_document(paper)
         summary = self.pipeline.replace_stage2(paper, document)
+        self.workbench.mark_parsed_ready(
+            paper,
+            candidate_count=sum(summary.get(key, 0) for key in ("dft_results", "dft_settings", "mechanism_claims")),
+        )
         self.session.commit()
+        self.workbench.prepare_paper_workspace(paper.id)
         return summary
 
     def classify_single_paper(self, paper_id: UUID, overwrite: bool = False) -> dict[str, Any]:

@@ -13,17 +13,29 @@ from app.config import Settings, get_settings
 from app.db.models import Base, Paper, PaperFigure
 from app.db.session import get_db_session
 from app.schemas.api import (
+    CodexContextResponse,
+    CodexItemContextResponse,
+    DFTResultCorrectionProposalRequest,
+    DFTResultCorrectionProposalResponse,
+    DFTResultRejectRequest,
+    DFTResultRejectResponse,
+    DFTResultVerifyRequest,
+    DFTResultVerifyResponse,
     ExtractionRunResponse,
     PaperDetailResponse,
+    PaperKnowledgeContextResponse,
     PaperTranslationItemResponse,
     PaperTranslationPreviewRequest,
     PaperTranslationPreviewResponse,
 )
+from app.services.codex_context_service import CodexContextService
+from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.llm_service import LLMService
 from app.services.paper_reprocessing import PaperReprocessingService
+from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 router = APIRouter()
@@ -132,6 +144,145 @@ async def get_paper(paper_id: UUID, session: Session = Depends(get_db_session)) 
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
     return detail
+
+
+@router.get("/{paper_id}/codex-context", response_model=CodexContextResponse)
+async def get_paper_codex_context(
+    paper_id: UUID,
+    max_sections: int = 8,
+    max_chars_per_section: int = 1800,
+    max_figures: int = 12,
+    max_tables: int = 8,
+    max_candidates: int = 20,
+    session: Session = Depends(get_db_session),
+) -> CodexContextResponse:
+    context = CodexContextService(session).build_context(
+        paper_id,
+        max_sections=max(1, min(max_sections, 20)),
+        max_chars_per_section=max(300, min(max_chars_per_section, 6000)),
+        max_figures=max(0, min(max_figures, 40)),
+        max_tables=max(0, min(max_tables, 30)),
+        max_candidates=max(1, min(max_candidates, 100)),
+    )
+    if context is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return context
+
+
+@router.get("/{paper_id}/codex-item/{item_type}/{item_id}", response_model=CodexItemContextResponse)
+async def get_paper_codex_item(
+    paper_id: UUID,
+    item_type: str,
+    item_id: UUID,
+    max_chars_per_section: int = 1600,
+    max_related_sections: int = 3,
+    max_locators: int = 12,
+    session: Session = Depends(get_db_session),
+) -> CodexItemContextResponse:
+    try:
+        context = CodexContextService(session).build_item_context(
+            paper_id,
+            item_type,
+            item_id,
+            max_chars_per_section=max(300, min(max_chars_per_section, 6000)),
+            max_related_sections=max(0, min(max_related_sections, 8)),
+            max_locators=max(0, min(max_locators, 40)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if context is None:
+        raise HTTPException(status_code=404, detail="Paper or item not found")
+    return context
+
+
+@router.get("/{paper_id}/knowledge-context", response_model=PaperKnowledgeContextResponse)
+async def get_paper_knowledge_context(
+    paper_id: UUID,
+    max_candidates: int = 60,
+    max_chars_per_candidate: int = 1200,
+    category: str | None = None,
+    session: Session = Depends(get_db_session),
+) -> PaperKnowledgeContextResponse:
+    context = PaperKnowledgeService(session).build_context(
+        paper_id,
+        max_candidates=max(1, min(max_candidates, 120)),
+        max_chars_per_candidate=max(300, min(max_chars_per_candidate, 4000)),
+        category=category,
+    )
+    if context is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return PaperKnowledgeContextResponse.model_validate(context)
+
+
+@router.post("/{paper_id}/dft-results/{result_id}/verify", response_model=DFTResultVerifyResponse)
+async def verify_dft_result(
+    paper_id: UUID,
+    result_id: UUID,
+    payload: DFTResultVerifyRequest,
+    session: Session = Depends(get_db_session),
+) -> DFTResultVerifyResponse:
+    try:
+        result = DFTResultReviewService(session).verify_result(
+            paper_id=paper_id,
+            result_id=result_id,
+            confirm_reviewed_against_pdf=payload.confirm_reviewed_against_pdf,
+            reviewer=payload.reviewer,
+            reviewer_note=payload.reviewer_note,
+            field_names=payload.field_names,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DFTResultVerifyResponse.model_validate(result)
+
+
+@router.post("/{paper_id}/dft-results/{result_id}/reject", response_model=DFTResultRejectResponse)
+async def reject_dft_result(
+    paper_id: UUID,
+    result_id: UUID,
+    payload: DFTResultRejectRequest,
+    session: Session = Depends(get_db_session),
+) -> DFTResultRejectResponse:
+    try:
+        result = DFTResultReviewService(session).reject_result(
+            paper_id=paper_id,
+            result_id=result_id,
+            confirm_reject_candidate=payload.confirm_reject_candidate,
+            reviewer=payload.reviewer,
+            reviewer_note=payload.reviewer_note,
+            field_names=payload.field_names,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DFTResultRejectResponse.model_validate(result)
+
+
+@router.post("/{paper_id}/dft-results/{result_id}/corrections", response_model=DFTResultCorrectionProposalResponse)
+async def propose_dft_result_correction(
+    paper_id: UUID,
+    result_id: UUID,
+    payload: DFTResultCorrectionProposalRequest,
+    session: Session = Depends(get_db_session),
+) -> DFTResultCorrectionProposalResponse:
+    try:
+        correction = DFTResultReviewService(session).propose_correction(
+            paper_id=paper_id,
+            result_id=result_id,
+            confirm_correction_proposal=payload.confirm_correction_proposal,
+            field_name=payload.field_name,
+            proposed_value=payload.proposed_value,
+            reason=payload.reason,
+            reviewer=payload.reviewer,
+            evidence_payload=payload.evidence_payload,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DFTResultCorrectionProposalResponse(correction=correction)
 
 
 @router.post("/{paper_id}/translation/preview", response_model=PaperTranslationPreviewResponse)

@@ -62,11 +62,11 @@ const PAPER_DETAIL = {
     { id: 'chunk-1', section_title: 'Introduction', section_type: 'introduction', text: 'Smoke-test content.', page_start: 1, page_end: 1 },
     { id: 'chunk-2', section_title: 'Results', section_type: 'results', text: 'Selected section translation content.', page_start: 3, page_end: 4 }
   ],
-  figures: [],
+  figures: [{ id: 'figure-1', caption: 'Figure 1. Graphene defect model.', page: 3, figure_role: 'structure' }],
   tables: [],
   dft_settings_items: [{ code: 'PBE', kpoints: '3x3x1' }],
   catalyst_samples_items: [{ name: 'Pt(111)' }],
-  dft_results_items: [{ property: 'adsorption_energy', value: -1.23, unit: 'eV' }],
+  dft_results_items: [{ id: 'dft-1', property_type: 'adsorption_energy', value: -1.23, unit: 'eV', evidence_text: 'The adsorption energy is -1.23 eV.' }],
   electrochemical_performance_items: [{ metric: 'onset_potential', value: 0.71, unit: 'V' }],
   mechanism_claims_items: [{ claim: 'Associative pathway is favored.' }],
   writing_cards_items: [{ title: 'Key insight', summary: 'A concise validation card.' }],
@@ -482,6 +482,84 @@ async function mockApi(route) {
     return jsonResponse(route, { status: 'deleted', paper_id: 'paper-1' });
   }
 
+  if (pathname === '/api/papers/paper-1/codex-context' && method === 'GET') {
+    return jsonResponse(route, {
+      paper_id: 'paper-1',
+      title: PAPER_DETAIL.title,
+      schema_version: 'codex_context_v1',
+      context: {
+        dft_export_readiness: {
+          safety_gate: 'safe_verified_with_required_evidence',
+          total_candidates: 1,
+          eligible_count: 0,
+          blocked_count: 1,
+          blocked_reasons: { missing_review: 1, unsafe_locator: 1 },
+          items: [
+            {
+              record_id: 'dft-1',
+              is_exportable: false,
+              eligible: false,
+              blocked_reasons: ['missing_review', 'unsafe_locator'],
+              review_status: 'missing',
+              review_gate_status: 'blocked',
+              provenance_level: 'text_evidence_only',
+              locator_status: 'missing_page',
+            },
+          ],
+        },
+      },
+      markdown: '# Test Paper for Smoke Validation',
+      token_budget_hint: {},
+    });
+  }
+
+  if (pathname === '/api/papers/paper-1/knowledge-context' && method === 'GET') {
+    return jsonResponse(route, {
+      paper_id: 'paper-1',
+      title: PAPER_DETAIL.title,
+      schema_version: 'paper_knowledge_context_v1',
+      reliability_policy: {
+        knowledge_items_are_candidates: true,
+        section_fallbacks_are_not_final_claims: true,
+        external_ai_imports_are_unverified: true,
+        use_codex_or_human_review_before_citing: true,
+      },
+      metadata: {
+        returned: 1,
+        category_counts: { mechanism_context: 1 },
+        source_type_counts: { paper_section: 1 },
+        has_mechanism_claims: false,
+        has_writing_cards: true,
+      },
+      candidates: [
+        {
+          id: 'section_fallback:paper-1:mechanism_context',
+          paper_id: 'paper-1',
+          category: 'mechanism_context',
+          title: 'mechanism context',
+          content: 'Defect sites alter adsorption and charge redistribution.',
+          source_type: 'paper_section',
+          candidate_status: 'section_candidate_unverified',
+          evidence_state: 'parsed_source_text',
+        },
+      ],
+      markdown: '# Paper Knowledge Candidates',
+    });
+  }
+
+  if (pathname.match(/^\/api\/papers\/paper-1\/codex-item\//) && method === 'GET') {
+    return jsonResponse(route, {
+      paper_id: 'paper-1',
+      title: PAPER_DETAIL.title,
+      item_type: pathname.includes('/figure/') ? 'figure' : 'dft_result',
+      item_id: pathname.split('/').pop(),
+      schema_version: 'codex_item_context_v1',
+      context: {},
+      markdown: '# Codex Item',
+      token_budget_hint: {},
+    });
+  }
+
   if (pathname === '/api/papers/aggregate') {
     return jsonResponse(route, {
       adsorbate_groups: { 'H*': ['paper-1'] },
@@ -552,10 +630,10 @@ async function mockApi(route) {
     });
   }
 
-  if (pathname === '/api/papers/export/dft-quality') {
+  if (pathname === '/api/papers/export/dft-quality' || pathname === '/api/papers/export/dft-review-queue') {
     return jsonResponse(route, {
       metadata: {
-        schema_version: 'dft_quality_v1',
+        schema_version: pathname.endsWith('dft-review-queue') ? 'dft_review_queue_v1' : 'dft_quality_v1',
         safety_gate: 'safe_verified_with_required_evidence',
         eligible_count: 1,
         blocked_count: 2,
@@ -573,10 +651,16 @@ async function mockApi(route) {
           unit: 'eV',
           review_status: 'missing',
           review_gate_status: 'blocked',
-          provenance_level: 'text_evidence_only',
-          locator_status: 'missing_locator',
+          provenance_level: 'exact_pdf_page',
+          locator_status: 'exact_page',
           blocked_reasons: ['missing_review'],
           is_exportable: false,
+          can_mark_verified: true,
+          recommended_action: 'verify_against_pdf',
+          codex_item_url: '/api/papers/paper-1/codex-item/dft_result/dft-blocked-1',
+          verify_url: '/api/papers/paper-1/dft-results/dft-blocked-1/verify',
+          correction_url: '/api/papers/paper-1/dft-results/dft-blocked-1/corrections',
+          evidence_locators: [{ page: 4, locator_status: 'exact_page', evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.' }],
           library_detail_url: '../literature_library/index.html?paper_id=paper-1&tab=dft',
           review_workbench_url: '../external_analysis_workbench/index.html?paper_id=paper-1',
         },
@@ -1602,6 +1686,43 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: DFT quality panel shows blocked reasons and review links', async ({ page }) => {
+    let verifyPayload = null;
+    let rejectPayload = null;
+    let correctionPayload = null;
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-blocked-1\/verify$/, async route => {
+      verifyPayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        paper_id: 'paper-1',
+        dft_result_id: 'dft-blocked-1',
+        field_names: ['value'],
+        reviews: [{ id: 'review-queue-1', verified: true, reviewer_status: 'verified' }],
+        export_safety: { record_id: 'dft-blocked-1', is_exportable: true, eligible: true, blocked_reasons: [] },
+      });
+    });
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-blocked-1\/reject$/, async route => {
+      rejectPayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        paper_id: 'paper-1',
+        dft_result_id: 'dft-blocked-1',
+        field_names: ['value'],
+        reviews: [{ id: 'review-queue-2', verified: false, reviewer_status: 'rejected' }],
+        export_safety: { record_id: 'dft-blocked-1', is_exportable: false, eligible: false, blocked_reasons: ['unsafe_review'] },
+      });
+    });
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-blocked-1\/corrections$/, async route => {
+      correctionPayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        correction: {
+          id: 'correction-queue-1',
+          paper_id: 'paper-1',
+          field_name: 'dft_results',
+          target_path: 'dft_results:dft-blocked-1:unit',
+          proposed_value: 'eV',
+          status: 'pending',
+        },
+      });
+    });
+
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
 
@@ -1613,6 +1734,32 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少催化剂样本');
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少 DFT 设置');
     await expect(page.locator('#qualityRows a:has-text("去文献库处理")')).toHaveAttribute('href', /literature_library/);
+    await expect(page.locator('#qualityRows button:has-text("标记已核验")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("拒绝候选")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("提出修正")')).toHaveCount(1);
+
+    const correctionPromptValues = ['unit', 'eV', 'Unit checked against the source PDF.'];
+    const correctionDialogHandler = dialog => dialog.accept(correctionPromptValues.shift() || '');
+    page.on('dialog', correctionDialogHandler);
+    await page.click('#qualityRows button:has-text("提出修正")');
+    await expect.poll(() => correctionPayload).not.toBeNull();
+    page.off('dialog', correctionDialogHandler);
+    expect(correctionPayload.confirm_correction_proposal).toBe(true);
+    expect(correctionPayload.field_name).toBe('unit');
+    expect(correctionPayload.proposed_value).toBe('eV');
+    expect(correctionPayload.reviewer).toBe('user_codex_review');
+
+    page.once('dialog', dialog => dialog.accept());
+    await page.click('#qualityRows button:has-text("标记已核验")');
+    await expect.poll(() => verifyPayload).not.toBeNull();
+    expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
+    expect(verifyPayload.reviewer).toBe('user_codex_review');
+
+    page.once('dialog', dialog => dialog.accept());
+    await page.click('#qualityRows button:has-text("拒绝候选")');
+    await expect.poll(() => rejectPayload).not.toBeNull();
+    expect(rejectPayload.confirm_reject_candidate).toBe(true);
+    expect(rejectPayload.reviewer).toBe('user_codex_review');
   });
 
   test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {
@@ -1779,6 +1926,50 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     const visibleText = await page.locator('body').innerText();
     expect(visibleText).not.toMatch(/Extraction Jobs|Extraction Job Center|source label|manual|unknown/);
+  });
+
+  test('business flow: literature library exposes DFT safety and Codex item actions', async ({ page }) => {
+    let verifyPayload = null;
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1\/verify$/, async route => {
+      verifyPayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        paper_id: 'paper-1',
+        dft_result_id: 'dft-1',
+        field_names: ['value'],
+        reviews: [{ id: 'review-1', verified: true, reviewer_status: 'verified' }],
+        export_safety: {
+          record_id: 'dft-1',
+          is_exportable: true,
+          eligible: true,
+          blocked_reasons: [],
+          review_status: 'verified',
+          review_gate_status: 'safe_verified',
+          provenance_level: 'exact_pdf_page',
+          locator_status: 'exact_page',
+        },
+        audit_log_id: 'audit-1',
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-card');
+    await page.click('button[data-tab="dft"]');
+
+    await expect(page.locator('#dftContent')).toContainText('DFT 数据库导出安全状态');
+    await expect(page.locator('#dftContent')).toContainText('可导出 0');
+    await expect(page.locator('#dftContent')).toContainText('缺少人工核验');
+    await expect(page.locator('#dftContent button:has-text("复制此项给 Codex")')).toHaveCount(1);
+    await expect(page.locator('#dftContent button:has-text("标记已核验")')).toHaveCount(1);
+
+    page.once('dialog', dialog => dialog.accept());
+    await page.click('#dftContent button:has-text("标记已核验")');
+    await expect.poll(() => verifyPayload).not.toBeNull();
+    expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
+    expect(verifyPayload.reviewer).toBe('user_codex_review');
+
+    await page.click('button[data-tab="figures"]');
+    await expect(page.locator('#figuresContent button:has-text("复制此项给 Codex")')).toHaveCount(1);
   });
 
   test('business flow: unconfigured internal AI shows parser settings guide with writer fallback', async ({ page }) => {

@@ -1,11 +1,16 @@
 """Tests for decorative figure filtering and figure number extraction."""
 from __future__ import annotations
 
+from io import BytesIO
+
+import fitz
+from PIL import Image
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Base, Paper, PaperFigure
 from app.parsers.docling_parser import DoclingParser
+from app.schemas.documents import UnifiedFigure
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.pdf_image_extractor import PdfImageExtractor
 from app.utils.figure_filtering import decorative_figure_reason, is_decorative_figure
@@ -129,6 +134,91 @@ class TestExtractFigureNumber:
         assert PdfImageExtractor._extract_figure_number("Fig 2: TEM images") == 2
 
 
+class TestPdfImageExtractor:
+    def test_extract_uses_image_block_when_bbox_is_missing(self, tmp_path):
+        pdf_path = tmp_path / "raster_article.pdf"
+        _write_pdf_with_raster_figure(pdf_path)
+        output_dir = tmp_path / "figures"
+        figure = UnifiedFigure(caption="Figure 1. Red composite panel", page=1, prov=[])
+
+        PdfImageExtractor.extract_figures(pdf_path=pdf_path, figures=[figure], output_dir=output_dir)
+
+        assert figure.image_path is not None
+        image_path = output_dir / figure.image_path
+        assert image_path.exists()
+        with Image.open(image_path) as image:
+            width, height = image.size
+        assert width >= 520
+        assert height >= 260
+        assert figure.prov[-1]["source"] == "image_block_near_caption"
+
+    def test_extract_uses_caption_anchor_for_vector_figure(self, tmp_path):
+        pdf_path = tmp_path / "vector_article.pdf"
+        _write_pdf_with_vector_figure(pdf_path)
+        output_dir = tmp_path / "figures"
+        figure = UnifiedFigure(caption="Figure 2. Vector defect model", page=1, prov=[])
+
+        PdfImageExtractor.extract_figures(pdf_path=pdf_path, figures=[figure], output_dir=output_dir)
+
+        assert figure.image_path is not None
+        image_path = output_dir / figure.image_path
+        assert image_path.exists()
+        with Image.open(image_path) as image:
+            width, height = image.size
+        assert width > 600
+        assert 180 <= height <= 520
+        assert figure.prov[-1]["source"] == "caption_anchor_above"
+
+    def test_duplicate_figure_numbers_do_not_overwrite_files(self, tmp_path):
+        pdf_path = tmp_path / "duplicate_figures.pdf"
+        _write_pdf_with_raster_figure(pdf_path)
+        output_dir = tmp_path / "figures"
+        figures = [
+            UnifiedFigure(caption="Figure 1. Red composite panel", page=1, prov=[]),
+            UnifiedFigure(caption="Fig. 1. Red composite panel duplicate", page=1, prov=[]),
+        ]
+
+        PdfImageExtractor.extract_figures(pdf_path=pdf_path, figures=figures, output_dir=output_dir)
+
+        assert figures[0].image_path
+        assert figures[1].image_path
+        assert figures[0].image_path != figures[1].image_path
+        assert (output_dir / figures[0].image_path).exists()
+        assert (output_dir / figures[1].image_path).exists()
+
+    def test_extract_keeps_same_page_left_and_right_image_blocks_separate(self, tmp_path):
+        pdf_path = tmp_path / "two_column_figures.pdf"
+        _write_pdf_with_two_column_raster_figures(pdf_path)
+        output_dir = tmp_path / "figures"
+        figures = [
+            UnifiedFigure(caption="FIG. 1: Left red defect panel", page=1, prov=[]),
+            UnifiedFigure(caption="FIG. 2: Right blue band panel", page=1, prov=[]),
+        ]
+
+        PdfImageExtractor.extract_figures(pdf_path=pdf_path, figures=figures, output_dir=output_dir)
+
+        assert figures[0].image_path
+        assert figures[1].image_path
+        assert figures[0].image_path != figures[1].image_path
+        left_bbox = figures[0].prov[-1]["bbox"]
+        right_bbox = figures[1].prov[-1]["bbox"]
+        assert left_bbox["r"] < right_bbox["l"]
+        assert figures[0].prov[-1]["source"] == "image_block_near_caption"
+        assert figures[1].prov[-1]["source"] == "image_block_near_caption"
+
+    def test_find_caption_rect_prefers_exact_caption_over_body_reference(self):
+        doc = fitz.open()
+        page = doc.new_page(width=420, height=520)
+        page.insert_text((72, 80), "Fig. 2 shows a body reference, not a caption.", fontsize=11)
+        page.insert_text((72, 300), "Fig. 2. Actual vector defect model", fontsize=11)
+
+        rect = PdfImageExtractor._find_caption_rect(page, "Fig. 2. Actual vector defect model")
+
+        assert rect is not None
+        assert rect.y0 > 250
+        doc.close()
+
+
 class TestExtractFiguresFiltersDecorative:
     """Integration test: _extract_figures should filter out decorative figures."""
 
@@ -217,6 +307,47 @@ class TestExtractFiguresFiltersDecorative:
         assert "limiting potential" in tables[0]["caption"]
         assert figures[0]["caption"].startswith("Figure 2.")
 
+    def test_fallback_caption_extraction_skips_body_figure_references(self):
+        page_blocks = [
+            {
+                "page": 7,
+                "text": (
+                    "Figure 6 shows DMC and DFT defect formation energies against system size.\n"
+                    "Fig. 3a presents the process of a single vacancy migration.\n"
+                    "Fig. 6 The calculated defect formation energies for monovacancies.\n"
+                    "FIG. 7. Band structure of defect-patterned graphene."
+                ),
+            }
+        ]
+
+        figures = DoclingParser._extract_fallback_figures(page_blocks)
+
+        captions = [item["caption"] for item in figures]
+        assert len(captions) == 2
+        assert captions[0].startswith("Fig. 6 The calculated")
+        assert captions[1].startswith("FIG. 7.")
+        assert not any("shows DMC" in caption for caption in captions)
+        assert not any("3a presents" in caption for caption in captions)
+
+    def test_fallback_caption_extraction_deduplicates_same_page_figure_number(self):
+        page_blocks = [
+            {
+                "page": 2,
+                "text": (
+                    "FIG. 1: Calculated energies relative to graphene.\n"
+                    "Fig. 1. The most stable graphene allotropes are discussed in the text.\n"
+                    "FIG. 2: Band structures and charge density maps."
+                ),
+            }
+        ]
+
+        figures = DoclingParser._extract_fallback_figures(page_blocks)
+
+        captions = [item["caption"] for item in figures]
+        assert len(captions) == 2
+        assert captions[0].startswith("FIG. 1:")
+        assert captions[1].startswith("FIG. 2:")
+
 
 class TestRepairScripts:
     """Tests for dry-run-first cleanup helpers used by maintenance scripts."""
@@ -296,5 +427,45 @@ class TestRepairScripts:
             remaining = session.scalars(select(PaperFigure)).all()
             assert len(flagged) == 1
             assert len(remaining) == 1
-            assert remaining[0].caption == "Figure 2. SEM images of the prepared catalyst"
+        assert remaining[0].caption == "Figure 2. SEM images of the prepared catalyst"
         engine.dispose()
+
+
+def _write_pdf_with_raster_figure(pdf_path):
+    image = Image.new("RGB", (240, 120), color=(220, 20, 40))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    doc = fitz.open()
+    page = doc.new_page(width=420, height=520)
+    page.insert_image(fitz.Rect(70, 70, 350, 210), stream=buffer.getvalue())
+    page.insert_text((72, 240), "Figure 1. Red composite panel", fontsize=12)
+    doc.save(pdf_path)
+    doc.close()
+
+
+def _write_pdf_with_vector_figure(pdf_path):
+    doc = fitz.open()
+    page = doc.new_page(width=420, height=520)
+    page.draw_rect(fitz.Rect(80, 70, 340, 210), color=(0, 0, 1), fill=(0.75, 0.85, 1), width=1)
+    page.draw_line(fitz.Point(105, 185), fitz.Point(315, 95), color=(1, 0, 0), width=2)
+    page.insert_text((100, 130), "Graphene vacancy defect", fontsize=13)
+    page.insert_text((72, 240), "Figure 2. Vector defect model", fontsize=12)
+    doc.save(pdf_path)
+    doc.close()
+
+
+def _write_pdf_with_two_column_raster_figures(pdf_path):
+    red = Image.new("RGB", (160, 110), color=(220, 20, 40))
+    blue = Image.new("RGB", (160, 110), color=(30, 80, 220))
+    red_buffer = BytesIO()
+    blue_buffer = BytesIO()
+    red.save(red_buffer, format="PNG")
+    blue.save(blue_buffer, format="PNG")
+    doc = fitz.open()
+    page = doc.new_page(width=520, height=520)
+    page.insert_image(fitz.Rect(60, 70, 220, 180), stream=red_buffer.getvalue())
+    page.insert_image(fitz.Rect(300, 70, 460, 180), stream=blue_buffer.getvalue())
+    page.insert_text((62, 210), "FIG. 1: Left red defect panel", fontsize=11)
+    page.insert_text((302, 210), "FIG. 2: Right blue band panel", fontsize=11)
+    doc.save(pdf_path)
+    doc.close()

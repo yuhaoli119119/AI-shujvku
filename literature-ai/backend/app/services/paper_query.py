@@ -50,7 +50,7 @@ class PaperQueryService:
 
     def list_papers(self, filters: PaperListFilterParams | None = None) -> list[PaperListItemResponse]:
         filters = filters or PaperListFilterParams()
-        query = select(Paper).order_by(Paper.created_at.desc())
+        query = select(Paper)
 
         if filters.library_name:
             query = query.where(build_library_name_clause(Paper.library_name, filters.library_name))
@@ -105,6 +105,7 @@ class PaperQueryService:
             )
             query = query.where(wc_sub.is_(filters.has_writing_cards))
 
+        query = query.order_by(*self._list_ordering(filters))
         query = query.offset(filters.offset).limit(filters.limit)
         papers = self.session.scalars(query).all()
         if not papers:
@@ -152,6 +153,40 @@ class PaperQueryService:
                 relationship_summary_map.get(paper.id, {}),
             ) for paper in papers
         ]
+
+    @staticmethod
+    def _list_ordering(filters: PaperListFilterParams) -> tuple:
+        sort_by = (filters.sort_by or "year_serial").strip().lower()
+        sort_order = (filters.sort_order or "asc").strip().lower()
+        descending = sort_order == "desc"
+
+        title_order = Paper.title.desc() if descending else Paper.title.asc()
+        created_order = Paper.created_at.desc() if descending else Paper.created_at.asc()
+
+        if sort_by == "created_at":
+            return (created_order, title_order)
+
+        if sort_by == "title":
+            return (
+                Paper.title.is_(None).asc(),
+                title_order,
+                Paper.year.is_(None).asc(),
+                Paper.year.desc() if descending else Paper.year.asc(),
+                Paper.serial_number.is_(None).asc(),
+                Paper.serial_number.desc() if descending else Paper.serial_number.asc(),
+            )
+
+        year_order = Paper.year.desc() if descending else Paper.year.asc()
+        serial_order = Paper.serial_number.desc() if descending else Paper.serial_number.asc()
+        return (
+            Paper.year.is_(None).asc(),
+            year_order,
+            Paper.serial_number.is_(None).asc(),
+            serial_order,
+            Paper.title.is_(None).asc(),
+            title_order,
+            created_order,
+        )
 
     def get_paper_detail(self, paper_id: UUID) -> PaperDetailResponse | None:
         paper = self.session.get(Paper, paper_id)
@@ -273,6 +308,11 @@ class PaperQueryService:
             paper_type=getattr(paper, "paper_type", None),
             type_confidence=getattr(paper, "type_confidence", None),
             classification_source=getattr(paper, "classification_source", None),
+            workflow_status=getattr(paper, "workflow_status", "Imported"),
+            pdf_quality_status=getattr(paper, "pdf_quality_status", None),
+            pdf_quality_score=getattr(paper, "pdf_quality_score", None),
+            pdf_quality_report=getattr(paper, "pdf_quality_report", None),
+            workspace_path=getattr(paper, "workspace_path", None),
             comprehensive_analysis=paper.comprehensive_analysis,
             created_at=paper.created_at,
             counts=c,

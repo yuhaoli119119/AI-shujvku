@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from uuid import UUID
 
+from app.config import get_settings
 from app.db.session import get_db_session
 from app.services.writing_citation_insertion_service import (
     CitationInsertionDraftRequest,
     WritingCitationInsertionService,
+)
+from app.services.word_citation_insertion_service import (
+    WordCitationInsertRequest,
+    WordCitationInsertionService,
 )
 from app.services.writing_citation_candidate_service import (
     CitationCandidateFilters,
@@ -144,6 +150,69 @@ async def citation_insertion_draft(
     if result is None:
         raise HTTPException(status_code=404, detail="Paper not found")
     return result
+
+
+@router.post("/word/insert-citation")
+async def word_insert_citation(
+    file: UploadFile = File(...),
+    text: str = Form(...),
+    selected_paper_id: UUID = Form(...),
+    citation_marker: str | None = Form(None),
+    docx_insertion_mode: str = Form("append_paragraph"),
+    citation_insertion_mode: str = Form("parenthetical"),
+    citation_style: str = Form("draft_author_year"),
+    placeholder: str | None = Form(None),
+    output_filename: str | None = Form(None),
+    user_note: str | None = Form(None),
+    session: Session = Depends(get_db_session),
+    settings=Depends(get_settings),
+) -> dict:
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="text must not be blank")
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only .docx files are supported")
+
+    document_bytes = await file.read()
+    service = WordCitationInsertionService(session=session, settings=settings)
+    try:
+        result = service.insert(
+            WordCitationInsertRequest(
+                document_bytes=document_bytes,
+                filename=file.filename,
+                text=text,
+                selected_paper_id=selected_paper_id,
+                citation_marker=citation_marker,
+                docx_insertion_mode=docx_insertion_mode,
+                citation_insertion_mode=citation_insertion_mode,
+                citation_style=citation_style,
+                placeholder=placeholder,
+                output_filename=output_filename,
+                user_note=user_note,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return result
+
+
+@router.get("/word/exports/{filename}")
+async def download_word_export(
+    filename: str,
+    settings=Depends(get_settings),
+) -> FileResponse:
+    try:
+        path = WordCitationInsertionService.resolve_export_path(settings, filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Word export not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=path.name,
+    )
 
 
 @router.post("/manuscript-comment-suggestions")

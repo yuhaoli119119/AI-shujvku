@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
@@ -175,6 +177,69 @@ def test_response_does_not_include_bibliography(insertion_client):
     assert "references" not in response.json()
 
 
+def test_word_insert_appends_safe_verified_citation_copy(insertion_client):
+    client, Session, seed = insertion_client
+    with Session() as session:
+        before = _counts(session)
+    response = _post_word(
+        client,
+        seed["safe"],
+        document_bytes=_docx_bytes(["Draft manuscript body."]),
+        output_filename="safe-citation-output.docx",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "inserted"
+    assert data["output_filename"] == "safe-citation-output.docx"
+    assert data["output_relative_path"] == "word_exports/safe-citation-output.docx"
+    assert data["download_url"] == "/api/writing/word/exports/safe-citation-output.docx"
+    assert data["safety"]["mutates_original_file"] is False
+    assert data["safety"]["writes_database"] is False
+    assert data["safety"]["can_insert_as_confirmed_citation"] is True
+    paragraphs = _docx_paragraphs(Path(data["output_path"]))
+    assert paragraphs[0] == "Draft manuscript body."
+    assert paragraphs[-1].endswith("(Safe et al., 2024).")
+    downloaded = client.get(data["download_url"])
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert downloaded.content.startswith(b"PK")
+    with Session() as session:
+        assert _counts(session) == before
+
+
+def test_word_insert_replaces_placeholder_with_unverified_marker(insertion_client):
+    client, _, seed = insertion_client
+    response = _post_word(
+        client,
+        seed["metadata_only"],
+        document_bytes=_docx_bytes([f"{TEXT} {{CITE}}"]),
+        docx_insertion_mode="replace_placeholder",
+        placeholder="{CITE}",
+        output_filename="placeholder-output.docx",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "inserted"
+    assert data["placeholder_replaced_count"] == 1
+    assert data["safety"]["requires_human_verification"] is True
+    assert "[DRAFT CITATION - VERIFY SOURCE BEFORE USE:" in data["inserted_text"]
+    paragraphs = _docx_paragraphs(Path(data["output_path"]))
+    assert "{CITE}" not in paragraphs[0]
+    assert "[DRAFT CITATION - VERIFY SOURCE BEFORE USE:" in paragraphs[0]
+
+
+def test_word_insert_excluded_paper_is_blocked_without_output(insertion_client):
+    client, _, seed = insertion_client
+    response = _post_word(client, seed["excluded"], document_bytes=_docx_bytes(["Draft manuscript body."]))
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "blocked"
+    assert data["output_path"] is None
+    assert data["download_url"] is None
+    assert data["draft"]["proposal_status"] == "blocked_excluded_from_citation"
+    assert data["inserted_text"] is None
+
+
 def _post(
     client,
     paper_id,
@@ -198,6 +263,53 @@ def _post(
             "user_note": "",
         },
     )
+
+
+def _post_word(
+    client,
+    paper_id,
+    *,
+    document_bytes,
+    text=TEXT,
+    docx_insertion_mode="append_paragraph",
+    citation_insertion_mode="parenthetical",
+    placeholder=None,
+    output_filename="citation-output.docx",
+):
+    data = {
+        "text": text,
+        "selected_paper_id": str(paper_id),
+        "docx_insertion_mode": docx_insertion_mode,
+        "citation_insertion_mode": citation_insertion_mode,
+        "citation_style": "draft_author_year",
+        "output_filename": output_filename,
+    }
+    if placeholder is not None:
+        data["placeholder"] = placeholder
+    return client.post(
+        "/api/writing/word/insert-citation",
+        files={
+            "file": (
+                "draft.docx",
+                document_bytes,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+        data=data,
+    )
+
+
+def _docx_bytes(paragraphs):
+    document = Document()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    buffer = BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _docx_paragraphs(path: Path):
+    return [paragraph.text for paragraph in Document(path).paragraphs]
 
 
 def _seed(Session):

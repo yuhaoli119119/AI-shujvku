@@ -531,11 +531,56 @@ function initSplitDrag() {
     window.addEventListener("blur", onEnd);
 }
 
-function initProtocolWarning() {
-    if (location.protocol === "file:") {
-        const warning = $("fileModeWarning");
-        if (warning) warning.style.display = "block";
+async function findReachableHostedLiteraturePage() {
+    const path = "/pages/literature_library/index.html";
+    const candidates = [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8001",
+        "http://localhost:8001",
+    ];
+    for (const base of candidates) {
+        const controller = new AbortController();
+        const timer = setTimeout(function() {
+            controller.abort();
+        }, 1200);
+        try {
+            await fetch(base + path, {
+                method: "GET",
+                mode: "no-cors",
+                cache: "no-store",
+                signal: controller.signal,
+            });
+            clearTimeout(timer);
+            return base + path;
+        } catch (_) {
+            clearTimeout(timer);
+        }
     }
+    return null;
+}
+
+function initProtocolWarning() {
+    if (location.protocol !== "file:") return;
+    const warning = $("fileModeWarning");
+    if (warning) {
+        warning.style.display = "block";
+        warning.innerHTML =
+            '你当前是以本地文件方式直接打开页面，页面可能缺少样式或无法正常调用接口。<br>' +
+            "正在尝试自动跳转到本地服务版本...";
+    }
+    findReachableHostedLiteraturePage().then(function(targetUrl) {
+        if (!targetUrl) {
+            if (warning) {
+                warning.innerHTML =
+                    '你当前是以本地文件方式直接打开页面。请改用 <code>http://127.0.0.1:8000/pages/literature_library/index.html</code> ' +
+                    "或已启动的本地服务地址打开。";
+            }
+            return;
+        }
+        const suffix = (window.location.search || "") + (window.location.hash || "");
+        window.location.replace(targetUrl + suffix);
+    });
 }
 
 function initActionMenus() {

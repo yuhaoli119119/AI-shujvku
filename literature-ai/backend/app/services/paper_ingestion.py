@@ -24,6 +24,7 @@ from app.services.embedding import DeterministicEmbeddingService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_identity import PaperIdentityService
+from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
 from app.utils.text_cleaning import normalize_text_tree
 
@@ -70,6 +71,7 @@ class PaperIngestionService:
             settings=settings,
         )
         self.locators = EvidenceLocatorService(session)
+        self.workbench = PaperWorkbenchService(session=session, settings=settings)
 
     async def ingest_upload(
         self,
@@ -109,6 +111,7 @@ class PaperIngestionService:
             stored_pdf = self.artifacts.save_pdf_copy(source_path, f"{uuid.uuid4()}_{original_filename}")
         else:
             stored_pdf = source_path
+        quality_report = PaperWorkbenchService.assess_pdf_path(stored_pdf, self.settings)
         try:
             grobid_result = await self.grobid_parser.parse_pdf(stored_pdf)
         except Exception as exc:
@@ -125,21 +128,36 @@ class PaperIngestionService:
             unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
         except Exception as exc:
             logger.error("Docling parsing or unified building failed for %s: %s", original_filename, exc, exc_info=True)
-            library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
-            ext = external_metadata or {"title": original_filename}
-            paper = Paper(
-                library_name=library,
-                doi=self.identity.normalize_doi(ext.get("doi")),
-                title=ext.get("title") or original_filename,
-                year=ext.get("year"),
-                pdf_path=self._artifact_ref(stored_pdf, category="pdf") or str(stored_pdf),
-                source_path=source_reference,
-                oa_status="parse_failed",
-            )
-            self.session.add(paper)
-            self.session.commit()
-            self.session.refresh(paper)
-            raise RuntimeError(f"docling_parse_failed:{paper.id} {exc}") from exc
+            if quality_report.get("needs_human_confirmation"):
+                unified = self._build_quality_blocked_document(
+                    stored_pdf=stored_pdf,
+                    original_filename=original_filename,
+                    grobid_result=grobid_result,
+                    external_metadata=external_metadata,
+                )
+            else:
+                library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
+                ext = external_metadata or {"title": original_filename}
+                paper = Paper(
+                    library_name=library,
+                    doi=self.identity.normalize_doi(ext.get("doi")),
+                    title=ext.get("title") or original_filename,
+                    year=ext.get("year"),
+                    pdf_path=self._artifact_ref(stored_pdf, category="pdf") or str(stored_pdf),
+                    source_path=source_reference,
+                    oa_status="parse_failed",
+                    workflow_status="Needs_Human_Confirmation",
+                    pdf_quality_status=quality_report.get("quality_status"),
+                    pdf_quality_score=quality_report.get("quality_score"),
+                    pdf_quality_report=quality_report,
+                )
+                self.session.add(paper)
+                self.session.commit()
+                self.session.refresh(paper)
+                raise RuntimeError(f"docling_parse_failed:{paper.id} {exc}") from exc
+
+        if quality_report.get("needs_human_confirmation"):
+            unified = self._document_metadata_only(unified)
 
         if not external_metadata:
             doi = unified.metadata.get("doi")
@@ -200,6 +218,7 @@ class PaperIngestionService:
                 external_metadata,
                 source_reference=source_reference,
                 oa_status=oa_status,
+                quality_report=quality_report,
             )
             ingest_status = "merged_confirmed" if match_report["decision"] == "low_confidence" else "merged"
             setattr(paper, "_ingest_status", ingest_status)
@@ -220,6 +239,7 @@ class PaperIngestionService:
                 external_metadata,
                 source_reference=source_reference,
                 oa_status=oa_status,
+                quality_report=quality_report,
             )
             setattr(paper, "_ingest_status", "merged")
             return paper
@@ -238,6 +258,7 @@ class PaperIngestionService:
             source_reference=source_reference,
             library_name=library,
             oa_status=oa_status,
+            quality_report=quality_report,
         )
         setattr(paper, "_ingest_status", "completed")
         return paper
@@ -262,6 +283,46 @@ class PaperIngestionService:
             library_name=library,
             source_reference=source_reference,
             classify_callback=self.extraction_pipeline._rule_based_classify,
+        )
+
+    def _build_quality_blocked_document(
+        self,
+        *,
+        stored_pdf: Path,
+        original_filename: str,
+        grobid_result: GrobidParseResult,
+        external_metadata: dict[str, Any] | None,
+    ) -> UnifiedPaperDocument:
+        metadata = dict(grobid_result.metadata or {})
+        metadata.update({key: value for key, value in (external_metadata or {}).items() if value not in (None, "", [], {})})
+        metadata.setdefault("title", original_filename)
+        return UnifiedPaperDocument(
+            metadata=metadata,
+            abstract=str((external_metadata or {}).get("abstract") or grobid_result.abstract or ""),
+            sections=[],
+            tables=[],
+            figures=[],
+            references=list(grobid_result.references or []),
+            markdown="",
+            tei_xml=grobid_result.tei_xml or "",
+            docling_json={},
+            source_pdf_path=stored_pdf,
+            tei_path=None,
+            markdown_path=None,
+            docling_json_path=None,
+        )
+
+    @staticmethod
+    def _document_metadata_only(document: UnifiedPaperDocument) -> UnifiedPaperDocument:
+        return document.model_copy(
+            update={
+                "sections": [],
+                "tables": [],
+                "figures": [],
+                "references": [],
+                "markdown": "",
+                "docling_json": {},
+            }
         )
 
     async def _build_unified_document(self, stored_pdf: Path, grobid_result, docling_result) -> UnifiedPaperDocument:
@@ -403,6 +464,7 @@ class PaperIngestionService:
         source_reference: str | None = None,
         library_name: str | None = None,
         oa_status: str | None = None,
+        quality_report: dict[str, Any] | None = None,
     ) -> Paper:
         ext = external_metadata or {}
         paper = Paper(
@@ -427,10 +489,28 @@ class PaperIngestionService:
         paper.serial_number = (max_sn or 0) + 1
         self.session.add(paper)
         self.session.flush()
+        if quality_report:
+            self.workbench.apply_quality_report(paper, quality_report)
+        if quality_report and quality_report.get("needs_human_confirmation"):
+            self.session.commit()
+            self.session.refresh(paper)
+            try:
+                self.workbench.prepare_paper_workspace(paper.id)
+            except Exception:
+                logger.exception("Failed to prepare Codex workspace for paper %s", paper.id)
+            return paper
         self._persist_document_entities(paper, document)
-        self.extraction_pipeline.run_stage2(paper, document)
+        summary = self.extraction_pipeline.run_stage2(paper, document)
+        self.workbench.mark_parsed_ready(
+            paper,
+            candidate_count=self._stage2_candidate_count(summary),
+        )
         self.session.commit()
         self.session.refresh(paper)
+        try:
+            self.workbench.prepare_paper_workspace(paper.id)
+        except Exception:
+            logger.exception("Failed to prepare Codex workspace for paper %s", paper.id)
         return paper
 
     def _merge_into_existing_paper(
@@ -440,6 +520,7 @@ class PaperIngestionService:
         external_metadata: dict[str, Any] | None = None,
         source_reference: str | None = None,
         oa_status: str | None = None,
+        quality_report: dict[str, Any] | None = None,
     ) -> Paper:
         ext = external_metadata or {}
         paper.doi = self.identity.normalize_doi(ext.get("doi") or document.metadata.get("doi") or paper.doi)
@@ -455,15 +536,89 @@ class PaperIngestionService:
         paper.tei_path = self._artifact_ref(document.tei_path, category="tei")
         paper.docling_json_path = self._artifact_ref(document.docling_json_path, category="docling_json")
         paper.markdown_path = self._artifact_ref(document.markdown_path, category="markdown")
+        if quality_report:
+            self.workbench.apply_quality_report(paper, quality_report)
         self.session.add(paper)
         self.session.flush()
 
+        if quality_report and quality_report.get("needs_human_confirmation"):
+            self.session.commit()
+            self.session.refresh(paper)
+            try:
+                self.workbench.prepare_paper_workspace(paper.id)
+            except Exception:
+                logger.exception("Failed to prepare Codex workspace for paper %s", paper.id)
+            return paper
+
         self._clear_document_entities(paper.id)
         self._persist_document_entities(paper, document)
-        self.extraction_pipeline.replace_stage2(paper, document)
+        summary = self.extraction_pipeline.replace_stage2(paper, document)
+        self.workbench.mark_parsed_ready(
+            paper,
+            candidate_count=self._stage2_candidate_count(summary),
+        )
         self.session.commit()
         self.session.refresh(paper)
+        try:
+            self.workbench.prepare_paper_workspace(paper.id)
+        except Exception:
+            logger.exception("Failed to prepare Codex workspace for paper %s", paper.id)
         return paper
+
+    def _persist_quality_blocked(
+        self,
+        *,
+        stored_pdf: Path,
+        original_filename: str,
+        quality_report: dict[str, Any],
+        external_metadata: dict[str, Any] | None,
+        source_reference: str | None,
+        library_name: str | None,
+        ingest_source: str | None,
+    ) -> Paper:
+        ext = external_metadata or {}
+        library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
+        paper = Paper(
+            library_name=library,
+            doi=self.identity.normalize_doi(ext.get("doi")),
+            title=ext.get("title") or original_filename,
+            year=ext.get("year"),
+            journal=ext.get("journal"),
+            authors=ext.get("authors") or [],
+            abstract=ext.get("abstract"),
+            pdf_path=self._artifact_ref(stored_pdf, category="pdf") or str(stored_pdf),
+            source_path=source_reference,
+            oa_status=ingest_source or "quality_blocked",
+            workflow_status="Needs_Human_Confirmation",
+            pdf_quality_status=quality_report.get("quality_status"),
+            pdf_quality_score=quality_report.get("quality_score"),
+            pdf_quality_report=quality_report,
+        )
+        max_sn = self.session.scalar(
+            select(func.max(Paper.serial_number)).where(Paper.library_name == paper.library_name)
+        )
+        paper.serial_number = (max_sn or 0) + 1
+        self.session.add(paper)
+        self.session.flush()
+        self.session.commit()
+        self.session.refresh(paper)
+        try:
+            self.workbench.prepare_paper_workspace(paper.id)
+        except Exception:
+            logger.exception("Failed to prepare quality-blocked Codex workspace for paper %s", paper.id)
+        return paper
+
+    @staticmethod
+    def _stage2_candidate_count(summary: Any) -> int:
+        if not isinstance(summary, dict):
+            return 0
+        total = 0
+        for key in ("dft_results", "dft_settings", "mechanism_claims"):
+            try:
+                total += int(summary.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+        return total
 
     def _persist_document_entities(self, paper: Paper, document: UnifiedPaperDocument) -> None:
         for section in document.sections:

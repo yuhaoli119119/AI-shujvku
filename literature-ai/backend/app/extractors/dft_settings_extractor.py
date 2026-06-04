@@ -278,6 +278,8 @@ class DFTSettingsExtractor:
             # 1. Software
             for match in self.software_pattern.finditer(sentence):
                 raw_val = match.group(1)
+                if self._is_false_software_match(raw_val, sentence):
+                    continue
                 # Normalize values
                 val = raw_val.strip()
                 if "Vienna" in val:
@@ -389,6 +391,21 @@ class DFTSettingsExtractor:
                 elif val.upper() == "COSMO":
                     val = "COSMO"
                 self._add_match(results["solvation model"], val, None, evidence, loc, base_conf + 0.05)
+
+    @staticmethod
+    def _is_false_software_match(raw_value: str, sentence: str) -> bool:
+        value = raw_value.strip().lower()
+        if not value.startswith("gaussian"):
+            return False
+        if re.search(r"\bGaussian\s*(?:09|16|98|03|05|10|package|program|software|code)\b", sentence, re.IGNORECASE):
+            return False
+        return bool(
+            re.search(
+                r"\bGaussian\s+(?:smearing|broadening|width|function|functions|basis|orbital|distribution|kernel)\b",
+                sentence,
+                re.IGNORECASE,
+            )
+        )
 
     def _add_match(
         self, 

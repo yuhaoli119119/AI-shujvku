@@ -592,7 +592,7 @@
             <div>
                 <p class="eyebrow">Ingestion Center</p>
                 <h1>入库中心</h1>
-                <p>把本地 PDF、DOI / URL、在线检索结果和 AI 批量检索统一放进当前文献库。页面只负责发起任务和展示状态，不会删除论文、PDF 或解析产物。</p>
+                <p>把本地 PDF、DOI / URL、在线检索结果和辅助批量检索统一放进当前文献库。页面只负责发起任务和展示状态，不会删除论文、PDF 或解析产物。</p>
             </div>
             <div class="toolbar-controls">
                 <label for="librarySelect">当前文献库</label>
@@ -608,7 +608,7 @@
                     <div class="panel-heading">
                         <div>
                             <h2 class="panel-title">选择入库方式</h2>
-                            <p class="panel-desc">推荐先使用 PDF 上传或 DOI / URL 收录；AI 自动收录适合批量扩展主题词后再人工筛选。</p>
+                            <p class="panel-desc">推荐先使用 PDF 上传或 DOI / URL 收录；辅助批量检索只用于扩展主题词和候选文献，后续由 Codex 或人工筛选。</p>
                         </div>
                     </div>
 
@@ -616,7 +616,7 @@
                         <button class="ingest-tab active" data-tab="pdf" onclick="switchIngestTab('pdf')">本地上传 PDF</button>
                         <button class="ingest-tab" data-tab="doi" onclick="switchIngestTab('doi')">DOI / URL 收录</button>
                         <button class="ingest-tab" data-tab="online" onclick="switchIngestTab('online')">在线文献检索</button>
-                        <button class="ingest-tab" data-tab="ai" onclick="switchIngestTab('ai')">AI 自动收录</button>
+                        <button class="ingest-tab" data-tab="ai" onclick="switchIngestTab('ai')">辅助批量检索</button>
                     </div>
 
                     <div id="tab-pdf" class="tab-content active">
@@ -657,7 +657,7 @@
 
                     <div id="tab-ai" class="tab-content">
                         <div class="form-group">
-                            <label for="aiQuery">AI 文献扩展查询提示词</label>
+                            <label for="aiQuery">批量文献扩展查询</label>
                             <textarea id="aiQuery" class="form-control" placeholder="例如 lithium sulfur battery single atom catalyst polysulfide adsorption mechanism"></textarea>
                         </div>
                         <div class="form-grid">
@@ -672,7 +672,7 @@
                         </div>
                         <div class="actions">
                             <button class="btn btn-primary" onclick="triggerAIWorkflow()">发起后台收录任务</button>
-                            <button class="btn btn-ghost" onclick="document.getElementById('aiQuery').value = ''">清空提示词</button>
+                            <button class="btn btn-ghost" onclick="document.getElementById('aiQuery').value = ''">清空查询</button>
                         </div>
                         <p class="help-note">后台任务会记录为 workflow job。下载失败不会自动删除已有文献，通常会保留为“仅元数据”。</p>
                     </div>
@@ -691,7 +691,7 @@
                         <div class="quick-actions">
                             <button class="btn btn-ghost btn-sm" onclick="goToday()">回到今天任务</button>
                             <button class="btn btn-ghost btn-sm" onclick="pollJobs()">刷新任务队列</button>
-                            <button class="btn btn-ghost btn-sm" onclick="reuseLastQuery()">重用上次 AI 提示词</button>
+                            <button class="btn btn-ghost btn-sm" onclick="reuseLastQuery()">重用上次查询</button>
                             <button class="btn btn-ghost btn-sm" onclick="clearSearchResults()">清空搜索结果</button>
                         </div>
                         <p class="quick-note">删除任务记录只会清理 workflow job，不会删除论文、PDF 或解析产物。</p>
@@ -704,7 +704,7 @@
                     <div class="panel-heading">
                         <div>
                             <h2 class="panel-title">任务中心</h2>
-                            <p class="panel-desc">按日期查看 AI 收录任务。运行中任务可取消，失败或已取消任务可重试。</p>
+                            <p class="panel-desc">按日期查看批量检索与收录任务。运行中任务可取消，失败或已取消任务可重试。</p>
                         </div>
                     </div>
 
@@ -823,7 +823,7 @@
                         <span class="toolbar-badge">Workspace</span>
                         <h1>入库中心</h1>
                     </div>
-                    <p class="toolbar-summary">在这里发起 PDF、DOI / URL、在线检索和 AI 收录，右侧直接查看任务状态和历史记录。</p>
+                    <p class="toolbar-summary">在这里发起 PDF、DOI / URL、在线检索和辅助批量收录，右侧直接查看任务状态和历史记录。</p>
                 `;
             }
             const label = right ? right.querySelector("label") : null;
@@ -1071,7 +1071,7 @@
             const maxResults = Number(document.getElementById("aiMaxResults").value || 20);
             const maxDownloads = Number(document.getElementById("aiMaxDownloads").value || 5);
             if (!query) {
-                showToast("请先输入 AI 自动收录提示词。", "error");
+                showToast("请先输入批量文献扩展查询。", "error");
                 return;
             }
             state.lastAiQuery = query;
@@ -1117,12 +1117,12 @@
 
         function reuseLastQuery() {
             if (!state.lastAiQuery) {
-                showToast("还没有可重用的 AI 提示词。", "error");
+                showToast("还没有可重用的查询。", "error");
                 return;
             }
             switchIngestTab("ai");
             document.getElementById("aiQuery").value = state.lastAiQuery;
-            showToast("已填入上次 AI 提示词。");
+            showToast("已填入上次查询。");
         }
 
         function filterJobs(status) {
@@ -1293,7 +1293,7 @@
                         <span class="status-pill ${esc(status)}">${esc(labels[status] || status)}</span>
                     </div>
                     <div class="muted">
-                        类型：${esc(summary.source_label || job.type || "AI 文献检索与入库")}<br>
+                        类型：${esc(summary.source_label || job.type || "批量文献检索与入库")}<br>
                         更新时间：${esc(formatJobTime(job.updated_at || job.created_at))}
                     </div>
                     <div class="job-progress">

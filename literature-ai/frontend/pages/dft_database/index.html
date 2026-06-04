@@ -272,7 +272,7 @@
     function qualityQueryUrl() {
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
-      let url = `/api/papers/export/dft-quality?limit=100`;
+      let url = `/api/papers/export/dft-review-queue?limit=100&status=needs_review`;
       if (prop) url += `&property_type=${encodeURIComponent(prop)}`;
       if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
       if (state.qualityReason) url += `&reason=${encodeURIComponent(state.qualityReason)}`;
@@ -337,6 +337,9 @@
             '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(locatorStatusLabel(row.locator_status)) + '</div></div>' +
           '</div>' +
           '<div class="quality-actions">' +
+            (row.can_mark_verified ? '<button class="btn primary small" type="button" onclick="verifyDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">标记已核验</button>' : '') +
+            (!row.is_exportable ? '<button class="btn danger small" type="button" onclick="rejectDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">拒绝候选</button>' : '') +
+            (!row.is_exportable ? '<button class="btn ghost small" type="button" onclick="proposeDftQueueCorrection(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">提出修正</button>' : '') +
             '<a class="btn primary small" href="' + esc(reviewTabUrl) + '">去文献库处理</a>' +
             '<a class="btn ghost small" href="' + esc(row.library_detail_url || row.paper_detail_url || "#") + '">论文详情</a>' +
           '</div>' +
@@ -405,6 +408,83 @@
     function setExportSafetyStatus(message) {
       const el = document.getElementById("exportSafetyStatus");
       if (el) el.textContent = message;
+    }
+    async function verifyDftQueueRow(paperId, resultId) {
+      if (!paperId || !resultId) return;
+      const confirmed = window.confirm("请确认你已经对照 PDF 原文、页码定位和证据文本核验了这条 DFT 数据。");
+      if (!confirmed) return;
+      try {
+        await fetchJSON(`/api/papers/${encodeURIComponent(paperId)}/dft-results/${encodeURIComponent(resultId)}/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirm_reviewed_against_pdf: true,
+            reviewer: "user_codex_review",
+            reviewer_note: "Verified from the DFT review queue after checking PDF evidence and locator."
+          })
+        });
+        showToast("DFT 数据已标记为已核验。");
+        await loadQualityPanel();
+      } catch (error) {
+        showToast("DFT 核验失败：" + error.message);
+      }
+    }
+    async function rejectDftQueueRow(paperId, resultId) {
+      if (!paperId || !resultId) return;
+      const confirmed = window.confirm("请确认这条 DFT 候选是误抽取、证据不支持或不适合进入数据集。拒绝后它会保留审计记录，但不再出现在默认待核验队列。");
+      if (!confirmed) return;
+      try {
+        await fetchJSON(`/api/papers/${encodeURIComponent(paperId)}/dft-results/${encodeURIComponent(resultId)}/reject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirm_reject_candidate: true,
+            reviewer: "user_codex_review",
+            reviewer_note: "Rejected from the DFT review queue as an unsupported or suspicious candidate."
+          })
+        });
+        showToast("DFT 候选已拒绝。");
+        await loadQualityPanel();
+      } catch (error) {
+        showToast("DFT 拒绝失败：" + error.message);
+      }
+    }
+    async function proposeDftQueueCorrection(paperId, resultId) {
+      if (!paperId || !resultId) return;
+      const fieldName = window.prompt("要修正的 DFT 字段，例如 value、unit、adsorbate、property_type：", "value");
+      if (!fieldName) return;
+      const fieldKey = fieldName.trim();
+      const rawValue = window.prompt("修正后的值：");
+      if (rawValue === null) return;
+      const reason = window.prompt("修正理由：", "Checked against the source PDF/evidence and found a mismatch.");
+      if (!reason || !reason.trim()) return;
+      let proposedValue = rawValue.trim();
+      if (["value", "confidence"].includes(fieldKey)) {
+        const numericValue = Number(proposedValue);
+        if (!Number.isFinite(numericValue)) {
+          showToast("数值字段需要输入有效数字。");
+          return;
+        }
+        proposedValue = numericValue;
+      }
+      try {
+        await fetchJSON(`/api/papers/${encodeURIComponent(paperId)}/dft-results/${encodeURIComponent(resultId)}/corrections`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirm_correction_proposal: true,
+            field_name: fieldKey,
+            proposed_value: proposedValue,
+            reason: reason.trim(),
+            reviewer: "user_codex_review",
+            evidence_payload: { source: "dft_review_queue" }
+          })
+        });
+        showToast("DFT 修正提议已提交，等待审核应用。");
+        await loadQualityPanel();
+      } catch (error) {
+        showToast("DFT 修正提议失败：" + error.message);
+      }
     }
     async function exportCSV() {
       const prop = document.getElementById("propertyType").value || "adsorption_energy";

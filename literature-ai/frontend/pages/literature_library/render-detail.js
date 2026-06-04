@@ -48,6 +48,222 @@ function renderJSONCards(title, items) {
     return renderReadableCards(title, items);
 }
 
+function compactText(value) {
+    return String(value || "").replace(/s+/g, " ").trim();
+}
+
+function clipText(value, maxChars) {
+    const text = compactText(value);
+    if (!text) return "";
+    return text.length <= maxChars ? text : text.slice(0, Math.max(0, maxChars - 1)).trim() + "…";
+}
+
+function bestSentencePreview(value, maxChars) {
+    const text = compactText(value);
+    if (!text) return "";
+    const parts = text.split(/(?<=[。！？.!?;；])s+/).filter(Boolean);
+    const preview = parts.slice(0, 2).join(" ");
+    return clipText(preview || text, maxChars);
+}
+
+function prettifyToken(value) {
+    return compactText(value).replace(/_/g, " ");
+}
+
+function knowledgeCategoryMeta(category) {
+    const mapping = {
+        mechanism: { label: "机理解释", group: "最适合写讨论", use: "讨论部分的机理解释", order: 1 },
+        mechanism_context: { label: "机理线索", group: "最适合写讨论", use: "讨论部分的背景或机理补充", order: 1 },
+        research_gap: { label: "研究空白", group: "最适合写引言", use: "引言中的问题铺垫", order: 0 },
+        research_context: { label: "研究背景", group: "最适合写引言", use: "引言中的背景铺垫", order: 0 },
+        proposed_solution: { label: "拟解决方案", group: "最适合写引言", use: "引言或摘要中的方案概括", order: 0 },
+        writing_logic: { label: "写作逻辑", group: "写作辅助", use: "组织摘要、引言或讨论的写作顺序", order: 3 },
+        computational_method: { label: "计算方法", group: "最适合写方法", use: "方法部分的计算设置说明", order: 2 },
+        synthesis_method: { label: "制备方法", group: "最适合写方法", use: "方法部分的实验或制备说明", order: 2 },
+        conclusion: { label: "结论启发", group: "最适合写结论", use: "结论或讨论收束", order: 4 },
+        abstract: { label: "摘要候选", group: "快速总览", use: "快速理解整篇文章", order: 5 },
+        external_analysis: { label: "外部解析", group: "待核对补充", use: "作为补充线索，不可直接引用", order: 6 },
+        correction_candidate: { label: "修正建议", group: "待核对补充", use: "校对已有解析结果", order: 6 },
+        citation_relationship: { label: "引用关系", group: "待核对补充", use: "梳理文献关联", order: 6 },
+        curation_note: { label: "人工笔记", group: "待核对补充", use: "作为整理备注参考", order: 6 }
+    };
+    return mapping[category] || { label: prettifyToken(category || "unknown"), group: "其他候选", use: "待人工判断用途", order: 7 };
+}
+
+function knowledgeSourceMeta(sourceType) {
+    const mapping = {
+        mechanism_claim: { label: "结构化机理提取", tip: "系统从已解析的机理字段中抽出的候选。" },
+        writing_card: { label: "写作卡片", tip: "系统生成的写作草稿或写作逻辑。" },
+        paper_section: { label: "正文节选", tip: "直接来自正文解析的章节片段。" },
+        paper_abstract: { label: "摘要原文", tip: "直接来自论文摘要。" },
+        external_analysis_candidate: { label: "外部 AI 导入", tip: "来自网页 AI 或外部模型导入，必须再核对。" },
+        paper_note: { label: "人工笔记", tip: "来自人工或 Codex 整理的笔记。" }
+    };
+    return mapping[sourceType] || { label: prettifyToken(sourceType || "unknown"), tip: "系统内部来源类型。" };
+}
+
+function knowledgeConfidenceMeta(confidence) {
+    if (typeof confidence !== "number" || !isFinite(confidence)) {
+        return { label: "待判断", className: "unknown", tip: "当前没有明确的可信度分数，需要结合证据判断。" };
+    }
+    if (confidence >= 0.82) {
+        return { label: "较高可信", className: "high", tip: "候选与原始结构化结果较一致，但仍应看证据。" };
+    }
+    if (confidence >= 0.62) {
+        return { label: "中等可信", className: "medium", tip: "可以作为线索使用，写入前应先核对证据。" };
+    }
+    return { label: "较低可信", className: "low", tip: "更像线索草稿，不宜直接用于写作。" };
+}
+
+function knowledgeEvidenceStateLabel(state) {
+    const mapping = {
+        structured_extraction_candidate: "结构化候选",
+        parsed_source_text: "解析原文",
+        external_ai_import_unverified: "外部导入待核对",
+        note_with_optional_quote: "笔记候选",
+        writing_candidate: "写作草稿",
+        text_only_candidate: "文本候选"
+    };
+    return mapping[state] || prettifyToken(state || "unknown");
+}
+
+function knowledgeLocationText(item) {
+    const pages = [];
+    if (item.page_start && item.page_end && item.page_start !== item.page_end) pages.push("第 " + item.page_start + "-" + item.page_end + " 页");
+    else if (item.page_start) pages.push("第 " + item.page_start + " 页");
+    if (item.section_title) pages.push(item.section_title);
+    return pages.join(" · ");
+}
+
+function knowledgeDisplayTitle(item, meta) {
+    const raw = compactText(item && item.title);
+    if (!raw) return meta.label;
+    const titleMapping = {
+        "Research gap": "研究空白",
+        "Proposed solution": "拟解决方案",
+        "Core hypothesis": "核心假设",
+        "Abstract logic": "摘要写法",
+        "Introduction logic": "引言写法",
+        "Discussion logic": "讨论写法",
+        "Mechanism claim": "机理说明",
+        "Abstract candidate": "摘要候选"
+    };
+    return titleMapping[raw] || prettifyToken(raw);
+}
+
+function knowledgeSummaryText(item, meta) {
+    const content = compactText(item && item.content);
+    if (!content) return "当前没有可直接阅读的候选摘要。";
+    const preview = bestSentencePreview(content, 150);
+    return preview || clipText(content, 150) || meta.use;
+}
+
+function knowledgeRawDetails(item) {
+    const blocks = [];
+    const evidence = compactText(item && item.evidence_text);
+    const content = compactText(item && item.content);
+    const location = knowledgeLocationText(item);
+    const source = knowledgeSourceMeta(item && item.source_type);
+    const stateLabel = knowledgeEvidenceStateLabel(item && item.evidence_state);
+    if (location || source.label || stateLabel) {
+        blocks.push(
+            '<div class="knowledge-support-grid">' +
+                (location ? '<div class="key-value"><div class="k">定位</div><div class="v">' + esc(location) + '</div></div>' : "") +
+                '<div class="key-value"><div class="k">来源</div><div class="v" title="' + esc(source.tip) + '">' + esc(source.label) + '</div></div>' +
+                '<div class="key-value"><div class="k">证据状态</div><div class="v">' + esc(stateLabel) + '</div></div>' +
+            '</div>'
+        );
+    }
+    if (evidence) {
+        blocks.push('<div class="knowledge-detail-block"><div class="knowledge-detail-title">证据原文</div><div class="knowledge-detail-text">' + esc(evidence) + '</div></div>');
+    }
+    if (content && content !== evidence) {
+        blocks.push('<div class="knowledge-detail-block"><div class="knowledge-detail-title">候选原文</div><div class="knowledge-detail-text">' + esc(content) + '</div></div>');
+    }
+    return blocks.join("");
+}
+
+function knowledgeJumpAction(item) {
+    const page = Number(item && item.page_start || 0);
+    if (!page || !(item && item.paper_id)) return "";
+    const evidencePreview = clipText(item.evidence_text || item.content || "", 160);
+    return '<button class="btn ghost small" type="button" onclick="openPdfViewer(\'' +
+        escAttr(item.paper_id) + '\', ' + page + ', false, null, \'exact_page\', \'' + escAttr(evidencePreview) +
+        '\')">\u67e5\u770b\u539f\u9875</button>';
+}
+function renderKnowledgeCandidateCard(item, index) {
+    const meta = knowledgeCategoryMeta(item && item.category);
+    const source = knowledgeSourceMeta(item && item.source_type);
+    const confidence = knowledgeConfidenceMeta(item && item.confidence);
+    const title = knowledgeDisplayTitle(item, meta);
+    const summary = knowledgeSummaryText(item, meta);
+    const details = knowledgeRawDetails(item);
+    const jumpButton = knowledgeJumpAction(item);
+    const locatorHint = knowledgeLocationText(item);
+    return '<article class="knowledge-card">' +
+        '<div class="knowledge-card-head">' +
+            '<div>' +
+                '<div class="knowledge-card-title">' + esc(title || ("候选 " + (index + 1))) + '</div>' +
+                '<div class="knowledge-card-use">可用于：' + esc(meta.use) + '</div>' +
+            '</div>' +
+            '<div class="knowledge-card-actions">' + jumpButton + '</div>' +
+        '</div>' +
+        '<div class="knowledge-tag-row">' +
+            '<span class="status-chip meta" title="候选类型">' + esc(meta.label) + '</span>' +
+            '<span class="status-chip confidence-' + esc(confidence.className) + '" title="' + esc(confidence.tip + (typeof item.confidence === "number" ? (" 分数: " + item.confidence.toFixed(2)) : "")) + '">' + esc(confidence.label) + '</span>' +
+            '<span class="status-chip" title="' + esc(source.tip) + '">' + esc(source.label) + '</span>' +
+            (locatorHint ? '<span class="status-chip">' + esc(locatorHint) + '</span>' : '') +
+        '</div>' +
+        '<div class="knowledge-summary">' + esc(summary) + '</div>' +
+        '<details class="knowledge-details">' +
+            '<summary>展开证据与来源</summary>' +
+            details +
+        '</details>' +
+    '</article>';
+}
+
+function renderKnowledgeGroup(groupName, items) {
+    return '<section class="section-card knowledge-group-section">' +
+        '<div class="knowledge-group-head">' +
+            '<h3>' + esc(groupName) + '</h3>' +
+            '<span class="status-chip">' + items.length + ' 条</span>' +
+        '</div>' +
+        '<div class="knowledge-group-list">' + items.map(renderKnowledgeCandidateCard).join("") + '</div>' +
+    '</section>';
+}
+
+function renderKnowledgeContext(detail) {
+    const knowledge = detail.knowledge_context || {};
+    const candidates = knowledge.candidates || [];
+    if (!candidates.length) {
+        return '<div class="section-card"><h3>知识候选</h3><div class="muted">暂无知识候选。可先导入网页 AI 解析，或重新解析文献。</div></div>';
+    }
+    const meta = knowledge.metadata || {};
+    const counts = meta.category_counts || {};
+    const grouped = {};
+    candidates.forEach(function(item) {
+        const info = knowledgeCategoryMeta(item.category);
+        const groupName = info.group;
+        if (!grouped[groupName]) grouped[groupName] = { order: info.order, items: [] };
+        grouped[groupName].items.push(item);
+    });
+    const summary = Object.keys(counts).map(function(key) {
+        const info = knowledgeCategoryMeta(key);
+        return '<div class="knowledge-summary-pill"><strong>' + esc(info.label) + '</strong><span>' + esc(counts[key]) + ' 条</span></div>';
+    }).join("");
+    const groupHtml = Object.keys(grouped)
+        .sort(function(a, b) { return grouped[a].order - grouped[b].order; })
+        .map(function(groupName) {
+            return renderKnowledgeGroup(groupName, grouped[groupName].items);
+        }).join("");
+    return '<div class="section-card">' +
+        '<h3>Codex 知识候选</h3>' +
+        '<div class="subtle">这里展示的是可供你写作和核对的候选线索，不是最终事实。默认先看短摘要，只有需要时再展开证据原文。</div>' +
+        (summary ? '<div class="knowledge-summary-grid">' + summary + '</div>' : '') +
+        '</div>' +
+        groupHtml;
+}
+
 function renderLocalizedSummary(detail) {
     const titleZh = detail.title_zh || (detail.comprehensive_analysis && detail.comprehensive_analysis.title_zh) || "";
     const abstractZh = detail.abstract_zh || (detail.comprehensive_analysis && detail.comprehensive_analysis.abstract_zh) || "";
@@ -239,31 +455,179 @@ function renderReadableFields(item, keys) {
     return fields.length ? '<div class="readable-grid">' + fields.join("") + '</div>' : '<div class="muted">暂无可读字段。</div>';
 }
 
+const CODEX_ITEM_TYPE_BY_CARD_TITLE = {
+    "DFT 设置": "dft_setting",
+    "催化剂样本": "catalyst_sample",
+    "DFT 结果": "dft_result",
+    "电化学性能": "electrochemical_performance",
+    "机理声明": "mechanism_claim",
+    "写作卡片": "writing_card",
+    "表格": "table"
+};
+
+const DFT_BLOCK_REASON_LABELS = {
+    missing_review: "缺少人工核验",
+    unsafe_review: "核验状态不安全",
+    missing_evidence: "缺少证据引用",
+    missing_evidence_text: "缺少证据原文",
+    unsafe_locator: "缺少准确 PDF 定位"
+};
+
+function codexItemActionHtml(itemType, item) {
+    if (!itemType || !item || !item.id) return "";
+    return '<button class="btn ghost small" type="button" title="只复制此项、证据定位和邻近正文" onclick="copyCodexItem(\'' +
+        escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">复制此项给 Codex</button>';
+}
+
+function dftBlockedReasonText(reasons) {
+    return (Array.isArray(reasons) ? reasons : []).map(function(reason) {
+        return DFT_BLOCK_REASON_LABELS[reason] || reason;
+    }).join("、");
+}
+
+function renderDftItemSafety(item) {
+    const safety = item && item.export_safety;
+    if (!safety) return "";
+    const exportable = safety.is_exportable === true || safety.eligible === true;
+    const blockedReasons = Array.isArray(safety.blocked_reasons) ? safety.blocked_reasons : [];
+    const reasons = dftBlockedReasonText(safety.blocked_reasons);
+    const canVerify = !exportable && item && item.id && blockedReasons.includes("missing_review");
+    return '<div class="figure-warning" style="margin-top:12px;">' +
+        '<strong>' + (exportable ? "已通过 DFT 导出安全门" : "当前不可进入机器学习数据库") + '</strong>' +
+        '<div>' + (exportable
+            ? "该条记录已满足人工核验、证据原文和准确 PDF 定位要求。"
+            : "阻断原因：" + (reasons || "待检查")) + '</div>' +
+        (canVerify
+            ? '<div style="margin-top:10px;"><button class="btn primary small" type="button" onclick="verifyDftResult(\'' +
+                escAttr(item.id) + '\')">标记已核验</button></div>'
+            : '') +
+    '</div>';
+}
+
+function dftResultsWithSafety(detail) {
+    const items = detail.dft_results_items || [];
+    const readiness = detail.codex_context && detail.codex_context.dft_export_readiness;
+    const safetyById = {};
+    ((readiness && readiness.items) || []).forEach(function(item) {
+        safetyById[String(item.record_id || "")] = item;
+    });
+    return items.map(function(item) {
+        const safety = safetyById[String(item.id || "")];
+        return safety ? Object.assign({}, item, { export_safety: safety }) : item;
+    });
+}
+
+function renderDftExportReadiness(detail) {
+    const readiness = detail.codex_context && detail.codex_context.dft_export_readiness;
+    if (!readiness) return "";
+    const reasons = Object.keys(readiness.blocked_reasons || {}).map(function(reason) {
+        return (DFT_BLOCK_REASON_LABELS[reason] || reason) + " " + readiness.blocked_reasons[reason] + " 条";
+    }).join("、");
+    return '<div class="section-card figure-audit-note">' +
+        '<h3>DFT 数据库导出安全状态</h3>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;">' +
+            '<span class="status-chip parsed">可导出 ' + Number(readiness.eligible_count || 0) + '</span>' +
+            '<span class="status-chip meta">需处理 ' + Number(readiness.blocked_count || 0) + '</span>' +
+            '<span class="status-chip">候选总数 ' + Number(readiness.total_candidates || 0) + '</span>' +
+        '</div>' +
+        '<div class="subtle">只有经过人工核验、具有证据原文且能准确定位到 PDF 页面的 DFT 记录才会进入导出和机器学习数据集。</div>' +
+        (reasons ? '<div class="subtle" style="margin-top:6px;">当前阻断：' + esc(reasons) + '</div>' : '') +
+    '</div>';
+}
+
+function writingCardReviewMeta(item) {
+    if (item && item.can_use_for_writing) {
+        return { label: "可直接参考", className: "high", tip: "这张写作卡已满足当前写作使用条件。" };
+    }
+    const reasons = Array.isArray(item && item.blocked_reasons) ? item.blocked_reasons : [];
+    if (reasons.length) {
+        return { label: "需先核对", className: "medium", tip: "当前仍有待处理项：" + reasons.join("、") };
+    }
+    return { label: "草稿候选", className: "unknown", tip: "这是自动生成的写作草稿，使用前建议先核对证据。" };
+}
+
+function writingCardLogicBlock(label, value) {
+    const textValue = compactText(value);
+    if (!textValue) return "";
+    return '<div class="knowledge-detail-block"><div class="knowledge-detail-title">' + esc(label) + '</div><div class="knowledge-detail-text">' + esc(textValue) + '</div></div>';
+}
+
+function renderWritingCardsCompact(items) {
+    if (!items || !items.length) {
+        return '<div class="section-card"><h3>写作卡片</h3><div class="muted">暂无内容。</div></div>';
+    }
+    const intro = '<div class="section-card figure-audit-note"><h3>写作卡片说明</h3><div class="subtle">这里优先显示适合写作时直接阅读的短摘要。详细逻辑、证据链和阻塞原因默认折叠，避免一上来铺成整页长文本。</div></div>';
+    return intro + items.map(function(item, index) {
+        const review = writingCardReviewMeta(item);
+        const action = codexItemActionHtml("writing_card", item);
+        const evidenceStatus = item && item.evidence_chain_status ? prettifyToken(item.evidence_chain_status) : "未提供";
+        const summaryBlocks = [
+            { label: "研究空白", value: item && item.research_gap },
+            { label: "拟解决方案", value: item && item.proposed_solution },
+            { label: "核心假设", value: item && item.core_hypothesis }
+        ].filter(function(block) {
+            return compactText(block.value);
+        }).map(function(block) {
+            return '<div class="writing-card-summary-block"><div class="writing-card-summary-title">' + esc(block.label) + '</div><div class="writing-card-summary-text">' + esc(clipText(block.value, 160)) + '</div></div>';
+        }).join("");
+        const details = [
+            writingCardLogicBlock("摘要写法", item && item.abstract_logic),
+            writingCardLogicBlock("引言写法", item && item.introduction_logic),
+            writingCardLogicBlock("讨论写法", item && item.discussion_logic)
+        ].filter(Boolean).join("");
+        const blocked = Array.isArray(item && item.blocked_reasons) && item.blocked_reasons.length
+            ? '<div class="knowledge-detail-block"><div class="knowledge-detail-title">当前限制</div><div class="knowledge-detail-text">' + esc(item.blocked_reasons.join("、")) + '</div></div>'
+            : "";
+        return '<div class="section-card writing-card-compact">' +
+            '<div class="knowledge-card-head">' +
+                '<div><h3 style="margin:0;">写作卡片 ' + (items.length > 1 ? (index + 1) : "") + '</h3><div class="knowledge-card-use">适合用来组织引言、摘要和讨论的写作骨架</div></div>' +
+                '<div class="knowledge-card-actions">' + action + '</div>' +
+            '</div>' +
+            '<div class="knowledge-tag-row">' +
+                '<span class="status-chip meta">' + esc(paperTypeLabel(item && item.paper_type)) + '</span>' +
+                '<span class="status-chip confidence-' + esc(review.className) + '" title="' + esc(review.tip) + '">' + esc(review.label) + '</span>' +
+                '<span class="status-chip" title="当前证据链状态">' + esc(evidenceStatus) + '</span>' +
+            '</div>' +
+            '<div class="writing-card-summary-grid">' + (summaryBlocks || '<div class="muted">这张写作卡还没有生成可直接阅读的短摘要。</div>') + '</div>' +
+            '<details class="knowledge-details">' +
+                '<summary>展开写作逻辑与限制</summary>' +
+                details +
+                blocked +
+            '</details>' +
+        '</div>';
+    }).join("");
+}
+
 function renderReadableCards(title, items) {
     if (!items || !items.length) {
         return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">暂无内容。</div></div>';
     }
+    if (title === "写作卡片") {
+        return renderWritingCardsCompact(items);
+    }
     const keySets = {
-        "DFT 设置": ["software", "functional", "dispersion_correction", "pseudopotential", "cutoff_energy_ev", "cutoff_energy", "k_points", "convergence_settings", "vacuum_thickness_a", "vacuum_thickness"],
-        "催化剂样本": ["name", "catalyst_type", "metal_centers", "coordination", "support", "synthesis_method", "evidence_text", "confidence"],
-        "DFT 结果": ["catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "evidence_text", "confidence"],
-        "电化学性能": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
-        "机理声明": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
-        "写作卡片": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
-        "表格": ["caption", "page", "markdown_content"],
-        "出向关系": ["relationship_type", "target_title", "target_doi", "reason"],
-        "入向关系": ["relationship_type", "source_title", "source_doi", "reason"]
+        "DFT ??": ["software", "functional", "dispersion_correction", "pseudopotential", "cutoff_energy_ev", "cutoff_energy", "k_points", "convergence_settings", "vacuum_thickness_a", "vacuum_thickness"],
+        "?????": ["name", "catalyst_type", "metal_centers", "coordination", "support", "synthesis_method", "evidence_text", "confidence"],
+        "DFT ??": ["catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "evidence_text", "confidence"],
+        "?????": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
+        "????": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
+        "????": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
+        "??": ["caption", "page", "markdown_content"],
+        "????": ["relationship_type", "target_title", "target_doi", "reason"],
+        "????": ["relationship_type", "source_title", "source_doi", "reason"]
     };
     const keys = keySets[title] || Object.keys(items[0] || {}).filter(function(key) {
         return !["id", "paper_id", "raw_json", "created_at", "updated_at"].includes(key);
     }).slice(0, 10);
-    const intro = title === "写作卡片"
-        ? '<div class="section-card figure-audit-note"><h3>写作卡片说明</h3><div class="subtle">这里是自动生成的写作草稿，不是最终论文结论。若内容和你的理解不一致，请先用“AI 建议候选”生成详细审阅，再进入人工确认工作台确认证据。</div></div>'
-        : "";
-    return intro + items.map(function(item, index) {
+    return items.map(function(item, index) {
         const heading = title + (items.length > 1 ? " " + (index + 1) : "");
-        return '<div class="section-card readable-card"><h3>' + esc(heading) + '</h3>' +
+        const itemType = CODEX_ITEM_TYPE_BY_CARD_TITLE[title];
+        const action = codexItemActionHtml(itemType, item);
+        const safety = title === "DFT 结果" ? renderDftItemSafety(item) : "";
+        return '<div class="section-card readable-card">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"><h3 style="margin:0;">' + esc(heading) + '</h3>' + action + '</div>' +
             renderReadableFields(item || {}, keys) +
+            safety +
         '</div>';
     }).join("");
 }
@@ -462,7 +826,7 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
     // Build evidence panel content
     var evidenceHtml = "";
     evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">PDF 页码定位</div>' +
-        '<div style="font-size:11px;color:var(--color-text-secondary);">这里用于查看原文页和核对证据。浏览器 PDF 工具栏里的临时高亮/绘制不会写回系统；需要保存结论时，请在 AI 建议候选或人工确认工作台里保存。</div>' +
+        '<div style="font-size:11px;color:var(--color-text-secondary);">这里用于查看原文页和核对证据。浏览器 PDF 工具栏里的临时高亮/绘制不会写回系统；需要保存结论时，请在解析候选或人工确认工作台里保存。</div>' +
         (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
     if (viewerEvidencePanel) viewerEvidencePanel.innerHTML = evidenceHtml;
 
@@ -602,8 +966,10 @@ function renderDetail(detail, audit) {
 
             var figNum = extractFigureNumber(item.caption);
             var figLabel = figNum !== null ? '图片 ' + figNum : '图片 ' + (index + 1);
+            var codexAction = codexItemActionHtml("figure", item);
 
-            return '<div class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '"><h3>' + figLabel + '</h3>' +
+            return '<div class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '">' +
+                   '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"><h3 style="margin:0;">' + figLabel + '</h3>' + codexAction + '</div>' +
                    '<div class="prewrap">' + esc(item.caption || "无 caption") + "</div>" +
                    summaryHtml + metaHtml + imgHtml + '</div>';
         }).join("");
@@ -698,6 +1064,7 @@ function renderDetail(detail, audit) {
             auditBanner +
             summaryCards +
             baseInfo +
+            pdfEvidenceEntry +
             localizedSummaryCard +
             abstractCard +
             comprehensiveCard;
@@ -716,14 +1083,16 @@ function renderDetail(detail, audit) {
     }
     if (dftEl) {
         dftEl.innerHTML =
+            renderDftExportReadiness(detail) +
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
             renderJSONCards("催化剂样本", detail.catalyst_samples_items || []) +
-            renderJSONCards("DFT 结果", detail.dft_results_items || []) +
+            renderJSONCards("DFT 结果", dftResultsWithSafety(detail)) +
             renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
             renderJSONCards("机理声明", detail.mechanism_claims_items || []);
     }
     if (writingEl) {
         writingEl.innerHTML =
+            renderKnowledgeContext(detail) +
             renderJSONCards("写作卡片", detail.writing_cards_items || []);
     }
     if (translationEl) {
@@ -764,7 +1133,32 @@ async function loadPaperDetail(paperId) {
     }
     try {
         renderDetailSkeleton();
-        const detail = await fetchJSON(API_BASE + "/" + paperId);
+        const results = await Promise.all([
+            fetchJSON(API_BASE + "/" + paperId),
+            fetchJSON(
+                API_BASE + "/" + encodeURIComponent(paperId) +
+                "/codex-context?max_sections=1&max_chars_per_section=300&max_figures=0&max_tables=0&max_candidates=100"
+            ).catch(function(error) {
+                console.warn("Codex context summary is not available:", error);
+                return null;
+            }),
+            fetchJSON(
+                API_BASE + "/" + encodeURIComponent(paperId) +
+                "/knowledge-context?max_candidates=40&max_chars_per_candidate=900"
+            ).catch(function(error) {
+                console.warn("Knowledge context is not available:", error);
+                return null;
+            })
+        ]);
+        const detail = results[0];
+        const codexBundle = results[1];
+        const knowledgeContext = results[2];
+        if (codexBundle && codexBundle.context) {
+            detail.codex_context = codexBundle.context;
+        }
+        if (knowledgeContext) {
+            detail.knowledge_context = knowledgeContext;
+        }
         state.selectedPaperId = paperId;
         state.selectedPaper = detail;
         renderPaperList();
@@ -804,4 +1198,75 @@ function copyPaperIdentity() {
     }).catch(function() {
         showToast("复制失败，请手动复制。", "error");
     });
+}
+
+async function copyCodexContext() {
+    closeDropdowns();
+    if (!state.selectedPaperId) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    try {
+        showToast("正在生成 Codex 文献包...", "info");
+        const data = await fetchJSON(API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/codex-context");
+        const value = data && data.markdown ? data.markdown : JSON.stringify(data, null, 2);
+        await navigator.clipboard.writeText(value);
+        showToast("Codex 文献包已复制。", "success");
+    } catch (error) {
+        showToast("Codex 文献包生成失败：" + error.message, "error");
+    }
+}
+
+async function copyCodexItem(itemType, itemId) {
+    if (!state.selectedPaperId || !itemType || !itemId) {
+        showToast("当前项目无法复制给 Codex。", "error");
+        return;
+    }
+    try {
+        showToast("正在生成 Codex 单项文献包...", "info");
+        const data = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
+            "/codex-item/" + encodeURIComponent(itemType) + "/" + encodeURIComponent(itemId)
+        );
+        const value = data && data.markdown ? data.markdown : JSON.stringify(data, null, 2);
+        await navigator.clipboard.writeText(value);
+        showToast("此项及其证据已复制给 Codex。", "success");
+    } catch (error) {
+        showToast("Codex 单项文献包生成失败：" + error.message, "error");
+    }
+}
+
+async function verifyDftResult(itemId) {
+    if (!state.selectedPaperId || !itemId) {
+        showToast("当前 DFT 记录无法核验。", "error");
+        return;
+    }
+    const ok = window.confirm("请确认你已经对照 PDF 原文、证据文本和定位检查过这条 DFT 数据。确认后，该记录会进入 DFT 导出安全门复核。");
+    if (!ok) return;
+    try {
+        showToast("正在写入 DFT 核验记录...", "info");
+        const data = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
+            "/dft-results/" + encodeURIComponent(itemId) + "/verify",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    confirm_reviewed_against_pdf: true,
+                    reviewer: "user_codex_review",
+                    reviewer_note: "Verified from the Literature Library DFT panel after checking Codex item context and evidence."
+                })
+            }
+        );
+        const safety = data && data.export_safety;
+        showToast(
+            safety && safety.is_exportable
+                ? "DFT 记录已通过导出安全门。"
+                : "DFT 核验已记录，但仍有安全门阻断项。",
+            safety && safety.is_exportable ? "success" : "info"
+        );
+        await loadPaperDetail(state.selectedPaperId);
+    } catch (error) {
+        showToast("DFT 核验失败：" + error.message, "error");
+    }
 }

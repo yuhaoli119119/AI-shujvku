@@ -1002,6 +1002,133 @@ function renderDraftProposal(paperId, data) {
     `;
 }
 
+const renderDraftProposalBase = renderDraftProposal;
+renderDraftProposal = function(paperId, data) {
+    renderDraftProposalBase(paperId, data);
+    mountWordInsertControl(paperId);
+};
+
+function mountWordInsertControl(paperId) {
+    const container = document.getElementById(`proposalContainer-${paperId}`);
+    if (!container || document.getElementById(`wordFile-${paperId}`)) return;
+    const actions = container.querySelector(".proposal-actions");
+    if (!actions) return;
+
+    const label = document.createElement("label");
+    label.className = "btn btn-sm btn-secondary word-upload-control";
+    label.textContent = "Insert Word Copy";
+
+    const input = document.createElement("input");
+    input.id = `wordFile-${paperId}`;
+    input.type = "file";
+    input.accept = ".docx";
+    input.hidden = true;
+    input.addEventListener("change", () => insertDraftIntoWord(paperId));
+    label.appendChild(input);
+    actions.appendChild(label);
+
+    const result = document.createElement("div");
+    result.id = `wordInsertResult-${paperId}`;
+    result.className = "word-insert-result";
+    result.style.display = "none";
+    container.querySelector(".proposal-content")?.appendChild(result);
+}
+
+async function insertDraftIntoWord(paperId) {
+    const input = document.getElementById(`wordFile-${paperId}`);
+    const resultBox = document.getElementById(`wordInsertResult-${paperId}`);
+    const draft = (window.currentDraftProposals || {})[paperId];
+    const textVal = document.getElementById("writingText").value.trim();
+    if (!input || !input.files || input.files.length === 0 || !draft) return;
+    if (!textVal) {
+        showToast("Please enter writing text first.", "error");
+        input.value = "";
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", input.files[0]);
+    formData.append("text", textVal);
+    formData.append("selected_paper_id", paperId);
+    formData.append("citation_marker", draft.citation_marker || "");
+    formData.append("docx_insertion_mode", "append_paragraph");
+    formData.append("citation_insertion_mode", draft.insertion_mode || "parenthetical");
+    formData.append("citation_style", draft.citation_style || "draft_author_year");
+
+    if (resultBox) {
+        resultBox.style.display = "block";
+        resultBox.innerHTML = '<div class="proposal-loading">Generating Word copy...</div>';
+    }
+
+    try {
+        const response = await fetch("/api/writing/word/insert-citation", {
+            method: "POST",
+            body: formData
+        });
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(errText);
+        }
+        const data = await response.json();
+        if (!window.currentWordInsertResults) window.currentWordInsertResults = {};
+        window.currentWordInsertResults[paperId] = data;
+        renderWordInsertResult(paperId, data);
+        showToast(data.status === "inserted" ? "Word copy generated." : "Word insertion blocked.", data.status === "inserted" ? "success" : "error");
+    } catch (err) {
+        if (resultBox) {
+            resultBox.innerHTML = `<div class="proposal-error">Word insertion failed: ${escapeHtml(err.message)}</div>`;
+        }
+        showToast("Word insertion failed.", "error");
+    } finally {
+        input.value = "";
+    }
+}
+
+function renderWordInsertResult(paperId, data) {
+    const resultBox = document.getElementById(`wordInsertResult-${paperId}`);
+    if (!resultBox) return;
+    resultBox.style.display = "block";
+    if (data.status !== "inserted") {
+        resultBox.innerHTML = `
+            <div class="proposal-blocked">
+                <div class="blocked-text">
+                    <strong>Word insertion blocked</strong><br>
+                    ${escapeHtml((data.draft && data.draft.blocked_reason) || "The selected candidate cannot be inserted.")}
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    const warnings = (data.warnings || []).map(w => `<li>${escapeHtml(formatWarningText(w))}</li>`).join("");
+    const downloadLink = data.download_url
+        ? `<a class="btn btn-sm btn-primary" href="${escapeHtml(data.download_url)}" download>Download Word Copy</a>`
+        : "";
+    resultBox.innerHTML = `
+        <div class="word-result-card">
+            <div class="draft-label">Word copy path:</div>
+            <div class="word-output-path">${escapeHtml(data.output_relative_path || data.output_path || "")}</div>
+            <div class="draft-label">Inserted text:</div>
+            <div class="draft-text">${escapeHtml(data.inserted_text || "")}</div>
+            ${warnings ? `<div class="proposal-warnings"><strong>Warnings:</strong><ul>${warnings}</ul></div>` : ""}
+            <div class="proposal-actions">
+                ${downloadLink}
+                <button class="btn btn-sm btn-outline" type="button" onclick="copyWordOutputPath('${paperId}')">Copy Word Path</button>
+            </div>
+        </div>
+    `;
+}
+
+function copyWordOutputPath(paperId) {
+    const data = (window.currentWordInsertResults || {})[paperId];
+    if (!data || !data.output_path) return;
+    writeClipboardText(data.output_path).then(() => {
+        showToast("Word path copied.", "success");
+    }).catch(() => {
+        showToast("Failed to copy Word path.", "error");
+    });
+}
+
 function renderBlockedActions(blockedActions) {
     if (!blockedActions || blockedActions.length === 0) return "";
     return `

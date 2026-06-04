@@ -225,6 +225,62 @@ class DoclingParser:
         return is_decorative_figure(caption, prov)
 
     @staticmethod
+    def _looks_like_fallback_caption_start(line: str, source: str) -> bool:
+        """Filter body references that look like captions in plain PDF text."""
+        label_pattern = (
+            r"^\s*(?:figure|fig\.?|scheme)\s+\d+(?P<tail>.*)$"
+            if source == "figure"
+            else r"^\s*table\s+\d+(?P<tail>.*)$"
+        )
+        match = re.match(label_pattern, line, re.IGNORECASE)
+        if not match:
+            return False
+
+        tail = match.group("tail") or ""
+        if not tail.strip():
+            return False
+        stripped = tail.strip()
+        if stripped[0] in ".:：);-–" or stripped.startswith(("(", "[")):
+            return True
+
+        # Body references often appear as "Fig. 3a presents ..." or
+        # "Figure 6 shows ..."; these are not standalone captions.
+        if tail and tail[0].isalpha():
+            return False
+        first_word = re.match(r"([A-Za-z]+)", stripped)
+        if first_word and first_word.group(1).lower() in {
+            "show",
+            "shows",
+            "shown",
+            "present",
+            "presents",
+            "presented",
+            "provide",
+            "provides",
+            "provided",
+            "demonstrate",
+            "demonstrates",
+            "illustrate",
+            "illustrates",
+            "display",
+            "displays",
+            "depict",
+            "depicts",
+            "report",
+            "reports",
+            "summarize",
+            "summarizes",
+            "compare",
+            "compares",
+            "does",
+            "is",
+            "are",
+            "can",
+        }:
+            return False
+        return True
+
+    @staticmethod
     def _extract_tables(payload: dict[str, Any]) -> list[dict[str, Any]]:
         tables = payload.get("tables") or payload.get("table_items") or []
         normalized = []
@@ -281,6 +337,8 @@ class DoclingParser:
             for index, line in enumerate(lines):
                 if not pattern.match(line):
                     continue
+                if not DoclingParser._looks_like_fallback_caption_start(line, source):
+                    continue
                 parts = [line]
                 for next_line in lines[index + 1 : index + 12]:
                     if not next_line:
@@ -323,18 +381,28 @@ class DoclingParser:
     def _extract_fallback_figures(page_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         figures = DoclingParser._extract_caption_blocks(page_blocks, r"^\s*(?:figure|fig\.?|scheme)\s+\d+[\.:：-]?", "figure")
         normalized = []
+        seen_by_page_number: dict[tuple[int | None, int], int] = {}
         for item in figures:
             caption = item["caption"]
             if DoclingParser._is_decorative_figure(caption, item.get("prov") or []):
                 continue
-            normalized.append(
-                {
-                    "caption": caption,
-                    "page": item.get("page"),
-                    "figure_role": "unknown",
-                    "prov": item.get("prov") or [],
-                }
-            )
+            payload = {
+                "caption": caption,
+                "page": item.get("page"),
+                "figure_role": "unknown",
+                "prov": item.get("prov") or [],
+            }
+            number_match = re.search(r"(?:figure|fig\.?|scheme)\s*(\d+)", caption, re.IGNORECASE)
+            key = (item.get("page"), int(number_match.group(1))) if number_match else None
+            if key is not None and key in seen_by_page_number:
+                existing_index = seen_by_page_number[key]
+                existing_caption = normalized[existing_index]["caption"] or ""
+                if caption[:4].isupper() and not existing_caption[:4].isupper():
+                    normalized[existing_index] = payload
+                continue
+            if key is not None:
+                seen_by_page_number[key] = len(normalized)
+            normalized.append(payload)
         return normalized
 
     @staticmethod

@@ -78,6 +78,24 @@ ADSORBATE_MAP: dict[str, str] = {
     "sulfur": "S8",
     "polysulfide": "LiPS",
     "lips": "LiPS",
+    "oxygen": "O",
+    "o2": "O2",
+    "hydrogen": "H",
+    "atomic hydrogen": "H",
+    "h2": "H2",
+    "water": "H2O",
+    "co2": "CO2",
+    "co": "CO",
+    "no2": "NO2",
+    "single vacancy": "single_vacancy",
+    "monovacancy": "single_vacancy",
+    "vacancy": "vacancy",
+    "divacancy": "divacancy",
+    "stone-wales": "Stone-Wales",
+    "stone wales": "Stone-Wales",
+    "interstitial": "interstitial",
+    "graphene": "graphene",
+    "graphite": "graphite",
 }
 
 # 能量单位标准化
@@ -88,6 +106,10 @@ UNIT_ALIASES: dict[str, str] = {
     "kcal/mol": "kcal/mol",
     "kj/mol": "kJ/mol",
     "mev": "meV",
+    "μb": "μB",
+    "mub": "μB",
+    "mu_b": "μB",
+    "bohr magneton": "μB",
 }
 
 TABLE_HEADER_CATEGORY_RULES: list[tuple[re.Pattern[str], str, str | None]] = [
@@ -103,17 +125,23 @@ TABLE_HEADER_CATEGORY_RULES: list[tuple[re.Pattern[str], str, str | None]] = [
 
 NUMERIC_CATEGORIES = {
     "adsorption_energy",
+    "formation_energy",
     "gibbs_free_energy_change",
     "reaction_barrier",
+    "migration_barrier",
     "li2s_decomposition_barrier",
     "li2s_nucleation_barrier",
     "bader_charge",
     "charge_transfer",
     "d_band_center",
+    "band_gap",
+    "work_function",
+    "magnetic_moment",
     "limiting_potential",
     "overpotential",
 }
 TABLE_ONLY_NUMERIC_CATEGORIES = {"limiting_potential", "overpotential"}
+NON_NUMERIC_DFT_CLAIM_CATEGORIES = {"dos_claim", "charge_density_difference_claim"}
 
 # 类别 → 正则模式列表 (每个模式: (pattern, value_group, unit_group))
 CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
@@ -174,14 +202,96 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
         ],
 }
 
+GRAPHITE_DEFECT_CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
+    "formation_energy": [
+        (
+            r"(?:formation\s+energ(?:y|ies)|defect\s+formation\s+energ(?:y|ies)|E\s*[_\-\s]?\s*f).{0,100}?([-\+]?\d+(?:\.\d+)?)\s*(eV|meV|kJ/mol|kcal/mol)",
+            1,
+            2,
+        ),
+        (
+            r"([-\+]?\d+(?:\.\d+)?)\s*(eV|meV|kJ/mol|kcal/mol).{0,80}(?:formation\s+energ(?:y|ies)|defect\s+formation)",
+            1,
+            2,
+        ),
+    ],
+    "migration_barrier": [
+        (
+            r"(?:migration|diffusion).{0,40}?(?:barrier|energ(?:y|ies)).{0,80}?([-\+]?\d+(?:\.\d+)?)\s*(eV|meV|kJ/mol|kcal/mol)",
+            1,
+            2,
+        ),
+        (
+            r"([-\+]?\d+(?:\.\d+)?)\s*(eV|meV|kJ/mol|kcal/mol).{0,80}(?:migration|diffusion).{0,40}?(?:barrier|energ(?:y|ies))",
+            1,
+            2,
+        ),
+    ],
+    "band_gap": [
+        (
+            r"\b(?:band[\s\-]*gaps?|E\s*[_\-\s]?\s*g)\b.{0,80}?([-\+]?\d+(?:\.\d+)?)\s*(eV|meV)",
+            1,
+            2,
+        ),
+    ],
+    "work_function": [
+        (
+            r"(?:work\s*function|WF).{0,80}?([-\+]?\d+(?:\.\d+)?)\s*(eV|meV)",
+            1,
+            2,
+        ),
+    ],
+    "magnetic_moment": [
+        (
+            r"(?:magnetic\s*moment|spin\s*moment|magnetization).{0,80}?([-\+]?\d+(?:\.\d+)?)\s*(?:\u03bcB|μB|mu_B|Bohr\s+magnetons?)",
+            1,
+            0,
+        ),
+    ],
+}
+
+for _category, _rules in GRAPHITE_DEFECT_CATEGORY_RULES.items():
+    CATEGORY_RULES.setdefault(_category, []).extend(_rules)
+
+TABLE_HEADER_CATEGORY_RULES.extend(
+    [
+        (re.compile(r"(defect\s*)?formation\s+energ|(^e[_\-\s]*f$)|(^e[_\-\s]*form)", re.IGNORECASE), "formation_energy", "eV"),
+        (re.compile(r"(migration|diffusion).*(barrier|energy)|(^e[_\-\s]*m$)", re.IGNORECASE), "migration_barrier", "eV"),
+        (re.compile(r"(band\s*gap|e[_\-\s]*g)", re.IGNORECASE), "band_gap", "eV"),
+        (re.compile(r"(work\s*function|^wf$)", re.IGNORECASE), "work_function", "eV"),
+        (re.compile(r"(magnetic\s*moment|magnetization|spin\s*moment)", re.IGNORECASE), "magnetic_moment", "μB"),
+    ]
+)
+
 
 def _resolve_adsorbate(text: str) -> str | None:
     """从文本中推断吸附质."""
-    text_lower = text.lower()
-    for key, name in ADSORBATE_MAP.items():
-        if key in text_lower:
+    normalized = re.sub(r"\s+", " ", (text or "").lower())
+    for key in sorted(ADSORBATE_MAP, key=len, reverse=True):
+        name = ADSORBATE_MAP[key]
+        escaped = re.escape(key.lower()).replace(r"\ ", r"[\s\-]+")
+        if re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", normalized):
             return name
     return None
+
+
+def _has_graphite_defect_context(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(graphene|graphite|graphitic|carbon|vacancy|divacancy|monovacancy|defect|stone[\s\-]?wales|interstitial|grain\s+boundary)\b",
+            text or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def _is_reference_like_evidence(text: str) -> bool:
+    lowered = (text or "").lower()
+    if re.search(r"\b(references|bibliography)\b", lowered):
+        return True
+    if re.search(r"\|\s*\[?\d+\]?\s*\|", text or "") and re.search(r"\b(?:journal|doi|vol|pp|pages?|publisher)\b", lowered):
+        return True
+    return False
 
 
 def _extract_context_around_match(text: str, match_start: int, match_end: int, window: int = 200) -> str:
@@ -192,6 +302,17 @@ def _extract_context_around_match(text: str, match_start: int, match_end: int, w
     if len(snippet) > 400:
         return snippet[:400] + "..."
     return snippet
+
+
+def _extract_sentence_around_match(text: str, match_start: int, match_end: int) -> str:
+    start = max(text.rfind(".", 0, match_start), text.rfind(";", 0, match_start), text.rfind("\n", 0, match_start)) + 1
+    end_candidates = [pos for pos in (text.find(".", match_end), text.find(";", match_end), text.find("\n", match_end)) if pos >= 0]
+    end = min(end_candidates) + 1 if end_candidates else min(len(text), match_end + 160)
+    return re.sub(r"\s+", " ", text[start:end]).strip()
+
+
+def _match_crosses_sentence(match_text: str) -> bool:
+    return bool(re.search(r"\.\s+[A-Z]", match_text or ""))
 
 
 def _normalize_numeric_text(text: str) -> str:
@@ -214,6 +335,14 @@ def _parse_float(value: str | None) -> float | None:
     return float(_normalize_numeric_text(value).strip())
 
 
+def _parse_uncertainty_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    cleaned = re.sub(r"\s+", "", _normalize_numeric_text(value))
+    cleaned = re.sub(r"\(\d+\)$", "", cleaned)
+    return float(cleaned)
+
+
 def _parse_match_float(match: re.Match[str], group_index: int) -> float | None:
     value = match.group(group_index)
     if value is None:
@@ -225,10 +354,64 @@ def _parse_match_float(match: re.Match[str], group_index: int) -> float | None:
     return float(normalized)
 
 
+def _looks_like_reference_token(value: str | None) -> bool:
+    if not value:
+        return False
+    return re.fullmatch(r"\[?\d+(?:[-,]\d+)*\]?", value.strip()) is not None
+
+
 def _should_keep_result(category: str, adsorbate: str | None, value: float | None, evidence: str) -> bool:
+    if _is_reference_like_evidence(evidence):
+        return False
+    if category in NON_NUMERIC_DFT_CLAIM_CATEGORIES:
+        return False
     if category in NUMERIC_CATEGORIES and value is None:
         return False
+    if _looks_like_reference_token(adsorbate):
+        return False
+    if category in {"limiting_potential", "overpotential"}:
+        lowered = evidence.lower()
+        if re.search(r"\[\s*\d+\s*\]", evidence):
+            return False
+        if value is not None and abs(value) > 20:
+            return False
+        if re.search(r"\b\d{4}\b", lowered) and not re.search(r"\b(?:0|1|2|3|4|5)\.\d+\s*(?:v|ev)\b", lowered):
+            return False
     if category == "adsorption_energy" and not adsorbate:
+        return False
+    if category == "formation_energy":
+        lowered = evidence.lower()
+        if not (adsorbate or _has_graphite_defect_context(evidence)):
+            return False
+        if value is not None and abs(value) < 1e-12:
+            return False
+        if not re.search(
+            r"(formation\s+(?:energ(?:y|ies)|free\s+energ(?:y|ies)|takes|took)|defect\s+formation|e\s*[_\-\s]?\s*f\b)",
+            lowered,
+            re.IGNORECASE,
+        ):
+            return False
+        if re.search(
+            r"\b(underestimat|overestimat|disagreement|difference|deviation|margin|"
+            r"order\s+of|error\s+bars?|standard\s+deviations?|finite[-\s]concentration|"
+            r"energy\s+scale|energy\s+drops?|cutoff\s+energy|force\s+tolerance|atomization\s+energ|activation\s+energy)\b",
+            lowered,
+            re.IGNORECASE,
+        ):
+            return False
+        if re.search(r"formation\s+energ(?:y|ies)\s+drops?", lowered):
+            return False
+        if re.search(r"\b\d+(?:\.\d+)?\s+electrons?\b", lowered) or re.search(r"electrons?.{0,40}\beV\b", lowered):
+            return False
+    if category == "band_gap" and not re.search(
+        r"\b(?:band[\s\-]*gaps?|e\s*[_\-\s]?\s*g)\b",
+        evidence,
+        re.IGNORECASE,
+    ):
+        return False
+    if category in {"band_gap", "work_function"} and value is not None and not (-1 <= value <= 30):
+        return False
+    if category == "magnetic_moment" and value is not None and not (-20 <= value <= 20):
         return False
     if category == "adsorption_energy" and value is not None and value > 0:
         lowered = evidence.lower()
@@ -258,6 +441,8 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
     for tbl in tables:
         caption = getattr(tbl, "caption", "") or ""
         content = getattr(tbl, "markdown_content", "") or ""
+        if _is_reference_like_evidence(f"{caption}\n{content}"):
+            continue
         if category in {"limiting_potential", "overpotential"} and _parse_markdown_table(content)[1]:
             continue
         combined = _normalize_numeric_text(f"{caption}\n{content}")
@@ -279,7 +464,9 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
                 )
                 adsorbate = _resolve_adsorbate(combined)
                 evidence = _extract_context_around_match(combined, m.start(), m.end())
-                if not _should_keep_result(category, adsorbate, val, evidence):
+                adsorbate = _resolve_adsorbate(m.group(0)) or adsorbate
+                quality_evidence = local_evidence if category in GRAPHITE_DEFECT_CATEGORY_RULES else evidence
+                if not _should_keep_result(category, adsorbate, val, quality_evidence):
                     continue
                 results.append(DFTResultItem(
                     category=category,
@@ -317,6 +504,9 @@ def _infer_table_columns(headers: list[str]) -> tuple[dict[int, tuple[str, str |
         lowered = header_text.lower()
         if adsorbate_col is None and re.search(r"(adsorbate|intermediate|species|molecule|state|slurry|lips|li2sx|sample)", lowered):
             adsorbate_col = idx
+        if re.search(r"(migration|diffusion).*(barrier|energy)", lowered):
+            category_columns[idx] = ("migration_barrier", "eV")
+            continue
         for pattern, category, unit in TABLE_HEADER_CATEGORY_RULES:
             if pattern.search(header_text):
                 category_columns[idx] = (category, unit)
@@ -333,6 +523,8 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
     for tbl in tables:
         caption = getattr(tbl, "caption", "") or ""
         content = _normalize_numeric_text(getattr(tbl, "markdown_content", "") or "")
+        if _is_reference_like_evidence(f"{caption}\n{content}"):
+            continue
         headers, rows = _parse_markdown_table(content)
         if not headers or not rows:
             continue
@@ -365,7 +557,7 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                     unit = default_unit
                 header = headers[col_idx]
                 evidence = f"{header}: {cell}; row: {row_text}"
-                adsorbate_value = adsorbate or _resolve_adsorbate(evidence)
+                adsorbate_value = _resolve_adsorbate(row_text) or adsorbate or _resolve_adsorbate(evidence)
                 if not _should_keep_result(category, adsorbate_value, value, evidence):
                     continue
                 results.append(
@@ -438,7 +630,7 @@ def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, p
                 results.append(
                     DFTResultItem(
                         category=category,
-                        adsorbate=_resolve_adsorbate(evidence),
+                adsorbate=_resolve_adsorbate(cell) or _resolve_adsorbate(evidence),
                         value=None,
                         unit=None,
                         reaction_step=(context + ": " + cell) if context else cell,
@@ -464,6 +656,70 @@ def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, p
                     evidence_text=evidence[:450],
                     source_location=SourceLocation(table=caption[:80] if caption else "Table", page=page),
                     confidence=0.86,
+                )
+            )
+    return results
+
+
+def _scan_graphene_defect_inline_tables(text: str) -> list[DFTResultItem]:
+    results: list[DFTResultItem] = []
+    if not text:
+        return results
+    normalized = _normalize_numeric_text(text)
+    number = r"[-+]?\d+\s*\.\s*\d+(?:\(\d+\))?"
+    targets = [
+        ("single_vacancy", "MV"),
+        ("silicon_substitution", "SiS"),
+        ("Stone-Wales", "SW"),
+    ]
+
+    row_pattern = re.compile(
+        rf"(Method\s+Defect\s+formation\s+energy\s*\(eV\)\s+MV\s+SiS\s+SW.*?)"
+        rf"DMC-corrected\s+DFT\s+({number})\s+({number})\s+({number})",
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in row_pattern.finditer(normalized):
+        evidence = re.sub(r"\s+", " ", match.group(0)).strip()[:500]
+        for index, (adsorbate, label) in enumerate(targets, start=2):
+            try:
+                value = _parse_uncertainty_float(match.group(index))
+            except (TypeError, ValueError):
+                continue
+            results.append(
+                DFTResultItem(
+                    category="formation_energy",
+                    adsorbate=adsorbate,
+                    value=value,
+                    unit="eV",
+                    reaction_step=f"DMC-corrected DFT {label}",
+                    evidence_text=evidence,
+                    source_location=SourceLocation(section="inline defect formation energy table"),
+                    confidence=0.9,
+                )
+            )
+
+    sentence_pattern = re.compile(
+        rf"vibrationally\s+corrected\s+DMC\s+defect\s+formation\s+energies\s+are\s+"
+        rf"({number})\s*,\s*({number})\s*,\s*(?:and\s+)?({number})\s+at\s+298\s*K\s+for\s+MV,\s*SiS,\s+and\s+SW",
+        re.IGNORECASE,
+    )
+    for match in sentence_pattern.finditer(normalized):
+        evidence = _extract_sentence_around_match(normalized, match.start(), match.end())[:500]
+        for index, (adsorbate, label) in enumerate(targets, start=1):
+            try:
+                value = _parse_uncertainty_float(match.group(index))
+            except (TypeError, ValueError):
+                continue
+            results.append(
+                DFTResultItem(
+                    category="formation_energy",
+                    adsorbate=adsorbate,
+                    value=value,
+                    unit="eV",
+                    reaction_step=f"vibrationally corrected DMC at 298 K {label}",
+                    evidence_text=evidence,
+                    source_location=SourceLocation(section="inline defect formation energy sentence"),
+                    confidence=0.88,
                 )
             )
     return results
@@ -543,6 +799,7 @@ class DFTResultsExtractor:
             if cat in TABLE_ONLY_NUMERIC_CATEGORIES:
                 continue
             all_results.extend(self._scan_text(full_text, cat, sec_text_map, sections))
+        all_results.extend(_scan_graphene_defect_inline_tables(full_text))
         all_results.extend(_scan_structured_tables(tables))
         for cat in self.categories:
             all_results.extend(_scan_tables_for_category(tables, cat))
@@ -553,8 +810,9 @@ class DFTResultsExtractor:
             system_prompt = (
                 "You are an expert materials science data extractor.\n"
                 "Extract all explicit DFT calculation results for single/dual-atom catalysts (SAC/DAC) and Li-S battery applications.\n"
-                "Categories: adsorption_energy, gibbs_free_energy_change, reaction_barrier, li2s_decomposition_barrier, li2s_nucleation_barrier, "
-                "bader_charge, charge_transfer, d_band_center, dos_claim, charge_density_difference_claim.\n"
+                "Categories: adsorption_energy, formation_energy, gibbs_free_energy_change, reaction_barrier, migration_barrier, "
+                "li2s_decomposition_barrier, li2s_nucleation_barrier, bader_charge, charge_transfer, d_band_center, "
+                "band_gap, work_function, magnetic_moment, dos_claim, charge_density_difference_claim.\n"
                 "Only return claims that are directly supported by the provided text, captions, or tables.\n"
                 "For numeric categories, keep the exact value and unit from the paper; do not infer missing numbers."
             )
@@ -576,7 +834,7 @@ class DFTResultsExtractor:
         figures = getattr(doc, "figures", []) or []
         markdown = getattr(doc, "markdown", "") or ""
         section_regex = re.compile(
-            r"(comput|dft|theor|result|discuss|mechan|electronic|dos|band|adsor|free energy|barrier|bader|charge)",
+            r"(comput|dft|theor|result|discuss|mechan|electronic|dos|band|adsor|free energy|barrier|migration|formation|vacancy|defect|graphene|graphite|stone|bader|charge)",
             re.IGNORECASE,
         )
         parts: list[str] = []
@@ -647,6 +905,8 @@ class DFTResultsExtractor:
         adsorbate = payload.get("adsorbate")
         if not adsorbate:
             adsorbate = _resolve_adsorbate(evidence)
+        if not _should_keep_result(category, adsorbate, value, evidence):
+            return None
         confidence = payload.get("confidence")
         try:
             confidence = float(confidence) if confidence is not None else 0.6
@@ -690,6 +950,8 @@ class DFTResultsExtractor:
             else:
                 pattern, vg, ug = pat_tuple, 1, 2
             for m in re.finditer(pattern, text, re.IGNORECASE):
+                if category in GRAPHITE_DEFECT_CATEGORY_RULES and _match_crosses_sentence(m.group(0)):
+                    continue
                 try:
                     val = _parse_match_float(m, vg) if vg else None
                     raw_unit = m.group(ug).strip() if ug and ug < len(m.groups()) + 1 else None
@@ -708,7 +970,8 @@ class DFTResultsExtractor:
                 loc = SourceLocation(section=best_sec, page=best_page)
 
                 evidence = _extract_context_around_match(text, m.start(), m.end())
-                adsorbate = _resolve_adsorbate(evidence)
+                local_evidence = _extract_sentence_around_match(text, m.start(), m.end())
+                adsorbate = _resolve_adsorbate(m.group(0)) or _resolve_adsorbate(local_evidence) or _resolve_adsorbate(evidence)
                 if not _should_keep_result(category, adsorbate, val, evidence):
                     continue
                 results.append(DFTResultItem(
@@ -748,8 +1011,8 @@ class DFTResultsExtractor:
                             figure=cap[:100],
                             page=getattr(fig, "page", None),
                         )
-                        adsorbate = _resolve_adsorbate(cap)
                         evidence = _extract_context_around_match(cap, m.start(), m.end())
+                        adsorbate = _resolve_adsorbate(m.group(0)) or _resolve_adsorbate(evidence)
                         if not _should_keep_result(cat, adsorbate, val, evidence):
                             continue
                         results.append(DFTResultItem(

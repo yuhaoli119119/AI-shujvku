@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,10 +16,12 @@ from app.db.models import (
     Base,
     DFTResult,
     ElectrochemicalPerformance,
+    EvidenceLocator,
     MechanismClaim,
     Paper,
     PaperCorrection,
     PaperNote,
+    PaperSection,
 )
 from app.main import app
 from app.mcp.context import MCPAuthInfo, mcp_auth_context
@@ -27,11 +30,17 @@ from app.mcp.server import (
     approve_correction,
     get_correction_detail,
     get_correction_queue,
+    get_codex_item,
+    get_dft_review_queue,
+    get_paper_knowledge,
     get_parse_status,
     ingest_pdf_batch,
+    insert_word_citation,
     list_notes,
     parse_paper,
     propose_correction,
+    propose_dft_result_correction,
+    reject_dft_result,
     query_papers,
     reject_correction,
     scan_local_pdfs,
@@ -49,13 +58,14 @@ def mcp_test_env(monkeypatch):
             "claude|Claude Desktop|litmcp_claude|read_papers,append_notes,propose_corrections,request_parse;"
             "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections",
         )
+        monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         get_settings.cache_clear()
 
         engine = create_engine(db_url, future=True)
         Base.metadata.create_all(engine)
         SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
-        yield {"sessionmaker": SessionLocal, "engine": engine}
+        yield {"sessionmaker": SessionLocal, "engine": engine, "tmpdir": Path(tmpdir)}
 
         engine.dispose()
         from app.db.session import _engines, _session_factories
@@ -144,6 +154,289 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
         assert [item.action for item in audit_logs] == ["append_note", "propose_correction"]
+
+
+def test_mcp_get_codex_item_returns_low_token_dft_context(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Codex Item Paper", pdf_path="codex-item.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="formation_energy",
+            value=7.5,
+            unit="eV",
+            evidence_text="The reported defect formation energy is 7.5 eV.",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_result",
+                target_id=str(row.id),
+                field_name="value",
+                page=5,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.9,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        payload = get_codex_item(
+            paper_id=paper_id,
+            item_type="dft_result",
+            item_id=row_id,
+        )
+
+    assert payload["schema_version"] == "codex_item_context_v1"
+    assert payload["item_type"] == "dft_result"
+    assert payload["context"]["item"]["value"] == 7.5
+    assert payload["context"]["export_safety"]["blocked_reasons"] == ["missing_review"]
+    assert payload["context"]["evidence_locators"]["items"][0]["page"] == 5
+
+
+def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP DFT Queue Paper", doi="10.1000/dft-queue", year=2025, pdf_path="queue.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="reaction_barrier",
+            adsorbate="vacancy",
+            value=1.3,
+            unit="eV",
+            reaction_step="single vacancy migration",
+            evidence_text="The migration barrier for the vacancy is 1.3 eV.",
+            confidence=0.88,
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_result",
+                target_id=str(row.id),
+                field_name="value",
+                page=7,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.93,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        payload = get_dft_review_queue(paper_id=paper_id, limit=10)
+
+    assert payload["metadata"]["schema_version"] == "dft_review_queue_v1"
+    assert payload["metadata"]["blocked_count"] == 1
+    assert len(payload["rows"]) == 1
+    row = payload["rows"][0]
+    assert row["record_id"] == row_id
+    assert row["blocked_reasons"] == ["missing_review"]
+    assert row["recommended_action"] == "verify_against_pdf"
+    assert row["sanity_flags"] == []
+    assert row["can_mark_verified"] is True
+    assert row["evidence_locators"][0]["page"] == 7
+    assert row["codex_item_url"].endswith(f"/codex-item/dft_result/{row_id}")
+    assert row["correction_url"].endswith(f"/dft-results/{row_id}/corrections")
+
+
+def test_mcp_get_paper_knowledge_returns_section_fallback_candidates(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(
+            title="MCP Knowledge Fallback Paper",
+            abstract="Graphene vacancy defects alter adsorption and electronic structure.",
+            pdf_path="knowledge.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                PaperNote(
+                    paper_id=paper.id,
+                    source="claude",
+                    field_name="mechanism",
+                    content="Check the vacancy adsorption mechanism before citing.",
+                    quoted_text="vacancy defects alter adsorption",
+                    page=1,
+                ),
+            ]
+        )
+        session.add(
+            PaperSection(
+                paper_id=paper.id,
+                section_title="Results and Discussion",
+                section_type="results",
+                text="Vacancy defects alter adsorption energy and charge density around the defect site.",
+                page_start=4,
+                page_end=5,
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        payload = get_paper_knowledge(paper_id=paper_id, max_candidates=10)
+
+    assert payload["schema_version"] == "paper_knowledge_context_v1"
+    assert payload["metadata"]["returned"] >= 2
+    categories = {item["category"] for item in payload["candidates"]}
+    assert "mechanism_context" in categories
+    assert any(item["source_type"] == "paper_note" for item in payload["candidates"])
+    assert payload["reliability_policy"]["knowledge_items_are_candidates"] is True
+
+
+def test_mcp_insert_word_citation_creates_guarded_docx_copy(mcp_test_env):
+    docx_path = mcp_test_env["tmpdir"] / "draft.docx"
+    document = Document()
+    document.add_paragraph("Draft manuscript body.")
+    document.save(docx_path)
+
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(
+            title="MCP Word Citation Paper",
+            year=2026,
+            journal="Citation Journal",
+            authors=[{"last": "Word"}],
+            abstract="Graphene defect citation context.",
+            pdf_path="word.pdf",
+        )
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        payload = insert_word_citation(
+            docx_path=str(docx_path),
+            selected_paper_id=paper_id,
+            text="Graphene defects alter adsorption behavior.",
+            output_filename="mcp-word-citation.docx",
+        )
+
+    assert payload["status"] == "inserted"
+    assert payload["output_filename"] == "mcp-word-citation.docx"
+    assert payload["safety"]["mutates_original_file"] is False
+    assert payload["safety"]["writes_database"] is False
+    paragraphs = [paragraph.text for paragraph in Document(payload["output_path"]).paragraphs]
+    assert paragraphs[0] == "Draft manuscript body."
+    assert "[DRAFT CITATION - VERIFY SOURCE BEFORE USE: Word, 2026]" in paragraphs[-1]
+
+
+def test_admin_mcp_reject_dft_result_leaves_active_queue(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Reject DFT Candidate", pdf_path="reject-dft.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="limiting_potential",
+            adsorbate="[22]",
+            value=436.0,
+            unit="e",
+            evidence_text="Reference-like artifact was parsed as a DFT result.",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_result",
+                target_id=str(row.id),
+                field_name="value",
+                page=4,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.9,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_admin_auth()):
+        rejected = reject_dft_result(
+            paper_id=paper_id,
+            dft_result_id=row_id,
+            confirm_reject_candidate=True,
+            reviewer_note="Reject citation-like DFT artifact.",
+        )
+        active_queue = get_dft_review_queue(paper_id=paper_id)
+        rejected_queue = get_dft_review_queue(paper_id=paper_id, status="rejected")
+
+    assert rejected["export_safety"]["review_status"] == "rejected"
+    assert rejected["export_safety"]["blocked_reasons"] == ["unsafe_review"]
+    assert active_queue["rows"] == []
+    assert rejected_queue["rows"][0]["record_id"] == row_id
+    assert rejected_queue["rows"][0]["decision_status"] == "rejected"
+
+
+def test_mcp_propose_dft_result_correction_enters_review_queue(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP DFT Correction Target", pdf_path="dft-correction.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="limiting_potential",
+            adsorbate="ORR",
+            value=0.66,
+            unit="e",
+            evidence_text="The limiting potential is 0.66 V.",
+            confidence=0.81,
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        with pytest.raises(ValueError):
+            propose_dft_result_correction(
+                paper_id=paper_id,
+                dft_result_id=row_id,
+                field_name="unit",
+                proposed_value="V",
+                reason="The source table reports potential in volts.",
+                confirm_correction_proposal=False,
+            )
+        correction = propose_dft_result_correction(
+            paper_id=paper_id,
+            dft_result_id=row_id,
+            field_name="unit",
+            proposed_value="V",
+            reason="The source table reports potential in volts.",
+            confirm_correction_proposal=True,
+            evidence_payload={"page": 6, "quoted_text": "The limiting potential is 0.66 V."},
+        )
+
+    assert correction["status"] == "pending"
+    assert correction["field_name"] == "dft_results"
+    assert correction["target_path"] == f"dft_results:{row_id}:unit"
+    assert correction["proposed_value"] == "V"
+
+    with mcp_auth_context(_admin_auth()):
+        approved = approve_correction(correction["id"])
+        assert approved["status"] == "approved"
+
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(DFTResult, UUID(row_id))
+        assert updated is not None
+        assert updated.unit == "V"
+        audit = session.scalar(select(AuditLog).where(AuditLog.action == "propose_dft_result_correction"))
+        assert audit is not None
+        assert audit.target_id == correction["id"]
 
 
 def test_admin_mcp_review_flow_applies_or_rejects_corrections(mcp_test_env):
