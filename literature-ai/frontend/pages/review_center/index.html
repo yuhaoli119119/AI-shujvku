@@ -26,7 +26,8 @@
     }
     .review-topline {
       display: flex;
-      align-items: stretch;
+      flex-wrap: wrap;
+      align-items: flex-start;
       gap: 8px;
       margin-bottom: 12px;
     }
@@ -91,48 +92,67 @@
       background: var(--color-primary-light);
     }
     .panel {
-      overflow: hidden;
       border: 1px solid var(--color-border);
       border-radius: var(--radius-lg);
       background: var(--color-surface);
       box-shadow: var(--shadow-card);
+      padding: 0;
     }
     .panel-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 14px 16px;
+      padding: 6px 14px;
       border-bottom: 1px solid var(--color-border);
-      background: var(--color-surface-alt);
+      background: transparent;
     }
     .panel-title {
       font-weight: 900;
+      display: none;
     }
     .filterbar {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 6px;
     }
     .filterbar select,
     .filterbar input {
-      height: 34px;
-      min-width: 150px;
+      height: 28px;
+      min-width: 120px;
       border: 1px solid var(--color-border);
       border-radius: var(--radius);
-      background: var(--color-bg);
-      color: var(--color-text);
-      padding: 0 10px;
+      background: transparent;
+      color: var(--color-text-secondary);
+      padding: 0 8px;
       font: inherit;
-      font-size: 13px;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+    .filterbar input {
+      min-width: 180px;
+    }
+    .filterbar select:hover,
+    .filterbar input:hover {
+      background: var(--color-surface-alt);
+      color: var(--color-text);
+    }
+    .filterbar select:focus,
+    .filterbar input:focus {
+      border-color: var(--color-primary-light);
+      background: var(--color-surface);
+      color: var(--color-text);
+      outline: none;
+      box-shadow: 0 0 0 2px var(--color-primary-bg);
     }
     .table-wrap {
-      overflow-x: auto;
+      width: 100%;
     }
     table {
       width: 100%;
       min-width: 1080px;
-      border-collapse: collapse;
+      border-collapse: separate;
+      border-spacing: 0;
       font-size: 13px;
     }
     th,
@@ -147,6 +167,9 @@
       background: var(--color-surface-alt);
       font-weight: 900;
       white-space: nowrap;
+      position: sticky;
+      top: var(--nav-height);
+      z-index: 10;
     }
     .paper-title {
       max-width: 390px;
@@ -267,10 +290,7 @@
 
     <section class="panel">
       <div class="panel-head">
-        <div>
-          <div class="panel-title">文献审核队列</div>
-          <div class="muted" id="queueMeta">正在读取当前库...</div>
-        </div>
+        <div class="muted mono" id="queueMeta" style="font-size: 12px; font-weight: 700; letter-spacing: 0.5px;">正在读取当前库...</div>
         <div class="filterbar">
           <select id="statusFilter" onchange="renderRows()">
             <option value="">全部流程状态</option>
