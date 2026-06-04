@@ -14,7 +14,8 @@
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
             background: var(--color-bg);
             color: var(--color-text);
             font-family: var(--font-body);
@@ -23,7 +24,10 @@
         .shell {
             width: min(1440px, calc(100% - 48px));
             margin: 0 auto;
-            padding: 14px 0 28px;
+            padding: 14px 0 20px;
+            height: calc(100vh - var(--nav-height));
+            display: flex;
+            flex-direction: column;
         }
 
         .page-toolbar { display: none; }
@@ -61,7 +65,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            max-width: min(520px, 100%);
+            max-width: 100%;
         }
         .toolbar-controls label {
             margin-bottom: 0;
@@ -71,8 +75,9 @@
             white-space: nowrap;
         }
         .toolbar-controls .form-control {
-            width: min(420px, 42vw);
+            flex: 1;
             min-width: 260px;
+            max-width: 100%;
             height: 34px;
         }
 
@@ -80,13 +85,16 @@
             display: grid;
             grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.9fr);
             gap: 16px;
-            align-items: start;
+            flex: 1;
+            min-height: 0;
         }
         .left-stack,
         .right-stack {
-            display: grid;
+            display: flex;
+            flex-direction: column;
             gap: 16px;
-            align-content: start;
+            height: 100%;
+            min-height: 0;
         }
         .panel-card {
             padding: 16px;
@@ -94,6 +102,12 @@
             border-radius: var(--radius-lg);
             background: var(--color-surface);
             box-shadow: var(--shadow-card);
+            display: flex;
+            flex-direction: column;
+        }
+        .right-stack .panel-card {
+            height: 100%;
+            min-height: 0;
         }
         .panel-heading {
             display: flex;
@@ -104,7 +118,7 @@
         }
         .panel-library-switch {
             margin-left: auto;
-            flex: 0 1 520px;
+            flex: 1 1 auto;
             justify-content: flex-end;
         }
         .panel-title {
@@ -122,12 +136,17 @@
             display: grid;
             grid-template-columns: minmax(0, 1.15fr) minmax(240px, 0.85fr);
             gap: 18px;
+            flex: 1;
+            min-height: 0;
         }
         .subpanel {
             padding: 16px;
             border: 1px solid var(--color-border);
             border-radius: var(--radius-lg);
             background: var(--color-surface-alt);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
         }
         .subpanel h3 {
             margin: 0 0 12px;
@@ -137,6 +156,9 @@
         .mini-list {
             display: grid;
             gap: 10px;
+            overflow-y: auto;
+            flex: 1;
+            align-content: start;
         }
         .mini-item {
             padding: 12px 13px;
@@ -362,7 +384,7 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            padding: 12px 14px;
+            padding: 8px 12px;
             background: var(--color-surface);
             border-bottom: 1px solid var(--color-border);
         }
@@ -413,8 +435,8 @@
             letter-spacing: 0.08em;
         }
         .calendar-day {
-            min-height: 56px;
-            padding: 6px 7px;
+            min-height: 38px;
+            padding: 4px 6px;
             border: none;
             color: var(--color-text);
             cursor: pointer;
@@ -480,9 +502,11 @@
         .job-list {
             display: grid;
             gap: 8px;
-            max-height: 520px;
-            overflow: auto;
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
             padding-right: 2px;
+            align-content: start;
         }
         .job-card {
             padding: 12px;
@@ -604,6 +628,65 @@
                 padding: 6px;
             }
         }
+        .modern-stats-panel {
+            background: linear-gradient(145deg, var(--color-surface) 0%, color-mix(in srgb, var(--color-surface-alt) 50%, var(--color-surface)) 100%);
+        }
+        .modern-stats-panel h3 {
+            margin: 0 0 20px;
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--color-text);
+            letter-spacing: 0.02em;
+        }
+        .modern-stats-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .stat-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stat-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .stat-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+        }
+        .stat-value {
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 800;
+            color: var(--color-text);
+            line-height: 1;
+        }
+        .stat-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: color-mix(in srgb, var(--color-border) 60%, transparent);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+        .stat-bar-fill {
+            height: 100%;
+            border-radius: 99px;
+            transition: width 0.6s ease-out;
+        }
     </style>
 </head>
 <body>
@@ -616,10 +699,9 @@
                     <div class="panel-heading">
                         <div>
                             <h2 class="panel-title">选择入库方式</h2>
-                            <p class="panel-desc">推荐先使用 PDF 上传或 DOI / URL 收录；辅助批量检索只用于扩展主题词和候选文献，后续由 Codex 或人工筛选。</p>
                         </div>
-                        <div class="toolbar-controls panel-library-switch">
-                            <label for="librarySelect">当前文献库</label>
+                        <div class="toolbar-controls panel-library-switch" style="gap: 20px;">
+                            <label for="librarySelect" style="font-size: var(--font-size-lg); font-weight: 800; color: var(--color-text);">当前文献库</label>
                             <select id="librarySelect" class="form-control" onchange="switchLibrary(this.value)">
                                 <option value="">加载中...</option>
                             </select>
@@ -700,15 +782,58 @@
                         </div>
                     </section>
 
-                    <section class="subpanel">
-                        <h3>快速操作</h3>
-                        <div class="quick-actions">
-                            <button class="btn btn-ghost btn-sm" onclick="goToday()">回到今天任务</button>
-                            <button class="btn btn-ghost btn-sm" onclick="pollJobs()">刷新任务队列</button>
-                            <button class="btn btn-ghost btn-sm" onclick="reuseLastQuery()">重用上次查询</button>
-                            <button class="btn btn-ghost btn-sm" onclick="clearSearchResults()">清空搜索结果</button>
+                    <section class="subpanel modern-stats-panel">
+                        <h3>文章类型统计</h3>
+                        <div class="modern-stats-list" id="articleStats">
+                            <div class="stat-item">
+                                <div class="stat-header">
+                                    <div class="stat-label">
+                                        <span class="stat-dot" style="background-color: #6366f1;"></span>
+                                        <span class="stat-name">A类 (Core)</span>
+                                    </div>
+                                    <div class="stat-value">12</div>
+                                </div>
+                                <div class="stat-bar-bg">
+                                    <div class="stat-bar-fill" style="width: 21%; background-color: #6366f1;"></div>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-header">
+                                    <div class="stat-label">
+                                        <span class="stat-dot" style="background-color: #14b8a6;"></span>
+                                        <span class="stat-name">B类 (Related)</span>
+                                    </div>
+                                    <div class="stat-value">34</div>
+                                </div>
+                                <div class="stat-bar-bg">
+                                    <div class="stat-bar-fill" style="width: 60%; background-color: #14b8a6;"></div>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-header">
+                                    <div class="stat-label">
+                                        <span class="stat-dot" style="background-color: #f59e0b;"></span>
+                                        <span class="stat-name">C类 (Background)</span>
+                                    </div>
+                                    <div class="stat-value">8</div>
+                                </div>
+                                <div class="stat-bar-bg">
+                                    <div class="stat-bar-fill" style="width: 14%; background-color: #f59e0b;"></div>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-header">
+                                    <div class="stat-label">
+                                        <span class="stat-dot" style="background-color: #9ca3af;"></span>
+                                        <span class="stat-name">未分类 (Uncategorized)</span>
+                                    </div>
+                                    <div class="stat-value">3</div>
+                                </div>
+                                <div class="stat-bar-bg">
+                                    <div class="stat-bar-fill" style="width: 5%; background-color: #9ca3af;"></div>
+                                </div>
+                            </div>
                         </div>
-                        <p class="quick-note">删除任务记录只会清理 workflow job，不会删除论文、PDF 或解析产物。</p>
                     </section>
                 </div>
             </div>
