@@ -6,7 +6,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>鏂囩尞搴?- Literature AI</title>
+    <title>文献库 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
@@ -20,85 +20,67 @@
     <div class="shell">
 
         <div id="fileModeWarning" class="banner">
-        浣犲綋鍓嶆槸浠ユ湰鍦版枃浠舵柟寮忕洿鎺ユ墦寮€椤甸潰銆傛纭叆鍙ｆ槸 `http://localhost:8000/pages/literature_library/index.html`銆?br>
-            鍚﹀垯妫€绱€佷笅杞姐€佸垏搴撱€丄I 鎺ュ彛閮戒細澶辩湡鎴栫洿鎺ュけ璐ャ€?
+        你当前是以本地文件方式直接打开页面。正确入口是 `http://localhost:8000/pages/literature_library/index.html`。<br>
+            否则检索、下载、切库、AI 接口都会失真或直接失败。
         </div>
 
-        <section class="library-overview">
-            <div class="library-overview-main">
-                <div class="library-eyebrow">Literature</div>
-                <h1>鏂囩尞搴?/h1>
-            <p class="library-overview-subtitle">按年份整理文献，优先展示题目、来源、PDF 质量、页数、文件大小与解析状态，适合检索、筛选与综述整理。</p>
-            </div>
-            <div id="libraryMetrics" class="library-metrics"></div>
-        </section>
-
-        <div class="toolbar library-toolbar">
-            <div class="toolbar-row toolbar-row-library">
-                <div class="library-selector-group">
-                    <span class="toolbar-label">褰撳墠搴?/span>
-                    <select id="librarySelect" class="library-select" onchange="activateLibraryByName(this.value)">
-                        <option value="">鍔犺浇涓?..</option>
-                    </select>
-                </div>
-                <div class="library-actions">
-                    <button class="btn ghost" onclick="openCreateLibraryDialog()">鏂板缓搴?/button>
-                    <button class="btn ghost" onclick="openImportLibraryDialog()">瀵煎叆宸叉湁搴?/button>
-                    <button class="btn danger" onclick="removeCurrentLibrary()">绉婚櫎搴?/button>
-                </div>
+        <div class="toolbar">
+            <div class="toolbar-row">
+                <span class="toolbar-label">当前库：</span>
+                <select id="librarySelect" class="library-select" onchange="activateLibraryByName(this.value)">
+                    <option value="">加载中...</option>
+                </select>
+                <button class="btn ghost" onclick="openCreateLibraryDialog()">新建库</button>
+                <button class="btn ghost" onclick="openImportLibraryDialog()">导入已有库</button>
+                <button class="btn danger" onclick="removeCurrentLibrary()">移除库</button>
                 <span id="libStatus" class="status-line subtle"></span>
             </div>
-            <details class="runtime-details">
-                <summary>璺緞涓庤繍琛屼俊鎭?/summary>
-                <div id="libraryRuntimeInfo" class="runtime-info-card subtle">姝ｅ湪璇诲彇褰撳墠鏂囩尞搴撹矾寰?..</div>
-            </details>
-            <div class="toolbar-row toolbar-row-search">
-                <input id="searchInput" class="search-input" type="text" placeholder="鎼滅储鏍囬銆丏OI銆佷綔鑰呫€佹憳瑕併€佸叧閿瘝">
-                <button class="btn ghost" onclick="searchLocal()">鎼滅储</button>
-                <div class="dropdown" id="addLiteratureDropdown">
-                    <button id="addLiteratureBtn" class="btn primary" type="button" onclick="toggleAddLiteratureMenu(event)">娣诲姞鏂囩尞 鈻?/button>
-                    <div id="addLiteratureMenu" class="dropdown-menu">
-                        <button type="button" data-add-mode="pdf" onclick="openAddLiteraturePanel('pdf')">涓婁紶 PDF</button>
-                        <button type="button" data-add-mode="doi" onclick="openAddLiteraturePanel('doi')">DOI / URL 涓嬭浇</button>
-                        <button type="button" data-add-mode="online" onclick="openAddLiteraturePanel('online')">鍦ㄧ嚎妫€绱?/button>
-                        <button type="button" data-add-mode="ai" onclick="openAddLiteraturePanel('ai')">AI 鑷姩鎼滄枃鐚?/button>
-                        <button type="button" data-add-mode="folder" onclick="openAddLiteraturePanel('folder')">瀵煎叆鏈湴鏂囦欢澶?/button>
-                    </div>
-                </div>
-                <button class="btn ghost" onclick="refreshCurrentPage()">鍒锋柊</button>
-                <button class="btn ghost" onclick="openExtractionJobCenter()">瑙ｆ瀽浠诲姟</button>
-                <button class="btn ghost" onclick="openMetadataDiagnostics()">鍏冩暟鎹瘖鏂?/button>
+            <div class="toolbar-row">
+                <div id="libraryRuntimeInfo" class="runtime-info-card subtle">正在读取当前文献库路径...</div>
             </div>
-            <div class="toolbar-row toolbar-row-filters">
-                <div class="filter-group">
-                    <input id="filterYear" class="small-input" type="number" placeholder="骞翠唤">
-                    <input id="filterJournal" class="small-input" type="text" placeholder="鏈熷垔">
-                    <select id="filterPaperType" class="small-input">
-                        <option value="">鏂囩尞绫诲瀷锛氬叏閮?/option>
-                        <option value="A">A绫?(璁＄畻)</option>
-                        <option value="B">B绫?(璁＄畻+瀹為獙)</option>
-                        <option value="C">C绫?(瀹為獙)</option>
-                        <option value="R">R绫?(缁艰堪)</option>
-                        <option value="Unknown">鏈煡</option>
-                    </select>
-                    <select id="filterDFT" class="small-input">
-                        <option value="">DFT 缁撴灉锛氬叏閮?/option>
-                        <option value="true">鏈?DFT 缁撴灉</option>
-                        <option value="false">鏃?DFT 缁撴灉</option>
-                    </select>
-                    <select id="filterWC" class="small-input">
-                        <option value="">鍐欎綔鍗★細鍏ㄩ儴</option>
-                        <option value="true">鏈夊啓浣滃崱</option>
-                        <option value="false">鏃犲啓浣滃崱</option>
-                    </select>
-                </div>
-                <div class="toolbar-tail">
-                    <button class="btn ghost" onclick="clearFilters()">娓呯┖绛涢€?/button>
-                    <div class="pager">
-                        <button class="btn ghost small" id="prevBtn" onclick="prevPage()" disabled>涓婁竴椤?/button>
-                        <span id="pageInfo" class="toolbar-label">绗?1 椤?/span>
-                        <button class="btn ghost small" id="nextBtn" onclick="nextPage()">涓嬩竴椤?/button>
+            <div class="toolbar-row">
+                <input id="searchInput" class="search-input" type="text" placeholder="搜索标题、DOI、作者、摘要、关键词">
+                <button class="btn ghost" onclick="searchLocal()">搜索</button>
+                <div class="dropdown" id="addLiteratureDropdown">
+                    <button id="addLiteratureBtn" class="btn primary" type="button" onclick="toggleAddLiteratureMenu(event)">添加文献 ▼</button>
+                    <div id="addLiteratureMenu" class="dropdown-menu">
+                        <button type="button" data-add-mode="pdf" onclick="openAddLiteraturePanel('pdf')">上传 PDF</button>
+                        <button type="button" data-add-mode="doi" onclick="openAddLiteraturePanel('doi')">DOI / URL 下载</button>
+                        <button type="button" data-add-mode="online" onclick="openAddLiteraturePanel('online')">在线检索</button>
+                        <button type="button" data-add-mode="ai" onclick="openAddLiteraturePanel('ai')">AI 自动搜文献</button>
+                        <button type="button" data-add-mode="folder" onclick="openAddLiteraturePanel('folder')">导入本地文件夹</button>
                     </div>
+                </div>
+                <button class="btn ghost" onclick="refreshCurrentPage()">刷新</button>
+                <button class="btn ghost" onclick="openExtractionJobCenter()">解析任务</button>
+                <button class="btn ghost" onclick="openMetadataDiagnostics()">元数据诊断</button>
+            </div>
+            <div class="toolbar-row">
+                <input id="filterYear" class="small-input" type="number" placeholder="年份">
+                <input id="filterJournal" class="small-input" type="text" placeholder="期刊">
+                <select id="filterPaperType" class="small-input">
+                    <option value="">文献类型：全部</option>
+                    <option value="A">A类 (计算)</option>
+                    <option value="B">B类 (计算+实验)</option>
+                    <option value="C">C类 (实验)</option>
+                    <option value="R">R类 (综述)</option>
+                    <option value="Unknown">未知</option>
+                </select>
+                <select id="filterDFT" class="small-input">
+                    <option value="">DFT 结果：全部</option>
+                    <option value="true">有 DFT 结果</option>
+                    <option value="false">无 DFT 结果</option>
+                </select>
+                <select id="filterWC" class="small-input">
+                    <option value="">写作卡：全部</option>
+                    <option value="true">有写作卡</option>
+                    <option value="false">无写作卡</option>
+                </select>
+                <button class="btn ghost" onclick="clearFilters()">清空筛选</button>
+                <div class="pager">
+                    <button class="btn ghost small" id="prevBtn" onclick="prevPage()" disabled>上一页</button>
+                    <span id="pageInfo" class="toolbar-label">第 1 页</span>
+                    <button class="btn ghost small" id="nextBtn" onclick="nextPage()">下一页</button>
                 </div>
             </div>
         </div>
@@ -106,12 +88,11 @@
         <div class="layout">
             <aside class="sidebar">
                 <div class="sidebar-header">
-                    <h2>褰撳墠鏂囩尞</h2>
-                    <span id="paperListMeta" class="subtle">0 绡?/span>
+                    <h2>当前文献</h2>
+                    <span id="paperListMeta" class="subtle">0 篇</span>
                 </div>
-                    <div id="paperListSummary" class="sidebar-summary">按年份分组，组内按编号顺序显示。</div>
                 <div id="paperList" class="paper-list">
-                    <div class="list-empty">姝ｅ湪鍔犺浇鏂囩尞鍒楄〃...</div>
+                    <div class="list-empty">正在加载文献列表...</div>
                 </div>
             </aside>
 
@@ -120,8 +101,8 @@
             <main class="workspace">
                 <div id="workspaceEmpty" class="workspace-empty">
                     <div>
-                        <h2>閫夋嫨涓€绡囨枃鐚煡鐪嬭鎯?/h2>
-                        <p>宸︿晶鐢ㄤ簬娴忚銆佹悳绱㈠拰绛涢€夋枃鐚€傞€変腑鏂囩尞鍚庯紝杩欓噷浼氭樉绀烘憳瑕併€佺珷鑺傘€佸浘琛ㄣ€丏FT 鏁版嵁銆佸啓浣滃崱鍜?AI 瀹￠槄缁撴灉銆?/p>
+                        <h2>选择一篇文献查看详情</h2>
+                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、DFT 数据、写作卡和 AI 审阅结果。</p>
                     </div>
                 </div>
 
@@ -132,18 +113,18 @@
                             <div id="paperMeta" class="workspace-meta"></div>
                         </div>
                         <div class="paper-actionbar">
-                            <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">鏌ョ湅 PDF</button>
-                            <button class="btn ghost small" onclick="openPaperDetailPage()">鎵撳紑璇︽儏</button>
-                            <button class="btn ghost small" onclick="rerunExtraction()">閲嶆柊瑙ｆ瀽</button>
+                            <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
+                            <button class="btn ghost small" onclick="openPaperDetailPage()">打开详情</button>
+                            <button class="btn ghost small" onclick="rerunExtraction()">重新解析</button>
                             <div class="dropdown" id="paperMoreDropdown">
-                                <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">鏇村鎿嶄綔 鈻?/button>
+                                <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
                                 <div id="paperMoreMenu" class="dropdown-menu right">
-                                    <button type="button" onclick="copyPaperIdentity()">澶嶅埗 DOI / 鏍囬</button>
-                                    <button type="button" onclick="runInternalAIParse()">鐢熸垚 AI 璇︾粏瀹￠槄</button>
-                                    <button type="button" onclick="switchTab('review')">AI 瀹￠槄涓庣‘璁?/button>
-                                    <button type="button" onclick="addToEvidencePack()">鍔犲叆鍐欎綔璇佹嵁鍖?/button>
-                                    <button type="button" onclick="openAggregateView()">鏌ョ湅鑱氬悎瑙嗗浘</button>
-                                    <button type="button" class="danger-menu-item" onclick="openDeletePaperDialog(event)">鍒犻櫎褰撳墠鏂囩尞</button>
+                                    <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
+                                    <button type="button" onclick="runInternalAIParse()">生成 AI 详细审阅</button>
+                                    <button type="button" onclick="switchTab('review')">AI 审阅与确认</button>
+                                    <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
+                                    <button type="button" onclick="openAggregateView()">查看聚合视图</button>
+                                    <button type="button" class="danger-menu-item" onclick="openDeletePaperDialog(event)">删除当前文献</button>
                                 </div>
                             </div>
                         </div>
@@ -152,13 +133,13 @@
                     <div id="paperHeaderBadges" class="badge-row"></div>
 
                     <div class="tabs">
-                        <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">鎽樿</button>
-                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">绔犺妭</button>
-                        <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">鍥捐〃</button>
-                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">DFT 鏁版嵁</button>
-                        <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">鍐欎綔鍗?/button>
-                        <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">涓枃璇戞枃</button>
-                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI 瀹￠槄涓庣‘璁?/button>
+                        <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
+                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">章节</button>
+                        <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
+                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">DFT 数据</button>
+                        <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
+                        <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
+                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI 审阅与确认</button>
                     </div>
 
                     <section id="tab-summary" class="tab-panel active">
@@ -181,14 +162,14 @@
                     <section id="tab-writing" class="tab-panel">
                         <div id="writingContent"></div>
                         <div class="writer-block compact-writer">
-                            <h3>鐢熸垚鏁寸悊缁撴灉</h3>
-                            <div id="writerStatusBox" class="subtle" style="margin-bottom:12px;">鍔犺浇鍐欎綔鍣ㄧ姸鎬?..</div>
+                            <h3>生成整理结果</h3>
+                            <div id="writerStatusBox" class="subtle" style="margin-bottom:12px;">加载写作器状态...</div>
                             <div class="writer-toolbar">
-                                <input id="writerTopic" class="search-input" type="text" placeholder="鍐欎綔涓婚">
-                                <input id="writerLimit" class="small-input" type="number" min="1" max="20" value="5" placeholder="璇佹嵁鏁?>
-                                <button class="btn ghost" onclick="generateWriterDraft()">鐢熸垚</button>
+                                <input id="writerTopic" class="search-input" type="text" placeholder="写作主题">
+                                <input id="writerLimit" class="small-input" type="number" min="1" max="20" value="5" placeholder="证据数">
+                                <button class="btn ghost" onclick="generateWriterDraft()">生成</button>
                             </div>
-                            <textarea id="writerNotes" placeholder="缁欏唴閮?AI 鐨勮ˉ鍏呰姹傦紝渚嬪锛氶噸鐐规暣鐞嗘満鐞嗛摼鏉°€佸垪鍑哄叧閿?DFT 缁撴灉銆佺獊鍑哄瓨鍦ㄤ簤璁殑鏁版嵁銆?></textarea>
+                            <textarea id="writerNotes" placeholder="给内部 AI 的补充要求，例如：重点整理机理链条、列出关键 DFT 结果、突出存在争议的数据。"></textarea>
                         </div>
                         <div id="writerResult"></div>
                     </section>
@@ -199,32 +180,32 @@
 
                     <section id="tab-review" class="tab-panel">
                         <div class="writer-block ai-review-section">
-                            <h3>缃戦〉鍐?AI 璇︾粏瀹￠槄</h3>
-                            <p class="subtle">AI 浼氬厛鐢熸垚鍙鐨勫闃呯瑪璁般€佸彲鐤戝瓧娈典慨姝ｅ拰鏂囩尞鍏宠仈寤鸿锛涜繖浜涘唴瀹瑰彧鏄€欓€夛紝涓嶄細鐩存帴鏀瑰簱銆傜偣鈥滅敓鎴愬緟纭璁板綍鈥濆悗锛岃繕瑕佷汉宸ユ牳瀵硅瘉鎹苟纭銆?/p>
+                            <h3>网页内 AI 详细审阅</h3>
+                            <p class="subtle">AI 会先生成可读的审阅笔记、可疑字段修正和文献关联建议；这些内容只是候选，不会直接改库。点“生成待确认记录”后，还要人工核对证据并确认。</p>
                             <div id="internalAIConfigGuide"></div>
                             <div class="modal-actions" style="justify-content:flex-start;">
-                                <button class="btn primary" onclick="runInternalAIParse()">鐢熸垚璇︾粏瀹￠槄</button>
-                                <button class="btn ghost" onclick="window.location.href='../settings/index.html'">鎵撳紑璁剧疆椤?/button>
+                                <button class="btn primary" onclick="runInternalAIParse()">生成详细审阅</button>
+                                <button class="btn ghost" onclick="window.location.href='../settings/index.html'">打开设置页</button>
                             </div>
                         </div>
                         <div class="writer-block ai-review-section">
-                            <h3>IDE / MCP AI 瀹￠槄</h3>
-                            <p class="subtle">鏄剧ず MCP 杩炴帴鎸囧崡锛屼緵 IDE 鎴?MCP 瀹㈡埛绔鍙栨枃鐚€佺敓鎴愬缓璁紱鏈叆鍙ｄ笉浼氳嚜鍔ㄧ敓鎴愬緟纭璁板綍銆?/p>
+                            <h3>IDE / MCP AI 审阅</h3>
+                            <p class="subtle">显示 MCP 连接指南，供 IDE 或 MCP 客户端读取文献、生成建议；本入口不会自动生成待确认记录。</p>
                             <div class="modal-actions" style="justify-content:flex-start;">
-                                <button class="btn ghost" onclick="loadAgentGuide()">鏄剧ず MCP 鎸囧崡</button>
+                                <button class="btn ghost" onclick="loadAgentGuide()">显示 MCP 指南</button>
                             </div>
                             <div id="mcpGuideBox"></div>
                         </div>
                         <div class="writer-block ai-review-section">
-                            <h3>瀵煎叆澶栭儴 AI 瀹￠槄缁撴灉</h3>
+                            <h3>导入外部 AI 审阅结果</h3>
                             <div class="external-toolbar">
-                                <input id="externalSource" class="medium-input" type="text" value="鎵嬪姩瀵煎叆" placeholder="鏉ユ簮">
-                                <input id="externalSourceLabel" class="medium-input" type="text" value="澶栭儴 AI 瀹￠槄缁撴灉" placeholder="鏉ユ簮鍚嶇О">
+                                <input id="externalSource" class="medium-input" type="text" value="手动导入" placeholder="来源">
+                                <input id="externalSourceLabel" class="medium-input" type="text" value="外部 AI 审阅结果" placeholder="来源名称">
                             </div>
-                            <textarea id="externalRawText" placeholder="鎶婂閮?AI 杩斿洖鐨勫闃呮枃鏈垨 JSON 绮樿创鍒拌繖閲岋紝鐒跺悗瀵煎叆銆?></textarea>
+                            <textarea id="externalRawText" placeholder="把外部 AI 返回的审阅文本或 JSON 粘贴到这里，然后导入。"></textarea>
                             <div class="modal-actions" style="margin-top:12px;">
-                                <button class="btn primary" onclick="importExternalAnalysis()">瀵煎叆瀹￠槄缁撴灉</button>
-                                <button class="btn ghost" onclick="loadExternalRuns()">鍒锋柊瀹￠槄璁板綍</button>
+                                <button class="btn primary" onclick="importExternalAnalysis()">导入审阅结果</button>
+                                <button class="btn ghost" onclick="loadExternalRuns()">刷新审阅记录</button>
                             </div>
                         </div>
                         <div id="externalRuns"></div>
@@ -239,71 +220,71 @@
     <div id="addLiteratureDialog" class="modal-overlay">
         <div class="modal add-modal">
             <div class="modal-title-row">
-                <h3>娣诲姞鏂囩尞</h3>
-                <button class="btn ghost small" onclick="closeAddLiteraturePanel()">鍏抽棴</button>
+                <h3>添加文献</h3>
+                <button class="btn ghost small" onclick="closeAddLiteraturePanel()">关闭</button>
             </div>
             <div class="ingest-tabs">
-                <button class="ingest-tab active" data-ingest-mode="pdf" onclick="switchAcquisitionMode('pdf')">涓婁紶 PDF</button>
-                <button class="ingest-tab" data-ingest-mode="doi" onclick="switchAcquisitionMode('doi')">DOI / URL 涓嬭浇</button>
-                <button class="ingest-tab" data-ingest-mode="online" onclick="switchAcquisitionMode('online')">鍦ㄧ嚎妫€绱?/button>
-                <button class="ingest-tab" data-ingest-mode="ai" onclick="switchAcquisitionMode('ai')">AI 鑷姩鎼滄枃鐚?/button>
-                <button class="ingest-tab" data-ingest-mode="folder" onclick="switchAcquisitionMode('folder')">鏈湴鏂囦欢澶?/button>
+                <button class="ingest-tab active" data-ingest-mode="pdf" onclick="switchAcquisitionMode('pdf')">上传 PDF</button>
+                <button class="ingest-tab" data-ingest-mode="doi" onclick="switchAcquisitionMode('doi')">DOI / URL 下载</button>
+                <button class="ingest-tab" data-ingest-mode="online" onclick="switchAcquisitionMode('online')">在线检索</button>
+                <button class="ingest-tab" data-ingest-mode="ai" onclick="switchAcquisitionMode('ai')">AI 自动搜文献</button>
+                <button class="ingest-tab" data-ingest-mode="folder" onclick="switchAcquisitionMode('folder')">本地文件夹</button>
             </div>
 
             <div id="acq-pdf" class="acq-panel">
                 <div class="writer-block" style="padding: 16px; margin-bottom: 16px;">
-                    <h4 style="margin-bottom: 6px;">鐩存帴涓婁紶 PDF 鏂囦欢</h4>
-                    <p class="subtle" style="margin-bottom: 12px;">鏂板缓鏂囩尞鏉＄洰骞惰嚜鍔ㄦ彁鍙栨枃鐚厓鏁版嵁涓庢鏂囥€?/p>
-                    <button class="btn primary small" onclick="document.getElementById('pdfUpload').click()">閫夋嫨 PDF 骞朵笂浼?/button>
+                    <h4 style="margin-bottom: 6px;">直接上传 PDF 文件</h4>
+                    <p class="subtle" style="margin-bottom: 12px;">新建文献条目并自动提取文献元数据与正文。</p>
+                    <button class="btn primary small" onclick="document.getElementById('pdfUpload').click()">选择 PDF 并上传</button>
                 </div>
                 <div class="writer-block" style="padding: 16px; margin-bottom: 0;">
-                    <h4 style="margin-bottom: 6px;">鍏宠仈鍒板凡鏈夊厓鏁版嵁鏂囩尞</h4>
-                    <p class="subtle" style="margin-bottom: 12px;">涓哄簱涓幇鏈夌殑鍏冩暟鎹潯鐩紙浠呭厓鏁版嵁/灏氭棤PDF锛変笂浼犲苟缁戝畾 PDF 鏂囦欢銆?/p>
+                    <h4 style="margin-bottom: 6px;">关联到已有元数据文献</h4>
+                    <p class="subtle" style="margin-bottom: 12px;">为库中现有的元数据条目（仅元数据/尚无PDF）上传并绑定 PDF 文件。</p>
                     <div class="inline-form" style="margin-bottom: 8px;">
                         <select id="attachPaperSelect" style="flex: 1; min-width: 240px; height: 32px; font-size: 13px; padding: 0 8px;">
-                            <option value="">鍔犺浇涓?..</option>
+                            <option value="">加载中...</option>
                         </select>
-                        <button class="btn primary small" onclick="triggerAttachPDF()">涓婁紶 PDF 骞跺悎骞?/button>
+                        <button class="btn primary small" onclick="triggerAttachPDF()">上传 PDF 并合并</button>
                     </div>
                     <input id="attachPdfInputModal" type="file" accept=".pdf" style="display: none;" onchange="uploadAttachPDFModal(this)">
                 </div>
             </div>
 
             <div id="acq-doi" class="acq-panel" style="display:none;">
-                <label for="doiInput">DOI 鎴栨枃鐚?URL</label>
+                <label for="doiInput">DOI 或文献 URL</label>
                 <div class="inline-form">
-                    <input id="doiInput" class="search-input" type="text" placeholder="10.1016/j.ensm.2023.102875 鎴?https://arxiv.org/abs/...">
-                    <button class="btn primary" onclick="downloadByDOI()">涓嬭浇骞舵敹褰?/button>
+                    <input id="doiInput" class="search-input" type="text" placeholder="10.1016/j.ensm.2023.102875 或 https://arxiv.org/abs/...">
+                    <button class="btn primary" onclick="downloadByDOI()">下载并收录</button>
                 </div>
             </div>
 
             <div id="acq-online" class="acq-panel" style="display:none;">
-                <label for="onlineSearchQuery">鍦ㄧ嚎妫€绱㈠叧閿瘝</label>
+                <label for="onlineSearchQuery">在线检索关键词</label>
                 <div class="inline-form">
-                    <input id="onlineSearchQuery" class="search-input" type="text" placeholder="杈撳叆鏍囬銆佸叧閿瘝銆佷綔鑰呮垨 DOI">
-                    <input id="onlineSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="鍗曟鏈€澶氭绱?100 绡?>
-                    <button class="btn primary" onclick="searchOnline()">妫€绱?/button>
+                    <input id="onlineSearchQuery" class="search-input" type="text" placeholder="输入标题、关键词、作者或 DOI">
+                    <input id="onlineSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="单次最多检索 100 篇">
+                    <button class="btn primary" onclick="searchOnline()">检索</button>
                 </div>
             </div>
 
             <div id="acq-ai" class="acq-panel" style="display:none;">
-                <label for="aiSearchQuery">AI 鏂囩尞妫€绱㈡彁绀鸿瘝</label>
+                <label for="aiSearchQuery">AI 文献检索提示词</label>
                 <div class="inline-form">
-                    <input id="aiSearchQuery" class="search-input" type="text" placeholder="渚嬪锛歭ithium sulfur battery CeO2 catalyst mechanism">
-                    <input id="aiSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="鍗曟鏈€澶氭绱?100 绡?>
-                    <input id="aiWorkflowMaxDownloads" class="small-input" type="number" value="100" min="1" max="100" title="鍗曟鏈€澶氭敹褰?100 绡?>
-                    <button class="btn primary" onclick="runAISearch()">AI 鎼滅储</button>
-                    <button class="btn ghost" onclick="runAIWorkflow()">鎼滅储骞舵敹褰?/button>
+                    <input id="aiSearchQuery" class="search-input" type="text" placeholder="例如：lithium sulfur battery CeO2 catalyst mechanism">
+                    <input id="aiSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="单次最多检索 100 篇">
+                    <input id="aiWorkflowMaxDownloads" class="small-input" type="number" value="100" min="1" max="100" title="单次最多收录 100 篇">
+                    <button class="btn primary" onclick="runAISearch()">AI 搜索</button>
+                    <button class="btn ghost" onclick="runAIWorkflow()">搜索并收录</button>
                 </div>
             </div>
 
             <div id="acq-folder" class="acq-panel" style="display:none;">
                 <div class="section-card no-margin">
-                    <h3>瀵煎叆鏈湴鏂囦欢澶?/h3>
-                    <div class="subtle">鎵归噺鎵弿鏈湴 PDF 鐩墠鐢?Ingestion Center / MCP 宸ュ叿鎵挎帴銆傝繖閲屼繚鐣欐竻鏅板叆鍙ｏ紝閬垮厤鏂囩尞搴撻〉闈㈤噸澶嶅爢鍙犳壒閲忓鍏ユ帶浠躲€?/div>
+                    <h3>导入本地文件夹</h3>
+                    <div class="subtle">批量扫描本地 PDF 目前由 Ingestion Center / MCP 工具承接。这里保留清晰入口，避免文献库页面重复堆叠批量导入控件。</div>
                     <div class="modal-actions" style="justify-content:flex-start;">
-                        <button class="btn primary" onclick="window.location.href='../ingestion/index.html'">鍓嶅線 Ingestion Center</button>
-                        <button class="btn ghost" onclick="showFolderImportGuide()">鏌ョ湅 MCP 鎸囧崡</button>
+                        <button class="btn primary" onclick="window.location.href='../ingestion/index.html'">前往 Ingestion Center</button>
+                        <button class="btn ghost" onclick="showFolderImportGuide()">查看 MCP 指南</button>
                     </div>
                 </div>
             </div>
@@ -314,54 +295,54 @@
 
     <div id="createLibDialog" class="modal-overlay">
         <div class="modal">
-            <h3>鏂板缓鏂囩尞搴?/h3>
-            <label for="createLibName">搴撳悕绉?/label>
-            <input id="createLibName" type="text" placeholder="渚嬪锛氶攤纭數姹犵患杩?>
-            <label>閫夋嫨瀛樺偍浣嶇疆</label>
-            <p class="dialog-hint">杩欓噷閫夋嫨鐨勬槸鐖剁洰褰曘€傜郴缁熶細鍦ㄨ鐩綍涓嬭嚜鍔ㄦ柊寤轰竴涓笌搴撳悕绉板悓鍚嶇殑瀛愮洰褰曘€?/p>
+            <h3>新建文献库</h3>
+            <label for="createLibName">库名称</label>
+            <input id="createLibName" type="text" placeholder="例如：锂硫电池综述">
+            <label>选择存储位置</label>
+            <p class="dialog-hint">这里选择的是父目录。系统会在该目录下自动新建一个与库名称同名的子目录。</p>
             <div id="createLibSelectedPath" class="selected-path"></div>
             <div id="createLibResolvedPath" class="path-preview subtle"></div>
-            <div id="createLibDirBrowser" class="dir-browser">鍔犺浇涓?..</div>
+            <div id="createLibDirBrowser" class="dir-browser">加载中...</div>
             <div class="modal-actions">
-                <button class="btn ghost" onclick="setCreateDefaultLocation()">浣跨敤榛樿浣嶇疆</button>
-                <button class="btn ghost" onclick="closeCreateLibraryDialog()">鍙栨秷</button>
-                <button class="btn primary" onclick="submitCreateLibrary()">鍒涘缓</button>
+                <button class="btn ghost" onclick="setCreateDefaultLocation()">使用默认位置</button>
+                <button class="btn ghost" onclick="closeCreateLibraryDialog()">取消</button>
+                <button class="btn primary" onclick="submitCreateLibrary()">创建</button>
             </div>
         </div>
     </div>
 
     <div id="importLibDialog" class="modal-overlay">
         <div class="modal">
-            <h3>瀵煎叆宸叉湁鏂囩尞搴?/h3>
-            <label>閫夋嫨宸叉湁搴撶洰褰?/label>
-            <p class="dialog-hint">璇烽€夋嫨宸茬粡瀛樺湪鐨勬枃鐚簱鏍圭洰褰曪紝鑰屼笉鏄櫘閫氱敤鎴风洰褰曘€傜洰褰曞唴鑷冲皯搴斿凡鏈?`database.sqlite`銆乣library.json`銆乣config/project_config.json`銆乣storage/` 鎴?`papers/` 涔嬩竴銆?/p>
+            <h3>导入已有文献库</h3>
+            <label>选择已有库目录</label>
+            <p class="dialog-hint">请选择已经存在的文献库根目录，而不是普通用户目录。目录内至少应已有 `database.sqlite`、`library.json`、`config/project_config.json`、`storage/` 或 `papers/` 之一。</p>
             <div id="importLibSelectedPath" class="selected-path"></div>
-            <div id="importLibDirBrowser" class="dir-browser">鍔犺浇涓?..</div>
+            <div id="importLibDirBrowser" class="dir-browser">加载中...</div>
             <div class="modal-actions">
-                <button class="btn ghost" onclick="closeImportLibraryDialog()">鍙栨秷</button>
-                <button class="btn primary" onclick="submitImportLibrary()">瀵煎叆</button>
+                <button class="btn ghost" onclick="closeImportLibraryDialog()">取消</button>
+                <button class="btn primary" onclick="submitImportLibrary()">导入</button>
             </div>
         </div>
     </div>
 
     <div id="removeLibDialog" class="modal-overlay">
         <div class="modal">
-            <h3>绉婚櫎鏂囩尞搴?/h3>
+            <h3>移除文献库</h3>
             <p id="removeLibMsg" class="prewrap"></p>
-            <p class="subtle" style="margin-top:8px;">鍙細浠庢敞鍐岃〃绉婚櫎锛屼笉浼氬垹闄ゅ疄闄呮枃浠躲€?/p>
+            <p class="subtle" style="margin-top:8px;">只会从注册表移除，不会删除实际文件。</p>
             <div class="modal-actions">
-                <button class="btn ghost" onclick="closeRemoveLibraryDialog()">鍙栨秷</button>
-                <button class="btn danger" onclick="confirmRemoveLibrary()">绉婚櫎</button>
+                <button class="btn ghost" onclick="closeRemoveLibraryDialog()">取消</button>
+                <button class="btn danger" onclick="confirmRemoveLibrary()">移除</button>
             </div>
         </div>
     </div>
 
     <div id="deletePaperDialog" class="modal-overlay">
         <div class="modal">
-            <h3>鍒犻櫎褰撳墠鏂囩尞</h3>
-            <p class="subtle">榛樿鍙垹闄ゆ暟鎹簱璁板綍锛屼笉鍒犻櫎鍘?PDF 鏂囦欢銆?/p>
+            <h3>删除当前文献</h3>
+            <p class="subtle">默认只删除数据库记录，不删除原 PDF 文件。</p>
             <div class="key-value" style="margin-top:12px;">
-                <div class="k">鏍囬</div>
+                <div class="k">标题</div>
                 <div id="deletePaperTitle" class="v doi-clamped">-</div>
             </div>
             <div class="key-value" style="margin-top:10px;">
@@ -369,12 +350,12 @@
                 <div id="deletePaperDoi" class="v doi-clamped">-</div>
             </div>
             <div class="delete-options">
-                <label><input type="checkbox" id="deletePaperPdfFiles"> 鍚屾椂鍒犻櫎鍘?PDF 鏂囦欢</label>
-                <label><input type="checkbox" id="deletePaperDerivedFiles"> 鍚屾椂鍒犻櫎瑙ｆ瀽浜х墿鏂囦欢锛圱EI / Markdown / Docling JSON / 鍥剧墖锛?/label>
+                <label><input type="checkbox" id="deletePaperPdfFiles"> 同时删除原 PDF 文件</label>
+                <label><input type="checkbox" id="deletePaperDerivedFiles"> 同时删除解析产物文件（TEI / Markdown / Docling JSON / 图片）</label>
             </div>
             <div class="modal-actions">
-                <button class="btn ghost" onclick="closeDeletePaperDialog(event)">鍙栨秷</button>
-                <button class="btn danger" onclick="confirmDeleteCurrentPaper(event)">纭鍒犻櫎</button>
+                <button class="btn ghost" onclick="closeDeletePaperDialog(event)">取消</button>
+                <button class="btn danger" onclick="confirmDeleteCurrentPaper(event)">确认删除</button>
             </div>
         </div>
     </div>
@@ -404,9 +385,9 @@
             </div>
             <!-- PDF unavailable message -->
             <div id="pdfViewerUnavailable" style="display:none;padding:40px;text-align:center;border:1px dashed var(--color-warning);border-radius:var(--radius-lg);background:var(--color-warning-bg);">
-                <div style="font-size:16px;font-weight:700;color:var(--color-warning);margin-bottom:8px;">PDF 尚未上传或暂不可预览</div>
-                <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:10px;">这篇文献暂时没有可用的 PDF 文件，因此当前无法进行浏览器预览，也无法执行基于 PDF 页码的证据跳转。</div>
-                <div style="font-size:12px;color:var(--color-text-secondary);">请先上传 PDF；如果你想确认是否已经生成证据定位结果，请回到文献内容区的“PDF 证据定位”卡片查看。</div>
+                <div style="font-size:16px;font-weight:700;color:var(--color-warning);margin-bottom:8px;">PDF 尚未上传或不可预览</div>
+                <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:10px;">该文献暂无 PDF 文件，因此当前无法进行浏览器预览，也无法执行基于 PDF 页码的证据跳转。</div>
+                <div style="font-size:12px;color:var(--color-text-secondary);">请先上传 PDF；如果你想查看是否已有证据定位结果，请回到文献内容区的“PDF 证据定位”卡片查看。</div>
             </div>
             <!-- PDF content area with side panel -->
             <div id="pdfViewerContent" style="flex:1;display:flex;gap:12px;overflow:hidden;min-height:0;">
@@ -422,6 +403,7 @@
 
     <script src="./state.js?v=20260531-loadfix" defer></script>
     <script src="./api.js?v=20260603-zhfix1" defer></script>
+    <script src="./library_runtime_fix.js?v=20260603-zhfix1" defer></script>
     <script src="./render-list.js?v=20260603-zhfix1" defer></script>
     <script src="./render-detail.js?v=20260603-zhfix1" defer></script>
     <script src="./jobs.js?v=20260603-zhfix1" defer></script>

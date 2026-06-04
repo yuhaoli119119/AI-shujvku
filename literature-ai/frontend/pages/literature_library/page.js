@@ -53,8 +53,6 @@ function getFilters() {
     const params = new URLSearchParams();
     params.set("limit", PAGE_SIZE);
     params.set("offset", state.currentOffset);
-    params.set("sort_by", "year_serial");
-    params.set("sort_order", "asc");
     const libraryName = getCurrentLibraryName();
     const searchInput = $("searchInput");
     const filterYear = $("filterYear");

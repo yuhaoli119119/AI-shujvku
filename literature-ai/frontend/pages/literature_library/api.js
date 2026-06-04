@@ -57,7 +57,7 @@ async function fetchJSON(url, options) {
     
     // Error handling with dynamic administrative guidance if 403 occurs
     if (resp.status === 403) {
-        showToast("无权访问这个接口。请先在[设置]中配置管理员 Token，或确认当前是本地请求。", "error");
+        showToast("无权访问该接口。请先在[设置]中配置管理员 Token 或确认是否为本地请求。", "error");
         throw new Error("403 Forbidden: Admin Token Required");
     }
 
@@ -279,7 +279,7 @@ async function loadLibraries() {
         if (el) {
             el.innerHTML = (quickLibraries || []).map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
-                    esc(item.name) + " (" + esc(item.paper_count || 0) + " 篇)" +
+                    esc(item.name) + "（" + esc(item.paper_count || 0) + " 篇）" +
                 "</option>";
             }).join("");
         }
@@ -362,7 +362,7 @@ async function removeCurrentLibrary() {
         const libraries = await fetchJSON(LIB_API);
         const active = (libraries || []).find(function(item) { return item.is_active; });
         if (!active) {
-            showToast("当前没有激活的文库。", "error");
+            showToast("当前没有激活的库。", "error");
             return;
         }
         window._removeLibName = active.name;
@@ -371,7 +371,7 @@ async function removeCurrentLibrary() {
         const dialog = $("removeLibDialog");
         if (dialog) dialog.style.display = "flex";
     } catch (error) {
-        showToast("读取文库信息失败：" + error.message, "error");
+        showToast("读取库信息失败：" + error.message, "error");
     }
 }
 
@@ -385,7 +385,7 @@ async function confirmRemoveLibrary() {
     try {
         await fetchJSON(LIB_API + "/" + encodeURIComponent(window._removeLibName), { method: "DELETE" });
         closeRemoveLibraryDialog();
-        showToast("文库已移除。", "success");
+        showToast("库已移除。", "success");
         await loadLibraries();
         state.currentOffset = 0;
         refreshCurrentPage();
@@ -426,7 +426,7 @@ async function renderDirBrowser(kind, path) {
         });
         html += "</div>";
         (data.subdirs || []).forEach(function(item) {
-            html += '<div class="dir-item" data-path="' + esc(item.path) + '">馃搧 ' + esc(item.name) + "</div>";
+            html += '<div class="dir-item" data-path="' + esc(item.path) + '">📁 ' + esc(item.name) + "</div>";
         });
         if (el) {
             el.innerHTML = html;
@@ -499,7 +499,7 @@ async function submitCreateLibrary() {
             body: JSON.stringify({ name: name, root_path: window._selectedPath_createLib || "" })
         });
         closeCreateLibraryDialog();
-        showToast("文库创建成功。", "success");
+        showToast("库创建成功。", "success");
         await loadLibraries();
         refreshCurrentPage();
     } catch (error) {
@@ -533,7 +533,7 @@ async function submitImportLibrary() {
             body: JSON.stringify({ root_path: window._selectedPath_importLib })
         });
         closeImportLibraryDialog();
-        showToast("文库导入成功。", "success");
+        showToast("库导入成功。", "success");
         await loadLibraries();
         refreshCurrentPage();
     } catch (error) {
@@ -545,7 +545,7 @@ async function fetchExtractionReviewAudit(paperId) {
     return await fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit");
 }
 
-// 鈹€鈹€ G3B Evidence Locator API 鈹€鈹€
+// ── G3B Evidence Locator API ──
 
 async function fetchPaperEvidenceLocators(paperId) {
     try {
@@ -591,7 +591,7 @@ loadLibraries = async function() {
         if (el) {
             el.innerHTML = (quickLibraries || []).map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
-                    esc(item.name) + " (" + esc(item.paper_count || 0) + " 篇)" +
+                    esc(item.name) + "（" + esc(item.paper_count || 0) + " 篇）" +
                 "</option>";
             }).join("");
         }
@@ -738,14 +738,14 @@ submitCreateLibrary = async function() {
             body: JSON.stringify({ name: name, root_path: window._selectedPath_createLib || "" })
         });
         closeCreateLibraryDialog();
-        showToast("文库创建成功。", "success");
+        showToast("库创建成功。", "success");
         await loadLibraries();
         refreshCurrentPage();
     } catch (error) {
         if (String(error.message || "").includes("already exists")) {
             closeCreateLibraryDialog();
             await activateLibraryByName(name);
-            showToast("同名文献库已经存在，已直接切换到该文库。", "info");
+            showToast("同名文献库已经存在，已直接切换到该库。", "info");
             return;
         }
         showToast("创建失败：" + error.message, "error");
@@ -764,7 +764,7 @@ submitImportLibrary = async function() {
             body: JSON.stringify({ root_path: window._selectedPath_importLib })
         });
         closeImportLibraryDialog();
-        showToast("文库导入成功。", "success");
+        showToast("库导入成功。", "success");
         await loadLibraries();
         refreshCurrentPage();
     } catch (error) {
@@ -777,11 +777,10 @@ submitImportLibrary = async function() {
             } else {
                 await loadLibraries();
             }
-            showToast("这个文献库已经导入过，已直接切换到现有文库。", "info");
+            showToast("这个文献库已经导入过了，已直接切换到现有库。", "info");
             return;
         }
         showToast("导入失败：" + error.message, "error");
     }
 };
-
 
