@@ -55,7 +55,8 @@ async def start_ai_workflow_job(
     )
     dispatch_mode = "reused_active"
     if not reused:
-        dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=settings.database_url)
+        db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else settings.database_url
+        dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
         if dispatch_mode != "celery":
             session.refresh(job)
     data = serialize_job(job)

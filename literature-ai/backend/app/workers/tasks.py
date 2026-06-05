@@ -35,5 +35,5 @@ def rerun_stage2_task(paper_id: str) -> dict[str, int | str]:
 
 
 @celery_app.task(name="papers.run_workflow_job")
-def run_workflow_job_task(job_id: str) -> None:
-    run_workflow_job_by_id(job_id)
+def run_workflow_job_task(job_id: str, control_database_url: str | None = None) -> None:
+    run_workflow_job_by_id(job_id, control_database_url)

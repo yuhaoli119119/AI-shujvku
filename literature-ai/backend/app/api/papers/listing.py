@@ -149,6 +149,25 @@ async def stream_papers(
 ):
     settings = get_settings()
 
+    def fetch_paper_snapshot():
+        with session_scope(settings.database_url) as poll_session:
+            total_stmt = select(func.count(Paper.id))
+            max_created_stmt = select(func.max(Paper.created_at))
+            max_serial_stmt = select(func.max(Paper.serial_number))
+            if library_name is not None:
+                clause = build_library_name_clause(Paper.library_name, library_name)
+                total_stmt = total_stmt.where(clause)
+                max_created_stmt = max_created_stmt.where(clause)
+                max_serial_stmt = max_serial_stmt.where(clause)
+            total_papers = poll_session.scalar(total_stmt) or 0
+            max_created = poll_session.scalar(max_created_stmt)
+            max_serial = poll_session.scalar(max_serial_stmt)
+            return {
+                "total": int(total_papers),
+                "max_created": max_created.isoformat() if max_created else None,
+                "max_serial": int(max_serial or 0),
+            }
+
     def fetch_updated_papers():
         with session_scope(settings.database_url) as poll_session:
             filters = PaperListFilterParams(
@@ -171,21 +190,24 @@ async def stream_papers(
             return [paper.model_dump(mode="json") for paper in papers], total_papers
 
     async def event_generator():
-        last_count = -1
+        last_snapshot = None
         error_count = 0
         while True:
             try:
                 if await request.is_disconnected():
                     break
 
-                papers, total_papers = await run_in_threadpool(fetch_updated_papers)
+                snapshot = await run_in_threadpool(fetch_paper_snapshot)
                 error_count = 0
-                current_count = len(papers)
-                if current_count != last_count:
-                    last_count = current_count
+                if snapshot != last_snapshot:
+                    last_snapshot = snapshot
+                    papers, total_papers = await run_in_threadpool(fetch_updated_papers)
+                    current_count = len(papers)
                     yield f"event: papers_update\ndata: {json.dumps(papers)}\n\n"
-                yield f"event: heartbeat\ndata: {json.dumps({'total': total_papers, 'displayed': current_count})}\n\n"
-                await asyncio.sleep(3)
+                    yield f"event: heartbeat\ndata: {json.dumps({'total': total_papers, 'displayed': current_count})}\n\n"
+                else:
+                    yield f"event: heartbeat\ndata: {json.dumps({'total': snapshot['total']})}\n\n"
+                await asyncio.sleep(8)
             except Exception as exc:
                 logging.getLogger(__name__).error("Error in SSE papers stream: %s", exc, exc_info=True)
                 yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"

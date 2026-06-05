@@ -95,7 +95,11 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+    command: >
+      celery -A app.workers.celery_app.celery_app worker --loglevel=info
+      --concurrency=${LITAI_CELERY_CONCURRENCY:-1}
+      --prefetch-multiplier=1
+      --max-tasks-per-child=${LITAI_CELERY_MAX_TASKS_PER_CHILD:-5}
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
       LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-false}

@@ -129,6 +129,20 @@ def post_json(url: str, payload: dict[str, Any], *, timeout: float = 240.0) -> d
     return response.json()
 
 
+def wait_job(job_id: str, *, timeout: float = 900.0, interval: float = 3.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = get_json(f"{API_BASE}/api/jobs/{job_id}", timeout=30)
+        status = job.get("status")
+        if status == "completed":
+            result = job.get("result") if isinstance(job.get("result"), dict) else {}
+            return result or job
+        if status in {"failed", "cancelled"}:
+            raise RuntimeError(job.get("error") or f"job {job_id} {status}")
+        time.sleep(interval)
+    raise TimeoutError(f"Timed out waiting for job {job_id}")
+
+
 def record_activity(
     action: str,
     *,
@@ -466,7 +480,8 @@ def import_candidate(candidate: Candidate) -> None:
     if candidate.downloaded_pdf:
         payload = {"pdf_path": to_container_path(candidate.downloaded_pdf), **metadata}
         try:
-            result = post_json(f"{API_BASE}/api/papers/ingest/path", payload)
+            job = post_json(f"{API_BASE}/api/papers/ingest/path/jobs", payload, timeout=30)
+            result = wait_job(job["job_id"])
         except Exception as exc:
             candidate.import_status = "failed"
             candidate.import_error = str(exc)
@@ -474,15 +489,16 @@ def import_candidate(candidate: Candidate) -> None:
     else:
         identifier = candidate.doi or candidate.source_url or candidate.title
         try:
-            result = post_json(
-                f"{API_BASE}/api/papers/discovery/download",
+            job = post_json(
+                f"{API_BASE}/api/papers/discovery/download/jobs",
                 {
                     "identifier": identifier,
                     "providers": ["openalex", "crossref", "arxiv", "semantic_scholar", "web_scraping"],
                     "library_name": LIBRARY_NAME,
                 },
-                timeout=180,
+                timeout=30,
             )
+            result = wait_job(job["job_id"])
         except Exception as exc:
             candidate.import_status = "failed"
             candidate.import_error = str(exc)

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -19,7 +20,15 @@ from app.schemas.api import (
 from app.services.discovery_service import DiscoveryService
 from app.services.paper_identity import PaperIdentityService
 from app.services.paper_ingestion import PaperIngestionService
-from app.services.workflow_jobs import download_discovery_candidate, normalize_library_name
+from app.services.workflow_jobs import (
+    JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
+    build_job_runtime_context,
+    create_job_or_reuse_active,
+    dispatch_job,
+    download_discovery_candidate,
+    normalize_library_name,
+    serialize_job,
+)
 
 from .common import rewrite_ai_search_query
 
@@ -36,11 +45,48 @@ def _find_existing_paper(session: Session, doi: str | None, title: str | None):
 async def discovery_search(
     q: str = Query(..., min_length=2, description="Keyword query for external literature search"),
     providers: list[str] = Query(default=["openalex", "arxiv"], description="External search providers"),
-    limit: int = Query(default=50, ge=1, le=200, description="Maximum number of returned results"),
+    limit: int = Query(default=30, ge=1, le=80, description="Maximum number of returned results"),
 ) -> DiscoverySearchResponse:
     service = DiscoveryService()
     items = service.search(query=q, providers=providers, limit=limit)
     return DiscoverySearchResponse(query=q, providers=providers, total=len(items), items=items)
+
+
+@router.post("/discovery/download/jobs")
+async def queue_discovery_download_and_ingest(
+    payload: DiscoveryDownloadRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    target_library = normalize_library_name(payload.library_name)
+    job_payload = {
+        "identifier": payload.identifier,
+        "providers": payload.providers,
+        "library_name": target_library,
+    }
+    job, reused = create_job_or_reuse_active(
+        session,
+        job_type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
+        library_name=target_library,
+        payload=job_payload,
+        runtime_context=build_job_runtime_context(settings),
+        progress={
+            "phase": "queued",
+            "message": "Discovery download ingest is queued in the worker.",
+            "identifier": payload.identifier,
+        },
+    )
+    dispatch_mode = "reused_active"
+    if not reused:
+        db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else settings.database_url
+        dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
+        if dispatch_mode != "celery":
+            session.refresh(job)
+    data = serialize_job(job)
+    data["dispatch_mode"] = dispatch_mode
+    data["deduplicated"] = reused
+    return data
 
 
 @router.post("/discovery/download", response_model=IngestResponse)

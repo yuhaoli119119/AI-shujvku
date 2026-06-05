@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,22 @@ def record_activity(action: str, **extra: Any) -> None:
     requests.post(f"{API_BASE}/api/jobs/agent-activities", json=payload, timeout=20).raise_for_status()
 
 
+def wait_job(job_id: str, *, timeout: float = 900.0, interval: float = 3.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        response = requests.get(f"{API_BASE}/api/jobs/{job_id}", timeout=30)
+        response.raise_for_status()
+        job = response.json()
+        status = job.get("status")
+        if status == "completed":
+            result = job.get("result") if isinstance(job.get("result"), dict) else {}
+            return result or job
+        if status in {"failed", "cancelled"}:
+            raise RuntimeError(job.get("error") or f"job {job_id} {status}")
+        time.sleep(interval)
+    raise TimeoutError(f"Timed out waiting for job {job_id}")
+
+
 def container_path(host_path: Path) -> str:
     data_root = (ROOT / "data").resolve()
     rel = host_path.resolve().relative_to(data_root).as_posix()
@@ -116,9 +133,9 @@ def main() -> int:
             "abstract": item["abstract"],
             "library_name": LIBRARY_NAME,
         }
-        response = requests.post(f"{API_BASE}/api/papers/ingest/path", json=payload, timeout=360)
+        response = requests.post(f"{API_BASE}/api/papers/ingest/path/jobs", json=payload, timeout=30)
         response.raise_for_status()
-        data = response.json()
+        data = wait_job(response.json()["job_id"])
         imported.append({"paper_id": data.get("paper_id"), "doi": item["doi"], "title": item["title"]})
 
     record_activity(

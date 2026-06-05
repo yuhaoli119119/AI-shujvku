@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -10,6 +11,11 @@ from typing import Any
 import httpx
 
 from app.utils.text_cleaning import normalize_text_tree
+
+
+_SEARCH_CACHE_TTL_SECONDS = 600
+_SEARCH_CACHE_MAX_ENTRIES = 128
+_SEARCH_CACHE: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
 
 
 class DiscoveryService:
@@ -39,6 +45,17 @@ class DiscoveryService:
         if not active_providers:
             return []
 
+        cache_key = (
+            normalized_query.lower(),
+            tuple(active_providers),
+            int(limit),
+            tuple(sorted(target_types or [])),
+        )
+        now = time.monotonic()
+        cached = _SEARCH_CACHE.get(cache_key)
+        if cached and now - cached[0] <= _SEARCH_CACHE_TTL_SECONDS:
+            return [dict(item) for item in cached[1]]
+
         merged: list[dict[str, Any]] = []
         seen_keys: set[str] = set()
         per_provider_limit = max(1, math.ceil(limit / max(len(active_providers), 1)))
@@ -63,8 +80,17 @@ class DiscoveryService:
                 seen_keys.add(key)
                 merged.append(item)
                 if len(merged) >= limit:
-                    return merged
-        return merged[:limit]
+                    return self._cache_search_result(cache_key, merged)
+        return self._cache_search_result(cache_key, merged[:limit])
+
+    @staticmethod
+    def _cache_search_result(cache_key: tuple[Any, ...], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX_ENTRIES:
+            oldest_key = min(_SEARCH_CACHE.items(), key=lambda item: item[1][0])[0]
+            _SEARCH_CACHE.pop(oldest_key, None)
+        snapshot = [dict(item) for item in items]
+        _SEARCH_CACHE[cache_key] = (time.monotonic(), snapshot)
+        return [dict(item) for item in snapshot]
 
     def fetch_metadata(
         self,

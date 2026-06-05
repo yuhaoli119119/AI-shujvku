@@ -42,6 +42,8 @@ JOB_TYPE_AI_WORKFLOW = "ai_workflow"
 JOB_TYPE_CLASSIFY_BATCH = "classify_batch"
 JOB_TYPE_EXTRACTION = "extraction"
 JOB_TYPE_AGENT_ACTIVITY = "agent_activity"
+JOB_TYPE_LOCAL_PDF_PATH_INGEST = "local_pdf_path_ingest"
+JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST = "discovery_download_ingest"
 JOB_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
 ACTIVE_JOB_STATUSES = {"queued", "running"}
 
@@ -263,6 +265,28 @@ def build_job_summary(job: WorkflowJob) -> dict[str, Any]:
                 "failure_count": _first_int(progress.get("failed"), result.get("failed_count"), _safe_len(failed_items)),
             }
         )
+    elif job.type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
+        summary.update(
+            {
+                "source_label": "本地 PDF 队列入库",
+                "paper_id": result.get("paper_id") or progress.get("paper_id"),
+                "paper_title": result.get("title") or progress.get("title"),
+                "source_path": payload.get("pdf_path"),
+                "success_count": 1 if job.status == "completed" else 0,
+                "failure_count": 1 if job.status == "failed" else 0,
+            }
+        )
+    elif job.type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
+        summary.update(
+            {
+                "source_label": "在线下载队列入库",
+                "paper_id": result.get("paper_id") or progress.get("paper_id"),
+                "paper_title": result.get("title") or progress.get("title"),
+                "identifier": payload.get("identifier"),
+                "success_count": 1 if job.status == "completed" else 0,
+                "failure_count": 1 if job.status == "failed" else 0,
+            }
+        )
     elif job.type == JOB_TYPE_AGENT_ACTIVITY:
         metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
         action = payload.get("action") or progress.get("action") or "activity"
@@ -382,6 +406,10 @@ def _normalized_job_key(job_type: str, library_name: str | None, payload: dict[s
         return (job_type, library, str(data.get("paper_id") or ""))
     if job_type == JOB_TYPE_CLASSIFY_BATCH:
         return (job_type, library, bool(data.get("overwrite")))
+    if job_type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
+        return (job_type, library, str(data.get("pdf_path") or "").strip().lower())
+    if job_type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
+        return (job_type, library, str(data.get("identifier") or "").strip().lower())
     return (job_type, library)
 
 
@@ -578,6 +606,10 @@ def clone_job_for_retry_with_status(session: Session, job_id: str) -> tuple[Work
         )
     if source_type == JOB_TYPE_EXTRACTION:
         retry_progress.update({"paper_id": retry_payload.get("paper_id"), "schemas": retry_payload.get("schemas")})
+    if source_type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
+        retry_progress.update({"source_path": retry_payload.get("pdf_path")})
+    if source_type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
+        retry_progress.update({"identifier": retry_payload.get("identifier")})
 
     retry = create_job(
         session,
@@ -697,6 +729,200 @@ async def download_discovery_candidate(
             return await run_in_threadpool(service.download_pdf_url, str(pdf_url), dest_dir, filename)
         except Exception:
             raise primary_exc
+
+
+def _external_metadata_from_ingest_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    keys = ("title", "doi", "authors", "year", "journal", "abstract")
+    metadata = {key: payload.get(key) for key in keys if payload.get(key)}
+    return metadata or None
+
+
+def run_local_pdf_path_ingest_job(job_id: str, control_database_url: str | None = None) -> None:
+    base_settings = get_settings()
+    control_db_url = control_database_url or base_settings.database_url
+    with session_scope(control_db_url) as control_session:
+        job = get_job_or_raise(control_session, job_id)
+        if job.status == "cancelled":
+            return
+        runtime_settings = build_runtime_settings(base_settings, job.runtime_context)
+        payload = dict(job.payload or {})
+        job_library_name = job.library_name
+        update_job(
+            control_session,
+            job_id,
+            status="running",
+            progress={
+                "phase": "ingest_pdf",
+                "message": "Parsing local PDF in the worker queue.",
+                "source_path": payload.get("pdf_path"),
+            },
+            error=None,
+        )
+
+    try:
+        source_path = Path(str(payload.get("pdf_path") or ""))
+        if not source_path.exists():
+            raise FileNotFoundError(f"PDF path does not exist: {source_path}")
+
+        with session_scope(runtime_settings.database_url) as job_session:
+            assert_job_not_cancelled(job_session, job_id)
+            ingestion = PaperIngestionService(session=job_session, settings=runtime_settings)
+            paper = asyncio.run(
+                ingestion.ingest_pdf(
+                    source_path=source_path,
+                    original_filename=source_path.name,
+                    external_metadata=_external_metadata_from_ingest_payload(payload),
+                    source_reference=str(source_path.resolve()),
+                    library_name=normalize_library_name(payload.get("library_name") or job_library_name),
+                    ingest_source="local_pdf",
+                )
+            )
+            result = {
+                "paper_id": str(paper.id),
+                "title": paper.title,
+                "status": getattr(paper, "_ingest_status", "completed"),
+            }
+            assert_job_not_cancelled(job_session, job_id)
+
+        with session_scope(control_db_url) as control_session:
+            update_job(
+                control_session,
+                job_id,
+                status="completed",
+                progress={
+                    "phase": "completed",
+                    "message": "Local PDF ingest completed.",
+                    "paper_id": result["paper_id"],
+                    "title": result["title"],
+                    "ingested": 1,
+                },
+                result=result,
+                error=None,
+            )
+    except JobCancelledError:
+        with session_scope(control_db_url) as control_session:
+            job = get_job(control_session, job_id)
+            if job and job.status != "cancelled":
+                update_job(control_session, job_id, status="cancelled", progress=_merge_progress(job.progress, {"phase": "cancelled"}))
+    except Exception as exc:
+        logger.exception("Local PDF path ingest job failed: %s", job_id)
+        with session_scope(control_db_url) as control_session:
+            update_job(
+                control_session,
+                job_id,
+                status="failed",
+                progress={"phase": "failed", "failure_code": classify_failure_code(reason=str(exc))},
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+
+def run_discovery_download_ingest_job(job_id: str, control_database_url: str | None = None) -> None:
+    base_settings = get_settings()
+    control_db_url = control_database_url or base_settings.database_url
+    with session_scope(control_db_url) as control_session:
+        job = get_job_or_raise(control_session, job_id)
+        if job.status == "cancelled":
+            return
+        runtime_settings = build_runtime_settings(base_settings, job.runtime_context)
+        payload = dict(job.payload or {})
+        job_library_name = job.library_name
+        update_job(
+            control_session,
+            job_id,
+            status="running",
+            progress={
+                "phase": "fetch_metadata",
+                "message": "Fetching metadata and downloading PDF in the worker queue.",
+                "identifier": payload.get("identifier"),
+            },
+            error=None,
+        )
+
+    try:
+        identifier = str(payload.get("identifier") or "").strip()
+        if not identifier:
+            raise ValueError("Missing identifier")
+
+        service = DiscoveryService()
+        providers = payload.get("providers") if isinstance(payload.get("providers"), list) else None
+        raw_paper, metadata = service.fetch_metadata(identifier, providers)
+        target_library = normalize_library_name(payload.get("library_name") or job_library_name)
+        doi = metadata.get("doi")
+
+        with session_scope(runtime_settings.database_url) as job_session:
+            assert_job_not_cancelled(job_session, job_id)
+            existing = _find_existing_paper(
+                job_session,
+                doi=doi,
+                title=metadata.get("title"),
+                year=metadata.get("year"),
+                arxiv_id=PaperIdentityService.extract_arxiv_id(identifier),
+                library_name=target_library,
+            )
+            if existing:
+                if existing.library_name != target_library:
+                    existing.library_name = target_library
+                    job_session.add(existing)
+                    job_session.commit()
+                    job_session.refresh(existing)
+                result = {"paper_id": str(existing.id), "title": existing.title, "status": "already_exists"}
+            else:
+                ingestion = PaperIngestionService(session=job_session, settings=runtime_settings)
+                status = "completed"
+                try:
+                    with TemporaryDirectory() as tmpdir:
+                        pdf_path = asyncio.run(download_discovery_candidate(service, raw_paper, metadata, Path(tmpdir)))
+                        paper = asyncio.run(
+                            ingestion.ingest_pdf(
+                                source_path=pdf_path,
+                                original_filename=pdf_path.name,
+                                copy_pdf=True,
+                                external_metadata=metadata,
+                                source_reference=None,
+                                library_name=target_library,
+                            )
+                        )
+                except Exception:
+                    paper = ingestion.ingest_metadata_only(
+                        external_metadata=metadata,
+                        identifier=identifier,
+                        library_name=target_library,
+                        source_reference=metadata.get("url") or identifier,
+                    )
+                    status = "metadata_only"
+                result = {"paper_id": str(paper.id), "title": paper.title, "status": status}
+            assert_job_not_cancelled(job_session, job_id)
+
+        with session_scope(control_db_url) as control_session:
+            update_job(
+                control_session,
+                job_id,
+                status="completed",
+                progress={
+                    "phase": "completed",
+                    "message": "Discovery download ingest completed.",
+                    "paper_id": result["paper_id"],
+                    "title": result["title"],
+                    "ingested": 1,
+                },
+                result=result,
+                error=None,
+            )
+    except JobCancelledError:
+        with session_scope(control_db_url) as control_session:
+            job = get_job(control_session, job_id)
+            if job and job.status != "cancelled":
+                update_job(control_session, job_id, status="cancelled", progress=_merge_progress(job.progress, {"phase": "cancelled"}))
+    except Exception as exc:
+        logger.exception("Discovery download ingest job failed: %s", job_id)
+        with session_scope(control_db_url) as control_session:
+            update_job(
+                control_session,
+                job_id,
+                status="failed",
+                progress={"phase": "failed", "failure_code": classify_failure_code(reason=str(exc))},
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
 
 async def execute_ai_workflow(
@@ -1213,7 +1439,7 @@ def dispatch_job(
     try:
         with Connection(get_settings().celery_broker_url, connect_timeout=1) as connection:
             connection.ensure_connection(max_retries=0)
-        run_workflow_job_task.delay(job_id)
+        run_workflow_job_task.delay(job_id, control_database_url)
         return "celery"
     except Exception as exc:
         logger.warning("Celery dispatch failed for job %s, falling back to in-process background task: %s", job_id, exc)
@@ -1240,5 +1466,11 @@ def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None)
         return
     if job_type == JOB_TYPE_EXTRACTION:
         run_extraction_job(job_id, control_database_url)
+        return
+    if job_type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
+        run_local_pdf_path_ingest_job(job_id, control_database_url)
+        return
+    if job_type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
+        run_discovery_download_ingest_job(job_id, control_database_url)
         return
     raise ValueError(f"Unsupported workflow job type: {job_type}")

@@ -42,7 +42,8 @@ async def start_classify_batch_job(
         },
     )
     data = serialize_job(job)
-    data["dispatch_mode"] = "reused_active" if reused else dispatch_job(job.job_id, background_tasks)
+    db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else settings.database_url
+    data["dispatch_mode"] = "reused_active" if reused else dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
     data["deduplicated"] = reused
     return data
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -13,7 +15,16 @@ from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
 from app.services.discovery_service import DiscoveryService
 from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
-from app.services.workflow_jobs import create_job, update_job, build_job_runtime_context, normalize_library_name
+from app.services.workflow_jobs import (
+    JOB_TYPE_LOCAL_PDF_PATH_INGEST,
+    build_job_runtime_context,
+    create_job,
+    create_job_or_reuse_active,
+    dispatch_job,
+    normalize_library_name,
+    serialize_job,
+    update_job,
+)
 
 router = APIRouter()
 
@@ -50,6 +61,52 @@ def _raise_identity_guard(exc: PaperIdentityMismatchError) -> None:
             "match_reason": exc.match_report.get("reason", ""),
         },
     ) from exc
+
+
+@router.post("/ingest/path/jobs")
+async def queue_ingest_from_path(
+    payload: IngestFromPathRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    source_path = Path(payload.pdf_path)
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="PDF path does not exist")
+
+    target_library = normalize_library_name(payload.library_name)
+    job_payload = {
+        "pdf_path": str(source_path),
+        "title": payload.title,
+        "doi": payload.doi,
+        "authors": payload.authors,
+        "year": payload.year,
+        "journal": payload.journal,
+        "abstract": payload.abstract,
+        "library_name": target_library,
+    }
+    job, reused = create_job_or_reuse_active(
+        session,
+        job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
+        library_name=target_library,
+        payload=job_payload,
+        runtime_context=build_job_runtime_context(settings),
+        progress={
+            "phase": "queued",
+            "message": "Local PDF ingest is queued in the worker.",
+            "source_path": str(source_path),
+        },
+    )
+    dispatch_mode = "reused_active"
+    if not reused:
+        db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else settings.database_url
+        dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
+        if dispatch_mode != "celery":
+            session.refresh(job)
+    data = serialize_job(job)
+    data["dispatch_mode"] = dispatch_mode
+    data["deduplicated"] = reused
+    return data
 
 
 @router.post("/ingest/path", response_model=IngestResponse)

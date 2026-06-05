@@ -849,6 +849,7 @@
             selectedDate: toDateKey(new Date()),
             calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
             pollTimer: null,
+            statsPollTick: 0,
         };
 
         let calendarVisible = true;
@@ -1155,9 +1156,9 @@
                 return;
             }
 
-            showToast("正在下载并收录文献。");
+            showToast("正在创建后台收录任务。");
             try {
-                const data = await fetchJSON(`${API_BASE}/discovery/download`, {
+                const job = await fetchJSON(`${API_BASE}/discovery/download/jobs`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1166,10 +1167,7 @@
                         library_name: state.currentLibrary || "",
                     }),
                 });
-                const title = data && data.title ? data.title : identifier;
-                const status = data && data.status ? data.status : "completed";
-                const statusText = status === "already_exists" ? "已存在" : status === "metadata_only" ? "仅元数据收录" : "收录完成";
-                showToast(`${statusText}：${title}`);
+                showToast(`任务已进入后台队列：${job && job.job_id ? job.job_id.slice(0, 8) : "queued"}`);
                 input.value = "";
                 await pollJobs();
             } catch (error) {
@@ -1233,9 +1231,9 @@
                 return;
             }
 
-            showToast("正在收录检索结果。");
+            showToast("正在创建后台收录任务。");
             try {
-                const data = await fetchJSON(`${API_BASE}/discovery/download`, {
+                const job = await fetchJSON(`${API_BASE}/discovery/download/jobs`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1244,7 +1242,7 @@
                         library_name: state.currentLibrary || "",
                     }),
                 });
-                showToast(`收录请求已完成：${data && data.title ? data.title : identifier}`);
+                showToast(`任务已进入后台队列：${job && job.job_id ? job.job_id.slice(0, 8) : "queued"}`);
                 await pollJobs();
             } catch (error) {
                 showToast(`收录失败：${error.message}`, "error");
@@ -1302,7 +1300,11 @@
                     data = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
                 }
                 state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
-                await loadArticleStats();
+                state.statsPollTick += 1;
+                const hasActiveJobs = state.jobs.some(job => ["queued", "running"].includes(job.status));
+                if (state.statsPollTick === 1 || !hasActiveJobs || state.statsPollTick % 3 === 0) {
+                    await loadArticleStats();
+                }
             } catch (error) {
                 state.jobs = [];
                 showToast(`任务列表加载失败：${error.message}`, "error");
@@ -1591,7 +1593,7 @@
             bindDropzone();
             loadLibraries();
             renderAllJobs();
-            state.pollTimer = setInterval(pollJobs, 5000);
+            state.pollTimer = setInterval(pollJobs, 12000);
         });
     </script>
 </body>

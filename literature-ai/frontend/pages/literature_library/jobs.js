@@ -23,9 +23,9 @@ function initSSE() {
 }
 
 function clampSearchLimit(value) {
-    const n = Number(value || 100);
-    if (!Number.isFinite(n)) return 100;
-    return Math.max(1, Math.min(100, Math.round(n)));
+    const n = Number(value || 50);
+    if (!Number.isFinite(n)) return 50;
+    return Math.max(1, Math.min(50, Math.round(n)));
 }
 
 function discoveryKey(item) {
@@ -84,7 +84,7 @@ async function searchOnline() {
     }
     openAddLiteraturePanel("online");
     if (onlineQuery) onlineQuery.value = query;
-    setAcquisitionResult('<div class="workspace-empty small-empty">正在从 OpenAlex / arXiv 检索，最多拉取 100 篇...</div>');
+    setAcquisitionResult('<div class="workspace-empty small-empty">正在从 OpenAlex / arXiv 检索，最多拉取 50 篇...</div>');
     try {
         const maxResults = $("onlineSearchMaxResults");
         const limit = clampSearchLimit(maxResults ? maxResults.value : 100);
@@ -217,13 +217,64 @@ async function pollAIWorkflowJob(jobId) {
         const job = await fetchJSON(API_BASE + "/ai_workflow/jobs/" + encodeURIComponent(jobId));
         renderAIWorkflowJob(job);
         if (job.status === "queued" || job.status === "running") {
-            setTimeout(function() { pollAIWorkflowJob(jobId); }, 1800);
+            setTimeout(function() { pollAIWorkflowJob(jobId); }, 3000);
         } else if (job.status === "completed") {
             showToast("AI 工作流完成，文献列表已刷新。", "success");
             state.currentOffset = 0;
             refreshCurrentPage();
         } else if (job.status === "failed") {
             showToast("AI 工作流失败：" + (job.error || ""), "error");
+        }
+    } catch (error) {
+        const el = acquisitionResultEl();
+        if (el) {
+            el.insertAdjacentHTML("afterbegin", '<div class="section-card"><h3>任务轮询失败</h3><div class="subtle">' + esc(error.message) + "</div></div>");
+        }
+    }
+}
+
+function renderQueuedIngestJob(job) {
+    const result = job.result || {};
+    const summary = job.summary || {};
+    setAcquisitionResult(
+        '<div class="writer-block"><h3>后台收录任务</h3>' +
+        '<div class="subtle">任务：' + esc(job.job_id || "-") + " | 状态：" + esc(job.status || "-") + " | 文献库：" + esc(job.library_name || getCurrentLibraryName() || "-") + "</div>" +
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;">' +
+            renderJobMetric("阶段", summary.phase || job.status || "-") +
+            renderJobMetric("成功", summary.success_count) +
+            renderJobMetric("失败", summary.failure_count) +
+        "</div>" +
+        (summary.identifier ? '<div class="subtle">标识符：' + esc(summary.identifier) + "</div>" : "") +
+        (summary.source_path ? '<div class="subtle">PDF：' + esc(summary.source_path) + "</div>" : "") +
+        (result.title ? '<div class="subtle" style="margin-top:8px;">结果：' + esc(result.title) + " | " + esc(result.status || "-") + "</div>" : "") +
+        renderJobFailureExplanation(job) +
+        renderJobProgressNotice(job) +
+        (job.error ? '<div class="subtle" style="margin-top:10px;color:var(--color-danger);">' + esc(job.error) + "</div>" : "") +
+        "</div>"
+    );
+}
+
+async function pollWorkflowIngestJob(jobId) {
+    if (!jobId) return;
+    try {
+        const job = await fetchJSON("/api/jobs/" + encodeURIComponent(jobId));
+        renderQueuedIngestJob(job);
+        if (job.status === "queued" || job.status === "running") {
+            setTimeout(function() { pollWorkflowIngestJob(jobId); }, 3000);
+        } else if (job.status === "completed") {
+            const result = job.result || {};
+            if (result.status === "already_exists") {
+                showToast("文献已在库中：" + (result.title || ""), "info");
+                if (result.paper_id) showAlreadyExistsPrompt(result.paper_id, result.title || "已存在的文献");
+            } else if (result.status === "metadata_only") {
+                showToast("已按元数据收录：" + (result.title || ""), "info");
+            } else {
+                showToast("已完成后台收录：" + (result.title || ""), "success");
+            }
+            state.currentOffset = 0;
+            refreshCurrentPage();
+        } else if (job.status === "failed") {
+            showToast("后台收录失败：" + (job.error || ""), "error");
         }
     } catch (error) {
         const el = acquisitionResultEl();
@@ -524,25 +575,16 @@ async function retryExtractionJob(jobId) {
 
 async function downloadIdentifier(identifier) {
     if (!identifier) return;
-    showProgress("正在下载并收录...");
+    showProgress("正在创建后台收录任务...");
     try {
-        const data = await fetchJSON(API_BASE + "/discovery/download", {
+        const job = await fetchJSON(API_BASE + "/discovery/download/jobs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ identifier: identifier, providers: [], library_name: getCurrentLibraryName() })
         });
-        if (data.status === "metadata_only") {
-            showToast("已按元数据收录：" + (data.title || ""), "info");
-        } else if (data.status === "already_exists") {
-            showToast("文献已在库中：" + (data.title || ""), "info");
-            if (data.paper_id) {
-                showAlreadyExistsPrompt(data.paper_id, data.title || "已存在文献");
-            }
-        } else {
-            showToast("已成功收录：" + (data.title || ""), "success");
-        }
-        state.currentOffset = 0;
-        refreshCurrentPage();
+        showToast("收录任务已进入后台队列。", "success");
+        renderQueuedIngestJob(job);
+        pollWorkflowIngestJob(job.job_id);
     } catch (error) {
         const detail = error.detail;
         if (detail && detail.status === "already_exists") {
