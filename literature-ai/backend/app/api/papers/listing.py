@@ -39,7 +39,7 @@ async def list_papers(
     has_dft_results: bool | None = Query(default=None, description="Only papers with/without DFT results"),
     has_writing_cards: bool | None = Query(default=None, description="Only papers with/without writing cards"),
     sort_by: str = Query(default="year_serial", description="Sort papers by year+serial, created_at, or title"),
-    sort_order: str = Query(default="asc", description="Sort direction: asc or desc"),
+    sort_order: str = Query(default="desc", description="Sort direction: asc or desc"),
     limit: int = Query(default=50, ge=1, le=200, description="Page size"),
     offset: int = Query(default=0, ge=0, description="Skip N items"),
     session: Session = Depends(get_db_session),
@@ -143,7 +143,7 @@ async def stream_papers(
     has_dft_results: bool | None = Query(default=None),
     has_writing_cards: bool | None = Query(default=None),
     sort_by: str = Query(default="year_serial"),
-    sort_order: str = Query(default="asc"),
+    sort_order: str = Query(default="desc"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):

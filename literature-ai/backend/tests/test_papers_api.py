@@ -141,12 +141,12 @@ def test_list_papers_api_supports_year_serial_sorting(setup_test_db):
     response = client.get("/api/papers")
     assert response.status_code == 200
     payload = response.json()
-    assert [item["title"] for item in payload] == ["2018-010", "2019-001", "2019-003"]
+    assert [item["title"] for item in payload] == ["2019-001", "2019-003", "2018-010"]
 
     response = client.get("/api/papers", params={"sort_by": "year_serial", "sort_order": "desc"})
     assert response.status_code == 200
     payload = response.json()
-    assert [item["title"] for item in payload] == ["2019-003", "2019-001", "2018-010"]
+    assert [item["title"] for item in payload] == ["2019-001", "2019-003", "2018-010"]
 
 
 def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):

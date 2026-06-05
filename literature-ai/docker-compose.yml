@@ -44,7 +44,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
-      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-false}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
@@ -84,6 +84,7 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
+      - ./prompts:/prompts:ro
       - ./data:/data
       - ./data/docling_cache:/root/.cache/docling
       # Host user directory browsing is optional. Override LITAI_HOST_USERS_ROOT on macOS/Linux.
@@ -97,7 +98,7 @@ services:
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
-      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-false}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
@@ -134,6 +135,7 @@ services:
       - minio
     volumes:
       - ./backend:/app
+      - ./prompts:/prompts:ro
       - ./data:/data
       - ./data/docling_cache:/root/.cache/docling
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users

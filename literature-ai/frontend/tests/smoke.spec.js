@@ -6,6 +6,7 @@ const PAGES = [
   { name: 'Literature Library', path: '/pages/literature_library/index.html', coreSelector: '#paperList' },
   { name: 'Paper Detail', path: '/pages/paper_detail/index.html', coreSelector: '.panel-card' },
   { name: 'DFT Database', path: '/pages/dft_database/index.html', coreSelector: '#dftTable' },
+  { name: 'Data Visuals', path: '/pages/visuals/index.html', coreSelector: '#metrics' },
   { name: 'Mechanism Knowledge', path: '/pages/mechanism_knowledge/index.html', coreSelector: '#mechanismTabs' },
   { name: 'AI Writing Studio', path: '/pages/ai_writer/index.html', coreSelector: '#paperChecklist' },
   { name: 'Extraction Review Workbench', path: '/pages/external_analysis_workbench/index.html', coreSelector: '#schemaForm' },
@@ -961,6 +962,45 @@ async function mockApi(route) {
       mcp_url: 'http://localhost:8000/mcp',
       local_ip: '127.0.0.1',
       hostname: 'localhost',
+    });
+  }
+
+  if (pathname === '/api/settings/extraction-protocols') {
+    return jsonResponse(route, {
+      schema_version: 'extraction_protocols_v1',
+      items: [
+        {
+          key: 'dft_results',
+          title: 'DFT 结果提取',
+          path: 'prompts/dft_results.yaml',
+          version: '0.2',
+          stage: 'mvp',
+          scope: 'DFT result extraction',
+          raw_text: 'name: dft_results_extraction\nversion: 0.2\n',
+        },
+      ],
+    });
+  }
+
+  if (pathname === '/api/visuals/overview') {
+    return jsonResponse(route, {
+      library_name: 'Default Library',
+      summary: {
+        papers: 1,
+        pdf_available: 1,
+        parsed_papers: 1,
+        figures: 2,
+        figure_data_points: 1,
+        dft_settings: 1,
+        catalyst_samples: 1,
+        dft_results: 1,
+      },
+      years: [{ year: 2025, count: 1 }],
+      journals: [{ journal: 'Journal of Testing', count: 1 }],
+      paper_types: [{ type: 'research', count: 1 }],
+      dft_matrix: [{ property_type: 'adsorption_energy', adsorbate: 'Li2S4', count: 1, avg_confidence: 0.9 }],
+      dft_status: [{ status: 'Codex_Candidate', count: 1 }],
+      recent_tasks: [{ job_id: 'job-1', type: 'agent_activity', status: 'completed', title: 'Mock activity', created_at: '2026-06-01T00:00:00' }],
     });
   }
 

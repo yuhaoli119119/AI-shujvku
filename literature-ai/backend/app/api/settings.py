@@ -16,12 +16,53 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
+
+_PROTOCOL_FILES = [
+    {
+        "key": "dft_results",
+        "title": "DFT 结果提取",
+        "path": "prompts/dft_results.yaml",
+        "scope": "吸附能、Gibbs 自由能、反应能垒、电荷、DOS 等计算结果",
+    },
+    {
+        "key": "dft_settings",
+        "title": "DFT 设置与结构参数",
+        "path": "prompts/dft_settings.yaml",
+        "scope": "软件、泛函、赝势/基组、截断能、k 点、收敛、真空层等",
+    },
+    {
+        "key": "mechanism_claims",
+        "title": "机理声明提取",
+        "path": "prompts/mechanism_claims.yaml",
+        "scope": "多硫化物吸附、LiPS 转化、Li2S 成核/分解、穿梭抑制等机理",
+    },
+    {
+        "key": "writing_card",
+        "title": "写作卡提取",
+        "path": "prompts/writing_card.yaml",
+        "scope": "论文类型、研究空白、解决方案、证据链、图逻辑与段落策略",
+    },
+]
+
+
+def _extract_protocol_meta(raw_text: str) -> dict[str, str | None]:
+    def grab(key: str) -> str | None:
+        match = re.search(rf"(?m)^{re.escape(key)}:\s*(.+)$", raw_text)
+        return match.group(1).strip() if match else None
+
+    return {
+        "name": grab("name"),
+        "version": grab("version"),
+        "stage": grab("stage"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +427,31 @@ async def get_services_status() -> dict[str, Any]:
         "writer": writer_status,
         "internal_parser": _internal_parser_status_from_writer(writer_status),
         "mcp": mcp_status,
+    }
+
+
+@router.get("/extraction-protocols")
+async def get_extraction_protocols() -> dict[str, Any]:
+    """Return the current extraction protocols shown in the settings UI."""
+    from app.config import PROJECT_ROOT
+
+    items = []
+    for item in _PROTOCOL_FILES:
+        path = Path(PROJECT_ROOT) / item["path"]
+        try:
+            raw_text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raw_text = f"# 协议文件读取失败: {exc}"
+        items.append(
+            {
+                **item,
+                **_extract_protocol_meta(raw_text),
+                "raw_text": raw_text,
+            }
+        )
+    return {
+        "schema_version": "extraction_protocols_v1",
+        "items": items,
     }
 
 

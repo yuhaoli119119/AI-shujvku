@@ -44,7 +44,7 @@ class PaperListFilterParams(BaseModel):
     has_writing_cards: bool | None = None
     paper_type: str | None = None
     sort_by: str = Field(default="year_serial", pattern="^(year_serial|created_at|title)$")
-    sort_order: str = Field(default="asc", pattern="^(asc|desc)$")
+    sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
 

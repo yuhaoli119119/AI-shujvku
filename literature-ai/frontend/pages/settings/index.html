@@ -283,6 +283,57 @@
         }
         .guide-section li { margin-bottom: 6px; }
 
+        .protocol-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .protocol-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .protocol-card {
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            background: var(--color-surface-alt);
+            color: var(--color-text);
+            padding: 14px;
+            cursor: pointer;
+            text-align: left;
+            font: inherit;
+        }
+        .protocol-card.active {
+            border-color: var(--color-primary);
+            background: var(--color-primary-bg);
+        }
+        .protocol-card h3 {
+            margin: 0 0 8px;
+            font-size: var(--font-size-base);
+        }
+        .protocol-meta {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .protocol-pill {
+            border: 1px solid var(--color-border);
+            border-radius: 999px;
+            padding: 3px 8px;
+            color: var(--color-text-secondary);
+            background: var(--color-surface);
+            font-size: var(--font-size-xs);
+        }
+        .protocol-text {
+            max-height: 520px;
+            overflow: auto;
+        }
+
         .toast-container {
             position: fixed;
             top: 72px;
@@ -323,6 +374,7 @@
         <div class="section-nav">
             <button class="active" onclick="showSection('api', event)">API 配置</button>
             <button onclick="showSection('ide', event)">IDE 连接</button>
+            <button onclick="showSection('protocol', event)">提取协议</button>
             <button onclick="showSection('theme', event)">主题外观</button>
             <button onclick="showSection('guide', event)">使用说明</button>
         </div>
@@ -462,6 +514,28 @@
                     <div class="field">
                         <label>主机名</label>
                         <div class="code-block" id="ide-hostname">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="section-protocol" class="section-content">
+            <div class="panel">
+                <div class="protocol-toolbar">
+                    <div>
+                        <div class="panel-title">当前提取协议</div>
+                        <div class="panel-desc">这些协议来自项目的 prompt / rule 配置，是 DFT 数据、机理声明和写作卡抽取时的公开规则。</div>
+                    </div>
+                    <button class="btn btn-ghost" onclick="loadExtractionProtocols()">刷新协议</button>
+                </div>
+                <div id="protocol-list" class="protocol-grid">
+                    <div class="protocol-card">加载中...</div>
+                </div>
+                <div class="field">
+                    <label id="protocol-detail-label">协议明文</label>
+                    <div class="code-block protocol-text">
+                        <button class="copy-btn" onclick="copyText('protocol-detail-text')">复制</button>
+                        <div id="protocol-detail-text">加载中...</div>
                     </div>
                 </div>
             </div>
@@ -627,6 +701,16 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             }).catch(() => {
                 showToast("复制失败", "error");
             });
+        }
+
+        function escapeHtml(value) {
+            return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;"
+            }[c]));
         }
 
         function showSection(name, evt) {
@@ -796,12 +880,63 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             }
         }
 
+        let extractionProtocols = [];
+        let selectedProtocolKey = "";
+
+        function selectProtocol(key) {
+            selectedProtocolKey = key;
+            document.querySelectorAll(".protocol-card").forEach(card => {
+                card.classList.toggle("active", card.dataset.protocolKey === key);
+            });
+            const item = extractionProtocols.find(entry => entry.key === key) || extractionProtocols[0];
+            const label = document.getElementById("protocol-detail-label");
+            const text = document.getElementById("protocol-detail-text");
+            if (label) label.textContent = item ? (item.title + " / " + (item.version || "未标版本")) : "协议明文";
+            if (text) text.textContent = item ? (item.raw_text || "") : "";
+        }
+
+        function renderExtractionProtocols(items) {
+            extractionProtocols = Array.isArray(items) ? items : [];
+            const list = document.getElementById("protocol-list");
+            if (!list) return;
+            if (!extractionProtocols.length) {
+                list.innerHTML = '<div class="protocol-card">未读取到协议。</div>';
+                selectProtocol("");
+                return;
+            }
+            list.innerHTML = extractionProtocols.map(item => {
+                const version = item.version || "未标版本";
+                const stage = item.stage || "active";
+                return '<button type="button" class="protocol-card" data-protocol-key="' + escapeHtml(item.key) + '" onclick="selectProtocol(\'' + escapeHtml(item.key) + '\')">' +
+                    '<h3>' + escapeHtml(item.title || item.key) + '</h3>' +
+                    '<div class="panel-desc" style="margin-bottom:0;">' + escapeHtml(item.scope || "") + '</div>' +
+                    '<div class="protocol-meta">' +
+                        '<span class="protocol-pill">version ' + escapeHtml(version) + '</span>' +
+                        '<span class="protocol-pill">' + escapeHtml(stage) + '</span>' +
+                        '<span class="protocol-pill">' + escapeHtml(item.path || "") + '</span>' +
+                    '</div>' +
+                '</button>';
+            }).join("");
+            selectProtocol(selectedProtocolKey || extractionProtocols[0].key);
+        }
+
+        async function loadExtractionProtocols() {
+            try {
+                const data = await fetchSettingsJSON(`${API_BASE}/api/settings/extraction-protocols`);
+                renderExtractionProtocols(data.items || []);
+            } catch (e) {
+                const list = document.getElementById("protocol-list");
+                if (list) list.innerHTML = '<div class="protocol-card">协议加载失败：' + escapeHtml(e.message) + '</div>';
+            }
+        }
+
         document.addEventListener("DOMContentLoaded", () => {
             TopNav.init({ currentPage: "settings", mountId: "topnav-mount" });
             initThemeControls();
             loadSettings();
             loadStatus();
             loadIdePrompts();
+            loadExtractionProtocols();
             document.getElementById("embedding_provider").addEventListener("change", toggleEmbeddingFields);
         });
     </script>

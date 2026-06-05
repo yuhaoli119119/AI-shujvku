@@ -151,7 +151,7 @@ def test_list_papers_with_filters():
         engine.dispose()
 
 
-def test_list_papers_defaults_to_year_then_serial_order():
+def test_list_papers_defaults_to_newest_year_then_serial_order():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(f"sqlite:///{Path(tmpdir) / 'sort.db'}", future=True)
         with engine.begin() as connection:
@@ -170,9 +170,9 @@ def test_list_papers_defaults_to_year_then_serial_order():
             result = service.list_papers()
 
             assert [paper.title for paper in result] == [
-                "Earlier year",
                 "Earlier serial",
                 "Later serial",
+                "Earlier year",
                 "Missing year",
             ]
 
@@ -197,8 +197,8 @@ def test_list_papers_supports_descending_year_serial_order():
             result = service.list_papers(PaperListFilterParams(sort_by="year_serial", sort_order="desc"))
 
             assert [paper.title for paper in result] == [
-                "Year 2020 serial 2",
                 "Year 2020 serial 1",
+                "Year 2020 serial 2",
                 "Year 2019 serial 1",
             ]
 

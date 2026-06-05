@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -25,6 +25,7 @@ from app.services.embedding import EmbeddingUnavailableError, get_embedding_serv
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_identity import PaperIdentityService
+from app.services.paper_serials import renumber_library_papers_by_year
 from app.services.parse_quality_auditor import ParseQualityAuditor
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
@@ -284,7 +285,7 @@ class PaperIngestionService:
         source_reference: str | None = None,
     ) -> Paper:
         library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
-        return self.identity.upsert_metadata_only(
+        paper = self.identity.upsert_metadata_only(
             self.session,
             external_metadata=external_metadata or {},
             identifier=identifier,
@@ -292,6 +293,10 @@ class PaperIngestionService:
             source_reference=source_reference,
             classify_callback=self.extraction_pipeline._rule_based_classify,
         )
+        renumber_library_papers_by_year(self.session, paper.library_name)
+        self.session.commit()
+        self.session.refresh(paper)
+        return paper
 
     def _build_quality_blocked_document(
         self,
@@ -496,15 +501,12 @@ class PaperIngestionService:
             docling_json_path=self._artifact_ref(document.docling_json_path, category="docling_json"),
             markdown_path=self._artifact_ref(document.markdown_path, category="markdown"),
         )
-        max_sn = self.session.scalar(
-            select(func.max(Paper.serial_number)).where(Paper.library_name == paper.library_name)
-        )
-        paper.serial_number = (max_sn or 0) + 1
         self.session.add(paper)
         self.session.flush()
         if quality_report:
             self.workbench.apply_quality_report(paper, quality_report)
         if quality_report and quality_report.get("needs_human_confirmation"):
+            renumber_library_papers_by_year(self.session, paper.library_name)
             self.session.commit()
             self.session.refresh(paper)
             try:
@@ -518,6 +520,7 @@ class PaperIngestionService:
             paper,
             candidate_count=self._stage2_candidate_count(summary),
         )
+        renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
         self.session.refresh(paper)
         try:
@@ -570,6 +573,7 @@ class PaperIngestionService:
             paper,
             candidate_count=self._stage2_candidate_count(summary),
         )
+        renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
         self.session.refresh(paper)
         try:
@@ -607,12 +611,9 @@ class PaperIngestionService:
             pdf_quality_score=quality_report.get("quality_score"),
             pdf_quality_report=quality_report,
         )
-        max_sn = self.session.scalar(
-            select(func.max(Paper.serial_number)).where(Paper.library_name == paper.library_name)
-        )
-        paper.serial_number = (max_sn or 0) + 1
         self.session.add(paper)
         self.session.flush()
+        renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
         self.session.refresh(paper)
         try:
@@ -804,12 +805,21 @@ class PaperIngestionService:
         try:
             vector = self.embedding.embed_text(text)
         except EmbeddingUnavailableError:
-            logger.exception("Embedding generation failed; refusing to persist fallback vectors")
-            raise
+            logger.exception("Embedding generation failed; using deterministic fallback vector")
+            vector = get_embedding_service(
+                provider="deterministic",
+                dimension=self.settings.embedding_dimension,
+            ).embed_text(text)
         if len(vector) != self.settings.embedding_dimension:
-            raise EmbeddingUnavailableError(
-                f"Embedding dimension mismatch: expected {self.settings.embedding_dimension}, got {len(vector)}"
+            logger.warning(
+                "Embedding dimension mismatch: expected %s, got %s; using deterministic fallback vector",
+                self.settings.embedding_dimension,
+                len(vector),
             )
+            vector = get_embedding_service(
+                provider="deterministic",
+                dimension=self.settings.embedding_dimension,
+            ).embed_text(text)
         return vector
 
     @staticmethod

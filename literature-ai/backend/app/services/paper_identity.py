@@ -5,10 +5,11 @@ from collections.abc import Callable, Mapping
 from difflib import SequenceMatcher
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Paper
+from app.services.paper_serials import renumber_library_papers_by_year
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
 
 
@@ -236,16 +237,13 @@ class PaperIdentityService:
                     classify_callback=classify_callback,
                 )
                 session.add(existing)
+                renumber_library_papers_by_year(session, existing.library_name)
                 session.commit()
                 session.refresh(existing)
             return existing
 
         classification = classify_callback(title, cls._string(metadata.get("journal"))) if classify_callback else {}
-        max_serial = session.execute(
-            select(func.max(Paper.serial_number)).where(build_library_name_clause(Paper.library_name, library))
-        ).scalar_one()
         paper = Paper(
-            serial_number=(max_serial or 0) + 1,
             title=title,
             year=year,
             journal=cls._string(metadata.get("journal")),
@@ -262,6 +260,8 @@ class PaperIdentityService:
             license=cls._string(metadata.get("license")),
         )
         session.add(paper)
+        session.flush()
+        renumber_library_papers_by_year(session, paper.library_name)
         session.commit()
         session.refresh(paper)
         return paper

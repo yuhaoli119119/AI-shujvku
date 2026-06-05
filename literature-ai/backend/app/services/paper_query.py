@@ -157,7 +157,7 @@ class PaperQueryService:
     @staticmethod
     def _list_ordering(filters: PaperListFilterParams) -> tuple:
         sort_by = (filters.sort_by or "year_serial").strip().lower()
-        sort_order = (filters.sort_order or "asc").strip().lower()
+        sort_order = (filters.sort_order or "desc").strip().lower()
         descending = sort_order == "desc"
 
         title_order = Paper.title.desc() if descending else Paper.title.asc()
@@ -177,7 +177,7 @@ class PaperQueryService:
             )
 
         year_order = Paper.year.desc() if descending else Paper.year.asc()
-        serial_order = Paper.serial_number.desc() if descending else Paper.serial_number.asc()
+        serial_order = Paper.serial_number.asc()
         return (
             Paper.year.is_(None).asc(),
             year_order,

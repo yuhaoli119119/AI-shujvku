@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据可视化 - Literature AI</title>
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      color: var(--color-text);
+      background: var(--color-bg);
+      min-height: 100vh;
+    }
+    .shell {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 22px 20px 34px;
+    }
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .eyebrow {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+    .head-meta {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      margin-top: 8px;
+      max-width: 760px;
+    }
+    .library-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .library-control select {
+      min-width: 210px;
+      height: 36px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text);
+      padding: 0 10px;
+      font: inherit;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .metric {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      padding: 12px;
+      min-height: 94px;
+    }
+    .metric .value {
+      font-size: 28px;
+      line-height: 1;
+      font-weight: 900;
+      margin-bottom: 8px;
+      color: var(--color-text);
+    }
+    .metric .label {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+    .metric .sub {
+      color: var(--color-text-muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    .tabs {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      overflow: auto;
+      margin-bottom: 14px;
+    }
+    .tab-btn {
+      border: 0;
+      background: transparent;
+      color: var(--color-text-secondary);
+      padding: 12px 18px;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      white-space: nowrap;
+    }
+    .tab-btn.active {
+      color: var(--color-primary);
+      background: var(--color-primary-bg);
+      border-bottom-color: var(--color-primary);
+    }
+    .view { display: none; }
+    .view.active { display: block; }
+    .panel {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .panel-title {
+      font-size: 18px;
+      font-weight: 900;
+    }
+    .muted {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+    }
+    .bar-list {
+      display: grid;
+      gap: 10px;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: minmax(128px, 0.8fr) minmax(0, 2fr) 54px;
+      gap: 10px;
+      align-items: center;
+      min-height: 30px;
+    }
+    .bar-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .bar-track {
+      height: 12px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      min-width: 2px;
+    }
+    .bar-value {
+      text-align: right;
+      font-weight: 900;
+      color: var(--color-text);
+      font-size: 13px;
+    }
+    .donut-row {
+      display: grid;
+      grid-template-columns: 160px minmax(0, 1fr);
+      gap: 18px;
+      align-items: center;
+    }
+    .donut {
+      width: 150px;
+      height: 150px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: conic-gradient(#2A9D8F 0deg, #2A9D8F var(--a), #E9C46A var(--a), #E9C46A var(--b), #E76F51 var(--b), #E76F51 var(--c), #7A7F9A var(--c), #7A7F9A 360deg);
+    }
+    .donut-inner {
+      width: 94px;
+      height: 94px;
+      border-radius: 50%;
+      background: var(--color-surface);
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--color-border);
+      text-align: center;
+      font-weight: 900;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
+      padding: 8px 10px;
+      min-width: 0;
+    }
+    .legend-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+    .matrix-wrap {
+      overflow: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+    }
+    .matrix {
+      display: grid;
+      min-width: 720px;
+    }
+    .matrix-cell,
+    .matrix-head,
+    .matrix-row-head {
+      min-height: 38px;
+      padding: 8px;
+      border-right: 1px solid var(--color-border);
+      border-bottom: 1px solid var(--color-border);
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .matrix-head,
+    .matrix-row-head {
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      font-weight: 900;
+    }
+    .matrix-row-head {
+      justify-content: flex-start;
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+    }
+    .status-card {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
+      padding: 14px;
+    }
+    .status-card .num {
+      font-size: 26px;
+      font-weight: 900;
+      margin-bottom: 6px;
+    }
+    .task-list {
+      display: grid;
+      gap: 10px;
+    }
+    .task-row {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
+      padding: 12px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+    }
+    .task-title {
+      font-weight: 900;
+      margin-bottom: 4px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 900;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .empty {
+      border: 1px dashed var(--color-border-strong);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      padding: 18px;
+      text-align: center;
+    }
+    .toast {
+      position: fixed;
+      top: 66px;
+      right: 18px;
+      border-radius: var(--radius);
+      background: var(--color-danger);
+      color: #fff;
+      padding: 12px 14px;
+      box-shadow: var(--shadow-elevated);
+      display: none;
+      z-index: 999;
+      max-width: 360px;
+      font-size: 13px;
+    }
+    @media (max-width: 1180px) {
+      .metrics { grid-template-columns: repeat(4, minmax(130px, 1fr)); }
+    }
+    @media (max-width: 840px) {
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-2 { grid-template-columns: 1fr; }
+      .donut-row { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: minmax(92px, 0.9fr) minmax(0, 1.6fr) 42px; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="topnav-mount"></div>
+  <main class="shell">
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">分析</div>
+        <h1>数据可视化</h1>
+        <div class="head-meta" id="libraryMeta">正在读取文献库...</div>
+      </div>
+      <div class="library-control">
+        <select id="librarySelect" onchange="handleLibraryChange(this.value)">
+          <option value="">加载中...</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="reloadAll()">刷新</button>
+      </div>
+    </div>
+
+    <section class="metrics" id="metrics"></section>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-view="overview" onclick="switchView('overview')">概览</button>
+      <button class="tab-btn" data-view="years" onclick="switchView('years')">年份</button>
+      <button class="tab-btn" data-view="journals" onclick="switchView('journals')">期刊</button>
+      <button class="tab-btn" data-view="matrix" onclick="switchView('matrix')">DFT 矩阵</button>
+      <button class="tab-btn" data-view="quality" onclick="switchView('quality')">质量</button>
+      <button class="tab-btn" data-view="tasks" onclick="switchView('tasks')">任务</button>
+    </nav>
+
+    <section id="view-overview" class="view active">
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">文献类型</div>
+            <div class="muted" id="typeSummary">-</div>
+          </div>
+          <div class="donut-row">
+            <div id="typeDonut"></div>
+            <div id="typeLegend" class="legend"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">科研数据覆盖</div>
+            <div class="muted" id="coverageSummary">-</div>
+          </div>
+          <div id="coverageBars" class="bar-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-years" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">年份分布</div>
+          <div class="muted">新文献排序优先级与此分布保持一致。</div>
+        </div>
+        <div id="yearBars" class="bar-list"></div>
+      </div>
+    </section>
+
+    <section id="view-journals" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">期刊分布</div>
+          <div class="muted">显示当前库中数量最多的期刊。</div>
+        </div>
+        <div id="journalBars" class="bar-list"></div>
+      </div>
+    </section>
+
+    <section id="view-matrix" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">DFT 属性 x 吸附物矩阵</div>
+            <div class="muted">颜色越深表示该属性-物种组合记录越多。</div>
+          </div>
+          <div class="pill" id="matrixCount">0 条</div>
+        </div>
+        <div id="dftMatrix"></div>
+      </div>
+    </section>
+
+    <section id="view-quality" class="view">
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">DFT 候选状态</div>
+            <div class="muted">候选数据进入导出前仍需人工核验。</div>
+          </div>
+          <div id="statusGrid" class="status-grid"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">解析资产覆盖</div>
+            <div class="muted">PDF、章节、图像、DFT 设置与数据点。</div>
+          </div>
+          <div id="assetBars" class="bar-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-tasks" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">任务中心最近记录</div>
+          <div class="muted">包含检索入库、解析、分类和 AI 工作留痕。</div>
+        </div>
+        <div id="taskList" class="task-list"></div>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const COLORS = ["#2A9D8F", "#E9C46A", "#E76F51", "#4C78A8", "#7A5195", "#59A14F", "#D37295"];
+    let currentLibrary = "";
+    let latestData = null;
+
+    function esc(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[c]));
+    }
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.style.display = "block";
+      setTimeout(() => { toast.style.display = "none"; }, 3200);
+    }
+    async function fetchJSON(url, options) {
+      const resp = await fetch(url, options || {});
+      const text = await resp.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!resp.ok) throw new Error((data && data.detail) || ("HTTP " + resp.status));
+      return data;
+    }
+    function switchView(name) {
+      document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.view === name));
+      document.querySelectorAll(".view").forEach(view => view.classList.toggle("active", view.id === "view-" + name));
+    }
+    function metric(label, value, sub) {
+      return '<div class="metric"><div class="value">' + esc(value) + '</div><div class="label">' + esc(label) + '</div><div class="sub">' + esc(sub || "") + '</div></div>';
+    }
+    function renderMetrics(summary) {
+      document.getElementById("metrics").innerHTML = [
+        metric("文献", summary.papers || 0, "当前库总量"),
+        metric("PDF", summary.pdf_available || 0, "可解析文件"),
+        metric("已解析", summary.parsed_papers || 0, "有正文分段"),
+        metric("图片", summary.figures || 0, "按文献归档"),
+        metric("DFT 设置", summary.dft_settings || 0, "计算协议字段"),
+        metric("催化剂样本", summary.catalyst_samples || 0, "结构/样本"),
+        metric("DFT 结果", summary.dft_results || 0, "候选数值")
+      ].join("");
+    }
+    function renderBars(targetId, rows, labelKey, valueKey, colorOffset) {
+      const target = document.getElementById(targetId);
+      if (!rows || !rows.length) {
+        target.innerHTML = '<div class="empty">暂无数据</div>';
+        return;
+      }
+      const maxValue = Math.max(1, ...rows.map(row => Number(row[valueKey] || 0)));
+      target.innerHTML = rows.map((row, index) => {
+        const value = Number(row[valueKey] || 0);
+        const width = Math.max(4, value / maxValue * 100);
+        const color = COLORS[(index + (colorOffset || 0)) % COLORS.length];
+        return '<div class="bar-row">' +
+          '<div class="bar-label" title="' + esc(row[labelKey]) + '">' + esc(row[labelKey]) + '</div>' +
+          '<div class="bar-track"><div class="bar-fill" style="width:' + width.toFixed(1) + '%;background:' + color + ';"></div></div>' +
+          '<div class="bar-value">' + esc(value) + '</div>' +
+        '</div>';
+      }).join("");
+    }
+    function renderTypeDonut(items, total) {
+      const normalized = (items || []).filter(item => item.count > 0);
+      const safeTotal = Math.max(1, total || normalized.reduce((sum, item) => sum + Number(item.count || 0), 0));
+      let angle = 0;
+      const stops = [];
+      normalized.forEach((item, index) => {
+        const start = angle;
+        angle += Number(item.count || 0) / safeTotal * 360;
+        const color = COLORS[index % COLORS.length];
+        stops.push(color + " " + start.toFixed(2) + "deg " + angle.toFixed(2) + "deg");
+      });
+      const background = stops.length ? "conic-gradient(" + stops.join(", ") + ")" : "var(--color-surface-alt)";
+      document.getElementById("typeDonut").innerHTML =
+        '<div class="donut" style="background:' + background + '"><div class="donut-inner"><div>' + esc(total || 0) + '<div class="muted">篇</div></div></div></div>';
+      document.getElementById("typeLegend").innerHTML = normalized.length ? normalized.map((item, index) => {
+        return '<div class="legend-item"><div class="legend-left"><span class="swatch" style="background:' + COLORS[index % COLORS.length] + '"></span><span>' + esc(item.type) + '</span></div><strong>' + esc(item.count) + '</strong></div>';
+      }).join("") : '<div class="empty">暂无类型数据</div>';
+      document.getElementById("typeSummary").textContent = normalized.length + " 个类型";
+    }
+    function renderCoverage(summary) {
+      const rows = [
+        { label: "PDF 覆盖", value: summary.pdf_available || 0 },
+        { label: "正文解析", value: summary.parsed_papers || 0 },
+        { label: "图像记录", value: summary.figures || 0 },
+        { label: "图像数据点", value: summary.figure_data_points || 0 },
+        { label: "DFT 设置", value: summary.dft_settings || 0 },
+        { label: "DFT 结果", value: summary.dft_results || 0 },
+        { label: "催化剂样本", value: summary.catalyst_samples || 0 }
+      ];
+      renderBars("coverageBars", rows, "label", "value", 2);
+      renderBars("assetBars", rows, "label", "value", 3);
+      document.getElementById("coverageSummary").textContent = "PDF " + (summary.pdf_available || 0) + " / 文献 " + (summary.papers || 0);
+    }
+    function renderMatrix(rows) {
+      const target = document.getElementById("dftMatrix");
+      document.getElementById("matrixCount").textContent = (rows || []).reduce((sum, row) => sum + Number(row.count || 0), 0) + " 条";
+      if (!rows || !rows.length) {
+        target.innerHTML = '<div class="empty">暂无 DFT 矩阵数据</div>';
+        return;
+      }
+      const properties = [...new Set(rows.map(row => row.property_type))].slice(0, 10);
+      const adsorbates = [...new Set(rows.map(row => row.adsorbate))].slice(0, 12);
+      const maxCount = Math.max(1, ...rows.map(row => Number(row.count || 0)));
+      const lookup = new Map(rows.map(row => [row.property_type + "::" + row.adsorbate, row]));
+      let html = '<div class="matrix-wrap"><div class="matrix" style="grid-template-columns:180px repeat(' + adsorbates.length + ', minmax(86px, 1fr));">';
+      html += '<div class="matrix-head">属性 / 物种</div>';
+      adsorbates.forEach(label => { html += '<div class="matrix-head">' + esc(label) + '</div>'; });
+      properties.forEach(property => {
+        html += '<div class="matrix-row-head">' + esc(property) + '</div>';
+        adsorbates.forEach(adsorbate => {
+          const row = lookup.get(property + "::" + adsorbate);
+          const count = row ? Number(row.count || 0) : 0;
+          const alpha = count ? (0.12 + count / maxCount * 0.78) : 0;
+          const bg = count ? "rgba(42,157,143," + alpha.toFixed(2) + ")" : "transparent";
+          html += '<div class="matrix-cell" style="background:' + bg + '"><strong>' + (count || "") + '</strong></div>';
+        });
+      });
+      html += '</div></div>';
+      target.innerHTML = html;
+    }
+    function renderStatus(rows) {
+      const target = document.getElementById("statusGrid");
+      if (!rows || !rows.length) {
+        target.innerHTML = '<div class="empty">暂无候选状态</div>';
+        return;
+      }
+      target.innerHTML = rows.map((row, index) => {
+        return '<div class="status-card"><div class="num" style="color:' + COLORS[index % COLORS.length] + '">' + esc(row.count) + '</div><div class="muted">' + esc(row.status) + '</div></div>';
+      }).join("");
+    }
+    function renderTasks(rows) {
+      const target = document.getElementById("taskList");
+      if (!rows || !rows.length) {
+        target.innerHTML = '<div class="empty">暂无任务记录</div>';
+        return;
+      }
+      target.innerHTML = rows.map(row => {
+        const title = row.title || row.action || row.type || "任务";
+        const time = row.updated_at || row.created_at || "";
+        return '<div class="task-row">' +
+          '<div><div class="task-title">' + esc(title) + '</div><div class="muted">' + esc(row.type) + ' · ' + esc(row.job_id) + '</div><div class="muted">' + esc(time ? new Date(time).toLocaleString("zh-CN") : "-") + '</div></div>' +
+          '<span class="pill">' + esc(row.status || "-") + '</span>' +
+        '</div>';
+      }).join("");
+    }
+    function renderAll(data) {
+      latestData = data;
+      const summary = data.summary || {};
+      renderMetrics(summary);
+      renderTypeDonut(data.paper_types || [], summary.papers || 0);
+      renderCoverage(summary);
+      renderBars("yearBars", (data.years || []).map(row => ({ label: row.year || "未知年份", value: row.count })), "label", "value", 0);
+      renderBars("journalBars", data.journals || [], "journal", "count", 1);
+      renderMatrix(data.dft_matrix || []);
+      renderStatus(data.dft_status || []);
+      renderTasks(data.recent_tasks || []);
+    }
+    async function loadLibraries() {
+      const libs = await fetchJSON("/api/libraries");
+      const select = document.getElementById("librarySelect");
+      const active = libs.find(item => item.is_active) || libs[0];
+      currentLibrary = active ? active.name : "";
+      select.innerHTML = libs.map(item => '<option value="' + esc(item.name) + '"' + (item.name === currentLibrary ? " selected" : "") + '>' + esc(item.name) + (item.is_active ? " (当前)" : "") + '</option>').join("");
+      document.getElementById("libraryMeta").textContent = active ? ("当前文献库：" + active.name + " · " + (active.paper_count || 0) + " 篇") : "未找到文献库";
+    }
+    async function loadVisuals() {
+      if (!currentLibrary) return;
+      const data = await fetchJSON("/api/visuals/overview?library_name=" + encodeURIComponent(currentLibrary));
+      renderAll(data);
+    }
+    async function handleLibraryChange(name) {
+      currentLibrary = name;
+      document.getElementById("libraryMeta").textContent = "当前文献库：" + name;
+      await loadVisuals().catch(error => showToast("加载可视化失败：" + error.message));
+    }
+    async function reloadAll() {
+      try {
+        await loadLibraries();
+        await loadVisuals();
+      } catch (error) {
+        showToast("刷新失败：" + error.message);
+      }
+    }
+    document.addEventListener("DOMContentLoaded", () => {
+      TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
+      reloadAll();
+    });
+  </script>
+</body>
+</html>

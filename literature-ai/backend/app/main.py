@@ -22,6 +22,7 @@ from app.api.system import router as system_router
 from app.api.writing import router as writing_router
 from app.api.writer import router as writer_router
 from app.api.verification import router as verification_router
+from app.api.visuals import router as visuals_router
 from app.api.workbench import router as workbench_router
 from app.config import get_settings
 from app.mcp import mcp_http_app, mcp_server
@@ -85,6 +86,7 @@ app.include_router(settings_router, prefix="/api/settings", tags=["settings"])
 app.include_router(retrieval_router, prefix="/api/retrieval", tags=["retrieval"])
 app.include_router(evidence_router, prefix="/api/evidence", tags=["evidence"])
 app.include_router(extraction_router, prefix="/api/extraction", tags=["extraction"])
+app.include_router(visuals_router, prefix="/api/visuals", tags=["visuals"])
 app.include_router(workbench_router, prefix="/api/workbench", tags=["workbench"])
 app.mount("/mcp", mcp_http_app)
 
