@@ -961,6 +961,10 @@
                 const data = await fetchJSON(`${API_BASE}/type-stats${query}`);
                 renderArticleStats(data);
             } catch (error) {
+                if (error && (error.status === 404 || error.status === 422)) {
+                    renderArticleStats({ items: [] });
+                    return;
+                }
                 container.innerHTML = `<div class="empty-state">文章类型统计加载失败：${esc(error.message)}</div>`;
             }
         }
@@ -1247,7 +1251,15 @@
                 return;
             }
             try {
-                const data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                let data;
+                try {
+                    data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                } catch (error) {
+                    if (!error || (error.status !== 404 && error.status !== 422)) {
+                        throw error;
+                    }
+                    data = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                }
                 state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
                 await loadArticleStats();
             } catch (error) {
