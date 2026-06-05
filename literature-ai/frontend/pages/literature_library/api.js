@@ -206,12 +206,6 @@ function safeLibraryFolderName(name) {
 }
 
 function containerPathToHostHint(path) {
-    const value = String(path || "").trim();
-    if (!value) return "";
-    if (value === "/data") return "literature-ai/data";
-    if (value.startsWith("/data/")) return "literature-ai/data/" + value.slice("/data/".length);
-    if (value === "/host/users") return "宿主机用户目录映射";
-    if (value.startsWith("/host/users/")) return "宿主机用户目录: " + value.slice("/host/users/".length);
     return "";
 }
 
@@ -241,20 +235,11 @@ async function loadLibraryRuntimeInfo() {
         const storageRoot = info.effective_storage_root || info.storage_root || "";
         const registryPath = "/data/library_registry.json";
         const activeRoot = activeDb ? activeDb.replace(/\\/g, "/").replace(/\/database\.sqlite$/i, "") : "";
-        const hostDbHint = containerPathToHostHint(activeDb);
-        const hostRootHint = containerPathToHostHint(activeRoot);
-        const hostStorageHint = containerPathToHostHint(storageRoot);
-        const hostRegistryHint = containerPathToHostHint(registryPath);
         el.innerHTML =
-            "当前库: <strong>" + esc(info.active_library || "未激活") + "</strong>" +
-            " | SQLite: <code>" + esc(activeDb || "-") + "</code>" +
-            (hostDbHint ? " | 宿主机: <code>" + esc(hostDbHint) + "</code>" : "") +
-            "<br>注册表: <code>" + esc(registryPath) + "</code>" +
-            (hostRegistryHint ? " | 宿主机: <code>" + esc(hostRegistryHint) + "</code>" : "") +
-            "<br>库目录: <code>" + esc(activeRoot || "-") + "</code>" +
-            (hostRootHint ? " | 宿主机: <code>" + esc(hostRootHint) + "</code>" : "") +
-            "<br>产物目录: <code>" + esc(storageRoot || "-") + "</code>" +
-            (hostStorageHint ? " | 宿主机: <code>" + esc(hostStorageHint) + "</code>" : "");
+            "SQLite: <code>" + esc(activeDb || "-") + "</code>" +
+            " | 注册表: <code>" + esc(registryPath) + "</code>" +
+            " | 库目录: <code>" + esc(activeRoot || "-") + "</code>" +
+            " | 产物目录: <code>" + esc(storageRoot || "-") + "</code>";
     } catch (error) {
         el.textContent = "当前文献库路径读取失败: " + error.message;
     }

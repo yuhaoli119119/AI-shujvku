@@ -32,10 +32,7 @@
         <div id="assistantLayout" class="main-layout">
             <aside id="assistantSidebar" class="input-panel card" aria-label="写作辅助侧栏">
                 <div class="sidebar-header">
-                    <div>
-                        <div class="section-title">工作台</div>
-                        <p class="sidebar-description">在目录中切换“写作上下文”和“高级筛选”，为右侧候选检索提供条件。</p>
-                    </div>
+                    <div class="section-title">工作台</div>
                     <button id="sidebarToggleButton" type="button" class="panel-icon-button" aria-label="隐藏左侧栏">隐藏侧栏</button>
                 </div>
 
@@ -73,11 +70,9 @@
                             <div id="validationAlert" class="validation-alert" style="display: none;"></div>
                         </div>
 
-                        <div class="field-row">
-                            <div class="field">
-                                <label for="maxCandidates">最多候选数</label>
-                                <input type="number" id="maxCandidates" class="input" value="10" min="1" max="50">
-                            </div>
+                        <div class="field field-horizontal">
+                            <label for="maxCandidates">最多候选数</label>
+                            <input type="number" id="maxCandidates" class="input" value="10" min="1" max="50" style="width: 160px; padding: 6px 12px;">
                         </div>
 
                         <div class="checkboxes-group checkboxes-inline">
@@ -177,9 +172,9 @@
 
                 <div class="panel-actions">
                     <button id="btnClear" class="btn btn-ghost" type="button" onclick="clearFilters()">清空筛选</button>
-                    <button id="btnSuggestComments" class="btn btn-secondary" type="button" onclick="suggestComments()">获取 Comment Suggestions</button>
-                    <button id="btnReviseDraft" class="btn btn-secondary" type="button" onclick="reviseDraft()">Revise Draft</button>
-                    <button id="btnGenerateCards" class="btn btn-secondary" type="button" onclick="generateEvidenceCards()">Generate Evidence Cards</button>
+                    <button id="btnSuggestComments" class="btn btn-secondary" type="button" onclick="suggestComments()">生成审稿意见</button>
+                    <button id="btnReviseDraft" class="btn btn-secondary" type="button" onclick="reviseDraft()">润色草稿</button>
+                    <button id="btnGenerateCards" class="btn btn-secondary" type="button" onclick="generateEvidenceCards()">生成证据卡片</button>
                     <button id="btnSearch" class="btn btn-primary" type="button" onclick="retrieveCandidates()">检索候选</button>
                 </div>
 

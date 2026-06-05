@@ -13,48 +13,50 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1440px; margin: 0 auto; padding: calc(var(--nav-height) + 28px) 24px 36px; }
-    .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
-    .page-head h1 { margin: 0 0 6px; font-size: 26px; }
-    .page-head p { margin: 0; color: var(--color-text-secondary); font-size: 14px; }
-    .panel-card, .filter-panel, .data-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-card); margin-bottom: 18px; }
-    .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-    label { display: block; font-size: 12px; color: var(--color-text-secondary); font-weight: 700; margin-bottom: 6px; }
-    input, select { width: 100%; border: 1px solid var(--color-border-strong); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); font: inherit; padding: 10px; }
-    .stats-banner { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
-    .stat-box { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); padding: 14px; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 18px 18px 28px; }
+    .panel-card, .filter-panel, .data-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-card); margin-bottom: 16px; }
+    .filter-panel { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .filter-grid { flex: 1 1 860px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+    .filter-field { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+    label { flex: 0 0 auto; display: inline-flex; align-items: center; margin: 0; font-size: 12px; color: var(--color-text-secondary); font-weight: 800; }
+    input, select { height: 32px; min-width: 92px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: 13px; padding: 0 8px; }
+    .filter-field input { width: 150px; }
+    .filter-field select { width: 150px; }
+    #minConfidence { width: 88px; }
+    #validationStatus { width: 118px; }
+    .stats-banner { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .stat-box { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); padding: 10px 12px; }
     .stat-box .lbl { color: var(--color-text-secondary); font-size: 12px; }
     .stat-box .val { font-size: 22px; font-weight: 800; margin-top: 4px; }
-    .panel-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-    .export-panel { max-width: 360px; text-align: right; }
-    .export-panel .btn + .btn { margin-left: 8px; }
-    .export-panel .export-note { margin-top: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
-    .export-panel .export-status { margin-top: 6px; color: var(--color-primary); font-size: 12px; font-weight: 700; }
-    .quality-panel { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 18px; align-items: stretch; }
-    .quality-panel > div:first-child { border-right: 1px solid var(--color-border); padding-right: 18px; }
+    .panel-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .export-panel { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+    .export-panel .btn { height: 32px; padding: 0 12px; font-size: 13px; }
+    .export-panel .export-status { color: var(--color-primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .quality-panel { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 14px; align-items: start; }
+    .quality-panel > div:first-child { border-right: 1px solid var(--color-border); padding-right: 14px; }
     .quality-panel > div:last-child { min-width: 0; }
     .quality-summary { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; }
     .reason-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .reason-chip { border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 6px 10px; background: var(--color-surface-alt); cursor: pointer; font-size: 12px; font-weight: 800; color: var(--color-text-secondary); }
     .reason-chip.active { background: var(--color-primary-bg); border-color: var(--color-primary); color: var(--color-primary); }
-    .quality-list { display: grid; gap: 10px; max-height: 360px; overflow: auto; padding-right: 4px; }
-    .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px; background: var(--color-surface-alt); }
+    .quality-list { display: grid; gap: 8px; max-height: 240px; overflow: auto; padding-right: 4px; }
+    .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 10px 12px; background: var(--color-surface-alt); }
     .quality-row.exportable { border-color: var(--color-success); background: var(--color-success-bg); }
     .quality-row h4 { margin: 0 0 6px; font-size: 14px; }
     .quality-meta { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-    .quality-help { color: var(--color-text-secondary); font-size: 13px; line-height: 1.65; margin-top: 12px; }
+    .quality-help { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; margin-top: 8px; }
     .quality-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
     .quality-pill { display: inline-flex; align-items: center; width: fit-content; border-radius: var(--radius-pill); padding: 4px 9px; background: var(--color-warning-bg); color: var(--color-warning); font-size: 12px; font-weight: 800; }
     .quality-row.exportable .quality-pill { background: var(--color-success-bg); color: var(--color-success); }
-    .readable-field { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
+    .readable-field { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 8px; background: var(--color-surface); }
     .readable-field .k { color: var(--color-text-muted); font-size: 12px; font-weight: 800; margin-bottom: 4px; }
     .readable-field .v { color: var(--color-text); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
     .completeness-list { display: grid; gap: 8px; margin-top: 12px; }
     .completeness-row { border: 1px dashed var(--color-border-strong); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
     .table-container { width: 100%; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { padding: 12px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
     th { background: var(--color-surface-alt); color: var(--color-text-secondary); font-weight: 800; }
     tr:hover td { background: var(--color-surface-alt); }
     .confidence-badge { display: inline-flex; border-radius: var(--radius-pill); padding: 3px 8px; font-size: 11px; font-weight: 800; }
@@ -63,37 +65,30 @@
     .confidence-badge.low { background: var(--color-danger-bg); color: var(--color-danger); }
     .evidence-link { border: 0; background: transparent; color: var(--color-primary); font-weight: 800; cursor: pointer; padding: 0; }
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
-    .empty-state { text-align: left; color: var(--color-text-secondary); padding: 18px; border: 1px dashed var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); }
+    .empty-state { text-align: left; color: var(--color-text-secondary); padding: 8px 12px; min-height: auto; border: 1px dashed var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); line-height: 1.45; }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
     @media (max-width: 768px) {
       .quality-panel { grid-template-columns: 1fr; }
       .quality-panel > div:first-child { border-right: 0; border-bottom: 1px solid var(--color-border); padding-right: 0; padding-bottom: 14px; }
-      .export-panel { max-width: none; text-align: left; }
+      .filter-panel { align-items: flex-start; }
+      .export-panel { margin-left: 0; }
     }
   </style>
 </head>
 <body>
   <div id="topnav-mount"></div>
   <main class="shell">
-    <header class="page-head">
-      <div>
-        <h1>DFT 数据库</h1>
-        <p>基于预定模式提取的催化剂、吸附物、能量类型、置信度、核验状态以及证据链接结果。</p>
-      </div>
-      <div class="export-panel">
-      <button class="btn green" onclick="exportCSV()">导出 CSV</button>
-        <div class="export-note">默认只导出“人工已确认、证据完整、定位准确”的记录；需要处理的记录不会导出。</div>
-        <div id="exportSafetyStatus" class="export-status">等待导出。</div>
-      </div>
-    </header>
-
     <section class="filter-panel">
       <div class="filter-grid">
-        <div><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="d_band_center">d_band_center</option><option value="">all</option></select></div>
-        <div><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
-        <div><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
-        <div><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
-        <div><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="">all</option><option value="validated">validated</option><option value="needs_review">needs_review</option></select></div>
+        <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="d_band_center">d_band_center</option><option value="">all</option></select></div>
+        <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
+        <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
+        <div class="filter-field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
+        <div class="filter-field"><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="">all</option><option value="validated">validated</option><option value="needs_review">needs_review</option></select></div>
+      </div>
+      <div class="export-panel">
+        <button class="btn green" onclick="exportCSV()">导出 CSV</button>
+        <span id="exportSafetyStatus" class="export-status">等待导出。</span>
       </div>
     </section>
 
