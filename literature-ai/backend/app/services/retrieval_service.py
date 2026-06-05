@@ -10,6 +10,7 @@ from app.db.models import PaperSection
 from app.rag.retriever import Retriever
 from app.schemas.evidence import EvidenceRef, PageSpan
 from app.schemas.retrieval import RetrievalSearchRequest, RetrievalSearchResponse, RetrievalSearchResult
+from app.services.embedding import get_embedding_service
 from app.utils.paper_type import normalize_paper_type_filter
 
 
@@ -25,7 +26,17 @@ class RetrievalService:
 
     def __init__(self, session: Session, reranker: NoopReranker | None = None) -> None:
         self.session = session
-        self.retriever = Retriever(session)
+        from app.config import get_settings
+
+        settings = get_settings()
+        embedding = get_embedding_service(
+            provider=settings.embedding_provider,
+            api_base=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+        )
+        self.retriever = Retriever(session, embedding_dimension=settings.embedding_dimension, embedding=embedding)
         self.reranker = reranker or NoopReranker()
 
     def search(self, payload: RetrievalSearchRequest) -> RetrievalSearchResponse:
@@ -115,7 +126,7 @@ class RetrievalService:
                     continue
                 paper_id = row.get("paper_id")
                 object_id = row.get("object_id")
-                section_id = object_id if row.get("type") == "section" else None
+                section_id = row.get("section_id") or (object_id if row.get("type") == "section" else None)
                 score_breakdown = row.get("score_breakdown") or {}
                 normalized_breakdown = {
                     "bm25": float(score_breakdown.get("lexical", score_breakdown.get("bm25", 0.0)) or 0.0),

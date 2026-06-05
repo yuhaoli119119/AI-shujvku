@@ -26,6 +26,10 @@ class PdfImageExtractor:
     render_zoom = 2.0
 
     @staticmethod
+    def _paper_figure_dir_name(pdf_path: Path) -> str:
+        return re.sub(r"[^A-Za-z0-9._-]+", "_", pdf_path.stem).strip("._") or "paper"
+
+    @staticmethod
     def _extract_figure_number(caption: str | None) -> int | None:
         if not caption:
             return None
@@ -48,6 +52,8 @@ class PdfImageExtractor:
 
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
+            paper_output_dir = output_dir / cls._paper_figure_dir_name(pdf_path)
+            paper_output_dir.mkdir(parents=True, exist_ok=True)
             doc = fitz.open(str(pdf_path))
         except Exception as exc:
             logger.error("Failed to open PDF for image extraction: %s", exc)
@@ -55,12 +61,28 @@ class PdfImageExtractor:
 
         try:
             for index, figure in enumerate(figures, start=1):
-                cls._extract_one(doc=doc, pdf_path=pdf_path, figure=figure, index=index, output_dir=output_dir)
+                cls._extract_one(
+                    doc=doc,
+                    pdf_path=pdf_path,
+                    figure=figure,
+                    index=index,
+                    output_dir=paper_output_dir,
+                    storage_root=output_dir,
+                )
         finally:
             doc.close()
 
     @classmethod
-    def _extract_one(cls, *, doc: fitz.Document, pdf_path: Path, figure: Any, index: int, output_dir: Path) -> None:
+    def _extract_one(
+        cls,
+        *,
+        doc: fitz.Document,
+        pdf_path: Path,
+        figure: Any,
+        index: int,
+        output_dir: Path,
+        storage_root: Path,
+    ) -> None:
         caption = cls._get(figure, "caption")
         page_no = cls._figure_page_number(figure)
         if page_no is None:
@@ -73,22 +95,28 @@ class PdfImageExtractor:
 
         page = doc[page_index]
         candidates = cls._crop_candidates(page=page, figure=figure, caption=caption)
-        best = cls._best_candidate(candidates, page.rect)
-        if best is None:
+        ranked = cls._rank_candidates(candidates, page.rect)
+        if not ranked:
             logger.debug("No usable crop candidate for figure on page %s: %s", page_no, caption)
             return
 
-        try:
-            pix = page.get_pixmap(matrix=fitz.Matrix(cls.render_zoom, cls.render_zoom), clip=best.rect, alpha=False)
-            if pix.width < 16 or pix.height < 16:
+        for candidate in ranked:
+            try:
+                pix = page.get_pixmap(matrix=fitz.Matrix(cls.render_zoom, cls.render_zoom), clip=candidate.rect, alpha=False)
+                if pix.width < 16 or pix.height < 16:
+                    continue
+                if not cls._pixmap_has_content(pix):
+                    continue
+                filename = cls._output_filename(pdf_path, caption, index)
+                out_path = cls._unique_output_path(output_dir / filename)
+                pix.save(str(out_path))
+                relative_output = out_path.relative_to(storage_root).as_posix()
+                cls._set(figure, "image_path", relative_output)
+                cls._append_crop_provenance(figure, page_no=page_no, candidate=candidate, output_name=relative_output)
                 return
-            filename = cls._output_filename(pdf_path, caption, index)
-            out_path = cls._unique_output_path(output_dir / filename)
-            pix.save(str(out_path))
-            cls._set(figure, "image_path", out_path.name)
-            cls._append_crop_provenance(figure, page_no=page_no, candidate=best, output_name=out_path.name)
-        except Exception as exc:
-            logger.warning("Failed to extract figure %s from %s: %s", index, pdf_path.name, exc)
+            except Exception as exc:
+                logger.debug("Rejected figure crop candidate %s for %s: %s", candidate.source, pdf_path.name, exc)
+        logger.warning("Failed to extract a usable figure %s from %s", index, pdf_path.name)
 
     @classmethod
     def _crop_candidates(cls, *, page: fitz.Page, figure: Any, caption: str | None) -> list[_CropCandidate]:
@@ -229,6 +257,11 @@ class PdfImageExtractor:
 
     @classmethod
     def _best_candidate(cls, candidates: list[_CropCandidate], page_rect: fitz.Rect) -> _CropCandidate | None:
+        ranked = cls._rank_candidates(candidates, page_rect)
+        return ranked[0] if ranked else None
+
+    @classmethod
+    def _rank_candidates(cls, candidates: list[_CropCandidate], page_rect: fitz.Rect) -> list[_CropCandidate]:
         usable: list[_CropCandidate] = []
         for candidate in candidates:
             rect = cls._usable_rect(candidate.rect, page_rect)
@@ -238,9 +271,27 @@ class PdfImageExtractor:
             if area_fraction < 0.002 or area_fraction > 0.88:
                 continue
             usable.append(_CropCandidate(rect, candidate.source, candidate.score + min(area_fraction, 0.25) * 20.0))
-        if not usable:
-            return None
-        return max(usable, key=lambda candidate: candidate.score)
+        return sorted(usable, key=lambda candidate: candidate.score, reverse=True)
+
+    @staticmethod
+    def _pixmap_has_content(pix: fitz.Pixmap) -> bool:
+        samples = pix.samples
+        channels = max(1, pix.n)
+        total_pixels = max(1, pix.width * pix.height)
+        step = max(1, total_pixels // 5000)
+        checked = 0
+        non_white = 0
+        for pixel_index in range(0, total_pixels, step):
+            offset = pixel_index * channels
+            rgb = samples[offset : offset + min(3, channels)]
+            if not rgb:
+                continue
+            checked += 1
+            if any(channel < 245 for channel in rgb):
+                non_white += 1
+        if checked == 0:
+            return False
+        return non_white / checked >= 0.001
 
     @classmethod
     def _usable_rect(cls, rect: fitz.Rect, page_rect: fitz.Rect) -> fitz.Rect | None:
@@ -306,6 +357,7 @@ class PdfImageExtractor:
 
     @staticmethod
     def _unique_output_path(path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
             return path
         counter = 2

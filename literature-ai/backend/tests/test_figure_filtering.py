@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 
 import fitz
 from PIL import Image
@@ -10,8 +11,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Base, Paper, PaperFigure
 from app.parsers.docling_parser import DoclingParser
-from app.schemas.documents import UnifiedFigure
+from app.schemas.documents import UnifiedFigure, UnifiedTable
 from app.services.paper_ingestion import PaperIngestionService
+from app.services.parse_quality_auditor import ParseQualityAuditor
 from app.services.pdf_image_extractor import PdfImageExtractor
 from app.utils.figure_filtering import decorative_figure_reason, is_decorative_figure
 from scripts.repair_decorative_figures import repair_decorative_figures
@@ -144,6 +146,7 @@ class TestPdfImageExtractor:
         PdfImageExtractor.extract_figures(pdf_path=pdf_path, figures=[figure], output_dir=output_dir)
 
         assert figure.image_path is not None
+        assert Path(figure.image_path).parts[0] == "raster_article"
         image_path = output_dir / figure.image_path
         assert image_path.exists()
         with Image.open(image_path) as image:
@@ -161,6 +164,7 @@ class TestPdfImageExtractor:
         PdfImageExtractor.extract_figures(pdf_path=pdf_path, figures=[figure], output_dir=output_dir)
 
         assert figure.image_path is not None
+        assert Path(figure.image_path).parts[0] == "vector_article"
         image_path = output_dir / figure.image_path
         assert image_path.exists()
         with Image.open(image_path) as image:
@@ -205,6 +209,24 @@ class TestPdfImageExtractor:
         assert left_bbox["r"] < right_bbox["l"]
         assert figures[0].prov[-1]["source"] == "image_block_near_caption"
         assert figures[1].prov[-1]["source"] == "image_block_near_caption"
+
+    def test_extract_stores_all_figure_images_under_per_paper_directory(self, tmp_path):
+        pdf_path = tmp_path / "per_paper.pdf"
+        _write_pdf_with_raster_figure(pdf_path)
+        output_dir = tmp_path / "figures"
+        figures = [
+            UnifiedFigure(caption="Figure 1. Red composite panel", page=1, prov=[]),
+            UnifiedFigure(caption="Fig. 1. Red composite panel duplicate", page=1, prov=[]),
+        ]
+
+        PdfImageExtractor.extract_figures(pdf_path=pdf_path, figures=figures, output_dir=output_dir)
+
+        for figure in figures:
+            assert figure.image_path is not None
+            relative = Path(figure.image_path)
+            assert relative.parts[0] == "per_paper"
+            assert len(relative.parts) == 2
+            assert (output_dir / relative).exists()
 
     def test_find_caption_rect_prefers_exact_caption_over_body_reference(self):
         doc = fitz.open()
@@ -255,6 +277,57 @@ class TestExtractFiguresFiltersDecorative:
         assert result[0]["caption"].startswith("Figure 2.")
         assert result[0]["page"] == 2
 
+    def test_docling_caption_resolution_deduplicates_repeated_figure_caption(self):
+        payload = {
+            "texts": [
+                {
+                    "text": (
+                        "Figure 2. Adsorption energies for Li2Sn on g-C3N4 and P-doped substrates. "
+                        "Figure 2. Adsorption energies for Li2Sn on g-C3N4 and P-doped substrates."
+                    )
+                }
+            ],
+            "figures": [
+                {
+                    "captions": [{"$ref": "#/texts/0"}],
+                    "prov": [{"page_no": 7, "bbox": {"l": 50, "t": 50, "r": 300, "b": 300}}],
+                }
+            ],
+        }
+
+        result = DoclingParser._extract_figures(payload)
+
+        assert len(result) == 1
+        assert result[0]["caption"] == (
+            "Figure 2. Adsorption energies for Li2Sn on g-C3N4 and P-doped substrates."
+        )
+
+    def test_docling_caption_resolution_repairs_common_fragmented_words(self):
+        payload = {
+            "texts": [
+                {
+                    "text": (
+                        "Figure 11. Energy pro fi les for ad -sorption on P-doped sheets. "
+                        "The dashe line marks the Fermi level."
+                    )
+                }
+            ],
+            "figures": [
+                {
+                    "captions": [{"$ref": "#/texts/0"}],
+                    "prov": [{"page_no": 15, "bbox": {"l": 50, "t": 50, "r": 300, "b": 300}}],
+                }
+            ],
+        }
+
+        result = DoclingParser._extract_figures(payload)
+
+        assert len(result) == 1
+        assert result[0]["caption"] == (
+            "Figure 11. Energy profiles for adsorption on P-doped sheets. "
+            "The dashed line marks the Fermi level."
+        )
+
     def test_all_decorative_returns_empty(self):
         """If all figures are decorative, result should be empty."""
         payload = {
@@ -292,6 +365,119 @@ class TestExtractFiguresFiltersDecorative:
         assert "| metric | constant μe |" in result[0]["markdown_content"]
         assert "| UL | 0.85 V |" in result[0]["markdown_content"]
 
+    def test_docling_table_caption_drops_leading_body_text(self):
+        payload = {
+            "texts": [
+                {
+                    "text": (
+                        "listed in Table 4 and Tables S2 and S3 of SI. "
+                        "The average Li-S bond length decreases. "
+                        "Table 4. The average S-S, Li-S, and Li-N distances (Å) and adsorption energy (eV)."
+                    )
+                }
+            ],
+            "tables": [
+                {
+                    "captions": [{"$ref": "#/texts/0"}],
+                    "prov": [{"page_no": 7}],
+                }
+            ],
+        }
+
+        result = DoclingParser._extract_tables(payload)
+
+        assert result[0]["caption"] == (
+            "Table 4. The average S-S, Li-S, and Li-N distances (Å) and adsorption energy (eV)."
+        )
+
+    def test_docling_table_grid_is_preferred_and_cleans_caption_pollution(self):
+        payload = {
+            "texts": [
+                {
+                    "text": (
+                        "listed in Table 4 and Tables S2 and S3 of SI. "
+                        "Table 4. The average S-S, Li-S, and Li-N distances (Å) and adsorption energy (eV). "
+                        "Molecules S-S Li-S Li-N E ad"
+                    )
+                }
+            ],
+            "tables": [
+                {
+                    "captions": [{"$ref": "#/texts/0"}],
+                    "prov": [{"page_no": 7}],
+                    "data": {
+                        "grid": [
+                            [
+                                {"text": "Molecules", "column_header": True},
+                                {"text": "S-S", "column_header": True},
+                                {"text": "Li-S", "column_header": True},
+                                {"text": "Li-N", "column_header": True},
+                                {"text": "E ad", "column_header": True},
+                            ],
+                            [
+                                {"text": "Li 2 S 4", "column_header": False},
+                                {"text": "2.093", "column_header": False},
+                                {"text": "Table 4. The 2.386", "column_header": False},
+                                {"text": "average S-S, Li-S, 3.040", "column_header": False},
+                                {"text": "adsorption energy 5.225", "column_header": False},
+                            ],
+                            [
+                                {"text": "S 8", "column_header": False},
+                                {"text": "-", "column_header": False},
+                                {"text": "LiPSs 2.021", "column_header": False},
+                                {"text": "P C 2.250", "column_header": False},
+                                {"text": "3.502", "column_header": False},
+                            ],
+                        ]
+                    },
+                }
+            ],
+        }
+
+        result = DoclingParser._extract_tables(payload)
+        markdown = result[0]["markdown_content"]
+
+        assert "| Molecules | S-S | Li-S | Li-N | E ad |" in markdown
+        assert "| Li 2 S 4 | 2.093 | 2.386 | 3.040 | 5.225 |" in markdown
+        assert "| S 8 | - | 2.021 | 2.250 | 3.502 |" in markdown
+
+    def test_docling_table_grid_combines_multilevel_headers(self):
+        payload = {
+            "texts": [{"text": "Table 4. Bond lengths and adsorption energies."}],
+            "tables": [
+                {
+                    "captions": [{"$ref": "#/texts/0"}],
+                    "data": {
+                        "grid": [
+                            [
+                                {"text": "Molecules", "column_header": True},
+                                {"text": "LiPSs", "column_header": True},
+                                {"text": "g-C 3 N 4", "column_header": True},
+                                {"text": "P C", "column_header": True},
+                            ],
+                            [
+                                {"text": "Molecules", "column_header": True},
+                                {"text": "S-S", "column_header": True},
+                                {"text": "Li-N", "column_header": True},
+                                {"text": "E ad", "column_header": True},
+                            ],
+                            [
+                                {"text": "Li 2 S 4", "column_header": False},
+                                {"text": "2.093", "column_header": False},
+                                {"text": "2.351", "column_header": False},
+                                {"text": "5.225", "column_header": False},
+                            ],
+                        ]
+                    },
+                }
+            ],
+        }
+
+        result = DoclingParser._extract_tables(payload)
+
+        assert "| Molecules | LiPSs S-S | g-C3N4 Li-N | PC E ad |" in result[0]["markdown_content"]
+        assert "| Li 2 S 4 | 2.093 | 2.351 | 5.225 |" in result[0]["markdown_content"]
+
     def test_fallback_caption_extraction_finds_tables_and_figures(self):
         page_blocks = [
             {
@@ -305,7 +491,72 @@ class TestExtractFiguresFiltersDecorative:
 
         assert tables[0]["page"] == 4
         assert "limiting potential" in tables[0]["caption"]
+        assert tables[0]["markdown_content"] == tables[0]["caption"]
         assert figures[0]["caption"].startswith("Figure 2.")
+
+    def test_fallback_table_extraction_skips_body_references(self):
+        page_blocks = [
+            {
+                "page": 5,
+                "text": (
+                    "Table 2, and the results show that the formation energies are similar.\n"
+                    "Table 3. Band gaps of the g-C3N4 monolayer and P-g-C3N4."
+                ),
+            }
+        ]
+
+        tables = DoclingParser._extract_fallback_tables(page_blocks)
+
+        assert len(tables) == 1
+        assert tables[0]["caption"].startswith("Table 3.")
+
+    def test_parse_quality_auditor_cleans_and_deduplicates_tables(self):
+        tables = [
+            UnifiedTable(
+                caption="Table 2, and the results show this is a body reference.",
+                markdown_content="Table 2, and the results show this is a body reference.",
+                page=5,
+                extraction_source="pypdf_caption_fallback",
+            ),
+            UnifiedTable(
+                caption=(
+                    "Table 4. The average S-S, Li-S, and Li-N distances (Å) and adsorption energy (eV). "
+                    "Molecules LiPSs g-C3N4 PC Li2S 2.108"
+                ),
+                markdown_content="Table 4. The average S-S, Li-S, and Li-N distances (Å) and adsorption energy (eV).",
+                page=7,
+                extraction_source="pypdf_caption_fallback",
+            ),
+            UnifiedTable(
+                caption="Table 4. The average S-S, Li-S, and Li-N distances (Å) and adsorption energy (eV).",
+                markdown_content="| Molecules | S-S |\n| --- | --- |\n| S8 | 2.060 |",
+                page=7,
+                extraction_source="docling",
+            ),
+        ]
+
+        cleaned = ParseQualityAuditor.clean_tables(tables)
+
+        assert len(cleaned) == 1
+        assert cleaned[0].extraction_source == "docling"
+        assert cleaned[0].caption == "Table 4. The average S-S, Li-S, and Li-N distances (Å) and adsorption energy (eV)."
+
+    def test_parse_quality_auditor_filters_figures_without_images_and_duplicates(self, tmp_path):
+        image_dir = tmp_path / "figures" / "paper"
+        image_dir.mkdir(parents=True)
+        (image_dir / "fig_1.png").write_bytes(b"same-image")
+        (image_dir / "fig_1_dup.png").write_bytes(b"same-image")
+        figures = [
+            UnifiedFigure(caption="Figure 1. Actual structure.", image_path="paper/fig_1.png", page=2),
+            UnifiedFigure(caption="Figure 1. Actual structure duplicate.", image_path="paper/fig_1_dup.png", page=2),
+            UnifiedFigure(caption="Figure 2. Missing file.", image_path="paper/missing.png", page=3),
+            UnifiedFigure(caption="Figure 3. No image.", image_path=None, page=4),
+        ]
+
+        cleaned = ParseQualityAuditor.clean_figures_after_extraction(figures, tmp_path / "figures")
+
+        assert len(cleaned) == 1
+        assert cleaned[0].caption == "Figure 1. Actual structure."
 
     def test_fallback_caption_extraction_skips_body_figure_references(self):
         page_blocks = [

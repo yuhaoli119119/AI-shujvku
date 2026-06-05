@@ -65,3 +65,16 @@ def test_docling_parser_respects_disabled_flag_and_falls_back(tmp_path: Path):
 
     assert result.json_payload["fallback"] is True
     assert "Warning" in result.markdown
+
+
+def test_docling_source_path_uses_ascii_temp_copy_for_unicode_absolute_path(tmp_path: Path):
+    unicode_dir = tmp_path / "测试目录"
+    unicode_dir.mkdir()
+    pdf_path = unicode_dir / "样本文档.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    with DoclingParser._docling_source_path(pdf_path.resolve()) as source_path:
+        assert source_path.exists()
+        assert source_path.suffix == ".pdf"
+        assert str(source_path).isascii()
+        assert source_path.read_bytes() == pdf_path.read_bytes()

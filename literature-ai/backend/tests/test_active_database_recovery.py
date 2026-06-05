@@ -182,6 +182,54 @@ def test_force_configured_database_bypasses_registered_active_library(tmp_path, 
     assert info["recovered_from_candidate_scan"] is False
 
 
+def test_force_configured_postgresql_bypasses_sqlite_candidates(tmp_path, monkeypatch):
+    workspace_root = tmp_path
+    backend_root = workspace_root / "backend"
+    backend_root.mkdir(parents=True, exist_ok=True)
+
+    active_root = workspace_root / "data" / "libraries" / "active"
+    (active_root / "papers").mkdir(parents=True, exist_ok=True)
+    _write_sqlite(active_root / "database.sqlite", paper_count=3)
+
+    registry_path = workspace_root / "data" / "library_registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "active_library": "active",
+                "libraries": [
+                    {
+                        "name": "active",
+                        "root_path": str(active_root.resolve()),
+                        "description": "active",
+                        "created_at": "2026-05-26T00:00:00",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@db.example/literature_ai")
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(workspace_root / "storage"))
+    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
+    monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
+
+    info = active_database_module.get_active_database_info()
+
+    assert info["db_kind"] == "postgresql"
+    assert info["effective_db_path"] is None
+    assert info["is_active_library_sqlite"] is False
+    assert info["effective_db_papers_total"] == 0
+    assert info["recovered_from_candidate_scan"] is False
+
+
 def test_get_active_database_info_keeps_empty_non_default_active_library(tmp_path, monkeypatch):
     workspace_root = tmp_path
     backend_root = workspace_root / "backend"

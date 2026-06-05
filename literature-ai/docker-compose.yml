@@ -1,8 +1,6 @@
 services:
-  # NOTE: PostgreSQL is started and initialized but NOT the default active database.
-  # The backend activates a per-library SQLite database via LibraryManager at startup.
-  # PostgreSQL is available for future use (e.g. pgvector retrieval) but sits idle unless
-  # the library system is bypassed (no active library in the registry).
+  # PostgreSQL + pgvector is the intended production source of truth when
+  # LITAI_FORCE_CONFIGURED_DATABASE=true is set for backend and worker.
   postgres:
     image: pgvector/pgvector:pg16
     environment:
@@ -46,6 +44,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
@@ -53,7 +52,12 @@ services:
       LITAI_MINIO_ACCESS_KEY: minioadmin
       LITAI_MINIO_SECRET_KEY: minioadmin
       LITAI_STORAGE_ROOT: /data/storage
-      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-false}
+      LITAI_EMBEDDING_PROVIDER: ${LITAI_EMBEDDING_PROVIDER:-openai_compatible}
+      LITAI_EMBEDDING_API_BASE: ${LITAI_EMBEDDING_API_BASE:-https://api.siliconflow.cn/v1}
+      LITAI_EMBEDDING_API_KEY: ${LITAI_EMBEDDING_API_KEY:-}
+      LITAI_EMBEDDING_MODEL: ${LITAI_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LITAI_EMBEDDING_DIMENSION: ${LITAI_EMBEDDING_DIMENSION:-1024}
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
       LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-false}
       LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
       LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}
@@ -93,6 +97,7 @@ services:
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
@@ -100,7 +105,12 @@ services:
       LITAI_MINIO_ACCESS_KEY: minioadmin
       LITAI_MINIO_SECRET_KEY: minioadmin
       LITAI_STORAGE_ROOT: /data/storage
-      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-false}
+      LITAI_EMBEDDING_PROVIDER: ${LITAI_EMBEDDING_PROVIDER:-openai_compatible}
+      LITAI_EMBEDDING_API_BASE: ${LITAI_EMBEDDING_API_BASE:-https://api.siliconflow.cn/v1}
+      LITAI_EMBEDDING_API_KEY: ${LITAI_EMBEDDING_API_KEY:-}
+      LITAI_EMBEDDING_MODEL: ${LITAI_EMBEDDING_MODEL:-BAAI/bge-m3}
+      LITAI_EMBEDDING_DIMENSION: ${LITAI_EMBEDDING_DIMENSION:-1024}
+      LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
       LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-false}
       LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
       LITAI_DOCLING_NUM_THREADS: ${LITAI_DOCLING_NUM_THREADS:-4}

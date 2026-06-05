@@ -73,12 +73,30 @@ class CitationGuard:
 
         supported: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
+        claim_audit: list[dict[str, Any]] = []
         for claim in numeric_claims:
             match = self._find_supporting_claim(claim, fact_claims)
             if match is None:
                 missing.append(claim)
+                near = self._find_near_numeric_claim(claim, fact_claims)
+                claim_audit.append(
+                    {
+                        "claim": claim,
+                        "claim_type": "numerical_claim",
+                        "status": "numerical_error" if near is not None else "unverified",
+                        "supported_by": near,
+                    }
+                )
             else:
                 supported.append({"claim": claim, "supported_by": match})
+                claim_audit.append(
+                    {
+                        "claim": claim,
+                        "claim_type": "numerical_claim",
+                        "status": "verified",
+                        "supported_by": match,
+                    }
+                )
 
         supported_textual: list[dict[str, Any]] = []
         missing_textual: list[dict[str, Any]] = []
@@ -86,8 +104,24 @@ class CitationGuard:
             match = self._find_supporting_textual_claim(claim, facts)
             if match is None:
                 missing_textual.append(claim)
+                claim_audit.append(
+                    {
+                        "claim": claim,
+                        "claim_type": self._textual_claim_type(claim),
+                        "status": "citation_mismatch" if self._has_any_textual_evidence(facts) else "not_in_source",
+                        "supported_by": None,
+                    }
+                )
             else:
                 supported_textual.append({"claim": claim, "supported_by": match})
+                claim_audit.append(
+                    {
+                        "claim": claim,
+                        "claim_type": self._textual_claim_type(claim),
+                        "status": "verified",
+                        "supported_by": match,
+                    }
+                )
         return {
             "ok": not missing and not missing_textual,
             "supported_values": supported,
@@ -96,6 +130,7 @@ class CitationGuard:
             "missing_fact_claims": missing_textual,
             "checked_count": len(numeric_claims),
             "checked_fact_count": len(textual_claims),
+            "claim_audit": claim_audit,
         }
 
     def _extract_numeric_claims(self, text: str) -> list[dict[str, Any]]:
@@ -156,6 +191,14 @@ class CitationGuard:
                     return fact
         return None
 
+    def _find_near_numeric_claim(self, claim: dict[str, Any], facts: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for fact in facts:
+            if fact["unit"] != claim["unit"]:
+                continue
+            if self._context_matches(claim, fact):
+                return fact
+        return None
+
     def _extract_textual_claims(self, text: str) -> list[dict[str, Any]]:
         claims: list[dict[str, Any]] = []
         for sentence in self._split_sentences(text):
@@ -186,6 +229,20 @@ class CitationGuard:
                 return None
             supported_by.append({"trigger": trigger, "evidence": match})
         return {"supports": supported_by}
+
+    @staticmethod
+    def _textual_claim_type(claim: dict[str, Any]) -> str:
+        triggers = set(claim.get("triggers") or [])
+        if triggers & {"causes", "infers_causality", "mediates"}:
+            return "causal_claim"
+        if triggers & {"superior", "strengthens", "weakens"}:
+            return "comparative_claim"
+        if triggers & {"evidences"}:
+            return "attribution_claim"
+        return "mechanism_claim"
+
+    def _has_any_textual_evidence(self, facts: dict[str, list[dict[str, Any]]] | list[dict[str, Any]]) -> bool:
+        return any((item.get("text") or item.get("evidence_text") or item.get("claim_text")) for item in self._collect_textual_evidence_items(facts))
 
     def _find_support_for_trigger(
         self,

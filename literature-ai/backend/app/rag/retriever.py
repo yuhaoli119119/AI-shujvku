@@ -4,10 +4,11 @@ import re
 from typing import Any
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DFTResult, ElectrochemicalPerformance, MechanismClaim, PaperSection, WritingCard, Paper, FigureDataPoint
+from app.db.models import DFTResult, ElectrochemicalPerformance, MechanismClaim, PaperChunk, PaperSection, WritingCard, Paper, FigureDataPoint
 from app.services.embedding import DeterministicEmbeddingService, get_embedding_service, EmbeddingService
 from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 
@@ -19,7 +20,7 @@ def _tokenize(text: str) -> set[str]:
 class Retriever:
     """Hybrid lexical + embedding retriever over sections, facts, claims, and writing cards."""
 
-    def __init__(self, session: Session, embedding_dimension: int = 64, embedding: EmbeddingService | None = None) -> None:
+    def __init__(self, session: Session, embedding_dimension: int = 1536, embedding: EmbeddingService | None = None) -> None:
         self.session = session
         self.embedding = embedding or DeterministicEmbeddingService(embedding_dimension)
 
@@ -61,6 +62,10 @@ class Retriever:
         limit: int,
         paper_type_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        chunk_results = self._retrieve_chunks(tokens, query_embedding, paper_ids, limit, paper_type_filter)
+        if chunk_results:
+            return chunk_results
+
         query = select(PaperSection)
         if paper_ids:
             query = query.where(PaperSection.paper_id.in_(paper_ids))
@@ -88,6 +93,64 @@ class Retriever:
                 }
             )
         return self._top_k(results, limit)
+
+    def _retrieve_chunks(
+        self,
+        tokens: set[str],
+        query_embedding: list[float],
+        paper_ids: list[UUID] | None,
+        limit: int,
+        paper_type_filter: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = self._candidate_chunks(query_embedding, paper_ids, max(limit * 10, 50), paper_type_filter)
+        results = []
+        for row in rows:
+            haystack = row.text or ""
+            score, score_info = self._hybrid_score(tokens, query_embedding, haystack, row.embedding, allow_paper_fallback=bool(paper_ids))
+            if score <= 0:
+                continue
+            results.append(
+                {
+                    "type": "section",
+                    "paper_id": row.paper_id,
+                    "object_id": row.id,
+                    "section_id": row.section_id,
+                    "score": score,
+                    "score_breakdown": score_info,
+                    "text": haystack[:1200],
+                    "section_title": "Chunk",
+                    "section_type": "chunk",
+                    "page_start": row.page_start,
+                    "page_end": row.page_end,
+                    "embedding_model": row.embedding_model,
+                    "embedding_dimension": row.embedding_dimension,
+                }
+            )
+        return self._top_k(results, limit)
+
+    def _candidate_chunks(
+        self,
+        query_embedding: list[float],
+        paper_ids: list[UUID] | None,
+        limit: int,
+        paper_type_filter: list[str] | None,
+    ) -> list[PaperChunk]:
+        dialect_name = self.session.bind.dialect.name if self.session.bind is not None else ""
+        query = select(PaperChunk)
+        if paper_ids:
+            query = query.where(PaperChunk.paper_id.in_(paper_ids))
+        query = self._apply_type_filter(query, PaperChunk, paper_type_filter)
+        if dialect_name != "postgresql" or not query_embedding:
+            return list(self.session.scalars(query).all())
+
+        vector_literal = "[" + ",".join(f"{float(item):.8f}" for item in query_embedding) + "]"
+        query_vector = sa.cast(sa.literal(vector_literal), PaperChunk.embedding.type)
+        distance = PaperChunk.embedding.op("<=>")(query_vector)
+        pg_query = query.where(PaperChunk.embedding.is_not(None)).order_by(distance.asc()).limit(limit)
+        try:
+            return list(self.session.scalars(pg_query).all())
+        except Exception:
+            return list(self.session.scalars(query).all())
 
     def _retrieve_dft_results(
         self,

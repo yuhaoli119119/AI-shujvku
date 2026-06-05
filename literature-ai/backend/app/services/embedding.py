@@ -18,6 +18,10 @@ class EmbeddingService(Protocol):
     def cosine_similarity(self, left: list[float] | None, right: list[float] | None) -> float: ...
 
 
+class EmbeddingUnavailableError(RuntimeError):
+    """Raised when a configured real embedding backend cannot produce a vector."""
+
+
 class DeterministicEmbeddingService:
     """Offline-safe hashed bag-of-words embeddings for MVP retrieval plumbing."""
 
@@ -56,10 +60,7 @@ class DeterministicEmbeddingService:
 
 
 class OpenAICompatibleEmbeddingService:
-    """Embedding service that calls OpenAI-compatible APIs (DeepSeek, OpenAI, etc.).
-
-    Falls back to DeterministicEmbeddingService when API is unavailable.
-    """
+    """Embedding service that calls OpenAI-compatible APIs such as SiliconFlow."""
 
     dimension: int
 
@@ -67,8 +68,8 @@ class OpenAICompatibleEmbeddingService:
         self,
         api_base: str,
         api_key: str,
-        model: str = "text-embedding-3-small",
-        dimension: int = 1536,
+        model: str = "BAAI/bge-m3",
+        dimension: int = 1024,
         timeout_seconds: float = 30.0,
     ) -> None:
         self.api_base = api_base.rstrip("/")
@@ -76,12 +77,11 @@ class OpenAICompatibleEmbeddingService:
         self.model = model
         self.dimension = dimension
         self.timeout_seconds = timeout_seconds
-        self._fallback = DeterministicEmbeddingService(dimension=64)
 
     def embed_text(self, text: str) -> list[float]:
-        """Call the embedding API. Falls back to deterministic on failure."""
+        """Call the embedding API and fail loudly if it cannot return the configured dimension."""
         if not self.api_base or not self.api_key:
-            return self._fallback.embed_text(text)
+            raise EmbeddingUnavailableError("Embedding API base/key are required for openai_compatible provider")
         try:
             import httpx
 
@@ -90,6 +90,9 @@ class OpenAICompatibleEmbeddingService:
                 "model": self.model,
                 "input": text,
             }
+            dimensions = self._resolve_dimensions_payload()
+            if dimensions is not None:
+                payload["dimensions"] = dimensions
             with httpx.Client(timeout=self.timeout_seconds) as client:
                 response = client.post(
                     url,
@@ -104,15 +107,14 @@ class OpenAICompatibleEmbeddingService:
             embedding = self._extract_embedding(data)
             if embedding and len(embedding) == self.dimension:
                 return embedding
-            logger.warning(
-                "Embedding dimension mismatch: expected %d, got %d; falling back",
-                self.dimension,
-                len(embedding) if embedding else 0,
+            raise EmbeddingUnavailableError(
+                f"Embedding dimension mismatch: expected {self.dimension}, got {len(embedding) if embedding else 0}"
             )
-            return self._fallback.embed_text(text)
         except Exception as exc:
-            logger.warning("Embedding API call failed (%s); falling back to deterministic", exc)
-            return self._fallback.embed_text(text)
+            if isinstance(exc, EmbeddingUnavailableError):
+                raise
+            logger.warning("Embedding API call failed: %s", exc)
+            raise EmbeddingUnavailableError(f"Embedding API call failed: {exc}") from exc
 
     def cosine_similarity(self, left: list[float] | None, right: list[float] | None) -> float:
         if not left or not right or len(left) != len(right):
@@ -125,6 +127,13 @@ class OpenAICompatibleEmbeddingService:
         if self.api_base.endswith("/v1"):
             return self.api_base + "/embeddings"
         return self.api_base + "/v1/embeddings"
+
+    def _resolve_dimensions_payload(self) -> int | None:
+        """Only send `dimensions` for SiliconFlow models that support it."""
+        normalized_model = (self.model or "").strip()
+        if normalized_model.startswith("Qwen/Qwen3-Embedding-"):
+            return self.dimension
+        return None
 
     @staticmethod
     def _extract_embedding(data: dict[str, Any]) -> list[float] | None:
@@ -143,7 +152,7 @@ def get_embedding_service(
     api_base: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
-    dimension: int = 64,
+    dimension: int = 1024,
 ) -> EmbeddingService:
     """Factory: return the appropriate embedding service based on configuration.
 
@@ -152,12 +161,10 @@ def get_embedding_service(
     """
     provider = (provider or "deterministic").lower()
     if provider == "openai_compatible":
-        if api_base and api_key:
-            return OpenAICompatibleEmbeddingService(
-                api_base=api_base,
-                api_key=api_key,
-                model=model or "text-embedding-3-small",
-                dimension=dimension,
-            )
-        logger.warning("openai_compatible embedding requested but api_base/api_key missing; falling back")
+        return OpenAICompatibleEmbeddingService(
+            api_base=api_base or "",
+            api_key=api_key or "",
+            model=model or "BAAI/bge-m3",
+            dimension=dimension,
+        )
     return DeterministicEmbeddingService(dimension=dimension)

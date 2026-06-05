@@ -274,6 +274,28 @@ def get_active_database_info() -> dict[str, Any]:
     configured_runtime_is_sqlite = configured_kind == "sqlite" and configured_path is not None
     force_configured_database = bool(getattr(settings, "force_configured_database", False))
 
+    if force_configured_database and configured_kind != "sqlite":
+        return {
+            "db_kind": configured_kind,
+            "db_path": None,
+            "db_url_masked": _mask_url(database_url),
+            "configured_db_kind": configured_kind,
+            "configured_db_path": configured_path,
+            "configured_db_url_masked": _mask_url(database_url),
+            "active_library": active_library,
+            "active_library_db_path": active_library_database_path,
+            "matches_active_library_db_path": False,
+            "configured_matches_active_library_db_path": False,
+            "is_active_library_sqlite": False,
+            "effective_db_path": None,
+            "effective_storage_root": str(Path(settings.storage_root).resolve()),
+            "effective_db_has_papers_table": False,
+            "effective_db_papers_total": 0,
+            "effective_matches_active_library_db_path": False,
+            "recovered_from_candidate_scan": False,
+            "force_configured_database": True,
+        }
+
     if force_configured_database and configured_sqlite_path is not None:
         effective = _sqlite_candidate_summary(configured_sqlite_path)
     else:
@@ -348,6 +370,13 @@ def activate_active_library_database() -> dict[str, Any]:
 
     settings = get_settings()
     if bool(getattr(settings, "force_configured_database", False)):
+        if _kind_from_url(settings.database_url) != "sqlite":
+            from app.db.session import init_db
+
+            init_db(settings.database_url)
+            info = get_active_database_info()
+            info["force_configured_database"] = True
+            return info
         info = get_active_database_info()
         configured_path = info.get("configured_db_path")
         if info.get("configured_db_kind") == "sqlite" and configured_path:

@@ -30,10 +30,35 @@ def get_engine(database_url: str):
 def init_db(database_url: str) -> None:
     engine = get_engine(database_url)
     if engine.dialect.name == "postgresql":
-        with engine.begin() as connection:
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            for extension in ("vector", "pgcrypto", "pg_trgm"):
+                try:
+                    connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
+                except Exception:
+                    logger.warning(
+                        "Could not create PostgreSQL extension %s; assuming it is preinstalled or managed externally",
+                        extension,
+                    )
     Base.metadata.create_all(engine)
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_paper_id ON paper_chunks(paper_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_section_id ON paper_chunks(section_id)"))
+            try:
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS paper_chunks_embedding_hnsw "
+                        "ON paper_chunks USING hnsw (embedding vector_cosine_ops)"
+                    )
+                )
+            except Exception:
+                logger.warning("Could not create paper_chunks HNSW index; pgvector may be unavailable")
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS paper_chunks_text_gin "
+                    "ON paper_chunks USING gin (to_tsvector('simple', coalesce(text, '')))"
+                )
+            )
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
 

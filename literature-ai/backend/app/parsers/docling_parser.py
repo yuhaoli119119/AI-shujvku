@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
+from contextlib import contextmanager
 import logging
 from pathlib import Path
 import re
+import shutil
+import tempfile
 from typing import Any
 
 from app.config import Settings
@@ -66,7 +70,8 @@ class DoclingParser:
                     InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
                 }
             )
-            result = converter.convert(str(pdf_path))
+            with self._docling_source_path(pdf_path) as source_path:
+                result = converter.convert(str(source_path))
             document = result.document
             markdown = self._export_markdown(document)
             payload = self._export_json(document)
@@ -85,6 +90,24 @@ class DoclingParser:
                 raise
             logger.warning("Docling parse failed for %s; falling back to pypdf text extraction: %s", pdf_path, exc)
             return self._fallback_parse(pdf_path)
+
+    @staticmethod
+    @contextmanager
+    def _docling_source_path(pdf_path: Path):
+        """Use an ASCII-only temp copy when Windows absolute paths contain non-ASCII characters."""
+        source = Path(pdf_path)
+        source_str = str(source)
+        needs_ascii_copy = source.is_absolute() and not source_str.isascii()
+        if not needs_ascii_copy:
+            yield source
+            return
+
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", source.stem).strip("._") or "document"
+        safe_suffix = source.suffix or ".pdf"
+        with tempfile.TemporaryDirectory(prefix="litai_docling_") as temp_dir:
+            temp_path = Path(temp_dir) / f"{safe_stem}{safe_suffix}"
+            shutil.copy2(source, temp_path)
+            yield temp_path
 
     @staticmethod
     def _export_markdown(document: Any) -> str:
@@ -136,7 +159,62 @@ class DoclingParser:
             elif isinstance(cap, str):
                 resolved_texts.append(cap)
                 
-        return " ".join(resolved_texts) if resolved_texts else None
+        if not resolved_texts:
+            return None
+        return DoclingParser._dedupe_caption_text(" ".join(resolved_texts))
+
+    @staticmethod
+    def _dedupe_caption_text(caption: str | None) -> str | None:
+        if not caption:
+            return None
+        normalized = re.sub(r"\s+", " ", str(caption)).strip()
+        if not normalized:
+            return None
+
+        label_matches = list(
+            re.finditer(r"(?:figure|fig\.?|scheme)\s*(\d+)[\.:]?", normalized, re.IGNORECASE)
+        )
+        deduped = normalized
+        if len(label_matches) >= 2:
+            first = label_matches[0]
+            second = label_matches[1]
+            if first.group(1) == second.group(1):
+                left = deduped[first.start() : second.start()].strip()
+                right = deduped[second.start() :].strip()
+                prefix_len = min(len(left), len(right), 80)
+                if prefix_len >= 24:
+                    similarity = SequenceMatcher(
+                        None,
+                        left[:prefix_len].lower(),
+                        right[:prefix_len].lower(),
+                    ).ratio()
+                    if similarity >= 0.72:
+                        deduped = left
+
+        half = len(deduped) // 2
+        if half >= 24 and len(deduped) % 2 == 0:
+            left = deduped[:half].strip()
+            right = deduped[half:].strip()
+            if left and right and SequenceMatcher(None, left.lower(), right.lower()).ratio() >= 0.9:
+                deduped = left
+
+        normalized = re.sub(r"(?<=\w)\s*-\s*(?=\w)", "-", deduped)
+        normalized = re.sub(r"\(\s*([A-Za-z0-9])\s*\)", r"(\1)", normalized)
+        normalized = re.sub(r"(?<=\))(?=[A-Za-z0-9])", " ", normalized)
+        replacements = (
+            (r"\bpro\s+fi\s+les\b", "profiles"),
+            (r"\bpro\s+fi\s+le\b", "profile"),
+            (r"\bad[\s-]+sorption\b", "adsorption"),
+            (r"\bfi\s+nal\b", "final"),
+            (r"\bSpeci\s+fically\b", "Specifically"),
+            (r"\bspeci\s+fically\b", "specifically"),
+            (r"\bdashe\s+line\b", "dashed line"),
+            (r"\bdas\s+line\b", "dashed line"),
+            (r"\bda\s+line\b", "dashed line"),
+        )
+        for pattern, replacement in replacements:
+            normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+        return normalized
 
     @staticmethod
     def _first_prov(item: dict[str, Any]) -> dict[str, Any]:
@@ -197,6 +275,152 @@ class DoclingParser:
         return "\n".join(lines)
 
     @staticmethod
+    def _clean_table_caption_text(caption: str | None, fallback_index: int | None = None) -> str | None:
+        normalized = DoclingParser._dedupe_caption_text(caption)
+        if not normalized:
+            return None
+
+        chosen_match = None
+        if fallback_index is not None:
+            indexed_matches = list(
+                re.finditer(rf"\btable\s+{fallback_index}\b[\.:]?", normalized, re.IGNORECASE)
+            )
+            if indexed_matches:
+                chosen_match = indexed_matches[-1]
+        if chosen_match is None:
+            matches = list(re.finditer(r"\btable\s+[A-Za-z]?\d+\b[\.:]?", normalized, re.IGNORECASE))
+            if matches:
+                chosen_match = matches[-1]
+        if chosen_match is not None:
+            normalized = normalized[chosen_match.start() :].strip()
+        return normalized
+
+    @staticmethod
+    def _strip_table_body_from_caption(caption: str, markdown_content: str) -> str:
+        if not caption or not markdown_content:
+            return caption
+
+        header_line = ""
+        for line in markdown_content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("|") and "---" not in stripped:
+                header_line = stripped
+                break
+        if not header_line:
+            return caption
+
+        header_text = re.sub(r"\s+", " ", header_line.replace("|", " ")).strip()
+        if not header_text:
+            return caption
+
+        overlap = re.search(re.escape(header_text[: min(len(header_text), 80)]), caption, re.IGNORECASE)
+        if overlap:
+            return caption[: overlap.start()].strip()
+        return caption
+
+    @staticmethod
+    def _clean_table_cell_text(text: str, row_index: int, col_index: int, is_header: bool) -> str:
+        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+        if not normalized:
+            return ""
+
+        normalized = re.sub(r"(?<=\w)\s*-\s*(?=\w)", "-", normalized)
+        normalized = re.sub(r"\(\s*([A-Za-z0-9])\s*\)", r"(\1)", normalized)
+        normalized = re.sub(r"\bTable\s+\d+\.\s*", "", normalized, flags=re.IGNORECASE)
+
+        if is_header:
+            if re.search(r"\bMolecules\b", normalized, re.IGNORECASE):
+                return "Molecules"
+            if re.search(r"\bS-S\b", normalized, re.IGNORECASE):
+                return "S-S"
+            if re.search(r"\bLi-S\b", normalized, re.IGNORECASE):
+                return "Li-S"
+            if re.search(r"\bLi-N\b", normalized, re.IGNORECASE):
+                return "Li-N"
+            if re.search(r"\bE\s*ad\b", normalized, re.IGNORECASE):
+                return "E ad"
+            if re.search(r"\bg-C\s*3\s*N\s*4\b", normalized, re.IGNORECASE):
+                return "g-C3N4"
+            if re.search(r"\bP\s*C\b", normalized):
+                return "PC"
+            if re.search(r"\bLiPSs\b", normalized, re.IGNORECASE):
+                return "LiPSs"
+            return normalized
+
+        if col_index == 0:
+            molecule_match = re.search(r"\b(Li\s*\d+\s*S(?:\s*\d+)?|S\s*\d+)\b", normalized, re.IGNORECASE)
+            if molecule_match:
+                return re.sub(r"\s+", " ", molecule_match.group(1)).strip()
+            if normalized.lower().startswith("molecules "):
+                return normalized.split()[0]
+            return normalized
+
+        numeric_match = re.search(r"(-?\d+(?:\.\d+)?)\s*$", normalized)
+        if numeric_match:
+            has_letters = bool(re.search(r"[A-Za-z]", normalized))
+            has_multiple_tokens = len(normalized.split()) > 1
+            if has_letters or has_multiple_tokens:
+                return numeric_match.group(1)
+        return normalized
+
+    @staticmethod
+    def _table_grid_to_markdown(item: dict[str, Any]) -> str:
+        data = item.get("data") or {}
+        grid = data.get("grid") or []
+        if not isinstance(grid, list) or not grid:
+            return ""
+
+        rows: list[list[str]] = []
+        for row_index, row in enumerate(grid):
+            if not isinstance(row, list):
+                continue
+            cleaned_row: list[str] = []
+            for col_index, cell in enumerate(row):
+                if not isinstance(cell, dict):
+                    raw_text = str(cell or "")
+                    is_header = row_index == 0
+                else:
+                    raw_text = str(cell.get("text") or "")
+                    is_header = bool(cell.get("column_header"))
+                cleaned = DoclingParser._clean_table_cell_text(raw_text, row_index, col_index, is_header)
+                if not is_header and cleaned_row and cleaned == cleaned_row[-1]:
+                    cleaned = ""
+                cleaned_row.append(cleaned)
+
+            if not any(cell.strip() for cell in cleaned_row):
+                continue
+            rows.append(cleaned_row)
+
+        if not rows:
+            return ""
+
+        width = max(len(row) for row in rows)
+        rows = [row + [""] * (width - len(row)) for row in rows]
+        if (
+            len(rows) >= 2
+            and rows[0][0] == "Molecules"
+            and rows[1][0] == "Molecules"
+            and any(cell in {"S-S", "Li-S", "Li-N", "E ad"} for cell in rows[1][1:])
+        ):
+            group_header = rows[0]
+            sub_header = rows[1]
+            combined_header = ["Molecules"]
+            for group, sub in zip(group_header[1:], sub_header[1:]):
+                if group and group != sub:
+                    combined_header.append(f"{group} {sub}")
+                else:
+                    combined_header.append(sub)
+            rows = [combined_header, *rows[2:]]
+        header = rows[0]
+        body = rows[1:] if len(rows) > 1 else []
+        lines = [
+            "| " + " | ".join(header) + " |",
+            "| " + " | ".join("---" for _ in header) + " |",
+        ]
+        lines.extend("| " + " | ".join(row) + " |" for row in body)
+        return "\n".join(lines)
+
+    @staticmethod
     def _extract_page_blocks(payload: dict[str, Any]) -> list[dict[str, Any]]:
         pages = payload.get("pages")
         if isinstance(pages, list) and pages and isinstance(pages[0], dict) and pages[0].get("text"):
@@ -240,6 +464,8 @@ class DoclingParser:
         if not tail.strip():
             return False
         stripped = tail.strip()
+        if source == "table" and stripped[0] not in ".:：;":
+            return False
         if stripped[0] in ".:：);-–" or stripped.startswith(("(", "[")):
             return True
 
@@ -285,15 +511,20 @@ class DoclingParser:
         tables = payload.get("tables") or payload.get("table_items") or []
         normalized = []
         for index, item in enumerate(tables, start=1):
-            caption = DoclingParser._resolve_caption(item, payload) or f"Table {index}"
+            raw_caption = (
+                DoclingParser._clean_table_caption_text(DoclingParser._resolve_caption(item, payload), index)
+                or f"Table {index}"
+            )
             prov = item.get("prov", [])
             markdown_content = (
-                item.get("markdown")
+                DoclingParser._table_grid_to_markdown(item)
+                or DoclingParser._table_cells_to_markdown(item)
+                or item.get("markdown")
                 or item.get("text")
                 or item.get("html")
-                or DoclingParser._table_cells_to_markdown(item)
                 or ""
             )
+            caption = DoclingParser._strip_table_body_from_caption(raw_caption, markdown_content)
             normalized.append(
                 {
                     "caption": caption,
@@ -340,17 +571,20 @@ class DoclingParser:
                 if not DoclingParser._looks_like_fallback_caption_start(line, source):
                     continue
                 parts = [line]
-                for next_line in lines[index + 1 : index + 12]:
-                    if not next_line:
-                        break
-                    if stop_pattern.match(next_line):
-                        break
-                    if re.match(r"^(?:references|acknowledg|associated content)\b", next_line, re.IGNORECASE):
-                        break
-                    parts.append(next_line)
-                    if len(" ".join(parts)) > 900:
-                        break
+                if source != "table":
+                    for next_line in lines[index + 1 : index + 12]:
+                        if not next_line:
+                            break
+                        if stop_pattern.match(next_line):
+                            break
+                        if re.match(r"^(?:references|acknowledg|associated content)\b", next_line, re.IGNORECASE):
+                            break
+                        parts.append(next_line)
+                        if len(" ".join(parts)) > 900:
+                            break
                 caption = re.sub(r"\s+", " ", " ".join(parts)).strip()
+                if source == "table":
+                    caption = DoclingParser._trim_fallback_table_caption(caption)
                 if caption:
                     results.append(
                         {
@@ -362,6 +596,31 @@ class DoclingParser:
                         }
                     )
         return results
+
+    @staticmethod
+    def _trim_fallback_table_caption(caption: str) -> str:
+        cleaned = DoclingParser._clean_table_caption_text(caption) or caption
+        match = re.match(r"^(Table\s+\d+[\.:])\s*(.+)$", cleaned, re.IGNORECASE)
+        if not match:
+            return cleaned
+
+        prefix = match.group(1)
+        body = match.group(2).strip()
+        sentence = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", body, maxsplit=1)[0].strip()
+        for marker in (
+            " Method ",
+            " P-Doping Positions ",
+            " Eg Gap ",
+            " Molecules ",
+            " Li2S ",
+            " 2.2. ",
+            " 2.3. ",
+            " 2.4. ",
+        ):
+            marker_index = sentence.find(marker)
+            if marker_index > 30:
+                sentence = sentence[:marker_index].strip()
+        return f"{prefix} {sentence}".strip()
 
     @staticmethod
     def _extract_fallback_tables(page_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:

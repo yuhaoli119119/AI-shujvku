@@ -31,7 +31,7 @@ from app.extractors.comprehensive_extractor import ComprehensiveExtractor
 from app.normalizers.chemistry_normalizer import ChemistryNormalizer
 from app.normalizers.dft_normalizer import DFTNormalizer
 from app.schemas.documents import UnifiedPaperDocument
-from app.services.embedding import DeterministicEmbeddingService
+from app.services.embedding import EmbeddingUnavailableError, get_embedding_service
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
 from app.services.paper_workbench_service import PaperWorkbenchService
@@ -80,7 +80,13 @@ class ExtractionPipelineService:
         self.comprehensive_extractor = ComprehensiveExtractor(settings)
         self.dft_normalizer = DFTNormalizer()
         self.chemistry_normalizer = ChemistryNormalizer()
-        self.embedding = DeterministicEmbeddingService(settings.embedding_dimension)
+        self.embedding = get_embedding_service(
+            provider=settings.embedding_provider,
+            api_base=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+        )
         self.locators = EvidenceLocatorService(session)
 
     def _rule_based_classify(
@@ -677,7 +683,7 @@ class ExtractionPipelineService:
             abstract_logic=payload.get("abstract_logic"),
             introduction_logic=payload.get("introduction_logic"),
             discussion_logic=payload.get("discussion_logic"),
-            embedding=self.embedding.embed_text(embedding_text),
+            embedding=self._embed_text(embedding_text),
         )
         self.session.add(record)
         self.session.flush()
@@ -694,6 +700,14 @@ class ExtractionPipelineService:
                 )
             )
         return 1
+
+    def _embed_text(self, text: str) -> list[float]:
+        vector = self.embedding.embed_text(text)
+        if len(vector) != self.settings.embedding_dimension:
+            raise EmbeddingUnavailableError(
+                f"Embedding dimension mismatch: expected {self.settings.embedding_dimension}, got {len(vector)}"
+            )
+        return vector
 
     def _persist_evidence_span(
         self,

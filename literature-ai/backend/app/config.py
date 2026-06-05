@@ -5,14 +5,16 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
 class Settings(BaseSettings):
     app_env: str = "dev"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    # NOTE: This default is overridden at startup by LibraryManager.activate_library(),
-    # which switches to the per-library SQLite database. The PostgreSQL URL is only
-    # used as a fallback when no active library exists in the registry.
+    # In production this can be pinned with LITAI_FORCE_CONFIGURED_DATABASE=true
+    # so the app never falls back to per-library SQLite databases.
     database_url: str = "postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai"
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
@@ -38,11 +40,11 @@ class Settings(BaseSettings):
     docling_document_timeout: float | None = 120.0
     docling_artifacts_path: Path | None = None
 
-    embedding_provider: str = "deterministic"
-    embedding_api_base: str | None = None
+    embedding_provider: str = "openai_compatible"
+    embedding_api_base: str | None = "https://api.siliconflow.cn/v1"
     embedding_api_key: str | None = None
-    embedding_model: str = "text-embedding-3-small"
-    embedding_dimension: int = 64
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dimension: int = 1024
     use_minio: bool = False
     writer_backend: str = "rule"
     writer_prompt_path: Path = Field(default=Path("prompts/paper_writer.yaml"))
@@ -59,7 +61,7 @@ class Settings(BaseSettings):
     browse_roots: str = "/host/users,/data,/legacy"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ROOT / ".env",
         env_prefix="LITAI_",
         extra="ignore",
     )
