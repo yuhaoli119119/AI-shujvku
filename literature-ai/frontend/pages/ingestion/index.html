@@ -972,33 +972,74 @@
         function renderArticleStats(data) {
             const container = document.getElementById("articleStats");
             if (!container) return;
+            const incoming = Array.isArray(data && data.items) ? data.items : [];
             const defaults = [
                 { key: "A", label: "A类 (Core)", color: "#6366f1", count: 0, percent: 0 },
                 { key: "B", label: "B类 (Related)", color: "#14b8a6", count: 0, percent: 0 },
                 { key: "C", label: "C类 (Background)", color: "#f59e0b", count: 0, percent: 0 },
                 { key: "uncategorized", label: "未分类 (Uncategorized)", color: "#9ca3af", count: 0, percent: 0 },
             ];
-            const incoming = Array.isArray(data && data.items) ? data.items : [];
             const byKey = new Map(incoming.map(item => [item.key, item]));
             const items = defaults.map(item => ({ ...item, ...(byKey.get(item.key) || {}) }));
-            container.innerHTML = items.map(item => {
+            
+            const totalCount = incoming.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+            const radius = 36;
+            const circumference = 2 * Math.PI * radius;
+            let strokeOffset = 0;
+            
+            let donutSVG = `<svg width="100%" height="100%" viewBox="0 0 80 80" style="transform: rotate(-90deg); filter: drop-shadow(0 4px 8px rgba(0,0,0,0.05));">
+                <circle cx="40" cy="40" r="${radius}" fill="none" stroke="var(--color-surface-alt)" stroke-width="8"></circle>`;
+            
+            if (totalCount > 0) {
+                items.forEach(item => {
+                    const cnt = Number(item.count) || 0;
+                    if (cnt > 0) {
+                        const dashArray = `${(cnt / totalCount) * circumference} ${circumference}`;
+                        donutSVG += `<circle cx="40" cy="40" r="${radius}" fill="none" stroke="${esc(item.color)}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${dashArray}" stroke-dashoffset="${-strokeOffset}" style="transition: all 1s cubic-bezier(0.34, 1.56, 0.64, 1);"></circle>`;
+                        strokeOffset += (cnt / totalCount) * circumference;
+                    }
+                });
+            }
+            donutSVG += `</svg>`;
+            
+            const barsHTML = items.map(item => {
                 const count = Number.isFinite(Number(item.count)) ? Number(item.count) : 0;
                 const percent = Math.max(0, Math.min(100, Number(item.percent) || 0));
                 return `
-                    <div class="stat-item">
+                    <div class="stat-item" style="margin-bottom: 0;">
                         <div class="stat-header">
-                            <div class="stat-label">
-                                <span class="stat-dot" style="background-color: ${esc(item.color)};"></span>
-                                <span class="stat-name">${esc(item.label)}</span>
+                            <div class="stat-label" style="min-width: 0;">
+                                <span class="stat-dot" style="background-color: ${esc(item.color)}; flex-shrink: 0;"></span>
+                                <span class="stat-name" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(item.label)}</span>
                             </div>
-                            <div class="stat-value">${esc(count)}</div>
+                            <div class="stat-value" style="font-size: 15px; margin-left: 8px;">${esc(count)}</div>
                         </div>
-                        <div class="stat-bar-bg">
+                        <div class="stat-bar-bg" style="height: 6px;">
                             <div class="stat-bar-fill" style="width: ${esc(percent)}%; background-color: ${esc(item.color)};"></div>
                         </div>
                     </div>
                 `;
             }).join("");
+
+            container.style.flex = "1";
+            container.style.justifyContent = "center";
+            container.style.overflowY = "hidden";
+            container.style.paddingRight = "0";
+
+            container.innerHTML = `
+                <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 16px; width: 100%; height: 100%;">
+                    <div style="position: relative; width: 84px; height: 84px; flex-shrink: 0;">
+                        ${donutSVG}
+                        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                            <span style="font-size: 8px; color: var(--color-text-secondary); font-weight: 800; letter-spacing: 0.05em; margin-bottom: 2px;">TOTAL</span>
+                            <span style="font-size: 18px; font-weight: 900; font-family: var(--font-mono); color: var(--color-text); line-height: 1;">${totalCount}</span>
+                        </div>
+                    </div>
+                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; justify-content: center;">
+                        ${barsHTML}
+                    </div>
+                </div>
+            `;
         }
 
         async function switchLibrary(name) {
