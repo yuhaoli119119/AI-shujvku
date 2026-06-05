@@ -785,54 +785,7 @@
                     <section class="subpanel modern-stats-panel">
                         <h3>文章类型统计</h3>
                         <div class="modern-stats-list" id="articleStats">
-                            <div class="stat-item">
-                                <div class="stat-header">
-                                    <div class="stat-label">
-                                        <span class="stat-dot" style="background-color: #6366f1;"></span>
-                                        <span class="stat-name">A类 (Core)</span>
-                                    </div>
-                                    <div class="stat-value">12</div>
-                                </div>
-                                <div class="stat-bar-bg">
-                                    <div class="stat-bar-fill" style="width: 21%; background-color: #6366f1;"></div>
-                                </div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-header">
-                                    <div class="stat-label">
-                                        <span class="stat-dot" style="background-color: #14b8a6;"></span>
-                                        <span class="stat-name">B类 (Related)</span>
-                                    </div>
-                                    <div class="stat-value">34</div>
-                                </div>
-                                <div class="stat-bar-bg">
-                                    <div class="stat-bar-fill" style="width: 60%; background-color: #14b8a6;"></div>
-                                </div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-header">
-                                    <div class="stat-label">
-                                        <span class="stat-dot" style="background-color: #f59e0b;"></span>
-                                        <span class="stat-name">C类 (Background)</span>
-                                    </div>
-                                    <div class="stat-value">8</div>
-                                </div>
-                                <div class="stat-bar-bg">
-                                    <div class="stat-bar-fill" style="width: 14%; background-color: #f59e0b;"></div>
-                                </div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-header">
-                                    <div class="stat-label">
-                                        <span class="stat-dot" style="background-color: #9ca3af;"></span>
-                                        <span class="stat-name">未分类 (Uncategorized)</span>
-                                    </div>
-                                    <div class="stat-value">3</div>
-                                </div>
-                                <div class="stat-bar-bg">
-                                    <div class="stat-bar-fill" style="width: 5%; background-color: #9ca3af;"></div>
-                                </div>
-                            </div>
+                            <div class="empty-state">正在加载文章类型统计...</div>
                         </div>
                     </section>
                 </div>
@@ -840,10 +793,10 @@
 
             <aside class="right-stack">
                 <div class="panel-card">
-                    <div class="panel-heading">
+                    <div class="panel-heading" style="margin-bottom: 8px;">
                         <div>
                             <h2 class="panel-title">任务中心</h2>
-                            <p class="panel-desc">按日期查看批量检索与收录任务。运行中任务可取消，失败或已取消任务可重试。</p>
+                            <p class="panel-desc" style="display:none;">按日期查看批量检索与收录任务。运行中任务可取消，失败或已取消任务可重试。</p>
                         </div>
                     </div>
 
@@ -858,12 +811,15 @@
                     </div>
 
                     <div class="calendar-shell">
-                        <div class="calendar-header">
+                        <div class="calendar-header" style="cursor:pointer; padding-right:6px;" onclick="toggleCalendar()">
                             <h3 class="calendar-title" id="calendarTitle">任务日历</h3>
-                            <div class="calendar-controls">
-                                <button class="calendar-btn" onclick="moveJobMonth(-1)" aria-label="上个月">&lt;</button>
-                                <button class="calendar-btn" onclick="goToday()">Today</button>
-                                <button class="calendar-btn" onclick="moveJobMonth(1)" aria-label="下个月">&gt;</button>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <div class="calendar-controls" id="calendarControls">
+                                    <button class="calendar-btn" onclick="event.stopPropagation(); moveJobMonth(-1)" aria-label="上个月">&lt;</button>
+                                    <button class="calendar-btn" onclick="event.stopPropagation(); goToday()">Today</button>
+                                    <button class="calendar-btn" onclick="event.stopPropagation(); moveJobMonth(1)" aria-label="下个月">&gt;</button>
+                                </div>
+                                <button class="btn btn-ghost btn-sm" id="calendarToggleBtn">收起</button>
                             </div>
                         </div>
                         <div class="calendar-grid" id="jobCalendar"></div>
@@ -882,6 +838,7 @@
 
     <script>
         const API_BASE = "/api/papers";
+        const JOBS_API = "/api/jobs";
         const LIB_API = "/api/libraries";
         const state = {
             activeTab: "pdf",
@@ -893,6 +850,14 @@
             calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
             pollTimer: null,
         };
+
+        let calendarVisible = true;
+        function toggleCalendar() {
+            calendarVisible = !calendarVisible;
+            document.getElementById('jobCalendar').style.display = calendarVisible ? 'grid' : 'none';
+            document.getElementById('calendarControls').style.display = calendarVisible ? 'flex' : 'none';
+            document.getElementById('calendarToggleBtn').textContent = calendarVisible ? '收起' : '展开';
+        }
 
         function esc(value) {
             return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({
@@ -967,6 +932,7 @@
                 if (!libs.length) {
                     select.innerHTML = '<option value="">未发现可用文献库</option>';
                     state.currentLibrary = "";
+                    await loadArticleStats();
                     renderAllJobs();
                     return;
                 }
@@ -978,12 +944,57 @@
                     return `<option value="${esc(name)}" ${name === active.name ? "selected" : ""}>${esc(label)}</option>`;
                 }).join("");
                 state.currentLibrary = active.name || "";
+                await loadArticleStats();
                 await pollJobs();
             } catch (error) {
                 select.innerHTML = '<option value="">文献库加载失败</option>';
                 showToast(`加载文献库失败：${error.message}`, "error");
                 renderAllJobs();
             }
+        }
+
+        async function loadArticleStats() {
+            const container = document.getElementById("articleStats");
+            if (!container) return;
+            try {
+                const query = state.currentLibrary ? `?library_name=${encodeURIComponent(state.currentLibrary)}` : "";
+                const data = await fetchJSON(`${API_BASE}/type-stats${query}`);
+                renderArticleStats(data);
+            } catch (error) {
+                container.innerHTML = `<div class="empty-state">文章类型统计加载失败：${esc(error.message)}</div>`;
+            }
+        }
+
+        function renderArticleStats(data) {
+            const container = document.getElementById("articleStats");
+            if (!container) return;
+            const defaults = [
+                { key: "A", label: "A类 (Core)", color: "#6366f1", count: 0, percent: 0 },
+                { key: "B", label: "B类 (Related)", color: "#14b8a6", count: 0, percent: 0 },
+                { key: "C", label: "C类 (Background)", color: "#f59e0b", count: 0, percent: 0 },
+                { key: "uncategorized", label: "未分类 (Uncategorized)", color: "#9ca3af", count: 0, percent: 0 },
+            ];
+            const incoming = Array.isArray(data && data.items) ? data.items : [];
+            const byKey = new Map(incoming.map(item => [item.key, item]));
+            const items = defaults.map(item => ({ ...item, ...(byKey.get(item.key) || {}) }));
+            container.innerHTML = items.map(item => {
+                const count = Number.isFinite(Number(item.count)) ? Number(item.count) : 0;
+                const percent = Math.max(0, Math.min(100, Number(item.percent) || 0));
+                return `
+                    <div class="stat-item">
+                        <div class="stat-header">
+                            <div class="stat-label">
+                                <span class="stat-dot" style="background-color: ${esc(item.color)};"></span>
+                                <span class="stat-name">${esc(item.label)}</span>
+                            </div>
+                            <div class="stat-value">${esc(count)}</div>
+                        </div>
+                        <div class="stat-bar-bg">
+                            <div class="stat-bar-fill" style="width: ${esc(percent)}%; background-color: ${esc(item.color)};"></div>
+                        </div>
+                    </div>
+                `;
+            }).join("");
         }
 
         async function switchLibrary(name) {
@@ -1231,12 +1242,14 @@
         async function pollJobs() {
             if (!state.currentLibrary) {
                 state.jobs = [];
+                await loadArticleStats();
                 renderAllJobs();
                 return;
             }
             try {
-                const data = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                const data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
                 state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
+                await loadArticleStats();
             } catch (error) {
                 state.jobs = [];
                 showToast(`任务列表加载失败：${error.message}`, "error");
@@ -1309,8 +1322,9 @@
             container.innerHTML = items.map(job => {
                 const summary = job.summary || {};
                 const status = job.status || "queued";
-                const title = summary.query || summary.source_label || job.type || "后台任务";
+                const title = summary.title || summary.query || summary.source_label || job.type || "后台任务";
                 const count = firstPresent(summary.success_count, job.progress && job.progress.ingested, 0);
+                const countLabel = job.type === "agent_activity" ? "处理项" : "已入库";
                 return `
                     <article class="mini-item">
                         <div class="mini-item-head">
@@ -1318,7 +1332,7 @@
                             <span class="status-pill ${esc(status)}">${esc(status)}</span>
                         </div>
                         <div class="muted">更新于 ${esc(formatJobTime(job.updated_at || job.created_at))}</div>
-                        <div class="muted">已入库 ${esc(count)} 篇</div>
+                        <div class="muted">${esc(countLabel)} ${esc(count)} ${job.type === "agent_activity" ? "项" : "篇"}</div>
                     </article>
                 `;
             }).join("");
@@ -1411,9 +1425,11 @@
             const successCount = firstPresent(summary.success_count, progress.ingested, "-");
             const failureCount = firstPresent(summary.failure_count, progress.failed, "-");
             const message = summary.message || progress.message || statusMessage(status);
+            const successLabel = job.type === "agent_activity" ? "处理项" : "成功入库";
+            const failureLabel = job.type === "agent_activity" ? "异常项" : "失败数";
+            const countUnit = job.type === "agent_activity" ? "项" : "篇";
             const canCancel = status === "queued" || status === "running";
-            const canRetry = status === "failed" || status === "cancelled";
-            const canDelete = !canCancel;
+            const canRetry = (status === "failed" || status === "cancelled") && job.type !== "agent_activity";
 
             return `
                 <article class="job-card" id="job-card-${esc(job.job_id)}">
@@ -1427,7 +1443,7 @@
                     </div>
                     <div class="job-progress">
                         <strong>${esc(message)}</strong><br>
-                        成功入库：${esc(successCount)} 篇 | 失败数：${esc(failureCount)} 篇
+                        ${esc(successLabel)}：${esc(successCount)} ${esc(countUnit)} | ${esc(failureLabel)}：${esc(failureCount)} ${esc(countUnit)}
                         ${failure ? `<br>失败说明：${esc(failure.summary || "请查看原始错误信息。")}` : ""}
                     </div>
                     <div class="job-actions">
@@ -1440,7 +1456,7 @@
 
         function appendDeleteButtons(jobs) {
             jobs.forEach(job => {
-                if (!job || ["queued", "running"].includes(job.status)) return;
+                if (!job) return;
                 const card = document.getElementById(`job-card-${job.job_id}`);
                 const actions = card ? card.querySelector(".job-actions") : null;
                 if (!actions || actions.querySelector(`[data-delete-job="${job.job_id}"]`)) return;
@@ -1478,7 +1494,7 @@
         async function retryJobById(jobId) {
             if (!jobId) return;
             try {
-                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+                await fetchJSON(`${JOBS_API}/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
                 showToast("重试任务已发起。");
                 await pollJobs();
             } catch (error) {
@@ -1489,7 +1505,7 @@
         async function cancelJobById(jobId) {
             if (!jobId) return;
             try {
-                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+                await fetchJSON(`${JOBS_API}/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
                 showToast("取消请求已发送。");
                 await pollJobs();
             } catch (error) {
@@ -1502,7 +1518,13 @@
             const confirmed = window.confirm("删除后只会移除这条任务记录，不会删除论文和 PDF。是否继续？");
             if (!confirmed) return;
             try {
-                await fetchJSON(`${API_BASE}/ai_workflow/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+                const job = state.jobs.find(item => item.job_id === jobId) || null;
+                if (job && ["queued", "running"].includes(job.status)) {
+                    try {
+                        await fetchJSON(`${JOBS_API}/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+                    } catch (_) {}
+                }
+                await fetchJSON(`${JOBS_API}/${encodeURIComponent(jobId)}?force=true`, { method: "DELETE" });
                 showToast("任务记录已删除。");
                 await pollJobs();
             } catch (error) {

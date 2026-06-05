@@ -80,6 +80,47 @@ async def list_libraries(session: Session = Depends(get_db_session)) -> list[Pap
     return libraries
 
 
+@router.get("/type-stats")
+async def get_paper_type_stats(
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    labels = {
+        "A": {"label": "A类 (Core)", "color": "#6366f1"},
+        "B": {"label": "B类 (Related)", "color": "#14b8a6"},
+        "C": {"label": "C类 (Background)", "color": "#f59e0b"},
+        "uncategorized": {"label": "未分类 (Uncategorized)", "color": "#9ca3af"},
+    }
+    counts = {key: 0 for key in labels}
+    stmt = select(Paper.paper_type, func.count(Paper.id)).group_by(Paper.paper_type)
+    if library_name is not None:
+        stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
+
+    for raw_type, count in session.execute(stmt).all():
+        normalized = str(raw_type or "").strip().upper()
+        key = normalized if normalized in {"A", "B", "C"} else "uncategorized"
+        counts[key] += int(count or 0)
+
+    total = sum(counts.values())
+    items = []
+    for key in ("A", "B", "C", "uncategorized"):
+        count = counts[key]
+        items.append(
+            {
+                "key": key,
+                "label": labels[key]["label"],
+                "color": labels[key]["color"],
+                "count": count,
+                "percent": round((count / total) * 100, 2) if total else 0,
+            }
+        )
+    return {
+        "library_name": normalize_library_name(library_name) if library_name is not None else None,
+        "total": total,
+        "items": items,
+    }
+
+
 @router.delete("/libraries/{library_name}")
 async def delete_library(library_name: str, session: Session = Depends(get_db_session)) -> dict:
     target = normalize_library_name(library_name)

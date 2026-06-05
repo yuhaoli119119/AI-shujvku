@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 JOB_TYPE_AI_WORKFLOW = "ai_workflow"
 JOB_TYPE_CLASSIFY_BATCH = "classify_batch"
 JOB_TYPE_EXTRACTION = "extraction"
+JOB_TYPE_AGENT_ACTIVITY = "agent_activity"
 JOB_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
 ACTIVE_JOB_STATUSES = {"queued", "running"}
 
@@ -260,6 +261,34 @@ def build_job_summary(job: WorkflowJob) -> dict[str, Any]:
                 "total": _first_int(progress.get("total"), result.get("total")),
                 "success_count": _first_int(progress.get("completed"), result.get("classified")),
                 "failure_count": _first_int(progress.get("failed"), result.get("failed_count"), _safe_len(failed_items)),
+            }
+        )
+    elif job.type == JOB_TYPE_AGENT_ACTIVITY:
+        metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+        action = payload.get("action") or progress.get("action") or "activity"
+        agent = payload.get("agent") or "AI"
+        summary.update(
+            {
+                "source_label": f"{agent} 工作留痕",
+                "action": action,
+                "agent": agent,
+                "title": payload.get("title") or progress.get("message") or action,
+                "paper_id": payload.get("paper_id"),
+                "paper_title": payload.get("paper_title"),
+                "query": payload.get("query") or summary.get("query"),
+                "success_count": _first_int(
+                    metrics.get("success_count"),
+                    metrics.get("papers"),
+                    metrics.get("items"),
+                    result.get("success_count"),
+                    1 if job.status == "completed" else 0,
+                ),
+                "failure_count": _first_int(
+                    metrics.get("failure_count"),
+                    result.get("failure_count"),
+                    1 if job.status == "failed" else 0,
+                ),
+                "artifacts": result.get("artifacts") if isinstance(result.get("artifacts"), list) else [],
             }
         )
     else:
@@ -501,9 +530,9 @@ def cancel_job(session: Session, job_id: str) -> WorkflowJob:
     return job
 
 
-def delete_job(session: Session, job_id: str) -> None:
+def delete_job(session: Session, job_id: str, *, allow_active: bool = False) -> None:
     job = get_job_or_raise(session, job_id)
-    if job.status in ACTIVE_JOB_STATUSES:
+    if job.status in ACTIVE_JOB_STATUSES and not allow_active:
         raise ValueError(f"Active jobs must be cancelled before deletion: {job.status}")
     session.delete(job)
     session.commit()

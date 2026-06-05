@@ -133,8 +133,8 @@ async def cancel_ai_workflow_job(job_id: str, session: Session = Depends(get_db_
 @router.delete("/ai_workflow/jobs/{job_id}")
 async def delete_ai_workflow_job(job_id: str, session: Session = Depends(get_db_session)) -> dict[str, Any]:
     job = get_job(session, job_id)
-    if not job or job.type != JOB_TYPE_AI_WORKFLOW:
-        raise HTTPException(status_code=404, detail="AI workflow job not found")
+    if not job:
+        raise HTTPException(status_code=404, detail="Workflow job not found")
     try:
         delete_job(session, job_id)
     except ValueError as exc:

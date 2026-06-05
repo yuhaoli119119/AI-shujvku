@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 from uuid import uuid4
 from pathlib import Path
@@ -8,7 +9,12 @@ from sqlalchemy import inspect
 from app.db import session as db_session
 from app.config import Settings
 from app.db.models import Paper, PaperSection, WorkflowJob
+from app.api.jobs import AgentActivityRequest, record_agent_activity
+from app.api.jobs import delete_workflow_job
+from app.api.papers.listing import get_paper_type_stats
+from app.api.papers.workflow import delete_ai_workflow_job
 from app.services.workflow_jobs import (
+    JOB_TYPE_AGENT_ACTIVITY,
     JobPreflightError,
     clone_job_for_retry_with_status,
     create_job_or_reuse_active,
@@ -75,6 +81,161 @@ def test_serialize_ai_workflow_job_summarizes_ingest_counts_and_failed_reasons()
     assert data["summary"]["success_count"] == 1
     assert data["summary"]["failure_count"] == 1
     assert data["failure_explanation"]["reasons"][0]["code"] == "download_failed"
+
+
+def test_serialize_agent_activity_job_summarizes_ai_work_trace():
+    job = WorkflowJob(
+        job_id="job-agent-1",
+        type=JOB_TYPE_AGENT_ACTIVITY,
+        status="completed",
+        library_name="DefaultLibrary",
+        payload={
+            "agent": "Codex",
+            "action": "figure_review",
+            "title": "校对图像裁剪",
+            "paper_id": "paper-1",
+        },
+        progress={"phase": "figure_review", "message": "校对图像裁剪"},
+        result={"metrics": {"success_count": 3, "failure_count": 1}, "artifacts": [{"path": "figures/a.png"}]},
+    )
+
+    data = serialize_job(job)
+
+    assert data["summary"]["source_label"] == "Codex 工作留痕"
+    assert data["summary"]["action"] == "figure_review"
+    assert data["summary"]["title"] == "校对图像裁剪"
+    assert data["summary"]["success_count"] == 3
+    assert data["summary"]["failure_count"] == 1
+    assert data["summary"]["artifacts"][0]["path"] == "figures/a.png"
+
+
+def test_record_agent_activity_persists_to_workflow_jobs_table():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "agent_activity.db"
+        db_url = f"sqlite:///{db_path}"
+        db_session.init_db(db_url)
+
+        factory = db_session._session_factories[db_url]
+        session = factory()
+        try:
+            request = AgentActivityRequest(
+                agent="Gemini",
+                action="table_review",
+                title="核对表格解析质量",
+                library_name="DefaultLibrary",
+                metrics={"success_count": 2, "failure_count": 0},
+                artifacts=[{"path": "tables/table-1.md"}],
+            )
+            data = asyncio.run(record_agent_activity(request, session=session))
+
+            assert data["type"] == JOB_TYPE_AGENT_ACTIVITY
+            assert data["status"] == "completed"
+            assert data["summary"]["source_label"] == "Gemini 工作留痕"
+            assert data["summary"]["success_count"] == 2
+            saved = session.get(WorkflowJob, data["job_id"])
+            assert saved is not None
+            assert saved.payload["action"] == "table_review"
+        finally:
+            session.close()
+            db_session.get_engine(db_url).dispose()
+            db_session._session_factories.pop(db_url, None)
+            db_session._engines.pop(db_url, None)
+
+
+def test_force_delete_active_agent_activity_record():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "delete_active.db"
+        db_url = f"sqlite:///{db_path}"
+        db_session.init_db(db_url)
+
+        factory = db_session._session_factories[db_url]
+        session = factory()
+        try:
+            job = WorkflowJob(
+                job_id="active-agent-job",
+                type=JOB_TYPE_AGENT_ACTIVITY,
+                status="running",
+                library_name="DefaultLibrary",
+                payload={"agent": "Codex", "action": "parse_review"},
+                progress={"phase": "parse_review"},
+            )
+            session.add(job)
+            session.commit()
+
+            data = asyncio.run(delete_workflow_job("active-agent-job", force=True, session=session))
+
+            assert data == {"status": "deleted", "job_id": "active-agent-job"}
+            assert session.get(WorkflowJob, "active-agent-job") is None
+        finally:
+            session.close()
+            db_session.get_engine(db_url).dispose()
+            db_session._session_factories.pop(db_url, None)
+            db_session._engines.pop(db_url, None)
+
+
+def test_legacy_ai_workflow_delete_endpoint_can_delete_agent_activity_record():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "legacy_delete.db"
+        db_url = f"sqlite:///{db_path}"
+        db_session.init_db(db_url)
+
+        factory = db_session._session_factories[db_url]
+        session = factory()
+        try:
+            job = WorkflowJob(
+                job_id="legacy-agent-job",
+                type=JOB_TYPE_AGENT_ACTIVITY,
+                status="completed",
+                library_name="DefaultLibrary",
+                payload={"agent": "Gemini", "action": "table_review"},
+                progress={"phase": "table_review"},
+            )
+            session.add(job)
+            session.commit()
+
+            data = asyncio.run(delete_ai_workflow_job("legacy-agent-job", session=session))
+
+            assert data == {"ok": True, "job_id": "legacy-agent-job"}
+            assert session.get(WorkflowJob, "legacy-agent-job") is None
+        finally:
+            session.close()
+            db_session.get_engine(db_url).dispose()
+            db_session._session_factories.pop(db_url, None)
+            db_session._engines.pop(db_url, None)
+
+
+def test_paper_type_stats_are_database_backed_and_empty_when_no_papers():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "type_stats.db"
+        db_url = f"sqlite:///{db_path}"
+        db_session.init_db(db_url)
+
+        factory = db_session._session_factories[db_url]
+        session = factory()
+        try:
+            empty = asyncio.run(get_paper_type_stats("DefaultLibrary", session=session))
+            assert empty["total"] == 0
+            assert [item["count"] for item in empty["items"]] == [0, 0, 0, 0]
+
+            session.add_all(
+                [
+                    Paper(title="Core", pdf_path="", paper_type="A", library_name="DefaultLibrary"),
+                    Paper(title="Related", pdf_path="", paper_type="B", library_name="DefaultLibrary"),
+                    Paper(title="Unknown", pdf_path="", paper_type="Unknown", library_name="DefaultLibrary"),
+                    Paper(title="Other library", pdf_path="", paper_type="C", library_name="OtherLibrary"),
+                ]
+            )
+            session.commit()
+
+            stats = asyncio.run(get_paper_type_stats("DefaultLibrary", session=session))
+            counts = {item["key"]: item["count"] for item in stats["items"]}
+            assert stats["total"] == 3
+            assert counts == {"A": 1, "B": 1, "C": 0, "uncategorized": 1}
+        finally:
+            session.close()
+            db_session.get_engine(db_url).dispose()
+            db_session._session_factories.pop(db_url, None)
+            db_session._engines.pop(db_url, None)
 
 
 def test_create_job_or_reuse_active_deduplicates_same_extraction_target():
