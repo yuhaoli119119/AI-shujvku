@@ -32,7 +32,7 @@
     .export-panel { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
     .export-panel .btn { height: 32px; padding: 0 12px; font-size: 13px; }
     .export-panel .export-status { color: var(--color-primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
-    .quality-panel { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 14px; align-items: start; }
+    .quality-panel { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; align-items: start; }
     .quality-panel > div:first-child { border-right: 1px solid var(--color-border); padding-right: 14px; }
     .quality-panel > div:last-child { min-width: 0; }
     .quality-summary { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; }
@@ -87,7 +87,7 @@
         <div class="filter-field"><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="">all</option><option value="validated">validated</option><option value="needs_review">needs_review</option></select></div>
       </div>
       <div class="export-panel">
-        <button class="btn green" onclick="exportCSV()">导出 CSV</button>
+        <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
         <span id="exportSafetyStatus" class="export-status">等待导出。</span>
       </div>
     </section>
@@ -101,16 +101,15 @@
 
     <section class="panel-card quality-panel" id="qualityPanel">
       <div>
-        <div class="panel-actions" style="margin-bottom:10px;">
-          <strong>DFT 数据质量</strong>
-          <button class="btn ghost small" onclick="loadQualityPanel()">刷新质量面板</button>
+        <div class="panel-actions" style="margin-bottom:8px;">
+          <strong>DFT 数据质量概览</strong>
+          <span title="只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。" style="cursor:help;color:var(--color-text-muted);font-size:14px;">ⓘ</span>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="loadQualityPanel()">↻ 刷新面板</button>
         </div>
-        <div class="quality-summary">
-          <div class="stat-box"><div class="lbl">可导出</div><div id="qualityExportable" class="val">-</div></div>
-          <div class="stat-box"><div class="lbl">需处理</div><div id="qualityBlocked" class="val">-</div></div>
+        <div id="qualityDonuts" style="display: flex; gap: 32px; align-items: center; margin-bottom: 12px; margin-top: 4px;">
+          <!-- Donuts injected via JS -->
         </div>
-        <div class="reason-chips" id="qualityReasonChips"></div>
-        <div class="quality-help">只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。</div>
+        <div class="reason-chips" id="qualityReasonChips" style="margin-top:0;"></div>
       </div>
       <div>
         <div class="panel-actions" style="margin-bottom:10px;">
@@ -127,7 +126,7 @@
     <section class="data-panel">
       <div class="panel-actions">
         <strong id="resultSummary">0 条 DFT 记录</strong>
-        <button class="btn ghost small" onclick="queryDFT()">刷新</button>
+        <button class="btn btn-ghost btn-sm" onclick="queryDFT()">↻ 刷新</button>
       </div>
       <div class="table-container">
         <table id="dftTable">
@@ -273,14 +272,94 @@
       if (state.qualityReason) url += `&reason=${encodeURIComponent(state.qualityReason)}`;
       return url;
     }
+    function getTechDonutHTML(exportable, blocked) {
+      const total = exportable + blocked;
+      const radius = 32;
+      const circumference = 2 * Math.PI * radius;
+      
+      let greenPercent = total === 0 ? 0 : exportable / total;
+      let redPercent = total === 0 ? 0 : blocked / total;
+      
+      // Calculate offsets for dasharray
+      const greenOffset = circumference * (1 - greenPercent);
+      const redOffset = circumference * (1 - redPercent);
+      const redRotation = greenPercent * 360; // start red after green
+
+      return `
+        <div style="display:flex; align-items:center; gap: 20px; width:100%; margin-top: 4px; margin-bottom: 8px;">
+          <!-- High-tech Donut -->
+          <div style="position:relative; width:80px; height:80px; display:inline-flex; align-items:center; justify-content:center; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.06));">
+            <svg width="80" height="80" viewBox="0 0 80 80" style="transform: rotate(-90deg);">
+              <defs>
+                <linearGradient id="gradRedPremium" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#ff4d4f" />
+                  <stop offset="100%" stop-color="#f5222d" />
+                </linearGradient>
+                <linearGradient id="gradGreenPremium" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#52c41a" />
+                  <stop offset="100%" stop-color="#389e0d" />
+                </linearGradient>
+              </defs>
+              <!-- Background Track -->
+              <circle cx="40" cy="40" r="${radius}" fill="transparent" stroke="var(--color-border)" stroke-width="6"></circle>
+              
+              ${total === 0 ? '' : `
+              <!-- Green Segment -->
+              <circle cx="40" cy="40" r="${radius}" fill="transparent" stroke="url(#gradGreenPremium)" stroke-width="6" 
+                      stroke-dasharray="${circumference}" stroke-dashoffset="${greenOffset}" 
+                      style="transition: stroke-dashoffset 1s cubic-bezier(0.34, 1.56, 0.64, 1); stroke-linecap: round;"></circle>
+              
+              <!-- Red Segment -->
+              <circle cx="40" cy="40" r="${radius}" fill="transparent" stroke="url(#gradRedPremium)" stroke-width="6" 
+                      stroke-dasharray="${circumference}" stroke-dashoffset="${redOffset}" 
+                      style="transform: rotate(${redRotation}deg); transform-origin: 50% 50%; transition: stroke-dashoffset 1s cubic-bezier(0.34, 1.56, 0.64, 1); stroke-linecap: round;"></circle>
+              `}
+            </svg>
+            <!-- Center Text -->
+            <div style="position:absolute; display:flex; flex-direction:column; align-items:center; pointer-events:none;">
+              <span style="font-size:9px; color:var(--color-text-muted); font-weight:800; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:-2px;">TOTAL</span>
+              <span style="font-size:22px; font-weight:900; color:var(--color-text); line-height:1; font-family:var(--font-mono, monospace);">${total}</span>
+            </div>
+          </div>
+          
+          <!-- Legend / Breakdown -->
+          <div style="display:flex; flex-direction:column; gap:8px; flex: 1;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-surface-alt); padding:6px 12px; border-radius:var(--radius-sm); border: 1px solid var(--color-border);">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="width:8px; height:8px; border-radius:50%; background:linear-gradient(135deg, #52c41a, #389e0d); box-shadow: 0 0 6px rgba(82,196,26,0.5);"></div>
+                <span style="font-size:12px; color:var(--color-text-secondary); font-weight:800;">可导出</span>
+              </div>
+              <strong style="font-size:15px; color:var(--color-text); font-family:var(--font-mono, monospace);">${exportable}</strong>
+            </div>
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-surface-alt); padding:6px 12px; border-radius:var(--radius-sm); border: 1px solid var(--color-border);">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="width:8px; height:8px; border-radius:50%; background:linear-gradient(135deg, #ff4d4f, #f5222d); box-shadow: 0 0 6px rgba(255,77,79,0.5);"></div>
+                <span style="font-size:12px; color:var(--color-text-secondary); font-weight:800;">需处理</span>
+              </div>
+              <strong style="font-size:15px; color:var(--color-text); font-family:var(--font-mono, monospace);">${blocked}</strong>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     async function loadQualityPanel() {
       const rowsEl = document.getElementById("qualityRows");
       if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">正在加载质量概览...</div>';
       try {
         const data = await fetchJSON(qualityQueryUrl());
         const metadata = data.metadata || {};
-        document.getElementById("qualityExportable").textContent = metadata.eligible_count == null ? "-" : metadata.eligible_count;
-        document.getElementById("qualityBlocked").textContent = metadata.blocked_count == null ? "-" : metadata.blocked_count;
+        const exportable = metadata.eligible_count == null ? 0 : metadata.eligible_count;
+        const blocked = metadata.blocked_count == null ? 0 : metadata.blocked_count;
+        const total = exportable + blocked;
+        const donutsContainer = document.getElementById("qualityDonuts");
+        if (donutsContainer) {
+          donutsContainer.innerHTML = getTechDonutHTML(exportable, blocked);
+          // Adjust container styles to fit the new design
+          donutsContainer.style.gap = "0";
+          donutsContainer.style.display = "block";
+        }
         document.getElementById("qualityGateLabel").textContent = "导出门槛：" + gateLabel(metadata.safety_gate);
         renderReasonChips(metadata.blocked_reasons || {});
         renderQualityRows(data.rows || []);
@@ -293,6 +372,10 @@
       const el = document.getElementById("qualityReasonChips");
       if (!el) return;
       const entries = Object.entries(reasons);
+      if (entries.length === 0 && !state.qualityReason) {
+        el.innerHTML = "";
+        return;
+      }
       let html = '<button type="button" class="reason-chip ' + (!state.qualityReason ? "active" : "") + '" onclick="setQualityReason(\'\')">全部原因</button>';
       html += entries.map(([reason, count]) => {
         const active = state.qualityReason === reason ? " active" : "";
@@ -332,11 +415,11 @@
             '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(locatorStatusLabel(row.locator_status)) + '</div></div>' +
           '</div>' +
           '<div class="quality-actions">' +
-            (row.can_mark_verified ? '<button class="btn primary small" type="button" onclick="verifyDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">标记已核验</button>' : '') +
-            (!row.is_exportable ? '<button class="btn danger small" type="button" onclick="rejectDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">拒绝候选</button>' : '') +
-            (!row.is_exportable ? '<button class="btn ghost small" type="button" onclick="proposeDftQueueCorrection(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">提出修正</button>' : '') +
-            '<a class="btn primary small" href="' + esc(reviewTabUrl) + '">去文献库处理</a>' +
-            '<a class="btn ghost small" href="' + esc(row.library_detail_url || row.paper_detail_url || "#") + '">论文详情</a>' +
+            (row.can_mark_verified ? '<button class="btn btn-primary btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">标记已核验</button>' : '') +
+            (!row.is_exportable ? '<button class="btn btn-outline btn-sm" type="button" style="color:var(--color-danger);border-color:var(--color-danger);" onclick="rejectDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">拒绝候选</button>' : '') +
+            (!row.is_exportable ? '<button class="btn btn-ghost btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">提出修正</button>' : '') +
+            '<a class="btn btn-primary btn-sm" href="' + esc(reviewTabUrl) + '">去文献库处理</a>' +
+            '<a class="btn btn-ghost btn-sm" href="' + esc(row.library_detail_url || row.paper_detail_url || "#") + '">论文详情</a>' +
           '</div>' +
         '</div>';
       }).join("");
@@ -538,7 +621,7 @@
       if (!panel || panel.querySelector('button[onclick="exportMLDataset()"]')) return;
       const csvButton = panel.querySelector('button[onclick="exportCSV()"]');
       const button = document.createElement("button");
-      button.className = "btn ghost";
+      button.className = "btn btn-outline";
       button.type = "button";
       button.textContent = "导出 ML 数据集";
       button.setAttribute("onclick", "exportMLDataset()");
