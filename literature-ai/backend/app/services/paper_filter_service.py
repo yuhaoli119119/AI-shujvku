@@ -22,6 +22,7 @@ from app.db.models import (
     PaperSection,
     WritingCard,
 )
+from app.services.metadata_diagnostics_service import paper_metadata_state
 from app.utils.review_safety import is_safe_verified_review
 
 
@@ -52,6 +53,7 @@ class PaperFilterCriteria:
 @dataclass(frozen=True)
 class FilteredPaper:
     id: UUID
+    doi: str | None
     title: str | None
     year: int | None
     journal: str | None
@@ -72,6 +74,9 @@ class FilteredPaper:
     impact_factor_source: str
     impact_factor_year: int | None
     impact_factor_status: str
+    metadata_completeness_status: str
+    metadata_missing_fields: list[str]
+    metadata_missing_field_codes: list[str]
 
 
 class PaperFilterService:
@@ -165,11 +170,13 @@ class PaperFilterService:
         exclude = eligibility.exclude_from_citation if eligibility else False
         priority = eligibility.citation_priority if eligibility else "medium"
         impact_factor = impact.impact_factor if impact else None
+        metadata_state = paper_metadata_state(paper, impact)
         has_parsed = bool(paper.tei_path or paper.docling_json_path or paper.markdown_path or features.get("has_sections"))
         has_extraction = bool(paper.comprehensive_analysis or features.get("has_extraction_tables"))
         has_verified = bool(features.get("has_verified_claim") or features.get("has_verified_review"))
         return FilteredPaper(
             id=paper.id,
+            doi=paper.doi,
             title=paper.title,
             year=paper.year,
             journal=paper.journal,
@@ -190,6 +197,9 @@ class PaperFilterService:
             impact_factor_source=impact.impact_factor_source if impact else "unknown",
             impact_factor_year=impact.impact_factor_year if impact else None,
             impact_factor_status="known" if impact_factor is not None else "needs_metadata",
+            metadata_completeness_status=metadata_state["status"],
+            metadata_missing_fields=metadata_state["missing_fields"],
+            metadata_missing_field_codes=metadata_state["missing_field_codes"],
         )
 
     def _matches_python_filters(self, row: FilteredPaper, criteria: PaperFilterCriteria) -> bool:
@@ -218,6 +228,6 @@ class PaperFilterService:
             expected = getattr(criteria, attr)
             if expected is not None and getattr(row, attr) is not expected:
                 return False
-        if criteria.needs_metadata is not None and (row.impact_factor_status == "needs_metadata") is not criteria.needs_metadata:
+        if criteria.needs_metadata is not None and (row.metadata_completeness_status != "complete") is not criteria.needs_metadata:
             return False
         return True

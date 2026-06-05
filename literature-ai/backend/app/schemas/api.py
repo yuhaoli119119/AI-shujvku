@@ -305,6 +305,13 @@ class PaperListItemResponse(BaseModel):
     pdf_quality_score: float | None = None
     pdf_quality_report: dict[str, Any] | None = None
     workspace_path: str | None = None
+    impact_factor: float | None = None
+    impact_factor_source: str = "unknown"
+    impact_factor_year: int | None = None
+    impact_factor_status: str = "needs_metadata"
+    metadata_completeness_status: str = "needs_metadata"
+    metadata_missing_fields: list[str] = Field(default_factory=list)
+    metadata_missing_field_codes: list[str] = Field(default_factory=list)
     created_at: datetime
     counts: PaperCountsResponse = Field(default_factory=PaperCountsResponse)
     serial_number: int | None = None

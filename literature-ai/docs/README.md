@@ -9,7 +9,7 @@
 - [mcp/MCP_IMPLEMENTATION.md](./mcp/MCP_IMPLEMENTATION.md)：当前 MCP 实现与安全边界
 - [plans/codex_centered_refocus.md](./plans/codex_centered_refocus.md)：Codex 中心化减法改造方向
 - [plans/codex_centered_execution_plan.md](./plans/codex_centered_execution_plan.md)：Codex 中心化执行目标与验收标准
-- [plans/litai_extraction_review_protocol_v0_1.md](./plans/litai_extraction_review_protocol_v0_1.md)：LitAI 当前提取与审核协议草案
+- [plans/litai_extraction_review_protocol_v0_1.md](./plans/litai_extraction_review_protocol_v0_1.md)：LitAI 当前提取与审核协议 v0.2
 
 ## 目录说明
 

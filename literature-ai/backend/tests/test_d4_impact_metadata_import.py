@@ -103,6 +103,25 @@ def test_journal_exact_normalized_match_works(impact_client):
     assert str(seed["advanced_two"]) in _ids(response)
 
 
+def test_dry_run_counts_pending_matches_as_planned_metadata(impact_client):
+    client, _, seed = impact_client
+    response = client.post(
+        "/api/library/impact-metadata/import?dry_run=true",
+        content="journal,impact_factor,impact_factor_year,impact_factor_source\nadvanced energy materials,24.4,2024,user_imported\n",
+        headers={"content-type": "text/csv"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dry_run"] is True
+    assert payload["matched_paper_count"] == 2
+    assert payload["active_db_write_performed"] is False
+    assert payload["needs_metadata_remaining"] == 1
+
+    response = client.get("/api/library/papers/filter", params={"needs_metadata": False})
+    assert str(seed["advanced_one"]) not in _ids(response)
+    assert str(seed["advanced_two"]) not in _ids(response)
+
+
 def test_unmatched_journal_returns_unmatched_items(impact_client):
     client, _, _ = impact_client
     response = client.post(
@@ -214,7 +233,7 @@ def test_import_does_not_modify_papers_reviews_locators_or_verified_gates(impact
 
 
 def test_no_online_fetch_or_scrape_path_exists():
-    source = Path("app/services/impact_metadata_import_service.py").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[1] / "app" / "services" / "impact_metadata_import_service.py").read_text(encoding="utf-8")
     assert "requests" not in source
     assert "httpx" not in source
     assert "urllib" not in source
@@ -222,10 +241,10 @@ def test_no_online_fetch_or_scrape_path_exists():
 
 def _seed(Session):
     with Session() as session:
-        advanced_one = Paper(title="A", year=2024, journal="Advanced Energy Materials", abstract="", pdf_path="a.pdf")
-        advanced_two = Paper(title="B", year=2023, journal="Advanced-Energy Materials", abstract="", pdf_path="b.pdf")
-        low_if = Paper(title="C", year=2022, journal="Archive Journal", abstract="", pdf_path="c.pdf")
-        missing_if = Paper(title="D", year=2021, journal="Unknown Journal", abstract="", pdf_path="d.pdf")
+        advanced_one = Paper(title="A", doi="10.1000/a", authors=["A. One"], year=2024, journal="Advanced Energy Materials", abstract="", pdf_path="a.pdf")
+        advanced_two = Paper(title="B", doi="10.1000/b", authors=["B. Two"], year=2023, journal="Advanced-Energy Materials", abstract="", pdf_path="b.pdf")
+        low_if = Paper(title="C", doi="10.1000/c", authors=["C. Low"], year=2022, journal="Archive Journal", abstract="", pdf_path="c.pdf")
+        missing_if = Paper(title="D", doi="10.1000/d", authors=["D. Missing"], year=2021, journal="Unknown Journal", abstract="", pdf_path="d.pdf")
         session.add_all([advanced_one, advanced_two, low_if, missing_if])
         session.flush()
         session.add(PaperImpactMetadata(paper_id=low_if.id, impact_factor=2.0, impact_factor_source="manual", impact_factor_year=2022))

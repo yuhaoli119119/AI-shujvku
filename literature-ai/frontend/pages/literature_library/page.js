@@ -614,26 +614,59 @@ function closeMetadataDiagnostics() {
 }
 
 function renderMetadataDiagnostics(data, container) {
+    const coverage = Array.isArray(data.coverage) ? data.coverage : [];
+    const unsupported = Array.isArray(data.unsupported_current_fields) ? data.unsupported_current_fields : [];
+    const coverageHtml = coverage.map(function(field) {
+        const ratio = Math.round(Number(field.coverage_ratio || 0) * 100);
+        return '<div class="panel-card" style="padding:10px;">' +
+            '<strong>' + esc(field.label) + '</strong>' +
+            '<div class="muted">覆盖率 ' + ratio + '% · 已有 ' + esc(field.present_count || 0) + ' / 缺失 ' + esc(field.missing_count || 0) + '</div>' +
+            '<div style="height:6px;border-radius:999px;background:var(--color-border-subtle);margin-top:8px;overflow:hidden;">' +
+                '<div style="height:100%;width:' + ratio + '%;background:var(--color-primary);"></div>' +
+            '</div>' +
+        '</div>';
+    }).join("");
+    const unsupportedHtml = unsupported.length
+        ? '<div class="panel-card" style="margin-top:12px;"><strong>当前未建模字段</strong><div class="muted" style="margin-top:6px;">' +
+            unsupported.map(function(field) { return esc(field.label) + '：' + esc(field.reason); }).join('<br>') +
+          '</div></div>'
+        : "";
+    const protocolHtml = data.impact_metadata_import_template
+        ? '<div class="panel-card" style="margin-top:12px;"><strong>影响因子补齐入口</strong>' +
+            '<div class="muted" style="margin-top:6px;">POST <code>' + esc(data.impact_metadata_import_template.endpoint) + '</code>，按规范化期刊名匹配。</div>' +
+            '<pre style="white-space:pre-wrap;margin-top:8px;">' + esc(data.impact_metadata_import_template.sample_csv || "") + '</pre>' +
+          '</div>'
+        : "";
+
     if (!data.items || data.items.length === 0) {
-        container.innerHTML = '<div class="empty-state">当前没有任何文献缺少必须的元数据字段。</div>';
+        container.innerHTML =
+            '<div style="margin-bottom:16px;">' +
+                '<p><strong>当前没有任何文献缺少必须的元数据字段。</strong></p>' +
+                '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">' + coverageHtml + '</div>' +
+                unsupportedHtml + protocolHtml +
+            '</div>';
         return;
     }
 
     let html = `
         <div style="margin-bottom:16px;">
-            <p><strong>需完善元数据的文献总数: ${data.total_papers_needing_metadata} 篇</strong></p>
+            <p><strong>需完善元数据的文献总数: ${data.total_papers_needing_metadata} / ${data.total_papers || 0} 篇</strong></p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:12px;">${coverageHtml}</div>
             <div class="panel-card" style="border-color:var(--color-warning);">
                 <span style="color:var(--color-warning);font-weight:700;">安全护栏说明:</span><br/>
                 ${esc(data.safety_guardrails.message)}<br/>
                 在线自动补全: ${data.safety_guardrails.auto_completion_enabled ? '允许' : '禁止'}<br/>
                 安全等级自动提升: ${data.safety_guardrails.safety_upgrade_on_completion ? '允许' : '禁止'}
             </div>
+            ${unsupportedHtml}
+            ${protocolHtml}
         </div>
         <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:14px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius);">
             <thead>
                 <tr style="border-bottom:1px solid var(--color-border);background:var(--color-surface-alt);">
                     <th style="text-align:left;padding:10px;">文献标题</th>
                     <th style="text-align:left;padding:10px;">缺失字段</th>
+                    <th style="text-align:left;padding:10px;">建议动作</th>
                 </tr>
             </thead>
             <tbody>
@@ -641,10 +674,12 @@ function renderMetadataDiagnostics(data, container) {
     
     data.items.forEach(item => {
         const missingList = item.missing_fields.map(m => `<span class="tag" style="background:var(--color-warning-bg);color:var(--color-warning);">${esc(m)}</span>`).join(" ");
+        const actions = (item.suggested_actions || []).map(action => esc(action)).join("<br>");
         html += `
             <tr style="border-bottom:1px solid var(--color-border-subtle);">
-                <td style="padding:10px;vertical-align:top;">${esc(item.title)}<div class="muted" style="margin-top:4px;">${esc(item.evidence_status_disclaimer)}</div></td>
+                <td style="padding:10px;vertical-align:top;">${esc(item.title)}<div class="muted" style="margin-top:4px;">${esc(item.year || "年份待补")} · ${esc(item.journal || "期刊待补")} · ${esc(item.doi || "DOI待补")}</div><div class="muted" style="margin-top:4px;">${esc(item.evidence_status_disclaimer)}</div></td>
                 <td style="padding:10px;vertical-align:top;">${missingList}</td>
+                <td style="padding:10px;vertical-align:top;" class="muted">${actions || "-"}</td>
             </tr>
         `;
     });

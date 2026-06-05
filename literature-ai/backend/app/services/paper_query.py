@@ -13,6 +13,7 @@ from app.db.models import (
     ElectrochemicalPerformance,
     MechanismClaim,
     Paper,
+    PaperImpactMetadata,
     PaperRelationship,
     PaperFigure,
     PaperNote,
@@ -22,6 +23,7 @@ from app.db.models import (
     WritingCard,
     FigureDataPoint,
 )
+from app.services.metadata_diagnostics_service import paper_metadata_state
 from app.schemas.api import (
     CatalystSampleResponse,
     DFTResultResponse,
@@ -129,6 +131,12 @@ class PaperQueryService:
         
         counts_map = defaultdict(lambda: {k: 0 for k in models_to_count.keys()})
         relationship_summary_map = defaultdict(dict)
+        impact_map = {
+            row.paper_id: row
+            for row in self.session.scalars(
+                select(PaperImpactMetadata).where(PaperImpactMetadata.paper_id.in_(paper_ids))
+            ).all()
+        }
         
         for key, model in models_to_count.items():
             stmt = (
@@ -151,6 +159,7 @@ class PaperQueryService:
                 paper, 
                 {**counts_map[paper.id], "comprehensive_analysis": 1 if paper.comprehensive_analysis else 0},
                 relationship_summary_map.get(paper.id, {}),
+                impact_map.get(paper.id),
             ) for paper in papers
         ]
 
@@ -245,7 +254,8 @@ class PaperQueryService:
         relationship_summary = {}
         for row in outgoing_relationships:
             relationship_summary[row.relationship_type] = relationship_summary.get(row.relationship_type, 0) + 1
-        base = self._build_list_item_with_counts(paper, base_counts, relationship_summary)
+        impact = self.session.get(PaperImpactMetadata, paper.id)
+        base = self._build_list_item_with_counts(paper, base_counts, relationship_summary, impact)
         related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {row.source_paper_id for row in incoming_relationships}
         related_titles = {}
         if related_paper_ids:
@@ -283,9 +293,11 @@ class PaperQueryService:
         paper: Paper,
         counts: dict[str, int],
         relationship_summary: dict[str, int] | None = None,
+        impact: PaperImpactMetadata | None = None,
     ) -> PaperListItemResponse:
         c = PaperCountsResponse(**counts)
         localized = self._localized_metadata(paper)
+        metadata_state = paper_metadata_state(paper, impact)
         return PaperListItemResponse(
             id=paper.id,
             serial_number=paper.serial_number,
@@ -313,6 +325,13 @@ class PaperQueryService:
             pdf_quality_score=getattr(paper, "pdf_quality_score", None),
             pdf_quality_report=getattr(paper, "pdf_quality_report", None),
             workspace_path=getattr(paper, "workspace_path", None),
+            impact_factor=impact.impact_factor if impact else None,
+            impact_factor_source=impact.impact_factor_source if impact else "unknown",
+            impact_factor_year=impact.impact_factor_year if impact else None,
+            impact_factor_status="known" if impact and impact.impact_factor is not None else "needs_metadata",
+            metadata_completeness_status=metadata_state["status"],
+            metadata_missing_fields=metadata_state["missing_fields"],
+            metadata_missing_field_codes=metadata_state["missing_field_codes"],
             comprehensive_analysis=paper.comprehensive_analysis,
             created_at=paper.created_at,
             counts=c,

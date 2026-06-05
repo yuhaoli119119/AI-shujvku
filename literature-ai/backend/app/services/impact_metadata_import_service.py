@@ -169,7 +169,7 @@ class ImpactMetadataImportService:
         if not dry_run:
             self.session.flush()
 
-        needs_metadata_remaining = self._needs_metadata_remaining(pending_paper_ids=set() if dry_run else set(operations))
+        needs_metadata_remaining = self._needs_metadata_remaining(pending_paper_ids=set(operations))
         after = self._snapshot()
         if not dry_run:
             self._assert_safety(before, after)

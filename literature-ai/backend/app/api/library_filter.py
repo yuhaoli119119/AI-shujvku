@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
+from app.services.metadata_diagnostics_service import MetadataDiagnosticsService
 from app.services.citation_eligibility_service import CitationEligibilityService, CitationEligibilityUpdate
 from app.services.paper_filter_service import PaperFilterCriteria, PaperFilterService
 
@@ -212,45 +213,4 @@ async def citation_metadata_preview(
 async def metadata_diagnostics(
     session: Session = Depends(get_db_session)
 ) -> dict:
-    papers = session.scalars(select(Paper)).all()
-    impact_map = {
-        row.paper_id: row 
-        for row in session.scalars(select(PaperImpactMetadata)).all()
-    }
-    
-    items = []
-    for paper in papers:
-        impact = impact_map.get(paper.id)
-        
-        missing = []
-        if not paper.title: missing.append("title")
-        if not paper.authors: missing.append("authors")
-        if not paper.journal: missing.append("journal")
-        if not paper.year: missing.append("year")
-        if not paper.doi: missing.append("DOI")
-        
-        # Currently unsupported DB fields
-        missing.extend(["volume", "issue", "pages", "publisher"])
-        
-        if not impact or impact.impact_factor is None: 
-            missing.append("impact factor")
-            
-        if missing:
-            items.append({
-                "paper_id": paper.id,
-                "title": paper.title or "Unknown Title",
-                "missing_fields": missing,
-                "metadata_source": "user_import", # Assuming static until DB supports tracking
-                "evidence_status_disclaimer": "Completeness of metadata does NOT imply evidence safety or verification.",
-            })
-            
-    return {
-        "total_papers_needing_metadata": len(items),
-        "items": items,
-        "safety_guardrails": {
-            "online_scraping_enabled": False,
-            "auto_completion_enabled": False,
-            "safety_upgrade_on_completion": False,
-            "message": "This endpoint is strictly read-only diagnostics. It performs no external lookups and does not alter paper statuses."
-        }
-    }
+    return MetadataDiagnosticsService(session).build_report()

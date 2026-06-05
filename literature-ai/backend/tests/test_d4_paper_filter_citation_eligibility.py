@@ -238,16 +238,18 @@ def _seed_fixture(Session):
     with Session() as session:
         high = Paper(
             title="Recent High IF",
+            doi="10.1000/high",
+            authors=["A. High"],
             year=2023,
             journal="Energy Materials",
             abstract="Catalyst paper with parsed text",
             pdf_path="high.pdf",
             markdown_path="high.md",
         )
-        low = Paper(title="Old Paper", year=2018, journal="Archive Journal", abstract="Old catalyst", pdf_path="")
-        missing_if = Paper(title="Unknown Impact", year=2022, journal="Manual Review", abstract="Needs metadata", pdf_path="unknown.pdf")
-        excluded = Paper(title="Excluded Candidate", year=2024, journal="Energy Materials", abstract="Exclude me", pdf_path="excluded.pdf")
-        verified_only = Paper(title="Verified But Unsafe", year=2024, journal="Claims Journal", abstract="Has verified claim", pdf_path="claim.pdf")
+        low = Paper(title="Old Paper", doi="10.1000/low", authors=["L. Low"], year=2018, journal="Archive Journal", abstract="Old catalyst", pdf_path="")
+        missing_if = Paper(title="Unknown Impact", doi="10.1000/missing", authors=["M. Missing"], year=2022, journal="Manual Review", abstract="Needs metadata", pdf_path="unknown.pdf")
+        excluded = Paper(title="Excluded Candidate", doi="10.1000/excluded", authors=["E. Excluded"], year=2024, journal="Energy Materials", abstract="Exclude me", pdf_path="excluded.pdf")
+        verified_only = Paper(title="Verified But Unsafe", doi="10.1000/verified", authors=["V. Verified"], year=2024, journal="Claims Journal", abstract="Has verified claim", pdf_path="claim.pdf")
         session.add_all([high, low, missing_if, excluded, verified_only])
         session.flush()
         session.add_all(
@@ -263,6 +265,12 @@ def _seed_fixture(Session):
                     impact_factor=2.1,
                     impact_factor_source="manual",
                     impact_factor_year=2018,
+                ),
+                PaperImpactMetadata(
+                    paper_id=verified_only.id,
+                    impact_factor=6.5,
+                    impact_factor_source="manual",
+                    impact_factor_year=2024,
                 ),
                 PaperCitationEligibility(paper_id=high.id, citation_priority="high"),
                 PaperCitationEligibility(

@@ -1,338 +1,205 @@
-# LitAI 提取与审核协议 v0.1
+# LitAI 提取与审核协议 v0.2
 
 ## 文档定位
 
-这是一份面向 `literature-ai` 当前阶段的执行协议草案，用于统一文献提取、证据追溯、审核入库、DFT 导出、写作引用和前端展示行为。
+本文是 `literature-ai` 当前阶段的执行协议，用于统一文献入库、PDF 解析、元数据补齐、结构化候选抽取、证据追溯、人工审核、写作引用和前端展示行为。
 
-本协议不是纯人工录入规范，而是面向以下工作流：
-
-- 软件负责导入、拆解、定位、候选抽取
-- Codex 负责组织、筛选、阅读、归纳
-- Gemini 或其他外部模型负责审核和标红
-- 用户负责最终确认和争议拍板
-
-## 参考来源
-
-参考页面：
-
-- [TiAl Data / Parameters & Properties / Extraction Protocol](http://101.42.36.213:3391/#properties)
-
-本协议吸收其优点，但不照搬其“人工逐篇提取员”模式。
+本协议吸收 [TiAl Data / Extraction Protocol](http://101.42.36.213:3391/#properties) 的优点：覆盖率优先、协议显性化、状态流锁定、字段可追溯、图像只作有边界的证据来源。但本项目不照搬其“人工逐篇录入员”模式；`literature-ai` 的定位仍是 Codex 使用的本地文献工具台。
 
 ## 核心原则
 
-1. 所有自动解析结果默认都是候选，不是最终事实。
-2. 所有正式字段必须可追溯到原文、图表或人工确认。
-3. 图中看见趋势不等于可入库数值。
-4. 结构化数据与长文本材料必须分层保存。
-5. 前端页面是工作台，不是数据真源。
-6. Codex 负责组织候选，Gemini 负责审核，用户负责最终确认。
+1. 自动解析、AI 抽取和外部模型结果默认都是候选，不是最终事实。
+2. 每个正式字段必须能追溯到原文、图、表、元数据来源或人工确认。
+3. 文献元数据完整不等于证据安全，也不等于抽取结果 verified。
+4. 前端页面是工作台和投影层，不是数据真源。
+5. 结构化数据、长文本、图像、证据 locator、审核记录必须分层保存。
+6. Codex 可以补齐候选和提出修复，但不能替代用户做最终人工确认。
 
-## 建议保留
+## 文献元数据协议
 
-### 1. 状态流锁定
+### 必需字段
 
-保留原因：
+文献入库和引用候选至少追踪以下字段：
 
-- 防止重复解析
-- 防止重复审核
-- 防止重复入库
-- 为多智能体协作提供互斥边界
+- `title`
+- `authors`
+- `journal`
+- `year`
+- `doi`
+- `impact_factor`
 
-本项目标准状态流：
+其中 `title/authors/journal/year/doi` 存在于 `papers` 表，`impact_factor` 存在于 `paper_impact_metadata` 表。`volume/issue/pages/publisher` 当前尚未建模，诊断报告只能把它们列为“当前未建模字段”，不得把它们计入缺失率。
 
-`Imported -> Quality_Checked -> Parsed_Material_Ready -> Codex_Candidate -> Gemini_Verified / Gemini_Revised / Gemini_Flagged / Evidence_Insufficient -> Human_Confirmed -> ML_Ready / Citation_Ready`
+### 补齐规则
 
-### 2. 一篇文献拆成多条独立记录
+- DOI、年份、期刊、标题、作者优先来自 DOI/URL provider metadata，例如 Crossref/OpenAlex；PDF 解析只作为 fallback。
+- DOI 必须规范化为小写、去掉 `https://doi.org/`、`doi:`、末尾标点。
+- 如果新 DOI 与已有 DOI 冲突，必须阻止自动合并，并进入人工确认。
+- 年份必须是可解释的四位年份；异常年份不应硬写入。
+- 影响因子只能通过可信 CSV/JSON 手动导入，按规范化期刊名匹配；系统诊断端点不得联网抓取影响因子。
+- 补齐元数据不得自动提升 `workflow_status`、`reviewer_status`、citation eligibility 或 ML export gate。
 
-保留原因：
+### 诊断输出
 
-- 同一篇文献可能包含多个构型、多个吸附物、多个测试条件、多个结论片段
-- 不拆分会导致记录混杂、字段含义漂移
+元数据诊断至少应返回：
 
-本项目拆分规则：
+- 总文献数
+- 完整文献数
+- 缺元数据文献数
+- 每个必需字段的覆盖率
+- 每篇缺失文献的缺失字段、建议动作和安全免责声明
+- 影响因子导入模板
+- 当前未建模字段说明
 
-- DFT 结果按“材料/构型/性质/条件/吸附物”拆记录
-- 图表按图号独立记录
-- 知识候选按“研究空白/机理/方法/结论/写作逻辑”拆记录
+## PDF 解析协议
 
-### 3. 原始值与归一化值并存
+### 解析顺序
 
-保留原因：
+1. 保存 PDF 到标准 storage。
+2. 运行 PDF 质量检查，记录 `pdf_quality_status`、`pdf_quality_score`、`pdf_quality_report`。
+3. 用 GROBID 提取 TEI、标题、摘要、作者、DOI、年份、期刊、参考文献和正文结构。
+4. 用 Docling 提取 Markdown、页面文本、表格、图片候选和版面 provenance。
+5. 如果 GROBID 标题是文件名或缺失，允许从 Docling 首页文本推断标题。
+6. 如果 GROBID 缺 DOI，允许从 Markdown 前部、citation 行或 DOI URL 中提取 DOI。
+7. 如 provider metadata 可用，优先用 provider 补齐缺失元数据，但不得覆盖明确冲突的 DOI。
 
-- 机器学习需要标准化字段
-- 人工复核需要原始表达
-- 单位转换需要留痕
+### 质量阻断
 
-推荐字段：
+如果 PDF 质量报告要求人工确认：
 
-- `value_original`
-- `unit_original`
-- `value_normalized`
-- `unit_normalized`
-- `normalization_note`
+- 文献可以保留元数据和 PDF。
+- 不应写入正文 sections、tables、figures 或结构化候选。
+- 工作流状态应提示需要人工确认。
+- 详情页必须明确显示“尚未可安全解析”或类似提示。
 
-### 4. 不从图中硬猜数值
+## 结构化候选协议
 
-保留原因：
+### 候选粒度
 
-- 这是避免幻觉和脏数据的底线
-- 当前截图裁剪和图像解析仍然存在误差
+一篇论文可以产生多条记录。拆分原则：
 
-本项目执行规则：
+- DFT 结果按材料、构型、性质、条件、吸附物或反应步骤拆分。
+- 实验性能按材料、工艺、测试条件和性能组合拆分。
+- 图表按图号、表号或可定位的图表对象独立记录。
+- 写作卡和机理候选按研究空白、方法、机制、结论、写作逻辑拆分。
 
-- 若数值仅存在于曲线图、散点图、扫描表格或图像中，不直接写入正式数值库
-- 可记录图像链接、图号、页码、候选说明
-- 标记为 `figure_pending`、`needs_digitization` 或 `evidence_insufficient`
+### 字段对象
 
-### 5. 每个非空字段都要可追溯
+非身份字段建议使用对象或对象数组表达，不推荐裸值：
 
-保留原因：
+```json
+{
+  "value_original": "-1.23 eV",
+  "unit_original": "eV",
+  "value_normalized": -1.23,
+  "unit_normalized": "eV",
+  "condition": "Li adsorption on vacancy defect",
+  "text_source": {
+    "page": 4,
+    "section": "Computational Results",
+    "excerpt": "The adsorption energy is -1.23 eV."
+  },
+  "image_source": null,
+  "confidence": 0.82,
+  "review_status": "candidate",
+  "normalization_note": "No unit conversion required."
+}
+```
 
-- 是 Codex、Gemini、用户三方协作的前提
-- 是避免“看起来提取了，实际无法核对”的核心约束
+### 禁止项
 
-每个正式字段至少应挂接：
+- 不得从曲线图、散点图、热图或扫描表中硬猜数值。
+- 不得把没有 source 的 AI 输出写成正式事实。
+- 不得把图像 OCR 或 VLM 结果直接标记为 verified。
+- 不得因为元数据完整就默认该论文适合引用或导出。
 
-- 原文摘录
-- 页码
-- 图号或表号
-- 来源类型
-- 置信度
-- 审核状态
+## 图像和表格协议
 
-### 6. 展示层不是数据源
+图像分三类：
 
-保留原因：
+- `data_figure`：曲线、柱状图、散点图、表格截图等，可能用于后续人工数字化。
+- `knowledge_figure`：机理图、结构图、流程图、表征图，适合阅读和写作理解。
+- `invalid_crop`：出版社标志、CrossMark、页眉页脚、孤立图标、裁剪噪声。
 
-- 页面可能缓存、简化、裁剪、聚合
-- 真实可信数据应来自数据库与标准材料包
+图像入库规则：
 
-本项目数据真源：
+- 必须保留 caption、page、image_path、provenance。
+- 无 caption 或疑似装饰图应过滤或标记为噪声。
+- 只在图中文字或正文明确给出数值时记录数值；纯视觉估读进入 `figure_pending` 或 `needs_digitization`。
+- 表格应保留 markdown_content、caption、page、provenance，并可作为证据 chunk。
 
-- SQLite 结构化表
-- 标准工作目录材料
-- Evidence bundle
-- 候选导出包
+## 审核状态流
 
-### 7. 审核清单化
+推荐状态流：
 
-保留原因：
+`Imported -> Quality_Checked -> Parsed_Material_Ready -> Codex_Candidate -> External_Reviewed -> Human_Confirmed -> ML_Ready / Citation_Ready`
 
-- 便于人类审核
-- 便于 Gemini 审核
-- 便于 Codex 生成统一审核报告
+状态含义：
 
-审核问题应固定化，例如：
+- `Imported`：文献已入库，可能只有元数据。
+- `Quality_Checked`：PDF 质量已评估。
+- `Parsed_Material_Ready`：PDF 文本、图表和候选材料已生成。
+- `Codex_Candidate`：Codex 或规则生成候选，仍需核对。
+- `External_Reviewed`：外部模型或人工辅助审阅给出意见，但不等于最终确认。
+- `Human_Confirmed`：用户完成最终确认。
+- `ML_Ready / Citation_Ready`：满足对应导出或写作引用安全门。
 
-- 该字段是否有直接证据？
-- 证据是否可定位到 PDF 页、图、表或正文？
-- 该值是否只来自图像推测？
-- 该候选是否适合正式入库？
-- 该候选是否适合机器学习？
-- 该候选是否适合引用与写作？
+任何自动流程都不得直接把候选升级为 `Human_Confirmed`。
 
-## 建议改写
+## 交付物
 
-### 1. 将“逐句人工阅读”改为“机器先粗提，AI 审核，人类拍板”
+每篇完成解析的文献至少应有：
 
-不直接采用的原因：
-
-- 纯人工流程不符合当前项目“以 Codex 为核心”的目标
-- 会把系统重新做回录入器，而不是工作台
-
-改写为：
-
-- 软件先拆 PDF、抽正文、图表、表格、候选字段
-- Codex 组织候选与证据链
-- Gemini 审核候选与证据冲突
-- 用户仅处理争议项或最终确认
-
-### 2. 将记录粒度扩展为“双轨”
-
-原协议重点是“材料-条件-性质记录”。
-
-本项目必须扩展为：
-
-- 数据记录轨：DFT、参数、性质、实验条件、结构化数值
-- 知识记录轨：研究空白、机理解释、方法概括、写作逻辑、结论要点
-
-### 3. 将“不要存长文本”改成“长文本分层保存”
-
-不直接采用的原因：
-
-- 本项目需要支持阅读、翻译、综述、写作卡和证据核对
-
-改写为：
-
-- 结构化数据库只保留摘要字段
-- 长正文与长证据保存在标准材料层
-- 前端按需折叠展示，不直接把长段塞入主表
-
-### 4. 将图像保留策略改成三层
-
-原协议偏向数值图保留。
-
-本项目应区分：
-
-- `data_figure`：适合数值提取
-- `knowledge_figure`：适合机理理解或写作参考
-- `invalid_crop`：无效截图、噪声图、页眉页脚、标识残片
-
-### 5. 将交付物扩展为“工作台产物”
-
-不只交付 JSON 和 SQLite，还应交付：
-
-- 标准工作目录
+- `metadata.json` 或数据库中的完整 paper 元数据投影
 - PDF 质量报告
-- Evidence bundle
-- DFT candidate bundle
-- Knowledge candidate bundle
-- Audit log
-- Review center 状态
+- TEI / Markdown / Docling JSON 中间产物
+- sections、tables、figures
+- structured candidates
+- evidence locators
+- audit log
+- metadata diagnostics 状态
+- Codex context bundle
 
-## 不建议采用
+## 前端工作台要求
 
-### 1. 不建议把人工逐篇通读设为刚性前提
+前端应显式展示：
 
-原因：
+- DOI、年份、期刊、影响因子是否缺失
+- PDF 是否存在、是否 metadata-only
+- PDF 质量状态
+- 解析产物数量
+- 候选是否 verified 或仍为 candidate
+- 影响因子来源和年份
+- 元数据诊断覆盖率
+- 协议和安全护栏说明
 
-- 与 Codex 中心化目标冲突
-- 难扩展
-- 无法支撑批量工作
+前端不得把缺失字段隐藏成 `-` 后不再提示；应使用“年份待补、期刊待补、DOI待补、IF待补”等明确语言。
 
-### 2. 不建议把所有长文本排除在系统外
+## 数据安全边界
 
-原因：
+默认禁止以下动作：
 
-- 不利于全文阅读
-- 不利于中文翻译核对
-- 不利于综述与写作卡生成
+- 未经确认执行 migration apply
+- 未经确认对真实 active SQLite 做批量 extraction apply
+- 删除真实 PDF、解析产物、artifacts 或 registry
+- 自动联网抓取影响因子并写库
+- 自动把 candidate 标记为 verified
+- 自动解锁 Citation/ML 导出
 
-### 3. 不建议只保留可直接数值化的图
+允许的安全动作：
 
-原因：
+- 只读诊断
+- 生成补齐建议
+- 生成 CSV/JSON 导入模板
+- 写入代码、测试和文档
+- 在用户明确授权后导入可信影响因子表
 
-- 机理图、结构图、流程图对本项目同样重要
-- 这些图虽然不适合直接入 DFT 数值库，但非常适合知识理解和写作支持
+## 值得持续借鉴的 TiAl Data 做法
 
-### 4. 不建议把网站只定位成 review meeting 展示板
+- 首页就给出 DOI coverage、text-readable、year range 等摘要指标。
+- 抽取协议作为产品页的一部分，不藏在开发文档里。
+- 数据可视化围绕字段覆盖率、版本、置信度、分布和相关性展开。
+- 图像记录区分 metadata-only、extracted image、source PDF 链接。
+- 记录级数据保留 schema_version、record_status、confidence 和 source location。
 
-原因：
-
-- 本项目的网页是 Codex 的工作台
-- 同时服务阅读、审核、入库、写作和引用
-
-## 系统落点
-
-### 数据库层
-
-- DFT 表保留原始值和归一化值
-- 每条记录挂 evidence 引用
-- 图像记录区分 `source_kind`
-- 审核状态字段统一枚举化
-
-### 标准工作目录层
-
-每篇文献应至少拥有：
-
-- `pdf/`
-- `markdown/`
-- `figures/`
-- `tables/`
-- `evidence/`
-- `quality_report/`
-- `dft_candidates/`
-- `knowledge_candidates/`
-- `audit/`
-
-### 审核中心
-
-应显示并可筛选：
-
-- 候选类型
-- 证据是否充分
-- 是否只来自图像
-- 是否适合入 ML
-- 是否适合 Citation
-- Gemini 审核结果
-- 人工最终状态
-
-### 文献详情页
-
-应明确区分：
-
-- 候选摘要
-- 原始证据
-- 来源类型
-- 当前审核状态
-- 是否可直接用于写作
-
-### DFT 导出层
-
-只有同时满足以下条件，才允许进入正式导出或 ML-ready：
-
-- 有证据
-- 有页码或图表定位
-- 有单位
-- 有审核状态
-- 不是从图中硬猜的数值
-
-### 写作引用层
-
-只有 `Citation_Ready` 的条目才参与：
-
-- Word 引用推荐
-- 自动插文献
-- 写作助手证据召回
-
-## 审核清单
-
-### DFT 数据审核
-
-1. 该值是否存在明确原文或表格证据？
-2. 该值单位是否明确？
-3. 是否能定位到页码、图号或表号？
-4. 是否需要单位归一化？
-5. 是否只来自图像估计？
-6. 是否适合进入 ML 导出？
-
-### 知识候选审核
-
-1. 这条内容是原文事实，还是候选归纳？
-2. 原文是否支持这条总结？
-3. 是否属于研究空白、机理、方法、结论或写作逻辑？
-4. 是否可以直接用于写作？
-5. 是否需要 Gemini 或人工标红？
-
-## 暂停中的前端打磨项
-
-当前已暂停但需要继续的任务：
-
-- 文献详情页中“写作卡 / 知识候选”的可读化打磨
-
-后续继续方向：
-
-- 默认显示短摘要而非原始长文本
-- 按写作用途分组
-- 证据与原文折叠展开
-- 可信度标签人类可读化
-- 写作卡和知识候选统一成“候选层”展示
-
-## 当前结论
-
-TiAl Data 的这份协议，最值得本项目吸收的是：
-
-- 去重意识
-- 粒度拆分意识
-- 单位规范意识
-- 字段追溯意识
-- 展示层与数据层分离意识
-
-最不适合直接照搬的是：
-
-- 纯人工逐句提取模式
-- 过度压缩长文本材料
-- 只保留数值图的单一目标
-
-因此，本项目应采用“结构化候选 + 证据追溯 + 多智能体审核 + 人类确认”的协议形态，而不是传统人工录入协议。
+本项目的对应实现方向是：元数据诊断覆盖率前置、文献卡片显式显示待补字段、影响因子通过可信导入补齐、结构化候选始终保留证据和审核状态。

@@ -66,15 +66,11 @@ def test_metadata_diagnostics_all_complete(client_db):
     data = resp.json()
 
     item = next((i for i in data["items"] if i["paper_id"] == str(paper_id)), None)
-    assert item is not None
-    missing = item["missing_fields"]
-    assert "title" not in missing
-    assert "authors" not in missing
-    assert "journal" not in missing
-    assert "year" not in missing
-    assert "DOI" not in missing
-    assert "impact factor" not in missing
-    assert "volume" in missing
+    assert item is None
+    assert data["schema_version"] == "metadata_diagnostics_v2"
+    assert data["complete_papers"] == 1
+    assert any(field["code"] == "impact_factor" and field["coverage_ratio"] == 1.0 for field in data["coverage"])
+    assert any(field["code"] == "volume" for field in data["unsupported_current_fields"])
 
 
 def test_metadata_diagnostics_missing_standard_fields(client_db):
@@ -98,6 +94,9 @@ def test_metadata_diagnostics_missing_standard_fields(client_db):
     assert "year" in missing
     assert "DOI" in missing
     assert "impact factor" in missing
+    assert "volume" not in missing
+    assert item["metadata_status"] == "needs_bibliographic_and_impact_metadata"
+    assert item["suggested_actions"]
 
 
 def test_metadata_diagnostics_guardrails(client_db):
@@ -110,3 +109,5 @@ def test_metadata_diagnostics_guardrails(client_db):
     assert guards["online_scraping_enabled"] is False
     assert guards["auto_completion_enabled"] is False
     assert guards["safety_upgrade_on_completion"] is False
+    assert guards["writes_database"] is False
+    assert data["impact_metadata_import_template"]["endpoint"] == "/api/library/impact-metadata/import"
