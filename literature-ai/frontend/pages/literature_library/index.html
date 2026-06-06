@@ -107,30 +107,30 @@
                 </div>
 
                 <div id="workspaceBody" style="display:none;">
-                    <div class="workspace-header">
-                        <div>
-                            <div id="paperTitle" class="workspace-title"></div>
-                            <div id="paperMeta" class="workspace-meta"></div>
-                        </div>
-                        <div class="paper-actionbar">
-                            <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
-                            <button class="btn ghost small" onclick="openPaperDetailPage()">打开详情</button>
-                            <button class="btn ghost small" onclick="rerunExtraction()">重新解析</button>
-                            <div class="dropdown" id="paperMoreDropdown">
-                                <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
-                                <div id="paperMoreMenu" class="dropdown-menu right">
-                                    <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
-                                    <button type="button" onclick="runInternalAIParse()">生成 AI 详细审阅</button>
-                                    <button type="button" onclick="switchTab('review')">AI 审阅与确认</button>
-                                    <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
-                                    <button type="button" onclick="openAggregateView()">查看聚合视图</button>
-                                    <button type="button" class="danger-menu-item" onclick="openDeletePaperDialog(event)">删除当前文献</button>
+                    <div class="workspace-header" style="display: block;">
+                        <div id="paperTitle" class="workspace-title" style="margin-bottom: 12px; width: 100%;"></div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px;">
+                            <div style="flex: 1; min-width: 0;">
+                                <div id="paperMeta" class="workspace-meta"></div>
+                                <div id="paperHeaderBadges" class="badge-row" style="margin-top: 12px;"></div>
+                            </div>
+                            <div class="paper-actionbar">
+                                <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
+                                <button class="btn ghost small" onclick="openPaperDetailPage()">打开详情</button>
+                                <button class="btn ghost small" onclick="rerunExtraction()">重新解析</button>
+                                <div class="dropdown" id="paperMoreDropdown">
+                                    <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
+                                    <div id="paperMoreMenu" class="dropdown-menu right">
+                                        <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
+                                        <button type="button" onclick="runInternalAIParse()">生成 AI 详细审阅</button>
+                                        <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
+                                        <button type="button" onclick="openAggregateView()">查看聚合视图</button>
+                                        <button type="button" class="danger-menu-item" onclick="openDeletePaperDialog(event)">删除当前文献</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-
-                    <div id="paperHeaderBadges" class="badge-row"></div>
 
                     <div class="tabs">
                         <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>

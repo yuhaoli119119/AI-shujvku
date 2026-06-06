@@ -298,13 +298,13 @@ function renderKnowledgeCandidateCard(item, index) {
 }
 
 function renderKnowledgeGroup(groupName, items) {
-    return '<section class="section-card knowledge-group-section">' +
-        '<div class="knowledge-group-head">' +
-            '<h3>' + esc(groupName) + '</h3>' +
+    return '<details class="section-card knowledge-group-section">' +
+        '<summary class="knowledge-group-head" style="justify-content:flex-start; gap:10px;">' +
+            '<h3 style="margin:0;">' + esc(groupName) + '</h3>' +
             '<span class="status-chip">' + items.length + ' 条</span>' +
-        '</div>' +
-        '<div class="knowledge-group-list">' + items.map(renderKnowledgeCandidateCard).join("") + '</div>' +
-    '</section>';
+        '</summary>' +
+        '<div class="knowledge-group-list" style="margin-top:16px;">' + items.map(renderKnowledgeCandidateCard).join("") + '</div>' +
+    '</details>';
 }
 
 function renderKnowledgeContext(detail) {
@@ -524,7 +524,7 @@ function renderReadableFields(item, keys) {
     keys.forEach(function(key) {
         const value = readableValue(item ? item[key] : null);
         if (value && value !== "-") {
-            fields.push('<div class="readable-field"><div class="k">' + esc(readableFieldLabel(key)) + '</div><div class="v">' + esc(value) + '</div></div>');
+            fields.push('<div class="readable-field field-' + esc(key) + '"><div class="k">' + esc(readableFieldLabel(key)) + '</div><div class="v">' + esc(value) + '</div></div>');
         }
     });
     return fields.length ? '<div class="readable-grid">' + fields.join("") + '</div>' : '<div class="muted">暂无可读字段。</div>';
@@ -653,23 +653,27 @@ function renderWritingCardsCompact(items) {
         const blocked = Array.isArray(item && item.blocked_reasons) && item.blocked_reasons.length
             ? '<div class="knowledge-detail-block"><div class="knowledge-detail-title">当前限制</div><div class="knowledge-detail-text">' + esc(item.blocked_reasons.join("、")) + '</div></div>'
             : "";
-        return '<div class="section-card writing-card-compact">' +
-            '<div class="knowledge-card-head">' +
-                '<div><h3 style="margin:0;">写作卡片 ' + (items.length > 1 ? (index + 1) : "") + '</h3><div class="knowledge-card-use">适合用来组织引言、摘要和讨论的写作骨架</div></div>' +
-                '<div class="knowledge-card-actions">' + action + '</div>' +
-            '</div>' +
-            '<div class="knowledge-tag-row">' +
-                '<span class="status-chip meta">' + esc(paperTypeLabel(item && item.paper_type)) + '</span>' +
-                '<span class="status-chip confidence-' + esc(review.className) + '" title="' + esc(review.tip) + '">' + esc(review.label) + '</span>' +
-                '<span class="status-chip" title="当前证据链状态">' + esc(evidenceStatus) + '</span>' +
-            '</div>' +
+        return '<details class="section-card writing-card-compact">' +
+            '<summary style="display:flex; justify-content:space-between; align-items:flex-start; flex:1; width:100%;">' +
+                '<div style="flex:1;">' +
+                    '<div class="knowledge-card-head">' +
+                        '<div><h3 style="margin:0;">写作卡片 ' + (items.length > 1 ? (index + 1) : "") + '</h3><div class="knowledge-card-use">适合用来组织引言、摘要和讨论的写作骨架</div></div>' +
+                        '<div class="knowledge-card-actions">' + action + '</div>' +
+                    '</div>' +
+                    '<div class="knowledge-tag-row">' +
+                        '<span class="status-chip meta">' + esc(paperTypeLabel(item && item.paper_type)) + '</span>' +
+                        '<span class="status-chip confidence-' + esc(review.className) + '" title="' + esc(review.tip) + '">' + esc(review.label) + '</span>' +
+                        '<span class="status-chip" title="当前证据链状态">' + esc(evidenceStatus) + '</span>' +
+                    '</div>' +
+                '</div>' +
+            '</summary>' +
             '<div class="writing-card-summary-grid">' + (summaryBlocks || '<div class="muted">这张写作卡还没有生成可直接阅读的短摘要。</div>') + '</div>' +
             '<details class="knowledge-details">' +
                 '<summary>展开写作逻辑与限制</summary>' +
                 details +
                 blocked +
             '</details>' +
-        '</div>';
+        '</details>';
     }).join("");
 }
 
@@ -691,9 +695,15 @@ function renderReadableCards(title, items) {
         "????": ["relationship_type", "target_title", "target_doi", "reason"],
         "????": ["relationship_type", "source_title", "source_doi", "reason"]
     };
-    const keys = keySets[title] || Object.keys(items[0] || {}).filter(function(key) {
+    let keys = keySets[title] ? keySets[title].slice() : Object.keys(items[0] || {}).filter(function(key) {
         return !["id", "paper_id", "raw_json", "created_at", "updated_at"].includes(key);
     }).slice(0, 10);
+    const longFields = ["evidence_text", "markdown_content", "reason", "claim_text", "research_gap", "proposed_solution", "core_hypothesis", "caption"];
+    keys.sort(function(a, b) {
+        const aLong = longFields.includes(a) ? 1 : 0;
+        const bLong = longFields.includes(b) ? 1 : 0;
+        return aLong - bLong;
+    });
     return items.map(function(item, index) {
         const heading = title + (items.length > 1 ? " " + (index + 1) : "");
         const itemType = CODEX_ITEM_TYPE_BY_CARD_TITLE[title];
