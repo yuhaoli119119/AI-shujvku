@@ -4,11 +4,17 @@ from typing import Any
 
 
 WORKBENCH_SCHEMA_VERSION = "codex_workbench_v1"
-EXTRACTION_PROTOCOL_VERSION = "codex_dft_candidate_v1"
+EXTRACTION_PROTOCOL_VERSION = "system_candidate_dft_v1"
 
 PAPER_WORKFLOW_STATUSES = (
     "Imported",
     "Quality_Checked",
+    "Unparsed",
+    "Initial_Parsed",
+    "Suspected_Missing",
+    "AI_Rescanned",
+    "Human_Complete",
+    "DB_Ready",
     "Parsed_Material_Ready",
     "Codex_Candidate",
     "Gemini_Verified",
@@ -47,6 +53,10 @@ HUMAN_FINAL_WORKFLOW_STATUSES = {
 }
 
 HUMAN_REVIEW_REQUIRED_WORKFLOW_STATUSES = {
+    "Unparsed",
+    "Initial_Parsed",
+    "Suspected_Missing",
+    "AI_Rescanned",
     "Codex_Candidate",
     "Gemini_Verified",
     "Gemini_Revised",
@@ -68,7 +78,7 @@ def normalize_choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
 
 
 def workflow_status_after_parsing(*, has_candidates: bool) -> str:
-    return "Codex_Candidate" if has_candidates else "Parsed_Material_Ready"
+    return "Initial_Parsed" if has_candidates else "Unparsed"
 
 
 def workflow_status_after_gemini(decision: str) -> str:

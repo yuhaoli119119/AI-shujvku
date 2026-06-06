@@ -1,0 +1,146 @@
+name: dft_material_ai_extraction_protocol
+version: system_candidate_dft_v1
+stage: ai_extraction_and_review_gate
+
+role_boundary:
+  system_preprocessing:
+    - Download PDF and collect metadata.
+    - Extract native text, sections, tables, captions, figures, page numbers, crop boxes, full-page screenshots, and nearby context.
+    - Rule-based DFT hints are only stored as system_candidate records.
+    - System candidates must never enter the final DFT/ML database without review.
+  ai_extraction:
+    - Read the full evidence package, not only rows pre-extracted by rules.
+    - Extract scientific DFT/material data from evidence.
+    - Compare new AI extraction with system_candidate hints and report missing/conflicting evidence.
+  review_gate:
+    - Deduplicate candidates.
+    - Run completeness audit.
+    - Require human or second-AI confirmation before promotion to exportable database.
+
+evidence_first_rules:
+  - Every non-empty scientific field must be supported by a text/table/figure locator.
+  - Do not infer a numeric value from trends, curves, colors, or pathway images unless the value is explicitly readable in the paper text/table/caption.
+  - If a figure gives only a visual trend, mark the value as pending or needs_fix.
+  - PDF original page, section title, table number, figure number, caption, and excerpt are preferred over parser-only text.
+  - Cropped figures are candidate locators only; verify them against the full PDF page and caption.
+  - Data without evidence location must not be promoted.
+
+required_fields_per_dft_record:
+  - catalyst_or_material
+  - normalized_catalyst_or_material
+  - adsorbate
+  - normalized_adsorbate
+  - property_type
+  - normalized_property_type
+  - value
+  - unit
+  - calculation_method_or_condition
+  - evidence_text
+  - pdf_page
+  - section_or_heading
+  - table_number
+  - figure_number
+  - figure_caption_or_table_caption
+  - bbox_or_locator_if_available
+  - confidence
+  - extraction_source
+  - notes
+
+property_types:
+  examples:
+    - adsorption_energy
+    - binding_energy
+    - gibbs_free_energy
+    - free_energy_change
+    - overpotential
+    - reaction_barrier
+    - limiting_potential
+    - band_gap
+    - HOMO
+    - LUMO
+    - bader_charge
+    - charge_transfer
+    - d_band_center
+    - work_function
+
+completeness_audit_keywords:
+  - DFT
+  - density functional theory
+  - adsorption energy
+  - binding energy
+  - Gibbs
+  - free energy
+  - overpotential
+  - reaction barrier
+  - band gap
+  - HOMO
+  - LUMO
+  - Bader
+  - d-band
+  - work function
+  - Table
+  - Figure
+  - Supplementary
+
+deduplication_policy:
+  key: paper_id + normalized_catalyst + normalized_adsorbate + property_type + value + unit + method_or_condition + evidence_location
+  normalization_examples:
+    - GDY, graphdiyne, pristine GDY -> GDY
+    - H2O, water -> H2O
+    - adsorption energy, Eads, E_ads -> adsorption_energy
+    - -3.8700 eV and -3.87 eV are near-duplicates
+  rule: Do not delete duplicates silently. Merge into a primary candidate and keep all evidence sources.
+
+ai_worker_protocol:
+  ai_a_initial_extract:
+    - Read abstract, methods, results/discussion, all tables, all captions, DFT-related text, and supporting evidence package.
+    - Output structured candidate records only when evidence is located.
+  ai_b_independent_review:
+    - Independently rescan the same evidence package.
+    - Report missing records, conflicts, weak evidence, and duplicate candidates.
+  judge:
+    - Compare AI-A, AI-B, and system_candidate hints.
+    - Produce one merged candidate set plus conflict report.
+    - Do not promote anything to final database.
+
+paper_statuses:
+  - Unparsed
+  - Initial_Parsed
+  - Suspected_Missing
+  - AI_Rescanned
+  - Human_Complete
+  - DB_Ready
+
+promotion_rule:
+  chain: PDF original evidence -> AI protocol extraction -> deduplicate/merge -> completeness audit -> human or second-AI review -> exportable database
+  final_database_filter: Only reviewed/exportable records are visible by default in the DFT database, exports, ML dataset, and trusted matrix.
+
+output_schema:
+  record:
+    candidate_status: ai_candidate
+    catalyst_or_material: string
+    normalized_catalyst_or_material: string
+    adsorbate: string
+    normalized_adsorbate: string
+    property_type: string
+    normalized_property_type: string
+    value: number
+    unit: string
+    calculation_method_or_condition: string
+    evidence:
+      text_excerpt: string
+      pdf_page: integer
+      section: string
+      table: string
+      figure: string
+      caption: string
+      bbox: object
+    confidence: number
+    notes: string
+  report:
+    detected_dft_signal_count: integer
+    parsed_candidate_count: integer
+    suspected_missing_count: integer
+    conflicts: list
+    duplicate_groups: list
+    promotion_recommendation: needs_human_review

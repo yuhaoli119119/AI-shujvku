@@ -17,6 +17,9 @@ class GeminiAuditRequest(BaseModel):
     target_id: UUID | None = None
     decision: str = Field(pattern="^(PASS|REVISE|FLAG|INSUFFICIENT)$")
     reviewer: str = "gemini_auditor"
+    agent_role: str | None = None
+    model_name: str | None = None
+    protocol_key: str = "gemini_audit_protocol"
     reviewer_note: str | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
     field_names: list[str] = Field(default_factory=list)

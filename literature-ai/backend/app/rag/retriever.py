@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, ElectrochemicalPerformance, MechanismClaim, PaperChunk, PaperSection, WritingCard, Paper, FigureDataPoint
 from app.services.embedding import DeterministicEmbeddingService, get_embedding_service, EmbeddingService
-from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
+from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
 
 
 def _tokenize(text: str) -> set[str]:
@@ -166,9 +166,10 @@ class Retriever:
             query = query.where(DFTResult.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, DFTResult, paper_type_filter)
         rows = self.session.scalars(query).all()
+        gate_by_id = bulk_export_gate_results(self.session, rows, target_type="dft_results")
         results = []
         for row in rows:
-            gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+            gate = gate_by_id[str(row.id)]
             if not gate.eligible:
                 continue
             haystack = " ".join(
@@ -227,9 +228,10 @@ class Retriever:
             query = query.where(ElectrochemicalPerformance.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, ElectrochemicalPerformance, paper_type_filter)
         rows = self.session.scalars(query).all()
+        gate_by_id = bulk_export_gate_results(self.session, rows, target_type="electrochemical_performance")
         results = []
         for row in rows:
-            gate = is_export_eligible_extraction(self.session, row, target_type="electrochemical_performance")
+            gate = gate_by_id[str(row.id)]
             if not gate.eligible:
                 continue
             haystack = self._format_electrochemical(row)
@@ -273,9 +275,10 @@ class Retriever:
             query = query.where(MechanismClaim.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, MechanismClaim, paper_type_filter)
         rows = self.session.scalars(query).all()
+        gate_by_id = bulk_export_gate_results(self.session, rows, target_type="mechanism_claims")
         results = []
         for row in rows:
-            gate = is_export_eligible_extraction(self.session, row, target_type="mechanism_claims")
+            gate = gate_by_id[str(row.id)]
             if not gate.eligible:
                 continue
             haystack = " ".join(filter(None, [row.claim_type, row.claim_text, row.evidence_text, " ".join(row.evidence_types or [])]))
@@ -392,8 +395,9 @@ class Retriever:
             unit_str = f" {row.unit}" if row.unit else ""
             val_str = f": {row.metric_value}" if row.metric_value is not None else ""
             sample_str = f" for {row.sample_label}" if row.sample_label else ""
+            cond_str = f" under {row.conditions}" if row.conditions else ""
             fig_suffix = f" (from Figure {fig_caption})" if fig_caption else " (from Figure)"
-            evidence_text = f"{row.metric_name}{val_str}{unit_str}{sample_str}{fig_suffix}"
+            evidence_text = f"{row.metric_name}{val_str}{unit_str}{sample_str}{cond_str}{fig_suffix}"
 
             bias = 0.20
             if target_paper_type:
@@ -411,6 +415,7 @@ class Retriever:
                     "value": row.metric_value,
                     "unit": row.unit,
                     "sample_label": row.sample_label,
+                    "conditions": str(row.conditions) if row.conditions else None,
                     "evidence_text": evidence_text,
                 }
             )
@@ -425,8 +430,9 @@ class Retriever:
         allow_paper_fallback: bool,
     ) -> tuple[float, dict[str, float]]:
         lexical = self._score_text(query_tokens, text)
-        text_embedding = stored_embedding or self.embedding.embed_text(text)
-        semantic = max(0.0, self.embedding.cosine_similarity(query_embedding, text_embedding))
+        semantic = 0.0
+        if stored_embedding:
+            semantic = max(0.0, self.embedding.cosine_similarity(query_embedding, stored_embedding))
         if lexical <= 0 and semantic <= 0 and allow_paper_fallback:
             lexical = 0.05
         if lexical <= 0 and semantic <= 0:
@@ -448,41 +454,68 @@ class Retriever:
     def _global_dedup(
         retrieved: dict[str, list[dict[str, Any]]], limit_per_type: int,
     ) -> dict[str, list[dict[str, Any]]]:
-        """Cross-type dedup: same paper_id + fingerprint keeps the higher-score entry.
+        """Cross-type dedup without collapsing distinct extracted records.
 
-        Two-pass approach:
-        1. Compute global best score per dedup_key across all types.
-        2. Filter each type — remove items superseded by a higher-score
-           duplicate in another type, and keep only the first among ties.
+        Stable object identities are authoritative. Full-text fallback is only
+        used for synthetic items without object_id, so two distinct extracted
+        rows with identical text are still preserved for review.
         """
-        # Pass 1: global best score per dedup_key
-        best_scores: dict[str, float] = {}
-        for items in retrieved.values():
-            for item in items:
-                text_content = str(item.get("text") or item.get("evidence_text") or "")
-                fingerprint = text_content.strip().lower()[:80]
-                dedup_key = f"{item.get('paper_id', '')}::{fingerprint}"
-                score = item.get("score", 0.0)
-                if dedup_key not in best_scores or score > best_scores[dedup_key]:
-                    best_scores[dedup_key] = score
+        best_scores_id: dict[str, float] = {}
+        best_scores_content: dict[str, float] = {}
+        
+        import re
+        import hashlib
 
-        # Pass 2: filter each type
-        emitted_keys: set[str] = set()
+        def _get_id_key(item: dict[str, Any], type_name: str) -> str:
+            pid = str(item.get("paper_id", ""))
+            oid = str(item.get("object_id", ""))
+            if oid:
+                return f"{pid}::{type_name}::{oid}"
+            return ""
+
+        def _get_content_key(item: dict[str, Any]) -> str:
+            pid = str(item.get("paper_id", ""))
+            text_content = str(item.get("text") or item.get("evidence_text") or "")
+            normalized = re.sub(r"\s+", " ", text_content.strip().lower())
+            fingerprint = hashlib.md5(normalized.encode('utf-8')).hexdigest()
+            return f"{pid}::{fingerprint}"
+
+        for type_name, items in retrieved.items():
+            for item in items:
+                score = item.get("score", 0.0)
+                id_key = _get_id_key(item, type_name)
+                content_key = _get_content_key(item)
+                
+                if id_key and (id_key not in best_scores_id or score > best_scores_id[id_key]):
+                    best_scores_id[id_key] = score
+                if not id_key and (content_key not in best_scores_content or score > best_scores_content[content_key]):
+                    best_scores_content[content_key] = score
+
+        emitted_id_keys: set[str] = set()
+        emitted_content_keys: set[str] = set()
+        
         for type_name, items in retrieved.items():
             filtered: list[dict[str, Any]] = []
             for item in items:
-                text_content = str(item.get("text") or item.get("evidence_text") or "")
-                fingerprint = text_content.strip().lower()[:80]
-                dedup_key = f"{item.get('paper_id', '')}::{fingerprint}"
                 score = item.get("score", 0.0)
-                # Skip if superseded by a higher-score duplicate
-                if score < best_scores[dedup_key]:
+                id_key = _get_id_key(item, type_name)
+                content_key = _get_content_key(item)
+                
+                if id_key and score < best_scores_id[id_key]:
                     continue
-                # Skip if an equal-score duplicate was already emitted
-                if dedup_key in emitted_keys:
+                if not id_key and score < best_scores_content[content_key]:
                     continue
+                if id_key and id_key in emitted_id_keys:
+                    continue
+                if not id_key and content_key in emitted_content_keys:
+                    continue
+                    
                 filtered.append(item)
-                emitted_keys.add(dedup_key)
+                if id_key:
+                    emitted_id_keys.add(id_key)
+                else:
+                    emitted_content_keys.add(content_key)
+                
             retrieved[type_name] = Retriever._top_k(filtered, limit_per_type)
         return retrieved
 

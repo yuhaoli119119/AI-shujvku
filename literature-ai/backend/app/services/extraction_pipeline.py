@@ -561,12 +561,20 @@ class ExtractionPipelineService:
 
     def _persist_dft_results(self, paper_id: UUID, items: list[dict[str, Any]]) -> int:
         count = 0
-        for item in items:
+        for item in self._merge_duplicate_dft_items(items):
             location = item.get("source_location") or {}
             norm_item = self.chemistry_normalizer.normalize({
                 "adsorbate": item.get("adsorbate") or "",
                 "property_type": item.get("category") or "",
             })
+            evidence_payload = PaperWorkbenchService.dft_evidence_payload(item)
+            if item.get("evidence_sources"):
+                evidence_payload["evidence_sources"] = item.get("evidence_sources")
+                evidence_payload["duplicate_merge"] = {
+                    "merged": True,
+                    "source_count": len(item.get("evidence_sources") or []),
+                    "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+                }
             record = DFTResult(
                 paper_id=paper_id,
                 adsorbate=norm_item.get("adsorbate") or item.get("adsorbate"),
@@ -578,8 +586,8 @@ class ExtractionPipelineService:
                 source_figure=location.get("figure"),
                 evidence_text=item.get("evidence_text"),
                 confidence=item.get("confidence"),
-                candidate_status="Codex_Candidate",
-                evidence_payload=PaperWorkbenchService.dft_evidence_payload(item),
+                candidate_status="system_candidate",
+                evidence_payload=evidence_payload,
                 extraction_protocol_version=EXTRACTION_PROTOCOL_VERSION,
             )
             self.session.add(record)
@@ -592,6 +600,71 @@ class ExtractionPipelineService:
             )
             count += 1
         return count
+
+    def _merge_duplicate_dft_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged: dict[str, dict[str, Any]] = {}
+        for item in items or []:
+            key = self._normalized_dft_candidate_key(item)
+            source = self._dft_evidence_source(item)
+            existing = merged.get(key)
+            if existing is None:
+                copied = dict(item)
+                copied["evidence_sources"] = [source]
+                merged[key] = copied
+                continue
+            existing_sources = existing.setdefault("evidence_sources", [])
+            if source not in existing_sources:
+                existing_sources.append(source)
+            if float(item.get("confidence") or 0.0) > float(existing.get("confidence") or 0.0):
+                preserved_sources = existing_sources
+                replacement = dict(item)
+                replacement["evidence_sources"] = preserved_sources
+                merged[key] = replacement
+        return list(merged.values())
+
+    def _normalized_dft_candidate_key(self, item: dict[str, Any]) -> str:
+        norm = self.chemistry_normalizer.normalize({
+            "adsorbate": item.get("adsorbate") or "",
+            "property_type": item.get("category") or "",
+        })
+        value = item.get("value")
+        try:
+            value_key = f"{float(value):.4f}" if value is not None else ""
+        except (TypeError, ValueError):
+            value_key = str(value or "").strip().lower()
+
+        def clean(value: Any) -> str:
+            text = str(value or "").strip().lower()
+            text = re.sub(r"\s+", "", text)
+            text = text.replace("water", "h2o")
+            text = text.replace("pristinegdy", "gdy").replace("graphdiyne", "gdy")
+            text = text.replace("adsorptionenergy", "adsorption_energy")
+            text = text.replace("eads", "adsorption_energy").replace("e_ads", "adsorption_energy")
+            return re.sub(r"[^a-z0-9_.+-]+", "", text)
+
+        return "|".join(
+            [
+                clean(norm.get("adsorbate") or item.get("adsorbate")),
+                clean(norm.get("property_type") or item.get("category")),
+                value_key,
+                clean(item.get("unit")),
+                clean(item.get("reaction_step")),
+            ]
+        )
+
+    @staticmethod
+    def _dft_evidence_source(item: dict[str, Any]) -> dict[str, Any]:
+        location = item.get("source_location") or {}
+        return {
+            "evidence_text": item.get("evidence_text"),
+            "page": location.get("page"),
+            "section": location.get("section"),
+            "table": location.get("table"),
+            "figure": location.get("figure"),
+            "bbox": location.get("bbox"),
+            "confidence": item.get("confidence"),
+            "parser_source": item.get("parser_source") or "system_rules",
+        }
 
     def _persist_electrochemical_performance(self, paper_id: UUID, items: list[dict[str, Any]]) -> int:
         if not items:

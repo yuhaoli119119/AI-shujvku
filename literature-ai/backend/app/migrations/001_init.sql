@@ -88,7 +88,10 @@ CREATE TABLE IF NOT EXISTS dft_results (
     source_section TEXT,
     source_figure TEXT,
     evidence_text TEXT,
-    confidence DOUBLE PRECISION
+    confidence DOUBLE PRECISION,
+    candidate_status TEXT NOT NULL DEFAULT 'system_candidate',
+    evidence_payload JSONB,
+    extraction_protocol_version TEXT
 );
 
 CREATE TABLE IF NOT EXISTS mechanism_claims (

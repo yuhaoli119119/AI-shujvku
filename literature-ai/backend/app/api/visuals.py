@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import math
 import re
 from typing import Any
 
@@ -12,6 +13,7 @@ from app.db.models import (
     CatalystSample,
     DFTResult,
     DFTSetting,
+    EvidenceLocator,
     FigureDataPoint,
     Paper,
     PaperFigure,
@@ -20,6 +22,7 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.utils.library_names import build_library_name_clause, normalize_library_name
+from app.utils.review_safety import bulk_export_gate_results
 
 router = APIRouter()
 
@@ -37,6 +40,26 @@ ELEMENT_SYMBOLS = {
 }
 
 REACTION_CATEGORY_ORDER = ["HER", "OER/ORR", "CO2RR", "NRR", "电池/离子", "分子/污染物", "其他"]
+TARGET_PROPERTY_ORDER = [
+    "adsorption_energy",
+    "gibbs_free_energy_change",
+    "overpotential",
+    "reaction_barrier",
+    "limiting_potential",
+    "band_gap",
+]
+DESCRIPTOR_PROPERTY_ORDER = [
+    "d_band_center",
+    "charge_transfer",
+    "bader_charge",
+    "work_function",
+    "band_gap",
+    "metal_electronegativity",
+    "coordination_number",
+    "bond_length",
+    "adsorption_distance",
+]
+DFT_TARGET_TYPES = {"dft_result", "dft_results"}
 
 
 def _clean_pdf_text(value: Any) -> str:
@@ -65,6 +88,32 @@ def _clean_pdf_text(value: Any) -> str:
 
 def _norm_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _canonical_property_type(value: Any) -> str:
+    raw = _clean_pdf_text(value).lower()
+    raw = raw.replace("-", "_").replace(" ", "_")
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    aliases = {
+        "e_ads": "adsorption_energy",
+        "eads": "adsorption_energy",
+        "adsorption_energy_ev": "adsorption_energy",
+        "binding_energy": "adsorption_energy",
+        "gibbs_free_energy": "gibbs_free_energy_change",
+        "free_energy_change": "gibbs_free_energy_change",
+        "delta_g": "gibbs_free_energy_change",
+        "reaction_energy_barrier": "reaction_barrier",
+        "energy_barrier": "reaction_barrier",
+        "d_band": "d_band_center",
+        "d_band_centre": "d_band_center",
+        "dband_center": "d_band_center",
+        "bader": "bader_charge",
+        "charge": "bader_charge",
+        "efermi_work_function": "work_function",
+        "bond_distance": "bond_length",
+        "adsorbate_distance": "adsorption_distance",
+    }
+    return aliases.get(raw, raw)
 
 
 def _canonical_adsorbate(value: Any) -> tuple[str | None, str, str | None]:
@@ -228,6 +277,7 @@ def _build_dft_catalyst_adsorbate_matrix(
     session: Session,
     filters: list[Any],
     *,
+    matrix_status: str = "all",
     limit: int = 240,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     dft_stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
@@ -237,6 +287,8 @@ def _build_dft_catalyst_adsorbate_matrix(
     if not dft_rows:
         return [], {
             "total_results": 0,
+            "reviewed_exportable_results": 0,
+            "blocked_candidate_results": 0,
             "included_results": 0,
             "excluded_results": 0,
             "excluded_reasons": {},
@@ -258,8 +310,21 @@ def _build_dft_catalyst_adsorbate_matrix(
     direct_links = 0
     fallback_links = 0
     included_results = 0
+    reviewed_exportable_results = 0
+    blocked_candidate_results = 0
+    reviewed_only = (matrix_status or "all").strip().lower() in {"reviewed", "exportable", "trusted"}
+    gate_by_id = bulk_export_gate_results(session, [row for row, _paper in dft_rows], target_type="dft_results")
 
     for dft, paper in dft_rows:
+        gate = gate_by_id[str(dft.id)]
+        if not gate.eligible:
+            blocked_candidate_results += 1
+            if reviewed_only:
+                for reason in gate.reasons:
+                    excluded_reasons[f"candidate_blocked:{reason}"] += 1
+                continue
+        else:
+            reviewed_exportable_results += 1
         adsorbate, category, reason = _canonical_adsorbate(dft.adsorbate)
         if reason or not adsorbate:
             excluded_reasons[reason or "invalid_adsorbate"] += 1
@@ -333,9 +398,18 @@ def _build_dft_catalyst_adsorbate_matrix(
     matrix_rows.sort(key=lambda row: (-row["count"], row["reaction_category"], row["catalyst"], row["adsorbate"]))
     meta = {
         "total_results": len(dft_rows),
+        "reviewed_exportable_results": reviewed_exportable_results,
+        "blocked_candidate_results": blocked_candidate_results,
         "included_results": included_results,
         "excluded_results": sum(excluded_reasons.values()),
         "excluded_reasons": dict(excluded_reasons),
+        "matrix_status": "reviewed" if reviewed_only else "all_candidates",
+        "candidate_policy": (
+            "Reviewed/exportable matrix excludes candidates; candidates remain in review center."
+            if reviewed_only
+            else "Legacy all-candidate matrix. Do not use for trusted analysis or export."
+        ),
+        "candidate_overlay_available": not reviewed_only,
         "direct_catalyst_links": direct_links,
         "paper_level_fallback_links": fallback_links,
         "category_counts": [
@@ -347,6 +421,289 @@ def _build_dft_catalyst_adsorbate_matrix(
         "adsorbate_count": len({row["adsorbate_key"] for row in matrix_rows}),
     }
     return matrix_rows[:limit], meta
+
+
+def _dft_review_counts(session: Session, filters: list[Any]) -> dict[str, int]:
+    stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
+    for clause in filters:
+        stmt = stmt.where(clause)
+    rows = session.execute(stmt).all()
+    gate_by_id = bulk_export_gate_results(session, [row for row, _paper in rows], target_type="dft_results")
+    reviewed = 0
+    blocked = 0
+    for dft, _paper in rows:
+        if gate_by_id[str(dft.id)].eligible:
+            reviewed += 1
+        else:
+            blocked += 1
+    return {
+        "total": len(rows),
+        "reviewed_exportable": reviewed,
+        "candidates": blocked,
+        "correlation_ready": reviewed,
+    }
+
+
+def _build_descriptor_correlation_summary(
+    session: Session,
+    filters: list[Any],
+    *,
+    min_n: int = 5,
+    reaction_category: str | None = None,
+    adsorbate: str | None = None,
+    material_family: str | None = None,
+) -> dict[str, Any]:
+    points = _descriptor_source_points(
+        session,
+        filters,
+        reaction_category=reaction_category,
+        adsorbate=adsorbate,
+        material_family=material_family,
+    )
+    property_counts = Counter(point["property_type"] for point in points)
+    cells = []
+    for target in TARGET_PROPERTY_ORDER:
+        for descriptor in DESCRIPTOR_PROPERTY_ORDER:
+            pair_payload = _paired_descriptor_points(points, target, descriptor)
+            stats = _correlation_stats(pair_payload)
+            n = len(pair_payload)
+            status = "ready" if n >= min_n and stats["pearson_r"] is not None else "insufficient_paired_data"
+            color = _correlation_color(stats["pearson_r"]) if status == "ready" else "gray"
+            cells.append(
+                {
+                    "target_property": target,
+                    "descriptor": descriptor,
+                    "n": n,
+                    "pearson_r": stats["pearson_r"] if status == "ready" else None,
+                    "spearman_rho": stats["spearman_rho"] if status == "ready" else None,
+                    "slope": stats["slope"] if status == "ready" else None,
+                    "intercept": stats["intercept"] if status == "ready" else None,
+                    "status": status,
+                    "color": color,
+                    "message": (
+                        f"已形成 {n} 个同类配对样本。"
+                        if status == "ready"
+                        else "Correlation is withheld until reviewed records provide paired descriptor/target "
+                        f"values with n >= {min_n} under the selected reaction/adsorbate/material filters."
+                    ),
+                }
+            )
+    return {
+        "schema_version": "descriptor_correlation_v1",
+        "min_n": min_n,
+        "target_properties": TARGET_PROPERTY_ORDER,
+        "descriptor_properties": DESCRIPTOR_PROPERTY_ORDER,
+        "cells": cells,
+        "property_counts": dict(property_counts),
+        "reviewed_numeric_points": len(points),
+        "filters": {
+            "reaction_category": reaction_category,
+            "adsorbate": adsorbate,
+            "material_family": material_family,
+            "status": "reviewed_exportable",
+        },
+        "correlation_policy": (
+            "Do not mix reaction types, adsorbates, or material families when calculating descriptor correlations. "
+            "Unreviewed candidates are excluded by default."
+        ),
+    }
+
+
+def _descriptor_source_points(
+    session: Session,
+    filters: list[Any],
+    *,
+    reaction_category: str | None = None,
+    adsorbate: str | None = None,
+    material_family: str | None = None,
+) -> list[dict[str, Any]]:
+    stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
+    for clause in filters:
+        stmt = stmt.where(clause)
+    rows = session.execute(stmt).all()
+    gate_by_id = bulk_export_gate_results(session, [row for row, _paper in rows], target_type="dft_results")
+    paper_by_id = {paper.id: paper for _row, paper in rows}
+    catalyst_names_by_id = {
+        str(row.id): _canonical_catalyst(row, paper_by_id.get(row.paper_id)).get("label", "")
+        for row in session.scalars(select(CatalystSample)).all()
+    }
+    requested_adsorbate_key = _canonical_adsorbate(adsorbate)[0] if adsorbate else None
+    requested_family_key = _norm_key(material_family or "")
+    points: list[dict[str, Any]] = []
+    for row, paper in rows:
+        if row.value is None:
+            continue
+        if not gate_by_id[str(row.id)].eligible:
+            continue
+        property_type = _canonical_property_type(row.property_type)
+        if property_type not in TARGET_PROPERTY_ORDER and property_type not in DESCRIPTOR_PROPERTY_ORDER:
+            continue
+        adsorbate_key, adsorbate_label, ads_reason = _canonical_adsorbate(row.adsorbate)
+        if not adsorbate_key or ads_reason:
+            continue
+        if requested_adsorbate_key and adsorbate_key != requested_adsorbate_key:
+            continue
+        category = _adsorbate_category(adsorbate_label)
+        if reaction_category and category != reaction_category:
+            continue
+        catalyst_label = catalyst_names_by_id.get(str(row.catalyst_sample_id or "")) or _paper_material_family(paper)
+        if requested_family_key and requested_family_key not in _norm_key(catalyst_label):
+            continue
+        points.append(
+            {
+                "row": row,
+                "paper": paper,
+                "paper_id": str(row.paper_id),
+                "paper_title": paper.title,
+                "doi": paper.doi,
+                "year": paper.year,
+                "journal": paper.journal,
+                "property_type": property_type,
+                "value": float(row.value),
+                "unit": row.unit,
+                "adsorbate_key": adsorbate_key,
+                "adsorbate": adsorbate_label,
+                "reaction_category": category,
+                "reaction_step": _clean_pdf_text(row.reaction_step).lower(),
+                "catalyst_sample_id": str(row.catalyst_sample_id) if row.catalyst_sample_id else "",
+                "catalyst": catalyst_label,
+                "evidence_text": row.evidence_text,
+                "source_section": row.source_section,
+                "source_figure": row.source_figure,
+                "candidate_status": row.candidate_status,
+            }
+        )
+    return points
+
+
+def _paper_material_family(paper: Paper) -> str:
+    haystack = _clean_pdf_text(" ".join([paper.title or "", paper.abstract or ""])).lower()
+    if "single atom" in haystack or "single-atom" in haystack or "sac" in haystack:
+        return "SAC-GDY"
+    if "doped" in haystack or "doping" in haystack:
+        return "doped GDY"
+    if "graphdiyne" in haystack or "gdy" in haystack:
+        return "graphdiyne"
+    return "未标注材料"
+
+
+def _pair_group_key(point: dict[str, Any]) -> tuple[str, str, str, str]:
+    catalyst_key = point.get("catalyst_sample_id") or _norm_key(point.get("catalyst") or "")
+    return (
+        str(point.get("paper_id") or ""),
+        str(catalyst_key or ""),
+        str(point.get("adsorbate_key") or ""),
+        str(point.get("reaction_step") or ""),
+    )
+
+
+def _paired_descriptor_points(points: list[dict[str, Any]], target: str, descriptor: str) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str, str], dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+    for point in points:
+        grouped[_pair_group_key(point)][point["property_type"]].append(point)
+    pairs: list[dict[str, Any]] = []
+    for _key, by_property in grouped.items():
+        target_rows = by_property.get(target) or []
+        descriptor_rows = by_property.get(descriptor) or []
+        if not target_rows or not descriptor_rows:
+            continue
+        target_point = _median_point(target_rows)
+        descriptor_point = _median_point(descriptor_rows)
+        if not target_point or not descriptor_point:
+            continue
+        direct = bool(target_point.get("catalyst_sample_id") and descriptor_point.get("catalyst_sample_id"))
+        pairs.append(
+            {
+                "x": descriptor_point["value"],
+                "y": target_point["value"],
+                "descriptor_unit": descriptor_point.get("unit"),
+                "target_unit": target_point.get("unit"),
+                "paper_id": target_point.get("paper_id"),
+                "paper_title": target_point.get("paper_title"),
+                "doi": target_point.get("doi"),
+                "year": target_point.get("year"),
+                "journal": target_point.get("journal"),
+                "catalyst": target_point.get("catalyst") or descriptor_point.get("catalyst"),
+                "adsorbate": target_point.get("adsorbate") or descriptor_point.get("adsorbate"),
+                "reaction_category": target_point.get("reaction_category"),
+                "reaction_step": target_point.get("reaction_step"),
+                "match_scope": "direct_catalyst" if direct else "paper_adsorbate_fallback",
+                "target_result_id": str(target_point["row"].id),
+                "descriptor_result_id": str(descriptor_point["row"].id),
+                "target_evidence": _clean_pdf_text(target_point.get("evidence_text"))[:420],
+                "descriptor_evidence": _clean_pdf_text(descriptor_point.get("evidence_text"))[:420],
+                "source_section": target_point.get("source_section") or descriptor_point.get("source_section"),
+                "source_figure": target_point.get("source_figure") or descriptor_point.get("source_figure"),
+            }
+        )
+    return pairs
+
+
+def _median_point(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not rows:
+        return None
+    sorted_rows = sorted(rows, key=lambda item: item["value"])
+    return sorted_rows[len(sorted_rows) // 2]
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2 or len(xs) != len(ys):
+        return None
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    dx = [x - mean_x for x in xs]
+    dy = [y - mean_y for y in ys]
+    denom = math.sqrt(sum(x * x for x in dx) * sum(y * y for y in dy))
+    if denom <= 0:
+        return None
+    return sum(x * y for x, y in zip(dx, dy)) / denom
+
+
+def _rank(values: list[float]) -> list[float]:
+    order = sorted(enumerate(values), key=lambda item: item[1])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and order[j + 1][1] == order[i][1]:
+            j += 1
+        avg_rank = (i + j + 2) / 2.0
+        for k in range(i, j + 1):
+            ranks[order[k][0]] = avg_rank
+        i = j + 1
+    return ranks
+
+
+def _correlation_stats(points: list[dict[str, Any]]) -> dict[str, float | None]:
+    xs = [float(point["x"]) for point in points]
+    ys = [float(point["y"]) for point in points]
+    pearson = _pearson(xs, ys)
+    spearman = _pearson(_rank(xs), _rank(ys)) if len(points) >= 2 else None
+    slope = None
+    intercept = None
+    if pearson is not None:
+        mean_x = sum(xs) / len(xs)
+        mean_y = sum(ys) / len(ys)
+        denom = sum((x - mean_x) ** 2 for x in xs)
+        if denom > 0:
+            slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
+            intercept = mean_y - slope * mean_x
+    return {
+        "pearson_r": round(pearson, 3) if pearson is not None else None,
+        "spearman_rho": round(spearman, 3) if spearman is not None else None,
+        "slope": round(slope, 6) if slope is not None else None,
+        "intercept": round(intercept, 6) if intercept is not None else None,
+    }
+
+
+def _correlation_color(value: float | None) -> str:
+    if value is None:
+        return "gray"
+    if value > 0:
+        return "positive"
+    if value < 0:
+        return "negative"
+    return "neutral"
 
 
 def _paper_filters(library_name: str | None) -> list[Any]:
@@ -376,6 +733,11 @@ def _joined_count(session: Session, model, library_name: str | None) -> int:
 @router.get("/overview")
 async def visualization_overview(
     library_name: str | None = Query(default=None),
+    matrix_status: str = Query(default="all", description="all or reviewed"),
+    corr_reaction: str | None = Query(default=None),
+    corr_adsorbate: str | None = Query(default=None),
+    corr_family: str | None = Query(default=None),
+    corr_min_n: int = Query(default=5, ge=3, le=50),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
     filters = _paper_filters(library_name)
@@ -417,7 +779,16 @@ async def visualization_overview(
         key = str(paper_type or "Unknown").strip() or "Unknown"
         type_counts[key] += int(count or 0)
 
-    matrix_rows, matrix_meta = _build_dft_catalyst_adsorbate_matrix(session, filters)
+    matrix_rows, matrix_meta = _build_dft_catalyst_adsorbate_matrix(session, filters, matrix_status=matrix_status)
+    dft_review_counts = _dft_review_counts(session, filters)
+    descriptor_correlation = _build_descriptor_correlation_summary(
+        session,
+        filters,
+        min_n=corr_min_n,
+        reaction_category=corr_reaction,
+        adsorbate=corr_adsorbate,
+        material_family=corr_family,
+    )
 
     dft_status = []
     status_stmt = (
@@ -459,12 +830,66 @@ async def visualization_overview(
             "dft_settings": _joined_count(session, DFTSetting, library_name),
             "catalyst_samples": _joined_count(session, CatalystSample, library_name),
             "dft_results": _joined_count(session, DFTResult, library_name),
+            "reviewed_exportable_dft_results": dft_review_counts["reviewed_exportable"],
+            "candidate_dft_results": dft_review_counts["candidates"],
+            "correlation_ready_dft_results": dft_review_counts["correlation_ready"],
         },
         "years": years,
         "journals": journals,
         "paper_types": [{"type": key, "count": value} for key, value in sorted(type_counts.items())],
         "dft_matrix": matrix_rows,
         "dft_matrix_meta": matrix_meta,
+        "descriptor_correlation": descriptor_correlation,
         "dft_status": dft_status,
         "recent_tasks": tasks,
+    }
+
+
+@router.get("/correlation-pairs")
+async def descriptor_correlation_pairs(
+    target_property: str = Query(...),
+    descriptor: str = Query(...),
+    library_name: str | None = Query(default=None),
+    reaction_category: str | None = Query(default=None),
+    adsorbate: str | None = Query(default=None),
+    material_family: str | None = Query(default=None),
+    min_n: int = Query(default=5, ge=3, le=50),
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    filters = _paper_filters(library_name)
+    target = _canonical_property_type(target_property)
+    descriptor_key = _canonical_property_type(descriptor)
+    points = _descriptor_source_points(
+        session,
+        filters,
+        reaction_category=reaction_category,
+        adsorbate=adsorbate,
+        material_family=material_family,
+    )
+    pairs = _paired_descriptor_points(points, target, descriptor_key)
+    stats = _correlation_stats(pairs)
+    ready = len(pairs) >= min_n and stats["pearson_r"] is not None
+    return {
+        "schema_version": "descriptor_scatter_v1",
+        "target_property": target,
+        "descriptor": descriptor_key,
+        "library_name": normalize_library_name(library_name) if library_name else None,
+        "filters": {
+            "reaction_category": reaction_category,
+            "adsorbate": adsorbate,
+            "material_family": material_family,
+            "status": "reviewed_exportable",
+        },
+        "min_n": min_n,
+        "n": len(pairs),
+        "ready": ready,
+        "pearson_r": stats["pearson_r"] if ready else None,
+        "spearman_rho": stats["spearman_rho"] if ready else None,
+        "slope": stats["slope"] if ready else None,
+        "intercept": stats["intercept"] if ready else None,
+        "points": pairs,
+        "policy": (
+            "Scatter pairs are built only from reviewed/exportable numeric DFT records. "
+            "Direct catalyst links are preferred; rows without catalyst_sample_id are marked as paper_adsorbate_fallback."
+        ),
     }

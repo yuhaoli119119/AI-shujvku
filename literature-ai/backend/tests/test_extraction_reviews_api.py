@@ -601,3 +601,81 @@ def test_validate_reports_locator_warning_without_overriding_stale_review_state(
     assert payload["results"]["DFTResult"][0]["value"]["verified"] is False
     assert any(warning["code"] == "review_target_stale" for warning in payload["validation_warnings"])
     assert any(warning["code"] == "evidence_locator_missing_page" for warning in payload["validation_warnings"])
+
+
+def test_multi_ai_audit_keeps_history_and_marks_conflict(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        paper = Paper(title="Multi AI Paper", pdf_path="multi-ai.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="H2O",
+            property_type="adsorption_energy",
+            value=-0.1,
+            unit="eV",
+            evidence_text="The adsorption energy of H2O is -0.1 eV.",
+            confidence=0.88,
+        )
+        session.add(result)
+        session.flush()
+        session.add(
+            EvidenceSpan(
+                paper_id=paper.id,
+                object_type="dft_results",
+                object_id=str(result.id),
+                text=result.evidence_text or "",
+                page=2,
+            )
+        )
+        session.commit()
+        paper_uuid = paper.id
+        paper_id = str(paper.id)
+        target_id = str(result.id)
+
+    client = TestClient(app)
+    first = client.post(
+        f"/api/workbench/papers/{paper_id}/gemini-audit",
+        json={
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "decision": "PASS",
+            "reviewer": "gemini_image_auditor",
+            "agent_role": "gemini_image_auditor",
+            "model_name": "gemini-test",
+            "field_names": ["value"],
+            "reviewer_note": "Image evidence looks aligned.",
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/api/workbench/papers/{paper_id}/gemini-audit",
+        json={
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "decision": "FLAG",
+            "reviewer": "glm_dft_auditor",
+            "agent_role": "glm_dft_auditor",
+            "model_name": "glm-5.1-test",
+            "field_names": ["value"],
+            "reviewer_note": "DFT value is not supported by the cited sentence.",
+        },
+    )
+    assert second.status_code == 200
+
+    with Session() as session:
+        review = session.query(ExtractionFieldReview).filter_by(
+            paper_id=paper_uuid,
+            target_type="dft_results",
+            target_id=target_id,
+            field_name="value",
+        ).one()
+        assert review.reviewer_status == "review_conflict"
+        payload = review.review_payload or {}
+        assert payload["review_conflict"] is True
+        assert len(payload["ai_audits"]) == 2
+        assert payload["ai_audits"][0]["protocol"]["sha256"]

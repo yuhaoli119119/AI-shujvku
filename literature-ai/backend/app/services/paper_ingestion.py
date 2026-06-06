@@ -390,12 +390,14 @@ class PaperIngestionService:
         # 过滤掉没有 caption 的图片（logo、CrossMark 等装饰图），只保留学术图片
         # 第二道防线：docling_parser 已做黑名单过滤，这里补充短 caption 和纯序号过滤
         _short_caption_re = re.compile(r'^fig\.?\s*\d+\.?\s*$', re.IGNORECASE)
-        figures = [
-            fig for fig in figures
-            if fig.caption
-            and fig.caption.strip()
-            and not _short_caption_re.match(fig.caption.strip())
-        ]
+        filtered_figures = []
+        for fig in figures:
+            if not fig.caption or not fig.caption.strip():
+                continue
+            if _short_caption_re.match(fig.caption.strip()):
+                fig.figure_role = "caption_incomplete"
+            filtered_figures.append(fig)
+        figures = filtered_figures
         figures = ParseQualityAuditor.clean_figures_before_extraction(figures)
 
         PdfImageExtractor.extract_figures(

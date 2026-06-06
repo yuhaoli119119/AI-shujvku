@@ -22,6 +22,7 @@ from app.db.models import (
     PaperSection,
     PaperTable,
 )
+from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.workbench_status import (
     EXTRACTION_PROTOCOL_VERSION,
@@ -29,6 +30,8 @@ from app.utils.workbench_status import (
     workflow_needs_human_confirmation,
     workflow_status_after_parsing,
 )
+from app.utils.review_safety import bulk_export_gate_results
+from app.utils.protocol_tracking import protocol_snapshot
 
 
 class PaperWorkbenchService:
@@ -202,6 +205,7 @@ class PaperWorkbenchService:
         self._write_markdown_copy(paper, dirs["markdown"])
         self._write_docling_copy(paper, dirs["extraction"])
         self._write_evidence_files(paper, dirs)
+        self._write_ai_reading_package(paper, dirs)
         self._write_extraction_files(paper, dirs)
         self._write_audit_files(paper, dirs)
         if render_pages and pdf_path is not None and quality_report.get("parse_allowed"):
@@ -276,10 +280,12 @@ class PaperWorkbenchService:
         rows = []
         status_counts: Counter[str] = Counter()
         quality_counts: Counter[str] = Counter()
+        auditor = DFTCompletenessAuditor(self.session)
         for paper in papers:
             status_counts[paper.workflow_status or "Imported"] += 1
             quality_counts[paper.pdf_quality_status or "unknown"] += 1
-            dft_count = self.session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper.id)) or 0
+            dft_rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+            dft_count = len(dft_rows)
             figure_count = (
                 self.session.scalar(select(func.count(PaperFigure.id)).where(PaperFigure.paper_id == paper.id)) or 0
             )
@@ -292,6 +298,26 @@ class PaperWorkbenchService:
             )
             quality_report = paper.pdf_quality_report if isinstance(paper.pdf_quality_report, dict) else {}
             needs_human_confirmation = workflow_needs_human_confirmation(paper.workflow_status, quality_report)
+            figure_crop_status_counts = dict(
+                Counter(
+                    self._figure_crop_payload(figure)["crop_status"]
+                    for figure in self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper.id)).all()
+                )
+            )
+            unreliable_figure_count = sum(
+                figure_crop_status_counts.get(status, 0)
+                for status in ("needs_recrop", "caption_only", "needs_review")
+            )
+            dft_candidate_status_counts = dict(Counter(row.candidate_status or "system_candidate" for row in dft_rows))
+            gate_by_id = bulk_export_gate_results(self.session, dft_rows, target_type="dft_results")
+            exportable_count = sum(1 for gate in gate_by_id.values() if gate.eligible)
+            blocked_count = max(0, dft_count - exportable_count)
+            dft_audit = auditor.audit_paper(
+                paper.id,
+                parsed_count=dft_count,
+                exportable_count=exportable_count,
+                blocked_count=blocked_count,
+            )
             rows.append(
                 {
                     "paper_id": str(paper.id),
@@ -305,11 +331,19 @@ class PaperWorkbenchService:
                     "needs_human_confirmation": needs_human_confirmation,
                     "has_dft_candidates": dft_count > 0,
                     "dft_candidate_count": dft_count,
+                    "dft_candidate_status_counts": dft_candidate_status_counts,
+                    "dft_audit": dft_audit,
+                    "dft_completeness_status": dft_audit["coverage_status"],
+                    "dft_completeness_label": dft_audit["status_label"],
+                    "suspected_missing_dft_count": dft_audit["suspected_missing_count"],
                     "figure_count": figure_count,
+                    "figure_crop_status_counts": figure_crop_status_counts,
+                    "unreliable_figure_count": unreliable_figure_count,
                     "table_count": table_count,
                     "evidence_count": evidence_count,
                     "workspace_path": paper.workspace_path,
                     "detail_url": f"../literature_library/index.html?paper_id={paper.id}&tab=review",
+                    "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
                 }
             )
         return {
@@ -502,10 +536,100 @@ class PaperWorkbenchService:
             ],
         )
 
+    def _write_ai_reading_package(self, paper: Paper, dirs: dict[str, Path]) -> None:
+        sections = self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper.id)).all()
+        tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id == paper.id)).all()
+        figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper.id)).all()
+        dft_rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        audit = DFTCompletenessAuditor(self.session).audit_paper(paper.id, parsed_count=len(dft_rows))
+
+        def section_role(section: PaperSection) -> str:
+            title = f"{section.section_title or ''} {section.section_type or ''}".lower()
+            if re.search(r"method|comput|dft|calculation|experimental", title):
+                return "methods"
+            if re.search(r"result|discussion|performance|mechanism", title):
+                return "results_discussion"
+            return "context"
+
+        relevant_sections = [
+            {
+                "id": str(section.id),
+                "role": section_role(section),
+                "title": section.section_title or section.section_type,
+                "page_start": section.page_start,
+                "page_end": section.page_end,
+                "text": section.text,
+            }
+            for section in sections
+            if section_role(section) != "context" or any(
+                example.get("source_id") == str(section.id) for example in audit.get("signal_examples", [])
+            )
+        ]
+        self._write_json(
+            dirs["extraction"] / "ai_reading_package.json",
+            {
+                "schema_version": "ai_reading_package_v1",
+                "paper": self._paper_metadata(paper),
+                "abstract": paper.abstract,
+                "dft_completeness_audit": audit,
+                "sections": relevant_sections,
+                "tables": [
+                    {
+                        "id": str(table.id),
+                        "caption": table.caption,
+                        "page": table.page,
+                        "markdown_content": table.markdown_content,
+                        "prov": table.prov,
+                    }
+                    for table in tables
+                ],
+                "figures": [
+                    {
+                        "id": str(figure.id),
+                        "figure_label": figure.figure_label,
+                        "caption": figure.caption,
+                        "page": figure.page,
+                        "image_path": figure.image_path,
+                        "crop_status": figure.crop_status,
+                        "crop_confidence": figure.crop_confidence,
+                        "prov": figure.prov,
+                    }
+                    for figure in figures
+                ],
+                "system_candidates": [
+                    {
+                        "record_id": str(row.id),
+                        "candidate_status": row.candidate_status or "system_candidate",
+                        "adsorbate": row.adsorbate,
+                        "property_type": row.property_type,
+                        "value": row.value,
+                        "unit": row.unit,
+                        "reaction_step": row.reaction_step,
+                        "source_section": row.source_section,
+                        "source_figure": row.source_figure,
+                        "evidence_text": row.evidence_text,
+                        "confidence": row.confidence,
+                        "evidence_payload": row.evidence_payload,
+                    }
+                    for row in dft_rows
+                ],
+                "ai_task": (
+                    "Read the full package, extract DFT/material data using the explicit AI protocol, "
+                    "compare with system_candidate hints, report missing/conflicting evidence, and keep "
+                    "all outputs as candidates until review."
+                ),
+            },
+        )
+
     def _write_audit_files(self, paper: Paper, dirs: dict[str, Path]) -> None:
         rows = self.session.scalars(
             select(AuditLog).where(AuditLog.paper_id == paper.id).order_by(AuditLog.created_at.asc())
         ).all()
+        dft_count = self.session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper.id)) or 0
+        self._write_json(
+            dirs["audit"] / "dft_completeness.json",
+            DFTCompletenessAuditor(self.session).audit_paper(paper.id, parsed_count=int(dft_count)),
+        )
         self._write_json(
             dirs["audit"] / "audit_log.json",
             [
@@ -605,6 +729,8 @@ class PaperWorkbenchService:
         location = item.get("source_location") or {}
         return {
             "schema_version": WORKBENCH_SCHEMA_VERSION,
+            "protocol": protocol_snapshot("dft_ai_protocol", fallback_version=EXTRACTION_PROTOCOL_VERSION),
+            "system_extractor_protocol": protocol_snapshot("dft_results", fallback_version=EXTRACTION_PROTOCOL_VERSION),
             "field_sources": [
                 {
                     "field_name": "value",
@@ -619,4 +745,9 @@ class PaperWorkbenchService:
                 }
             ],
             "policy": "Candidate values require Codex/Gemini review and human confirmation before ML export.",
+            "ai_protocol_policy": (
+                "System rule extraction only creates system_candidate records. Final DFT/ML data must pass "
+                "PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, "
+                "and human or second-AI confirmation."
+            ),
         }

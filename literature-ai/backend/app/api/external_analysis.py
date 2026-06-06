@@ -149,7 +149,7 @@ async def materialize_external_analysis_run(
 
 
 @router.post("/papers/{paper_id}/internal-parse", response_model=InternalAIParseResponse)
-async def internal_ai_parse_paper(
+def internal_ai_parse_paper(
     paper_id: UUID,
     payload: InternalAIParseRequest,
     session: Session = Depends(get_db_session),

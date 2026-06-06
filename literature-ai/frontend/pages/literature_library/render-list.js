@@ -1,7 +1,15 @@
 function renderPaperList() {
     const container = $("paperList");
     const meta = $("paperListMeta");
-    if (meta) meta.textContent = state.papers.length + " 篇";
+    if (meta) {
+        const total = Number(state.currentLibraryTotal || 0);
+        const shown = state.papers.length;
+        const rangeStart = shown ? state.currentOffset + 1 : 0;
+        const rangeEnd = state.currentOffset + shown;
+        meta.textContent = total
+            ? "全库 " + total + " 篇 · 本页 " + rangeStart + "-" + rangeEnd
+            : "本页 " + shown + " 篇";
+    }
     if (!container) return;
     if (!state.papers.length) {
         container.innerHTML = '<div class="list-empty">当前条件下没有文献</div>';

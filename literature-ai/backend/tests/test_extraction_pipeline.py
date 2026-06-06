@@ -17,10 +17,45 @@ from app.db.models import (
     Paper,
     WritingCard,
 )
+from app.normalizers.chemistry_normalizer import ChemistryNormalizer
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.extraction_schema_service import ExtractionSchemaService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.extraction_validator import ExtractionValidator
+
+
+def test_dft_duplicate_candidates_merge_across_source_locations():
+    service = object.__new__(ExtractionPipelineService)
+    service.chemistry_normalizer = ChemistryNormalizer()
+
+    items = [
+        {
+            "category": "adsorption_energy",
+            "adsorbate": "water",
+            "value": -0.1,
+            "unit": "eV",
+            "reaction_step": "solvent effect",
+            "evidence_text": "Text reports water adsorption energy is -0.1 eV.",
+            "source_location": {"section": "Results", "page": 3},
+            "confidence": 0.7,
+        },
+        {
+            "category": "adsorption_energy",
+            "adsorbate": "H2O",
+            "value": -0.1,
+            "unit": "eV",
+            "reaction_step": "solvent effect",
+            "evidence_text": "Table 1 lists H2O adsorption energy as -0.1 eV.",
+            "source_location": {"table": "Table 1", "page": 5},
+            "confidence": 0.9,
+        },
+    ]
+
+    merged = service._merge_duplicate_dft_items(items)
+
+    assert len(merged) == 1
+    assert merged[0]["evidence_text"] == "Table 1 lists H2O adsorption energy as -0.1 eV."
+    assert len(merged[0]["evidence_sources"]) == 2
 
 
 def test_extraction_pipeline_persists_stage2_outputs():

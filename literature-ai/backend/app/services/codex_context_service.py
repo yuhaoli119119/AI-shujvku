@@ -13,7 +13,7 @@ from app.schemas.api import CodexContextResponse, CodexItemContextResponse, Pape
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
-from app.utils.review_safety import is_export_eligible_extraction, summarize_gate_results
+from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
 
 class CodexContextService:
@@ -131,7 +131,12 @@ class CodexContextService:
             return None
 
         item_payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
-        item_payload["candidate_status"] = self._candidate_status_for_item(normalized_type)
+        raw_candidate_status = item_payload.get("candidate_status")
+        if raw_candidate_status:
+            item_payload["workbench_candidate_status"] = raw_candidate_status
+            item_payload["candidate_status"] = self._legacy_candidate_status(raw_candidate_status)
+        else:
+            item_payload["candidate_status"] = self._candidate_status_for_item(normalized_type)
         export_safety = None
         if normalized_type == "figure":
             item_payload["asset_url"] = (
@@ -569,6 +574,18 @@ class CodexContextService:
                     "",
                 ]
             )
+        if context["item_type"] == "dft_result":
+            lines.extend(
+                [
+                    "## AI Review Protocol",
+                    "You are a materials-computation data reviewer. Do not invent or repair values from memory.",
+                    "Check whether this DFT candidate is directly supported by the PDF evidence package.",
+                    "Required checks: material/catalyst, adsorbate, property type, numeric value, unit, method/condition, evidence excerpt, page/section/table/figure locator, duplicates, and suspected missing data.",
+                    "If a figure only shows a trend/path and no readable value, mark pending/needs_fix instead of estimating from the image.",
+                    "Output exactly one decision: accept / reject / needs_fix / suspected_duplicate / suspected_missing, followed by a concise reason and evidence location.",
+                    "",
+                ]
+            )
         lines.append("## Evidence Locators")
         for locator in context["evidence_locators"]["items"]:
             lines.append(
@@ -613,6 +630,7 @@ class CodexContextService:
     def _build_figure_image_review(self, figure: PaperFigureResponse) -> dict[str, Any]:
         bbox = self._first_bbox(figure.prov)
         bbox_size = self._bbox_size_points(bbox)
+        full_page_image_path = self._first_prov_value(figure.prov, "full_page_image_path")
         asset_path = resolve_persisted_artifact_path(
             figure.image_path,
             category="figures",
@@ -626,6 +644,10 @@ class CodexContextService:
             flags.append("missing_image_file")
         if bbox is None:
             flags.append("missing_parser_bbox")
+        if figure.page is None:
+            flags.append("missing_pdf_page")
+        if not full_page_image_path:
+            flags.append("missing_full_page_snapshot")
         if self._is_small_crop(pixel_size, bbox_size):
             flags.append("small_crop_or_subfigure")
         if self._is_extreme_aspect(pixel_size):
@@ -640,10 +662,12 @@ class CodexContextService:
             "review_required": bool(flags),
             "flags": flags,
             "local_path": str(asset_path) if asset_path else None,
+            "full_page_image_path": full_page_image_path,
             "file_size_bytes": file_size,
             "pixel_size": pixel_size,
             "bbox_points": bbox,
             "bbox_size_points": bbox_size,
+            "locator_reliability": "needs_review" if flags else "candidate_reliable",
             "note": "Verify this crop against the PDF page before using it in summaries or evidence."
             if flags
             else "Parser crop is available; still treat it as an unverified figure candidate.",
@@ -653,11 +677,22 @@ class CodexContextService:
     def _first_bbox(prov: list[Any] | None) -> dict[str, Any] | None:
         if not prov:
             return None
-        first = prov[0]
-        if not isinstance(first, dict):
+        for item in prov:
+            if not isinstance(item, dict):
+                continue
+            bbox = item.get("bbox")
+            if isinstance(bbox, dict):
+                return bbox
+        return None
+
+    @staticmethod
+    def _first_prov_value(prov: list[Any] | None, key: str) -> Any:
+        if not prov:
             return None
-        bbox = first.get("bbox")
-        return bbox if isinstance(bbox, dict) else None
+        for item in prov:
+            if isinstance(item, dict) and item.get(key):
+                return item.get(key)
+        return None
 
     @staticmethod
     def _bbox_size_points(bbox: dict[str, Any] | None) -> dict[str, float] | None:
@@ -731,10 +766,13 @@ class CodexContextService:
         rows = self.session.scalars(
             select(DFTResult).where(DFTResult.paper_id == detail.id)
         ).all()
+        gate_by_id = bulk_export_gate_results(self.session, rows, target_type="dft_results")
         gates = []
         items = []
         for row in rows:
-            gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+            gate = gate_by_id.get(str(row.id))
+            if gate is None:
+                continue
             gates.append(gate)
             if len(items) < limit:
                 items.append(self._dft_export_gate_payload(row, gate=gate))
@@ -752,6 +790,7 @@ class CodexContextService:
         gate = gate or is_export_eligible_extraction(self.session, row, target_type="dft_results")
         return {
             "record_id": str(row.id),
+            "candidate_status": row.candidate_status or "system_candidate",
             "is_exportable": gate.eligible,
             "eligible": gate.eligible,
             "blocked_reasons": list(gate.reasons),
@@ -779,7 +818,9 @@ class CodexContextService:
     @staticmethod
     def _legacy_candidate_status(status: Any) -> str:
         normalized = str(status or "").strip()
-        if not normalized or normalized in {"Codex_Candidate", "Imported", "Quality_Checked", "Parsed_Material_Ready"}:
+        if normalized in {"Codex_Candidate", "system_candidate"}:
+            return "candidate_unverified"
+        if not normalized or normalized in {"Imported", "Quality_Checked", "Parsed_Material_Ready"}:
             return "candidate_unverified"
         if normalized == "Gemini_Verified":
             return "gemini_reviewed_candidate"

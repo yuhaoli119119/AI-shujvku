@@ -39,7 +39,7 @@ def decorative_figure_reason(caption: str | None, prov: list[Any] | None = None)
 
     caption_lower = caption.lower().strip()
     if SHORT_CAPTION_RE.match(caption_lower):
-        return "bare figure label"
+        return None
 
     for keyword in DECORATIVE_CAPTION_KEYWORDS:
         if keyword in caption_lower:

@@ -19,8 +19,9 @@ from app.db.models import DFTResult as DR
 from app.db.models import DFTSetting as DS
 from app.db.models import Paper as P
 from app.db.session import get_db_session
+from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_review_queue_service import DFTReviewQueueService
-from app.utils.review_safety import is_export_eligible_extraction, summarize_gate_results
+from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -165,9 +166,12 @@ async def export_dft_results_csv(
             "locator_status",
         ]
     )
+    gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
     gate_results = []
     for dr, paper in rows:
-        gate = is_export_eligible_extraction(session, dr, target_type="dft_results")
+        gate = gate_by_id.get(str(dr.id))
+        if gate is None:
+            continue
         gate_results.append(gate)
         if not gate.eligible:
             continue
@@ -235,8 +239,11 @@ async def export_dft_dataset(
     paper_ids = set()
     catalyst_sample_ids = set()
 
+    gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
     for dr, paper in rows:
-        gate = is_export_eligible_extraction(session, dr, target_type="dft_results")
+        gate = gate_by_id.get(str(dr.id))
+        if gate is None:
+            continue
         gate_results.append(gate)
         if not gate.eligible:
             continue
@@ -370,9 +377,12 @@ async def dft_dataset_quality(
     paper_meta_by_id = {}
     exportable_by_paper: dict[str, int] = defaultdict(int)
     blocked_by_paper: dict[str, int] = defaultdict(int)
+    parsed_by_paper: dict[str, int] = defaultdict(int)
+
+    gate_by_id = bulk_export_gate_results(session, [row for row, _paper in rows], target_type="dft_results")
 
     for row, paper in rows:
-        gate = is_export_eligible_extraction(session, row, target_type="dft_results")
+        gate = gate_by_id[str(row.id)]
         gate_results.append(gate)
         paper_id = str(paper.id)
         paper_ids.add(paper.id)
@@ -382,6 +392,7 @@ async def dft_dataset_quality(
             "library_detail_url": f"../literature_library/index.html?paper_id={paper_id}&tab=dft",
             "review_workbench_url": f"../external_analysis_workbench/index.html?paper_id={paper_id}",
         }
+        parsed_by_paper[paper_id] += 1
         if gate.eligible:
             exportable_by_paper[paper_id] += 1
         else:
@@ -399,8 +410,15 @@ async def dft_dataset_quality(
             setting_counts[str(paper_id)] += 1
 
     paper_completeness = []
+    auditor = DFTCompletenessAuditor(session)
     for paper_id in sorted({str(pid) for pid in paper_ids}):
         meta = paper_meta_by_id.get(paper_id, {})
+        audit = auditor.audit_paper(
+            UUID(paper_id),
+            parsed_count=parsed_by_paper.get(paper_id, 0),
+            exportable_count=exportable_by_paper.get(paper_id, 0),
+            blocked_count=blocked_by_paper.get(paper_id, 0),
+        )
         paper_completeness.append(
             {
                 "paper_id": paper_id,
@@ -410,6 +428,9 @@ async def dft_dataset_quality(
                 "review_workbench_url": meta.get("review_workbench_url"),
                 "exportable_dft_results": exportable_by_paper.get(paper_id, 0),
                 "blocked_dft_results": blocked_by_paper.get(paper_id, 0),
+                "dft_audit": audit,
+                "dft_completeness_status": audit["coverage_status"],
+                "dft_completeness_label": audit["status_label"],
                 "catalyst_samples": catalyst_counts.get(paper_id, 0),
                 "dft_settings": setting_counts.get(paper_id, 0),
                 "hints": [
@@ -418,6 +439,7 @@ async def dft_dataset_quality(
                         ("missing_catalyst_sample", catalyst_counts.get(paper_id, 0) == 0),
                         ("missing_dft_setting", setting_counts.get(paper_id, 0) == 0),
                         ("has_blocked_dft_results", blocked_by_paper.get(paper_id, 0) > 0),
+                        ("suspected_missing_dft", audit["suspected_missing_count"] > 0),
                     )
                     if present
                 ],
@@ -479,15 +501,17 @@ async def compare_dft_results(
     year_min: int | None = Query(default=None),
     year_max: int | None = Query(default=None),
     min_confidence: float = Query(default=0.3, ge=0.0, le=1.0),
+    status: str = Query(default="all", description="exportable, needs_review, or all"),
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
 ):
+    fetch_limit = limit if (status or "").strip().lower() in {"all", "any", ""} else min(limit * 5, 2500)
     stmt = (
         select(DR, P)
         .join(P, DR.paper_id == P.id)
         .where(DR.confidence >= min_confidence)
         .order_by(DR.value.asc().nulls_last())
-        .limit(limit)
+        .limit(fetch_limit)
     )
     if property_type:
         stmt = stmt.where(DR.property_type.ilike(f"%{property_type}%"))
@@ -514,6 +538,8 @@ async def compare_dft_results(
             )
 
     items = []
+    gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
+
     for dr, paper in rows:
         pid = str(paper.id)
         catalysts = catalyst_by_paper.get(pid, [])
@@ -521,7 +547,12 @@ async def compare_dft_results(
             catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
             if not catalysts and catalyst_by_paper.get(pid):
                 continue
-        gate = is_export_eligible_extraction(session, dr, target_type="dft_results")
+        gate = gate_by_id[str(dr.id)]
+        normalized_status = (status or "exportable").strip().lower()
+        if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
+            continue
+        if normalized_status in {"needs_review", "candidate", "blocked"} and gate.eligible:
+            continue
         items.append(
             {
                 "paper_id": pid,
@@ -535,6 +566,7 @@ async def compare_dft_results(
                 "unit": dr.unit,
                 "reaction_step": dr.reaction_step,
                 "confidence": dr.confidence,
+                "candidate_status": dr.candidate_status or "system_candidate",
                 "evidence_text": dr.evidence_text,
                 "source_section": dr.source_section,
                 "source_figure": dr.source_figure,
@@ -548,6 +580,8 @@ async def compare_dft_results(
                 "locator_status": gate.locator_status,
             }
         )
+        if len(items) >= limit:
+            break
 
     property_types = {item["property_type"] for item in items if item.get("property_type")}
     units = {item["unit"] for item in items if item.get("unit")}
@@ -563,7 +597,12 @@ async def compare_dft_results(
         }
 
     return {
-        "query": {"property_type": property_type, "adsorbate": adsorbate, "catalyst_type": catalyst_type},
+        "query": {
+            "property_type": property_type,
+            "adsorbate": adsorbate,
+            "catalyst_type": catalyst_type,
+            "status": status,
+        },
         "stats": stats,
         "total": len(items),
         "items": items,

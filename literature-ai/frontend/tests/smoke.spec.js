@@ -1278,8 +1278,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: Ingestion page is localized and renders calendar jobs safely', async ({ page }) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).toISOString();
-    await page.route(/\/api\/papers\/ai_workflow\/jobs.*/, route => {
-      return jsonResponse(route, [
+    const mockedJobs = [
         {
           job_id: 'job-safe-1',
           type: 'ai_workflow',
@@ -1292,8 +1291,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           updated_at: today,
           library_name: 'Default Library',
         },
-      ]);
-    });
+      ];
+    await page.route(/\/api\/jobs.*/, route => jsonResponse(route, mockedJobs));
+    await page.route(/\/api\/papers\/ai_workflow\/jobs.*/, route => jsonResponse(route, mockedJobs));
 
     await page.goto(`${BASE_URL}/pages/ingestion/index.html`);
     await page.waitForTimeout(600);
@@ -1377,7 +1377,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/paper_detail/index.html?paper_id=paper-1`);
     await page.waitForTimeout(500);
     await expect(page.locator('#evidencePanel')).toContainText('已支持');
-    await page.click('button:has-text("DFT 与性能")');
+    await page.click('button:has-text("DFT 候选与性能")');
     await expect(page.locator('#dftSettings')).toContainText('查看原始 JSON');
     await page.locator('#dftSettings summary').first().click();
     await expect(page.locator('#dftSettings')).toContainText('原始数据');
@@ -1769,37 +1769,19 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityExportable')).toContainText('1');
     await expect(page.locator('#qualityBlocked')).toContainText('2');
     await expect(page.locator('#qualityReasonChips')).toContainText('缺少人工确认');
-    await expect(page.locator('#qualityRows')).toContainText('原因');
+    await expect(page.locator('#qualityRows')).toContainText('候选区已隔离');
+    await expect(page.locator('#qualityRows')).toContainText('候选 DFT 数据不在正式数据库页展开');
     await expect(page.locator('#qualityRows')).toContainText('缺少人工确认');
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少催化剂样本');
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少 DFT 设置');
-    await expect(page.locator('#qualityRows a:has-text("去文献库处理")')).toHaveAttribute('href', /literature_library/);
-    await expect(page.locator('#qualityRows button:has-text("标记已核验")')).toHaveCount(1);
-    await expect(page.locator('#qualityRows button:has-text("拒绝候选")')).toHaveCount(1);
-    await expect(page.locator('#qualityRows button:has-text("提出修正")')).toHaveCount(1);
-
-    const correctionPromptValues = ['unit', 'eV', 'Unit checked against the source PDF.'];
-    const correctionDialogHandler = dialog => dialog.accept(correctionPromptValues.shift() || '');
-    page.on('dialog', correctionDialogHandler);
-    await page.click('#qualityRows button:has-text("提出修正")');
-    await expect.poll(() => correctionPayload).not.toBeNull();
-    page.off('dialog', correctionDialogHandler);
-    expect(correctionPayload.confirm_correction_proposal).toBe(true);
-    expect(correctionPayload.field_name).toBe('unit');
-    expect(correctionPayload.proposed_value).toBe('eV');
-    expect(correctionPayload.reviewer).toBe('user_codex_review');
-
-    page.once('dialog', dialog => dialog.accept());
-    await page.click('#qualityRows button:has-text("标记已核验")');
-    await expect.poll(() => verifyPayload).not.toBeNull();
-    expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
-    expect(verifyPayload.reviewer).toBe('user_codex_review');
-
-    page.once('dialog', dialog => dialog.accept());
-    await page.click('#qualityRows button:has-text("拒绝候选")');
-    await expect.poll(() => rejectPayload).not.toBeNull();
-    expect(rejectPayload.confirm_reject_candidate).toBe(true);
-    expect(rejectPayload.reviewer).toBe('user_codex_review');
+    await expect(page.locator('#qualityRows a:has-text("打开审核中心")')).toHaveAttribute('href', /review_center/);
+    await expect(page.locator('#qualityRows a:has-text("回文献库核对证据")')).toHaveAttribute('href', /literature_library/);
+    await expect(page.locator('#qualityRows button:has-text("标记已核验")')).toHaveCount(0);
+    await expect(page.locator('#qualityRows button:has-text("拒绝候选")')).toHaveCount(0);
+    await expect(page.locator('#qualityRows button:has-text("提出修正")')).toHaveCount(0);
+    expect(verifyPayload).toBeNull();
+    expect(rejectPayload).toBeNull();
+    expect(correctionPayload).toBeNull();
   });
 
   test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {
@@ -1996,10 +1978,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('.paper-card');
     await page.click('button[data-tab="dft"]');
 
-    await expect(page.locator('#dftContent')).toContainText('DFT 数据库导出安全状态');
+    await expect(page.locator('#dftContent')).toContainText('AI 候选 DFT 入库安全状态');
     await expect(page.locator('#dftContent')).toContainText('可导出 0');
     await expect(page.locator('#dftContent')).toContainText('缺少人工核验');
-    await expect(page.locator('#dftContent button:has-text("复制此项给 Codex")')).toHaveCount(1);
+    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(1);
     await expect(page.locator('#dftContent button:has-text("标记已核验")')).toHaveCount(1);
 
     page.once('dialog', dialog => dialog.accept());
@@ -2009,7 +1991,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(verifyPayload.reviewer).toBe('user_codex_review');
 
     await page.click('button[data-tab="figures"]');
-    await expect(page.locator('#figuresContent button:has-text("复制此项给 Codex")')).toHaveCount(1);
+    await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
   });
 
   test('business flow: unconfigured internal AI shows parser settings guide with writer fallback', async ({ page }) => {

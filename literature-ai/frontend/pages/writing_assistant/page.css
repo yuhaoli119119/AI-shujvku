@@ -22,7 +22,7 @@ body.is-resizing-sidebar {
 }
 
 .header-container {
-    display: none;
+    display: flex;
     align-items: baseline;
     gap: 12px;
     flex-wrap: wrap;

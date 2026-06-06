@@ -93,6 +93,7 @@ class TopNav {
     { id: "dft-database", label: "DFT 数据库", href: "../dft_database/index.html" },
     { id: "visuals", label: "数据可视化", href: "../visuals/index.html" },
     { id: "review-center", label: "审核中心", href: "../review_center/index.html" },
+    { id: "extraction-workflow", label: "提取向导", href: "../extraction_workflow/index.html" },
     { id: "writing-assistant", label: "写作辅助", href: "../writing_assistant/index.html" },
     { id: "settings", label: "设置", href: "../settings/index.html" },
   ];

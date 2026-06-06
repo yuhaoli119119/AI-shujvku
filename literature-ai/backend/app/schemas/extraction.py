@@ -18,7 +18,15 @@ ReviewStatus = Literal[
     "gemini_pass",
     "gemini_revise",
     "gemini_flagged",
+    "glm_pass",
+    "glm_revise",
+    "glm_flagged",
+    "ai_pass",
+    "ai_revise",
+    "ai_flagged",
     "evidence_insufficient",
+    "review_conflict",
+    "blocked_by_schema",
     "unknown",
 ]
 ReviewResolutionStatus = Literal["active", "remapped", "stale", "ambiguous", "unresolved", "unknown"]
@@ -43,6 +51,7 @@ class ExtractionFieldReviewResponse(BaseModel):
     reviewer_status: ReviewStatus
     reviewer: str | None = None
     reviewer_note: str | None = None
+    review_payload: Any = None
     verified: bool = False
     created_at: str
     updated_at: str
@@ -149,6 +158,7 @@ class ExtractionFieldReviewSaveItem(BaseModel):
     reviewer_status: ReviewStatus = "corrected"
     reviewer: str | None = None
     reviewer_note: str | None = None
+    review_payload: Any = None
 
 
 class ExtractionFieldReviewSaveRequest(BaseModel):

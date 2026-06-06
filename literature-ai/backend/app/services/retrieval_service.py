@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 from uuid import UUID
 
@@ -40,7 +41,8 @@ class RetrievalService:
         self.reranker = reranker or NoopReranker()
 
     def search(self, payload: RetrievalSearchRequest) -> RetrievalSearchResponse:
-        if payload.mode == "full_context" and payload.paper_ids:
+        is_full_context = payload.mode == "full_context" and bool(payload.paper_ids)
+        if is_full_context:
             items = self._full_context(payload.paper_ids, payload.limit)
         else:
             retrieved = self.retriever.retrieve(
@@ -52,12 +54,19 @@ class RetrievalService:
             )
             items = self._flatten_retrieved(retrieved)
 
-        if payload.rerank:
+        actually_reranked = False
+        if is_full_context:
+            pass # Full context must preserve sequential reading order
+        elif payload.rerank:
             items = self.reranker.rerank(items, payload.query)
+            actually_reranked = True
         else:
             items = sorted(items, key=lambda item: item.score, reverse=True)
 
         limited = items[: payload.limit]
+        
+        reranker_name = self.reranker.name if actually_reranked else ("disabled_for_full_context" if payload.rerank and is_full_context else "disabled")
+        
         return RetrievalSearchResponse(
             query=payload.query,
             mode=payload.mode,
@@ -66,8 +75,8 @@ class RetrievalService:
                 "vector": "enabled: deterministic embedding cosine fallback",
             },
             reranker={
-                "enabled": payload.rerank,
-                "name": self.reranker.name,
+                "enabled": actually_reranked,
+                "name": reranker_name,
                 "interface": "rerank(items, query) -> items",
             },
             total=len(limited),
@@ -75,46 +84,50 @@ class RetrievalService:
         )
 
     def _full_context(self, paper_ids: list[UUID], limit: int) -> list[RetrievalSearchResult]:
-        stmt = (
-            select(PaperSection)
-            .where(PaperSection.paper_id.in_(paper_ids))
-            .order_by(PaperSection.page_start.asc().nulls_last(), PaperSection.section_title.asc())
-            .limit(limit)
-        )
         items: list[RetrievalSearchResult] = []
-        for index, section in enumerate(self.session.scalars(stmt).all()):
-            text = (section.text or "").strip()
-            if not text:
-                continue
-            score = round(max(0.1, 1.0 - index * 0.01), 4)
-            items.append(
-                RetrievalSearchResult(
-                    score=score,
-                    source="full_context",
-                    paper_id=section.paper_id,
-                    chunk_id=str(section.id),
-                    section_id=section.id,
-                    section_title=section.section_title,
-                    text=text,
-                    page_start=section.page_start,
-                    page_end=section.page_end,
-                    score_breakdown={"bm25": 0.0, "vector": 0.0, "hybrid": score},
-                    evidence=EvidenceRef(
+        limit_per_paper = max(1, math.ceil(limit / len(paper_ids))) if paper_ids else limit
+        index = 0
+        for paper_id in paper_ids:
+            stmt = (
+                select(PaperSection)
+                .where(PaperSection.paper_id == paper_id)
+                .order_by(PaperSection.page_start.asc().nulls_last(), PaperSection.id.asc())
+                .limit(limit_per_paper)
+            )
+            for section in self.session.scalars(stmt).all():
+                text = (section.text or "").strip()
+                if not text:
+                    continue
+                score = round(max(0.1, 1.0 - index * 0.001), 4)
+                index += 1
+                items.append(
+                    RetrievalSearchResult(
+                        score=score,
+                        source="full_context",
                         paper_id=section.paper_id,
                         chunk_id=str(section.id),
                         section_id=section.id,
-                        page_span=PageSpan(page_start=section.page_start, page_end=section.page_end),
-                        evidence_text=text[:1200],
-                        confidence=score,
-                        source="full_context",
                         section_title=section.section_title,
-                        target_type="section",
-                        target_id=str(section.id),
-                    ),
-                    metadata={"section_type": section.section_type},
+                        text=text,
+                        page_start=section.page_start,
+                        page_end=section.page_end,
+                        score_breakdown={"bm25": 0.0, "vector": 0.0, "hybrid": score},
+                        evidence=EvidenceRef(
+                            paper_id=section.paper_id,
+                            chunk_id=str(section.id),
+                            section_id=section.id,
+                            page_span=PageSpan(page_start=section.page_start, page_end=section.page_end),
+                            evidence_text=text[:1200],
+                            confidence=score,
+                            source="full_context",
+                            section_title=section.section_title,
+                            target_type="section",
+                            target_id=str(section.id),
+                        ),
+                        metadata={"section_type": section.section_type},
+                    )
                 )
-            )
-        return items
+        return items[:limit]
 
     @staticmethod
     def _flatten_retrieved(retrieved: dict[str, list[dict[str, Any]]]) -> list[RetrievalSearchResult]:

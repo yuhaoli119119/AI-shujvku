@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>提取向导 - Literature AI</title>
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
+    .shell { max-width: 1380px; margin: 0 auto; padding: 20px 22px 34px; }
+    .summary-band {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .panel {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      box-shadow: var(--shadow-card);
+      padding: 16px;
+    }
+    .eyebrow { color: var(--color-primary); font-size: 12px; font-weight: 900; letter-spacing: 0; margin-bottom: 6px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+    .muted { color: var(--color-text-secondary); line-height: 1.7; }
+    .status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .status-cell { border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); padding: 10px; }
+    .status-cell strong { display: block; font-size: 18px; }
+    .layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .step-list { display: grid; gap: 8px; position: sticky; top: 84px; }
+    .step-btn {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text);
+      padding: 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .step-btn.active { border-color: var(--color-primary); background: var(--color-primary-bg); }
+    .step-index {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--color-surface-alt);
+      color: var(--color-primary);
+      font-weight: 900;
+    }
+    .step-title { font-weight: 900; }
+    .step-sub { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+    .detail-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .pill {
+      border: 1px solid var(--color-border);
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .block-title { font-weight: 900; margin-bottom: 8px; }
+    .check-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .check-list li {
+      border-left: 3px solid var(--color-primary);
+      background: var(--color-surface-alt);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      color: var(--color-text-secondary);
+      line-height: 1.55;
+    }
+    .prompt-box {
+      position: relative;
+      margin-top: 12px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
+      padding: 13px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      color: var(--color-text-secondary);
+    }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .protocol-list { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
+    .protocol-item { border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 8px; background: var(--color-surface-alt); }
+    @media (max-width: 900px) {
+      .summary-band, .layout, .two-col { grid-template-columns: 1fr; }
+      .step-list { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <div id="topnav-mount"></div>
+  <main class="shell">
+    <section class="summary-band">
+      <div class="panel">
+        <div class="eyebrow">WORKER EXTRACTION FLOW</div>
+        <h1>按证据拆文献，按记录逐项提取</h1>
+        <p class="muted">系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；Gemini/第二 AI 和人工负责审核。候选数据不直接进入 DFT 数据库、ML 导出或可信可视化。</p>
+        <div class="pill-row">
+          <span class="pill">Scope gate</span>
+          <span class="pill">Record plan</span>
+          <span class="pill">Row check</span>
+          <span class="pill">Duplicate guard</span>
+          <span class="pill">Gemini audit</span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="block-title">当前协议状态</div>
+        <div class="status-grid">
+          <div class="status-cell"><strong id="protocolCount">-</strong><span class="muted">协议</span></div>
+          <div class="status-cell"><strong>7</strong><span class="muted">步骤</span></div>
+          <div class="status-cell"><strong>0</strong><span class="muted">自动入库</span></div>
+        </div>
+        <div id="protocolList" class="protocol-list" style="margin-top:12px;"><div class="muted">读取协议中...</div></div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="step-list" id="stepList"></aside>
+      <section class="panel">
+        <div class="detail-head">
+          <div>
+            <div class="eyebrow" id="stepKicker">STEP</div>
+            <h1 id="stepTitle">-</h1>
+            <p id="stepDescription" class="muted"></p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-ghost" onclick="copyCurrentPrompt()">复制当前步骤提示</button>
+            <a class="btn btn-primary" href="../settings/index.html" style="text-decoration:none;">打开协议</a>
+          </div>
+        </div>
+        <div class="two-col">
+          <div>
+            <div class="block-title">Worker 填什么</div>
+            <ul id="workerList" class="check-list"></ul>
+          </div>
+          <div>
+            <div class="block-title">审核/阻断规则</div>
+            <ul id="reviewList" class="check-list"></ul>
+          </div>
+        </div>
+        <div class="block-title" style="margin-top:14px;">AI 可见命令</div>
+        <div id="promptBox" class="prompt-box"></div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const steps = [
+      {
+        id: "scope",
+        title: "Scope Gate",
+        sub: "是否进入提取",
+        description: "先判断论文是否属于当前库目标，是否包含石墨炔/DFT/实验加计算数据。无范围价值时带证据停止。",
+        worker: ["检查标题、摘要、关键词、方法和结论。", "记录是否石墨炔相关、是否纯计算或实验+计算。", "若跳过，必须写明证据原文和页码。"],
+        review: ["不合范围的论文不得进入 record plan。", "不能只因关键词出现就判定可提取。", "跳过也要保留审计记录。"],
+        prompt: "任务：执行 Scope Gate。请基于 evidence packet 判断论文是否进入 DFT/材料数据提取。输出 scope_decision、reason、evidence_text、pdf_page、questions_for_reviewer。"
+      },
+      {
+        id: "packet",
+        title: "Paper Evidence Packet",
+        sub: "系统拆材料",
+        description: "系统准备元数据、章节、表格、图注、图片、页码、PDF 定位和附近上下文；这些只是证据材料，不等于可信数据。",
+        worker: ["核对 DOI、期刊、年份、PDF 可读性。", "检查章节、表格、图片是否按文献归档。", "标记短 caption、缺页码、缺截图等风险。"],
+        review: ["证据包不完整时不得直接抽最终数据。", "图片裁剪只是候选定位，必须回到 PDF 原页确认。", "解析错误要记录为修复任务。"],
+        prompt: "任务：检查 evidence packet 完整性。列出缺失的 section/table/figure/page/caption/crop，并说明是否需要重新解析或人工补证据。"
+      },
+      {
+        id: "plan",
+        title: "Record Plan",
+        sub: "拆材料状态",
+        description: "AI 先规划一篇文章应拆成哪些材料、结构、掺杂体系、反应体系或测试条件，不急着抽数值。",
+        worker: ["列出材料/催化剂/结构/掺杂体系。", "列出反应类型、吸附物、测试条件或计算条件。", "写 known_missing，不用空白掩盖缺失。"],
+        review: ["不同材料状态不能混为一个 record。", "不要在 plan 阶段预填详细数值行。", "每个 record 必须有 source_anchors。"],
+        prompt: "任务：生成 Record Plan。不要抽具体数值。只规划 record_id、material_state、reaction_family、source_anchors、expected_categories、known_missing。"
+      },
+      {
+        id: "record",
+        title: "Record One By One",
+        sub: "逐记录提取",
+        description: "每次只处理一个材料体系，提取 DFT 设置、催化剂结构、吸附物、能量值、描述符和实验性能候选。",
+        worker: ["一次只处理一个 record。", "每条候选写原始值、标准值、单位和条件。", "保留 source_section、table、figure、caption、pdf_page。"],
+        review: ["没有证据定位的数据保持 candidate。", "估算曲线值不得当作精确值入库。", "同一 record 的条件必须一致。"],
+        prompt: "任务：对当前 record 提取候选行。输出 DFT settings、catalyst/sample、adsorbate、property_type、value、unit、condition、evidence、confidence。"
+      },
+      {
+        id: "row_check",
+        title: "Row Check",
+        sub: "逐行闭环",
+        description: "每条候选数值都要确认字段完整、单位准确、定位准确、证据支持，不完整就停留在需处理状态。",
+        worker: ["检查 value/unit/property/adsorbate/catalyst 是否和证据一致。", "检查 PDF page、table/figure、caption、bbox。", "给出 numeric_ready 和 blocked_reasons。"],
+        review: ["缺 evidence_text、缺 locator、缺 review 任一项都不能导出。", "needs_fix 不得进入可信矩阵。", "修正必须保留原值和原因。"],
+        prompt: "任务：执行 Row Check。逐条输出 accept/reject/needs_fix/suspected_duplicate/suspected_missing，并给出证据和阻断原因。"
+      },
+      {
+        id: "duplicate",
+        title: "Duplicate Guard",
+        sub: "合并不删除",
+        description: "同一论文、同一材料、同一吸附物、同一属性、同一条件的近重复候选要合并证据，不能静默删除。",
+        worker: ["构造 duplicate_key。", "识别近似值、同义属性名和同义材料名。", "合并证据来源而不是丢弃候选。"],
+        review: ["不同条件不能合并。", "不同 object_id 的原始证据默认保留。", "重复组需要可追溯。"],
+        prompt: "任务：执行 Duplicate Guard。按 normalized material/adsorbate/property/value/unit/condition/evidence_location 分组，输出 primary 和 merged_evidence。"
+      },
+      {
+        id: "audit",
+        title: "Gemini / Human Audit",
+        sub: "可信入库",
+        description: "Gemini 或人工依据明文协议和证据包复核。只有已审核、证据完整、PDF 定位准确的数据才进入 DFT 数据库和可信可视化。",
+        worker: ["读取 Gemini 审核协议。", "复核候选字段、证据、定位和重复。", "输出可否 promote_to_exportable_database。"],
+        review: ["accept 仍需满足项目设定的人审门槛。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心。"],
+        prompt: "任务：按 Gemini audit protocol 审核候选记录。不要发明值；不要从常识修复；只基于 evidence packet 给出 decision 和 reasons。"
+      }
+    ];
+    let currentStep = steps[0];
+
+    function esc(value) {
+      return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+    }
+    function renderSteps() {
+      document.getElementById("stepList").innerHTML = steps.map((step, index) => {
+        return '<button class="step-btn' + (step.id === currentStep.id ? ' active' : '') + '" onclick="selectStep(\'' + step.id + '\')">' +
+          '<span class="step-index">' + (index + 1) + '</span>' +
+          '<span><span class="step-title">' + esc(step.title) + '</span><span class="step-sub">' + esc(step.sub) + '</span></span>' +
+        '</button>';
+      }).join("");
+    }
+    function selectStep(id) {
+      currentStep = steps.find(step => step.id === id) || steps[0];
+      renderSteps();
+      document.getElementById("stepKicker").textContent = "STEP " + (steps.indexOf(currentStep) + 1) + " / " + steps.length;
+      document.getElementById("stepTitle").textContent = currentStep.title;
+      document.getElementById("stepDescription").textContent = currentStep.description;
+      document.getElementById("workerList").innerHTML = currentStep.worker.map(item => '<li>' + esc(item) + '</li>').join("");
+      document.getElementById("reviewList").innerHTML = currentStep.review.map(item => '<li>' + esc(item) + '</li>').join("");
+      document.getElementById("promptBox").textContent = currentStep.prompt;
+    }
+    async function copyCurrentPrompt() {
+      await navigator.clipboard.writeText(currentStep.prompt);
+    }
+    async function loadProtocols() {
+      try {
+        const response = await fetch("/api/settings/extraction-protocols");
+        const data = await response.json();
+        const items = data.items || [];
+        document.getElementById("protocolCount").textContent = items.length;
+        document.getElementById("protocolList").innerHTML = items.slice(0, 6).map(item => {
+          return '<div class="protocol-item"><strong>' + esc(item.title || item.key) + '</strong><div class="muted">' + esc(item.version || "未标版本") + ' · ' + esc(item.scope || "") + '</div></div>';
+        }).join("") || '<div class="muted">未读取到协议。</div>';
+      } catch (error) {
+        document.getElementById("protocolList").innerHTML = '<div class="muted">协议读取失败：' + esc(error.message) + '</div>';
+      }
+    }
+    document.addEventListener("DOMContentLoaded", () => {
+      ThemeManager.init();
+      TopNav.init({ currentPage: "extraction-workflow", mountId: "topnav-mount" });
+      renderSteps();
+      selectStep("scope");
+      loadProtocols();
+    });
+  </script>
+</body>
+</html>

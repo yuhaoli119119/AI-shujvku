@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1432,6 +1433,12 @@ def dispatch_job(
     *,
     control_database_url: str | None = None,
 ) -> str:
+    force_background_tasks = os.getenv("LITAI_FORCE_BACKGROUND_TASKS", "").strip().lower() in {"1", "true", "yes"}
+    running_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    if (force_background_tasks or running_pytest) and background_tasks is not None:
+        background_tasks.add_task(run_workflow_job_by_id, job_id, control_database_url)
+        return "background_tasks"
+
     from kombu import Connection
 
     from app.workers.tasks import run_workflow_job_task

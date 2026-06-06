@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.settings import sync_writer_settings_from_session
 from app.config import Settings, get_settings
-from app.db.models import Base, Paper, PaperFigure
+from app.db.models import AuditLog, Base, Paper, PaperFigure, WorkflowJob
 from app.db.session import get_db_session
 from app.schemas.api import (
     CodexContextResponse,
@@ -36,6 +36,7 @@ from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.llm_service import LLMService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.paper_knowledge_service import PaperKnowledgeService
+from app.services.pdf_image_extractor import PdfImageExtractor
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 router = APIRouter()
@@ -415,7 +416,7 @@ async def delete_paper(
 
 
 @router.post("/{paper_id}/extract", response_model=ExtractionRunResponse)
-async def rerun_stage2_extraction(
+def rerun_stage2_extraction(
     paper_id: UUID,
     session: Session = Depends(get_db_session),
 ):
@@ -435,6 +436,69 @@ async def rerun_stage2_extraction(
         mechanism_claims=summary.get("mechanism_claims", 0),
         writing_cards=summary.get("writing_cards", 0),
     )
+
+
+@router.post("/{paper_id}/figures/recrop")
+def recrop_paper_figures(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+):
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    pdf_path = _resolve_paper_pdf_path(paper_id, session)
+    settings = get_settings()
+    figures = session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper_id)).all()
+    if not figures:
+        raise HTTPException(status_code=400, detail="No figures are available for recropping.")
+    for figure in figures:
+        figure.crop_status = "needs_recrop"
+        session.add(figure)
+    PdfImageExtractor.extract_figures(pdf_path, figures, settings.storage_paths["figures"])
+    extracted = 0
+    for figure in figures:
+        if figure.image_path:
+            extracted += 1
+            figure.crop_status = "candidate_crop"
+        session.add(figure)
+    session.add(
+        AuditLog(
+            paper_id=paper_id,
+            action="recrop_paper_figures",
+            source="review_center",
+            target_type="paper",
+            target_id=str(paper_id),
+            payload={
+                "figure_count": len(figures),
+                "extracted_count": extracted,
+                "policy": "Figure crops are candidate locators and must be checked against the full PDF page.",
+            },
+        )
+    )
+    session.add(
+        WorkflowJob(
+            job_id=str(uuid4()),
+            type="figure_evidence_relocation",
+            status="completed",
+            library_name=paper.library_name or "默认文献库",
+            payload={
+                "action": "recrop_paper_figures",
+                "paper_id": str(paper_id),
+                "title": paper.title,
+                "figure_count": len(figures),
+                "extracted_count": extracted,
+            },
+            progress={"completed": True},
+            result={"status": "recorded"},
+        )
+    )
+    session.commit()
+    return {
+        "paper_id": str(paper_id),
+        "figure_count": len(figures),
+        "extracted_count": extracted,
+        "status": "recrop_completed",
+    }
 
 
 @router.get("/{paper_id}/evidence/locators", response_model=list[EvidenceLocatorResponse])

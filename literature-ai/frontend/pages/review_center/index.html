@@ -315,9 +315,14 @@
             <option value="">全部流程状态</option>
             <option value="Imported">已导入</option>
             <option value="Quality_Checked">已检质量</option>
-            <option value="Parsed_Material_Ready">材料已就绪</option>
+            <option value="Unparsed">未解析</option>
+            <option value="Initial_Parsed">初步解析</option>
+            <option value="Suspected_Missing">疑似漏提</option>
+            <option value="AI_Rescanned">AI 已重扫</option>
+            <option value="Human_Complete">人工确认完整</option>
+            <option value="DB_Ready">可入库</option>
             <option value="Needs_Human_Confirmation">待人工确认</option>
-            <option value="Codex_Candidate">Codex 候选</option>
+            <option value="Codex_Candidate">系统候选（旧）</option>
             <option value="Gemini_Verified">Gemini 已核验</option>
             <option value="Gemini_Revised">Gemini 已修订</option>
             <option value="Gemini_Flagged">Gemini 标红</option>
@@ -346,7 +351,7 @@
               <th style="width: 60px; text-align: center;">年份</th>
               <th class="col-divider" style="text-align: center;">文献标题</th>
               <th class="col-divider" style="width: 300px; text-align: center;">流程与质量</th>
-              <th class="col-divider" style="width: 110px; text-align: center;">提取数据</th>
+              <th class="col-divider" style="width: 230px; text-align: center;">DFT 审计</th>
               <th style="width: 280px; text-align: center;">操作</th>
             </tr>
           </thead>
@@ -404,9 +409,9 @@
     }
 
     function workflowClass(status, needsHuman) {
-      if (["Human_Confirmed", "ML_Ready", "Citation_Ready"].includes(status)) return "ok";
-      if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected"].includes(status)) return "bad";
-      if (needsHuman || ["Codex_Candidate", "Gemini_Verified", "Gemini_Revised"].includes(status)) return "warn";
+      if (["Human_Confirmed", "ML_Ready", "Citation_Ready", "Human_Complete", "DB_Ready"].includes(status)) return "ok";
+      if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected", "Suspected_Missing", "Unparsed"].includes(status)) return "bad";
+      if (needsHuman || ["Codex_Candidate", "Initial_Parsed", "AI_Rescanned", "Gemini_Verified", "Gemini_Revised"].includes(status)) return "warn";
       return "warn";
     }
 
@@ -422,7 +427,13 @@
         Imported: { label: "已导入", tip: "文献已进入当前库，但还没完成后续准备。" },
         Quality_Checked: { label: "已检质量", tip: "已经做过 PDF 质量判断。" },
         Parsed_Material_Ready: { label: "材料已就绪", tip: "标准工作目录、证据和图表材料已准备好。" },
-        Codex_Candidate: { label: "待审核候选", tip: "Codex 已抽出候选内容，下一步应该检查证据是否对得上。" },
+        Unparsed: { label: "未解析", tip: "尚未完成 DFT/材料数据解析。" },
+        Initial_Parsed: { label: "初步解析", tip: "已有候选，但还需要完整性审计和证据核对。" },
+        Suspected_Missing: { label: "疑似漏提", tip: "检测到 DFT 线索多于已解析候选，建议 AI 重扫全文。" },
+        AI_Rescanned: { label: "AI 已重扫", tip: "AI 已按协议重新扫描过全文，需要继续合并和审核。" },
+        Human_Complete: { label: "人工确认完整", tip: "人工已确认当前候选覆盖完整。" },
+        DB_Ready: { label: "可入库", tip: "已达到正式数据库入库条件。" },
+        Codex_Candidate: { label: "系统候选（旧）", tip: "旧状态：系统规则候选，只能作为审核线索。" },
         Gemini_Verified: { label: "Gemini 已核验", tip: "Gemini 已通过证据核验，但还不等于最终正式确认。" },
         Gemini_Revised: { label: "Gemini 已修订", tip: "Gemini 认为候选内容需要调整后再确认。" },
         Gemini_Flagged: { label: "Gemini 标红", tip: "Gemini 发现明显疑点，建议优先人工复核。" },
@@ -494,7 +505,8 @@
         ["待人工确认", rows.filter(function (row) { return row.needs_human_confirmation; }).length],
         ["A/B 可读", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0)],
         ["有 DFT 候选", rows.filter(function (row) { return row.has_dft_candidates; }).length],
-        ["证据定位", rows.reduce(function (sum, row) { return sum + Number(row.evidence_count || 0); }, 0)]
+        ["疑似漏提", rows.reduce(function (sum, row) { return sum + Number(row.suspected_missing_dft_count || 0); }, 0)],
+        ["图片可疑", rows.reduce(function (sum, row) { return sum + Number(row.unreliable_figure_count || 0); }, 0)]
       ];
       document.getElementById("stats").innerHTML = items.map(function (item) {
         return '<div class="stat"><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
@@ -533,10 +545,22 @@
         const workspace = row.workspace_path || "-";
         const workflow = workflowMeta(row.workflow_status);
         const quality = qualityMeta(row.pdf_quality_status);
+        const dftAudit = row.dft_audit || {};
+        const dftStatus = row.dft_completeness_label || dftAudit.status_label || "未解析";
+        const suspectedMissing = toCount(row.suspected_missing_dft_count || dftAudit.suspected_missing_count);
+        const candidateStatusCounts = row.dft_candidate_status_counts || {};
+        const candidateSummary = Object.keys(candidateStatusCounts).length
+          ? Object.keys(candidateStatusCounts).map(function (key) { return key + ":" + candidateStatusCounts[key]; }).join("；")
+          : "无候选";
+        const figureStatusCounts = row.figure_crop_status_counts || {};
+        const figureSummary = Object.keys(figureStatusCounts).length
+          ? Object.keys(figureStatusCounts).map(function (key) { return key + ":" + figureStatusCounts[key]; }).join("；")
+          : "无图片裁剪";
         const qualityReasonText = qualityReasonLabel(row.quality_reason);
         const dftChip = row.has_dft_candidates
-          ? '<span class="chip warn" title="待审 DFT 候选：已检测到可进一步审核的 DFT 字段候选。">待审 DFT 候选</span>'
+          ? '<span class="chip warn" title="待审 DFT 候选：系统规则/AI 候选必须经过证据审核才能入库。">待审 DFT 候选</span>'
           : '<span class="chip" title="无 DFT 候选：当前轮次未抽出可核对的 DFT 字段。">无 DFT 候选</span>';
+        const dftAuditChipClass = suspectedMissing > 0 ? "bad" : (row.dft_completeness_status === "DB_Ready" ? "ok" : "warn");
         const wfChip = '<span class="chip ' + workflowClass(row.workflow_status, row.needs_human_confirmation) + '" title="' + esc(workflow.tip + " 原始状态码: " + (row.workflow_status || "Imported")) + '">' + esc(workflow.label) + '</span>';
         const qlChip = '<span class="chip ' + qualityClass(row.pdf_quality_status) + '" title="质量分: ' + esc(row.pdf_quality_score == null ? "-" : row.pdf_quality_score) + '。原因: ' + esc(qualityReasonText) + '。' + esc(quality.tip) + '">' + esc(quality.label) + '</span>';
         let wsDisp = workspace;
@@ -551,11 +575,17 @@
           '<td style="text-align: center;"><span style="font-size: 13px;">' + yearDisp + '</span></td>' +
           '<td class="col-divider"><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
           '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + qlChip + dftChip + '</div></td>' +
-          '<td class="col-divider" style="text-align: center;"><div class="muted" style="display: inline-block; text-align: left; font-size: 13px; line-height: 1.6;">定位: <strong>' + esc(evidence) + '</strong><br>图表: <strong>' + esc(figureCount + tableCount) + '</strong></div></td>' +
+          '<td class="col-divider"><div style="display:grid;gap:6px;">' +
+            '<span class="chip ' + dftAuditChipClass + '" title="DFT 完整性状态">' + esc(dftStatus) + '</span>' +
+            '<div class="muted">线索: <strong>' + esc(dftAudit.detected_signal_count || 0) + '</strong>；已解析: <strong>' + esc(dftAudit.parsed_dft_count || 0) + '</strong>；疑似漏提: <strong>' + esc(suspectedMissing) + '</strong></div>' +
+            '<div class="muted" title="' + esc(candidateSummary) + '">候选状态：' + esc(candidateSummary) + '</div>' +
+            '<div class="muted" title="' + esc(figureSummary) + '">图片定位可靠性：可疑 ' + esc(row.unreliable_figure_count || 0) + ' / 图表 ' + esc(figureCount + tableCount) + '</div>' +
+            '<div class="muted">证据定位: <strong>' + esc(evidence) + '</strong></div>' +
+          '</div></td>' +
           '<td><div class="actions">' +
-            '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">' + esc(inspectTarget.label) + '</a>' +
+            '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">审核候选</a>' +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
-            '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">人工确认</button>' +
+            '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">确认完整</button>' +
           '</div></td>' +
         '</tr>';
       }).join("");

@@ -191,12 +191,18 @@ class DoclingParser:
                     if similarity >= 0.72:
                         deduped = left
 
-        half = len(deduped) // 2
-        if half >= 24 and len(deduped) % 2 == 0:
-            left = deduped[:half].strip()
-            right = deduped[half:].strip()
+        clean_deduped = re.sub(r"[\s\W]+$", "", deduped)
+        half = len(clean_deduped) // 2
+        if half >= 24:
+            left = clean_deduped[:half].strip()
+            right = clean_deduped[half:].strip()
             if left and right and SequenceMatcher(None, left.lower(), right.lower()).ratio() >= 0.9:
                 deduped = left
+            else:
+                left_alt = clean_deduped[:half+1].strip()
+                right_alt = clean_deduped[half+1:].strip()
+                if left_alt and right_alt and SequenceMatcher(None, left_alt.lower(), right_alt.lower()).ratio() >= 0.9:
+                    deduped = left_alt
 
         normalized = re.sub(r"(?<=\w)\s*-\s*(?=\w)", "-", deduped)
         normalized = re.sub(r"\(\s*([A-Za-z0-9])\s*\)", r"(\1)", normalized)
@@ -309,13 +315,21 @@ class DoclingParser:
         if not header_line:
             return caption
 
+        overlap = re.search(r"\|(?:[^\n\|]+\|){2,}", caption)
+        if overlap:
+            return caption[: overlap.start()].strip()
+
         header_text = re.sub(r"\s+", " ", header_line.replace("|", " ")).strip()
         if not header_text:
             return caption
 
-        overlap = re.search(re.escape(header_text[: min(len(header_text), 80)]), caption, re.IGNORECASE)
-        if overlap:
-            return caption[: overlap.start()].strip()
+        cells = [c.strip() for c in header_line.strip("|").split("|") if c.strip()]
+        if len(cells) >= 3:
+            glued_headers = " ".join(cells[:3])
+            overlap_glued = re.search(re.escape(glued_headers[: min(len(glued_headers), 80)]), caption, re.IGNORECASE)
+            if overlap_glued:
+                return caption[: overlap_glued.start()].strip()
+
         return caption
 
     @staticmethod

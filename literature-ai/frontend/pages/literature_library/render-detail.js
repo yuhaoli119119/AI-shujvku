@@ -534,6 +534,8 @@ const CODEX_ITEM_TYPE_BY_CARD_TITLE = {
     "DFT 设置": "dft_setting",
     "催化剂样本": "catalyst_sample",
     "DFT 结果": "dft_result",
+    "AI 候选 DFT 数据": "dft_result",
+    "DFT 候选结果": "dft_result",
     "电化学性能": "electrochemical_performance",
     "机理声明": "mechanism_claim",
     "写作卡片": "writing_card",
@@ -550,8 +552,8 @@ const DFT_BLOCK_REASON_LABELS = {
 
 function codexItemActionHtml(itemType, item) {
     if (!itemType || !item || !item.id) return "";
-    return '<button class="btn ghost small" type="button" title="只复制此项、证据定位和邻近正文" onclick="event.stopPropagation(); copyCodexItem(\'' +
-        escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">复制此项给 Codex</button>';
+    return '<button class="btn ghost small" type="button" title="复制此项、证据定位、邻近正文和 AI 审核协议" onclick="event.stopPropagation(); copyCodexItem(\'' +
+        escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">复制审核提示</button>';
 }
 
 function dftBlockedReasonText(reasons) {
@@ -568,10 +570,10 @@ function renderDftItemSafety(item) {
     const reasons = dftBlockedReasonText(safety.blocked_reasons);
     const canVerify = !exportable && item && item.id && blockedReasons.includes("missing_review");
     return '<div class="figure-warning" style="margin-top:12px;">' +
-        '<strong>' + (exportable ? "已通过 DFT 导出安全门" : "当前不可进入机器学习数据库") + '</strong>' +
+        '<strong>' + (exportable ? "已审核可导出" : "候选不可进入正式数据库") + '</strong>' +
         '<div>' + (exportable
             ? "该条记录已满足人工核验、证据原文和准确 PDF 定位要求。"
-            : "阻断原因：" + (reasons || "待检查")) + '</div>' +
+            : "阻断原因：" + (reasons || "待按 AI 协议和 PDF 证据检查")) + '</div>' +
         (canVerify
             ? '<div style="margin-top:10px;"><button class="btn primary small" type="button" onclick="verifyDftResult(\'' +
                 escAttr(item.id) + '\')">标记已核验</button></div>'
@@ -599,13 +601,13 @@ function renderDftExportReadiness(detail) {
         return (DFT_BLOCK_REASON_LABELS[reason] || reason) + " " + readiness.blocked_reasons[reason] + " 条";
     }).join("、");
     return '<div class="section-card figure-audit-note">' +
-        '<h3>DFT 数据库导出安全状态</h3>' +
+        '<h3>AI 候选 DFT 入库安全状态</h3>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;">' +
             '<span class="status-chip parsed">可导出 ' + Number(readiness.eligible_count || 0) + '</span>' +
             '<span class="status-chip meta">需处理 ' + Number(readiness.blocked_count || 0) + '</span>' +
             '<span class="status-chip">候选总数 ' + Number(readiness.total_candidates || 0) + '</span>' +
         '</div>' +
-        '<div class="subtle">只有经过人工核验、具有证据原文且能准确定位到 PDF 页面的 DFT 记录才会进入导出和机器学习数据集。</div>' +
+        '<div class="subtle">这里展示的是候选证据状态。只有通过 PDF 证据定位、AI 协议抽取/复核、去重和人工确认的数据，才会进入 DFT 数据库、导出和机器学习数据集。</div>' +
         (reasons ? '<div class="subtle" style="margin-top:6px;">当前阻断：' + esc(reasons) + '</div>' : '') +
     '</div>';
 }
@@ -688,6 +690,8 @@ function renderReadableCards(title, items) {
         "DFT ??": ["software", "functional", "dispersion_correction", "pseudopotential", "cutoff_energy_ev", "cutoff_energy", "k_points", "convergence_settings", "vacuum_thickness_a", "vacuum_thickness"],
         "?????": ["name", "catalyst_type", "metal_centers", "coordination", "support", "synthesis_method", "evidence_text", "confidence"],
         "DFT ??": ["catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "evidence_text", "confidence"],
+        "AI 候选 DFT 数据": ["candidate_status", "catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
+        "DFT 候选结果": ["candidate_status", "catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
         "?????": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
         "????": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
         "????": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
@@ -708,8 +712,9 @@ function renderReadableCards(title, items) {
         const heading = title + (items.length > 1 ? " " + (index + 1) : "");
         const itemType = CODEX_ITEM_TYPE_BY_CARD_TITLE[title];
         const action = codexItemActionHtml(itemType, item);
-        const safety = title === "DFT 结果" ? renderDftItemSafety(item) : "";
-        return '<details class="section-card readable-card">' +
+        const safety = (title === "DFT 结果" || title === "AI 候选 DFT 数据" || title === "DFT 候选结果") ? renderDftItemSafety(item) : "";
+        const openAttr = (title === "AI 候选 DFT 数据" || title === "DFT 候选结果") ? " open" : "";
+        return '<details class="section-card readable-card"' + openAttr + '>' +
             '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3>' + action + '</div></summary>' +
             '<div style="margin-top:10px;">' +
             renderReadableFields(item || {}, keys) +
@@ -859,6 +864,8 @@ function renderEvidenceLocators(locators) {
 
 async function loadEvidenceLocators(paperId) {
     var result = await fetchPaperEvidenceLocators(paperId);
+    if (state.selectedPaperId !== paperId) return;
+    state.selectedPaperEvidenceLocators = result;
     renderEvidenceLocators(result);
 }
 
@@ -963,7 +970,7 @@ function renderDetail(detail, audit) {
             '<div class="stat-card"><h3>正文</h3><div class="value">' + (counts.sections || 0) + "</div></div>" +
             '<div class="stat-card"><h3>表格</h3><div class="value">' + (counts.tables || 0) + "</div></div>" +
             '<div class="stat-card"><h3>图片</h3><div class="value">' + (counts.figures || 0) + "</div></div>" +
-            '<div class="stat-card"><h3>DFT 结果</h3><div class="value">' + (counts.dft_results || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>DFT 候选</h3><div class="value">' + (counts.dft_results || 0) + "</div></div>" +
             '<div class="stat-card"><h3>机理</h3><div class="value">' + (counts.mechanism_claims || 0) + "</div></div>" +
             '<div class="stat-card"><h3>写作卡</h3><div class="value">' + (counts.writing_cards || 0) + "</div></div>" +
         "</div>";
@@ -1007,7 +1014,10 @@ function renderDetail(detail, audit) {
             if (f.figure_role) roles.add(f.figure_role);
         });
         
-        let filterHtml = "";
+        let filterHtml = '<div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">' +
+            '<button class="btn primary small" type="button" onclick="recropPaperFigures(\'' + escAttr(detail.id) + '\')">重新定位/重裁图</button>' +
+            '<span class="status-chip meta" title="裁剪图只作为候选图，必须对照 PDF 原页、图注和上下文。">图片定位可靠性需审核</span>' +
+        '</div>';
         if (roles.size > 0) {
             filterHtml += '<div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">';
             filterHtml += '<button class="btn small" onclick="document.querySelectorAll(\'.figure-card\').forEach(el => el.style.display=\'block\')">全部</button>';
@@ -1081,6 +1091,7 @@ function renderDetail(detail, audit) {
         '<details class="section-card pdf-evidence-entry" open><summary><h3>PDF 证据定位</h3></summary>' +
             '<p>当前版本只在有精确页码时跳转到 PDF 页，并显示证据信息。</p>' +
             '<p class="subtle">请使用标题右侧的“' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '”入口。</p>' +
+            '<div id="evidenceLocatorsPanel"><div class="muted">正在加载证据定位...</div></div>' +
         '</details>';
 
     let referenceCards = "";
@@ -1123,6 +1134,8 @@ function renderDetail(detail, audit) {
     const reviewTabEl = $("tab-review");
     const existingWarning = $("reviewTabAuditWarning");
     if (existingWarning) existingWarning.remove();
+    const existingAiTrail = $("aiAuditTrailPanel");
+    if (existingAiTrail) existingAiTrail.remove();
     
     if (audit && (audit.stale > 0 || audit.ambiguous > 0 || audit.unresolved > 0)) {
         const totalAlerts = (audit.stale || 0) + (audit.ambiguous || 0) + (audit.unresolved || 0);
@@ -1155,6 +1168,9 @@ function renderDetail(detail, audit) {
             reviewTabEl.insertAdjacentHTML("afterbegin", reviewTabWarningHtml);
         }
     }
+    if (reviewTabEl && audit && audit.items && audit.items.length) {
+        reviewTabEl.insertAdjacentHTML("afterbegin", renderAiAuditTrail(audit.items));
+    }
     
     if (summaryEl) {
         summaryEl.innerHTML =
@@ -1166,6 +1182,9 @@ function renderDetail(detail, audit) {
             localizedSummaryCard +
             abstractCard +
             comprehensiveCard;
+        if (state.selectedPaperEvidenceLocators !== undefined) {
+            renderEvidenceLocators(state.selectedPaperEvidenceLocators);
+        }
     }
     if (sectionsEl && activeTab === "sections") {
         sectionsEl.innerHTML =
@@ -1184,7 +1203,7 @@ function renderDetail(detail, audit) {
             renderDftExportReadiness(detail) +
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
             renderJSONCards("催化剂样本", detail.catalyst_samples_items || []) +
-            renderJSONCards("DFT 结果", dftResultsWithSafety(detail)) +
+            renderJSONCards("AI 候选 DFT 数据", dftResultsWithSafety(detail)) +
             renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
             renderJSONCards("机理声明", detail.mechanism_claims_items || []);
     }
@@ -1329,6 +1348,7 @@ async function loadPaperDetail(paperId) {
     state.detailLoadToken = loadToken;
     state.selectedPaperId = paperId;
     state.selectedPaperAudit = null;
+    state.selectedPaperEvidenceLocators = undefined;
     try {
         clearDeferredDetailPanels();
         renderImmediatePaperDetail(paperId);
@@ -1449,21 +1469,65 @@ async function copyCodexContext() {
 
 async function copyCodexItem(itemType, itemId) {
     if (!state.selectedPaperId || !itemType || !itemId) {
-        showToast("当前项目无法复制给 Codex。", "error");
+        showToast("当前项目无法复制审核提示。", "error");
         return;
     }
     try {
-        showToast("正在生成 Codex 单项文献包...", "info");
+        showToast("正在生成 AI 审核包...", "info");
         const data = await fetchJSON(
             API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
             "/codex-item/" + encodeURIComponent(itemType) + "/" + encodeURIComponent(itemId)
         );
         const value = data && data.markdown ? data.markdown : JSON.stringify(data, null, 2);
         await navigator.clipboard.writeText(value);
-        showToast("此项及其证据已复制给 Codex。", "success");
+        showToast("审核提示已复制，可发给 AI/Gemini 审核。", "success");
     } catch (error) {
-        showToast("Codex 单项文献包生成失败：" + error.message, "error");
+        showToast("审核包生成失败：" + error.message, "error");
     }
+}
+
+function renderAiAuditTrail(items) {
+    const aiItems = (items || []).filter(function(item) {
+        const payload = item.review_payload || {};
+        return payload.latest_ai_audit || (payload.ai_audits && payload.ai_audits.length);
+    }).slice(0, 12);
+    if (!aiItems.length) {
+        return "";
+    }
+    return (
+        '<div id="aiAuditTrailPanel" class="section-card" style="border:1px solid var(--color-border);margin-bottom:16px;">' +
+            '<h3>AI 审核建议记录</h3>' +
+            '<div class="subtle">这里显示 Gemini / GLM / 第二 AI 写入的审核意见。AI 结论不会直接进入可信数据库；冲突项会标记为 review_conflict 并要求人工确认。</div>' +
+            '<div style="display:grid;gap:10px;margin-top:12px;">' +
+                aiItems.map(renderAiAuditTrailItem).join("") +
+            '</div>' +
+        '</div>'
+    );
+}
+
+function renderAiAuditTrailItem(item) {
+    const payload = item.review_payload || {};
+    const audits = payload.ai_audits || [];
+    const latest = payload.latest_ai_audit || audits[audits.length - 1] || {};
+    const protocol = latest.protocol || {};
+    const conflict = payload.review_conflict || item.reviewer_status === "review_conflict";
+    const hash = protocol.sha256 ? String(protocol.sha256).slice(0, 12) : "-";
+    return (
+        '<div class="candidate-card" style="' + (conflict ? 'border-color:var(--color-danger);' : '') + '">' +
+            '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">' +
+                '<strong>' + esc(item.target_type || "-") + " / " + esc(item.field_name || "-") + '</strong>' +
+                '<span class="badge ' + (conflict ? 'danger' : 'ok') + '">' + esc(item.reviewer_status || "-") + '</span>' +
+            '</div>' +
+            '<div class="subtle" style="margin-top:6px;">AI：' + esc(latest.reviewer || item.reviewer || "-") +
+                ' ｜ 模型：' + esc(latest.model_name || "-") +
+                ' ｜ 角色：' + esc(latest.agent_role || "-") +
+                ' ｜ 决策：' + esc(latest.decision || "-") +
+            '</div>' +
+            '<div class="subtle">协议：' + esc(protocol.version || protocol.key || "-") + ' ｜ hash：' + esc(hash) + '</div>' +
+            (item.reviewer_note ? '<div style="margin-top:8px;">' + esc(item.reviewer_note) + '</div>' : '') +
+            (conflict ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">AI 结论冲突：该条必须人工确认后才能进入可信数据。</div>' : '') +
+        '</div>'
+    );
 }
 
 async function verifyDftResult(itemId) {
@@ -1471,7 +1535,7 @@ async function verifyDftResult(itemId) {
         showToast("当前 DFT 记录无法核验。", "error");
         return;
     }
-    const ok = window.confirm("请确认你已经对照 PDF 原文、证据文本和定位检查过这条 DFT 数据。确认后，该记录会进入 DFT 导出安全门复核。");
+    const ok = window.confirm("请确认你已经按 AI 解析协议，对照 PDF 原文、证据文本、页码/章节/表格/图号和重复项检查过这条 DFT 候选。确认后，该记录才会尝试进入可导出安全门。");
     if (!ok) return;
     try {
         showToast("正在写入 DFT 核验记录...", "info");
@@ -1491,12 +1555,32 @@ async function verifyDftResult(itemId) {
         const safety = data && data.export_safety;
         showToast(
             safety && safety.is_exportable
-                ? "DFT 记录已通过导出安全门。"
+                ? "DFT 候选已审核可导出。"
                 : "DFT 核验已记录，但仍有安全门阻断项。",
             safety && safety.is_exportable ? "success" : "info"
         );
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
         showToast("DFT 核验失败：" + error.message, "error");
+    }
+}
+
+async function recropPaperFigures(paperId) {
+    if (!paperId) {
+        showToast("当前文献无法重新裁图。", "error");
+        return;
+    }
+    const ok = window.confirm("将重新根据 PDF 页码、图注和候选裁剪框定位图片。裁剪图仍然只是候选证据，需要人工核对原 PDF 页。是否继续？");
+    if (!ok) return;
+    try {
+        showToast("正在重新定位/重裁图片...", "info");
+        const data = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(paperId) + "/figures/recrop",
+            { method: "POST" }
+        );
+        showToast("图片重裁完成：" + (data.extracted_count || 0) + " / " + (data.figure_count || 0), "success");
+        await loadPaperDetail(paperId);
+    } catch (error) {
+        showToast("图片重裁失败：" + error.message, "error");
     }
 }

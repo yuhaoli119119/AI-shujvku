@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
@@ -396,6 +396,157 @@ def is_export_eligible_extraction(
         provenance_level=provenance_level,
         locator_status=locator_status,
     )
+
+
+def bulk_export_gate_results(
+    session: Session,
+    rows: list[Any],
+    *,
+    target_type: str,
+) -> dict[str, ExportGateResult]:
+    """Build export gates for many extracted rows without per-row review/evidence queries."""
+    if not rows:
+        return {}
+    target_types = _target_type_values(target_type)
+    row_by_id = {str(row.id): row for row in rows}
+    target_ids = set(row_by_id)
+    paper_ids = {row.paper_id for row in rows}
+
+    reviews_by_target: dict[str, list[ExtractionFieldReview]] = {target_id: [] for target_id in target_ids}
+    if _table_exists(session, "extraction_field_reviews"):
+        for review in session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id.in_(paper_ids),
+                ExtractionFieldReview.target_id.in_(target_ids),
+                ExtractionFieldReview.target_type.in_(target_types),
+            )
+        ).all():
+            reviews_by_target.setdefault(str(review.target_id), []).append(review)
+
+    locators_by_target: dict[str, list[EvidenceLocator]] = {target_id: [] for target_id in target_ids}
+    evidence_reference_ids: set[str] = set()
+    if _table_exists(session, "evidence_locators"):
+        for locator in session.scalars(
+            select(EvidenceLocator).where(
+                EvidenceLocator.paper_id.in_(paper_ids),
+                EvidenceLocator.target_id.in_(target_ids),
+                EvidenceLocator.target_type.in_(target_types),
+            )
+        ).all():
+            target_id = str(locator.target_id)
+            locators_by_target.setdefault(target_id, []).append(locator)
+            if not _is_blank(locator.evidence_text):
+                evidence_reference_ids.add(target_id)
+
+    span_pages_by_target: dict[str, list[Any]] = defaultdict(list)
+    if _table_exists(session, "evidence_spans"):
+        for object_id, page in session.execute(
+            select(EvidenceSpan.object_id, EvidenceSpan.page).where(
+                EvidenceSpan.paper_id.in_(paper_ids),
+                EvidenceSpan.object_id.in_(target_ids),
+                EvidenceSpan.object_type.in_(target_types),
+                EvidenceSpan.text.is_not(None),
+                EvidenceSpan.text != "",
+            )
+        ).all():
+            target_id = str(object_id)
+            evidence_reference_ids.add(target_id)
+            span_pages_by_target[target_id].append(page)
+
+    claim_pages_by_target: dict[str, list[tuple[Any, Any]]] = defaultdict(list)
+    if _table_exists(session, "evidence_claims"):
+        for target_id, page_start, page_end in session.execute(
+            select(EvidenceClaim.target_id, EvidenceClaim.page_start, EvidenceClaim.page_end).where(
+                EvidenceClaim.paper_id.in_(paper_ids),
+                EvidenceClaim.target_id.in_(target_ids),
+                EvidenceClaim.target_type.in_(target_types),
+                EvidenceClaim.evidence_text.is_not(None),
+                EvidenceClaim.evidence_text != "",
+            )
+        ).all():
+            target_id_str = str(target_id)
+            evidence_reference_ids.add(target_id_str)
+            claim_pages_by_target[target_id_str].append((page_start, page_end))
+
+    gates: dict[str, ExportGateResult] = {}
+    for target_id, row in row_by_id.items():
+        reviews = reviews_by_target.get(target_id, [])
+        safe_review = next((review for review in reviews if is_safe_verified_review(review)), None)
+        provenance_level, locator_status = _bulk_locator_summary(
+            locators_by_target.get(target_id, []),
+            span_pages_by_target.get(target_id, []),
+            claim_pages_by_target.get(target_id, []),
+        )
+        reasons = build_export_gate_reason(
+            has_review=bool(reviews),
+            has_safe_review=safe_review is not None,
+            has_evidence_reference=target_id in evidence_reference_ids,
+            has_evidence_text=has_required_evidence_text(row),
+            has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
+        )
+        review_status = safe_review.reviewer_status if safe_review is not None else (
+            ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews}))
+            if reviews
+            else "missing"
+        )
+        gates[target_id] = ExportGateResult(
+            eligible=not reasons,
+            reasons=reasons,
+            review_status=review_status,
+            review_gate_status="safe_verified" if not reasons else "blocked",
+            provenance_level=provenance_level,
+            locator_status=locator_status,
+        )
+    return gates
+
+
+def _bulk_locator_summary(
+    locators: list[EvidenceLocator],
+    span_pages: list[Any],
+    claim_pages: list[tuple[Any, Any]],
+) -> tuple[str, str]:
+    if locators:
+        if any(
+            _safe_locator_from_parts(
+                page=locator.page,
+                locator_status=locator.locator_status,
+                evidence_text=locator.evidence_text,
+                bbox=locator.bbox,
+                warning_reason=locator.warning_reason,
+            )
+            for locator in locators
+        ):
+            return "exact_pdf_page", "exact_page"
+        statuses = [
+            locator_degradation(
+                page=locator.page,
+                locator_status=locator.locator_status,
+                evidence_text=locator.evidence_text,
+                bbox=locator.bbox,
+                warning_reason=locator.warning_reason,
+            ).locator_status
+            for locator in locators
+        ]
+        if "approximate" in statuses:
+            return "approximate_pdf_page", "approximate"
+        if "unresolved" in statuses:
+            return "unavailable", "unresolved"
+        if "text_only" in statuses:
+            return "text_evidence_only", "text_only"
+        return "text_evidence_only", "missing_page"
+
+    if any(_safe_locator_from_parts(page=page, locator_status="exact_page") for page in span_pages):
+        return "exact_pdf_page", "exact_page"
+    if span_pages:
+        return "text_evidence_only", "missing_page"
+    if any(
+        _safe_locator_from_parts(page=page_start or page_end, locator_status="exact_page")
+        for page_start, page_end in claim_pages
+    ):
+        return "exact_pdf_page", "exact_page"
+    if claim_pages:
+        return "text_evidence_only", "missing_page"
+    return "text_evidence_only", "missing_locator"
 
 
 def summarize_gate_results(results: list[ExportGateResult]) -> dict[str, Any]:

@@ -33,6 +33,18 @@ _PROTOCOL_FILES = [
         "scope": "吸附能、Gibbs 自由能、反应能垒、电荷、DOS 等计算结果",
     },
     {
+        "key": "dft_ai_protocol",
+        "title": "DFT/材料数据 AI 解析协议",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "scope": "全文证据阅读、AI-A/AI-B/Judge、候选抽取字段、去重、完整性审计与入库闸门",
+    },
+    {
+        "key": "gemini_audit_protocol",
+        "title": "Gemini/第二 AI 审核协议",
+        "path": "prompts/gemini_audit_protocol.yaml",
+        "scope": "检查候选 DFT 数据是否被 PDF 证据支持，并输出 accept/reject/needs_fix 等审核结论",
+    },
+    {
         "key": "dft_settings",
         "title": "DFT 设置与结构参数",
         "path": "prompts/dft_settings.yaml",

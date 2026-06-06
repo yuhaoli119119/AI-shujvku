@@ -308,11 +308,31 @@ def init_db(database_url: str) -> None:
                 "dft_results",
                 "candidate_status",
                 (
-                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_status VARCHAR(64) NOT NULL DEFAULT 'Codex_Candidate'"
+                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_status VARCHAR(64) NOT NULL DEFAULT 'system_candidate'"
                     if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE dft_results ADD COLUMN candidate_status VARCHAR(64) NOT NULL DEFAULT 'Codex_Candidate'"
+                    else "ALTER TABLE dft_results ADD COLUMN candidate_status VARCHAR(64) NOT NULL DEFAULT 'system_candidate'"
                 ),
             )
+            try:
+                connection.execute(
+                    text(
+                        "UPDATE dft_results SET candidate_status = 'system_candidate' "
+                        "WHERE candidate_status IS NULL "
+                        "OR candidate_status = '' "
+                        "OR candidate_status = 'Codex_Candidate' "
+                        "OR ("
+                        "candidate_status NOT IN ('system_candidate', 'Rejected', 'human_reviewed_needs_evidence') "
+                        "AND NOT EXISTS ("
+                        "SELECT 1 FROM extraction_field_reviews r "
+                        "WHERE r.target_type = 'dft_results' "
+                        "AND r.target_id = CAST(dft_results.id AS TEXT) "
+                        "AND r.reviewer_status IN ('verified', 'safe_verified')"
+                        ")"
+                        ")"
+                    )
+                )
+            except Exception:
+                logger.exception("Automatic database migration failed while downgrading DFT candidates")
             execute_migration_step(
                 "dft_results",
                 "evidence_payload",
@@ -554,6 +574,15 @@ def init_db(database_url: str) -> None:
                     "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS last_resolved_target_id VARCHAR(64)"
                     if engine.dialect.name == "postgresql"
                     else "ALTER TABLE extraction_field_reviews ADD COLUMN last_resolved_target_id VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "review_payload",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS review_payload JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN review_payload JSON"
                 ),
             )
 

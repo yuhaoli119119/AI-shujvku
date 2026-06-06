@@ -89,7 +89,13 @@ class GrobidParser:
         body_divs = root.xpath("//tei:text/tei:body/tei:div", namespaces=NS)
         for index, div in enumerate(body_divs, start=1):
             head = self._join_text(div.xpath("./tei:head//text()", namespaces=NS)).strip()
-            text = self._join_text(div.xpath(".//tei:p//text()", namespaces=NS)).strip()
+            
+            elements = div.xpath(".//tei:p | .//tei:item | .//tei:formula | .//tei:figDesc | .//tei:note", namespaces=NS)
+            parts = []
+            for el in elements:
+                parts.append(self._join_text(el.xpath(".//text()", namespaces=NS)))
+            text = "\n\n".join(part.strip() for part in parts if part.strip())
+            
             if not text:
                 continue
             sections.append(

@@ -199,7 +199,7 @@ class DFTResultResponse(BaseModel):
     source_figure: str | None = None
     evidence_text: str | None = None
     confidence: float | None = None
-    candidate_status: str = "Codex_Candidate"
+    candidate_status: str = "system_candidate"
     evidence_payload: dict[str, Any] | None = None
     extraction_protocol_version: str | None = None
 

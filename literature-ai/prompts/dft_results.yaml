@@ -6,6 +6,14 @@ description: >
   Rule-based DFT results extraction for Li-S battery catalyst papers.
   No LLM dependency — uses regex patterns + keyword matching + heuristics.
 
+candidate_policy:
+  status: system_candidate
+  rule: >
+    Rule-based extraction is only a preprocessing hint. These records must not
+    enter the final DFT database, ML dataset, exports, or trusted matrix until
+    AI protocol extraction/review, deduplication, completeness audit, and human
+    or second-AI confirmation are complete.
+
 input:
   type: UnifiedPaperDocument
   fields:

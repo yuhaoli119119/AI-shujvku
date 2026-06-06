@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, DFTResult, PaperCorrection
+from app.db.models import AuditLog, DFTResult, Paper, PaperCorrection, WorkflowJob
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.review_service import ReviewService
@@ -80,6 +80,8 @@ class DFTResultReviewService:
             ),
         )
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+        row.candidate_status = "ML_Ready" if gate.eligible else "human_reviewed_needs_evidence"
+        self.session.add(row)
         audit = AuditLog(
             paper_id=paper_id,
             action="verify_dft_result",
@@ -94,6 +96,16 @@ class DFTResultReviewService:
             },
         )
         self.session.add(audit)
+        self._add_workflow_job(
+            paper_id=paper_id,
+            action="verify_dft_result",
+            payload={
+                "dft_result_id": str(result_id),
+                "field_names": selected_fields,
+                "is_exportable": gate.eligible,
+                "blocked_reasons": list(gate.reasons),
+            },
+        )
         self.session.commit()
         self.session.refresh(audit)
         return {
@@ -146,6 +158,8 @@ class DFTResultReviewService:
                 for field_name in selected_fields
             ],
         )
+        row.candidate_status = "Rejected"
+        self.session.add(row)
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
         audit = AuditLog(
             paper_id=paper_id,
@@ -161,6 +175,15 @@ class DFTResultReviewService:
             },
         )
         self.session.add(audit)
+        self._add_workflow_job(
+            paper_id=paper_id,
+            action="reject_dft_result",
+            payload={
+                "dft_result_id": str(result_id),
+                "field_names": selected_fields,
+                "blocked_reasons": list(gate.reasons),
+            },
+        )
         self.session.commit()
         self.session.refresh(audit)
         return {
@@ -227,9 +250,38 @@ class DFTResultReviewService:
                 },
             )
         )
+        self._add_workflow_job(
+            paper_id=paper_id,
+            action="propose_dft_result_correction",
+            payload={
+                "dft_result_id": str(result_id),
+                "field_name": canonical_field,
+                "target_path": correction.target_path,
+                "correction_id": str(correction.id),
+            },
+        )
         self.session.commit()
         self.session.refresh(correction)
         return self._correction_payload(correction)
+
+    def _add_workflow_job(self, *, paper_id: UUID, action: str, payload: dict[str, Any]) -> None:
+        paper = self.session.get(Paper, paper_id)
+        self.session.add(
+            WorkflowJob(
+                job_id=str(uuid4()),
+                type="dft_review_gate",
+                status="completed",
+                library_name=getattr(paper, "library_name", None) or "默认文献库",
+                payload={
+                    "action": action,
+                    "paper_id": str(paper_id),
+                    "title": getattr(paper, "title", None),
+                    **payload,
+                },
+                progress={"completed": True},
+                result={"status": "recorded"},
+            )
+        )
 
     def _select_review_fields(
         self,
@@ -255,6 +307,7 @@ class DFTResultReviewService:
     def _gate_payload(row: DFTResult, gate: Any) -> dict[str, Any]:
         return {
             "record_id": str(row.id),
+            "candidate_status": row.candidate_status or "system_candidate",
             "is_exportable": gate.eligible,
             "eligible": gate.eligible,
             "blocked_reasons": list(gate.reasons),

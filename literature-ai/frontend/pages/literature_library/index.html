@@ -67,9 +67,9 @@
                     <option value="Unknown">未知</option>
                 </select>
                 <select id="filterDFT" class="small-input">
-                    <option value="">DFT 结果：全部</option>
-                    <option value="true">有 DFT 结果</option>
-                    <option value="false">无 DFT 结果</option>
+                    <option value="">DFT 候选：全部</option>
+                    <option value="true">有 DFT 候选</option>
+                    <option value="false">无 DFT 候选</option>
                 </select>
                 <select id="filterWC" class="small-input">
                     <option value="">写作卡：全部</option>
@@ -102,7 +102,7 @@
                 <div id="workspaceEmpty" class="workspace-empty">
                     <div>
                         <h2>选择一篇文献查看详情</h2>
-                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、DFT 数据、写作卡和 AI 审阅结果。</p>
+                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、AI 候选 DFT 数据、写作卡和 AI 审阅结果。</p>
                     </div>
                 </div>
 
@@ -136,7 +136,7 @@
                         <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
                         <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">正文</button>
                         <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
-                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">DFT 数据</button>
+                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">AI 候选 DFT 数据</button>
                         <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
                         <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
                         <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI 审阅与确认</button>

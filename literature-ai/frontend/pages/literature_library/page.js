@@ -176,7 +176,7 @@ function renderNoSelectionState() {
         emptyEl.innerHTML =
             '<div class="empty-state-card">' +
                 '<h2>选择一篇文献查看详情</h2>' +
-                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、DFT 数据、写作卡和 AI 建议候选。</p>' +
+                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、AI 候选 DFT 数据、写作卡和 AI 审阅结果。</p>' +
             '</div>';
     }
     showEmptyWorkspace();

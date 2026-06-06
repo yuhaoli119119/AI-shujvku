@@ -1043,6 +1043,138 @@ def test_visuals_dft_matrix_uses_catalyst_adsorbate_categories(setup_test_db):
     assert rows[("Ni / graphdiyne", "CO2")]["reaction_category"] == "CO2RR"
 
 
+def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    rows_to_verify = []
+    with Session() as session:
+        for index, (band_gap, adsorption_energy) in enumerate(
+            [(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)],
+            start=1,
+        ):
+            paper = Paper(
+                title=f"Descriptor correlation paper {index}",
+                year=2026,
+                journal="Codex Test Journal",
+                library_name="CorrelationLibrary",
+                pdf_path=f"descriptor-correlation-{index}.pdf",
+                doi=f"10.1000/correlation-{index}",
+            )
+            session.add(paper)
+            session.flush()
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name=f"Fe-GDY-{index}",
+                metal_centers=["Fe"],
+                support="graphdiyne",
+            )
+            session.add(catalyst)
+            session.flush()
+            target = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                property_type="adsorption_energy",
+                adsorbate="H",
+                value=adsorption_energy,
+                unit="eV",
+                reaction_step="H adsorption",
+                source_section="Results",
+                evidence_text=f"The H adsorption energy is {adsorption_energy} eV.",
+                confidence=0.95,
+            )
+            descriptor = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                property_type="band_gap",
+                adsorbate="H",
+                value=band_gap,
+                unit="eV",
+                reaction_step="H adsorption",
+                source_section="Results",
+                evidence_text=f"The band gap is {band_gap} eV.",
+                confidence=0.95,
+            )
+            session.add_all([target, descriptor])
+            session.flush()
+            for row in (target, descriptor):
+                session.add(
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="text",
+                        page=index,
+                        target_type="dft_results",
+                        target_id=str(row.id),
+                        field_name="value",
+                        evidence_text=row.evidence_text,
+                        locator_status="exact_page",
+                        locator_confidence=0.98,
+                        parser_source="test",
+                    )
+                )
+                rows_to_verify.append((paper.id, row.id))
+        session.commit()
+
+    client = TestClient(app)
+    before_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "CorrelationLibrary",
+            "target_property": "adsorption_energy",
+            "descriptor": "band_gap",
+            "min_n": 3,
+        },
+    )
+    assert before_response.status_code == 200
+    assert before_response.json()["ready"] is False
+    assert before_response.json()["n"] == 0
+
+    for paper_id, row_id in rows_to_verify:
+        verify_response = client.post(
+            f"/api/papers/{paper_id}/dft-results/{row_id}/verify",
+            json={
+                "confirm_reviewed_against_pdf": True,
+                "reviewer": "correlation_test",
+                "reviewer_note": "Verified against exact-page test evidence.",
+            },
+        )
+        assert verify_response.status_code == 200
+        assert verify_response.json()["export_safety"]["eligible"] is True
+
+    overview_response = client.get(
+        "/api/visuals/overview",
+        params={"library_name": "CorrelationLibrary", "matrix_status": "reviewed", "corr_min_n": 3},
+    )
+    assert overview_response.status_code == 200
+    overview = overview_response.json()
+    assert overview["summary"]["reviewed_exportable_dft_results"] == 6
+    cell = next(
+        item
+        for item in overview["descriptor_correlation"]["cells"]
+        if item["target_property"] == "adsorption_energy" and item["descriptor"] == "band_gap"
+    )
+    assert cell["status"] == "ready"
+    assert cell["n"] == 3
+    assert cell["pearson_r"] == -1.0
+    assert cell["spearman_rho"] == -1.0
+
+    pairs_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "CorrelationLibrary",
+            "target_property": "adsorption_energy",
+            "descriptor": "band_gap",
+            "min_n": 3,
+        },
+    )
+    assert pairs_response.status_code == 200
+    pairs = pairs_response.json()
+    assert pairs["ready"] is True
+    assert pairs["n"] == 3
+    assert pairs["pearson_r"] == -1.0
+    assert len(pairs["points"]) == 3
+    assert {point["match_scope"] for point in pairs["points"]} == {"direct_catalyst"}
+
+
 def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, monkeypatch):
     monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
     monkeypatch.setenv("LITAI_WRITER_API_KEY", "")

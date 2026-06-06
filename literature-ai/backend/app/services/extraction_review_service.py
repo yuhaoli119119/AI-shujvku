@@ -199,6 +199,7 @@ class ExtractionReviewService:
             review.reviewer_status = incoming_status if review.reviewer_status != "verified" else review.reviewer_status
             review.reviewer = item.reviewer
             review.reviewer_note = item.reviewer_note
+            review.review_payload = item.review_payload
             # D1 Phase 3: do not reset target_resolution_status on save
             # Only mark_verified is allowed to set it to "active"
             if review.id is None:
@@ -255,6 +256,14 @@ class ExtractionReviewService:
             review.reviewer_status = "verified"
             review.reviewer = payload.reviewer
             review.reviewer_note = payload.reviewer_note
+            review.review_payload = {
+                "human_verification": {
+                    "reviewer": payload.reviewer,
+                    "reviewer_note": payload.reviewer_note,
+                    "decision": "verified",
+                    "writes_final_truth": True,
+                }
+            }
             review.target_resolution_status = "active"
             review.remapped_from_target_id = None
             review.last_resolved_target_id = payload.target_id
@@ -375,6 +384,7 @@ class ExtractionReviewService:
             reviewer_status=row.reviewer_status,  # type: ignore[arg-type]
             reviewer=row.reviewer,
             reviewer_note=row.reviewer_note,
+            review_payload=row.review_payload,
             verified=is_safe_verified_review(row),
             created_at=created,
             updated_at=updated,

@@ -31,6 +31,17 @@
         }
 
         .page-toolbar { display: none; }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
         .toolbar-title {
             display: flex;
             flex-wrap: wrap;
@@ -693,6 +704,7 @@
     <div id="topnav-mount"></div>
 
     <main class="shell">
+        <h1 class="sr-only">入库中心</h1>
         <section class="workspace-grid">
             <div class="left-stack">
                 <div class="panel-card">
@@ -1300,6 +1312,7 @@
                     data = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
                 }
                 state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
+                syncSelectedJobDateWithJobs();
                 state.statsPollTick += 1;
                 const hasActiveJobs = state.jobs.some(job => ["queued", "running"].includes(job.status));
                 if (state.statsPollTick === 1 || !hasActiveJobs || state.statsPollTick % 3 === 0) {
@@ -1354,6 +1367,18 @@
             const raw = job.updated_at || job.created_at;
             const date = raw ? new Date(raw) : new Date();
             return toDateKey(Number.isNaN(date.getTime()) ? new Date() : date);
+        }
+
+        function syncSelectedJobDateWithJobs() {
+            const jobs = filteredJobs();
+            if (!jobs.length || jobs.some(job => jobDateKey(job) === state.selectedDate)) return;
+            const latest = [...jobs].sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0];
+            const key = jobDateKey(latest);
+            state.selectedDate = key;
+            const parsed = new Date(key + "T00:00:00");
+            if (!Number.isNaN(parsed.getTime())) {
+                state.calendarMonth = new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+            }
         }
 
         function renderAllJobs() {

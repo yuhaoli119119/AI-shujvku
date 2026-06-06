@@ -99,6 +99,13 @@ class PdfImageExtractor:
         if not ranked:
             logger.debug("No usable crop candidate for figure on page %s: %s", page_no, caption)
             return
+        full_page_image_path = cls._save_page_snapshot(
+            page=page,
+            pdf_path=pdf_path,
+            output_dir=output_dir,
+            storage_root=storage_root,
+            page_no=page_no,
+        )
 
         for candidate in ranked:
             try:
@@ -112,7 +119,16 @@ class PdfImageExtractor:
                 pix.save(str(out_path))
                 relative_output = out_path.relative_to(storage_root).as_posix()
                 cls._set(figure, "image_path", relative_output)
-                cls._append_crop_provenance(figure, page_no=page_no, candidate=candidate, output_name=relative_output)
+                cls._append_crop_provenance(
+                    figure,
+                    page_no=page_no,
+                    candidate=candidate,
+                    output_name=relative_output,
+                    full_page_image_path=full_page_image_path,
+                    pixel_size={"width": pix.width, "height": pix.height},
+                    page_size={"width": round(page.rect.width, 2), "height": round(page.rect.height, 2)},
+                    caption=caption,
+                )
                 return
             except Exception as exc:
                 logger.debug("Rejected figure crop candidate %s for %s: %s", candidate.source, pdf_path.name, exc)
@@ -367,12 +383,53 @@ class PdfImageExtractor:
                 return candidate
             counter += 1
 
+    @classmethod
+    def _save_page_snapshot(
+        cls,
+        *,
+        page: fitz.Page,
+        pdf_path: Path,
+        output_dir: Path,
+        storage_root: Path,
+        page_no: int,
+    ) -> str | None:
+        safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", pdf_path.stem).strip("._") or "paper"
+        out_path = output_dir / f"{safe_stem}_page_{page_no:03d}.png"
+        try:
+            if not out_path.exists():
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.2, 1.2), alpha=False)
+                pix.save(str(out_path))
+            return out_path.relative_to(storage_root).as_posix()
+        except Exception as exc:
+            logger.debug("Failed to save full-page figure snapshot for %s page %s: %s", pdf_path.name, page_no, exc)
+            return None
+
     @staticmethod
-    def _append_crop_provenance(figure: Any, *, page_no: int, candidate: _CropCandidate, output_name: str) -> None:
+    def _append_crop_provenance(
+        figure: Any,
+        *,
+        page_no: int,
+        candidate: _CropCandidate,
+        output_name: str,
+        full_page_image_path: str | None,
+        pixel_size: dict[str, int],
+        page_size: dict[str, float],
+        caption: str | None,
+    ) -> None:
+        quality_flags: list[str] = []
+        if pixel_size.get("width", 0) < 280 or pixel_size.get("height", 0) < 160:
+            quality_flags.append("small_crop_or_subfigure")
+        if candidate.source == "caption_anchor_above":
+            quality_flags.append("caption_anchor_candidate")
+        if not caption:
+            quality_flags.append("missing_caption")
+        if not full_page_image_path:
+            quality_flags.append("missing_full_page_snapshot")
         entry = {
             "image_extraction": "pymupdf",
             "source": candidate.source,
             "page_no": page_no,
+            "full_page_image_path": full_page_image_path,
             "bbox": {
                 "l": candidate.rect.x0,
                 "t": candidate.rect.y0,
@@ -381,7 +438,15 @@ class PdfImageExtractor:
                 "coord_origin": "TOPLEFT",
             },
             "image_path": output_name,
+            "pixel_size": pixel_size,
+            "page_size": page_size,
             "confidence": min(0.99, max(0.3, candidate.score / 100.0)),
+            "crop_candidate": True,
+            "quality_flags": quality_flags,
+            "evidence_policy": (
+                "Figure crop is a candidate locator only. Review against the full PDF page, caption, "
+                "and surrounding text before using it as evidence."
+            ),
         }
         prov = PdfImageExtractor._prov_items(figure)
         if hasattr(figure, "prov"):

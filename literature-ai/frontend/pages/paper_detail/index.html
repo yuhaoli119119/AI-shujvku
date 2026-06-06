@@ -6,17 +6,6 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script>
-    (function redirectToUnifiedDetail() {
-      var params = new URLSearchParams(window.location.search);
-      var paperId = params.get("id") || params.get("paper_id");
-      if (!paperId) return;
-      var target = new URL("../literature_library/index.html", window.location.href);
-      target.searchParams.set("paper_id", paperId);
-      target.searchParams.set("tab", params.get("tab") || "summary");
-      window.location.replace(target.toString());
-    })();
-  </script>
   <title>论文详情 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
@@ -105,7 +94,7 @@
       <div class="cards-grid">
         <div class="mini-card"><div class="k">章节</div><div class="v" id="cntSections">0</div></div>
         <div class="mini-card"><div class="k">图表</div><div class="v" id="cntFigures">0</div></div>
-        <div class="mini-card"><div class="k">DFT 结果</div><div class="v" id="cntDFT">0</div></div>
+        <div class="mini-card"><div class="k">DFT 候选</div><div class="v" id="cntDFT">0</div></div>
         <div class="mini-card"><div class="k">论断</div><div class="v" id="cntMechanism">0</div></div>
       </div>
 
@@ -115,7 +104,7 @@
             <button class="tab-btn active" onclick="switchDetailTab('summary', event)">概览</button>
             <button class="tab-btn" onclick="switchDetailTab('sections', event)">章节</button>
             <button class="tab-btn" onclick="switchDetailTab('figures', event)">图表</button>
-            <button class="tab-btn" onclick="switchDetailTab('dft', event)">DFT 与性能</button>
+            <button class="tab-btn" onclick="switchDetailTab('dft', event)">DFT 候选与性能</button>
             <button class="tab-btn" onclick="switchDetailTab('cards', event)">机理与写作</button>
             <button class="tab-btn" onclick="switchDetailTab('translation', event)">中文译文</button>
           </div>
@@ -138,7 +127,7 @@
           <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">图表内容</div><div id="figuresList"></div><div id="tablesList" style="margin-top:12px;"></div></div></div>
           <div id="tab-dft" class="tab-pane">
             <div class="panel-card"><div class="panel-title">DFT 设置</div><div id="dftSettings"></div></div>
-            <div class="panel-card"><div class="panel-title">DFT 结果</div><div id="dftResults"></div></div>
+            <div class="panel-card"><div class="panel-title">AI 候选 DFT 数据</div><div id="dftResults"></div></div>
             <div class="panel-card"><div class="panel-title">电化学性能</div><div id="electrochemicalPerformance"></div></div>
           </div>
           <div id="tab-cards" class="tab-pane">
@@ -562,7 +551,7 @@
         : "";
 
       document.getElementById("dftSettings").innerHTML = renderStructuredCollection(paper.dft_settings_items || [], "暂无 DFT 设置数据。");
-      document.getElementById("dftResults").innerHTML = renderStructuredCollection(paper.dft_results_items || [], "暂无 DFT 结果数据。");
+      document.getElementById("dftResults").innerHTML = renderStructuredCollection(paper.dft_results_items || [], "暂无 DFT 候选结果。");
       document.getElementById("electrochemicalPerformance").innerHTML = renderStructuredCollection(paper.electrochemical_performance_items || [], "暂无电化学性能数据。");
       document.getElementById("mechanismClaims").innerHTML = renderStructuredCollection(paper.mechanism_claims_items || [], "暂无机理论断。");
       document.getElementById("writingCards").innerHTML = renderStructuredCollection(paper.writing_cards_items || [], "暂无写作卡片。");

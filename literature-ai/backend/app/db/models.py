@@ -249,8 +249,8 @@ class DFTResult(Base):
     confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     candidate_status: Mapped[str] = mapped_column(
         sa.String(64),
-        default="Codex_Candidate",
-        server_default="Codex_Candidate",
+        default="system_candidate",
+        server_default="system_candidate",
         nullable=False,
         index=True,
     )
@@ -576,6 +576,7 @@ class ExtractionFieldReview(Base):
     reviewer_status: Mapped[str] = mapped_column(sa.String(32), default="pending", index=True)
     reviewer: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
     reviewer_note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    review_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
     __table_args__ = (

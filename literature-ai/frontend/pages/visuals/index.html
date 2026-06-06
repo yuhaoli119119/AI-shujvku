@@ -311,6 +311,99 @@
       line-height: 1.55;
       margin-bottom: 12px;
     }
+    .correlation-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .correlation-controls select,
+    .correlation-controls input {
+      height: 34px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text);
+      padding: 0 10px;
+      font: inherit;
+      font-size: 12px;
+    }
+    .correlation-grid {
+      display: grid;
+      overflow: auto;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+    }
+    .correlation-cell {
+      min-height: 56px;
+      padding: 8px;
+      border-right: 1px solid var(--color-border);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-alt);
+      font-size: 12px;
+      display: grid;
+      gap: 2px;
+      align-content: center;
+      text-align: center;
+    }
+    .correlation-cell.insufficient {
+      color: var(--color-text-muted);
+      background: repeating-linear-gradient(135deg, var(--color-surface-alt), var(--color-surface-alt) 8px, rgba(127,127,127,0.06) 8px, rgba(127,127,127,0.06) 16px);
+    }
+    .correlation-cell.ready {
+      cursor: pointer;
+      color: var(--color-text);
+      background: #f3f5f4;
+    }
+    .correlation-cell.positive {
+      background: #f4d6c6;
+    }
+    .correlation-cell.negative {
+      background: #cddfea;
+    }
+    .correlation-cell.ready:hover {
+      outline: 2px solid var(--color-primary);
+      outline-offset: -2px;
+    }
+    .scatter-shell {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      padding: 12px;
+    }
+    .scatter-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .scatter-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: #fff;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+    }
+    .scatter-point {
+      fill: var(--color-primary);
+      opacity: 0.72;
+    }
+    .scatter-point.fallback {
+      fill: none;
+      stroke: var(--color-primary);
+      stroke-width: 2;
+    }
+    .evidence-mini-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    .evidence-mini-item {
+      border-top: 1px solid var(--color-border);
+      padding-top: 8px;
+    }
     .status-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -412,19 +505,17 @@
 
     <nav class="tabs">
       <button class="tab-btn active" data-view="overview" onclick="switchView('overview')">概览</button>
-      <button class="tab-btn" data-view="years" onclick="switchView('years')">年份</button>
-      <button class="tab-btn" data-view="journals" onclick="switchView('journals')">期刊</button>
       <button class="tab-btn" data-view="matrix" onclick="switchView('matrix')">DFT 矩阵</button>
+      <button class="tab-btn" data-view="correlation" onclick="switchView('correlation')">描述符相关性</button>
       <button class="tab-btn" data-view="quality" onclick="switchView('quality')">质量</button>
-      <button class="tab-btn" data-view="tasks" onclick="switchView('tasks')">任务</button>
     </nav>
 
     <section id="view-overview" class="view active">
       <div class="grid-2">
         <div class="panel">
           <div class="panel-head">
-            <div class="panel-title">文献类型</div>
-            <div class="muted" id="typeSummary">-</div>
+            <div class="panel-title">主要反应类型</div>
+            <div class="muted" id="typeSummary">按已审核矩阵数据统计</div>
           </div>
           <div class="donut-row">
             <div id="typeDonut"></div>
@@ -433,7 +524,7 @@
         </div>
         <div class="panel">
           <div class="panel-head">
-            <div class="panel-title">科研数据覆盖</div>
+            <div class="panel-title">可信数据覆盖</div>
             <div class="muted" id="coverageSummary">-</div>
           </div>
           <div id="coverageBars" class="bar-list"></div>
@@ -466,13 +557,34 @@
         <div class="panel-head">
           <div>
             <div class="panel-title">DFT 催化剂 x 吸附物矩阵</div>
-            <div class="muted">颜色越深表示该催化剂-吸附物组合候选记录越多；非吸附物标签会被排除到质量提示。</div>
+            <div class="muted">默认只使用已审核可导出的 DFT 数据；候选数据不参与正式矩阵。</div>
           </div>
           <div class="pill" id="matrixCount">0 条</div>
         </div>
         <div id="matrixQualityNote" class="matrix-note"></div>
         <div id="matrixCategoryTabs" class="matrix-tools"></div>
         <div id="dftMatrix"></div>
+      </div>
+    </section>
+
+    <section id="view-correlation" class="view">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">描述符相关性矩阵</div>
+            <div class="muted">只在同一反应类型、吸附物、材料家族和审核状态下计算；样本数不足时不显示相关系数。</div>
+          </div>
+          <div class="pill" id="correlationCount">n = 0</div>
+        </div>
+        <div class="correlation-controls">
+          <select id="corrReaction"><option value="">反应：全部</option><option>HER</option><option>OER/ORR</option><option>CO2RR</option><option>NRR</option><option>电池/离子</option><option>其他</option></select>
+          <select id="corrAdsorbate"><option value="">吸附物：全部</option><option>H</option><option>OH</option><option>OOH</option><option>CO</option><option>COOH</option></select>
+          <select id="corrFamily"><option value="">材料家族：全部</option><option>graphdiyne</option><option>doped GDY</option><option>SAC-GDY</option></select>
+          <select id="corrStatus"><option value="reviewed">仅已审核</option></select>
+          <input id="corrMinN" type="number" min="3" value="5" title="最小样本数">
+        </div>
+        <div id="descriptorCorrelation"></div>
+        <div id="correlationScatter" class="matrix-note" style="margin-top:12px;">点击相关性方块后，这里会显示散点图、拟合线、Pearson r、Spearman ρ、n 和原文证据链接。当前实现会在数据满足审核和样本数条件后启用。</div>
       </div>
     </section>
 
@@ -543,15 +655,20 @@
     function metric(label, value, sub) {
       return '<div class="metric"><div class="value">' + esc(value) + '</div><div class="label">' + esc(label) + '</div><div class="sub">' + esc(sub || "") + '</div></div>';
     }
-    function renderMetrics(summary) {
+    function renderMetrics(data) {
+      const summary = data.summary || {};
+      const matrixMeta = data.dft_matrix_meta || {};
+      const blocked = summary.candidate_dft_results || matrixMeta.blocked_candidate_results || 0;
+      const reviewed = summary.reviewed_exportable_dft_results || matrixMeta.reviewed_exportable_results || 0;
+      const categories = (matrixMeta.category_counts || []).map(item => item.category).slice(0, 3).join(" / ") || "-";
+      const qualityWarnings = Number(blocked || 0) + Number(matrixMeta.excluded_results || 0);
       document.getElementById("metrics").innerHTML = [
-        metric("文献", summary.papers || 0, "当前库总量"),
-        metric("PDF", summary.pdf_available || 0, "可解析文件"),
-        metric("已解析", summary.parsed_papers || 0, "有正文分段"),
-        metric("图片", summary.figures || 0, "按文献归档"),
-        metric("DFT 设置", summary.dft_settings || 0, "计算协议字段"),
-        metric("催化剂样本", summary.catalyst_samples || 0, "结构/样本"),
-        metric("DFT 结果", summary.dft_results || 0, "候选数值")
+        metric("文献数", summary.papers || 0, "当前库总量"),
+        metric("已审核可用数据", reviewed, "可导出/可入矩阵"),
+        metric("候选数据", blocked, "进入审核中心"),
+        metric("可用于相关性分析", summary.correlation_ready_dft_results || reviewed, "默认仅已审核"),
+        metric("主要反应类型", categories, "HER/OER/CO2RR/NRR 等"),
+        metric("数据质量提示", qualityWarnings, "候选阻断 + 标签排除")
       ].join("");
     }
     function renderBars(targetId, rows, labelKey, valueKey, colorOffset) {
@@ -595,10 +712,9 @@
       const rows = [
         { label: "PDF 覆盖", value: summary.pdf_available || 0 },
         { label: "正文解析", value: summary.parsed_papers || 0 },
-        { label: "图像记录", value: summary.figures || 0 },
-        { label: "图像数据点", value: summary.figure_data_points || 0 },
+        { label: "已审核 DFT", value: summary.reviewed_exportable_dft_results || 0 },
+        { label: "候选 DFT", value: summary.candidate_dft_results || 0 },
         { label: "DFT 设置", value: summary.dft_settings || 0 },
-        { label: "DFT 结果", value: summary.dft_results || 0 },
         { label: "催化剂样本", value: summary.catalyst_samples || 0 }
       ];
       renderBars("coverageBars", rows, "label", "value", 2);
@@ -619,7 +735,7 @@
         ? "；" + quality.paper_level_fallback_links + " 条使用文献级催化剂回填，仍需核验"
         : "";
       document.getElementById("matrixQualityNote").textContent =
-        "总 DFT 候选 " + (quality.total_results || includedCount) + " 条，进入矩阵 " + includedCount + " 条" + excludedText + fallbackText + "。";
+        "总 DFT 记录 " + (quality.total_results || includedCount) + " 条；已审核可导出 " + (quality.reviewed_exportable_results || 0) + " 条；候选阻断 " + (quality.blocked_candidate_results || 0) + " 条。正式矩阵只使用已审核数据" + excludedText + fallbackText + "。";
       renderMatrixCategoryTabs(quality.category_counts || [], allRows);
       if (!categoryRows.length) {
         target.innerHTML = '<div class="empty">暂无 DFT 矩阵数据</div>';
@@ -683,6 +799,129 @@
         return '<div class="status-card"><div class="num" style="color:' + COLORS[index % COLORS.length] + '">' + esc(row.count) + '</div><div class="muted">' + esc(row.status) + '</div></div>';
       }).join("");
     }
+    function renderCorrelation(payload) {
+      const target = document.getElementById("descriptorCorrelation");
+      if (!target) return;
+      const data = payload || {};
+      const targets = data.target_properties || [];
+      const descriptors = data.descriptor_properties || [];
+      const cells = data.cells || [];
+      document.getElementById("correlationCount").textContent = "reviewed n = " + esc(data.reviewed_numeric_points || 0);
+      if (!targets.length || !descriptors.length) {
+        target.innerHTML = '<div class="empty">暂无描述符相关性数据。</div>';
+        return;
+      }
+      const lookup = new Map(cells.map(cell => [cell.target_property + "::" + cell.descriptor, cell]));
+      let html = '<div class="correlation-grid" style="grid-template-columns:190px repeat(' + descriptors.length + ', minmax(130px, 1fr));">';
+      html += '<div class="matrix-head">目标性能 / 描述符</div>';
+      descriptors.forEach(descriptor => { html += '<div class="matrix-head">' + esc(descriptor) + '</div>'; });
+      targets.forEach(targetProperty => {
+        html += '<div class="matrix-row-head">' + esc(targetProperty) + '</div>';
+        descriptors.forEach(descriptor => {
+          const cell = lookup.get(targetProperty + "::" + descriptor) || {};
+          const ready = cell.status === "ready" && cell.pearson_r != null;
+          const label = ready ? ("r=" + cell.pearson_r) : "数据不足";
+          const nText = "n=" + (cell.n || 0);
+          const cls = ready ? ("ready " + (cell.color || "neutral")) : "insufficient";
+          const rho = ready && cell.spearman_rho != null ? "ρ=" + cell.spearman_rho : "";
+          html += '<button class="correlation-cell ' + esc(cls) + '" type="button" title="' + esc(cell.message || data.correlation_policy || "") + '" onclick="showCorrelationScatter(\'' + esc(targetProperty) + '\', \'' + esc(descriptor) + '\')"><strong>' + esc(label) + '</strong><span>' + esc(nText) + '</span><span>' + esc(rho) + '</span></button>';
+        });
+      });
+      html += '</div>';
+      target.innerHTML = html;
+    }
+    function corrFilters() {
+      return {
+        reaction: document.getElementById("corrReaction").value || "",
+        adsorbate: document.getElementById("corrAdsorbate").value || "",
+        family: document.getElementById("corrFamily").value || "",
+        minN: document.getElementById("corrMinN").value || "5"
+      };
+    }
+    async function showCorrelationScatter(targetProperty, descriptor) {
+      const box = document.getElementById("correlationScatter");
+      const filters = corrFilters();
+      box.innerHTML = '<div class="matrix-note">正在读取 ' + esc(targetProperty) + ' vs ' + esc(descriptor) + ' 的散点数据...</div>';
+      const params = new URLSearchParams();
+      params.set("library_name", currentLibrary || "");
+      params.set("target_property", targetProperty);
+      params.set("descriptor", descriptor);
+      params.set("min_n", filters.minN);
+      if (filters.reaction) params.set("reaction_category", filters.reaction);
+      if (filters.adsorbate) params.set("adsorbate", filters.adsorbate);
+      if (filters.family) params.set("material_family", filters.family);
+      try {
+        const payload = await fetchJSON("/api/visuals/correlation-pairs?" + params.toString());
+        renderCorrelationScatter(payload);
+      } catch (error) {
+        box.innerHTML = '<div class="matrix-note">散点数据读取失败：' + esc(error.message) + '</div>';
+      }
+    }
+    function renderCorrelationScatter(payload) {
+      const box = document.getElementById("correlationScatter");
+      const points = payload.points || [];
+      if (!payload.ready) {
+        box.innerHTML = '<div class="matrix-note">' + esc(payload.target_property) + ' vs ' + esc(payload.descriptor) + '：当前只有 n=' + esc(payload.n || 0) + ' 个已审核配对样本，未达到最小样本数 ' + esc(payload.min_n || 5) + '。可先完成 Gemini/人工审核，或放宽反应/吸附物筛选。</div>';
+        return;
+      }
+      const xs = points.map(p => Number(p.x)).filter(Number.isFinite);
+      const ys = points.map(p => Number(p.y)).filter(Number.isFinite);
+      const minX = Math.min.apply(null, xs);
+      const maxX = Math.max.apply(null, xs);
+      const minY = Math.min.apply(null, ys);
+      const maxY = Math.max.apply(null, ys);
+      const padX = Math.max((maxX - minX) * 0.08, 0.001);
+      const padY = Math.max((maxY - minY) * 0.08, 0.001);
+      const width = 920;
+      const height = 460;
+      const left = 72;
+      const right = 24;
+      const top = 24;
+      const bottom = 58;
+      const x0 = minX - padX;
+      const x1 = maxX + padX;
+      const y0 = minY - padY;
+      const y1 = maxY + padY;
+      function sx(x) { return left + (Number(x) - x0) / (x1 - x0 || 1) * (width - left - right); }
+      function sy(y) { return top + (y1 - Number(y)) / (y1 - y0 || 1) * (height - top - bottom); }
+      let svg = '<svg class="scatter-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="descriptor correlation scatter">';
+      svg += '<line x1="' + left + '" y1="' + (height - bottom) + '" x2="' + (width - right) + '" y2="' + (height - bottom) + '" stroke="#ddd"/>';
+      svg += '<line x1="' + left + '" y1="' + top + '" x2="' + left + '" y2="' + (height - bottom) + '" stroke="#ddd"/>';
+      for (let i = 0; i < 5; i++) {
+        const gx = left + i * (width - left - right) / 4;
+        const gy = top + i * (height - top - bottom) / 4;
+        svg += '<line x1="' + gx + '" y1="' + top + '" x2="' + gx + '" y2="' + (height - bottom) + '" stroke="#f1eee9"/>';
+        svg += '<line x1="' + left + '" y1="' + gy + '" x2="' + (width - right) + '" y2="' + gy + '" stroke="#f1eee9"/>';
+      }
+      if (payload.slope != null && payload.intercept != null) {
+        const yA = payload.slope * x0 + payload.intercept;
+        const yB = payload.slope * x1 + payload.intercept;
+        svg += '<line x1="' + sx(x0) + '" y1="' + sy(yA) + '" x2="' + sx(x1) + '" y2="' + sy(yB) + '" stroke="#26938b" stroke-width="2" stroke-dasharray="6 5"/>';
+      }
+      points.forEach((p, index) => {
+        const fallback = p.match_scope !== "direct_catalyst";
+        svg += '<circle class="scatter-point ' + (fallback ? "fallback" : "") + '" cx="' + sx(p.x) + '" cy="' + sy(p.y) + '" r="5"><title>' + esc((p.catalyst || "-") + " | " + (p.adsorbate || "-") + " | " + (p.paper_title || "-")) + '</title></circle>';
+      });
+      svg += '<text x="' + (width / 2) + '" y="' + (height - 14) + '" text-anchor="middle" fill="#6b7280" font-size="13">' + esc(payload.descriptor) + '</text>';
+      svg += '<text x="18" y="' + (height / 2) + '" transform="rotate(-90 18 ' + (height / 2) + ')" text-anchor="middle" fill="#6b7280" font-size="13">' + esc(payload.target_property) + '</text>';
+      svg += '</svg>';
+      const examples = points.slice(0, 6).map((p, idx) =>
+        '<div class="evidence-mini-item"><strong>#' + (idx + 1) + ' ' + esc(p.catalyst || "-") + '</strong> · ' + esc(p.adsorbate || "-") + ' · x=' + esc(p.x) + ' / y=' + esc(p.y) +
+        '<div class="muted">' + esc(p.paper_title || "-") + '</div>' +
+        '<div class="muted">证据：' + esc(p.target_evidence || p.descriptor_evidence || "-") + '</div></div>'
+      ).join("");
+      box.innerHTML =
+        '<div class="scatter-shell">' +
+          '<div class="scatter-meta">' +
+            '<span class="pill">Pearson r = ' + esc(payload.pearson_r) + '</span>' +
+            '<span class="pill">Spearman ρ = ' + esc(payload.spearman_rho) + '</span>' +
+            '<span class="pill">n = ' + esc(payload.n) + '</span>' +
+            '<span class="pill">仅已审核</span>' +
+          '</div>' +
+          svg +
+          '<div class="evidence-mini-list">' + examples + '</div>' +
+        '</div>';
+    }
     function renderTasks(rows) {
       const target = document.getElementById("taskList");
       if (!rows || !rows.length) {
@@ -701,12 +940,14 @@
     function renderAll(data) {
       latestData = data;
       const summary = data.summary || {};
-      renderMetrics(summary);
-      renderTypeDonut(data.paper_types || [], summary.papers || 0);
+      renderMetrics(data);
+      const reactionItems = ((data.dft_matrix_meta || {}).category_counts || []).map(item => ({ type: item.category, count: item.count }));
+      renderTypeDonut(reactionItems, (data.dft_matrix_meta || {}).included_results || 0);
       renderCoverage(summary);
       renderBars("yearBars", (data.years || []).map(row => ({ label: row.year || "未知年份", value: row.count })), "label", "value", 0);
       renderBars("journalBars", data.journals || [], "journal", "count", 1);
       renderMatrix(data.dft_matrix || [], data.dft_matrix_meta || {});
+      renderCorrelation(data.descriptor_correlation || {});
       renderStatus(data.dft_status || []);
       renderTasks(data.recent_tasks || []);
     }
@@ -720,7 +961,15 @@
     }
     async function loadVisuals() {
       if (!currentLibrary) return;
-      const data = await fetchJSON("/api/visuals/overview?library_name=" + encodeURIComponent(currentLibrary));
+      const filters = corrFilters();
+      const params = new URLSearchParams();
+      params.set("library_name", currentLibrary);
+      params.set("matrix_status", "reviewed");
+      params.set("corr_min_n", filters.minN);
+      if (filters.reaction) params.set("corr_reaction", filters.reaction);
+      if (filters.adsorbate) params.set("corr_adsorbate", filters.adsorbate);
+      if (filters.family) params.set("corr_family", filters.family);
+      const data = await fetchJSON("/api/visuals/overview?" + params.toString());
       renderAll(data);
     }
     async function handleLibraryChange(name) {
@@ -738,6 +987,10 @@
     }
     document.addEventListener("DOMContentLoaded", () => {
       TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
+      ["corrReaction", "corrAdsorbate", "corrFamily", "corrMinN"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("change", () => loadVisuals().catch(error => showToast("相关性刷新失败：" + error.message)));
+      });
       reloadAll();
     });
   </script>

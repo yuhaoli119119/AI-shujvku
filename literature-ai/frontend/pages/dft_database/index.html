@@ -32,6 +32,7 @@
     .export-panel { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
     .export-panel .btn { height: 32px; padding: 0 12px; font-size: 13px; }
     .export-panel .export-status { color: var(--color-primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .export-note { flex-basis: 100%; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-panel { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; align-items: start; }
     .quality-panel > div:first-child { border-right: 1px solid var(--color-border); padding-right: 14px; }
     .quality-panel > div:last-child { min-width: 0; }
@@ -84,12 +85,13 @@
         <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
         <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
         <div class="filter-field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
-        <div class="filter-field"><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="">all</option><option value="validated">validated</option><option value="needs_review">needs_review</option></select></div>
+        <div class="filter-field"><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="validated" selected>已审核可导出</option></select></div>
       </div>
       <div class="export-panel">
         <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
         <span id="exportSafetyStatus" class="export-status">等待导出。</span>
       </div>
+      <div class="export-note">只导出人工已确认、证据完整、定位准确的记录；候选和需要处理的记录不会导出。</div>
     </section>
 
     <section class="stats-banner" id="statsBanner" style="display:none;">
@@ -102,7 +104,7 @@
     <section class="panel-card quality-panel" id="qualityPanel">
       <div>
         <div class="panel-actions" style="margin-bottom:8px;">
-          <strong>DFT 候选质量概览</strong>
+          <strong>候选审核概览</strong>
           <span title="只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。" style="cursor:help;color:var(--color-text-muted);font-size:14px;">ⓘ</span>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="loadQualityPanel()">↻ 刷新面板</button>
         </div>
@@ -113,7 +115,7 @@
       </div>
       <div>
         <div class="panel-actions" style="margin-bottom:10px;">
-          <strong id="qualityListTitle">需要处理的记录</strong>
+          <strong id="qualityListTitle">候选问题汇总</strong>
           <span id="qualityGateLabel" class="quality-meta"></span>
         </div>
         <div id="qualityRows" class="quality-list">
@@ -125,7 +127,7 @@
 
     <section class="data-panel">
       <div class="panel-actions">
-        <strong id="resultSummary">0 条 DFT 候选记录</strong>
+        <strong id="resultSummary">0 条已审核可导出 DFT 记录</strong>
         <button class="btn btn-ghost btn-sm" onclick="queryDFT()">↻ 刷新</button>
       </div>
       <div class="table-container">
@@ -135,7 +137,7 @@
               <th>催化剂</th><th>吸附物</th><th>能量类型</th><th>数值</th><th>章节 / 步骤</th><th>状态 / 置信度</th><th>证据</th><th>来源文献</th>
             </tr>
           </thead>
-          <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载 DFT 候选记录中...</td></tr></tbody>
+          <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载已审核可导出 DFT 记录中...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -155,8 +157,13 @@
       unsafe_review: "人工确认未通过",
       missing_required_evidence: "缺少必要证据",
       missing_locator: "缺少 PDF 定位",
+      missing_evidence: "缺少 PDF 定位",
+      missing_evidence_text: "缺少证据原文",
       unsafe_locator: "PDF 定位不可靠",
-      low_confidence: "置信度偏低"
+      low_confidence: "置信度偏低",
+      suspected_missing_dft: "疑似漏提",
+      merged_duplicate: "疑似重复已合并",
+      figure_locator_missing: "图片定位可疑"
     };
     function reasonLabel(reason) { return REASON_LABELS[reason] || String(reason || "未知原因").replace(/_/g, " "); }
     function reasonAction(reason) {
@@ -178,7 +185,7 @@
     }
     function validationStatusLabel(status) {
       const labels = {
-        validated: "已校验可导出",
+        validated: "已审核可导出",
         needs_review: "需审核",
       };
       return labels[status] || String(status || "needs_review").replace(/_/g, " ");
@@ -223,9 +230,9 @@
         DAC: "DAC"
       };
       const validationLabels = {
-        "": "全部",
-        validated: "已校验",
-        needs_review: "需要复核"
+        "": "全部（含候选）",
+        validated: "已审核可导出",
+        needs_review: "候选需审核"
       };
       function setSelectLabels(id, labels) {
         const select = document.getElementById(id);
@@ -252,18 +259,18 @@
       const adsorbate = document.getElementById("adsorbate").value.trim();
       const catalyst = document.getElementById("catalystType").value;
       const minConf = document.getElementById("minConfidence").value || 0.3;
-      let url = `${API_BASE}/compare?min_confidence=${minConf}&limit=300`;
+      const validationStatus = document.getElementById("validationStatus").value;
+      const backendStatus = validationStatus === "validated" ? "exportable" : (validationStatus === "needs_review" ? "needs_review" : "all");
+      let url = `${API_BASE}/compare?min_confidence=${minConf}&limit=300&status=${encodeURIComponent(backendStatus)}`;
       if (prop) url += `&property_type=${encodeURIComponent(prop)}`;
       if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
       if (catalyst) url += `&catalyst_type=${encodeURIComponent(catalyst)}`;
       const list = document.getElementById("dftList");
-      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询 DFT 候选记录...</td></tr>';
+      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询已审核可导出 DFT 数据...</td></tr>';
       try {
         const data = await fetchJSON(url);
         let items = data.items || [];
         if (!prop) items = items;
-        const validationStatus = document.getElementById("validationStatus").value;
-        if (validationStatus) items = items.filter(item => (item.validation_status || "needs_review") === validationStatus);
         state.items = items;
         renderStats(buildStats(items), items.length);
         renderRows(items);
@@ -338,7 +345,7 @@
                 <div style="width:8px; height:8px; border-radius:50%; background:linear-gradient(135deg, #52c41a, #389e0d); box-shadow: 0 0 6px rgba(82,196,26,0.5);"></div>
                 <span style="font-size:12px; color:var(--color-text-secondary); font-weight:800;">可导出</span>
               </div>
-              <strong style="font-size:15px; color:var(--color-text); font-family:var(--font-mono, monospace);">${exportable}</strong>
+              <strong id="qualityExportable" style="font-size:15px; color:var(--color-text); font-family:var(--font-mono, monospace);">${exportable}</strong>
             </div>
             
             <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-surface-alt); padding:6px 12px; border-radius:var(--radius-sm); border: 1px solid var(--color-border);">
@@ -346,7 +353,7 @@
                 <div style="width:8px; height:8px; border-radius:50%; background:linear-gradient(135deg, #ff4d4f, #f5222d); box-shadow: 0 0 6px rgba(255,77,79,0.5);"></div>
                 <span style="font-size:12px; color:var(--color-text-secondary); font-weight:800;">需处理</span>
               </div>
-              <strong style="font-size:15px; color:var(--color-text); font-family:var(--font-mono, monospace);">${blocked}</strong>
+              <strong id="qualityBlocked" style="font-size:15px; color:var(--color-text); font-family:var(--font-mono, monospace);">${blocked}</strong>
             </div>
           </div>
         </div>
@@ -399,39 +406,31 @@
     function renderQualityRows(rows) {
       const el = document.getElementById("qualityRows");
       const title = document.getElementById("qualityListTitle");
-      if (title) title.textContent = state.qualityReason ? ("处理原因：" + reasonLabel(state.qualityReason)) : "需要处理的候选记录";
+      if (title) title.textContent = state.qualityReason ? ("处理原因：" + reasonLabel(state.qualityReason)) : "候选问题汇总";
       if (!el) return;
       if (!rows.length) {
-        el.innerHTML = '<div class="empty-state">当前筛选下没有需要处理的 DFT 候选记录。</div>';
+        el.innerHTML = '<div class="empty-state">当前筛选下没有需要处理的 DFT 候选。正式库仍只显示已审核可导出数据。</div>';
         return;
       }
-      const blockedRows = rows.filter(row => !row.is_exportable);
-      const visibleRows = blockedRows.length ? blockedRows : rows;
-      el.innerHTML = visibleRows.map(row => {
-        const reasonsList = row.blocked_reasons || [];
-        const reasons = reasonsList.length ? reasonsList.map(reasonLabel).join("、") : "可导出";
-        const reviewReason = state.qualityReason || reasonsList[0] || "";
-        const reviewTabUrl = '../literature_library/index.html?paper_id=' + encodeURIComponent(row.paper_id || "") + '&tab=review' + (reviewReason ? '&quality_reason=' + encodeURIComponent(reviewReason) : '');
-        const cls = row.is_exportable ? " exportable" : "";
-        return '<div class="quality-row' + cls + '">' +
-          '<div class="quality-pill">' + esc(row.is_exportable ? "可导出" : "需要处理") + '</div>' +
-          '<h4>' + esc(row.property_type || "DFT 结果") + ' / ' + esc(row.adsorbate || "-") + ' / ' + esc(row.value == null ? "-" : row.value) + ' ' + esc(row.unit || "") + '</h4>' +
-          '<div class="quality-meta">' + esc(row.title || "未命名文献") + '</div>' +
-          '<div class="quality-status-grid">' +
-            '<div class="readable-field"><div class="k">原因</div><div class="v">' + esc(reasons) + '</div></div>' +
-            '<div class="readable-field"><div class="k">下一步</div><div class="v">' + esc(reasonAction(reviewReason)) + '</div></div>' +
-            '<div class="readable-field"><div class="k">人工确认</div><div class="v">' + esc(reviewStatusLabel(row.review_status)) + '</div></div>' +
-            '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(locatorStatusLabel(row.locator_status)) + '</div></div>' +
-          '</div>' +
-          '<div class="quality-actions">' +
-            (row.can_mark_verified ? '<button class="btn btn-primary btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">标记已核验</button>' : '') +
-            (!row.is_exportable ? '<button class="btn btn-outline btn-sm" type="button" style="color:var(--color-danger);border-color:var(--color-danger);" onclick="rejectDftQueueRow(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">拒绝候选</button>' : '') +
-            (!row.is_exportable ? '<button class="btn btn-ghost btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(row.paper_id || "") + '\', \'' + esc(row.record_id || "") + '\')">提出修正</button>' : '') +
-            '<a class="btn btn-primary btn-sm" href="' + esc(reviewTabUrl) + '">去文献库处理</a>' +
-            '<a class="btn btn-ghost btn-sm" href="' + esc(row.library_detail_url || row.paper_detail_url || "#") + '">论文详情</a>' +
-          '</div>' +
-        '</div>';
+      const issueCounts = {};
+      rows.forEach(row => {
+        (row.issue_flags || row.blocked_reasons || []).forEach(reason => {
+          issueCounts[reason] = (issueCounts[reason] || 0) + 1;
+        });
+      });
+      const chips = Object.entries(issueCounts).slice(0, 8).map(([reason, count]) => {
+        return '<span class="reason-chip" style="cursor:default;">' + esc(reasonLabel(reason)) + ' ' + esc(count) + '</span>';
       }).join("");
+      el.innerHTML = '<div class="quality-row">' +
+        '<div class="quality-pill">候选区已隔离</div>' +
+        '<h4>候选 DFT 数据不在正式数据库页展开</h4>' +
+        '<div class="quality-meta">当前筛选下有 ' + esc(rows.length) + ' 条候选需要审核。请到审核中心执行确认入库、合并重复、退回重抽、重新定位证据或拒绝候选。</div>' +
+        '<div class="reason-chips">' + (chips || '<span class="quality-meta">暂无问题分类。</span>') + '</div>' +
+        '<div class="quality-actions">' +
+          '<a class="btn btn-primary btn-sm" href="../review_center/index.html">打开审核中心</a>' +
+          '<a class="btn btn-ghost btn-sm" href="../literature_library/index.html">回文献库核对证据</a>' +
+        '</div>' +
+      '</div>';
     }
     function renderCompletenessHints(items) {
       const el = document.getElementById("qualityCompleteness");
@@ -444,6 +443,7 @@
       el.innerHTML = '<div class="quality-meta"><strong>论文级处理提示</strong>：仅列出当前筛选下含 DFT 候选且存在风险的 ' + esc(flagged.length) + ' 篇论文。</div>' + flagged.slice(0, 8).map(item => {
         return '<div class="completeness-row">' +
           '<div class="quality-meta"><a href="' + esc(item.library_detail_url || "#") + '">' + esc(item.title || item.paper_id || "Paper") + '</a></div>' +
+          '<div class="quality-meta">完整性状态：' + esc(item.dft_completeness_label || item.dft_completeness_status || "-") + '；检测线索：' + esc((item.dft_audit && item.dft_audit.detected_signal_count) || 0) + '；疑似漏提：' + esc((item.dft_audit && item.dft_audit.suspected_missing_count) || 0) + '</div>' +
           '<div class="quality-meta">可导出 DFT：' + esc(item.exportable_dft_results || 0) + '；需处理 DFT：' + esc(item.blocked_dft_results || 0) + '；催化剂样本：' + esc(item.catalyst_samples || 0) + '；DFT 设置：' + esc(item.dft_settings || 0) + '</div>' +
           '<div class="quality-meta">提示：' + esc((item.hints || []).map(completenessHintLabel).join("；")) + '</div>' +
         '</div>';
@@ -456,7 +456,9 @@
       document.getElementById("statMin").textContent = stats.min != null ? `${stats.min} ${stats.unit || ""}` : "-";
       document.getElementById("statMax").textContent = stats.max != null ? `${stats.max} ${stats.unit || ""}` : "-";
       document.getElementById("statMean").textContent = stats.mean != null ? `${stats.mean} ${stats.unit || ""}` : "-";
-      document.getElementById("resultSummary").textContent = `${count} 条 DFT 候选记录`;
+      const status = document.getElementById("validationStatus").value;
+      const suffix = status === "validated" ? "已审核可导出 DFT 记录" : (status === "needs_review" ? "候选需审核 DFT 记录" : "DFT 记录（含候选）");
+      document.getElementById("resultSummary").textContent = `${count} 条${suffix}`;
     }
     function buildStats(items) {
       const propertyTypes = new Set((items || []).map(item => item.property_type || "").filter(Boolean));
@@ -478,7 +480,7 @@
     function renderRows(items) {
       const list = document.getElementById("dftList");
       if (!items.length) {
-        list.innerHTML = '<tr><td colspan="8" class="empty-state">当前筛选条件下暂无 DFT 候选结果。</td></tr>';
+        list.innerHTML = '<tr><td colspan="8" class="empty-state">当前筛选条件下暂无已审核可导出 DFT 数据；候选请到审核中心处理。</td></tr>';
         return;
       }
       list.innerHTML = items.map((item, idx) => {
