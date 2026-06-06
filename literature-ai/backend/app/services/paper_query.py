@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from uuid import UUID
 
 from sqlalchemy import String, cast, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.db.models import (
     CatalystSample,
@@ -116,15 +117,9 @@ class PaperQueryService:
         
         models_to_count = {
             "sections": PaperSection,
-            "tables": PaperTable,
             "figures": PaperFigure,
-            "dft_settings": DFTSetting,
-            "catalyst_samples": CatalystSample,
             "dft_results": DFTResult,
-            "electrochemical_performance": ElectrochemicalPerformance,
-            "mechanism_claims": MechanismClaim,
             "writing_cards": WritingCard,
-            "figure_data_points": FigureDataPoint,
         }
         
         counts_map = defaultdict(lambda: {k: 0 for k in models_to_count.keys()})
@@ -138,6 +133,21 @@ class PaperQueryService:
             )
             for pid, count in self.session.execute(stmt):
                 counts_map[pid][key] = count
+
+        section_rows = self.session.execute(
+            select(
+                PaperSection.paper_id,
+                PaperSection.section_type,
+                PaperSection.section_title,
+                PaperSection.text,
+            ).where(PaperSection.paper_id.in_(paper_ids))
+        ).all()
+        counts_map_by_section = defaultdict(int)
+        for paper_id, section_type, section_title, text in section_rows:
+            if self._is_display_body_section_values(section_type, section_title, text):
+                counts_map_by_section[paper_id] += 1
+        for paper_id in paper_ids:
+            counts_map[paper_id]["sections"] = counts_map_by_section.get(paper_id, 0)
 
         relationship_rows = self.session.scalars(
             select(PaperRelationship).where(PaperRelationship.source_paper_id.in_(paper_ids))
@@ -193,11 +203,26 @@ class PaperQueryService:
         if not paper:
             return None
 
-        sections = self.session.scalars(
+        all_sections = self.session.scalars(
             select(PaperSection)
             .where(PaperSection.paper_id == paper_id)
+            .options(
+                load_only(
+                    PaperSection.id,
+                    PaperSection.paper_id,
+                    PaperSection.section_title,
+                    PaperSection.section_type,
+                    PaperSection.text,
+                    PaperSection.page_start,
+                    PaperSection.page_end,
+                )
+            )
             .order_by(PaperSection.page_start.asc().nulls_last(), PaperSection.section_title.asc())
         ).all()
+        sections = sorted(
+            [section for section in all_sections if self._is_display_body_section(section)],
+            key=self._section_display_sort_key,
+        )
         tables = self.session.scalars(
             select(PaperTable)
             .where(PaperTable.paper_id == paper_id)
@@ -245,7 +270,7 @@ class PaperQueryService:
         relationship_summary = {}
         for row in outgoing_relationships:
             relationship_summary[row.relationship_type] = relationship_summary.get(row.relationship_type, 0) + 1
-        base = self._build_list_item_with_counts(paper, base_counts, relationship_summary)
+        base = self._build_list_item_with_counts(paper, base_counts, relationship_summary, include_heavy=True)
         related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {row.source_paper_id for row in incoming_relationships}
         related_titles = {}
         if related_paper_ids:
@@ -257,7 +282,7 @@ class PaperQueryService:
         base_payload["full_translation_zh"] = full_translation
         return PaperDetailResponse(
             **base_payload,
-            sections=[PaperSectionResponse.model_validate(item) for item in sections],
+            sections=[self._serialize_section(item) for item in sections],
             tables=[PaperTableResponse.model_validate(item) for item in tables],
             figures=[PaperFigureResponse.model_validate(item) for item in figures],
             dft_settings_items=[DFTSettingResponse.model_validate(item) for item in dft_settings],
@@ -278,11 +303,126 @@ class PaperQueryService:
             figure_data_points_items=[FigureDataPointResponse.model_validate(item) for item in figure_data_points],
         )
 
+    @classmethod
+    def _is_display_body_section(cls, section: PaperSection) -> bool:
+        return cls._is_display_body_section_values(section.section_type, section.section_title, section.text)
+
+    @classmethod
+    def _is_display_body_section_values(
+        cls,
+        section_type_value: str | None,
+        section_title: str | None,
+        section_text: str | None,
+    ) -> bool:
+        section_type = (section_type_value or "").strip().lower()
+        if section_type in {"table", "figure", "figure_caption", "caption", "reference", "references"}:
+            return False
+
+        title = cls._compact_section_text(section_title)
+        text = cls._compact_section_text(section_text)
+        title_lower = title.lower()
+        text_lower = text.lower()
+        if re.match(r"^(fig(?:ure)?\.?|scheme|table)\s*\d+", title_lower):
+            return False
+
+        prefix = text_lower[:500]
+        table_like_markers = (
+            "donor nbo",
+            "acceptor nbo",
+            "homo",
+            "lumo",
+            "e homo",
+            "e lumo",
+            "gibbs free energy",
+            "enthalpy",
+            "entropy",
+            "row:",
+        )
+        if title_lower in {"system", "row", "entry"} and any(marker in prefix for marker in table_like_markers):
+            return False
+        if prefix.count(" | ") >= 3:
+            return False
+        return bool(text)
+
+    @staticmethod
+    def _compact_section_text(value: str | None) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip()
+
+    @classmethod
+    def _section_display_sort_key(cls, section: PaperSection) -> tuple[int, int, str]:
+        section_type = (section.section_type or "").strip().lower()
+        title = cls._compact_section_text(section.section_title).lower()
+        type_rank = {
+            "abstract": 0,
+            "introduction": 1,
+            "methods": 2,
+            "method": 2,
+            "experimental": 2,
+            "computational": 2,
+            "results": 3,
+            "discussion": 3,
+            "results and discussion": 3,
+            "body": 4,
+            "conclusion": 9,
+            "conclusions": 9,
+        }.get(section_type, 5)
+        if "introduction" in title:
+            type_rank = min(type_rank, 1)
+        elif "method" in title or "computational" in title or "calculation" in title:
+            type_rank = min(type_rank, 2)
+        elif "result" in title or "discussion" in title:
+            type_rank = min(type_rank, 3)
+        elif "conclusion" in title:
+            type_rank = 9
+        page_rank = section.page_start if section.page_start is not None else 9999
+        return (type_rank, page_rank, title)
+
+    @classmethod
+    def _serialize_section(cls, item: PaperSection) -> PaperSectionResponse:
+        return PaperSectionResponse(
+            id=item.id,
+            section_title=cls._clean_pdf_text(item.section_title),
+            section_type=item.section_type,
+            text=cls._clean_pdf_text(item.text) or "",
+            page_start=item.page_start,
+            page_end=item.page_end,
+        )
+
+    @staticmethod
+    def _clean_pdf_text(value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        replacements = {
+            "/uniFB00": "ff",
+            "/uniFB01": "fi",
+            "/uniFB02": "fl",
+            "/uniFB03": "ffi",
+            "/uniFB04": "ffl",
+            "\u00ee\u0084\u0080": "ff",
+            "\u00ee\u0084\u0081": "fi",
+            "\u00ee\u0084\u0082": "fl",
+            "\u00ee\u0084\u0083": "fi",
+            "\u00ee\u0084\u0084": "fl",
+            "\ue100": "ff",
+            "\ue101": "fi",
+            "\ue102": "fl",
+            "\ue103": "fi",
+            "\ue104": "fl",
+        }
+        for source, target in replacements.items():
+            text = text.replace(source, target)
+        text = re.sub(r"\s+([,.;:])", r"\1", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
     def _build_list_item_with_counts(
         self,
         paper: Paper,
         counts: dict[str, int],
         relationship_summary: dict[str, int] | None = None,
+        *,
+        include_heavy: bool = False,
     ) -> PaperListItemResponse:
         c = PaperCountsResponse(**counts)
         localized = self._localized_metadata(paper)
@@ -296,8 +436,8 @@ class PaperQueryService:
             year=paper.year,
             journal=paper.journal,
             authors=paper.authors or [],
-            abstract=paper.abstract,
-            abstract_zh=localized.get("abstract_zh"),
+            abstract=paper.abstract if include_heavy else self._clip_list_text(paper.abstract, 700),
+            abstract_zh=localized.get("abstract_zh") if include_heavy else self._clip_list_text(localized.get("abstract_zh"), 420),
             full_translation_zh=localized.get("full_translation_zh"),
             pdf_path=paper.pdf_path,
             oa_status=paper.oa_status,
@@ -311,9 +451,9 @@ class PaperQueryService:
             workflow_status=getattr(paper, "workflow_status", "Imported"),
             pdf_quality_status=getattr(paper, "pdf_quality_status", None),
             pdf_quality_score=getattr(paper, "pdf_quality_score", None),
-            pdf_quality_report=getattr(paper, "pdf_quality_report", None),
+            pdf_quality_report=getattr(paper, "pdf_quality_report", None) if include_heavy else None,
             workspace_path=getattr(paper, "workspace_path", None),
-            comprehensive_analysis=paper.comprehensive_analysis,
+            comprehensive_analysis=paper.comprehensive_analysis if include_heavy else None,
             created_at=paper.created_at,
             counts=c,
             relationship_summary=relationship_summary or {},
@@ -326,6 +466,15 @@ class PaperQueryService:
             "abstract_zh": data.get("abstract_zh") if isinstance(data.get("abstract_zh"), str) else None,
             "full_translation_zh": None,
         }
+
+    @staticmethod
+    def _clip_list_text(value: str | None, max_chars: int) -> str | None:
+        if not value:
+            return None
+        text = re.sub(r"\s+", " ", str(value)).strip()
+        if len(text) <= max_chars:
+            return text
+        return text[: max(0, max_chars - 1)].rstrip() + "..."
 
     def _latest_full_translation(self, paper_id: UUID) -> str | None:
         note = self.session.scalars(

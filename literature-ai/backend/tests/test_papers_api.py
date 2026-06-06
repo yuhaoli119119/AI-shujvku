@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import AuditLog, Base, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob
+from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
@@ -258,6 +258,97 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
+
+
+def test_paper_detail_filters_caption_and_table_noise_from_sections(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Section filtering paper",
+            doi="10.1000/section-filter",
+            year=2026,
+            journal="Codex Test Journal",
+            authors=["A. Curator"],
+            abstract="Section filter test.",
+            pdf_path="section-filter.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Fig. 1 Optimized graphdiyne structure.",
+                    section_type="figure_caption",
+                    text="Fig. 1 Optimized graphdiyne structure.",
+                    page_start=2,
+                    page_end=2,
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Table 1 HOMO and LUMO energies",
+                    section_type="table",
+                    text="Table 1 HOMO | LUMO | gap | adsorption energy",
+                    page_start=3,
+                    page_end=3,
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="System",
+                    section_type="body",
+                    text="Donor NBO (i) Acceptor NBO (j) E (2) row: System | HOMO | LUMO | E ads",
+                    page_start=4,
+                    page_end=4,
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="In\ue104uence Results",
+                    section_type="results",
+                    text="The con\ue103gurations show stable adsorption on graphdiyne surfaces.",
+                    page_start=5,
+                    page_end=6,
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Conclusion",
+                    section_type="conclusion",
+                    text="The work closes with a stable graphdiyne adsorption conclusion.",
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Introduction",
+                    section_type="introduction",
+                    text="The introduction frames graphdiyne adsorption.",
+                ),
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="Computational methods",
+                    section_type="methods",
+                    text="The methods describe the DFT workflow.",
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = paper.id
+
+    client = TestClient(app)
+    detail_response = client.get(f"/api/papers/{paper_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["counts"]["sections"] == 4
+    assert [section["section_title"] for section in detail["sections"]] == [
+        "Introduction",
+        "Computational methods",
+        "Influence Results",
+        "Conclusion",
+    ]
+    assert "configurations show stable adsorption" in detail["sections"][2]["text"]
+
+    list_response = client.get("/api/papers/", params={"q": "Section filtering paper"})
+    assert list_response.status_code == 200
+    items = list_response.json()
+    assert items[0]["counts"]["sections"] == 4
 
 
 def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
@@ -848,6 +939,108 @@ def test_compare_dft_results_without_property_type_returns_all_types(setup_test_
     assert filtered_response.status_code == 200
     filtered_types = {item["property_type"] for item in filtered_response.json()["items"]}
     assert filtered_types == {"adsorption_energy"}
+
+
+def test_visuals_dft_matrix_uses_catalyst_adsorbate_categories(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Fe graphdiyne HER matrix paper",
+            year=2026,
+            journal="Codex Test Journal",
+            library_name="MatrixLibrary",
+            pdf_path="fe-gdy.pdf",
+        )
+        fallback_paper = Paper(
+            title="Ni graphdiyne CO2RR matrix paper",
+            year=2026,
+            journal="Codex Test Journal",
+            library_name="MatrixLibrary",
+            pdf_path="ni-gdy.pdf",
+        )
+        session.add_all([paper, fallback_paper])
+        session.flush()
+        fe_gdy = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-GDY",
+            metal_centers=["Fe"],
+            support="GDY",
+        )
+        fe_graphdiyne = CatalystSample(
+            paper_id=paper.id,
+            name="Fe on graphdiyne",
+            metal_centers=["Fe"],
+            support="graphdiyne",
+        )
+        ni_gdy = CatalystSample(
+            paper_id=fallback_paper.id,
+            name="Ni-GDY",
+            metal_centers=["Ni"],
+            support="graphdiyne",
+        )
+        session.add_all([fe_gdy, fe_graphdiyne, ni_gdy])
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=fe_gdy.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H",
+                    value=-0.12,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=fe_graphdiyne.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H*",
+                    value=-0.1,
+                    unit="eV",
+                    confidence=0.8,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=fe_graphdiyne.id,
+                    property_type="band_gap",
+                    adsorbate="PBE",
+                    value=1.2,
+                    unit="eV",
+                    confidence=0.7,
+                ),
+                DFTResult(
+                    paper_id=fallback_paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="CO2",
+                    value=-0.4,
+                    unit="eV",
+                    confidence=0.85,
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/visuals/overview", params={"library_name": "MatrixLibrary"})
+    assert response.status_code == 200
+    data = response.json()
+    meta = data["dft_matrix_meta"]
+    assert meta["total_results"] == 4
+    assert meta["included_results"] == 3
+    assert meta["excluded_results"] == 1
+    assert meta["excluded_reasons"] == {"non_adsorbate_label": 1}
+    assert meta["direct_catalyst_links"] == 2
+    assert meta["paper_level_fallback_links"] == 1
+
+    rows = {(row["catalyst"], row["adsorbate"]): row for row in data["dft_matrix"]}
+    fe_h = rows[("Fe / graphdiyne", "H")]
+    assert fe_h["reaction_category"] == "HER"
+    assert fe_h["count"] == 2
+    assert fe_h["paper_count"] == 1
+    assert fe_h["match_scope_counts"] == {"direct": 2}
+    assert rows[("Ni / graphdiyne", "CO2")]["reaction_category"] == "CO2RR"
 
 
 def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, monkeypatch):

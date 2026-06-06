@@ -47,6 +47,8 @@ LOCATOR_PAYLOAD_KEYS = {
     "evidence_locator",
 }
 
+_TABLE_NAMES_BY_BIND: dict[int, set[str]] = {}
+
 
 @dataclass(frozen=True)
 class ExportGateResult:
@@ -85,7 +87,13 @@ def _target_type_values(target_type: str) -> set[str]:
 
 
 def _table_exists(session: Session, table_name: str) -> bool:
-    return table_name in set(inspect(session.bind).get_table_names())
+    bind = session.get_bind()
+    bind_key = id(bind)
+    table_names = _TABLE_NAMES_BY_BIND.get(bind_key)
+    if table_names is None:
+        table_names = set(inspect(bind).get_table_names())
+        _TABLE_NAMES_BY_BIND[bind_key] = table_names
+    return table_name in table_names
 
 
 def is_safe_verified_review(review: ExtractionFieldReview | dict[str, Any] | None) -> bool:

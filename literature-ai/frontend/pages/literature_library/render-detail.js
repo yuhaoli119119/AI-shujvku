@@ -49,7 +49,82 @@ function renderJSONCards(title, items) {
 }
 
 function compactText(value) {
-    return String(value || "").replace(/s+/g, " ").trim();
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function cleanPdfExtractedText(value) {
+    return String(value || "")
+        .replace(/\/uniFB00\s*/g, "ff")
+        .replace(/\/uniFB01\s*/g, "fi")
+        .replace(/\/uniFB02\s*/g, "fl")
+        .replace(/\/uniFB03\s*/g, "ffi")
+        .replace(/\/uniFB04\s*/g, "ffl")
+        .replace(/\u00ee\u0084\u0080/g, "ff")
+        .replace(/\u00ee\u0084\u0081/g, "fi")
+        .replace(/\u00ee\u0084\u0082/g, "fl")
+        .replace(/\u00ee\u0084\u0083/g, "fi")
+        .replace(/\u00ee\u0084\u0084/g, "fl")
+        .replace(/\uE100/g, "ff")
+        .replace(/\uE101/g, "fi")
+        .replace(/\uE102/g, "fl")
+        .replace(/\uE103/g, "fi")
+        .replace(/\uE104/g, "fl")
+        .replace(/\uE000|\uE001|\uE002|\uE003|\uE004|\uE005/g, "")
+        .replace(/\s+([,.;:])/g, "$1")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function isDisplayBodySection(item) {
+    if (!item) return false;
+    const sectionType = String(item.section_type || "").trim().toLowerCase();
+    if (["table", "figure", "figure_caption", "caption", "reference", "references"].includes(sectionType)) return false;
+    const title = cleanPdfExtractedText(item.section_title || "");
+    const text = cleanPdfExtractedText(item.text || "");
+    const titleLower = title.toLowerCase();
+    const textLower = text.toLowerCase().slice(0, 500);
+    if (/^(fig(?:ure)?\.?|scheme|table)\s*\d+/.test(titleLower)) return false;
+    if (["system", "row", "entry"].includes(titleLower)) {
+        if (/(donor nbo|acceptor nbo|homo|lumo|e homo|e lumo|gibbs free energy|enthalpy|entropy|row:)/.test(textLower)) return false;
+    }
+    if ((textLower.match(/\s\|\s/g) || []).length >= 3) return false;
+    return Boolean(text);
+}
+
+function sectionDisplaySortKey(item) {
+    const sectionType = String(item && item.section_type || "").trim().toLowerCase();
+    const title = cleanPdfExtractedText(item && item.section_title || "").toLowerCase();
+    let typeRank = {
+        abstract: 0,
+        introduction: 1,
+        methods: 2,
+        method: 2,
+        experimental: 2,
+        computational: 2,
+        results: 3,
+        discussion: 3,
+        "results and discussion": 3,
+        body: 4,
+        conclusion: 9,
+        conclusions: 9
+    }[sectionType];
+    if (typeof typeRank !== "number") typeRank = 5;
+    if (title.includes("introduction")) typeRank = Math.min(typeRank, 1);
+    else if (title.includes("method") || title.includes("computational") || title.includes("calculation")) typeRank = Math.min(typeRank, 2);
+    else if (title.includes("result") || title.includes("discussion")) typeRank = Math.min(typeRank, 3);
+    else if (title.includes("conclusion")) typeRank = 9;
+    const pageRank = Number(item && item.page_start || 9999);
+    return [typeRank, pageRank, title];
+}
+
+function compareDisplaySections(a, b) {
+    const left = sectionDisplaySortKey(a);
+    const right = sectionDisplaySortKey(b);
+    for (let i = 0; i < left.length; i += 1) {
+        if (left[i] < right[i]) return -1;
+        if (left[i] > right[i]) return 1;
+    }
+    return 0;
 }
 
 function clipText(value, maxChars) {
@@ -873,7 +948,7 @@ function renderDetail(detail, audit) {
     const counts = detail.counts || {};
     const summaryCards =
         '<div class="cards">' +
-            '<div class="stat-card"><h3>章节</h3><div class="value">' + (counts.sections || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>正文</h3><div class="value">' + (counts.sections || 0) + "</div></div>" +
             '<div class="stat-card"><h3>表格</h3><div class="value">' + (counts.tables || 0) + "</div></div>" +
             '<div class="stat-card"><h3>图片</h3><div class="value">' + (counts.figures || 0) + "</div></div>" +
             '<div class="stat-card"><h3>DFT 结果</h3><div class="value">' + (counts.dft_results || 0) + "</div></div>" +
@@ -902,10 +977,13 @@ function renderDetail(detail, audit) {
     const activeTab = state.currentTab || "summary";
     let sectionCards = "";
     if (activeTab === "sections") {
-        sectionCards = renderListBlock("正文节选", detail.sections ? detail.sections.slice(0, 8) : [], function(item) {
+        const displaySections = (detail.sections || []).filter(isDisplayBodySection).sort(compareDisplaySections).slice(0, 8);
+        sectionCards = renderListBlock("正文节选", displaySections, function(item) {
+            const title = cleanPdfExtractedText(item.section_title || item.section_type || "未命名章节");
+            const text = cleanPdfExtractedText(item.text || "");
             return (
-                '<div class="subtle">标题：' + esc(item.section_title || item.section_type || "未命名章节") + "</div>" +
-                '<div class="prewrap" style="margin-top:8px;">' + esc(ellipsis(item.text || "", 2200) || "暂无文本。") + "</div>"
+                '<div class="subtle">标题：' + esc(title) + "</div>" +
+                '<div class="prewrap" style="margin-top:8px;">' + esc(ellipsis(text, 2200) || "暂无文本。") + "</div>"
             );
         });
     }

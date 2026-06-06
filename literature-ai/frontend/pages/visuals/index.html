@@ -277,6 +277,40 @@
       text-align: left;
       overflow-wrap: anywhere;
     }
+    .matrix-tools {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .category-btn {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-pill);
+      background: var(--color-surface);
+      color: var(--color-text-secondary);
+      padding: 7px 11px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .category-btn.active {
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+      background: var(--color-primary-bg);
+    }
+    .matrix-note {
+      border: 1px dashed var(--color-border-strong);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.55;
+      margin-bottom: 12px;
+    }
     .status-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -431,11 +465,13 @@
       <div class="panel">
         <div class="panel-head">
           <div>
-            <div class="panel-title">DFT 属性 x 吸附物矩阵</div>
-            <div class="muted">颜色越深表示该属性-物种组合记录越多。</div>
+            <div class="panel-title">DFT 催化剂 x 吸附物矩阵</div>
+            <div class="muted">颜色越深表示该催化剂-吸附物组合候选记录越多；非吸附物标签会被排除到质量提示。</div>
           </div>
           <div class="pill" id="matrixCount">0 条</div>
         </div>
+        <div id="matrixQualityNote" class="matrix-note"></div>
+        <div id="matrixCategoryTabs" class="matrix-tools"></div>
         <div id="dftMatrix"></div>
       </div>
     </section>
@@ -475,6 +511,7 @@
     const COLORS = ["#2A9D8F", "#E9C46A", "#E76F51", "#4C78A8", "#7A5195", "#59A14F", "#D37295"];
     let currentLibrary = "";
     let latestData = null;
+    let matrixCategory = "all";
 
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({
@@ -568,32 +605,73 @@
       renderBars("assetBars", rows, "label", "value", 3);
       document.getElementById("coverageSummary").textContent = "PDF " + (summary.pdf_available || 0) + " / 文献 " + (summary.papers || 0);
     }
-    function renderMatrix(rows) {
+    function renderMatrix(rows, meta) {
       const target = document.getElementById("dftMatrix");
-      document.getElementById("matrixCount").textContent = (rows || []).reduce((sum, row) => sum + Number(row.count || 0), 0) + " 条";
-      if (!rows || !rows.length) {
+      const quality = meta || {};
+      const allRows = rows || [];
+      const categoryRows = matrixCategory === "all" ? allRows : allRows.filter(row => row.reaction_category === matrixCategory);
+      const includedCount = Number(quality.included_results || allRows.reduce((sum, row) => sum + Number(row.count || 0), 0));
+      document.getElementById("matrixCount").textContent = includedCount + " 条入矩阵";
+      const excludedText = quality.excluded_results
+        ? "；已排除 " + quality.excluded_results + " 条非吸附物/缺失标签"
+        : "";
+      const fallbackText = quality.paper_level_fallback_links
+        ? "；" + quality.paper_level_fallback_links + " 条使用文献级催化剂回填，仍需核验"
+        : "";
+      document.getElementById("matrixQualityNote").textContent =
+        "总 DFT 候选 " + (quality.total_results || includedCount) + " 条，进入矩阵 " + includedCount + " 条" + excludedText + fallbackText + "。";
+      renderMatrixCategoryTabs(quality.category_counts || [], allRows);
+      if (!categoryRows.length) {
         target.innerHTML = '<div class="empty">暂无 DFT 矩阵数据</div>';
         return;
       }
-      const properties = [...new Set(rows.map(row => row.property_type))].slice(0, 10);
-      const adsorbates = [...new Set(rows.map(row => row.adsorbate))].slice(0, 12);
-      const maxCount = Math.max(1, ...rows.map(row => Number(row.count || 0)));
-      const lookup = new Map(rows.map(row => [row.property_type + "::" + row.adsorbate, row]));
+      const topLabels = (items, key, limit) => {
+        const counts = new Map();
+        items.forEach(row => counts.set(row[key], (counts.get(row[key]) || 0) + Number(row.count || 0)));
+        return [...counts.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).slice(0, limit).map(item => item[0]);
+      };
+      const catalysts = topLabels(categoryRows, "catalyst", 14);
+      const adsorbates = topLabels(categoryRows, "adsorbate", 14);
+      const maxCount = Math.max(1, ...categoryRows.map(row => Number(row.count || 0)));
+      const lookup = new Map(categoryRows.map(row => [row.catalyst + "::" + row.adsorbate, row]));
       let html = '<div class="matrix-wrap"><div class="matrix" style="grid-template-columns:180px repeat(' + adsorbates.length + ', minmax(86px, 1fr));">';
-      html += '<div class="matrix-head">属性 / 物种</div>';
+      html += '<div class="matrix-head">催化剂 / 吸附物</div>';
       adsorbates.forEach(label => { html += '<div class="matrix-head">' + esc(label) + '</div>'; });
-      properties.forEach(property => {
-        html += '<div class="matrix-row-head">' + esc(property) + '</div>';
+      catalysts.forEach(catalyst => {
+        html += '<div class="matrix-row-head" title="' + esc(catalyst) + '">' + esc(catalyst) + '</div>';
         adsorbates.forEach(adsorbate => {
-          const row = lookup.get(property + "::" + adsorbate);
+          const row = lookup.get(catalyst + "::" + adsorbate);
           const count = row ? Number(row.count || 0) : 0;
           const alpha = count ? (0.12 + count / maxCount * 0.78) : 0;
           const bg = count ? "rgba(42,157,143," + alpha.toFixed(2) + ")" : "transparent";
-          html += '<div class="matrix-cell" style="background:' + bg + '"><strong>' + (count || "") + '</strong></div>';
+          const propText = row && row.property_types ? row.property_types.map(item => item.property_type + " × " + item.count).join("；") : "";
+          const scopeText = row && row.match_scope_counts ? Object.entries(row.match_scope_counts).map(item => item[0] + " × " + item[1]).join("；") : "";
+          const title = row ? ("记录 " + count + "；文献 " + row.paper_count + "；" + propText + "；" + scopeText) : "";
+          html += '<div class="matrix-cell" title="' + esc(title) + '" style="background:' + bg + '"><strong>' + (count || "") + '</strong></div>';
         });
       });
       html += '</div></div>';
       target.innerHTML = html;
+    }
+    function renderMatrixCategoryTabs(categoryCounts, rows) {
+      const target = document.getElementById("matrixCategoryTabs");
+      const counts = new Map((categoryCounts || []).map(item => [item.category, Number(item.count || 0)]));
+      (rows || []).forEach(row => {
+        if (!counts.has(row.reaction_category)) counts.set(row.reaction_category, Number(row.count || 0));
+      });
+      const order = ["all", "HER", "OER/ORR", "CO2RR", "NRR", "电池/离子", "分子/污染物", "其他"];
+      const total = (rows || []).reduce((sum, row) => sum + Number(row.count || 0), 0);
+      target.innerHTML = order
+        .filter(category => category === "all" || counts.has(category))
+        .map(category => {
+          const count = category === "all" ? total : counts.get(category);
+          const label = category === "all" ? "全部" : category;
+          return '<button class="category-btn ' + (matrixCategory === category ? "active" : "") + '" type="button" onclick="setMatrixCategory(\'' + esc(category) + '\')">' + esc(label) + ' · ' + esc(count || 0) + '</button>';
+        }).join("");
+    }
+    function setMatrixCategory(category) {
+      matrixCategory = category || "all";
+      if (latestData) renderMatrix(latestData.dft_matrix || [], latestData.dft_matrix_meta || {});
     }
     function renderStatus(rows) {
       const target = document.getElementById("statusGrid");
@@ -628,7 +706,7 @@
       renderCoverage(summary);
       renderBars("yearBars", (data.years || []).map(row => ({ label: row.year || "未知年份", value: row.count })), "label", "value", 0);
       renderBars("journalBars", data.journals || [], "journal", "count", 1);
-      renderMatrix(data.dft_matrix || []);
+      renderMatrix(data.dft_matrix || [], data.dft_matrix_meta || {});
       renderStatus(data.dft_status || []);
       renderTasks(data.recent_tasks || []);
     }
