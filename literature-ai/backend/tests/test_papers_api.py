@@ -893,6 +893,84 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         assert audit.target_id == str(row_id)
 
 
+def test_dft_aggregation_endpoints_filter_by_library_name(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        graphdiyne = Paper(
+            title="Graphdiyne library candidate",
+            year=2025,
+            library_name="石墨炔",
+            pdf_path="graphdiyne.pdf",
+        )
+        other = Paper(
+            title="Other library candidate",
+            year=2025,
+            library_name="OtherLibrary",
+            pdf_path="other.pdf",
+        )
+        session.add_all([graphdiyne, other])
+        session.flush()
+        graph_result = DFTResult(
+            paper_id=graphdiyne.id,
+            property_type="adsorption_energy",
+            adsorbate="H2O",
+            value=-0.42,
+            unit="eV",
+            evidence_text="Graphdiyne adsorption energy is -0.42 eV.",
+            confidence=0.8,
+        )
+        other_result = DFTResult(
+            paper_id=other.id,
+            property_type="adsorption_energy",
+            adsorbate="CO2",
+            value=-1.23,
+            unit="eV",
+            evidence_text="Other library adsorption energy is -1.23 eV.",
+            confidence=0.8,
+        )
+        session.add_all([graph_result, other_result])
+        session.add_all(
+            [
+                CatalystSample(paper_id=graphdiyne.id, name="Fe-GDY"),
+                CatalystSample(paper_id=other.id, name="Ni-other"),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    params = {"library_name": "石墨炔", "status": "all", "limit": 10}
+    queue_response = client.get("/api/papers/export/dft-review-queue", params=params)
+    assert queue_response.status_code == 200
+    queue = queue_response.json()
+    assert queue["metadata"]["filters"]["library_name"] == "石墨炔"
+    assert queue["metadata"]["total_candidates"] == 1
+    assert {row["title"] for row in queue["rows"]} == {"Graphdiyne library candidate"}
+
+    quality_response = client.get("/api/papers/export/dft-quality", params={"library_name": "石墨炔"})
+    assert quality_response.status_code == 200
+    quality = quality_response.json()
+    assert quality["metadata"]["filters"]["library_name"] == "石墨炔"
+    assert quality["metadata"]["total_candidates"] == 1
+    assert {row["title"] for row in quality["rows"]} == {"Graphdiyne library candidate"}
+
+    compare_response = client.get(
+        "/api/papers/compare",
+        params={"library_name": "石墨炔", "min_confidence": 0.0},
+    )
+    assert compare_response.status_code == 200
+    compare = compare_response.json()
+    assert compare["query"]["library_name"] == "石墨炔"
+    assert {item["title"] for item in compare["items"]} == {"Graphdiyne library candidate"}
+
+    aggregate_response = client.get("/api/papers/aggregate", params={"library_name": "石墨炔"})
+    assert aggregate_response.status_code == 200
+    aggregate = aggregate_response.json()
+    assert aggregate["library_name"] == "石墨炔"
+    assert set(aggregate["adsorbate_groups"]) == {"h2o"}
+    assert set(aggregate["catalyst_groups"]) == {"fegdy"}
+
+
 def test_compare_dft_results_without_property_type_returns_all_types(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)

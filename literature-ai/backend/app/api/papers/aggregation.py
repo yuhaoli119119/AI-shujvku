@@ -21,6 +21,7 @@ from app.db.models import Paper as P
 from app.db.session import get_db_session
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_review_queue_service import DFTReviewQueueService
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
 router = APIRouter()
@@ -80,6 +81,7 @@ def _dft_rows_statement(
     adsorbate: str | None,
     year_min: int | None,
     year_max: int | None,
+    library_name: str | None,
 ):
     stmt = select(DR, P).join(P, DR.paper_id == P.id).order_by(P.year.desc().nulls_last(), P.title)
     if property_type:
@@ -90,6 +92,8 @@ def _dft_rows_statement(
         stmt = stmt.where(P.year >= year_min)
     if year_max:
         stmt = stmt.where(P.year <= year_max)
+    if library_name is not None:
+        stmt = stmt.where(build_library_name_clause(P.library_name, library_name))
     return stmt
 
 
@@ -131,6 +135,7 @@ async def export_dft_results_csv(
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
     session: Session = Depends(get_db_session),
 ):
     rows = session.execute(
@@ -139,6 +144,7 @@ async def export_dft_results_csv(
             adsorbate=adsorbate,
             year_min=year_min,
             year_max=year_max,
+            library_name=library_name,
         )
     ).all()
     output = io.StringIO()
@@ -224,6 +230,7 @@ async def export_dft_dataset(
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
     session: Session = Depends(get_db_session),
 ):
     rows = session.execute(
@@ -232,6 +239,7 @@ async def export_dft_dataset(
             adsorbate=adsorbate,
             year_min=year_min,
             year_max=year_max,
+            library_name=library_name,
         )
     ).all()
     gate_results = []
@@ -342,6 +350,7 @@ async def export_dft_dataset(
                 "adsorbate": adsorbate,
                 "year_min": year_min,
                 "year_max": year_max,
+                "library_name": normalize_library_name(library_name) if library_name is not None else None,
             },
             "safety_gate": "safe_verified_with_required_evidence",
             "eligible_count": gate_summary["eligible"],
@@ -359,6 +368,7 @@ async def dft_dataset_quality(
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
     reason: str | None = Query(default=None, description="Optional blocked reason filter"),
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
@@ -369,6 +379,7 @@ async def dft_dataset_quality(
             adsorbate=adsorbate,
             year_min=year_min,
             year_max=year_max,
+            library_name=library_name,
         )
     ).all()
     gate_results = []
@@ -456,6 +467,7 @@ async def dft_dataset_quality(
                 "adsorbate": adsorbate,
                 "year_min": year_min,
                 "year_max": year_max,
+                "library_name": normalize_library_name(library_name) if library_name is not None else None,
                 "reason": reason,
             },
             "safety_gate": "safe_verified_with_required_evidence",
@@ -476,6 +488,7 @@ async def dft_review_queue(
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
     paper_id: UUID | None = Query(default=None, description="Restrict queue to one paper"),
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
     reason: str | None = Query(default=None, description="Optional blocked reason filter"),
     status: str = Query(default="needs_review", description="needs_review, exportable, all, or a blocked reason"),
     limit: int = Query(default=100, ge=1, le=500),
@@ -487,6 +500,7 @@ async def dft_review_queue(
         year_min=year_min,
         year_max=year_max,
         paper_id=paper_id,
+        library_name=library_name,
         reason=reason,
         status=status,
         limit=limit,
@@ -500,6 +514,7 @@ async def compare_dft_results(
     catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
     year_min: int | None = Query(default=None),
     year_max: int | None = Query(default=None),
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
     min_confidence: float = Query(default=0.3, ge=0.0, le=1.0),
     status: str = Query(default="all", description="exportable, needs_review, or all"),
     limit: int = Query(default=100, ge=1, le=500),
@@ -521,6 +536,8 @@ async def compare_dft_results(
         stmt = stmt.where(P.year >= year_min)
     if year_max:
         stmt = stmt.where(P.year <= year_max)
+    if library_name is not None:
+        stmt = stmt.where(build_library_name_clause(P.library_name, library_name))
 
     rows = session.execute(stmt).all()
     catalyst_by_paper: dict[str, list] = defaultdict(list)
@@ -601,6 +618,7 @@ async def compare_dft_results(
             "property_type": property_type,
             "adsorbate": adsorbate,
             "catalyst_type": catalyst_type,
+            "library_name": normalize_library_name(library_name) if library_name is not None else None,
             "status": status,
         },
         "stats": stats,
@@ -610,8 +628,14 @@ async def compare_dft_results(
 
 
 @router.get("/aggregate")
-async def aggregate_papers(session: Session = Depends(get_db_session)):
-    dft_rows = session.scalars(select(DR).order_by(DR.adsorbate.asc().nulls_last())).all()
+async def aggregate_papers(
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
+    session: Session = Depends(get_db_session),
+):
+    dft_stmt = select(DR).join(P, DR.paper_id == P.id).order_by(DR.adsorbate.asc().nulls_last())
+    if library_name is not None:
+        dft_stmt = dft_stmt.where(build_library_name_clause(P.library_name, library_name))
+    dft_rows = session.scalars(dft_stmt).all()
     adsorbate_groups = defaultdict(list)
     for row in dft_rows:
         key_raw = (row.adsorbate or "").strip()
@@ -632,7 +656,10 @@ async def aggregate_papers(session: Session = Depends(get_db_session)):
             }
         )
 
-    cat_rows = session.scalars(select(CS).order_by(CS.name.asc().nulls_last())).all()
+    cat_stmt = select(CS).join(P, CS.paper_id == P.id).order_by(CS.name.asc().nulls_last())
+    if library_name is not None:
+        cat_stmt = cat_stmt.where(build_library_name_clause(P.library_name, library_name))
+    cat_rows = session.scalars(cat_stmt).all()
     catalyst_groups = defaultdict(list)
     for row in cat_rows:
         key_raw = (row.name or "").strip()
@@ -680,6 +707,7 @@ async def aggregate_papers(session: Session = Depends(get_db_session)):
             )
 
     return {
+        "library_name": normalize_library_name(library_name) if library_name is not None else None,
         "adsorbate_groups": dict(sorted(adsorbate_groups.items())),
         "catalyst_groups": dict(sorted(catalyst_groups.items())),
         "possible_name_aliases": aliases,

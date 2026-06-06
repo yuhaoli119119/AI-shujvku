@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample, DFTResult, DFTSetting, EvidenceLocator, Paper
 from app.services.dft_audit_service import DFTCompletenessAuditor
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
 
 
@@ -45,6 +46,7 @@ class DFTReviewQueueService:
         year_min: int | None = None,
         year_max: int | None = None,
         paper_id: UUID | None = None,
+        library_name: str | None = None,
         reason: str | None = None,
         status: str = "needs_review",
         limit: int = 100,
@@ -57,6 +59,7 @@ class DFTReviewQueueService:
                 year_min=year_min,
                 year_max=year_max,
                 paper_id=paper_id,
+                library_name=library_name,
             )
         ).all()
         gate_results = []
@@ -165,6 +168,7 @@ class DFTReviewQueueService:
                     "year_min": year_min,
                     "year_max": year_max,
                     "paper_id": str(paper_id) if paper_id else None,
+                    "library_name": normalize_library_name(library_name) if library_name is not None else None,
                     "reason": reason,
                     "status": status,
                 },
@@ -188,6 +192,7 @@ class DFTReviewQueueService:
         year_min: int | None,
         year_max: int | None,
         paper_id: UUID | None,
+        library_name: str | None,
     ):
         stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id).order_by(
             Paper.year.desc().nulls_last(),
@@ -204,6 +209,8 @@ class DFTReviewQueueService:
             stmt = stmt.where(Paper.year <= year_max)
         if paper_id:
             stmt = stmt.where(Paper.id == paper_id)
+        if library_name is not None:
+            stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
         return stmt
 
     def _row_payload(self, row: DFTResult, paper: Paper, gate: Any, locators: list[dict[str, Any]] | None = None) -> dict[str, Any]:
