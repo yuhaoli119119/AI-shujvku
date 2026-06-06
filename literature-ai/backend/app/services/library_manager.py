@@ -68,6 +68,12 @@ class LibraryManager:
             return tuple(sorted(DEFAULT_LIBRARY_ALIASES))
         return (normalized,)
 
+    @staticmethod
+    def _force_configured_database() -> bool:
+        from app.config import get_settings
+
+        return bool(getattr(get_settings(), "force_configured_database", False))
+
     def list_libraries(self) -> list[LibraryInfo]:
         registry = self._read_registry()
         active_name = self.normalize_library_name(registry.get("active_library"))
@@ -101,7 +107,8 @@ class LibraryManager:
 
         now_iso = datetime.utcnow().isoformat()
         self.init_library_structure(root, storage_mode=SHARED_STORAGE_MODE)
-        self.init_library_db(root)
+        if not self._force_configured_database():
+            self.init_library_db(root)
         self._write_library_meta(
             root=root,
             payload=self._build_library_meta(
@@ -147,16 +154,16 @@ class LibraryManager:
         meta = self._load_library_meta(root)
         storage_mode = self._resolve_storage_mode(root, meta)
         self.init_library_structure(root, storage_mode=storage_mode)
-        db_path = root / "database.sqlite"
-        if not db_path.exists():
-            self.init_library_db(root)
+        if not self._force_configured_database():
+            db_path = root / "database.sqlite"
+            if not db_path.exists():
+                self.init_library_db(root)
+            from app.db.session import switch_database
 
-        from app.db.session import switch_database
-
-        switch_database(
-            f"sqlite:///{db_path.as_posix()}",
-            storage_root=str(self._storage_root_for_mode(root, storage_mode)),
-        )
+            switch_database(
+                f"sqlite:///{db_path.as_posix()}",
+                storage_root=str(self._storage_root_for_mode(root, storage_mode)),
+            )
 
         registry["active_library"] = normalized_name
         self._write_registry(registry)
@@ -215,15 +222,16 @@ class LibraryManager:
                 default_meta = self._load_library_meta(default_root)
                 default_mode = self._resolve_storage_mode(default_root, default_meta)
                 self.init_library_structure(default_root, storage_mode=default_mode)
-                db_path = default_root / "database.sqlite"
-                if not db_path.exists():
-                    self.init_library_db(default_root)
-                from app.db.session import switch_database
+                if not self._force_configured_database():
+                    db_path = default_root / "database.sqlite"
+                    if not db_path.exists():
+                        self.init_library_db(default_root)
+                    from app.db.session import switch_database
 
-                switch_database(
-                    f"sqlite:///{db_path.as_posix()}",
-                    storage_root=str(self._storage_root_for_mode(default_root, default_mode)),
-                )
+                    switch_database(
+                        f"sqlite:///{db_path.as_posix()}",
+                        storage_root=str(self._storage_root_for_mode(default_root, default_mode)),
+                    )
 
         self._write_registry(registry)
         return info
@@ -353,7 +361,7 @@ class LibraryManager:
         assert default_entry is not None
         default_root = Path(default_entry["root_path"]).resolve()
         self.init_library_structure(default_root, storage_mode=LEGACY_STORAGE_MODE)
-        if not (default_root / "database.sqlite").exists():
+        if not self._force_configured_database() and not (default_root / "database.sqlite").exists():
             self.init_library_db(default_root)
         default_meta = self._build_library_meta(
             name=DEFAULT_LIBRARY_NAME,

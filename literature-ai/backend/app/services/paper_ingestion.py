@@ -728,11 +728,14 @@ class PaperIngestionService:
                     self.session.add(db_dp)
                     self.session.flush()
 
-                    unit_str = f" {db_dp.unit}" if db_dp.unit else ""
-                    val_str = f": {db_dp.metric_value}" if db_dp.metric_value is not None else ""
-                    sample_str = f" for {db_dp.sample_label}" if db_dp.sample_label else ""
-                    fig_str = f" (from Figure {figure.caption or ''})"
-                    text_evidence = f"{db_dp.metric_name}{val_str}{unit_str}{sample_str}{fig_str}"
+                    text_evidence = self._figure_data_evidence_text(
+                        metric_name=db_dp.metric_name,
+                        metric_value=db_dp.metric_value,
+                        unit=db_dp.unit,
+                        sample_label=db_dp.sample_label,
+                        conditions=db_dp.conditions,
+                        figure_caption=figure.caption,
+                    )
 
                     evidence = EvidenceSpan(
                         paper_id=paper.id,
@@ -763,6 +766,23 @@ class PaperIngestionService:
                         bbox=bbox,
                         parser_source="docling" if bbox else "fallback",
                     )
+
+    @staticmethod
+    def _figure_data_evidence_text(
+        *,
+        metric_name: str,
+        metric_value: float | None,
+        unit: str | None,
+        sample_label: str | None,
+        conditions: dict | None,
+        figure_caption: str | None,
+    ) -> str:
+        unit_str = f" {unit}" if unit else ""
+        val_str = f": {metric_value}" if metric_value is not None else ""
+        sample_str = f" for {sample_label}" if sample_label else ""
+        conditions_str = f" under {conditions}" if conditions else ""
+        fig_str = f" (from Figure {figure_caption or ''})"
+        return f"{metric_name}{val_str}{unit_str}{sample_str}{conditions_str}{fig_str}"
 
     def _add_section_with_chunks(
         self,

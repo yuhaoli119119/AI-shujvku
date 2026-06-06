@@ -3,10 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import func, select
 
 from app.config import get_settings
+from app.db.models import Paper
+from app.db.session import session_scope
 from app.schemas.api import LibraryCreateRequest, LibraryImportRequest, LibraryInfoResponse
 from app.services.library_manager import LibraryManager
+from app.utils.library_names import build_library_name_clause
 from app.utils.active_database import activate_active_library_database, get_active_database_info
 from app.utils.project_paths import resolve_data_mount_path
 
@@ -22,14 +26,28 @@ def _get_manager() -> LibraryManager:
     return _manager
 
 
+def _configured_database_library_count(library_name: str) -> int | None:
+    settings = get_settings()
+    if not bool(getattr(settings, "force_configured_database", False)):
+        return None
+    with session_scope(settings.database_url) as session:
+        stmt = select(func.count(Paper.id)).where(build_library_name_clause(Paper.library_name, library_name))
+        return int(session.scalar(stmt) or 0)
+
+
 def _effective_active_library_response(lib) -> LibraryInfoResponse:
     payload = lib.model_dump()
     info = get_active_database_info()
     effective_db_path = info.get("effective_db_path")
     effective_total = info.get("effective_db_papers_total")
     active_name = info.get("active_library")
+    configured_count = _configured_database_library_count(str(payload.get("name") or ""))
 
-    if payload.get("is_active") and effective_db_path:
+    if configured_count is not None:
+        payload["paper_count"] = configured_count
+        if active_name and payload.get("name") == active_name:
+            payload["is_active"] = True
+    elif payload.get("is_active") and effective_db_path:
         payload["root_path"] = str(Path(str(effective_db_path)).resolve().parent)
         payload["paper_count"] = int(effective_total or 0)
     elif active_name and payload.get("name") == active_name and effective_db_path:

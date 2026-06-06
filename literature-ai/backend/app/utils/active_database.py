@@ -124,6 +124,31 @@ def _sqlite_candidate_summary(path: Path) -> dict[str, Any]:
     return summary
 
 
+def _configured_database_paper_counts(database_url: str, active_library: str | None) -> dict[str, int]:
+    try:
+        from sqlalchemy import text
+
+        from app.db.session import get_engine
+    except Exception:
+        return {"papers_total": 0, "active_library_papers_total": 0}
+
+    try:
+        with get_engine(database_url).connect() as connection:
+            total = int(connection.execute(text("SELECT COUNT(*) FROM papers")).scalar() or 0)
+            active_total = total
+            if active_library:
+                active_total = int(
+                    connection.execute(
+                        text("SELECT COUNT(*) FROM papers WHERE library_name = :library_name"),
+                        {"library_name": active_library},
+                    ).scalar()
+                    or 0
+                )
+            return {"papers_total": total, "active_library_papers_total": active_total}
+    except Exception:
+        return {"papers_total": 0, "active_library_papers_total": 0}
+
+
 def get_registered_active_library_info() -> dict[str, Any]:
     registry_path = canonical_registry_path().resolve()
     payload = _load_json(registry_path)
@@ -275,6 +300,7 @@ def get_active_database_info() -> dict[str, Any]:
     force_configured_database = bool(getattr(settings, "force_configured_database", False))
 
     if force_configured_database and configured_kind != "sqlite":
+        configured_counts = _configured_database_paper_counts(database_url, active_library)
         return {
             "db_kind": configured_kind,
             "db_path": None,
@@ -283,14 +309,16 @@ def get_active_database_info() -> dict[str, Any]:
             "configured_db_path": configured_path,
             "configured_db_url_masked": _mask_url(database_url),
             "active_library": active_library,
-            "active_library_db_path": active_library_database_path,
+            "active_library_db_path": None,
+            "active_library_root": registered_active.get("active_library_root"),
             "matches_active_library_db_path": False,
             "configured_matches_active_library_db_path": False,
             "is_active_library_sqlite": False,
             "effective_db_path": None,
             "effective_storage_root": str(Path(settings.storage_root).resolve()),
             "effective_db_has_papers_table": False,
-            "effective_db_papers_total": 0,
+            "effective_db_papers_total": configured_counts["active_library_papers_total"],
+            "configured_db_papers_total": configured_counts["papers_total"],
             "effective_matches_active_library_db_path": False,
             "recovered_from_candidate_scan": False,
             "force_configured_database": True,

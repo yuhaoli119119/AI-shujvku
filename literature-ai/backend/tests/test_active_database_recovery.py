@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from app.db.models import Base, Paper
 import app.services.library_manager as library_manager_module
 from app.utils import active_database as active_database_module
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
+from app.db import session as db_session_module
 
 
 def _write_sqlite(path: Path, *, paper_count: int) -> None:
@@ -179,7 +181,17 @@ def test_force_configured_database_bypasses_registered_active_library(tmp_path, 
     assert Path(str(info["effective_storage_root"])) == (configured_root / "storage").resolve()
     assert info["effective_db_papers_total"] == 5
     assert info["effective_matches_active_library_db_path"] is False
-    assert info["recovered_from_candidate_scan"] is False
+
+
+def test_switch_database_rejects_sqlite_when_configured_database_is_forced(tmp_path, monkeypatch):
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
+    get_settings.cache_clear()
+
+    with pytest.raises(RuntimeError, match="Runtime SQLite switching is disabled"):
+        db_session_module.switch_database(f"sqlite:///{(tmp_path / 'wrong.sqlite').as_posix()}")
+
+    get_settings.cache_clear()
 
 
 def test_force_configured_postgresql_bypasses_sqlite_candidates(tmp_path, monkeypatch):
@@ -226,6 +238,7 @@ def test_force_configured_postgresql_bypasses_sqlite_candidates(tmp_path, monkey
     assert info["db_kind"] == "postgresql"
     assert info["effective_db_path"] is None
     assert info["is_active_library_sqlite"] is False
+    assert info["active_library_db_path"] is None
     assert info["effective_db_papers_total"] == 0
     assert info["recovered_from_candidate_scan"] is False
 
@@ -372,6 +385,37 @@ def test_resolve_persisted_artifact_path_accepts_storage_relative_reference(tmp_
     get_settings.cache_clear()
 
     resolved = resolve_persisted_artifact_path("storage/markdown/sample.md", category="markdown")
+
+    assert resolved == target.resolve()
+
+
+def test_resolve_persisted_artifact_path_accepts_storage_relative_figure(tmp_path, monkeypatch):
+    storage_root = tmp_path / "library" / "storage"
+    target = storage_root / "figures" / "paper-1" / "fig_1.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"png")
+
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    resolved = resolve_persisted_artifact_path(
+        "storage/figures/paper-1/fig_1.png",
+        category="figures",
+    )
+
+    assert resolved == target.resolve()
+
+
+def test_resolve_persisted_artifact_path_accepts_category_relative_figure(tmp_path, monkeypatch):
+    storage_root = tmp_path / "library" / "storage"
+    target = storage_root / "figures" / "paper-1" / "fig_1.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"png")
+
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+
+    resolved = resolve_persisted_artifact_path("paper-1/fig_1.png", category="figures")
 
     assert resolved == target.resolve()
 

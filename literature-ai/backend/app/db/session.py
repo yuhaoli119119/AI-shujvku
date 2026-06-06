@@ -638,6 +638,15 @@ def switch_database(database_url: str, storage_root: str | None = None) -> None:
     from app.config import get_settings
 
     settings = get_settings()
+    if (
+        bool(getattr(settings, "force_configured_database", False))
+        and database_url.strip().lower().startswith("sqlite")
+        and not settings.database_url.strip().lower().startswith("sqlite")
+    ):
+        raise RuntimeError(
+            "Runtime SQLite switching is disabled because LITAI_FORCE_CONFIGURED_DATABASE=true "
+            f"and the configured database is {settings.database_url!r}."
+        )
     old_url = settings.database_url
 
     # Dispose old engine if it exists

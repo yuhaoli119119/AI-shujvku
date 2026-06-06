@@ -7,6 +7,7 @@ def test_default_library_name_is_real_utf8_text() -> None:
     assert DEFAULT_LIBRARY_NAME == "默认文献库"
     assert normalize_library_name(None) == "默认文献库"
     assert normalize_library_name("榛樿鏂囩尞搴?") == "默认文献库"
+    assert normalize_library_name("Codex ????????") == "默认文献库"
 
 
 def test_non_ascii_library_name_matches_legacy_question_mark_damage() -> None:

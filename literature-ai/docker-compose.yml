@@ -44,7 +44,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
-      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-false}
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
@@ -102,7 +102,7 @@ services:
       --max-tasks-per-child=${LITAI_CELERY_MAX_TASKS_PER_CHILD:-5}
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
-      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-false}
+      LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070

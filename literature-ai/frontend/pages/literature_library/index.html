@@ -24,7 +24,7 @@
             否则检索、下载、切库、AI 接口都会失真或直接失败。
         </div>
 
-        <div class="toolbar">
+        <div class="toolbar" id="mainToolbar">
             <div class="toolbar-row">
                 <span class="toolbar-label">当前库：</span>
                 <select id="librarySelect" class="library-select" onchange="activateLibraryByName(this.value)">
@@ -82,6 +82,9 @@
                     <span id="pageInfo" class="toolbar-label">第 1 页</span>
                     <button class="btn ghost small" id="nextBtn" onclick="nextPage()">下一页</button>
                 </div>
+                <button class="btn ghost small" onclick="toggleSidebar()" id="toggleSidebarBtn" style="margin-left: 12px;">隐藏列表</button>
+                <button class="btn ghost small" onclick="toggleWorkspace()" id="toggleWorkspaceBtn">隐藏详情</button>
+                <button class="btn ghost small" onclick="toggleDashboard()" id="dashboardToggleBtn" style="margin-left: 8px;">收起面板</button>
             </div>
         </div>
 

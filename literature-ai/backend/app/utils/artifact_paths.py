@@ -111,6 +111,10 @@ def resolve_persisted_artifact_path(
     direct_candidates = [Path(raw), Path(stripped)]
     direct_candidates.extend(_storage_relative_candidates(runtime_settings, raw, category))
     direct_candidates.extend(_storage_relative_candidates(runtime_settings, stripped, category))
+    stripped_path = Path(stripped)
+    if category and category in runtime_settings.storage_paths and not stripped_path.is_absolute():
+        direct_candidates.append(runtime_settings.storage_paths[category] / stripped_path)
+        direct_candidates.append(runtime_settings.storage_root / stripped_path)
     basename = _basename(stripped)
     if basename:
         for root in _search_roots(runtime_settings, category):

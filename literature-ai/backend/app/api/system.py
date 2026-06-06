@@ -19,6 +19,30 @@ async def get_db_info() -> dict:
 
     settings = get_settings()
     info = get_active_database_info()
+    configured_db_papers_total = info.get("configured_db_papers_total")
+    effective_db_papers_total = info.get("effective_db_papers_total")
+    if info.get("db_kind") == "postgresql":
+        try:
+            from sqlalchemy import text
+
+            from app.db.session import get_engine
+
+            with get_engine(settings.database_url).connect() as connection:
+                configured_db_papers_total = int(
+                    connection.execute(text("SELECT COUNT(*) FROM papers")).scalar() or 0
+                )
+                if info.get("active_library"):
+                    effective_db_papers_total = int(
+                        connection.execute(
+                            text("SELECT COUNT(*) FROM papers WHERE library_name = :library_name"),
+                            {"library_name": info["active_library"]},
+                        ).scalar()
+                        or 0
+                    )
+                else:
+                    effective_db_papers_total = configured_db_papers_total
+        except Exception:
+            pass
 
     return {
         "database_url_masked": info["db_url_masked"],
@@ -31,15 +55,24 @@ async def get_db_info() -> dict:
         "matches_active_library_db_path": info["matches_active_library_db_path"],
         "effective_db_path": info.get("effective_db_path"),
         "effective_storage_root": info.get("effective_storage_root"),
-        "effective_db_papers_total": info.get("effective_db_papers_total"),
+        "effective_db_papers_total": effective_db_papers_total,
+        "configured_db_papers_total": configured_db_papers_total,
         "effective_matches_active_library_db_path": info.get("effective_matches_active_library_db_path"),
         "recovered_from_candidate_scan": info.get("recovered_from_candidate_scan"),
+        "force_configured_database": info.get("force_configured_database"),
     }
 
 
 @router.post("/switch-db", deprecated=True)
 async def switch_db(payload: SwitchDbPayload) -> dict:
     """已废弃。请改用 POST /api/libraries/{name}/activate 切换库。"""
+    from app.config import get_settings
+
+    if bool(getattr(get_settings(), "force_configured_database", False)):
+        raise HTTPException(
+            status_code=400,
+            detail="Runtime SQLite switching is disabled because LITAI_FORCE_CONFIGURED_DATABASE=true.",
+        )
     url = payload.database_url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="database_url is required")
@@ -57,6 +90,13 @@ async def switch_db(payload: SwitchDbPayload) -> dict:
 @router.post("/upload-db", deprecated=True)
 async def upload_db(file: UploadFile = File(...)) -> dict:
     """已废弃。请改用 POST /api/libraries 或 POST /api/libraries/import 管理库。"""
+    from app.config import get_settings
+
+    if bool(getattr(get_settings(), "force_configured_database", False)):
+        raise HTTPException(
+            status_code=400,
+            detail="Runtime SQLite upload/switch is disabled because LITAI_FORCE_CONFIGURED_DATABASE=true.",
+        )
     if not file.filename or not file.filename.lower().endswith((".sqlite", ".db", ".sqlite3")):
         raise HTTPException(status_code=400, detail="只允许 SQLite 文件 (.sqlite, .db, .sqlite3)")
 

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.config import get_settings
+from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 router = APIRouter()
 
@@ -11,20 +12,19 @@ router = APIRouter()
 @router.get("/assets/{filename:path}")
 async def get_asset(filename: str):
     settings = get_settings()
-    candidates = [
-        settings.storage_paths["figures"] / filename,
-        settings.storage_paths["tables"] / filename,
-    ]
-    file_path = None
-    for candidate in candidates:
-        try:
-            resolved = candidate.resolve()
-            resolved.relative_to(candidate.parents[1].resolve())
-        except (OSError, ValueError, IndexError):
-            continue
-        if resolved.exists() and resolved.is_file():
-            file_path = resolved
-            break
+    file_path = resolve_persisted_artifact_path(
+        filename,
+        category="figures",
+        settings=settings,
+        must_exist=True,
+    )
+    if file_path is None:
+        file_path = resolve_persisted_artifact_path(
+            filename,
+            category="tables",
+            settings=settings,
+            must_exist=True,
+        )
     if file_path is None:
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(str(file_path))

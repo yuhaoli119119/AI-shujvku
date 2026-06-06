@@ -20,7 +20,7 @@ def _tokenize(text: str) -> set[str]:
 class Retriever:
     """Hybrid lexical + embedding retriever over sections, facts, claims, and writing cards."""
 
-    def __init__(self, session: Session, embedding_dimension: int = 1536, embedding: EmbeddingService | None = None) -> None:
+    def __init__(self, session: Session, embedding_dimension: int = 1024, embedding: EmbeddingService | None = None) -> None:
         self.session = session
         self.embedding = embedding or DeterministicEmbeddingService(embedding_dimension)
 
@@ -146,7 +146,17 @@ class Retriever:
         vector_literal = "[" + ",".join(f"{float(item):.8f}" for item in query_embedding) + "]"
         query_vector = sa.cast(sa.literal(vector_literal), PaperChunk.embedding.type)
         distance = PaperChunk.embedding.op("<=>")(query_vector)
-        pg_query = query.where(PaperChunk.embedding.is_not(None)).order_by(distance.asc()).limit(limit)
+        pg_query = (
+            query.where(PaperChunk.embedding.is_not(None))
+            .where(
+                sa.or_(
+                    PaperChunk.embedding_dimension.is_(None),
+                    PaperChunk.embedding_dimension == len(query_embedding),
+                )
+            )
+            .order_by(distance.asc())
+            .limit(limit)
+        )
         try:
             return list(self.session.scalars(pg_query).all())
         except Exception:

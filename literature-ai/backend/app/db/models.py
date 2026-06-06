@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime
 
@@ -56,7 +57,7 @@ def json_type():
     return JSONB().with_variant(sa.JSON(), "sqlite")
 
 
-EMBEDDING_DIMENSION = 1536
+EMBEDDING_DIMENSION = int(os.getenv("LITAI_EMBEDDING_DIMENSION", "1024"))
 
 
 class Paper(Base):
@@ -133,7 +134,7 @@ class PaperSection(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
-    section_title: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    section_title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     section_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     text: Mapped[str] = mapped_column(sa.Text)
     page_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
@@ -213,7 +214,7 @@ class CatalystSample(Base):
     coordination: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     support: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     synthesis_method: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    evidence_strength: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    evidence_strength: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
 
 class DFTSetting(Base):
@@ -242,7 +243,7 @@ class DFTResult(Base):
     property_type: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
     value: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
-    reaction_step: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    reaction_step: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     source_section: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     source_figure: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
@@ -315,8 +316,8 @@ class EvidenceSpan(Base):
     text: Mapped[str] = mapped_column(sa.Text)
     page: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     section: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
-    figure: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
-    table: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    figure: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    table: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
 
 

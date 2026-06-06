@@ -108,6 +108,8 @@ def test_vlm_level3_extraction_and_rag_integration():
                 cap_ev = next(x for x in db_evs if "capacity" in x.text)
                 assert cap_ev.object_type == "figure_data"
                 assert cap_ev.figure == "Figure 3. Capacity voltage profiles."
+                assert "current_density" in cap_ev.text
+                assert "0.1C" in cap_ev.text
                 
                 # 4. 验证 Retriever 混合检索 FigureDataPoint 的召回与打分
                 retriever = Retriever(session)

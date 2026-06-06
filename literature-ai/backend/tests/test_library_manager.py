@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from app.config import get_settings
 from app.services.library_manager import (
     DEFAULT_LIBRARY_NAME,
     LEGACY_STORAGE_MODE,
@@ -71,6 +72,30 @@ def test_default_library_stays_on_legacy_storage(isolated_manager, monkeypatch):
 
     assert calls
     assert calls[-1][1].endswith(str(Path(LEGACY_STORAGE_MODE)))
+
+
+def test_force_configured_database_does_not_create_or_switch_sqlite(tmp_path, monkeypatch):
+    registry_path = tmp_path / "registry.json"
+    default_root = tmp_path / "default-library"
+    monkeypatch.setattr(LibraryManager, "REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(LibraryManager, "DEFAULT_LIBRARY_ROOT", default_root)
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
+    get_settings.cache_clear()
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_switch_database(database_url: str, storage_root: str | None = None) -> None:
+        calls.append((database_url, storage_root or ""))
+
+    monkeypatch.setattr("app.db.session.switch_database", fake_switch_database)
+    manager = LibraryManager()
+    activated = manager.activate_library(DEFAULT_LIBRARY_NAME)
+
+    assert activated.is_active is True
+    assert calls == []
+    assert not (default_root / "database.sqlite").exists()
+    get_settings.cache_clear()
 
 
 def test_create_library_uses_selected_parent_directory(isolated_manager, tmp_path):

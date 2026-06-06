@@ -10,6 +10,7 @@ DEFAULT_LIBRARY_NAME = "默认文献库"
 DEFAULT_LIBRARY_ALIASES = {
     DEFAULT_LIBRARY_NAME,
     "?????",
+    "Codex ????????",
     "榛樿鏂囩尞搴?",
     "茅禄聵猫庐陇忙聳聡莽聦庐氓潞聯",
     "姒涙顓婚弬鍥╁盀鎼?",

@@ -661,6 +661,36 @@ function renderMetadataDiagnostics(data, container) {
     container.innerHTML = html;
 }
 
+function toggleDashboard() {
+    const toolbar = $("mainToolbar");
+    if (!toolbar) return;
+    toolbar.classList.toggle("collapsed");
+    const btn = $("dashboardToggleBtn");
+    if (btn) {
+        btn.textContent = toolbar.classList.contains("collapsed") ? "展开面板" : "收起面板";
+    }
+}
+
+function toggleSidebar() {
+    const layout = document.querySelector(".layout");
+    if (!layout) return;
+    layout.classList.toggle("hide-sidebar");
+    const btn = $("toggleSidebarBtn");
+    if (btn) {
+        btn.textContent = layout.classList.contains("hide-sidebar") ? "展开列表" : "隐藏列表";
+    }
+}
+
+function toggleWorkspace() {
+    const layout = document.querySelector(".layout");
+    if (!layout) return;
+    layout.classList.toggle("hide-workspace");
+    const btn = $("toggleWorkspaceBtn");
+    if (btn) {
+        btn.textContent = layout.classList.contains("hide-workspace") ? "展开详情" : "隐藏详情";
+    }
+}
+
 Object.assign(window, {
     openAddLiteraturePanel: openAddLiteraturePanel,
     closeAddLiteraturePanel: closeAddLiteraturePanel,
@@ -678,6 +708,9 @@ Object.assign(window, {
     switchTab: switchTab,
     openMetadataDiagnostics: openMetadataDiagnostics,
     closeMetadataDiagnostics: closeMetadataDiagnostics,
+    toggleDashboard: toggleDashboard,
+    toggleSidebar: toggleSidebar,
+    toggleWorkspace: toggleWorkspace,
     fetchPapers: fetchPapers,
     searchLocal: searchLocal,
     refreshCurrentPage: refreshCurrentPage,

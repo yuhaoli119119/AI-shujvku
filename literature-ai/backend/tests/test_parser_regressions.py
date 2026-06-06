@@ -2,6 +2,7 @@ import pytest
 import re
 from app.parsers.docling_parser import DoclingParser
 from app.parsers.grobid_parser import GrobidParser
+from app.services.paper_ingestion import PaperIngestionService
 from app.utils.figure_filtering import is_decorative_figure
 from lxml import etree
 
@@ -85,3 +86,17 @@ def test_dedupe_caption_odd_length():
     s4 = "Table 1. This is a very very long test data string"
     res2 = DoclingParser._dedupe_caption_text(s3 + s4)
     assert res2 == s3
+
+def test_figure_data_evidence_text_includes_conditions():
+    text = PaperIngestionService._figure_data_evidence_text(
+        metric_name="overpotential",
+        metric_value=100.0,
+        unit="mV",
+        sample_label="Pt/C",
+        conditions={"electrolyte": "0.1 M KOH"},
+        figure_caption="Fig. 2. HER activity.",
+    )
+
+    assert "0.1 M KOH" in text
+    assert "Pt/C" in text
+    assert "Fig. 2" in text
