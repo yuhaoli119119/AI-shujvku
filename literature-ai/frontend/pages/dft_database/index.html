@@ -102,7 +102,7 @@
     <section class="panel-card quality-panel" id="qualityPanel">
       <div>
         <div class="panel-actions" style="margin-bottom:8px;">
-          <strong>DFT 数据质量概览</strong>
+          <strong>DFT 候选质量概览</strong>
           <span title="只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。" style="cursor:help;color:var(--color-text-muted);font-size:14px;">ⓘ</span>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="loadQualityPanel()">↻ 刷新面板</button>
         </div>
@@ -125,17 +125,17 @@
 
     <section class="data-panel">
       <div class="panel-actions">
-        <strong id="resultSummary">0 条 DFT 记录</strong>
+        <strong id="resultSummary">0 条 DFT 候选记录</strong>
         <button class="btn btn-ghost btn-sm" onclick="queryDFT()">↻ 刷新</button>
       </div>
       <div class="table-container">
         <table id="dftTable">
           <thead>
             <tr>
-              <th>催化剂</th><th>吸附物</th><th>能量类型</th><th>数值</th><th>章节 / 步骤</th><th>置信度</th><th>证据</th><th>来源文献</th>
+              <th>催化剂</th><th>吸附物</th><th>能量类型</th><th>数值</th><th>章节 / 步骤</th><th>状态 / 置信度</th><th>证据</th><th>来源文献</th>
             </tr>
           </thead>
-          <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载 DFT 记录中...</td></tr></tbody>
+          <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载 DFT 候选记录中...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -175,6 +175,13 @@
         rejected: "人工已拒绝",
       };
       return labels[status] || String(status || "-").replace(/_/g, " ");
+    }
+    function validationStatusLabel(status) {
+      const labels = {
+        validated: "已校验可导出",
+        needs_review: "需审核",
+      };
+      return labels[status] || String(status || "needs_review").replace(/_/g, " ");
     }
     function locatorStatusLabel(status) {
       const labels = {
@@ -248,15 +255,15 @@
       if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
       if (catalyst) url += `&catalyst_type=${encodeURIComponent(catalyst)}`;
       const list = document.getElementById("dftList");
-      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询 DFT 记录...</td></tr>';
+      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询 DFT 候选记录...</td></tr>';
       try {
         const data = await fetchJSON(url);
         let items = data.items || [];
         if (!prop) items = items;
         const validationStatus = document.getElementById("validationStatus").value;
-        if (validationStatus) items = items.filter(item => (item.validation_status || "validated") === validationStatus);
+        if (validationStatus) items = items.filter(item => (item.validation_status || "needs_review") === validationStatus);
         state.items = items;
-        renderStats(data.stats || {}, items.length);
+        renderStats(buildStats(items), items.length);
         renderRows(items);
         loadQualityPanel();
       } catch (error) {
@@ -390,10 +397,10 @@
     function renderQualityRows(rows) {
       const el = document.getElementById("qualityRows");
       const title = document.getElementById("qualityListTitle");
-      if (title) title.textContent = state.qualityReason ? ("处理原因：" + reasonLabel(state.qualityReason)) : "需要处理的记录";
+      if (title) title.textContent = state.qualityReason ? ("处理原因：" + reasonLabel(state.qualityReason)) : "需要处理的候选记录";
       if (!el) return;
       if (!rows.length) {
-        el.innerHTML = '<div class="empty-state">当前筛选下没有需要处理的 DFT 记录。</div>';
+        el.innerHTML = '<div class="empty-state">当前筛选下没有需要处理的 DFT 候选记录。</div>';
         return;
       }
       const blockedRows = rows.filter(row => !row.is_exportable);
@@ -429,13 +436,13 @@
       if (!el) return;
       const flagged = (items || []).filter(item => (item.hints || []).length);
       if (!flagged.length) {
-        el.innerHTML = '<div class="quality-meta">完整性提示：当前筛选下没有发现催化剂或 DFT 设置缺失提示。</div>';
+        el.innerHTML = '<div class="quality-meta">论文级处理提示：当前筛选下没有发现含 DFT 候选且需要补材料的论文。</div>';
         return;
       }
-      el.innerHTML = '<div class="quality-meta"><strong>完整性提示</strong></div>' + flagged.slice(0, 8).map(item => {
+      el.innerHTML = '<div class="quality-meta"><strong>论文级处理提示</strong>：仅列出当前筛选下含 DFT 候选且存在风险的 ' + esc(flagged.length) + ' 篇论文。</div>' + flagged.slice(0, 8).map(item => {
         return '<div class="completeness-row">' +
           '<div class="quality-meta"><a href="' + esc(item.library_detail_url || "#") + '">' + esc(item.title || item.paper_id || "Paper") + '</a></div>' +
-          '<div class="quality-meta">DFT 结果可导出/需处理：' + esc(item.exportable_dft_results || 0) + '/' + esc(item.blocked_dft_results || 0) + '；催化剂样本：' + esc(item.catalyst_samples || 0) + '；DFT 设置：' + esc(item.dft_settings || 0) + '</div>' +
+          '<div class="quality-meta">可导出 DFT：' + esc(item.exportable_dft_results || 0) + '；需处理 DFT：' + esc(item.blocked_dft_results || 0) + '；催化剂样本：' + esc(item.catalyst_samples || 0) + '；DFT 设置：' + esc(item.dft_settings || 0) + '</div>' +
           '<div class="quality-meta">提示：' + esc((item.hints || []).map(completenessHintLabel).join("；")) + '</div>' +
         '</div>';
       }).join("");
@@ -447,25 +454,39 @@
       document.getElementById("statMin").textContent = stats.min != null ? `${stats.min} ${stats.unit || ""}` : "-";
       document.getElementById("statMax").textContent = stats.max != null ? `${stats.max} ${stats.unit || ""}` : "-";
       document.getElementById("statMean").textContent = stats.mean != null ? `${stats.mean} ${stats.unit || ""}` : "-";
-      document.getElementById("resultSummary").textContent = `${count} 条 DFT 记录`;
+      document.getElementById("resultSummary").textContent = `${count} 条 DFT 候选记录`;
+    }
+    function buildStats(items) {
+      const values = (items || []).map(item => Number(item.value)).filter(value => Number.isFinite(value));
+      if (!values.length) return {};
+      const sum = values.reduce((total, value) => total + value, 0);
+      return {
+        count: values.length,
+        min: Math.round(Math.min(...values) * 10000) / 10000,
+        max: Math.round(Math.max(...values) * 10000) / 10000,
+        mean: Math.round((sum / values.length) * 10000) / 10000,
+        unit: (items.find(item => item.unit) || {}).unit || "",
+      };
     }
     function renderRows(items) {
       const list = document.getElementById("dftList");
       if (!items.length) {
-        list.innerHTML = '<tr><td colspan="8" class="empty-state">当前筛选条件下暂无 DFT 结果。</td></tr>';
+        list.innerHTML = '<tr><td colspan="8" class="empty-state">当前筛选条件下暂无 DFT 候选结果。</td></tr>';
         return;
       }
       list.innerHTML = items.map((item, idx) => {
         const catName = item.catalysts && item.catalysts[0] ? item.catalysts[0].name : "-";
         const conf = Number(item.confidence || 0);
         const cls = conf >= 0.8 ? "high" : conf >= 0.5 ? "medium" : "low";
+        const validation = item.validation_status || "needs_review";
+        const validationColor = validation === "validated" ? "var(--color-success)" : "var(--color-warning)";
         return `<tr>
           <td><strong>${esc(catName)}</strong></td>
           <td>${esc(item.adsorbate || "-")}</td>
           <td>${esc(item.property_type || "-")}</td>
           <td><strong>${item.value != null ? Number(item.value).toFixed(4) : "-"}</strong> ${esc(item.unit || "")}</td>
           <td>${esc(item.reaction_step || "-")}<div class="muted">${esc(item.source_section || "-")}</div></td>
-          <td><span class="confidence-badge ${cls}">${Math.round(conf * 100)}%</span></td>
+          <td><span style="display:inline-flex;color:${validationColor};font-weight:900;margin-bottom:4px;">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}">${Math.round(conf * 100)}%</span></td>
           <td><button class="evidence-link" onclick="showEvidence(${idx})">证据链接</button></td>
           <td><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}">${esc((item.title || "文献").slice(0, 42))}</a><div class="muted">${esc(item.doi || "无 DOI")}</div></td>
         </tr>`;
@@ -478,7 +499,7 @@
           '<div class="readable-field"><div class="k">来源章节</div><div class="v">' + esc(item.source_section || "-") + '</div></div>' +
           '<div class="readable-field"><div class="k">页码</div><div class="v">' + esc(item.page_start || "-") + '</div></div>' +
           '<div class="readable-field"><div class="k">置信度</div><div class="v">' + esc(item.confidence == null ? "-" : item.confidence) + '</div></div>' +
-          '<div class="readable-field"><div class="k">校验状态</div><div class="v">' + esc(item.validation_status || "validated") + '</div></div>' +
+          '<div class="readable-field"><div class="k">校验状态</div><div class="v">' + esc(validationStatusLabel(item.validation_status || "needs_review")) + '</div></div>' +
         '</div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">证据原文</div><div class="v">' + esc(item.evidence_text || "暂无证据原文") + '</div></div>';
       document.getElementById("validationSummary").textContent = item.evidence_text ? "已显示证据" : "这条记录缺少证据原文";

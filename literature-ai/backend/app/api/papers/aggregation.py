@@ -520,6 +520,7 @@ async def compare_dft_results(
             catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
             if not catalysts and catalyst_by_paper.get(pid):
                 continue
+        gate = is_export_eligible_extraction(session, dr, target_type="dft_results")
         items.append(
             {
                 "paper_id": pid,
@@ -537,6 +538,13 @@ async def compare_dft_results(
                 "source_section": dr.source_section,
                 "source_figure": dr.source_figure,
                 "catalysts": catalysts,
+                "is_exportable": gate.eligible,
+                "validation_status": "validated" if gate.eligible else "needs_review",
+                "blocked_reasons": list(gate.reasons),
+                "review_status": gate.review_status,
+                "review_gate_status": gate.review_gate_status,
+                "provenance_level": gate.provenance_level,
+                "locator_status": gate.locator_status,
             }
         )
 

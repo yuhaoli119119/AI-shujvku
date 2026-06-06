@@ -654,6 +654,18 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
     assert exportable_rows[0]["record_id"] == str(dft_result_id)
     assert exportable_rows[0]["recommended_action"] == "ready_for_ml_export"
 
+    compare_response = client.get(
+        "/api/papers/compare",
+        params={"property_type": "adsorption_energy", "min_confidence": 0.0},
+    )
+    assert compare_response.status_code == 200
+    compare_items = {item["adsorbate"]: item for item in compare_response.json()["items"]}
+    assert compare_items["Li"]["validation_status"] == "validated"
+    assert compare_items["Li"]["is_exportable"] is True
+    assert compare_items["Na"]["validation_status"] == "needs_review"
+    assert compare_items["Na"]["is_exportable"] is False
+    assert "missing_review" in compare_items["Na"]["blocked_reasons"]
+
     with Session() as session:
         reviews = session.scalars(
             select(ExtractionFieldReview).where(ExtractionFieldReview.target_id == str(dft_result_id))
