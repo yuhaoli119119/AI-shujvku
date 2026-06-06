@@ -40,7 +40,7 @@ function renderListBlock(title, items, formatter) {
         return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">暂无内容。</div></div>';
     }
     return items.map(function(item, index) {
-        return '<div class="section-card"><h3>' + esc(title) + " " + (items.length > 1 ? (index + 1) : "") + '</h3>' + formatter(item) + "</div>";
+        return '<details class="section-card"><summary><h3 style="margin:0;">' + esc(title) + " " + (items.length > 1 ? (index + 1) : "") + '</h3></summary><div style="margin-top:10px;">' + formatter(item) + '</div></details>';
     }).join("");
 }
 
@@ -372,13 +372,13 @@ function renderLocalizedSummary(detail) {
     const titleZh = detail.title_zh || (detail.comprehensive_analysis && detail.comprehensive_analysis.title_zh) || "";
     const abstractZh = detail.abstract_zh || (detail.comprehensive_analysis && detail.comprehensive_analysis.abstract_zh) || "";
     if (!titleZh && !abstractZh) return "";
-    return '<div class="section-card localized-summary-card">' +
-        '<h3>' + esc("\u4e2d\u6587\u9898\u76ee\u4e0e\u6458\u8981") + '</h3>' +
+    return '<details class="section-card localized-summary-card" open>' +
+        '<summary><h3>' + esc("\u4e2d\u6587\u9898\u76ee\u4e0e\u6458\u8981") + '</h3></summary>' +
         (titleZh ? '<div class="localized-title">' + esc(titleZh) + '</div>' : '') +
         (detail.title ? '<div class="subtle original-title">' + esc("\u82f1\u6587\u9898\u76ee\uff1a") + esc(detail.title) + '</div>' : '') +
         (abstractZh ? '<h4>' + esc("\u4e2d\u6587\u6458\u8981") + '</h4><div class="prewrap">' + esc(abstractZh) + '</div>' : '') +
         (detail.abstract ? '<details class="original-abstract"><summary>' + esc("\u67e5\u770b\u82f1\u6587\u6458\u8981") + '</summary><div class="prewrap">' + esc(detail.abstract) + '</div></details>' : '') +
-        '</div>';
+        '</details>';
 }
 
 function translationBlockTitle(rawTitle, index) {
@@ -550,7 +550,7 @@ const DFT_BLOCK_REASON_LABELS = {
 
 function codexItemActionHtml(itemType, item) {
     if (!itemType || !item || !item.id) return "";
-    return '<button class="btn ghost small" type="button" title="只复制此项、证据定位和邻近正文" onclick="copyCodexItem(\'' +
+    return '<button class="btn ghost small" type="button" title="只复制此项、证据定位和邻近正文" onclick="event.stopPropagation(); copyCodexItem(\'' +
         escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">复制此项给 Codex</button>';
 }
 
@@ -699,11 +699,13 @@ function renderReadableCards(title, items) {
         const itemType = CODEX_ITEM_TYPE_BY_CARD_TITLE[title];
         const action = codexItemActionHtml(itemType, item);
         const safety = title === "DFT 结果" ? renderDftItemSafety(item) : "";
-        return '<div class="section-card readable-card">' +
-            '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"><h3 style="margin:0;">' + esc(heading) + '</h3>' + action + '</div>' +
+        return '<details class="section-card readable-card">' +
+            '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3>' + action + '</div></summary>' +
+            '<div style="margin-top:10px;">' +
             renderReadableFields(item || {}, keys) +
             safety +
-        '</div>';
+            '</div>' +
+        '</details>';
     }).join("");
 }
 
@@ -713,7 +715,7 @@ function renderComprehensiveAnalysis(data) {
     }
     const summary = data.layman_summary || {};
     const logic = data.writing_logic || {};
-    return '<div class="section-card readable-card"><h3>综合解析</h3>' +
+    return '<details class="section-card readable-card" open><summary><h3>综合解析</h3></summary>' +
         renderReadableFields({
             one_sentence_takeaway: summary.one_sentence_takeaway,
             real_world_impact: summary.real_world_impact,
@@ -721,7 +723,7 @@ function renderComprehensiveAnalysis(data) {
             core_hypothesis: logic.core_hypothesis,
             conclusion_mapping: logic.conclusion_mapping
         }, ["one_sentence_takeaway", "real_world_impact", "research_gap", "core_hypothesis", "conclusion_mapping"]) +
-    '</div>';
+    '</details>';
 }
 
 function isLikelyNoisyFigure(item) {
@@ -957,7 +959,7 @@ function renderDetail(detail, audit) {
         "</div>";
 
     const baseInfo =
-        '<div class="section-card"><h3>基础信息</h3>' +
+        '<details class="section-card" open><summary><h3>基础信息</h3></summary>' +
             '<div class="inline-grid">' +
                 '<div class="key-value"><div class="k">文献库</div><div class="v">' + esc(detail.library_name || "-") + '</div></div>' +
                 '<div class="key-value"><div class="k">文献类型</div><div class="v">' + esc(paperTypeLabel(detail.paper_type)) + (detail.type_confidence ? ' (置信度 ' + detail.type_confidence + ')' : '') + '</div></div>' +
@@ -966,10 +968,10 @@ function renderDetail(detail, audit) {
                 '<div class="key-value"><div class="k">PDF 路径</div><div class="v">' + esc(detail.pdf_path || "-") + '</div></div>' +
                 '<div class="key-value"><div class="k">Markdown 路径</div><div class="v">' + esc(detail.markdown_path || "-") + '</div></div>' +
             "</div>" +
-        "</div>";
+        "</details>";
 
     const abstractCard =
-        '<div class="section-card"><h3>摘要</h3><div class="prewrap">' + esc(detail.abstract || "暂无摘要。") + "</div></div>";
+        '<details class="section-card" open><summary><h3>摘要</h3></summary><div class="prewrap">' + esc(detail.abstract || "暂无摘要。") + "</div></details>";
 
     const localizedSummaryCard = renderLocalizedSummary(detail);
     const comprehensiveCard = renderComprehensiveAnalysis(detail.comprehensive_analysis || {});
@@ -1050,10 +1052,11 @@ function renderDetail(detail, audit) {
             var figLabel = figNum !== null ? '图片 ' + figNum : '图片 ' + (index + 1);
             var codexAction = codexItemActionHtml("figure", item);
 
-            return '<div class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '">' +
-                   '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;"><h3 style="margin:0;">' + figLabel + '</h3>' + codexAction + '</div>' +
+            return '<details class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '">' +
+                   '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + figLabel + '</h3>' + codexAction + '</div></summary>' +
+                   '<div style="margin-top:10px;">' +
                    '<div class="prewrap">' + esc(item.caption || "无 caption") + "</div>" +
-                   summaryHtml + metaHtml + imgHtml + '</div>';
+                   summaryHtml + metaHtml + imgHtml + '</div></details>';
         }).join("");
         
         const figureNotice = noisyCount
@@ -1065,10 +1068,10 @@ function renderDetail(detail, audit) {
     }
 
     const pdfEvidenceEntry =
-        '<div class="section-card pdf-evidence-entry"><h3>PDF 证据定位</h3>' +
+        '<details class="section-card pdf-evidence-entry" open><summary><h3>PDF 证据定位</h3></summary>' +
             '<p>当前版本只在有精确页码时跳转到 PDF 页，并显示证据信息。</p>' +
             '<p class="subtle">请使用标题右侧的“' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '”入口。</p>' +
-        '</div>';
+        '</details>';
 
     let referenceCards = "";
     if (activeTab === "sections") {
