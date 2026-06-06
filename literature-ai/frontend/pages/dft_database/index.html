@@ -80,7 +80,7 @@
   <main class="shell">
     <section class="filter-panel">
       <div class="filter-grid">
-        <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="d_band_center">d_band_center</option><option value="">all</option></select></div>
+        <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option></select></div>
         <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
         <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
         <div class="filter-field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
@@ -208,11 +208,12 @@
     }
     function applyReadableDftLabels() {
       const propertyLabels = {
+        "": "全部",
         adsorption_energy: "吸附能",
         gibbs_free_energy_change: "Gibbs 自由能变化",
         reaction_barrier: "反应能垒",
+        band_gap: "带隙",
         d_band_center: "d 带中心",
-        "": "全部"
       };
       const catalystLabels = {
         "": "全部",
@@ -251,7 +252,8 @@
       const adsorbate = document.getElementById("adsorbate").value.trim();
       const catalyst = document.getElementById("catalystType").value;
       const minConf = document.getElementById("minConfidence").value || 0.3;
-      let url = `${API_BASE}/compare?property_type=${encodeURIComponent(prop || "adsorption_energy")}&min_confidence=${minConf}&limit=300`;
+      let url = `${API_BASE}/compare?min_confidence=${minConf}&limit=300`;
+      if (prop) url += `&property_type=${encodeURIComponent(prop)}`;
       if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
       if (catalyst) url += `&catalyst_type=${encodeURIComponent(catalyst)}`;
       const list = document.getElementById("dftList");
@@ -457,6 +459,11 @@
       document.getElementById("resultSummary").textContent = `${count} 条 DFT 候选记录`;
     }
     function buildStats(items) {
+      const propertyTypes = new Set((items || []).map(item => item.property_type || "").filter(Boolean));
+      const units = new Set((items || []).map(item => item.unit || "").filter(Boolean));
+      if (propertyTypes.size > 1 || units.size > 1) {
+        return { count: (items || []).length };
+      }
       const values = (items || []).map(item => Number(item.value)).filter(value => Number.isFinite(value));
       if (!values.length) return {};
       const sum = values.reduce((total, value) => total + value, 0);
@@ -586,10 +593,12 @@
       }
     }
     async function exportCSV() {
-      const prop = document.getElementById("propertyType").value || "adsorption_energy";
+      const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
-      let url = `/api/papers/export/csv?property_type=${encodeURIComponent(prop)}`;
-      if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
+      const params = new URLSearchParams();
+      if (prop) params.set("property_type", prop);
+      if (adsorbate) params.set("adsorbate", adsorbate);
+      let url = `/api/papers/export/csv?${params.toString()}`;
       const headers = {};
       const token = sessionStorage.getItem("litai-settings-token");
       if (token) headers["X-Settings-Token"] = token;
@@ -653,10 +662,12 @@
       }
     }
     async function exportMLDataset() {
-      const prop = document.getElementById("propertyType").value || "adsorption_energy";
+      const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
-      let url = `/api/papers/export/dft-dataset?property_type=${encodeURIComponent(prop)}`;
-      if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
+      const params = new URLSearchParams();
+      if (prop) params.set("property_type", prop);
+      if (adsorbate) params.set("adsorbate", adsorbate);
+      let url = `/api/papers/export/dft-dataset?${params.toString()}`;
       const headers = {};
       const token = sessionStorage.getItem("litai-settings-token");
       if (token) headers["X-Settings-Token"] = token;

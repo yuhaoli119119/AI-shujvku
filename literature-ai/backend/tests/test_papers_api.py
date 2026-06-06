@@ -802,6 +802,54 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         assert audit.target_id == str(row_id)
 
 
+def test_compare_dft_results_without_property_type_returns_all_types(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Mixed DFT result paper", year=2026, pdf_path="mixed.pdf")
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H2O",
+                    value=-0.42,
+                    unit="eV",
+                    evidence_text="The adsorption energy is -0.42 eV.",
+                    confidence=0.8,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="band_gap",
+                    adsorbate=None,
+                    value=1.6,
+                    unit="eV",
+                    evidence_text="The band gap is 1.6 eV.",
+                    confidence=0.85,
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    all_response = client.get("/api/papers/compare", params={"min_confidence": 0.0})
+    assert all_response.status_code == 200
+    all_data = all_response.json()
+    all_types = {item["property_type"] for item in all_data["items"]}
+    assert all_types == {"adsorption_energy", "band_gap"}
+    assert all_data["stats"] == {"count": 2}
+
+    filtered_response = client.get(
+        "/api/papers/compare",
+        params={"property_type": "adsorption_energy", "min_confidence": 0.0},
+    )
+    assert filtered_response.status_code == 200
+    filtered_types = {item["property_type"] for item in filtered_response.json()["items"]}
+    assert filtered_types == {"adsorption_energy"}
+
+
 def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, monkeypatch):
     monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
     monkeypatch.setenv("LITAI_WRITER_API_KEY", "")

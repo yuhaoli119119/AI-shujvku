@@ -473,7 +473,7 @@ async def dft_review_queue(
 
 @router.get("/compare")
 async def compare_dft_results(
-    property_type: str = Query(..., description="Property type to compare, e.g. adsorption_energy"),
+    property_type: str | None = Query(default=None, description="Optional property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Optional adsorbate filter, e.g. Li2S4"),
     catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
     year_min: int | None = Query(default=None),
@@ -485,11 +485,12 @@ async def compare_dft_results(
     stmt = (
         select(DR, P)
         .join(P, DR.paper_id == P.id)
-        .where(DR.property_type.ilike(f"%{property_type}%"))
         .where(DR.confidence >= min_confidence)
         .order_by(DR.value.asc().nulls_last())
         .limit(limit)
     )
+    if property_type:
+        stmt = stmt.where(DR.property_type.ilike(f"%{property_type}%"))
     if adsorbate:
         stmt = stmt.where(DR.adsorbate.ilike(f"%{adsorbate}%"))
     if year_min:
@@ -548,9 +549,11 @@ async def compare_dft_results(
             }
         )
 
+    property_types = {item["property_type"] for item in items if item.get("property_type")}
+    units = {item["unit"] for item in items if item.get("unit")}
     numeric_values = [item["value"] for item in items if item["value"] is not None]
-    stats = {}
-    if numeric_values:
+    stats = {"count": len(items)}
+    if numeric_values and len(property_types) <= 1 and len(units) <= 1:
         stats = {
             "count": len(numeric_values),
             "min": round(min(numeric_values), 4),
