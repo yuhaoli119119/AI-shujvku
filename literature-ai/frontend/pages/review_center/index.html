@@ -171,6 +171,9 @@
       top: var(--nav-height);
       z-index: 10;
     }
+    .col-divider {
+      border-right: 1px solid var(--color-border);
+    }
     .paper-title {
       max-width: 520px;
       font-weight: 900;
@@ -225,10 +228,11 @@
     }
     .actions {
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      min-width: 210px;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      align-items: center;
       justify-content: center;
+      gap: 8px;
     }
     .action-note {
       width: 100%;
@@ -332,10 +336,10 @@
             <tr>
               <th style="width: 40px; text-align: center;">#</th>
               <th style="width: 60px; text-align: center;">年份</th>
-              <th style="text-align: center;">文献标题</th>
-              <th style="width: 230px; text-align: center;">流程与质量</th>
-              <th style="width: 110px; text-align: center;">提取数据</th>
-              <th style="width: 220px; text-align: center;">操作</th>
+              <th class="col-divider" style="text-align: center;">文献标题</th>
+              <th class="col-divider" style="width: 300px; text-align: center;">流程与质量</th>
+              <th class="col-divider" style="width: 110px; text-align: center;">提取数据</th>
+              <th style="width: 280px; text-align: center;">操作</th>
             </tr>
           </thead>
           <tbody id="rows">
@@ -487,7 +491,8 @@
       const quality = getValue("qualityFilter");
       const q = getValue("searchBox").toLowerCase();
       return state.rows.filter(function (row) {
-        if (status && row.workflow_status !== status) return false;
+        if (status === "Needs_Human_Confirmation" && !row.needs_human_confirmation) return false;
+        if (status && status !== "Needs_Human_Confirmation" && row.workflow_status !== status) return false;
         if (quality && row.pdf_quality_status !== quality) return false;
         if (!q) return true;
         const haystack = [row.title, row.journal, row.year, row.workflow_status, row.pdf_quality_status].join(" ").toLowerCase();
@@ -529,9 +534,9 @@
         return '<tr>' +
           '<td style="text-align: center;"><span class="muted" style="font-size: 13px;">' + (idx + 1) + '</span></td>' +
           '<td style="text-align: center;"><span style="font-size: 13px;">' + yearDisp + '</span></td>' +
-          '<td><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
-          '<td><div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;">' + wfChip + qlChip + dftChip + '</div></td>' +
-          '<td style="text-align: center;"><div class="muted" style="display: inline-block; text-align: left; font-size: 13px; line-height: 1.6;">定位: <strong>' + esc(evidence) + '</strong><br>图表: <strong>' + esc(figureCount + tableCount) + '</strong></div></td>' +
+          '<td class="col-divider"><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
+          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + qlChip + dftChip + '</div></td>' +
+          '<td class="col-divider" style="text-align: center;"><div class="muted" style="display: inline-block; text-align: left; font-size: 13px; line-height: 1.6;">定位: <strong>' + esc(evidence) + '</strong><br>图表: <strong>' + esc(figureCount + tableCount) + '</strong></div></td>' +
           '<td><div class="actions">' +
             '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">' + esc(inspectTarget.label) + '</a>' +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +

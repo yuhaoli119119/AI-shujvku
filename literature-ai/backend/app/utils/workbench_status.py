@@ -40,6 +40,21 @@ FIGURE_CROP_STATUSES = (
 
 GEMINI_AUDIT_DECISIONS = ("PASS", "REVISE", "FLAG", "INSUFFICIENT")
 
+HUMAN_FINAL_WORKFLOW_STATUSES = {
+    "Human_Confirmed",
+    "ML_Ready",
+    "Citation_Ready",
+}
+
+HUMAN_REVIEW_REQUIRED_WORKFLOW_STATUSES = {
+    "Codex_Candidate",
+    "Gemini_Verified",
+    "Gemini_Revised",
+    "Gemini_Flagged",
+    "Evidence_Insufficient",
+    "Needs_Human_Confirmation",
+}
+
 
 def normalize_choice(value: Any, allowed: tuple[str, ...], default: str) -> str:
     text = str(value or "").strip()
@@ -64,3 +79,14 @@ def workflow_status_after_gemini(decision: str) -> str:
         "FLAG": "Gemini_Flagged",
         "INSUFFICIENT": "Evidence_Insufficient",
     }[normalized]
+
+
+def workflow_needs_human_confirmation(status: str | None, quality_report: dict[str, Any] | None = None) -> bool:
+    normalized = str(status or "Imported").strip() or "Imported"
+    if normalized in HUMAN_FINAL_WORKFLOW_STATUSES:
+        return False
+    if normalized in HUMAN_REVIEW_REQUIRED_WORKFLOW_STATUSES:
+        return True
+    if isinstance(quality_report, dict) and quality_report.get("needs_human_confirmation"):
+        return True
+    return False

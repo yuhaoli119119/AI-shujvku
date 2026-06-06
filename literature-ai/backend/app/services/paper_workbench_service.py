@@ -26,6 +26,7 @@ from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.workbench_status import (
     EXTRACTION_PROTOCOL_VERSION,
     WORKBENCH_SCHEMA_VERSION,
+    workflow_needs_human_confirmation,
     workflow_status_after_parsing,
 )
 
@@ -290,6 +291,7 @@ class PaperWorkbenchService:
                 or 0
             )
             quality_report = paper.pdf_quality_report if isinstance(paper.pdf_quality_report, dict) else {}
+            needs_human_confirmation = workflow_needs_human_confirmation(paper.workflow_status, quality_report)
             rows.append(
                 {
                     "paper_id": str(paper.id),
@@ -300,12 +302,7 @@ class PaperWorkbenchService:
                     "pdf_quality_status": paper.pdf_quality_status,
                     "pdf_quality_score": paper.pdf_quality_score,
                     "quality_reason": quality_report.get("reason"),
-                    "needs_human_confirmation": paper.workflow_status in {
-                        "Needs_Human_Confirmation",
-                        "Gemini_Flagged",
-                        "Evidence_Insufficient",
-                    }
-                    or bool(quality_report.get("needs_human_confirmation")),
+                    "needs_human_confirmation": needs_human_confirmation,
                     "has_dft_candidates": dft_count > 0,
                     "dft_candidate_count": dft_count,
                     "figure_count": figure_count,

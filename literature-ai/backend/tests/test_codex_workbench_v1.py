@@ -245,7 +245,23 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
             pdf_quality_score=0.1,
             pdf_quality_report={"reason": "too_little_text_or_image_signal", "needs_human_confirmation": True},
         )
+        codex_candidate = Paper(
+            title="Codex candidate still needs human review",
+            pdf_path="candidate.pdf",
+            workflow_status="Codex_Candidate",
+            pdf_quality_status="A_text_readable",
+            pdf_quality_report={"reason": "native_text_is_readable", "needs_human_confirmation": False},
+        )
+        human_confirmed = Paper(
+            title="Human confirmed paper",
+            pdf_path="confirmed.pdf",
+            workflow_status="Human_Confirmed",
+            pdf_quality_status="A_text_readable",
+            pdf_quality_report={"reason": "native_text_is_readable", "needs_human_confirmation": False},
+        )
         session.add(paper)
+        session.add(codex_candidate)
+        session.add(human_confirmed)
         session.flush()
         session.add(DFTResult(paper_id=paper.id, property_type="band_gap", value=0.5, unit="eV"))
         session.add(EvidenceLocator(paper_id=paper.id, source_type="text", evidence_text="candidate", locator_status="candidate"))
@@ -258,6 +274,9 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     data = response.json()
     assert data["schema_version"] == "codex_workbench_v1"
     assert data["metadata"]["status_counts"]["Needs_Human_Confirmation"] == 1
-    assert data["rows"][0]["needs_human_confirmation"] is True
-    assert data["rows"][0]["has_dft_candidates"] is True
-    assert data["rows"][0]["evidence_count"] == 1
+    by_title = {row["title"]: row for row in data["rows"]}
+    assert by_title["Review center paper"]["needs_human_confirmation"] is True
+    assert by_title["Review center paper"]["has_dft_candidates"] is True
+    assert by_title["Review center paper"]["evidence_count"] == 1
+    assert by_title["Codex candidate still needs human review"]["needs_human_confirmation"] is True
+    assert by_title["Human confirmed paper"]["needs_human_confirmation"] is False
