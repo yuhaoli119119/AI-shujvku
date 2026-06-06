@@ -127,7 +127,12 @@ function switchTab(tab) {
         panel.classList.toggle("active", panel.id === "tab-" + tab);
     });
     syncQueryParams();
-    if (tab === "writing") ensureWriterStatus();
+    if (tab === "writing") {
+        ensureWriterStatus();
+        if (state.selectedPaperId && typeof loadPaperKnowledgeContext === "function") {
+            loadPaperKnowledgeContext(state.selectedPaperId);
+        }
+    }
     if (tab === "review" && state.selectedPaperId) loadExternalRuns();
     if (tab === "review" && !state.selectedPaperId) loadAgentGuide();
 }

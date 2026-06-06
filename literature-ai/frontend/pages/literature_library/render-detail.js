@@ -1131,58 +1131,96 @@ async function loadPaperDetail(paperId) {
         showEmptyWorkspace();
         return;
     }
+    const loadToken = Date.now() + ":" + paperId;
+    state.detailLoadToken = loadToken;
+    state.selectedPaperId = paperId;
+    state.selectedPaperAudit = null;
     try {
         renderDetailSkeleton();
-        const results = await Promise.all([
-            fetchJSON(API_BASE + "/" + paperId),
-            fetchJSON(
-                API_BASE + "/" + encodeURIComponent(paperId) +
-                "/codex-context?max_sections=1&max_chars_per_section=300&max_figures=0&max_tables=0&max_candidates=100"
-            ).catch(function(error) {
-                console.warn("Codex context summary is not available:", error);
-                return null;
-            }),
-            fetchJSON(
-                API_BASE + "/" + encodeURIComponent(paperId) +
-                "/knowledge-context?max_candidates=40&max_chars_per_candidate=900"
-            ).catch(function(error) {
-                console.warn("Knowledge context is not available:", error);
-                return null;
-            })
-        ]);
-        const detail = results[0];
-        const codexBundle = results[1];
-        const knowledgeContext = results[2];
-        if (codexBundle && codexBundle.context) {
-            detail.codex_context = codexBundle.context;
+        const preview = state.papers.find(function(paper) { return paper.id === paperId; }) || state.selectedPaper;
+        if (preview && preview.id === paperId) {
+            renderWorkspaceHeader(preview);
+            showWorkspace();
         }
-        if (knowledgeContext) {
-            detail.knowledge_context = knowledgeContext;
-        }
-        state.selectedPaperId = paperId;
+        const detail = await fetchJSON(API_BASE + "/" + encodeURIComponent(paperId));
+        if (state.detailLoadToken !== loadToken) return;
         state.selectedPaper = detail;
         renderPaperList();
         renderWorkspaceHeader(detail);
         renderDetail(detail, null);
         showWorkspace();
         syncQueryParams();
-        fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit")
-            .then(function(audit) {
-                if (state.selectedPaperId === paperId) {
-                    renderDetail(detail, audit);
-                    loadEvidenceLocators(paperId);
-                }
-            })
-            .catch(function(e) {
-                console.warn("Audit API is not available or failed:", e);
-            });
+        loadPaperDetailEnrichment(paperId, loadToken);
         loadEvidenceLocators(paperId);
         if (state.currentTab === "review") loadExternalRuns();
         if (state.currentTab === "aggregate") loadAggregate();
         if (state.currentTab === "writer") ensureWriterStatus();
     } catch (error) {
-        showToast("详情加载失败：" + error.message, "error");
+        if (state.detailLoadToken === loadToken) {
+            showToast("详情加载失败：" + error.message, "error");
+        }
     }
+}
+
+function rerenderSelectedDetail(paperId) {
+    if (state.selectedPaperId !== paperId || !state.selectedPaper) return;
+    renderDetail(state.selectedPaper, state.selectedPaperAudit || null);
+}
+
+function loadPaperDetailEnrichment(paperId, loadToken) {
+    fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit")
+        .then(function(audit) {
+            if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
+                state.selectedPaperAudit = audit;
+                rerenderSelectedDetail(paperId);
+            }
+        })
+        .catch(function(e) {
+            console.warn("Audit API is not available or failed:", e);
+        });
+
+    fetchJSON(
+        API_BASE + "/" + encodeURIComponent(paperId) +
+        "/codex-context?max_sections=1&max_chars_per_section=300&max_figures=0&max_tables=0&max_candidates=30"
+    )
+        .then(function(codexBundle) {
+            if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId && codexBundle && codexBundle.context) {
+                state.selectedPaper.codex_context = codexBundle.context;
+                rerenderSelectedDetail(paperId);
+            }
+        })
+        .catch(function(error) {
+            console.warn("Codex context summary is not available:", error);
+        });
+
+    if (state.currentTab === "writing") {
+        loadPaperKnowledgeContext(paperId);
+    }
+}
+
+function loadPaperKnowledgeContext(paperId) {
+    if (!paperId || state.selectedPaperId !== paperId) return;
+    if (state.selectedPaper && state.selectedPaper.knowledge_context) return;
+    if (state.knowledgeContextLoadingFor === paperId) return;
+    state.knowledgeContextLoadingFor = paperId;
+    fetchJSON(
+        API_BASE + "/" + encodeURIComponent(paperId) +
+        "/knowledge-context?max_candidates=24&max_chars_per_candidate=600"
+    )
+            .then(function(audit) {
+                if (state.selectedPaperId === paperId && state.selectedPaper) {
+                    state.selectedPaper.knowledge_context = audit;
+                    rerenderSelectedDetail(paperId);
+                }
+            })
+            .catch(function(e) {
+                console.warn("Knowledge context is not available:", e);
+            })
+            .finally(function() {
+                if (state.knowledgeContextLoadingFor === paperId) {
+                    state.knowledgeContextLoadingFor = null;
+                }
+            });
 }
 
 function openPaperDetailPage() {

@@ -132,7 +132,7 @@ class TopNav {
 
     return (
       '<nav class="topnav" id="topnav">' +
-        '<a class="topnav-brand" href="../literature_library/index.html">LitAI · Codex</a>' +
+        '<span class="topnav-brand" aria-label="LitAI">LitAI</span>' +
         '<div class="topnav-items">' + items + "</div>" +
         '<button class="topnav-theme-btn" id="theme-toggle-btn" title="主题设置" aria-label="主题设置">' +
           '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
