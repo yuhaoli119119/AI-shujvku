@@ -1126,6 +1126,95 @@ function renderDetailSkeleton() {
         '</div>';
 }
 
+function buildPreviewDetail(paper) {
+    const source = paper || {};
+    return {
+        id: source.id,
+        serial_number: source.serial_number,
+        library_name: source.library_name || (state.currentLibrary && state.currentLibrary.name) || "",
+        doi: source.doi,
+        title: source.title,
+        title_zh: source.title_zh,
+        year: source.year,
+        journal: source.journal,
+        authors: source.authors || [],
+        abstract: source.abstract,
+        abstract_zh: source.abstract_zh,
+        pdf_path: source.pdf_path,
+        oa_status: source.oa_status,
+        license: source.license,
+        tei_path: source.tei_path,
+        docling_json_path: source.docling_json_path,
+        markdown_path: source.markdown_path,
+        paper_type: source.paper_type,
+        type_confidence: source.type_confidence,
+        classification_source: source.classification_source,
+        workflow_status: source.workflow_status,
+        pdf_quality_status: source.pdf_quality_status,
+        pdf_quality_score: source.pdf_quality_score,
+        pdf_quality_report: source.pdf_quality_report,
+        workspace_path: source.workspace_path,
+        comprehensive_analysis: source.comprehensive_analysis || {},
+        created_at: source.created_at,
+        counts: source.counts || {},
+        relationship_summary: source.relationship_summary || {},
+        sections: [],
+        tables: [],
+        figures: [],
+        dft_settings_items: [],
+        catalyst_samples_items: [],
+        dft_results_items: [],
+        electrochemical_performance_items: [],
+        mechanism_claims_items: [],
+        writing_cards_items: [],
+        outgoing_relationships: [],
+        incoming_relationships: [],
+        references: [],
+        figure_data_points_items: [],
+        full_translation_zh: source.full_translation_zh || null,
+        is_preview_detail: true,
+    };
+}
+
+function cachePaperDetail(detail) {
+    if (!detail || !detail.id) return;
+    state.paperDetailCache = state.paperDetailCache || {};
+    state.paperDetailCache[detail.id] = detail;
+    const keys = Object.keys(state.paperDetailCache);
+    if (keys.length > 20) {
+        delete state.paperDetailCache[keys[0]];
+    }
+}
+
+function renderImmediatePaperDetail(paperId) {
+    const cached = state.paperDetailCache && state.paperDetailCache[paperId];
+    const preview = state.papers.find(function(paper) { return paper.id === paperId; }) || state.selectedPaper;
+    const immediate = cached || (preview && preview.id === paperId ? buildPreviewDetail(preview) : null);
+    if (!immediate) {
+        renderDetailSkeleton();
+        return false;
+    }
+    state.selectedPaper = immediate;
+    renderPaperList();
+    renderWorkspaceHeader(immediate);
+    renderDetail(immediate, state.selectedPaperAudit || null);
+    showWorkspace();
+    return true;
+}
+
+function scheduleDetailEnrichment(paperId, loadToken) {
+    const run = function() {
+        if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
+            loadPaperDetailEnrichment(paperId, loadToken);
+        }
+    };
+    if (window.requestIdleCallback) {
+        window.requestIdleCallback(run, { timeout: 1200 });
+    } else {
+        window.setTimeout(run, 60);
+    }
+}
+
 async function loadPaperDetail(paperId) {
     if (!paperId) {
         showEmptyWorkspace();
@@ -1136,21 +1225,18 @@ async function loadPaperDetail(paperId) {
     state.selectedPaperId = paperId;
     state.selectedPaperAudit = null;
     try {
-        renderDetailSkeleton();
-        const preview = state.papers.find(function(paper) { return paper.id === paperId; }) || state.selectedPaper;
-        if (preview && preview.id === paperId) {
-            renderWorkspaceHeader(preview);
-            showWorkspace();
-        }
+        renderImmediatePaperDetail(paperId);
+        syncQueryParams();
         const detail = await fetchJSON(API_BASE + "/" + encodeURIComponent(paperId));
         if (state.detailLoadToken !== loadToken) return;
         state.selectedPaper = detail;
+        cachePaperDetail(detail);
         renderPaperList();
         renderWorkspaceHeader(detail);
         renderDetail(detail, null);
         showWorkspace();
         syncQueryParams();
-        loadPaperDetailEnrichment(paperId, loadToken);
+        scheduleDetailEnrichment(paperId, loadToken);
         loadEvidenceLocators(paperId);
         if (state.currentTab === "review") loadExternalRuns();
         if (state.currentTab === "aggregate") loadAggregate();

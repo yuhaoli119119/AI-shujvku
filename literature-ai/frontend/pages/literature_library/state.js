@@ -18,6 +18,10 @@ const state = {
     jobCenterStatus: "",
     jobCenterType: "",
     qualityReasonContext: "",
+    detailLoadToken: null,
+    selectedPaperAudit: null,
+    knowledgeContextLoadingFor: null,
+    paperDetailCache: {},
 };
 
 function $(id) { return document.getElementById(id); }
