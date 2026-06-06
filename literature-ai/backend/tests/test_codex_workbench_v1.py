@@ -24,6 +24,7 @@ from app.db.session import get_db_session
 from app.main import app
 from app.services.gemini_audit_service import GeminiAuditService
 from app.services.paper_workbench_service import PaperWorkbenchService
+from app.utils.workbench_status import workflow_needs_human_confirmation
 
 
 @pytest.fixture
@@ -232,6 +233,22 @@ def test_human_confirm_requires_explicit_acknowledgement(workbench_env):
         assert payload["workflow_status"] == "Human_Confirmed"
         assert session.get(Paper, paper_id).workflow_status == "Human_Confirmed"
         assert session.scalar(select(AuditLog).where(AuditLog.action == "human_confirm_workbench_status")) is not None
+
+
+def test_workflow_human_confirmation_gate_covers_candidate_statuses():
+    assert workflow_needs_human_confirmation("Codex_Candidate") is True
+    assert workflow_needs_human_confirmation("Gemini_Verified") is True
+    assert workflow_needs_human_confirmation("Gemini_Revised") is True
+    assert workflow_needs_human_confirmation("Gemini_Flagged") is True
+    assert workflow_needs_human_confirmation("Evidence_Insufficient") is True
+    assert workflow_needs_human_confirmation("Needs_Human_Confirmation") is True
+
+    assert workflow_needs_human_confirmation("Human_Confirmed") is False
+    assert workflow_needs_human_confirmation("ML_Ready") is False
+    assert workflow_needs_human_confirmation("Citation_Ready") is False
+
+    assert workflow_needs_human_confirmation("Quality_Checked", {"needs_human_confirmation": True}) is True
+    assert workflow_needs_human_confirmation("Quality_Checked", {"needs_human_confirmation": False}) is False
 
 
 def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):

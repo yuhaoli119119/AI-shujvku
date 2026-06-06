@@ -313,11 +313,19 @@
         <div class="filterbar">
           <select id="statusFilter" onchange="renderRows()">
             <option value="">全部流程状态</option>
+            <option value="Imported">已导入</option>
+            <option value="Quality_Checked">已检质量</option>
+            <option value="Parsed_Material_Ready">材料已就绪</option>
             <option value="Needs_Human_Confirmation">待人工确认</option>
             <option value="Codex_Candidate">Codex 候选</option>
+            <option value="Gemini_Verified">Gemini 已核验</option>
+            <option value="Gemini_Revised">Gemini 已修订</option>
             <option value="Gemini_Flagged">Gemini 标红</option>
             <option value="Evidence_Insufficient">证据不足</option>
             <option value="Human_Confirmed">已人工确认</option>
+            <option value="Rejected">已拒绝</option>
+            <option value="ML_Ready">可进机器学习</option>
+            <option value="Citation_Ready">可用于引用</option>
           </select>
           <select id="qualityFilter" onchange="renderRows()">
             <option value="">全部 PDF 质量</option>
@@ -395,9 +403,10 @@
       return data;
     }
 
-    function workflowClass(status) {
-      if (["Human_Confirmed", "ML_Ready", "Citation_Ready", "Gemini_Verified", "Parsed_Material_Ready"].includes(status)) return "ok";
+    function workflowClass(status, needsHuman) {
+      if (["Human_Confirmed", "ML_Ready", "Citation_Ready"].includes(status)) return "ok";
       if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected"].includes(status)) return "bad";
+      if (needsHuman || ["Codex_Candidate", "Gemini_Verified", "Gemini_Revised"].includes(status)) return "warn";
       return "warn";
     }
 
@@ -439,11 +448,17 @@
     }
 
     function qualityReasonLabel(reason) {
+      if (reason && String(reason).startsWith("pdf_open_failed:")) {
+        return "PDF 打开失败：" + String(reason).split(":").slice(1).join(":");
+      }
       const mapping = {
         native_text_is_readable: "自带文字层，可直接检索",
-        partial_text_layer: "只有部分文字层可读",
-        scan_requires_ocr: "需要 OCR 辅读",
-        scan_unclear: "扫描不清，可靠性低",
+        native_text_is_partial: "只有部分文字层可读",
+        scan_or_image_pdf_requires_ocr: "扫描版或图片型 PDF，需要 OCR 辅读",
+        too_little_text_or_image_signal: "文字层和图像信号都不足，可靠性低",
+        pdf_has_no_pages: "PDF 没有可读取页面",
+        pdf_file_missing: "PDF 文件缺失",
+        missing_pdf_reference: "文献没有 PDF 路径记录",
         file_broken_or_unreadable: "文件异常或无法读取"
       };
       return mapping[reason] || reason || "未提供原因说明";
@@ -522,7 +537,7 @@
         const dftChip = row.has_dft_candidates
           ? '<span class="chip warn" title="待审 DFT 候选：已检测到可进一步审核的 DFT 字段候选。">待审 DFT 候选</span>'
           : '<span class="chip" title="无 DFT 候选：当前轮次未抽出可核对的 DFT 字段。">无 DFT 候选</span>';
-        const wfChip = '<span class="chip ' + workflowClass(row.workflow_status) + '" title="' + esc(workflow.tip + " 原始状态码: " + (row.workflow_status || "Imported")) + '">' + esc(workflow.label) + '</span>';
+        const wfChip = '<span class="chip ' + workflowClass(row.workflow_status, row.needs_human_confirmation) + '" title="' + esc(workflow.tip + " 原始状态码: " + (row.workflow_status || "Imported")) + '">' + esc(workflow.label) + '</span>';
         const qlChip = '<span class="chip ' + qualityClass(row.pdf_quality_status) + '" title="质量分: ' + esc(row.pdf_quality_score == null ? "-" : row.pdf_quality_score) + '。原因: ' + esc(qualityReasonText) + '。' + esc(quality.tip) + '">' + esc(quality.label) + '</span>';
         let wsDisp = workspace;
         if (wsDisp.length > 8) { wsDisp = "... " + wsDisp.slice(-8); }
