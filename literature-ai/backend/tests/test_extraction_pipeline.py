@@ -58,6 +58,63 @@ def test_dft_duplicate_candidates_merge_across_source_locations():
     assert len(merged[0]["evidence_sources"]) == 2
 
 
+def test_dft_persist_merges_existing_duplicate_candidate_without_new_row():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'dedup_existing.db'}", future=True)
+        try:
+            with engine.begin() as connection:
+                connection.execute(text("PRAGMA foreign_keys=ON"))
+            Base.metadata.create_all(engine)
+            with Session(engine) as session:
+                paper = Paper(title="Duplicate Paper", pdf_path="dup.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                existing = DFTResult(
+                    paper_id=paper.id,
+                    adsorbate="H2O",
+                    property_type="adsorption_energy",
+                    value=-0.1,
+                    unit="eV",
+                    reaction_step="solvent effect",
+                    evidence_text="Original evidence.",
+                    confidence=0.6,
+                    candidate_status="system_candidate",
+                    evidence_payload={"evidence_sources": [{"evidence_text": "Original evidence."}]},
+                )
+                session.add(existing)
+                session.flush()
+
+                service = object.__new__(ExtractionPipelineService)
+                service.session = session
+                service.chemistry_normalizer = ChemistryNormalizer()
+                count = service._persist_dft_results(
+                    paper.id,
+                    [
+                        {
+                            "category": "adsorption_energy",
+                            "adsorbate": "water",
+                            "value": -0.1,
+                            "unit": "eV",
+                            "reaction_step": "solvent effect",
+                            "evidence_text": "Updated table evidence.",
+                            "source_location": {"table": "Table 1", "page": 4},
+                            "confidence": 0.9,
+                        }
+                    ],
+                )
+                session.commit()
+
+                assert count == 1
+                assert session.query(DFTResult).count() == 1
+                session.refresh(existing)
+                assert existing.confidence == 0.9
+                assert existing.evidence_text == "Updated table evidence."
+                assert existing.evidence_payload["duplicate_merge"]["merged"] is True
+                assert len(existing.evidence_payload["evidence_sources"]) >= 2
+        finally:
+            engine.dispose()
+
+
 def test_extraction_pipeline_persists_stage2_outputs():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(f"sqlite:///{Path(tmpdir) / 'test.db'}", future=True)

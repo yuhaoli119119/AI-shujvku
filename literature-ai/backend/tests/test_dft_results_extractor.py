@@ -426,6 +426,31 @@ def test_dft_results_extracts_graphene_defect_table_values():
     assert any(item["category"] == "band_gap" and item["value"] == 0.05 for item in results)
 
 
+def test_dft_results_table_category_scan_uses_local_quality_evidence():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                caption="Table 1. The defect formation energy takes 2.30 eV for single vacancy graphene.",
+                markdown_content="",
+                page=4,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert any(
+        item["category"] == "formation_energy"
+        and item["adsorbate"] == "single_vacancy"
+        and item["value"] == 2.30
+        for item in results
+    )
+
+
 def test_dft_results_extracts_graphene_defect_inline_plain_text_table_values():
     extractor = DFTResultsExtractor()
     document = {

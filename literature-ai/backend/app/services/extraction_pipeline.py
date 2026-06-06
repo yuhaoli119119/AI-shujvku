@@ -7,7 +7,7 @@ from uuid import UUID
 
 from app.config import Settings
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -561,6 +561,7 @@ class ExtractionPipelineService:
 
     def _persist_dft_results(self, paper_id: UUID, items: list[dict[str, Any]]) -> int:
         count = 0
+        existing_by_key = self._existing_dft_results_by_key(paper_id)
         for item in self._merge_duplicate_dft_items(items):
             location = item.get("source_location") or {}
             norm_item = self.chemistry_normalizer.normalize({
@@ -575,6 +576,18 @@ class ExtractionPipelineService:
                     "source_count": len(item.get("evidence_sources") or []),
                     "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
                 }
+            key = self._normalized_dft_candidate_key(item)
+            existing = existing_by_key.get(key)
+            if existing is not None:
+                self._merge_existing_dft_result(
+                    existing,
+                    item=item,
+                    norm_item=norm_item,
+                    location=location,
+                    evidence_payload=evidence_payload,
+                )
+                count += 1
+                continue
             record = DFTResult(
                 paper_id=paper_id,
                 adsorbate=norm_item.get("adsorbate") or item.get("adsorbate"),
@@ -592,6 +605,7 @@ class ExtractionPipelineService:
             )
             self.session.add(record)
             self.session.flush()
+            existing_by_key[key] = record
             self._persist_evidence_span(
                 paper_id=paper_id,
                 object_type="dft_result",
@@ -600,6 +614,87 @@ class ExtractionPipelineService:
             )
             count += 1
         return count
+
+    def _existing_dft_results_by_key(self, paper_id: UUID) -> dict[str, DFTResult]:
+        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        existing: dict[str, DFTResult] = {}
+        for row in rows:
+            key = self._normalized_dft_candidate_key(
+                {
+                    "adsorbate": row.adsorbate,
+                    "category": row.property_type,
+                    "value": row.value,
+                    "unit": row.unit,
+                    "reaction_step": row.reaction_step,
+                }
+            )
+            current = existing.get(key)
+            if current is None or float(row.confidence or 0.0) > float(current.confidence or 0.0):
+                existing[key] = row
+        return existing
+
+    def _merge_existing_dft_result(
+        self,
+        row: DFTResult,
+        *,
+        item: dict[str, Any],
+        norm_item: dict[str, Any],
+        location: dict[str, Any],
+        evidence_payload: dict[str, Any],
+    ) -> None:
+        row.evidence_payload = self._merge_dft_evidence_payload(row.evidence_payload, evidence_payload)
+        locked_statuses = {"ML_Ready", "Rejected", "human_verified", "verified"}
+        if (row.candidate_status or "") in locked_statuses:
+            self.session.add(row)
+            self.session.flush()
+            return
+
+        if float(item.get("confidence") or 0.0) > float(row.confidence or 0.0):
+            row.adsorbate = norm_item.get("adsorbate") or item.get("adsorbate")
+            row.property_type = norm_item.get("property_type") or item.get("category")
+            row.value = item.get("value")
+            row.unit = item.get("unit")
+            row.reaction_step = item.get("reaction_step")
+            row.source_section = location.get("section")
+            row.source_figure = location.get("figure")
+            row.evidence_text = item.get("evidence_text")
+            row.confidence = item.get("confidence")
+            if not row.extraction_protocol_version:
+                row.extraction_protocol_version = EXTRACTION_PROTOCOL_VERSION
+        self.session.add(row)
+        self.session.flush()
+
+    @staticmethod
+    def _merge_dft_evidence_payload(existing: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(existing or {})
+        for key, value in incoming.items():
+            if key not in merged or merged.get(key) in (None, "", [], {}):
+                merged[key] = value
+
+        sources: list[dict[str, Any]] = []
+        for payload in (existing or {}, incoming or {}):
+            candidate_sources = payload.get("evidence_sources")
+            if isinstance(candidate_sources, list):
+                sources.extend(source for source in candidate_sources if isinstance(source, dict))
+            elif payload:
+                sources.append({key: value for key, value in payload.items() if key != "evidence_sources"})
+
+        unique_sources: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for source in sources:
+            identity = json.dumps(source, ensure_ascii=False, sort_keys=True, default=str)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            unique_sources.append(source)
+        if unique_sources:
+            merged["evidence_sources"] = unique_sources
+            merged["duplicate_merge"] = {
+                "merged": True,
+                "source_count": len(unique_sources),
+                "policy": "Duplicate DFT candidates with the same normalized key are stored once; evidence sources are retained for audit.",
+            }
+        return merged
 
     def _merge_duplicate_dft_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         merged: dict[str, dict[str, Any]] = {}

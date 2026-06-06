@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from uuid import UUID
@@ -9,8 +10,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, ElectrochemicalPerformance, MechanismClaim, PaperChunk, PaperSection, WritingCard, Paper, FigureDataPoint
-from app.services.embedding import DeterministicEmbeddingService, get_embedding_service, EmbeddingService
+from app.services.embedding import (
+    DeterministicEmbeddingService,
+    EmbeddingService,
+    EmbeddingUnavailableError,
+    get_embedding_service,
+)
 from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
+
+
+logger = logging.getLogger(__name__)
 
 
 def _tokenize(text: str) -> set[str]:
@@ -33,7 +42,7 @@ class Retriever:
         paper_type_filter: list[str] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         tokens = _tokenize(query)
-        query_embedding = self.embedding.embed_text(query)
+        query_embedding = self._safe_query_embedding(query)
         result = {
             "sections": self._retrieve_sections(tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter),
             "dft_results": self._retrieve_dft_results(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
@@ -43,6 +52,21 @@ class Retriever:
             "figure_data_points": self._retrieve_figure_data(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
         }
         return self._global_dedup(result, limit_per_type)
+
+    def _safe_query_embedding(self, query: str) -> list[float]:
+        """Return a query vector when available, otherwise keep retrieval lexical.
+
+        Search must remain responsive even when the configured embedding backend
+        is unavailable, slow, rate limited, or misconfigured. The downstream
+        scoring code already treats an empty vector as lexical-only retrieval.
+        """
+        try:
+            return self.embedding.embed_text(query)
+        except EmbeddingUnavailableError as exc:
+            logger.warning("Embedding unavailable; falling back to lexical retrieval: %s", exc)
+        except Exception as exc:
+            logger.warning("Embedding failed; falling back to lexical retrieval: %s", exc)
+        return []
 
     def _apply_type_filter(self, query: Any, model_class: Any, paper_type_filter: list[str] | None) -> Any:
         if not paper_type_filter:

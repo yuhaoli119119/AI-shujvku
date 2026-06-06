@@ -465,7 +465,9 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
                 adsorbate = _resolve_adsorbate(combined)
                 evidence = _extract_context_around_match(combined, m.start(), m.end())
                 adsorbate = _resolve_adsorbate(m.group(0)) or adsorbate
-                quality_evidence = local_evidence if category in GRAPHITE_DEFECT_CATEGORY_RULES else evidence
+                quality_evidence = _extract_sentence_around_match(combined, m.start(), m.end())
+                if category not in GRAPHITE_DEFECT_CATEGORY_RULES:
+                    quality_evidence = evidence
                 if not _should_keep_result(category, adsorbate, val, quality_evidence):
                     continue
                 results.append(DFTResultItem(

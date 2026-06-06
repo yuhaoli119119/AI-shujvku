@@ -62,9 +62,8 @@ class ParseQualityAuditor:
 
     @classmethod
     def clean_figures_after_extraction(cls, figures: Iterable[UnifiedFigure], figures_root: Path) -> list[UnifiedFigure]:
-        best_by_number: dict[int, UnifiedFigure] = {}
+        best_by_page_number: dict[tuple[int | None, int], UnifiedFigure] = {}
         unnumbered: list[UnifiedFigure] = []
-        seen_hashes: set[str] = set()
 
         for figure in figures:
             if not figure.image_path:
@@ -72,24 +71,28 @@ class ParseQualityAuditor:
             image_path = figures_root / figure.image_path
             if not image_path.exists() or image_path.stat().st_size <= 0:
                 continue
-            digest = cls._file_digest(image_path)
-            if digest and digest in seen_hashes:
-                continue
 
             number = cls._figure_number(figure.caption)
             if number is None:
                 unnumbered.append(figure)
-                if digest:
-                    seen_hashes.add(digest)
                 continue
 
-            current = best_by_number.get(number)
+            key = (figure.page, number)
+            current = best_by_page_number.get(key)
             if current is None or cls._figure_score(figure, figures_root) > cls._figure_score(current, figures_root):
-                best_by_number[number] = figure
-                if digest:
-                    seen_hashes.add(digest)
+                best_by_page_number[key] = figure
 
-        return [*best_by_number.values(), *unnumbered]
+        deduped: list[UnifiedFigure] = []
+        seen_hashes: set[str] = set()
+        for figure in [*best_by_page_number.values(), *unnumbered]:
+            image_path = figures_root / figure.image_path
+            digest = cls._file_digest(image_path)
+            if digest and digest in seen_hashes:
+                continue
+            if digest:
+                seen_hashes.add(digest)
+            deduped.append(figure)
+        return deduped
 
     @staticmethod
     def _clean_table_caption(caption: str | None, markdown_content: str | None, extraction_source: str | None) -> str | None:

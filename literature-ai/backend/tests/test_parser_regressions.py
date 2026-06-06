@@ -3,6 +3,8 @@ import re
 from app.parsers.docling_parser import DoclingParser
 from app.parsers.grobid_parser import GrobidParser
 from app.services.paper_ingestion import PaperIngestionService
+from app.services.parse_quality_auditor import ParseQualityAuditor
+from app.schemas.documents import UnifiedFigure
 from app.utils.figure_filtering import is_decorative_figure
 from lxml import etree
 
@@ -100,3 +102,19 @@ def test_figure_data_evidence_text_includes_conditions():
     assert "0.1 M KOH" in text
     assert "Pt/C" in text
     assert "Fig. 2" in text
+
+
+def test_same_figure_number_on_different_pages_is_not_dropped(tmp_path):
+    figures_root = tmp_path
+    (figures_root / "p1_fig1.png").write_bytes(b"page-one-figure")
+    (figures_root / "p2_fig1.png").write_bytes(b"page-two-figure")
+
+    figures = [
+        UnifiedFigure(caption="Figure 1. First page structure.", image_path="p1_fig1.png", page=1),
+        UnifiedFigure(caption="Figure 1. Second page workflow.", image_path="p2_fig1.png", page=2),
+    ]
+
+    cleaned = ParseQualityAuditor.clean_figures_after_extraction(figures, figures_root)
+
+    assert len(cleaned) == 2
+    assert {figure.page for figure in cleaned} == {1, 2}

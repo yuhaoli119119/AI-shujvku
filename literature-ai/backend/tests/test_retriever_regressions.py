@@ -1,5 +1,6 @@
 import pytest
 from app.rag.retriever import Retriever
+from app.services.embedding import EmbeddingUnavailableError
 from app.services.retrieval_service import RetrievalService
 from app.schemas.retrieval import RetrievalSearchRequest
 from unittest.mock import MagicMock
@@ -69,6 +70,25 @@ def test_hybrid_score_no_dynamic_embed():
     assert embedding.embed_text.call_count == 0
     assert breakdown["semantic"] == 0.0
     assert score > 0
+
+
+def test_query_embedding_failure_falls_back_to_lexical():
+    embedding = MagicMock()
+    embedding.embed_text.side_effect = EmbeddingUnavailableError("rate limited")
+    retriever = Retriever(MagicMock(), embedding_dimension=1536, embedding=embedding)
+
+    query_embedding = retriever._safe_query_embedding("graphdiyne adsorption energy")
+    score, breakdown = retriever._hybrid_score(
+        {"graphdiyne", "adsorption", "energy"},
+        query_embedding,
+        "graphdiyne adsorption energy from DFT",
+        None,
+        False,
+    )
+
+    assert query_embedding == []
+    assert score > 0
+    assert breakdown["semantic"] == 0.0
 
 def test_full_context_mode():
     session = MagicMock()
