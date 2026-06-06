@@ -127,6 +127,9 @@ function switchTab(tab) {
         panel.classList.toggle("active", panel.id === "tab-" + tab);
     });
     syncQueryParams();
+    if (state.selectedPaper && typeof rerenderSelectedDetail === "function") {
+        rerenderSelectedDetail(state.selectedPaperId);
+    }
     if (tab === "writing") {
         ensureWriterStatus();
         if (state.selectedPaperId && typeof loadPaperKnowledgeContext === "function") {

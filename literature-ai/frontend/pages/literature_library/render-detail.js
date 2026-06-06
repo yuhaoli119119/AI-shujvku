@@ -899,15 +899,19 @@ function renderDetail(detail, audit) {
     const localizedSummaryCard = renderLocalizedSummary(detail);
     const comprehensiveCard = renderComprehensiveAnalysis(detail.comprehensive_analysis || {});
 
-    const sectionCards = renderListBlock("正文节选", detail.sections ? detail.sections.slice(0, 8) : [], function(item) {
-        return (
-            '<div class="subtle">标题：' + esc(item.section_title || item.section_type || "未命名章节") + "</div>" +
-            '<div class="prewrap" style="margin-top:8px;">' + esc(ellipsis(item.text || "", 2200) || "暂无文本。") + "</div>"
-        );
-    });
+    const activeTab = state.currentTab || "summary";
+    let sectionCards = "";
+    if (activeTab === "sections") {
+        sectionCards = renderListBlock("正文节选", detail.sections ? detail.sections.slice(0, 8) : [], function(item) {
+            return (
+                '<div class="subtle">标题：' + esc(item.section_title || item.section_type || "未命名章节") + "</div>" +
+                '<div class="prewrap" style="margin-top:8px;">' + esc(ellipsis(item.text || "", 2200) || "暂无文本。") + "</div>"
+            );
+        });
+    }
 
     let figureCards = "";
-    if (detail.figures && detail.figures.length) {
+    if (activeTab === "figures" && detail.figures && detail.figures.length) {
         const roles = new Set();
         detail.figures.forEach(f => {
             if (f.figure_role) roles.add(f.figure_role);
@@ -978,7 +982,7 @@ function renderDetail(detail, audit) {
             ? '<div class="section-card figure-audit-note"><h3>图表抽取提示</h3><div class="subtle">检测到 ' + noisyCount + ' 张自动截图疑似无效。AI 审阅会把这些当作抽取噪声处理，不再把出版社标志、CrossMark 或页眉图片当作科学图表。</div></div>'
             : "";
         figureCards = figureNotice + filterHtml + cardsHtml;
-    } else {
+    } else if (activeTab === "figures") {
         figureCards = '<div class="section-card"><h3>图片</h3><div class="muted">暂无内容。</div></div>';
     }
 
@@ -988,13 +992,16 @@ function renderDetail(detail, audit) {
             '<p class="subtle">请使用标题右侧的“' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '”入口。</p>' +
         '</div>';
 
-    const referenceCards = renderListBlock("参考文献", detail.references ? detail.references.slice(0, 20) : [], function(item) {
-        return (
-            '<div class="prewrap">' + esc(item.title || "未命名参考文献") + "</div>" +
-            '<div class="subtle" style="margin-top:8px;">作者：' + esc(item.authors || "-") + " | DOI：" + esc(item.doi || "-") + "</div>" +
-            (item.citation_context ? '<div class="mono" style="margin-top:8px;">' + esc(item.citation_context) + "</div>" : "")
-        );
-    });
+    let referenceCards = "";
+    if (activeTab === "sections") {
+        referenceCards = renderListBlock("参考文献", detail.references ? detail.references.slice(0, 20) : [], function(item) {
+            return (
+                '<div class="prewrap">' + esc(item.title || "未命名参考文献") + "</div>" +
+                '<div class="subtle" style="margin-top:8px;">作者：' + esc(item.authors || "-") + " | DOI：" + esc(item.doi || "-") + "</div>" +
+                (item.citation_context ? '<div class="mono" style="margin-top:8px;">' + esc(item.citation_context) + "</div>" : "")
+            );
+        });
+    }
 
     const summaryEl = $("summaryContent");
     const sectionsEl = $("sectionsContent");
@@ -1069,19 +1076,19 @@ function renderDetail(detail, audit) {
             abstractCard +
             comprehensiveCard;
     }
-    if (sectionsEl) {
+    if (sectionsEl && activeTab === "sections") {
         sectionsEl.innerHTML =
             sectionCards +
             referenceCards +
             renderJSONCards("出向关系", detail.outgoing_relationships || []) +
             renderJSONCards("入向关系", detail.incoming_relationships || []);
     }
-    if (figuresEl) {
+    if (figuresEl && activeTab === "figures") {
         figuresEl.innerHTML =
             figureCards +
             renderJSONCards("表格", detail.tables || []);
     }
-    if (dftEl) {
+    if (dftEl && activeTab === "dft") {
         dftEl.innerHTML =
             renderDftExportReadiness(detail) +
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
@@ -1090,12 +1097,12 @@ function renderDetail(detail, audit) {
             renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
             renderJSONCards("机理声明", detail.mechanism_claims_items || []);
     }
-    if (writingEl) {
+    if (writingEl && activeTab === "writing") {
         writingEl.innerHTML =
             renderKnowledgeContext(detail) +
             renderJSONCards("写作卡片", detail.writing_cards_items || []);
     }
-    if (translationEl) {
+    if (translationEl && activeTab === "translation") {
         translationEl.innerHTML = renderFullTranslation(detail);
     }
     if (aggregateEl) aggregateEl.innerHTML = "";
@@ -1124,6 +1131,13 @@ function renderDetailSkeleton() {
                 '<div class="skeleton skeleton-text short"></div>' +
             '</div>' +
         '</div>';
+}
+
+function clearDeferredDetailPanels() {
+    ["sectionsContent", "figuresContent", "dftContent", "writingContent", "translationContent", "writerResult", "externalRuns", "aggregateResult"].forEach(function(id) {
+        const el = $(id);
+        if (el) el.innerHTML = "";
+    });
 }
 
 function buildPreviewDetail(paper) {
@@ -1225,6 +1239,7 @@ async function loadPaperDetail(paperId) {
     state.selectedPaperId = paperId;
     state.selectedPaperAudit = null;
     try {
+        clearDeferredDetailPanels();
         renderImmediatePaperDetail(paperId);
         syncQueryParams();
         const detail = await fetchJSON(API_BASE + "/" + encodeURIComponent(paperId));

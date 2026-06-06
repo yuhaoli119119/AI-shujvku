@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
-  <script src="../../shared/topnav.js"></script>
+  <script src="../../shared/topnav.js?v=20260606-ui3"></script>
   <script>ThemeManager.init();</script>
   <style>
     * { box-sizing: border-box; }
@@ -150,7 +150,7 @@
     }
     table {
       width: 100%;
-      min-width: 1080px;
+      min-width: 980px;
       border-collapse: separate;
       border-spacing: 0;
       font-size: 13px;
@@ -172,9 +172,23 @@
       z-index: 10;
     }
     .paper-title {
-      max-width: 390px;
+      max-width: 520px;
       font-weight: 900;
       line-height: 1.45;
+    }
+    .paper-meta-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 4px;
+      font-size: 12px;
+    }
+    .paper-doi-inline {
+      max-width: 360px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .muted {
       color: var(--color-text-secondary);
@@ -213,7 +227,8 @@
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      min-width: 230px;
+      min-width: 210px;
+      justify-content: center;
     }
     .action-note {
       width: 100%;
@@ -318,14 +333,13 @@
               <th style="width: 40px; text-align: center;">#</th>
               <th style="width: 60px; text-align: center;">年份</th>
               <th style="text-align: center;">文献标题</th>
-              <th style="width: 140px; text-align: center;">DOI</th>
-              <th style="text-align: center;">流程与质量</th>
-              <th style="text-align: center;">提取数据</th>
-              <th style="text-align: center;">操作</th>
+              <th style="width: 230px; text-align: center;">流程与质量</th>
+              <th style="width: 110px; text-align: center;">提取数据</th>
+              <th style="width: 220px; text-align: center;">操作</th>
             </tr>
           </thead>
           <tbody id="rows">
-            <tr><td colspan="7"><div class="empty">正在加载...</div></td></tr>
+            <tr><td colspan="6"><div class="empty">正在加载...</div></td></tr>
           </tbody>
         </table>
       </div>
@@ -487,7 +501,7 @@
       document.getElementById("queueMeta").textContent = "显示 " + rows.length + " / " + state.rows.length + " 篇";
       const tbody = document.getElementById("rows");
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="7"><div class="empty">暂无匹配文献</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无匹配文献</div></td></tr>';
         return;
       }
       tbody.innerHTML = rows.map(function (row, idx) {
@@ -507,17 +521,18 @@
         const qlChip = '<span class="chip ' + qualityClass(row.pdf_quality_status) + '" title="质量分: ' + esc(row.pdf_quality_score == null ? "-" : row.pdf_quality_score) + '。原因: ' + esc(qualityReasonText) + '。' + esc(quality.tip) + '">' + esc(quality.label) + '</span>';
         let wsDisp = workspace;
         if (wsDisp.length > 8) { wsDisp = "... " + wsDisp.slice(-8); }
-        let doiDisp = row.doi ? esc(row.doi) : '<span class="muted">-</span>';
+        const doiInline = row.doi
+          ? '<span class="mono paper-doi-inline" title="DOI：' + esc(row.doi) + '">DOI: ' + esc(row.doi) + '</span>'
+          : '';
         let yearDisp = row.year ? esc(row.year) : '<span class="muted">-</span>';
 
         return '<tr>' +
           '<td style="text-align: center;"><span class="muted" style="font-size: 13px;">' + (idx + 1) + '</span></td>' +
           '<td style="text-align: center;"><span style="font-size: 13px;">' + yearDisp + '</span></td>' +
-          '<td><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted" style="font-size: 12px; margin-top: 4px;">' + esc(row.journal || '未知期刊') + ' &nbsp;|&nbsp; <span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span></div></td>' +
-          '<td style="text-align: center;"><div class="mono" style="font-size: 12px; opacity: 0.7; word-break: break-all; line-height: 1.4;">' + doiDisp + '</div></td>' +
+          '<td><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
           '<td><div style="display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;">' + wfChip + qlChip + dftChip + '</div></td>' +
           '<td style="text-align: center;"><div class="muted" style="display: inline-block; text-align: left; font-size: 13px; line-height: 1.6;">定位: <strong>' + esc(evidence) + '</strong><br>图表: <strong>' + esc(figureCount + tableCount) + '</strong></div></td>' +
-          '<td><div class="actions" style="justify-content: center;">' +
+          '<td><div class="actions">' +
             '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">' + esc(inspectTarget.label) + '</a>' +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
             '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">人工确认</button>' +
@@ -534,7 +549,7 @@
         renderRows();
       } catch (error) {
         document.getElementById("queueMeta").textContent = "读取失败";
-        document.getElementById("rows").innerHTML = '<tr><td colspan="7"><div class="error">加载失败：' + esc(error.message) + '</div></td></tr>';
+        document.getElementById("rows").innerHTML = '<tr><td colspan="6"><div class="error">加载失败：' + esc(error.message) + '</div></td></tr>';
         showToast("审核中心加载失败：" + error.message);
       }
     }
