@@ -1789,8 +1789,10 @@ def get_field_disputes(paper_id: str) -> dict[str, Any]:
     name="export_ml_dataset",
     description=(
         "Export verified DFT results and electrochemical performance data as a structured dataset "
-        "for machine learning. Only includes candidates that have passed human/AI review (ML_Ready status). "
-        "Returns JSON array; optionally writes CSV to a file path."
+        "for machine learning. DFT results are filtered through the safety gate (safe_verified_with_required_evidence) "
+        "and include catalyst info, DFT settings, and normalized energy units. "
+        "Electrochemical performance includes verified records only. "
+        "Returns JSON by default; set format='csv' for CSV output."
     ),
 )
 def export_ml_dataset(
@@ -1838,6 +1840,7 @@ def export_ml_dataset(
                     year_min=year_min,
                     year_max=year_max,
                     paper_id=UUID(paper_id) if paper_id else None,
+                    limit=max(1, min(limit, 5000)),
                 )
 
         # Electrochemical performance — MCP-only feature (no REST equivalent yet)

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample as CS
 from app.db.models import DFTResult as DR
+from app.db.models import DFTSetting as DS
 from app.db.models import Paper as P
 from app.db.session import get_db_session
 from app.services.dft_audit_service import DFTCompletenessAuditor

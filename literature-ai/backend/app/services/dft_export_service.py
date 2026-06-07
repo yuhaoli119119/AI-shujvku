@@ -156,10 +156,12 @@ def build_dft_ml_dataset(
     year_max: int | None = None,
     library_name: str | None = None,
     paper_id: UUID | None = None,
+    limit: int | None = None,
 ) -> dict:
     """Build a structured ML-ready DFT dataset with safety gates, catalyst info, and normalized units.
 
     Shared core logic used by both the REST API (/export/dft-dataset) and MCP (export_ml_dataset).
+    `limit` caps the number of eligible (gated) records returned.
     """
     stmt = _dft_rows_statement(
         property_type=property_type,
@@ -189,6 +191,8 @@ def build_dft_ml_dataset(
         paper_ids.add(paper.id)
         if dr.catalyst_sample_id:
             catalyst_sample_ids.add(dr.catalyst_sample_id)
+        if limit is not None and len(eligible_rows) >= limit:
+            break
 
     catalyst_by_id: dict[str, CS] = {}
     catalysts_by_paper: dict[str, list[CS]] = defaultdict(list)
