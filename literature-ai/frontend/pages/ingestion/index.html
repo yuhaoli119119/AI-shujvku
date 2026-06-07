@@ -249,12 +249,19 @@
             color: #fff;
         }
         .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .tab-content.active { 
+            display: flex; 
+            flex-direction: column;
+            flex: 1;
+            justify-content: center;
+            min-height: 0;
+        }
 
         .dropzone {
             display: grid;
             place-items: center;
             min-height: 190px;
+            flex: 1;
             padding: 18px;
             border: 2px dashed var(--color-border-strong);
             border-radius: calc(var(--radius-lg) + 4px);

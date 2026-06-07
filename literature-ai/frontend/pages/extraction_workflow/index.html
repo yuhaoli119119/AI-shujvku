@@ -12,220 +12,781 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1380px; margin: 0 auto; padding: 20px 22px 34px; }
-    .summary-band {
-      display: grid;
-      grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
-      gap: 14px;
-      margin-bottom: 16px;
+    .shell { max-width: 1400px; margin: 0 auto; padding: 24px 28px 40px; }
+
+    /* ===== Hero Banner ===== */
+    .hero {
+      position: relative;
+      border-radius: 20px;
+      background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark, #6b21a8) 100%);
+      padding: 36px 40px;
+      margin-bottom: 24px;
+      overflow: hidden;
+      color: #fff;
     }
-    .panel {
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius);
-      background: var(--color-surface);
-      box-shadow: var(--shadow-card);
-      padding: 16px;
-    }
-    .eyebrow { color: var(--color-primary); font-size: 12px; font-weight: 900; letter-spacing: 0; margin-bottom: 6px; }
-    h1 { margin: 0; font-size: 28px; line-height: 1.2; }
-    .muted { color: var(--color-text-secondary); line-height: 1.7; }
-    .status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
-    .status-cell { border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); padding: 10px; }
-    .status-cell strong { display: block; font-size: 18px; }
-    .layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 16px; align-items: start; }
-    .step-list { display: grid; gap: 8px; position: sticky; top: 84px; }
-    .step-btn {
-      display: grid;
-      grid-template-columns: 34px minmax(0, 1fr);
-      gap: 10px;
-      align-items: center;
-      width: 100%;
-      text-align: left;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius);
-      background: var(--color-surface);
-      color: var(--color-text);
-      padding: 10px;
-      cursor: pointer;
-      font: inherit;
-    }
-    .step-btn.active { border-color: var(--color-primary); background: var(--color-primary-bg); }
-    .step-index {
-      width: 30px;
-      height: 30px;
+    .hero::before {
+      content: "";
+      position: absolute;
+      top: -60px; right: -60px;
+      width: 280px; height: 280px;
       border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      pointer-events: none;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      bottom: -40px; left: 10%;
+      width: 180px; height: 180px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.05);
+      pointer-events: none;
+    }
+    .hero-inner { position: relative; z-index: 1; }
+    .hero-eyebrow {
       display: inline-flex;
       align-items: center;
-      justify-content: center;
-      background: var(--color-surface-alt);
-      color: var(--color-primary);
-      font-weight: 900;
-    }
-    .step-title { font-weight: 900; }
-    .step-sub { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
-    .detail-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
-    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .pill {
-      border: 1px solid var(--color-border);
-      border-radius: 999px;
-      padding: 4px 9px;
-      background: var(--color-surface-alt);
-      color: var(--color-text-secondary);
+      gap: 8px;
       font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.75);
+      margin-bottom: 12px;
+    }
+    .hero-eyebrow .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+      box-shadow: 0 0 0 3px rgba(74,222,128,0.25);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(74,222,128,0.25); }
+      50% { box-shadow: 0 0 0 6px rgba(74,222,128,0.1); }
+    }
+    .hero h1 {
+      margin: 0 0 12px;
+      font-size: 32px;
       font-weight: 800;
+      line-height: 1.25;
+      letter-spacing: -0.3px;
     }
-    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .block-title { font-weight: 900; margin-bottom: 8px; }
-    .check-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
-    .check-list li {
-      border-left: 3px solid var(--color-primary);
-      background: var(--color-surface-alt);
-      border-radius: var(--radius-sm);
-      padding: 8px 10px;
-      color: var(--color-text-secondary);
-      line-height: 1.55;
+    .hero-desc {
+      max-width: 720px;
+      margin: 0 0 20px;
+      font-size: 15px;
+      line-height: 1.7;
+      color: rgba(255,255,255,0.82);
     }
-    .tool-deck {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 12px;
-      margin-bottom: 16px;
+    .hero-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
-    .tool-card {
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius);
-      background: var(--color-surface-alt);
-      padding: 14px;
-    }
-    .tool-card h3 { margin: 0 0 6px; font-size: 14px; }
-    .tool-card p { margin: 0; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
-    .tool-card code { background: var(--color-surface); padding: 2px 5px; border-radius: 4px; font-size: 11px; }
-    .prompt-box {
-      position: relative;
-      margin-top: 12px;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius);
-      background: var(--color-surface-alt);
-      padding: 13px;
-      font-family: var(--font-mono);
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(8px);
       font-size: 12px;
-      line-height: 1.65;
+      font-weight: 600;
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.12);
+    }
+    .hero-badge svg { width: 14px; height: 14px; opacity: 0.85; }
+
+    /* ===== Protocol Status Bar ===== */
+    .status-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      padding: 20px 22px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+    }
+    .stat-icon {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .stat-icon.purple { background: linear-gradient(135deg, #e9d5ff, #f3e8ff); }
+    .stat-icon.blue   { background: linear-gradient(135deg, #bfdbfe, #dbeafe); }
+    .stat-icon.green  { background: linear-gradient(135deg, #bbf7d0, #dcfce7); }
+    .stat-icon.amber  { background: linear-gradient(135deg, #fde68a, #fef3c7); }
+    [data-theme="dark"] .stat-icon.purple { background: linear-gradient(135deg, #581c87, #7e22ce); }
+    [data-theme="dark"] .stat-icon.blue   { background: linear-gradient(135deg, #1e40af, #3b82f6); }
+    [data-theme="dark"] .stat-icon.green  { background: linear-gradient(135deg, #166534, #22c55e); }
+    [data-theme="dark"] .stat-icon.amber  { background: linear-gradient(135deg, #92400e, #f59e0b); }
+    .stat-body { min-width: 0; }
+    .stat-value {
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1;
+      color: var(--color-text);
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      font-weight: 500;
+    }
+
+    /* ===== Section Cards ===== */
+    .section-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 20px;
+      padding: 28px;
+      margin-bottom: 24px;
+    }
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .section-title-wrap { min-width: 0; }
+    .section-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--color-primary);
+      margin-bottom: 6px;
+    }
+    .section-title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.3;
+      letter-spacing: -0.2px;
+    }
+    .section-desc {
+      margin: 8px 0 0;
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+      max-width: 800px;
+    }
+
+    /* ===== MCP Tool Grid ===== */
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 14px;
+    }
+    .tool-item {
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      padding: 20px;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: default;
+    }
+    .tool-item:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.08);
+      border-color: var(--color-primary-soft, rgba(139,92,246,0.3));
+    }
+    .tool-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .tool-icon {
+      width: 40px; height: 40px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .tool-icon.teal  { background: linear-gradient(135deg, #99f6e4, #ccfbf1); }
+    .tool-icon.indigo{ background: linear-gradient(135deg, #c7d2fe, #e0e7ff); }
+    .tool-icon.rose  { background: linear-gradient(135deg, #fecdd3, #ffe4e6); }
+    .tool-icon.sky   { background: linear-gradient(135deg, #bae6fd, #e0f2fe); }
+    .tool-icon.orange{ background: linear-gradient(135deg, #fed7aa, #ffedd5); }
+    .tool-icon.lime  { background: linear-gradient(135deg, #d9f99d, #ecfccb); }
+    .tool-icon.violet{ background: linear-gradient(135deg, #ddd6fe, #ede9fe); }
+    .tool-icon.emerald{ background: linear-gradient(135deg, #a7f3d0, #d1fae5); }
+    .tool-icon.pink  { background: linear-gradient(135deg, #fbcfe8, #fce7f3); }
+    .tool-icon.cyan  { background: linear-gradient(135deg, #a5f3fc, #cffafe); }
+    [data-theme="dark"] .tool-icon.teal   { background: linear-gradient(135deg, #115e59, #14b8a6); }
+    [data-theme="dark"] .tool-icon.indigo { background: linear-gradient(135deg, #3730a3, #6366f1); }
+    [data-theme="dark"] .tool-icon.rose   { background: linear-gradient(135deg, #9f1239, #f43f5e); }
+    [data-theme="dark"] .tool-icon.sky    { background: linear-gradient(135deg, #0369a1, #0ea5e9); }
+    [data-theme="dark"] .tool-icon.orange { background: linear-gradient(135deg, #9a3412, #f97316); }
+    [data-theme="dark"] .tool-icon.lime   { background: linear-gradient(135deg, #3f6212, #84cc16); }
+    [data-theme="dark"] .tool-icon.violet { background: linear-gradient(135deg, #5b21b6, #8b5cf6); }
+    [data-theme="dark"] .tool-icon.emerald{ background: linear-gradient(135deg, #065f46, #10b981); }
+    [data-theme="dark"] .tool-icon.pink   { background: linear-gradient(135deg, #831843, #ec4899); }
+    [data-theme="dark"] .tool-icon.cyan   { background: linear-gradient(135deg, #155e75, #06b6d4); }
+    .tool-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--color-text);
+      margin: 0;
+    }
+    .tool-desc {
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      line-height: 1.7;
+      margin: 0;
+    }
+    .tool-desc code {
+      background: var(--color-surface);
+      padding: 2px 6px;
+      border-radius: 5px;
+      font-size: 11.5px;
+      font-family: var(--font-mono);
+      color: var(--color-primary);
+      border: 1px solid var(--color-border);
+    }
+    .tool-desc strong {
+      color: var(--color-text);
+      font-weight: 600;
+    }
+
+    /* ===== Pipeline Layout ===== */
+    .pipeline-wrap {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    /* Step Timeline Sidebar */
+    .step-timeline {
+      position: sticky;
+      top: 84px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 20px;
+      padding: 20px;
+    }
+    .step-timeline-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 0 0 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .timeline-list { display: grid; gap: 4px; }
+    .timeline-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+    }
+    .timeline-item:hover {
+      background: var(--color-surface-alt);
+    }
+    .timeline-item.active {
+      background: var(--color-primary-bg);
+      border-color: var(--color-primary-soft, rgba(139,92,246,0.25));
+    }
+    .timeline-number {
+      width: 32px; height: 32px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      font-weight: 800;
+      flex-shrink: 0;
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      border: 1px solid var(--color-border);
+      transition: all 0.2s;
+    }
+    .timeline-item.active .timeline-number {
+      background: var(--color-primary);
+      color: #fff;
+      border-color: var(--color-primary);
+      box-shadow: 0 4px 12px rgba(139,92,246,0.35);
+    }
+    .timeline-text { min-width: 0; padding-top: 2px; }
+    .timeline-text .tl-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--color-text);
+      line-height: 1.4;
+    }
+    .timeline-text .tl-sub {
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      margin-top: 2px;
+    }
+
+    /* Step Detail Panel */
+    .detail-panel {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 20px;
+      overflow: hidden;
+    }
+    .detail-header {
+      padding: 24px 28px;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-alt);
+    }
+    .detail-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--color-primary);
+      margin-bottom: 6px;
+    }
+    .detail-kicker .step-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--color-primary);
+    }
+    .detail-title {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.2px;
+    }
+    .detail-desc {
+      margin: 8px 0 0;
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      line-height: 1.7;
+      max-width: 800px;
+    }
+    .detail-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .detail-body {
+      padding: 24px 28px;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .detail-col {}
+    .col-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--color-text);
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--color-border);
+    }
+    .col-header .col-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+    }
+    .col-header .col-dot.worker { background: var(--color-primary); }
+    .col-header .col-dot.review { background: var(--color-warning, #f59e0b); }
+    .check-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .check-list li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      background: var(--color-surface-alt);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: var(--color-text-secondary);
+      border: 1px solid var(--color-border);
+      transition: border-color 0.2s;
+    }
+    .check-list li:hover {
+      border-color: var(--color-primary-soft, rgba(139,92,246,0.25));
+    }
+    .check-list li .check-icon {
+      width: 20px; height: 20px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+      font-size: 11px;
+    }
+    .check-list.worker-list li .check-icon {
+      background: linear-gradient(135deg, #e9d5ff, #f3e8ff);
+      color: #7c3aed;
+    }
+    .check-list.review-list li .check-icon {
+      background: linear-gradient(135deg, #fde68a, #fef3c7);
+      color: #b45309;
+    }
+    [data-theme="dark"] .check-list.worker-list li .check-icon {
+      background: linear-gradient(135deg, #581c87, #7e22ce);
+      color: #e9d5ff;
+    }
+    [data-theme="dark"] .check-list.review-list li .check-icon {
+      background: linear-gradient(135deg, #92400e, #f59e0b);
+      color: #fef3c7;
+    }
+
+    /* Prompt Box */
+    .prompt-section {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--color-border);
+    }
+    .prompt-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--color-text);
+      margin-bottom: 12px;
+    }
+    .prompt-label .prompt-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #34d399, #10b981);
+    }
+    .prompt-box {
+      background: linear-gradient(135deg, var(--color-surface-alt), var(--color-surface));
+      border: 1px solid var(--color-border);
+      border-radius: 14px;
+      padding: 18px 20px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.75;
+      color: var(--color-text-secondary);
       white-space: pre-wrap;
+      position: relative;
+    }
+    .prompt-box::before {
+      content: "PROMPT";
+      position: absolute;
+      top: 10px; right: 14px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: var(--color-text-tertiary, rgba(0,0,0,0.25));
+    }
+
+    /* Protocol List in status card */
+    .protocol-list-mini {
+      max-height: 200px;
+      overflow: auto;
+      display: grid;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    .protocol-mini-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      font-size: 13px;
+    }
+    .protocol-mini-item .pm-icon {
+      width: 24px; height: 24px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #e9d5ff, #f3e8ff);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    [data-theme="dark"] .protocol-mini-item .pm-icon {
+      background: linear-gradient(135deg, #581c87, #7e22ce);
+    }
+    .protocol-mini-item .pm-title {
+      font-weight: 600;
+      color: var(--color-text);
+    }
+    .protocol-mini-item .pm-meta {
+      font-size: 11px;
       color: var(--color-text-secondary);
     }
-    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .protocol-list { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
-    .protocol-item { border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 8px; background: var(--color-surface-alt); }
-    @media (max-width: 900px) {
-      .summary-band, .layout, .two-col { grid-template-columns: 1fr; }
-      .step-list { position: static; }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 980px) {
+      .status-bar { grid-template-columns: repeat(2, 1fr); }
+      .pipeline-wrap { grid-template-columns: 1fr; }
+      .step-timeline { position: static; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .hero { padding: 24px; }
+      .hero h1 { font-size: 24px; }
+    }
+    @media (max-width: 640px) {
+      .status-bar { grid-template-columns: 1fr; }
+      .tool-grid { grid-template-columns: 1fr; }
+      .section-header { flex-direction: column; }
+      .shell { padding: 16px; }
     }
   </style>
 </head>
 <body>
   <div id="topnav-mount"></div>
   <main class="shell">
-    <section class="summary-band">
-      <div class="panel">
-        <div class="eyebrow">WORKER EXTRACTION FLOW</div>
+
+    <!-- ===== Hero Banner ===== -->
+    <section class="hero">
+      <div class="hero-inner">
+        <div class="hero-eyebrow">
+          <span class="dot"></span>
+          Worker Extraction Flow
+        </div>
         <h1>按证据拆文献，按记录逐项提取</h1>
-        <p class="muted">系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；Gemini/第二 AI 和人工负责审核。候选数据不直接进入 DFT 数据库、ML 导出或可信可视化。</p>
-        <div class="pill-row">
-          <span class="pill">Scope gate</span>
-          <span class="pill">Record plan</span>
-          <span class="pill">Row check</span>
-          <span class="pill">Duplicate guard</span>
-          <span class="pill">Gemini audit</span>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="block-title">当前协议状态</div>
-        <div class="status-grid">
-          <div class="status-cell"><strong id="protocolCount">-</strong><span class="muted">协议</span></div>
-          <div class="status-cell"><strong>7</strong><span class="muted">步骤</span></div>
-          <div class="status-cell"><strong id="stage2Mode">-</strong><span class="muted">深度解析</span></div>
-          <div class="status-cell"><strong style="color:var(--color-success);">✓</strong><span class="muted">需人工确认入库</span></div>
-        </div>
-        <div id="protocolList" class="protocol-list" style="margin-top:12px;"><div class="muted">读取协议中...</div></div>
-      </div>
-    </section>
-
-    <section class="panel" style="margin-bottom:16px;">
-      <div class="eyebrow">ON-DEMAND MCP TOOLS</div>
-      <h2 style="margin:0 0 12px; font-size:20px;">按需原子工具决策树</h2>
-      <p class="muted" style="margin-bottom:14px;">AI Agent 在提取流程中可随时调用以下工具查证。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
-      <div class="tool-deck">
-        <div class="tool-card">
-          <h3>🔍 宏观检索</h3>
-          <p>用 <code>retrieve_evidence(query)</code> 跨文献语义检索证据切片。适合定位"哪些论文提到 X"。</p>
-        </div>
-        <div class="tool-card">
-          <h3>🌐 外部文献发现</h3>
-          <p>用 <code>search_external_papers(query, year_min, year_max, target_types)</code> 从 OpenAlex、arXiv 等外部数据库检索新文献。支持年份过滤和类型分类（computational/experimental/review）。<strong>只检索不入库</strong>，后续用 <code>parse_paper</code> 或 <code>ingest_pdf_batch</code> 导入。</p>
-        </div>
-        <div class="tool-card">
-          <h3>📖 翻页查证</h3>
-          <p>当 RAG 片段被截断或缺上下文时，用 <code>read_paper_page(paper_id, page)</code> 翻开原文指定页。返回该页所有 sections、tables 和 figures 的摘要。</p>
-        </div>
-        <div class="tool-card">
-          <h3>🔬 图表追问</h3>
-          <p>当 AI Visual Summary 不够具体时，用 <code>analyze_chart(figure_id, question)</code> 唤醒 VLM 重新凝视原图。如"绿色曲线与 x 轴的交点值"。<strong>结果自动落盘为共享笔记</strong>，其他 AI 和人类可通过 <code>list_notes</code> 查看分析痕迹——雁过留声。</p>
-        </div>
-        <div class="tool-card">
-          <h3>✅ 图表审核</h3>
-          <p>用 <code>review_figure(figure_id, verdict, reasoning)</code> 对图表记录审核结论（verified / needs_attention / incorrect）。结论自动落盘为共享笔记，其他 AI 可见。</p>
-        </div>
-        <div class="tool-card">
-          <h3>✂️ 图表重裁</h3>
-          <p>用 <code>recrop_figure(figure_id, strategy, new_bbox)</code> 修正错误的图片裁剪。支持整页、扩大、缩小。AI 可先在本地试裁，确认无误后使用 <code>ai_bbox</code> 策略注入系统闭环。</p>
-        </div>
-        <div class="tool-card">
-          <h3>📋 审核覆盖率</h3>
-          <p>用 <code>get_review_coverage(paper_id)</code> 查看哪些图表、表格、章节已被审核、哪些还没人碰。快速定位盲区。</p>
-        </div>
-        <div class="tool-card">
-          <h3>⚔️ 分歧检测</h3>
-          <p>用 <code>get_field_disputes(paper_id)</code> 找出多个 AI 对同一字段给出了不同值的冲突，包括已裁决的历史分歧（status='resolved'）。后续 AI 可避免重复踩坑。</p>
-        </div>
-        <div class="tool-card">
-          <h3>✅ 批量确认</h3>
-          <p>用 <code>verify_dft_results_batch</code> / <code>reject_dft_results_batch</code> 批量审核 DFT 结果；用 <code>approve_corrections_batch</code> / <code>reject_corrections_batch</code> 批量处理修正提案。减少重复操作。</p>
-        </div>
-        <div class="tool-card">
-          <h3>📊 ML 数据集导出</h3>
-          <p>用 <code>export_ml_dataset(target_types=['dft_results'], format='json')</code> 导出已审核通过的 ML 就绪数据。支持按年份、库名过滤，输出 JSON 或 CSV。</p>
+        <p class="hero-desc">
+          系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；Gemini / 第二 AI 和人工负责审核。
+          候选数据不直接进入 DFT 数据库、ML 导出或可信可视化。
+        </p>
+        <div class="hero-badges">
+          <span class="hero-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+            Scope Gate
+          </span>
+          <span class="hero-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Record Plan
+          </span>
+          <span class="hero-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Row Check
+          </span>
+          <span class="hero-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Duplicate Guard
+          </span>
+          <span class="hero-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            Gemini Audit
+          </span>
         </div>
       </div>
     </section>
 
-    <section class="layout">
-      <aside class="step-list" id="stepList"></aside>
-      <section class="panel">
-        <div class="detail-head">
-          <div>
-            <div class="eyebrow" id="stepKicker">STEP</div>
-            <h1 id="stepTitle">-</h1>
-            <p id="stepDescription" class="muted"></p>
+    <!-- ===== Protocol Status Bar ===== -->
+    <section class="status-bar">
+      <div class="stat-card">
+        <div class="stat-icon purple">📋</div>
+        <div class="stat-body">
+          <div class="stat-value" id="protocolCount">-</div>
+          <div class="stat-label">提取协议</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon blue">🔄</div>
+        <div class="stat-body">
+          <div class="stat-value">7</div>
+          <div class="stat-label">执行步骤</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green" id="stage2Icon">🤖</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stage2Mode">-</div>
+          <div class="stat-label">深度解析模式</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon amber">🔒</div>
+        <div class="stat-body">
+          <div class="stat-value" style="font-size:18px; color:var(--color-success);">✓ 人工确认</div>
+          <div class="stat-label">入库审核机制</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Protocol Detail Card ===== -->
+    <section class="section-card">
+      <div class="section-header">
+        <div class="section-title-wrap">
+          <div class="section-eyebrow">📖 协议详情</div>
+          <div class="section-title">当前生效的提取协议</div>
+          <p class="section-desc">以下协议定义了证据提取、字段映射和审核规则。所有 AI 提取操作均须遵循这些协议。</p>
+        </div>
+      </div>
+      <div id="protocolList" class="protocol-list-mini">
+        <div class="muted" style="padding: 20px; text-align: center; color: var(--color-text-secondary);">
+          <div style="font-size: 24px; margin-bottom: 8px;">⏳</div>
+          正在读取协议配置...
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== MCP Tools Section ===== -->
+    <section class="section-card">
+      <div class="section-header">
+        <div class="section-title-wrap">
+          <div class="section-eyebrow">🔧 On-Demand MCP Tools</div>
+          <div class="section-title">按需原子工具决策树</div>
+          <p class="section-desc">AI Agent 在提取流程中可随时调用以下工具查证。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
+        </div>
+      </div>
+      <div class="tool-grid">
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon sky">🔍</div>
+            <h3 class="tool-name">宏观检索</h3>
           </div>
-          <div class="btn-row">
-            <button class="btn btn-ghost" onclick="copyCurrentPrompt()">复制当前步骤提示</button>
-            <a class="btn btn-primary" href="../settings/index.html" style="text-decoration:none;">打开协议</a>
+          <p class="tool-desc">用 <code>retrieve_evidence(query)</code> 跨文献语义检索证据切片。适合定位"哪些论文提到 X"。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon indigo">🌐</div>
+            <h3 class="tool-name">外部文献发现</h3>
+          </div>
+          <p class="tool-desc">用 <code>search_external_papers(query, year_min, year_max, target_types)</code> 从 OpenAlex、arXiv 等外部数据库检索新文献。<strong>只检索不入库</strong>，后续用 <code>parse_paper</code> 或 <code>ingest_pdf_batch</code> 导入。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon teal">📖</div>
+            <h3 class="tool-name">翻页查证</h3>
+          </div>
+          <p class="tool-desc">当 RAG 片段被截断或缺上下文时，用 <code>read_paper_page(paper_id, page)</code> 翻开原文指定页。返回该页所有 sections、tables 和 figures 的摘要。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon rose">🔬</div>
+            <h3 class="tool-name">图表追问</h3>
+          </div>
+          <p class="tool-desc">当 AI Visual Summary 不够具体时，用 <code>analyze_chart(figure_id, question)</code> 唤醒 VLM 重新凝视原图。<strong>结果自动落盘为共享笔记</strong>，其他 AI 和人类可通过 <code>list_notes</code> 查看分析痕迹——雁过留声。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon emerald">✅</div>
+            <h3 class="tool-name">图表审核</h3>
+          </div>
+          <p class="tool-desc">用 <code>review_figure(figure_id, verdict, reasoning)</code> 对图表记录审核结论（verified / needs_attention / incorrect）。结论自动落盘为共享笔记，其他 AI 可见。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon orange">✂️</div>
+            <h3 class="tool-name">图表重裁</h3>
+          </div>
+          <p class="tool-desc">用 <code>recrop_figure(figure_id, strategy, new_bbox)</code> 修正错误的图片裁剪。支持整页、扩大、缩小。AI 可先在本地试裁，确认无误后使用 <code>ai_bbox</code> 策略注入系统闭环。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon violet">📋</div>
+            <h3 class="tool-name">审核覆盖率</h3>
+          </div>
+          <p class="tool-desc">用 <code>get_review_coverage(paper_id)</code> 查看哪些图表、表格、章节已被审核、哪些还没人碰。快速定位盲区。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon pink">⚔️</div>
+            <h3 class="tool-name">分歧检测</h3>
+          </div>
+          <p class="tool-desc">用 <code>get_field_disputes(paper_id)</code> 找出多个 AI 对同一字段给出了不同值的冲突，包括已裁决的历史分歧（status='resolved'）。后续 AI 可避免重复踩坑。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon lime">✅</div>
+            <h3 class="tool-name">批量确认</h3>
+          </div>
+          <p class="tool-desc">用 <code>verify_dft_results_batch</code> / <code>reject_dft_results_batch</code> 批量审核 DFT 结果；用 <code>approve_corrections_batch</code> / <code>reject_corrections_batch</code> 批量处理修正提案。减少重复操作。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon cyan">📊</div>
+            <h3 class="tool-name">ML 数据集导出</h3>
+          </div>
+          <p class="tool-desc">用 <code>export_ml_dataset(target_types=['dft_results'], format='json')</code> 导出已审核通过的 ML 就绪数据。支持按年份、库名过滤，输出 JSON 或 CSV。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 7-Step Pipeline ===== -->
+    <section class="pipeline-wrap">
+      <!-- Step Timeline Sidebar -->
+      <aside class="step-timeline">
+        <div class="step-timeline-title">📌 提取流程</div>
+        <div class="timeline-list" id="stepList"></div>
+      </aside>
+
+      <!-- Step Detail Panel -->
+      <section class="detail-panel">
+        <div class="detail-header">
+          <div>
+            <div class="detail-kicker">
+              <span class="step-dot"></span>
+              <span id="stepKicker">STEP</span>
+            </div>
+            <h1 class="detail-title" id="stepTitle">-</h1>
+            <p class="detail-desc" id="stepDescription"></p>
+          </div>
+          <div class="detail-actions">
+            <button class="btn btn-ghost" onclick="copyCurrentPrompt()">📋 复制提示词</button>
+            <a class="btn btn-primary" href="../settings/index.html" style="text-decoration:none;">⚙️ 打开协议设置</a>
           </div>
         </div>
-        <div class="two-col">
-          <div>
-            <div class="block-title">Worker 填什么</div>
-            <ul id="workerList" class="check-list"></ul>
+        <div class="detail-body">
+          <div class="detail-grid">
+            <div class="detail-col">
+              <div class="col-header">
+                <span class="col-dot worker"></span>
+                Worker 填什么
+              </div>
+              <ul id="workerList" class="check-list worker-list"></ul>
+            </div>
+            <div class="detail-col">
+              <div class="col-header">
+                <span class="col-dot review"></span>
+                审核 / 阻断规则
+              </div>
+              <ul id="reviewList" class="check-list review-list"></ul>
+            </div>
           </div>
-          <div>
-            <div class="block-title">审核/阻断规则</div>
-            <ul id="reviewList" class="check-list"></ul>
+          <div class="prompt-section">
+            <div class="prompt-label">
+              <span class="prompt-dot"></span>
+              AI 可见命令
+            </div>
+            <div id="promptBox" class="prompt-box"></div>
           </div>
         </div>
-        <div class="block-title" style="margin-top:14px;">AI 可见命令</div>
-        <div id="promptBox" class="prompt-box"></div>
       </section>
     </section>
+
   </main>
 
   <script>
@@ -297,14 +858,17 @@
     let currentStep = steps[0];
 
     function esc(value) {
-      return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+      return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[c]));
     }
     function renderSteps() {
       document.getElementById("stepList").innerHTML = steps.map((step, index) => {
-        return '<button class="step-btn' + (step.id === currentStep.id ? ' active' : '') + '" onclick="selectStep(\'' + step.id + '\')">' +
-          '<span class="step-index">' + (index + 1) + '</span>' +
-          '<span><span class="step-title">' + esc(step.title) + '</span><span class="step-sub">' + esc(step.sub) + '</span></span>' +
-        '</button>';
+        return '<div class="timeline-item' + (step.id === currentStep.id ? ' active' : '') + '" onclick="selectStep(\'' + step.id + '\')">' +
+          '<span class="timeline-number">' + (index + 1) + '</span>' +
+          '<div class="timeline-text">' +
+            '<div class="tl-title">' + esc(step.title) + '</div>' +
+            '<div class="tl-sub">' + esc(step.sub) + '</div>' +
+          '</div>' +
+        '</div>';
       }).join("");
     }
     function selectStep(id) {
@@ -313,8 +877,8 @@
       document.getElementById("stepKicker").textContent = "STEP " + (steps.indexOf(currentStep) + 1) + " / " + steps.length;
       document.getElementById("stepTitle").textContent = currentStep.title;
       document.getElementById("stepDescription").textContent = currentStep.description;
-      document.getElementById("workerList").innerHTML = currentStep.worker.map(item => '<li>' + esc(item) + '</li>').join("");
-      document.getElementById("reviewList").innerHTML = currentStep.review.map(item => '<li>' + esc(item) + '</li>').join("");
+      document.getElementById("workerList").innerHTML = currentStep.worker.map(item => '<li><span class="check-icon">✓</span><span>' + esc(item) + '</span></li>').join("");
+      document.getElementById("reviewList").innerHTML = currentStep.review.map(item => '<li><span class="check-icon">!</span><span>' + esc(item) + '</span></li>').join("");
       document.getElementById("promptBox").textContent = currentStep.prompt;
     }
     async function copyCurrentPrompt() {
@@ -327,10 +891,16 @@
         const items = data.items || [];
         document.getElementById("protocolCount").textContent = items.length;
         document.getElementById("protocolList").innerHTML = items.slice(0, 7).map(item => {
-          return '<div class="protocol-item"><strong>' + esc(item.title || item.key) + '</strong><div class="muted">' + esc(item.version || "未标版本") + ' · ' + esc(item.scope || "") + '</div></div>';
-        }).join("") || '<div class="muted">未读取到协议。</div>';
+          return '<div class="protocol-mini-item">' +
+            '<span class="pm-icon">📄</span>' +
+            '<div style="min-width:0;">' +
+              '<div class="pm-title">' + esc(item.title || item.key) + '</div>' +
+              '<div class="pm-meta">' + esc(item.version || "未标版本") + ' · ' + esc(item.scope || "") + '</div>' +
+            '</div>' +
+          '</div>';
+        }).join("") || '<div class="muted" style="padding:20px; text-align:center; color:var(--color-text-secondary);">未读取到协议。</div>';
       } catch (error) {
-        document.getElementById("protocolList").innerHTML = '<div class="muted">协议读取失败：' + esc(error.message) + '</div>';
+        document.getElementById("protocolList").innerHTML = '<div class="muted" style="padding:20px; text-align:center; color:var(--color-text-secondary);">协议读取失败：' + esc(error.message) + '</div>';
       }
     }
     async function loadAgentGuide() {
@@ -339,14 +909,18 @@
         const data = await response.json();
         const autoStage2 = data?.ingestion_config?.auto_run_stage2_extraction;
         const el = document.getElementById("stage2Mode");
+        const iconEl = document.getElementById("stage2Icon");
         if (autoStage2 === true) {
           el.textContent = "自动";
           el.style.color = "var(--color-success)";
+          iconEl.textContent = "⚡";
         } else if (autoStage2 === false) {
           el.textContent = "AI按需";
           el.style.color = "var(--color-warning)";
+          iconEl.textContent = "🤖";
         } else {
           el.textContent = "未知";
+          iconEl.textContent = "❓";
         }
       } catch (error) {
         document.getElementById("stage2Mode").textContent = "-";
