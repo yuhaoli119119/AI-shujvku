@@ -234,9 +234,15 @@ async function loadLibraryRuntimeInfo() {
         const activeDb = info.active_library_db_path || info.effective_db_path || "";
         const storageRoot = info.effective_storage_root || info.storage_root || "";
         const registryPath = "/data/library_registry.json";
-        const activeRoot = activeDb ? activeDb.replace(/\\/g, "/").replace(/\/database\.sqlite$/i, "") : "";
+        let activeRoot = activeDb ? activeDb.replace(/\\/g, "/").replace(/\/database\.sqlite$/i, "") : "";
+        if (info.dialect === "postgresql" && !activeRoot) {
+            activeRoot = storageRoot ? storageRoot.replace(/\\/g, "/").replace(/\/storage$/i, "") : "";
+        }
+        const dbDisplay = info.dialect === "postgresql"
+            ? "PostgreSQL: <code>" + esc(info.database_url_masked || activeDb || "-") + "</code>"
+            : "SQLite: <code>" + esc(activeDb || "-") + "</code>";
         el.innerHTML =
-            "SQLite: <code>" + esc(activeDb || "-") + "</code>" +
+            dbDisplay +
             " | 注册表: <code>" + esc(registryPath) + "</code>" +
             " | 库目录: <code>" + esc(activeRoot || "-") + "</code>" +
             " | 产物目录: <code>" + esc(storageRoot || "-") + "</code>";
