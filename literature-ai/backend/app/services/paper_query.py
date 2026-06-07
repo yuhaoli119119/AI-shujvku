@@ -139,7 +139,7 @@ class PaperQueryService:
                 PaperSection.paper_id,
                 PaperSection.section_type,
                 PaperSection.section_title,
-                PaperSection.text,
+                func.substr(PaperSection.text, 1, 500),
             ).where(PaperSection.paper_id.in_(paper_ids))
         ).all()
         counts_map_by_section = defaultdict(int)
