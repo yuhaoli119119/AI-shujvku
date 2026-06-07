@@ -971,7 +971,7 @@ function renderDetail(detail, audit) {
     const counts = detail.counts || {};
     const summaryCards =
         '<div class="cards">' +
-            '<div class="stat-card"><h3>正文</h3><div class="value">' + (counts.sections || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>章节</h3><div class="value">' + (counts.sections || 0) + "</div></div>" +
             '<div class="stat-card"><h3>表格</h3><div class="value">' + (counts.tables || 0) + "</div></div>" +
             '<div class="stat-card"><h3>图片</h3><div class="value">' + (counts.figures || 0) + "</div></div>" +
             '<div class="stat-card"><h3>DFT 候选</h3><div class="value">' + (counts.dft_results || 0) + "</div></div>" +
@@ -1001,7 +1001,7 @@ function renderDetail(detail, audit) {
     let sectionCards = "";
     if (activeTab === "sections") {
         const displaySections = (detail.sections || []).filter(isDisplayBodySection).sort(compareDisplaySections).slice(0, 8);
-        sectionCards = renderListBlock("正文节选", displaySections, function(item) {
+        sectionCards = renderListBlock("章节内容", displaySections, function(item) {
             const text = cleanPdfExtractedText(item.text || "");
             return '<div class="prewrap">' + esc(ellipsis(text, 2200) || "暂无文本。") + "</div>";
         }, function(item) {
