@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# NOTE: This project uses PostgreSQL (with pgvector extension) as its database.
+# All models use PostgreSQL-native types: UUID, JSONB, vector(N).
+# Do NOT assume SQLite compatibility — there is no SQLite database in this project.
+
 import json
 import os
 import uuid
@@ -583,3 +587,14 @@ class ExtractionFieldReview(Base):
     __table_args__ = (
         sa.UniqueConstraint("paper_id", "target_type", "target_id", "field_name", name="uq_extraction_field_review"),
     )
+
+
+class ShareToken(Base):
+    __tablename__ = "share_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    token: Mapped[str] = mapped_column(sa.String(64), unique=True, index=True, nullable=False)
+    scope: Mapped[str] = mapped_column(sa.Text, default="all", server_default="all")
+    expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)

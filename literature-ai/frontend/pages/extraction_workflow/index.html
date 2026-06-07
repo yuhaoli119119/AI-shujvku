@@ -85,6 +85,21 @@
       color: var(--color-text-secondary);
       line-height: 1.55;
     }
+    .tool-deck {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .tool-card {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
+      padding: 14px;
+    }
+    .tool-card h3 { margin: 0 0 6px; font-size: 14px; }
+    .tool-card p { margin: 0; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
+    .tool-card code { background: var(--color-surface); padding: 2px 5px; border-radius: 4px; font-size: 11px; }
     .prompt-box {
       position: relative;
       margin-top: 12px;
@@ -128,9 +143,45 @@
         <div class="status-grid">
           <div class="status-cell"><strong id="protocolCount">-</strong><span class="muted">协议</span></div>
           <div class="status-cell"><strong>7</strong><span class="muted">步骤</span></div>
-          <div class="status-cell"><strong>0</strong><span class="muted">自动入库</span></div>
+          <div class="status-cell"><strong style="color:var(--color-success);">✓</strong><span class="muted">需人工确认入库</span></div>
         </div>
         <div id="protocolList" class="protocol-list" style="margin-top:12px;"><div class="muted">读取协议中...</div></div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-bottom:16px;">
+      <div class="eyebrow">ON-DEMAND MCP TOOLS</div>
+      <h2 style="margin:0 0 12px; font-size:20px;">按需原子工具决策树</h2>
+      <p class="muted" style="margin-bottom:14px;">AI Agent 在提取流程中可随时调用以下工具查证。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
+      <div class="tool-deck">
+        <div class="tool-card">
+          <h3>🔍 宏观检索</h3>
+          <p>用 <code>retrieve_evidence(query)</code> 跨文献语义检索证据切片。适合定位"哪些论文提到 X"。</p>
+        </div>
+        <div class="tool-card">
+          <h3>📖 翻页查证</h3>
+          <p>当 RAG 片段被截断或缺上下文时，用 <code>read_paper_page(paper_id, page)</code> 翻开原文指定页。返回该页所有 sections、tables 和 figures 的摘要。</p>
+        </div>
+        <div class="tool-card">
+          <h3>🔬 图表追问</h3>
+          <p>当 AI Visual Summary 不够具体时，用 <code>analyze_chart(figure_id, question)</code> 唤醒 VLM 重新凝视原图。如"绿色曲线与 x 轴的交点值"。<strong>结果自动落盘为共享笔记</strong>，其他 AI 和人类可通过 <code>list_notes</code> 查看分析痕迹——雁过留声。</p>
+        </div>
+        <div class="tool-card">
+          <h3>✅ 图表审核</h3>
+          <p>用 <code>review_figure(figure_id, verdict, reasoning)</code> 对图表记录审核结论（verified / needs_attention / incorrect）。结论自动落盘为共享笔记，其他 AI 可见。</p>
+        </div>
+        <div class="tool-card">
+          <h3>✂️ 图表重裁</h3>
+          <p>用 <code>recrop_figure(figure_id, strategy, new_bbox)</code> 修正错误的图片裁剪。支持整页、扩大、缩小。AI 可先在本地试裁，确认无误后使用 <code>ai_bbox</code> 策略注入系统闭环。</p>
+        </div>
+        <div class="tool-card">
+          <h3>📋 审核覆盖率</h3>
+          <p>用 <code>get_review_coverage(paper_id)</code> 查看哪些图表、表格、章节已被审核、哪些还没人碰。快速定位盲区。</p>
+        </div>
+        <div class="tool-card">
+          <h3>⚔️ 分歧检测</h3>
+          <p>用 <code>get_field_disputes(paper_id)</code> 找出多个 AI 对同一字段给出了不同值的冲突。终审者据此裁决。</p>
+        </div>
       </div>
     </section>
 
@@ -173,16 +224,16 @@
         description: "先判断论文是否属于当前库目标，是否包含石墨炔/DFT/实验加计算数据。无范围价值时带证据停止。",
         worker: ["检查标题、摘要、关键词、方法和结论。", "记录是否石墨炔相关、是否纯计算或实验+计算。", "若跳过，必须写明证据原文和页码。"],
         review: ["不合范围的论文不得进入 record plan。", "不能只因关键词出现就判定可提取。", "跳过也要保留审计记录。"],
-        prompt: "任务：执行 Scope Gate。请基于 evidence packet 判断论文是否进入 DFT/材料数据提取。输出 scope_decision、reason、evidence_text、pdf_page、questions_for_reviewer。"
+        prompt: "任务：执行 Scope Gate。请基于 evidence packet 判断论文是否进入 DFT/材料数据提取。输出 scope_decision、reason、evidence_text、pdf_page、questions_for_reviewer。完整协议请查看设置页 → 提取协议。"
       },
       {
         id: "packet",
         title: "Paper Evidence Packet",
         sub: "系统拆材料",
-        description: "系统准备元数据、章节、表格、图注、图片、页码、PDF 定位和附近上下文；这些只是证据材料，不等于可信数据。",
-        worker: ["核对 DOI、期刊、年份、PDF 可读性。", "检查章节、表格、图片是否按文献归档。", "标记短 caption、缺页码、缺截图等风险。"],
-        review: ["证据包不完整时不得直接抽最终数据。", "图片裁剪只是候选定位，必须回到 PDF 原页确认。", "解析错误要记录为修复任务。"],
-        prompt: "任务：检查 evidence packet 完整性。列出缺失的 section/table/figure/page/caption/crop，并说明是否需要重新解析或人工补证据。"
+        description: "系统准备元数据、章节、表格、图注、图片、页码、PDF 定位和附近上下文；VLM 自动生成图表摘要和数值点；长表完整保留不截断；图文联合向量索引可跨模态检索。这些只是证据材料，不等于可信数据。",
+        worker: ["核对 DOI、期刊、年份、PDF 可读性。", "检查章节、表格、图片是否按文献归档。", "检查 VLM 图表摘要 (content_summary) 和数值点 (numerical_data_points) 是否完整。", "长表已自动按 token 窗口分块，不再截断，可跨页检索。", "标记短 caption、缺页码、缺截图等风险。"],
+        review: ["证据包不完整时不得直接抽最终数据。", "图片裁剪只是候选定位，必须回到 PDF 原页确认（可用 read_paper_page）。", "VLM 摘要不足时可用 analyze_chart 追问原图。", "解析错误要记录为修复任务。"],
+        prompt: "任务：检查 evidence packet 完整性。核对 sections/tables/figures/VLM summaries/numerical data points。列出缺失项，判断是否需要 read_paper_page 补读或 analyze_chart 追问。完整协议请查看设置页 → 提取协议。"
       },
       {
         id: "plan",
@@ -191,7 +242,7 @@
         description: "AI 先规划一篇文章应拆成哪些材料、结构、掺杂体系、反应体系或测试条件，不急着抽数值。",
         worker: ["列出材料/催化剂/结构/掺杂体系。", "列出反应类型、吸附物、测试条件或计算条件。", "写 known_missing，不用空白掩盖缺失。"],
         review: ["不同材料状态不能混为一个 record。", "不要在 plan 阶段预填详细数值行。", "每个 record 必须有 source_anchors。"],
-        prompt: "任务：生成 Record Plan。不要抽具体数值。只规划 record_id、material_state、reaction_family、source_anchors、expected_categories、known_missing。"
+        prompt: "任务：生成 Record Plan。不要抽具体数值。只规划 record_id、material_state、reaction_family、source_anchors、expected_categories、known_missing。完整协议请查看设置页 → 提取协议。"
       },
       {
         id: "record",
@@ -200,16 +251,16 @@
         description: "每次只处理一个材料体系，提取 DFT 设置、催化剂结构、吸附物、能量值、描述符和实验性能候选。",
         worker: ["一次只处理一个 record。", "每条候选写原始值、标准值、单位和条件。", "保留 source_section、table、figure、caption、pdf_page。"],
         review: ["没有证据定位的数据保持 candidate。", "估算曲线值不得当作精确值入库。", "同一 record 的条件必须一致。"],
-        prompt: "任务：对当前 record 提取候选行。输出 DFT settings、catalyst/sample、adsorbate、property_type、value、unit、condition、evidence、confidence。"
+        prompt: "任务：对当前 record 提取候选行。输出 DFT settings、catalyst/sample、adsorbate、property_type、value、unit、condition、evidence、confidence。完整协议请查看设置页 → 提取协议。"
       },
       {
         id: "row_check",
         title: "Row Check",
         sub: "逐行闭环",
         description: "每条候选数值都要确认字段完整、单位准确、定位准确、证据支持，不完整就停留在需处理状态。",
-        worker: ["检查 value/unit/property/adsorbate/catalyst 是否和证据一致。", "检查 PDF page、table/figure、caption、bbox。", "给出 numeric_ready 和 blocked_reasons。"],
+        worker: ["检查 value/unit/property/adsorbate/catalyst 是否和证据一致。", "检查 PDF page、table/figure、caption、bbox。", "证据不足时用 read_paper_page 翻看原文上下文。", "图表数据存疑时用 analyze_chart 追问精确值。", "给出 numeric_ready 和 blocked_reasons。"],
         review: ["缺 evidence_text、缺 locator、缺 review 任一项都不能导出。", "needs_fix 不得进入可信矩阵。", "修正必须保留原值和原因。"],
-        prompt: "任务：执行 Row Check。逐条输出 accept/reject/needs_fix/suspected_duplicate/suspected_missing，并给出证据和阻断原因。"
+        prompt: "任务：执行 Row Check。逐条输出 accept/reject/needs_fix/suspected_duplicate/suspected_missing，并给出证据和阻断原因。完整协议请查看设置页 → 提取协议。"
       },
       {
         id: "duplicate",
@@ -218,7 +269,7 @@
         description: "同一论文、同一材料、同一吸附物、同一属性、同一条件的近重复候选要合并证据，不能静默删除。",
         worker: ["构造 duplicate_key。", "识别近似值、同义属性名和同义材料名。", "合并证据来源而不是丢弃候选。"],
         review: ["不同条件不能合并。", "不同 object_id 的原始证据默认保留。", "重复组需要可追溯。"],
-        prompt: "任务：执行 Duplicate Guard。按 normalized material/adsorbate/property/value/unit/condition/evidence_location 分组，输出 primary 和 merged_evidence。"
+        prompt: "任务：执行 Duplicate Guard。按 normalized material/adsorbate/property/value/unit/condition/evidence_location 分组，输出 primary 和 merged_evidence。完整协议请查看设置页 → 提取协议。"
       },
       {
         id: "audit",
@@ -227,7 +278,7 @@
         description: "Gemini 或人工依据明文协议和证据包复核。只有已审核、证据完整、PDF 定位准确的数据才进入 DFT 数据库和可信可视化。",
         worker: ["读取 Gemini 审核协议。", "复核候选字段、证据、定位和重复。", "输出可否 promote_to_exportable_database。"],
         review: ["accept 仍需满足项目设定的人审门槛。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心。"],
-        prompt: "任务：按 Gemini audit protocol 审核候选记录。不要发明值；不要从常识修复；只基于 evidence packet 给出 decision 和 reasons。"
+        prompt: "任务：按 Gemini audit protocol 审核候选记录。不要发明值；不要从常识修复；只基于 evidence packet 给出 decision 和 reasons。完整协议请查看设置页 → 提取协议。"
       }
     ];
     let currentStep = steps[0];
@@ -262,7 +313,7 @@
         const data = await response.json();
         const items = data.items || [];
         document.getElementById("protocolCount").textContent = items.length;
-        document.getElementById("protocolList").innerHTML = items.slice(0, 6).map(item => {
+        document.getElementById("protocolList").innerHTML = items.slice(0, 7).map(item => {
           return '<div class="protocol-item"><strong>' + esc(item.title || item.key) + '</strong><div class="muted">' + esc(item.version || "未标版本") + ' · ' + esc(item.scope || "") + '</div></div>';
         }).join("") || '<div class="muted">未读取到协议。</div>';
       } catch (error) {

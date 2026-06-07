@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
+    # NOTE: The database is PostgreSQL (with pgvector), NOT SQLite.
     # In production this can be pinned with LITAI_FORCE_CONFIGURED_DATABASE=true
     # so the app never falls back to per-library SQLite databases.
     database_url: str = "postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai"

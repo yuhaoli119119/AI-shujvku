@@ -8,6 +8,21 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Base
 
+# ──────────────────────────────────────────────────────────────────────────────
+# DATABASE: This project uses PostgreSQL (with pgvector extension) as its
+# primary database, NOT SQLite. The default connection string is:
+#   postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+#
+# IMPORTANT for AI developers:
+# - PostgreSQL supports concurrent read/write — no SQLite-style file locking.
+# - pgvector provides HNSW vector indexing for semantic search.
+# - JSONB columns are used for structured data (not plain JSON).
+# - UUID columns are native PostgreSQL UUID type (not CHAR(32)).
+# - session_scope() commits on success, rolls back on exception.
+# - Avoid holding sessions open during long external calls (e.g. VLM inference);
+#   read what you need, close the session, then do the slow work.
+# ──────────────────────────────────────────────────────────────────────────────
+
 _engines: dict[str, object] = {}
 _session_factories: dict[str, sessionmaker[Session]] = {}
 logger = logging.getLogger(__name__)

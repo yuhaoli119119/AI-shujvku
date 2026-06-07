@@ -8,10 +8,18 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+# NOTE: This project uses PostgreSQL (with pgvector extension) as its database,
+# NOT SQLite. All session_scope() calls operate against PostgreSQL.
+# Do not assume SQLite-style locking or file-based database behavior.
+
 PROTOCOL_FILES: dict[str, str] = {
     "dft_results": "prompts/dft_results.yaml",
     "dft_ai_protocol": "prompts/dft_ai_protocol.yaml",
     "gemini_audit_protocol": "prompts/gemini_audit_protocol.yaml",
+    "dft_settings": "prompts/dft_settings.yaml",
+    "mechanism_claims": "prompts/mechanism_claims.yaml",
+    "paper_writer": "prompts/paper_writer.yaml",
+    "writing_card": "prompts/writing_card.yaml",
 }
 
 

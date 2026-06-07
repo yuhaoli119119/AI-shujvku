@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import uuid
@@ -660,18 +661,25 @@ class PaperIngestionService:
                 )
             )
             if table_text:
-                truncated_text = table_text[:2000] + ("..." if len(table_text) > 2000 else "")
                 self._add_section_with_chunks(
                     paper_id=paper.id,
                     section_title=table.caption or "Table",
                     section_type="table",
-                    text=truncated_text,
+                    text=table_text,
                     page_start=table.page,
                     page_end=table.page,
                 )
 
         for figure in document.figures:
             caption_text = figure.caption or "Figure"
+
+            # Build enhanced text for vector indexing: caption + VLM summary + numerical data points
+            enhanced_text = caption_text
+            if figure.content_summary:
+                enhanced_text += f"\n[AI Visual Summary]: {figure.content_summary}"
+            if figure.numerical_data_points:
+                enhanced_text += f"\n[Extracted Data]: {json.dumps(figure.numerical_data_points, ensure_ascii=False)}"
+
             db_figure = PaperFigure(
                 paper_id=paper.id,
                 caption=figure.caption,
@@ -690,7 +698,7 @@ class PaperIngestionService:
                 paper_id=paper.id,
                 section_title=caption_text,
                 section_type="figure_caption",
-                text=caption_text,
+                text=enhanced_text,
                 page_start=figure.page,
                 page_end=figure.page,
             )

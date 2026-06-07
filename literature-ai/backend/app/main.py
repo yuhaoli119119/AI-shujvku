@@ -10,6 +10,18 @@ from app.api.external_analysis import router as external_analysis_router
 from app.api.evidence import router as evidence_router
 from app.api.extraction import router as extraction_router
 from app.api.health import router as health_router
+from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
+import logging
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+from app.api.corrections import router as corrections_router
+from app.api.external_analysis import router as external_analysis_router
+from app.api.evidence import router as evidence_router
+from app.api.extraction import router as extraction_router
+from app.api.health import router as health_router
 from app.api.impact_metadata import router as impact_metadata_router
 from app.api.jobs import router as jobs_router
 from app.api.libraries import router as libraries_router
@@ -17,6 +29,7 @@ from app.api.library_filter import router as library_filter_router
 from app.api.papers import router as papers_router
 from app.api.references import router as references_router
 from app.api.retrieval import router as retrieval_router
+from app.api.share import router as share_router
 from app.api.settings import router as settings_router
 from app.api.system import router as system_router
 from app.api.writing import router as writing_router
@@ -88,6 +101,7 @@ app.include_router(evidence_router, prefix="/api/evidence", tags=["evidence"])
 app.include_router(extraction_router, prefix="/api/extraction", tags=["extraction"])
 app.include_router(visuals_router, prefix="/api/visuals", tags=["visuals"])
 app.include_router(workbench_router, prefix="/api/workbench", tags=["workbench"])
+app.include_router(share_router, prefix="/api")
 app.mount("/mcp", mcp_http_app)
 
 frontend_dir = Path("/frontend")

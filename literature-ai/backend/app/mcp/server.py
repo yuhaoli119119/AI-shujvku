@@ -10,9 +10,9 @@ from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.db.models import AuditLog, Paper, PaperCorrection, PaperNote, ParseJob
+from app.db.models import AuditLog, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken
 from app.db.session import session_scope
-from app.mcp.auth import require_mcp_capability
+from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.rag.retriever import Retriever
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
 from app.services.discovery_service import DiscoveryService
@@ -272,7 +272,7 @@ def verify_dft_result(
     reviewer_note: str | None = None,
     field_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    auth = require_mcp_capability("review_corrections")
+    auth = require_mcp_capability_any("review_corrections", "review_dft")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return DFTResultReviewService(session).verify_result(
@@ -293,7 +293,7 @@ def reject_dft_result(
     reviewer_note: str | None = None,
     field_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    auth = require_mcp_capability("review_corrections")
+    auth = require_mcp_capability_any("review_corrections", "review_dft")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return DFTResultReviewService(session).reject_result(
@@ -892,4 +892,713 @@ def compare_papers(
             "paper_count": len(comparison),
             "compared_fields": sorted(active_fields),
             "papers": comparison,
+        }
+
+
+# ---------------------------------------------------------------------------
+# On-demand atomic tools (read_paper_page, analyze_chart)
+# ---------------------------------------------------------------------------
+
+
+@mcp_server.tool(
+    name="read_paper_page",
+    description="Read the exact full layout of a specific page or range of pages from a paper. Returns all sections, tables, and figures whose page range overlaps with the requested pages.",
+)
+def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    if page_start < 1:
+        raise ValueError("page_start must be >= 1")
+    if page_end is not None and page_end < page_start:
+        raise ValueError("page_end must be >= page_start when provided")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        _ensure_paper_exists(session, UUID(paper_id))
+
+        pid = UUID(paper_id)
+        effective_page_end = page_end if page_end is not None else page_start
+
+        # Fetch sections whose page range overlaps with the requested page range
+        sections = session.scalars(
+            select(PaperSection)
+            .where(PaperSection.paper_id == pid)
+            .where(
+                (PaperSection.page_start <= effective_page_end)
+                & (PaperSection.page_end >= page_start)
+            )
+            .order_by(PaperSection.page_start, PaperSection.section_title)
+        ).all()
+
+        # Fetch tables on this page range
+        tables = session.scalars(
+            select(PaperTable)
+            .where(PaperTable.paper_id == pid)
+            .where(PaperTable.page >= page_start)
+            .where(PaperTable.page <= effective_page_end)
+        ).all()
+
+        # Fetch figures on this page range (caption + VLM summary + figure_id for analyze_chart)
+        figures = session.scalars(
+            select(PaperFigure)
+            .where(PaperFigure.paper_id == pid)
+            .where(PaperFigure.page >= page_start)
+            .where(PaperFigure.page <= effective_page_end)
+        ).all()
+
+        page_parts: list[str] = []
+        figure_refs: list[dict[str, str]] = []
+
+        for sec in sections:
+            label = sec.section_title or sec.section_type or "Section"
+            page_parts.append(f"## {label} (pp. {sec.page_start}-{sec.page_end})\n{sec.text}")
+
+        for tbl in tables:
+            label = tbl.caption or "Table"
+            page_parts.append(f"## {label} (p. {tbl.page})\n{tbl.markdown_content or ''}")
+
+        for fig in figures:
+            label = fig.caption or "Figure"
+            summary = fig.content_summary or "N/A"
+            role = fig.figure_role or "N/A"
+            page_parts.append(
+                f"## {label} (p. {fig.page})\n"
+                f"Role: {role}\n"
+                f"AI Visual Summary: {summary}\n"
+                f"Figure ID: {fig.id}  ← use analyze_chart with this ID for targeted VLM questions"
+            )
+            figure_refs.append({
+                "figure_id": str(fig.id),
+                "caption": fig.caption or "",
+                "figure_role": role,
+                "has_image": bool(fig.image_path),
+            })
+
+        full_text = "\n\n---\n\n".join(page_parts)
+
+        return {
+            "paper_id": paper_id,
+            "page_start": page_start,
+            "page_end": effective_page_end,
+            "section_count": len(sections),
+            "table_count": len(tables),
+            "figure_count": len(figures),
+            "figure_refs": figure_refs,
+            "full_text": full_text,
+        }
+
+
+@mcp_server.tool(
+    name="analyze_chart",
+    description="Analyze a specific figure from a paper using the VLM (visual language model) with a custom question. Use this when the stored AI summary is insufficient and you need to ask a targeted question about the chart (e.g. exact crossing point of a curve, specific value on an axis). The VLM response is automatically persisted as a shared note so other agents and humans can see it.",
+)
+async def analyze_chart(figure_id: str, custom_question: str) -> dict[str, Any]:
+    auth = require_mcp_capability("read_papers")
+    settings = get_settings()
+
+    if not settings.writer_api_key:
+        raise ValueError("VLM is not configured. Set LITAI_WRITER_API_KEY to enable chart analysis.")
+
+    # Phase 1: Read figure metadata from DB, then close session immediately.
+    # NOTE: This project uses PostgreSQL (pgvector), not SQLite. PostgreSQL handles
+    # concurrent connections well, but we still avoid holding a session open during
+    # a 10-30 second VLM call — long-lived transactions prevent connection pool recycling
+    # and can cause idle-in-transaction timeouts.
+    fig_meta: dict[str, Any] = {}
+    with session_scope(settings.database_url) as session:
+        fig = session.get(PaperFigure, UUID(figure_id))
+        if not fig:
+            raise ValueError(f"Figure {figure_id} not found")
+
+        if not fig.image_path:
+            raise ValueError("This figure has no associated image file.")
+
+        abs_path = settings.storage_paths["figures"] / fig.image_path
+        if not abs_path.exists():
+            raise ValueError(f"Image file not found on disk: {abs_path}")
+
+        fig_meta = {
+            "paper_id": str(fig.paper_id),
+            "caption": fig.caption,
+            "figure_role": fig.figure_role,
+            "image_abs_path": str(abs_path),
+            "page": fig.page,
+        }
+
+    # Phase 2: VLM call — session is already closed, safe to block.
+    from app.services.vlm_service import VLMService
+    import asyncio
+
+    vlm = VLMService(settings)
+    result = await asyncio.to_thread(vlm.analyze_image, fig_meta["image_abs_path"], custom_question)
+
+    if not result:
+        raise ValueError("VLM analysis returned no result")
+
+    # Phase 3: Auto-persist the VLM response as a shared PaperNote (Blackboard pattern).
+    # This is a system-level action, not an agent-initiated write, so we bypass the
+    # append_notes capability check and write directly to DB. Any AI or human who
+    # calls list_notes will see the analysis trail — "雁过留声".
+    note_content = (
+        f"[VLM Chart Analysis] Question: {custom_question}\n"
+        f"Answer: {result}"
+    )
+    with session_scope(settings.database_url) as session:
+        note = PaperNote(
+            paper_id=UUID(fig_meta["paper_id"]),
+            source=f"analyze_chart:{auth.source_prefix}",
+            content=note_content,
+            field_name="figure_analysis",
+            page=fig_meta.get("page"),
+            section_title=fig_meta.get("caption"),
+            quoted_text=custom_question,
+        )
+        session.add(note)
+        session.flush()
+        session.add(
+            AuditLog(
+                paper_id=note.paper_id,
+                action="analyze_chart_auto_note",
+                source=auth.source_prefix,
+                target_type="paper_note",
+                target_id=str(note.id),
+                payload={
+                    "figure_id": figure_id,
+                    "custom_question": custom_question,
+                },
+            )
+        )
+
+    return {
+        "figure_id": figure_id,
+        "paper_id": fig_meta["paper_id"],
+        "caption": fig_meta["caption"],
+        "figure_role": fig_meta["figure_role"],
+        "custom_question": custom_question,
+        "vlm_response": result,
+        "auto_note_created": True,
+    }
+
+
+@mcp_server.tool(
+    name="recrop_figure",
+    description=(
+        "Recrop a specific figure from the original PDF and update its image in the database. "
+        "Strategies: 'full_page' (safest, returns the whole page), 'wider' (expands original bbox by 30%), "
+        "'tight' (shrinks by 10%), 'ai_bbox' (uses new_bbox provided by AI). "
+        "IMPORTANT: If using 'ai_bbox', you SHOULD first write a local Python script using PyMuPDF (fitz) "
+        "to test the crop locally and visually verify it using view_file before calling this tool!"
+    ),
+)
+def recrop_figure(
+    figure_id: str,
+    strategy: str = "full_page",
+    new_bbox: list[float] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("request_parse")  # Modifying images is a parse-level action
+    if strategy not in ("full_page", "wider", "tight", "ai_bbox"):
+        raise ValueError("Invalid strategy")
+    if strategy == "ai_bbox" and not new_bbox:
+        raise ValueError("new_bbox is required when strategy is 'ai_bbox'")
+    if new_bbox and len(new_bbox) != 4:
+        raise ValueError("new_bbox must be [x0, y0, x1, y1]")
+
+    settings = get_settings()
+    import fitz
+
+    # Phase 1: Read figure + paper metadata from DB, then close session immediately.
+    # NOTE: This project uses PostgreSQL (pgvector), not SQLite. We avoid holding a session
+    # open during PDF rendering and file I/O — long-lived transactions prevent connection
+    # pool recycling and can cause idle-in-transaction timeouts.
+    fig_meta: dict[str, Any] = {}
+    with session_scope(settings.database_url) as session:
+        from app.db.models import Paper
+        fig = session.get(PaperFigure, UUID(figure_id))
+        if not fig:
+            raise ValueError(f"Figure {figure_id} not found")
+
+        paper = session.get(Paper, fig.paper_id)
+        if not paper or not paper.pdf_path:
+            raise ValueError("Associated paper or PDF path not found")
+
+        pdf_abs_path = settings.storage_paths["pdf"] / paper.pdf_path
+        if not pdf_abs_path.exists():
+            raise ValueError(f"PDF file not found: {pdf_abs_path}")
+
+        if fig.page is None or fig.page < 1:
+            raise ValueError("Figure does not have a valid page number")
+
+        fig_meta = {
+            "paper_id": str(paper.id),
+            "figure_page": fig.page,
+            "old_image_path": fig.image_path,
+            "prov": list(fig.prov) if fig.prov else [],
+        }
+
+    # Phase 2: PDF rendering — session is already closed, safe to do I/O.
+    doc = fitz.open(str(pdf_abs_path))
+    try:
+        page_index = fig_meta["figure_page"] - 1
+        if page_index >= len(doc):
+            raise ValueError(f"Page {fig_meta['figure_page']} is out of bounds for this PDF")
+
+        page = doc[page_index]
+        page_rect = page.rect
+
+        target_rect = None
+        orig_bbox = None
+        prov = fig_meta["prov"]
+        # prov is a list of dicts; the last entry with "bbox" is the most recent crop.
+        # bbox format in prov: {"l": ..., "t": ..., "r": ..., "b": ..., "coord_origin": "TOPLEFT"}
+        if prov and isinstance(prov, list):
+            for entry in reversed(prov):
+                if isinstance(entry, dict) and "bbox" in entry:
+                    orig_bbox = entry["bbox"]
+                    break
+
+        if strategy == "full_page":
+            target_rect = page_rect
+        elif strategy == "ai_bbox" and new_bbox:
+            target_rect = fitz.Rect(new_bbox[0], new_bbox[1], new_bbox[2], new_bbox[3])
+        elif strategy in ("wider", "tight"):
+            if not orig_bbox:
+                raise ValueError(f"Cannot apply '{strategy}' strategy because original bbox is not found in provenance.")
+            # orig_bbox from prov uses named keys: {"l": left, "t": top, "r": right, "b": bottom}
+            if isinstance(orig_bbox, dict):
+                left = float(orig_bbox.get("l", orig_bbox.get("x0", 0)))
+                top = float(orig_bbox.get("t", orig_bbox.get("y0", 0)))
+                right = float(orig_bbox.get("r", orig_bbox.get("x1", 0)))
+                bottom = float(orig_bbox.get("b", orig_bbox.get("y1", 0)))
+                r = fitz.Rect(left, top, right, bottom)
+            elif isinstance(orig_bbox, (list, tuple)) and len(orig_bbox) == 4:
+                r = fitz.Rect(orig_bbox[0], orig_bbox[1], orig_bbox[2], orig_bbox[3])
+            else:
+                raise ValueError(f"Unsupported bbox format in provenance: {type(orig_bbox)}")
+
+            if strategy == "wider":
+                pad_x = r.width * 0.15
+                pad_y = r.height * 0.15
+                target_rect = fitz.Rect(r.x0 - pad_x, r.y0 - pad_y, r.x1 + pad_x, r.y1 + pad_y)
+            else:  # tight
+                pad_x = r.width * 0.05
+                pad_y = r.height * 0.05
+                target_rect = fitz.Rect(r.x0 + pad_x, r.y0 + pad_y, r.x1 - pad_x, r.y1 - pad_y)
+
+        if target_rect:
+            target_rect = target_rect.intersect(page_rect)
+
+        if not target_rect or target_rect.is_empty:
+            raise ValueError("Calculated crop rectangle is empty or invalid")
+
+        zoom = 2.0  # High res
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, clip=target_rect, alpha=False)
+
+        import uuid as _uuid
+        new_filename = f"{fig_meta['paper_id']}_fig_{_uuid.uuid4().hex[:8]}.png"
+        new_rel_path = f"{fig_meta['paper_id']}/{new_filename}"
+        new_abs_path = settings.storage_paths["figures"] / fig_meta["paper_id"] / new_filename
+
+        new_abs_path.parent.mkdir(parents=True, exist_ok=True)
+        pix.save(str(new_abs_path))
+
+        rendered_meta = {
+            "new_rel_path": new_rel_path,
+            "bbox_used": [target_rect.x0, target_rect.y0, target_rect.x1, target_rect.y1],
+            "pixel_size": {"width": pix.width, "height": pix.height},
+        }
+    finally:
+        doc.close()
+
+    # Phase 3: Write back to DB — new session for the update.
+    with session_scope(settings.database_url) as session:
+        fig = session.get(PaperFigure, UUID(figure_id))
+        if not fig:
+            raise ValueError(f"Figure {figure_id} not found during write-back (race condition)")
+
+        old_path = fig.image_path
+        fig.image_path = rendered_meta["new_rel_path"]
+        fig.crop_status = "recropped"
+        fig.crop_source = f"recrop:{strategy}:{auth.source_prefix}"
+        fig.crop_confidence = 0.5 if strategy == "ai_bbox" else 0.8  # ai_bbox is lower confidence
+
+        prov_entry = {
+            "action": "recrop_figure",
+            "strategy": strategy,
+            "bbox": {"l": rendered_meta["bbox_used"][0], "t": rendered_meta["bbox_used"][1],
+                     "r": rendered_meta["bbox_used"][2], "b": rendered_meta["bbox_used"][3],
+                     "coord_origin": "TOPLEFT"},
+            "pixel_size": rendered_meta["pixel_size"],
+            "previous_path": old_path,
+            "recropped_by": auth.source_prefix,
+        }
+        if fig.prov is None:
+            fig.prov = []
+        if isinstance(fig.prov, dict):
+            fig.prov = [fig.prov]
+        fig.prov.append(prov_entry)
+
+        session.add(
+            AuditLog(
+                paper_id=UUID(fig_meta["paper_id"]),
+                action="recrop_figure",
+                source=auth.source_prefix,
+                target_type="paper_figure",
+                target_id=figure_id,
+                payload={
+                    "strategy": strategy,
+                    "new_bbox": rendered_meta["bbox_used"],
+                    "new_image_path": rendered_meta["new_rel_path"],
+                    "old_image_path": old_path,
+                },
+            )
+        )
+        session.flush()
+
+        return {
+            "figure_id": figure_id,
+            "paper_id": fig_meta["paper_id"],
+            "strategy": strategy,
+            "new_image_path": rendered_meta["new_rel_path"],
+            "bbox_used": rendered_meta["bbox_used"],
+            "pixel_size": rendered_meta["pixel_size"],
+            "crop_confidence": fig.crop_confidence,
+            "status": "success",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Figure review & coverage tools
+# ---------------------------------------------------------------------------
+
+
+@mcp_server.tool(
+    name="review_figure",
+    description="Record a review verdict for a specific figure. Verdicts: verified (AI summary matches the image), needs_attention (summary is incomplete or misleading), incorrect (summary contradicts the image). The verdict is persisted as a shared note so other agents and humans can see it (Blackboard pattern).",
+)
+def review_figure(
+    figure_id: str,
+    verdict: str,
+    reasoning: str,
+) -> dict[str, Any]:
+    auth = require_mcp_capability_any("review_corrections", "review_dft")
+    if verdict not in ("verified", "needs_attention", "incorrect"):
+        raise ValueError("verdict must be one of: verified, needs_attention, incorrect")
+
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        fig = session.get(PaperFigure, UUID(figure_id))
+        if not fig:
+            raise ValueError(f"Figure {figure_id} not found")
+
+        # Write structured review note (Blackboard pattern — same as analyze_chart auto-note)
+        note = PaperNote(
+            paper_id=fig.paper_id,
+            source=f"review_figure:{auth.source_prefix}",
+            content=f"[Figure Review] Verdict: {verdict}\nReasoning: {reasoning}",
+            field_name="figure_review",
+            page=fig.page,
+            section_title=fig.caption,
+            quoted_text=verdict,
+        )
+        session.add(note)
+        session.flush()
+
+        session.add(
+            AuditLog(
+                paper_id=fig.paper_id,
+                action="review_figure",
+                source=auth.source_prefix,
+                target_type="paper_figure",
+                target_id=figure_id,
+                payload={
+                    "verdict": verdict,
+                    "reasoning": reasoning,
+                    "note_id": str(note.id),
+                },
+            )
+        )
+
+    return {
+        "figure_id": figure_id,
+        "paper_id": str(fig.paper_id),
+        "verdict": verdict,
+        "reviewer": auth.source_prefix,
+        "note_created": True,
+    }
+
+
+@mcp_server.tool(
+    name="get_review_coverage",
+    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Aggregates review_figure verdicts, analyze_chart auto-notes, and PaperCorrection records to produce a coverage report.",
+)
+def get_review_coverage(paper_id: str) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+
+    with session_scope(settings.database_url) as session:
+        pid = UUID(paper_id)
+        _ensure_paper_exists(session, pid)
+
+        # --- Figures ---
+        all_figures = session.scalars(
+            select(PaperFigure).where(PaperFigure.paper_id == pid)
+        ).all()
+
+        figure_logs = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.paper_id == pid)
+            .where(AuditLog.action.in_(["review_figure", "analyze_chart_auto_note"]))
+        ).all()
+
+        reviewed_fig_ids = set()
+        fig_verdicts: dict[str, list[str]] = {}
+        analyzed_fig_ids = set()
+
+        for log in figure_logs:
+            if log.action == "review_figure" and log.target_id:
+                fig_id = str(log.target_id)
+                reviewed_fig_ids.add(fig_id)
+                payload = log.payload or {}
+                verdict = payload.get("verdict", "unknown") if isinstance(payload, dict) else "unknown"
+                fig_verdicts.setdefault(fig_id, []).append(f"{verdict} (by {log.source})")
+            elif log.action == "analyze_chart_auto_note":
+                payload = log.payload or {}
+                if isinstance(payload, dict) and "figure_id" in payload:
+                    analyzed_fig_ids.add(str(payload["figure_id"]))
+
+        figure_report = []
+        for fig in all_figures:
+            fig_id_str = str(fig.id)
+            cap = fig.caption or ""
+            figure_report.append({
+                "figure_id": fig_id_str,
+                "caption": cap,
+                "page": fig.page,
+                "has_vlm_summary": bool(fig.content_summary),
+                "analyzed_via_chart": fig_id_str in analyzed_fig_ids,
+                "review_verdicts": fig_verdicts.get(fig_id_str, []),
+                "review_status": "reviewed" if fig_id_str in reviewed_fig_ids else ("analyzed" if fig_id_str in analyzed_fig_ids else "unreviewed"),
+            })
+
+        # --- Tables ---
+        all_tables = session.scalars(
+            select(PaperTable).where(PaperTable.paper_id == pid)
+        ).all()
+
+        table_corr = session.scalars(
+            select(PaperCorrection)
+            .where(PaperCorrection.paper_id == pid)
+            .where(PaperCorrection.field_name == "table")
+        ).all()
+
+        reviewed_table_ids = {c.target_path for c in table_corr if c.status != "pending"}
+        table_report = []
+        for tbl in all_tables:
+            table_report.append({
+                "table_id": str(tbl.id),
+                "caption": tbl.caption,
+                "page": tbl.page,
+                "review_status": "has_correction" if str(tbl.id) in reviewed_table_ids else "unreviewed",
+            })
+
+        # --- Sections ---
+        all_sections = session.scalars(
+            select(PaperSection).where(PaperSection.paper_id == pid)
+        ).all()
+
+        section_corr = session.scalars(
+            select(PaperCorrection)
+            .where(PaperCorrection.paper_id == pid)
+            .where(PaperCorrection.field_name.in_(["section", "title", "text"]))
+        ).all()
+
+        reviewed_section_ids = {c.target_path for c in section_corr if c.status != "pending"}
+        section_report = []
+        for sec in all_sections:
+            section_report.append({
+                "section_id": str(sec.id),
+                "title": sec.section_title,
+                "type": sec.section_type,
+                "pages": f"{sec.page_start}-{sec.page_end}",
+                "review_status": "has_correction" if str(sec.id) in reviewed_section_ids else "unreviewed",
+            })
+
+        # --- Summary ---
+        fig_reviewed = sum(1 for f in figure_report if f["review_status"] == "reviewed")
+        fig_analyzed = sum(1 for f in figure_report if f["review_status"] == "analyzed")
+        fig_unreviewed = sum(1 for f in figure_report if f["review_status"] == "unreviewed")
+
+        return {
+            "paper_id": paper_id,
+            "figures": {
+                "total": len(all_figures),
+                "reviewed": fig_reviewed,
+                "analyzed_only": fig_analyzed,
+                "unreviewed": fig_unreviewed,
+                "details": figure_report,
+            },
+            "tables": {
+                "total": len(all_tables),
+                "with_corrections": len(reviewed_table_ids),
+                "unreviewed": len(all_tables) - len(reviewed_table_ids),
+                "details": table_report,
+            },
+            "sections": {
+                "total": len(all_sections),
+                "with_corrections": len(reviewed_section_ids),
+                "unreviewed": len(all_sections) - len(reviewed_section_ids),
+                "details": section_report,
+            },
+        }
+
+
+@mcp_server.tool(
+    name="get_field_disputes",
+    description="Find fields where multiple AIs or reviewers have proposed different values. Returns conflicting PaperCorrection records and figure review disagreements for the same paper.",
+)
+def get_field_disputes(paper_id: str) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+
+    with session_scope(settings.database_url) as session:
+        pid = UUID(paper_id)
+        _ensure_paper_exists(session, pid)
+
+        # --- Correction disputes: same target_path, different proposed values ---
+        all_corrections = session.scalars(
+            select(PaperCorrection)
+            .where(PaperCorrection.paper_id == pid)
+            .where(PaperCorrection.status == "pending")
+        ).all()
+
+        # Group by target_path
+        by_path: dict[str, list[PaperCorrection]] = {}
+        for c in all_corrections:
+            by_path.setdefault(c.target_path, []).append(c)
+
+        # Find paths with >1 pending correction (potential dispute)
+        correction_disputes = []
+        for path, corrections in by_path.items():
+            if len(corrections) < 2:
+                continue
+            # Check if proposed values actually differ
+            values = set()
+            for c in corrections:
+                val = str(c.proposed_value) if c.proposed_value is not None else ""
+                values.add(val)
+            if len(values) > 1:
+                correction_disputes.append({
+                    "target_path": path,
+                    "conflict_count": len(corrections),
+                    "proposals": [
+                        {
+                            "correction_id": str(c.id),
+                            "source": c.source,
+                            "proposed_value": c.proposed_value,
+                            "reason": c.reason,
+                            "created_at": str(c.created_at),
+                        }
+                        for c in corrections
+                    ],
+                })
+
+        # --- Figure review disputes: conflicting verdicts for same figure ---
+        figure_review_logs = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.paper_id == pid)
+            .where(AuditLog.action == "review_figure")
+        ).all()
+
+        # Group by figure_id
+        by_figure_id: dict[str, list[AuditLog]] = {}
+        for log in figure_review_logs:
+            target = str(log.target_id)
+            if target:
+                by_figure_id.setdefault(target, []).append(log)
+
+        figure_disputes = []
+        for fig_id, logs in by_figure_id.items():
+            verdicts = set()
+            for log in logs:
+                if isinstance(log.payload, dict) and "verdict" in log.payload:
+                    verdicts.add(log.payload["verdict"])
+            if len(verdicts) > 1:
+                # Fetch figure caption for context
+                fig = session.get(PaperFigure, UUID(fig_id))
+                caption = fig.caption if fig else "unknown"
+                figure_disputes.append({
+                    "figure_id": fig_id,
+                    "caption": caption,
+                    "conflicting_verdicts": list(verdicts),
+                    "reviews": [
+                        {
+                            "source": log.source,
+                            "verdict": log.payload.get("verdict") if isinstance(log.payload, dict) else "unknown",
+                            "reasoning": log.payload.get("reasoning") if isinstance(log.payload, dict) else "",
+                            "created_at": str(log.created_at),
+                        }
+                        for log in logs
+                    ],
+                })
+
+        return {
+            "paper_id": paper_id,
+            "correction_disputes": correction_disputes,
+            "correction_dispute_count": len(correction_disputes),
+            "figure_disputes": figure_disputes,
+            "figure_dispute_count": len(figure_disputes),
+            "total_disputes": len(correction_disputes) + len(figure_disputes),
+        }
+
+
+# ---------------------------------------------------------------------------
+# create_share_token — generate a read-only share link
+# ---------------------------------------------------------------------------
+
+@mcp_server.tool(
+    name="create_share_token",
+    description=(
+        "Create a read-only share token that lets others view data via /api/share/{token}/... "
+        "without needing MCP access. Scope can be 'all' (all papers) or 'paper:{uuid}' (one paper). "
+        "Optionally set expires_at for time-limited access. Requires 'review_corrections' capability."
+    ),
+)
+def create_share_token(
+    scope: str = "all",
+    expires_hours: int | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    if scope != "all" and not scope.startswith("paper:"):
+        raise ValueError("Scope must be 'all' or 'paper:{uuid}'")
+
+    import secrets
+    token_str = secrets.token_urlsafe(32)
+
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        from datetime import timedelta
+        expires_at = None
+        if expires_hours:
+            expires_at = utcnow() + timedelta(hours=expires_hours)
+
+        share = ShareToken(
+            token=token_str,
+            scope=scope,
+            expires_at=expires_at,
+            created_by=auth.source_prefix,
+        )
+        session.add(share)
+        session.flush()
+
+        # Determine the base URL for share links
+        host = settings.host if hasattr(settings, "host") else "localhost"
+        port = settings.port if hasattr(settings, "port") else 8000
+        base_url = f"http://{host}:{port}"
+
+        return {
+            "token": token_str,
+            "scope": scope,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+            "share_url": f"{base_url}/pages/share/index.html?token={token_str}",
+            "api_base": f"{base_url}/api/share/{token_str}",
+            "created_by": auth.source_prefix,
         }

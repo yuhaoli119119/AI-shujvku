@@ -126,7 +126,8 @@ async def get_agent_guide() -> dict:
         "positioning": (
             "A local literature toolbench for Codex-centered workflows. "
             "The system stores papers, parses PDFs into readable artifacts, exposes evidence and structured candidates, "
-            "and lets Codex or a human decide what is reliable."
+            "and lets Codex or a human decide what is reliable. "
+            "NOTE: The database is PostgreSQL (with pgvector extension), NOT SQLite."
         ),
         "recommended_entrypoint": {
             "mode": "codex_mcp_first",
@@ -134,9 +135,9 @@ async def get_agent_guide() -> dict:
             "method": "MCP",
             "path": "/mcp",
             "json_schema_hint": {
-                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "get_dft_review_queue", "retrieve_evidence", "compare_papers"],
-                "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result"],
-                "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper"],
+                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "get_dft_review_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "analyze_chart", "review_figure", "get_review_coverage", "get_field_disputes"],
+                "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result", "recrop_figure"],
+                "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper", "get_parse_status", "recrop_figure"],
                 "writing_tools": ["insert_word_citation"],
             },
         },
@@ -246,6 +247,11 @@ async def get_agent_guide() -> dict:
                 "get_dft_review_queue",
                 "retrieve_evidence",
                 "compare_papers",
+                "read_paper_page",
+                "analyze_chart",
+                "review_figure",
+                "get_review_coverage",
+                "get_field_disputes",
                 "insert_word_citation",
                 "append_note",
                 "propose_correction",
@@ -257,6 +263,8 @@ async def get_agent_guide() -> dict:
                 "scan_local_pdfs",
                 "ingest_pdf_batch",
                 "get_parse_status",
+                "recrop_figure",
+                "create_share_token",
             ],
         },
         "desktop_sync": {
@@ -279,6 +287,13 @@ async def get_agent_guide() -> dict:
         "suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
             "Then connect to /mcp and prefer query_papers, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, and reject_dft_result for bad candidates. "
+            "Use read_paper_page to read a specific page when evidence is truncated or missing context. "
+            "Use analyze_chart for targeted VLM analysis of figures when the stored AI summary is insufficient. "
+            "Use recrop_figure to recalculate and persist an image crop. You can use 'full_page', 'wider', or 'ai_bbox' strategies. "
+            "Use review_figure to store structured human/AI judgements on whether a figure's analysis is correct. "
+            "Use get_review_coverage to check which figures, tables, and sections have been reviewed. "
+            "Use get_field_disputes to find conflicting values proposed by different AIs. "
+            "Use create_share_token to generate a read-only share link for others to view papers, figures, DFT data, and audit logs without MCP access. "
             "Use /api/papers/ai_workflow only when batch acquisition is explicitly needed."
         ),
     }

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Shared Read-Only View - Literature AI</title>
+  <style>
+    :root { --primary: #0056b3; --bg: #f9f9f9; --card-bg: #fff; --border: #ddd; --muted: #666; --error-bg: #ffebee; --error-text: #d32f2f; }
+    body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg); color: #333; margin: 0; padding: 20px; }
+    .container { max-width: 1000px; margin: 0 auto; background: var(--card-bg); padding: 24px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { font-size: 22px; margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 12px; }
+    h2 { font-size: 18px; color: var(--primary); margin-top: 20px; }
+    h3 { font-size: 16px; margin: 12px 0 6px; }
+    h4 { font-size: 14px; color: var(--muted); margin: 8px 0 4px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .badge { display: inline-block; background: #e3f2fd; color: var(--primary); padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 6px; }
+    .card { border: 1px solid var(--border); padding: 16px; margin-top: 16px; border-radius: 6px; background: #fafafa; }
+    .error { color: var(--error-text); background: var(--error-bg); padding: 10px; border-radius: 4px; display: none; margin-bottom: 16px; }
+    pre { background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 13px; border: 1px solid var(--border); white-space: pre-wrap; word-wrap: break-word; }
+    .btn { background: var(--primary); color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; margin-right: 6px; }
+    .btn:hover { background: #004494; }
+    .btn:disabled { background: #ccc; cursor: default; }
+    .btn-outline { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+    .btn-outline:hover { background: #e3f2fd; }
+    .section { margin-top: 12px; display: none; }
+    .section.active { display: block; }
+    .tab-bar { display: flex; gap: 4px; margin: 12px 0; border-bottom: 2px solid #eee; padding-bottom: 4px; }
+    .tab { padding: 6px 14px; cursor: pointer; font-size: 13px; border-radius: 4px 4px 0 0; border: 1px solid transparent; }
+    .tab:hover { background: #f0f0f0; }
+    .tab.active { background: #e3f2fd; border: 1px solid var(--border); border-bottom: 2px solid var(--card-bg); margin-bottom: -2px; font-weight: 600; }
+    .figure-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 12px; }
+    .figure-card { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #fff; }
+    .figure-card img { width: 100%; height: 200px; object-fit: contain; background: #f8f8f8; cursor: pointer; }
+    .figure-card .caption { padding: 8px; font-size: 13px; }
+    .figure-card .meta { padding: 0 8px 8px; font-size: 11px; color: var(--muted); }
+    .note-item { border-left: 3px solid var(--primary); padding: 8px 12px; margin: 8px 0; background: #f8f9ff; border-radius: 0 4px 4px 0; }
+    .note-source { font-size: 12px; color: var(--primary); font-weight: 600; }
+    .note-content { font-size: 13px; margin-top: 4px; }
+    .dft-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    .dft-table th, .dft-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    .dft-table th { background: #f0f0f0; font-weight: 600; }
+    .dft-table tr:hover { background: #f8f8f8; }
+    .status-candidate { color: #e65100; }
+    .status-verified { color: #2e7d32; }
+    .audit-item { padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 999; align-items: center; justify-content: center; }
+    .lightbox.show { display: flex; }
+    .lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; }
+    .lightbox .close { position: absolute; top: 16px; right: 24px; color: white; font-size: 32px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📚 Literature AI — Shared View</h1>
+    <p class="muted">You are viewing this data via a secure, read-only share link. Modifications are disabled.</p>
+    <div id="errorBox" class="error"></div>
+    <div id="content"><p>Loading...</p></div>
+  </div>
+
+  <div id="lightbox" class="lightbox" onclick="closeLightbox()">
+    <span class="close">&times;</span>
+    <img id="lightboxImg" src="" alt="">
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const errorBox = document.getElementById('errorBox');
+    const content = document.getElementById('content');
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.style.display = 'block';
+      content.innerHTML = '';
+    }
+
+    async function fetchApi(endpoint) {
+      const response = await fetch(`/api/share/${token}${endpoint}`);
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) throw new Error('Invalid, expired, or unauthorized share token.');
+        throw new Error(`Server error: ${response.status}`);
+      }
+      return response.json();
+    }
+
+    function openLightbox(src) {
+      document.getElementById('lightboxImg').src = src;
+      document.getElementById('lightbox').classList.add('show');
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('show');
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+    async function loadData() {
+      if (!token) { showError('No share token provided. Use ?token=YOUR_TOKEN'); return; }
+      try {
+        const data = await fetchApi('/papers');
+        renderPapers(data.items);
+      } catch (e) { showError(e.message); }
+    }
+
+    function renderPapers(papers) {
+      if (!papers || !papers.length) { content.innerHTML = '<p>No papers found.</p>'; return; }
+      let html = '<h2>Accessible Papers</h2>';
+      papers.forEach(p => {
+        let authors = 'Unknown';
+        if (Array.isArray(p.authors)) authors = p.authors.map(a => a.name || a).join(', ');
+        html += `
+          <div class="card" id="paper-${p.id}">
+            <h3 style="margin-top:0;color:var(--primary)">${p.title || 'Untitled'} <span class="muted">(${p.year || '?'})</span></h3>
+            <div class="muted">${authors}${p.journal ? ' — ' + p.journal : ''}</div>
+            <div class="tab-bar" id="tabs-${p.id}">
+              <div class="tab active" onclick="switchTab('${p.id}','figures')">🖼️ Figures</div>
+              <div class="tab" onclick="switchTab('${p.id}','notes')">📝 Notes</div>
+              <div class="tab" onclick="switchTab('${p.id}','dft')">⚛️ DFT</div>
+              <div class="tab" onclick="switchTab('${p.id}','corrections')">✏️ Corrections</div>
+              <div class="tab" onclick="switchTab('${p.id}','audit')">📋 Audit</div>
+            </div>
+            <div id="section-${p.id}-figures" class="section active"><button class="btn" onclick="loadFigures('${p.id}')">Load Figures</button></div>
+            <div id="section-${p.id}-notes" class="section"><button class="btn" onclick="loadNotes('${p.id}')">Load Notes</button></div>
+            <div id="section-${p.id}-dft" class="section"><button class="btn" onclick="loadDft('${p.id}')">Load DFT Data</button></div>
+            <div id="section-${p.id}-corrections" class="section"><button class="btn" onclick="loadCorrections('${p.id}')">Load Corrections</button></div>
+            <div id="section-${p.id}-audit" class="section"><button class="btn" onclick="loadAudit('${p.id}')">Load Audit Log</button></div>
+          </div>`;
+      });
+      content.innerHTML = html;
+    }
+
+    function switchTab(paperId, tabName) {
+      document.querySelectorAll(`#tabs-${paperId} .tab`).forEach(t => t.classList.remove('active'));
+      document.querySelectorAll(`[id^="section-${paperId}-"]`).forEach(s => s.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById(`section-${paperId}-${tabName}`).classList.add('active');
+    }
+
+    async function loadFigures(paperId) {
+      const container = document.getElementById(`section-${paperId}-figures`);
+      container.innerHTML = '<p class="muted">Loading figures...</p>';
+      try {
+        const data = await fetchApi(`/figures/${paperId}`);
+        if (!data.items || !data.items.length) { container.innerHTML = '<p class="muted">No figures found.</p>'; return; }
+        let html = '<div class="figure-grid">';
+        data.items.forEach(f => {
+          const imgSrc = f.image_path ? `/api/share/${token}/figures/${paperId}/${f.image_path.split('/').pop()}` : '';
+          const label = f.figure_label || 'Figure';
+          const role = f.figure_role ? `<span class="badge">${f.figure_role}</span>` : '';
+          html += `<div class="figure-card">
+            ${imgSrc ? `<img src="${imgSrc}" alt="${label}" onclick="openLightbox('${imgSrc}')" loading="lazy">` : '<div style="height:200px;display:flex;align-items:center;justify-content:center;color:#999">No image</div>'}
+            <div class="caption"><strong>${label}</strong>${role} ${f.content_summary ? '<br>' + f.content_summary : ''}</div>
+            ${f.caption ? `<div class="meta">${f.caption}</div>` : ''}
+          </div>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+    }
+
+    async function loadNotes(paperId) {
+      const container = document.getElementById(`section-${paperId}-notes`);
+      container.innerHTML = '<p class="muted">Loading notes...</p>';
+      try {
+        const data = await fetchApi(`/notes/${paperId}`);
+        if (!data.items || !data.items.length) { container.innerHTML = '<p class="muted">No notes found.</p>'; return; }
+        let html = '';
+        data.items.forEach(n => {
+          html += `<div class="note-item">
+            <div class="note-source">${n.source}${n.field_name ? ' → ' + n.field_name : ''}${n.section_title ? ' [' + n.section_title + ']' : ''}</div>
+            <div class="note-content">${n.content}</div>
+            ${n.quoted_text ? '<div class="muted" style="margin-top:4px;font-style:italic">"' + n.quoted_text + '"</div>' : ''}
+            ${n.page ? '<div class="muted">p.' + n.page + '</div>' : ''}
+          </div>`;
+        });
+        container.innerHTML = html;
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+    }
+
+    async function loadDft(paperId) {
+      const container = document.getElementById(`section-${paperId}-dft`);
+      container.innerHTML = '<p class="muted">Loading DFT data...</p>';
+      try {
+        const data = await fetchApi(`/dft/${paperId}`);
+        if (!data.items || !data.items.length) { container.innerHTML = '<p class="muted">No DFT results found.</p>'; return; }
+        let html = '<table class="dft-table"><thead><tr><th>Adsorbate</th><th>Property</th><th>Value</th><th>Unit</th><th>Step</th><th>Status</th></tr></thead><tbody>';
+        data.items.forEach(r => {
+          const statusClass = r.candidate_status === 'verified' ? 'status-verified' : 'status-candidate';
+          html += `<tr>
+            <td>${r.adsorbate || '?'}</td><td>${r.property_type || '?'}</td>
+            <td>${r.value != null ? r.value : '?'}</td><td>${r.unit || ''}</td>
+            <td>${r.reaction_step || '-'}</td><td class="${statusClass}">${r.candidate_status}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+    }
+
+    async function loadCorrections(paperId) {
+      const container = document.getElementById(`section-${paperId}-corrections`);
+      container.innerHTML = '<p class="muted">Loading corrections...</p>';
+      try {
+        const data = await fetchApi(`/corrections/${paperId}`);
+        if (!data.items || !data.items.length) { container.innerHTML = '<p class="muted">No corrections found.</p>'; return; }
+        let html = '';
+        data.items.forEach(c => {
+          html += `<div class="note-item" style="border-left-color:${c.status === 'approved' ? '#2e7d32' : '#e65100'}">
+            <div class="note-source">${c.source} → ${c.field_name} <span class="badge">${c.status}</span></div>
+            <div class="note-content">Proposed: <code>${JSON.stringify(c.proposed_value)}</code></div>
+            ${c.review_comment ? '<div class="muted">' + c.review_comment + '</div>' : ''}
+          </div>`;
+        });
+        container.innerHTML = html;
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+    }
+
+    async function loadAudit(paperId) {
+      const container = document.getElementById(`section-${paperId}-audit`);
+      container.innerHTML = '<p class="muted">Loading audit logs...</p>';
+      try {
+        const data = await fetchApi(`/audit/${paperId}`);
+        if (!data.items || !data.items.length) { container.innerHTML = '<p class="muted">No audit logs found.</p>'; return; }
+        let html = '';
+        data.items.forEach(l => {
+          const time = l.created_at ? new Date(l.created_at).toLocaleString() : '?';
+          html += `<div class="audit-item"><strong>${l.action}</strong> by <em>${l.source}</em> <span class="muted">${time}</span></div>`;
+        });
+        container.innerHTML = html;
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

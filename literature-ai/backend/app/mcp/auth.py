@@ -79,6 +79,21 @@ def require_mcp_capability(capability: str) -> MCPAuthInfo:
     return auth
 
 
+def require_mcp_capability_any(*capabilities: str) -> MCPAuthInfo:
+    """Check that the MCP key has at least one of the given capabilities.
+    Used when multiple capability levels grant access (e.g. review_corrections
+    is a superset of review_dft).
+    """
+    auth = get_mcp_auth()
+    if auth is None:
+        raise PermissionError("MCP authentication context is missing")
+    if not any(cap in auth.capabilities for cap in capabilities):
+        raise PermissionError(
+            f"MCP key does not have any of the required capabilities: {', '.join(capabilities)}"
+        )
+    return auth
+
+
 def get_request_mcp_auth(request: Request) -> MCPAuthInfo:
     return authenticate_mcp_request(request)
 
