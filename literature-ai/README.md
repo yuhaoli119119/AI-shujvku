@@ -18,7 +18,7 @@
 - `prompts/`：抽取与写作相关提示词
 - `data/`：当前 Docker 默认宿主机数据目录，包含 `library_registry.json`、`libraries/`、`storage/`
 - `storage/`：历史目录；当前建议以 `data/storage/` 为准
-- `docs/`：当前文档、MCP 文档、历史归档
+- `docs/`：当前文档、MCP 文档、执行计划
 
 ## 入口
 
@@ -47,6 +47,6 @@ Codex 文献包：
 ## 文档说明
 
 - `docs/mcp/`：当前仍有效的 MCP 文档
-- `docs/archive/`：历史计划、旧报告、旧变更记录
+- `docs/plans/`：当前执行计划与协议草案
 
-如果你要协作修改本项目，请先读 `AGENTS.md`，不要把 archive 文档当作当前执行规范。
+如果你要协作修改本项目，请先读 `AGENTS.md`，当前真实进度以 `README + AGENTS + git history` 为准。

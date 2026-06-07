@@ -14,10 +14,9 @@
 ## 目录说明
 
 - `docs/mcp/`：当前仍有效的 MCP 文档
-- `docs/archive/`：历史规划、旧报告、旧变更记录
+- `docs/plans/`：当前执行计划与协议草案
 
-## archive 使用规则
+## 文档使用规则
 
-- `docs/archive/` 下的文档不再作为当前执行依据
-- archive 文档可能存在编码损坏、阶段性假设或与当前事实不一致的问题
+- 历史归档文档已从仓库中删除，如需查阅旧版本，请通过 `git history` 回溯
 - 当前真实状态请以根 README、`AGENTS.md`、`使用说明.md` 和 git history 为准

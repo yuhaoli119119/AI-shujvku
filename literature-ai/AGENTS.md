@@ -42,8 +42,7 @@ git branch -vv
 ## 4. 文档同步原则
 
 - 优先维护当前有效文档：`../README.md`、`AGENTS.md`、`README.md`、`使用说明.md`、`docs/README.md`
-- 历史规划、旧报告、乱码文档统一放入 `docs/archive/`
-- archive 文档仅作历史参考，不作为当前执行依据
+- 历史规划、旧报告统一放入 `docs/archive/`（若 archive 目录已删除，以 git history 为准）
 - 当前真实进度以 `README + AGENTS + git history` 为准
 
 ## 5. 数据安全原则
