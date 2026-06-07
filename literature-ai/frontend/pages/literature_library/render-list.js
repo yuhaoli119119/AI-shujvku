@@ -42,7 +42,8 @@ function renderPaperList() {
         const active = paper.id === state.selectedPaperId ? " active" : "";
         const titleLine = esc(paper.title_zh || paper.title || "未命名文献");
         const originalTitle = paper.title_zh && paper.title ? '<div class="paper-original-title" style="margin-top:2px;" title="' + esc(paper.title) + '">' + esc(paper.title) + '</div>' : '';
-        const metaLine = esc(paper.journal || "未知期刊") + (paper.doi ? ' | DOI: ' + esc(paper.doi) : '') + '<span id="pdf-size-' + paper.id + '"></span>';
+        const pdfSizeStr = paper.pdf_size ? ' | ' + formatFileSize(paper.pdf_size) : '';
+        const metaLine = esc(paper.journal || "未知期刊") + (paper.doi ? ' | DOI: ' + esc(paper.doi) : '') + pdfSizeStr;
         
         let wfChip = "";
         if (paper.workflow_status && paper.workflow_status !== "Imported") {
@@ -88,20 +89,16 @@ function renderPaperList() {
 
     container.innerHTML = '<table class="paper-table">' +
         '<thead><tr>' +
-            '<th style="width:50px; text-align:center;">#</th>' +
+            '<th style="width:40px; text-align:center;">#</th>' +
             '<th style="width:50px; text-align:center;">年份</th>' +
             '<th style="width:60px; text-align:center;">类型</th>' +
-            '<th style="width:70px; text-align:center;">影响因子</th>' +
+            '<th style="width:60px; text-align:center;">IF</th>' +
             '<th class="col-divider" style="text-align:center;">文献标题</th>' +
-            '<th class="col-divider" style="width:200px; text-align:center;">流程与质量</th>' +
-            '<th style="width:340px; text-align:center;">DFT 审计</th>' +
+            '<th class="col-divider" style="width:180px; text-align:center;">流程与质量</th>' +
+            '<th style="width:160px; text-align:center;">数据统计</th>' +
         '</tr></thead>' +
         '<tbody>' + tbodyHtml + '</tbody>' +
     '</table>';
-
-    if (typeof fetchPdfSizes === "function") {
-        fetchPdfSizes(state.papers);
-    }
 }
 
 window.impactFactorCache = JSON.parse(localStorage.getItem('impactFactors') || '{}');
@@ -126,24 +123,6 @@ function formatFileSize(bytes) {
     return kb.toFixed(0) + " KB";
 }
 
-function fetchPdfSizes(papers) {
-    papers.forEach(function(paper) {
-        if (!paperHasPdf(paper)) return;
-        const el = document.getElementById("pdf-size-" + paper.id);
-        if (!el || el.dataset.fetched) return;
-        fetch(API_BASE + "/" + paper.id + "/pdf", { method: "HEAD" })
-            .then(function(res) {
-                if (res.ok) {
-                    const size = res.headers.get("content-length");
-                    if (size) {
-                        el.textContent = ' | ' + formatFileSize(size);
-                        el.dataset.fetched = "true";
-                    }
-                }
-            })
-            .catch(function() {});
-    });
-}
 function normalizePaperTypeLabel(value) {
     const raw = String(value || "").trim();
     if (!raw || raw.toLowerCase() === "unknown") return "未知类型";

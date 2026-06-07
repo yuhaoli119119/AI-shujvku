@@ -291,6 +291,7 @@ class PaperListItemResponse(BaseModel):
     abstract_zh: str | None = None
     full_translation_zh: str | None = None
     pdf_path: str
+    pdf_size: int | None = None
     oa_status: str | None = None
     license: str | None = None
     tei_path: str | None = None

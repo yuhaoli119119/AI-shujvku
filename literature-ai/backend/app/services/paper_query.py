@@ -41,6 +41,8 @@ from app.schemas.api import (
     WritingCardResponse,
     FigureDataPointResponse,
 )
+from app.config import get_settings
+from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import writing_card_gate
 
@@ -426,6 +428,17 @@ class PaperQueryService:
     ) -> PaperListItemResponse:
         c = PaperCountsResponse(**counts)
         localized = self._localized_metadata(paper)
+        
+        pdf_size = None
+        if paper.pdf_path:
+            try:
+                settings = get_settings()
+                file_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
+                if file_path and file_path.exists():
+                    pdf_size = file_path.stat().st_size
+            except Exception:
+                pass
+
         return PaperListItemResponse(
             id=paper.id,
             serial_number=paper.serial_number,
@@ -440,6 +453,7 @@ class PaperQueryService:
             abstract_zh=localized.get("abstract_zh") if include_heavy else self._clip_list_text(localized.get("abstract_zh"), 420),
             full_translation_zh=localized.get("full_translation_zh"),
             pdf_path=paper.pdf_path,
+            pdf_size=pdf_size,
             oa_status=paper.oa_status,
             license=paper.license,
             tei_path=paper.tei_path,
