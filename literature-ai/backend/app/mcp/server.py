@@ -18,6 +18,7 @@ from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, 
 from app.services.discovery_service import DiscoveryService
 from app.services.embedding import get_embedding_service
 from app.services.codex_context_service import CodexContextService
+from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.external_analysis_service import (
@@ -1809,51 +1810,56 @@ def export_ml_dataset(
         targets = ["dft_results"]
 
     with session_scope(settings.database_url) as session:
-        # Build base paper query
-        paper_query = select(Paper)
-        if paper_id:
-            paper_query = paper_query.where(Paper.id == UUID(paper_id))
-        if library_name:
-            paper_query = paper_query.where(Paper.library_name == library_name)
-        if year_min is not None:
-            paper_query = paper_query.where(Paper.year >= year_min)
-        if year_max is not None:
-            paper_query = paper_query.where(Paper.year <= year_max)
-        papers = session.scalars(paper_query).all()
-        paper_ids = [p.id for p in papers]
+        dft_data: dict | None = None
+        ec_records: list[dict[str, Any]] = []
 
-        records: list[dict[str, Any]] = []
-
+        # DFT results — reuse the same safety-gated export logic as the REST API
         if "dft_results" in targets:
-            dft_query = select(DFTResult).where(DFTResult.paper_id.in_(paper_ids))
-            dft_query = dft_query.where(DFTResult.candidate_status == "ML_Ready")
-            dft_query = dft_query.limit(max(1, min(limit, 5000)))
-            for row in session.scalars(dft_query).all():
-                paper = next((p for p in papers if p.id == row.paper_id), None)
-                records.append({
-                    "target_type": "dft_result",
-                    "paper_id": str(row.paper_id),
-                    "paper_title": paper.title if paper else None,
-                    "paper_year": paper.year if paper else None,
-                    "paper_doi": paper.doi if paper else None,
-                    "dft_result_id": str(row.id),
-                    "adsorbate": row.adsorbate,
-                    "property_type": row.property_type,
-                    "value": row.value,
-                    "unit": row.unit,
-                    "reaction_step": row.reaction_step,
-                    "evidence_text": row.evidence_text,
-                    "confidence": row.confidence,
-                    "candidate_status": row.candidate_status,
-                })
+            if format.lower() == "csv":
+                csv_text, gate_summary = build_dft_csv_rows(
+                    session,
+                    library_name=library_name,
+                    year_min=year_min,
+                    year_max=year_max,
+                    paper_id=UUID(paper_id) if paper_id else None,
+                )
+                dft_data = {
+                    "metadata": {
+                        "target_type": "dft_results",
+                        "format": "csv",
+                        "gate_summary": gate_summary,
+                    },
+                    "csv": csv_text,
+                }
+            else:
+                dft_data = build_dft_ml_dataset(
+                    session,
+                    library_name=library_name,
+                    year_min=year_min,
+                    year_max=year_max,
+                    paper_id=UUID(paper_id) if paper_id else None,
+                )
 
-        if "electrochemical_performance" in targets:
+        # Electrochemical performance — MCP-only feature (no REST equivalent yet)
+        if "electrochemical_performance" in targets and format.lower() != "csv":
+            paper_query = select(Paper)
+            if paper_id:
+                paper_query = paper_query.where(Paper.id == UUID(paper_id))
+            if library_name:
+                paper_query = paper_query.where(Paper.library_name == library_name)
+            if year_min is not None:
+                paper_query = paper_query.where(Paper.year >= year_min)
+            if year_max is not None:
+                paper_query = paper_query.where(Paper.year <= year_max)
+            papers = session.scalars(paper_query).all()
+            paper_ids = [p.id for p in papers]
+
             ec_query = select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id.in_(paper_ids))
             ec_query = ec_query.where(ElectrochemicalPerformance.validation_status == "verified")
             ec_query = ec_query.limit(max(1, min(limit, 5000)))
             for row in session.scalars(ec_query).all():
                 paper = next((p for p in papers if p.id == row.paper_id), None)
-                records.append({
+                ec_records.append({
                     "target_type": "electrochemical_performance",
                     "paper_id": str(row.paper_id),
                     "paper_title": paper.title if paper else None,
@@ -1882,14 +1888,15 @@ def export_ml_dataset(
                 "year_max": year_max,
                 "target_types": targets,
                 "format": format,
-                "record_count": len(records),
+                "dft_record_count": len(dft_data.get("records", [])) if dft_data else 0,
+                "ec_record_count": len(ec_records),
             },
         )
         session.add(audit)
         session.flush()
 
-        result = {
-            "record_count": len(records),
+        # Assemble result
+        result: dict[str, Any] = {
             "target_types": targets,
             "filters": {
                 "paper_id": paper_id,
@@ -1897,20 +1904,15 @@ def export_ml_dataset(
                 "year_min": year_min,
                 "year_max": year_max,
             },
-            "records": records,
         }
 
-        if format.lower() == "csv":
-            import csv
-            import io
-            if not records:
-                result["csv"] = ""
-            else:
-                output = io.StringIO()
-                writer = csv.DictWriter(output, fieldnames=records[0].keys())
-                writer.writeheader()
-                writer.writerows(records)
-                result["csv"] = output.getvalue()
+        if dft_data is not None:
+            result["dft_results"] = dft_data
+        if ec_records:
+            result["electrochemical_performance"] = {
+                "record_count": len(ec_records),
+                "records": ec_records,
+            }
 
         return result
 
