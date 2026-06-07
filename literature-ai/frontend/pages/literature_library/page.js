@@ -10,9 +10,9 @@ function paperStatusChip(paper) {
         (paper.relationship_summary && (paper.relationship_summary["duplicate"] > 0 || paper.relationship_summary["duplicate_candidate"] > 0))) {
         return '<span class="status-chip duplicate">潜在重复</span>';
     }
-    // 2. metadata_only / needs_upload
-    if (paper.oa_status === "metadata_only" || paper.oa_status === "needs_upload") {
-        return '<span class="status-chip meta">仅元数据</span>';
+    // 2. metadata_only / needs_upload / no pdf
+    if (paper.oa_status === "metadata_only" || paper.oa_status === "needs_upload" || !paperHasPdf(paper)) {
+        return '<span class="status-chip meta" style="background:var(--color-surface-alt); color:var(--color-text-secondary); border:1px solid var(--color-border);">无 PDF</span>';
     }
     // 3. extraction_failed
     if (paper.oa_status === "failed" || paper.oa_status === "extraction_failed" || paper.oa_status === "error") {
@@ -272,12 +272,39 @@ function clearFilters() {
     searchLocal();
 }
 
+function updateRowSelectionUI() {
+    document.querySelectorAll(".paper-row").forEach(function(row) {
+        if (row.dataset.id === String(state.selectedPaperId)) {
+            row.classList.add("active");
+        } else {
+            row.classList.remove("active");
+        }
+    });
+}
+
 function selectPaperById(paperId) {
     if (!paperId) return;
+    if (state.selectedPaperId === paperId) {
+        state.selectedPaperId = null;
+        state.selectedPaper = null;
+        updateRowSelectionUI();
+        if (typeof loadPaperDetail === "function") loadPaperDetail(null);
+        return;
+    }
     state.selectedPaperId = paperId;
-    state.selectedPaper = state.papers.find(function(paper) { return paper.id === paperId; }) || state.selectedPaper;
-    renderPaperList();
-    loadPaperDetail(paperId);
+    state.selectedPaper = state.papers.find(function(paper) { return String(paper.id) === String(paperId); }) || state.selectedPaper;
+    updateRowSelectionUI();
+    if (typeof loadPaperDetail === "function") loadPaperDetail(paperId);
+}
+
+function openWorkspaceForPaper(paperId) {
+    if (state.selectedPaperId !== paperId) {
+        selectPaperById(paperId);
+    }
+    const layout = document.querySelector(".layout");
+    if (layout && layout.classList.contains("hide-workspace")) {
+        toggleWorkspace();
+    }
 }
 
 function toggleDropdown(menuId, event) {
@@ -665,29 +692,50 @@ function toggleDashboard() {
     const toolbar = $("mainToolbar");
     if (!toolbar) return;
     toolbar.classList.toggle("collapsed");
+    const isCollapsed = toolbar.classList.contains("collapsed");
     const btn = $("dashboardToggleBtn");
-    if (btn) {
-        btn.textContent = toolbar.classList.contains("collapsed") ? "展开面板" : "收起面板";
-    }
+    if (btn) btn.textContent = isCollapsed ? "展开面板" : "收起面板";
+    localStorage.setItem("lit_lib_hide_dashboard", isCollapsed ? "1" : "0");
 }
 
 function toggleSidebar() {
     const layout = document.querySelector(".layout");
     if (!layout) return;
     layout.classList.toggle("hide-sidebar");
+    const isHidden = layout.classList.contains("hide-sidebar");
     const btn = $("toggleSidebarBtn");
-    if (btn) {
-        btn.textContent = layout.classList.contains("hide-sidebar") ? "展开列表" : "隐藏列表";
-    }
+    if (btn) btn.textContent = isHidden ? "展开列表" : "隐藏列表";
+    localStorage.setItem("lit_lib_hide_sidebar", isHidden ? "1" : "0");
 }
 
 function toggleWorkspace() {
     const layout = document.querySelector(".layout");
     if (!layout) return;
     layout.classList.toggle("hide-workspace");
+    const isHidden = layout.classList.contains("hide-workspace");
     const btn = $("toggleWorkspaceBtn");
-    if (btn) {
-        btn.textContent = layout.classList.contains("hide-workspace") ? "展开详情" : "隐藏详情";
+    if (btn) btn.textContent = isHidden ? "展开详情" : "隐藏详情";
+    localStorage.setItem("lit_lib_hide_workspace", isHidden ? "1" : "0");
+}
+
+function initLayoutState() {
+    if (localStorage.getItem("lit_lib_hide_dashboard") === "1") {
+        const toolbar = $("mainToolbar");
+        if (toolbar) toolbar.classList.add("collapsed");
+        const btn = $("dashboardToggleBtn");
+        if (btn) btn.textContent = "展开面板";
+    }
+    const layout = document.querySelector(".layout");
+    if (!layout) return;
+    if (localStorage.getItem("lit_lib_hide_sidebar") === "1") {
+        layout.classList.add("hide-sidebar");
+        const btn = $("toggleSidebarBtn");
+        if (btn) btn.textContent = "展开列表";
+    }
+    if (localStorage.getItem("lit_lib_hide_workspace") === "1") {
+        layout.classList.add("hide-workspace");
+        const btn = $("toggleWorkspaceBtn");
+        if (btn) btn.textContent = "展开详情";
     }
 }
 
@@ -717,16 +765,36 @@ Object.assign(window, {
     prevPage: prevPage,
     nextPage: nextPage,
     clearFilters: clearFilters,
-    selectPaperById: selectPaperById
+    selectPaperById: selectPaperById,
+    openWorkspaceForPaper: openWorkspaceForPaper
 });
 
 window.addEventListener("beforeunload", disconnectSSE);
 document.addEventListener("click", closeDropdowns);
+document.addEventListener("click", function(event) {
+    if (event.target.closest(".paper-row") || 
+        event.target.closest(".workspace-container") ||
+        event.target.closest(".sidebar") ||
+        event.target.closest(".toolbar") ||
+        event.target.closest(".topnav") ||
+        event.target.closest("button") ||
+        event.target.closest(".modal-overlay") ||
+        event.target.closest("a")) {
+        return;
+    }
+    if (state.selectedPaperId) {
+        state.selectedPaperId = null;
+        state.selectedPaper = null;
+        renderPaperList();
+        if (typeof loadPaperDetail === "function") loadPaperDetail(null);
+    }
+});
 const searchInput = $("searchInput");
 if (searchInput) {
     searchInput.addEventListener("keydown", function(event) { if (event.key === "Enter") searchLocal(); });
 }
 
+initLayoutState();
 applyQueryParams();
 initProtocolWarning();
 initSplitDrag();

@@ -5,7 +5,10 @@ function renderWorkspaceHeader(paper) {
     const badgesEl = $("paperHeaderBadges");
     const topicEl = $("writerTopic");
     const pdfBtn = $("pdfEvidenceHeaderBtn");
-    if (titleEl) titleEl.textContent = paper.title_zh || paper.title || "未命名文献";
+    if (titleEl) {
+        const titleStr = paper.title_zh || paper.title || "未命名文献";
+        titleEl.textContent = paper.serial_number ? formatSerialNumber(paper.serial_number) + " " + titleStr : titleStr;
+    }
     if (metaEl) {
         metaEl.innerHTML = [
             esc(paper.year || "-"),

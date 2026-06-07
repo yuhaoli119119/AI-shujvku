@@ -318,8 +318,11 @@ body.resizing iframe {
 .paper-table td {
     padding: 12px 12px;
     border-bottom: 1px solid var(--color-border);
-    vertical-align: top;
+    vertical-align: middle;
     font-size: 13px;
+}
+.paper-table .col-divider {
+    border-right: 1px solid var(--color-border);
 }
 .paper-table tr.paper-row {
     cursor: pointer;
