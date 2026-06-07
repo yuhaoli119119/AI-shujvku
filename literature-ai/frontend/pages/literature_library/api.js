@@ -240,7 +240,7 @@ async function loadLibraryRuntimeInfo() {
         }
         const dbDisplay = info.dialect === "postgresql"
             ? "PostgreSQL: <code>" + esc(info.database_url_masked || activeDb || "-") + "</code>"
-            : "SQLite: <code>" + esc(activeDb || "-") + "</code>";
+            : "Database (" + esc(info.dialect || "unknown") + "): <code>" + esc(activeDb || info.database_url_masked || "-") + "</code>";
         el.innerHTML =
             dbDisplay +
             " | 注册表: <code>" + esc(registryPath) + "</code>" +

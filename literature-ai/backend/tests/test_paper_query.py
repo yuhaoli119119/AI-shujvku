@@ -17,7 +17,7 @@ from app.db.models import (
     WritingCard,
 )
 from app.schemas.api import PaperListFilterParams
-from app.services.paper_query import PaperQueryService
+from app.services.paper_query import PaperQueryService, _cached_pdf_size_for_storage
 
 
 def test_paper_query_service_returns_counts_and_detail_payload():
@@ -69,6 +69,75 @@ def test_paper_query_service_returns_counts_and_detail_payload():
             assert isinstance(detail.writing_cards_items[0].figure_logic, list)
 
         engine.dispose()
+
+
+def test_detail_payload_cleans_pdf_text_without_flattening_table_markdown():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'cleanup.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Ligature Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+
+            session.add(
+                PaperTable(
+                    paper_id=paper.id,
+                    caption="Table /uniFB01ndings",
+                    markdown_content="| field | value |\n| --- | --- |\n| con/uniFB01guration | e/uniFB00ect |",
+                    page=2,
+                    extraction_source="docling",
+                )
+            )
+            session.add(
+                PaperFigure(
+                    paper_id=paper.id,
+                    caption="Figure /uniFB02ow",
+                    content_summary="A /uniFB02ow summary",
+                    image_path=None,
+                    page=3,
+                    figure_role="summary",
+                )
+            )
+            session.add(
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    value=-1.23,
+                    source_section="con/uniFB01guration",
+                    evidence_text="The con/uniFB01guration has a clear e/uniFB00ect.",
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail is not None
+            assert detail.tables[0].caption == "Table findings"
+            assert "| --- | --- |" in detail.tables[0].markdown_content
+            assert "\n" in detail.tables[0].markdown_content
+            assert "configuration" in detail.tables[0].markdown_content
+            assert detail.figures[0].caption == "Figure flow"
+            assert detail.figures[0].content_summary == "A flow summary"
+            assert detail.dft_results_items[0].source_section == "configuration"
+            assert "configuration has a clear effect" in detail.dft_results_items[0].evidence_text
+
+        engine.dispose()
+
+
+def test_cached_pdf_size_uses_direct_storage_candidates(tmp_path):
+    _cached_pdf_size_for_storage.cache_clear()
+    storage_root = tmp_path / "storage"
+    pdf_dir = storage_root / "pdf"
+    pdf_dir.mkdir(parents=True)
+    pdf_path = pdf_dir / "paper.pdf"
+    pdf_path.write_bytes(b"123456789")
+
+    assert _cached_pdf_size_for_storage("storage/pdf/paper.pdf", str(storage_root)) == 9
+    assert _cached_pdf_size_for_storage("paper.pdf", str(storage_root)) == 9
 
 
 def test_list_papers_with_filters():

@@ -10,7 +10,7 @@ from app.db.models import AuditLog, DFTResult, ExtractionFieldReview, Paper, Pap
 from app.schemas.extraction import ExtractionFieldReviewSaveItem
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.review_service import ReviewService
-from app.utils.protocol_tracking import ai_review_payload, append_ai_audit
+from app.utils.protocol_tracking import ai_review_payload, append_ai_audit, protocol_snapshot
 from app.utils.workbench_status import (
     GEMINI_AUDIT_DECISIONS,
     normalize_choice,
@@ -92,6 +92,7 @@ class GeminiAuditService:
                     evidence_payload=evidence_payload,
                 )
         paper.workflow_status = workflow_status_after_gemini(normalized_decision)
+        protocol = protocol_snapshot(protocol_key)
         audit = AuditLog(
             paper_id=paper_id,
             action="gemini_audit",
@@ -105,6 +106,7 @@ class GeminiAuditService:
                 "agent_role": agent_role,
                 "model_name": model_name,
                 "protocol_key": protocol_key,
+                "protocol": protocol,
                 "field_names": field_names or [],
                 "field_name": field_name,
                 "proposed_value": proposed_value,
@@ -112,6 +114,7 @@ class GeminiAuditService:
                 "review_status_written": REVIEW_STATUS_BY_DECISION[normalized_decision],
                 "review_conflict": any(item.reviewer_status == "review_conflict" for item in review_rows),
                 "schema_blocked": any(item.reviewer_status == "blocked_by_schema" for item in review_rows),
+                "writes_final_truth": False,
                 "human_confirmation_required": True,
             },
         )

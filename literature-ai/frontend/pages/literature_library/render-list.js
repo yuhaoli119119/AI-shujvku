@@ -60,7 +60,7 @@ function renderPaperList() {
                 '<td style="text-align:center; color:var(--color-text-secondary);">' + (paper.serial_number ? formatSerialNumber(paper.serial_number) : (idx + 1)) + '</td>' +
                 '<td style="text-align:center; color:var(--color-text-secondary);">' + esc(paper.year || "-") + '</td>' +
                 '<td style="text-align:center; color:var(--color-text-secondary); font-weight:600;">' + esc(paperTypeLabel(paper.paper_type)) + '</td>' +
-                '<td style="text-align:center; vertical-align:middle;">' + renderImpactFactor(paper) + '</td>' +
+                '<td class="col-divider" style="text-align:center; vertical-align:middle;">' + renderImpactFactor(paper) + '</td>' +
                 '<td class="col-divider" style="text-align:left; padding-left:16px;">' +
                     '<div class="paper-title" title="' + esc(paper.title || "未命名文献") + '">' + titleLine + '</div>' +
                     originalTitle +
@@ -92,7 +92,7 @@ function renderPaperList() {
             '<th style="width:40px; text-align:center;">#</th>' +
             '<th style="width:50px; text-align:center;">年份</th>' +
             '<th style="width:60px; text-align:center;">类型</th>' +
-            '<th style="width:60px; text-align:center;">IF</th>' +
+            '<th class="col-divider" style="width:60px; text-align:center;">IF</th>' +
             '<th class="col-divider" style="text-align:center;">文献标题</th>' +
             '<th class="col-divider" style="width:180px; text-align:center;">流程与质量</th>' +
             '<th style="width:160px; text-align:center;">数据统计</th>' +

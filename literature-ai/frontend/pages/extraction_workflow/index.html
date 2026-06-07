@@ -275,17 +275,23 @@
       grid-template-columns: 260px minmax(0, 1fr);
       gap: 16px;
       align-items: stretch;
-      height: min(720px, calc(100vh - 340px));
+      height: auto;
+      min-height: 400px;
+    }
+    @media (min-width: 981px) {
+      .pipeline-wrap {
+        height: 500px;
+      }
     }
 
     /* Step Timeline Sidebar */
     .step-timeline {
       height: 100%;
-      overflow-y: auto;
       background: var(--color-surface);
       border: 1px solid var(--color-border);
       border-radius: 16px;
       padding: 16px;
+      overflow-y: auto;
     }
     .step-timeline-title {
       font-size: 11px;
@@ -298,13 +304,15 @@
       border-bottom: 1px solid var(--color-border);
     }
     .timeline-list { display: grid; gap: 2px; }
-    .timeline-item {
+    .timeline-item,
+    .timeline-item:hover,
+    .timeline-item.active {
       display: flex;
       align-items: flex-start;
       gap: 10px;
       padding: 8px 10px;
       border-radius: 10px;
-      cursor: pointer;
+      cursor: default !important;
       transition: all 0.2s;
       border: 1px solid transparent;
     }
@@ -326,6 +334,8 @@
       color: var(--color-text-secondary);
       border: 1px solid var(--color-border);
       transition: all 0.2s;
+      cursor: default !important;
+      user-select: none;
     }
     .timeline-item.active .timeline-number {
       background: var(--color-primary);
@@ -406,6 +416,7 @@
       padding: 14px 18px;
       flex: 1;
       overflow-y: auto;
+      min-height: 0;
     }
     .detail-grid {
       display: grid;
@@ -561,9 +572,9 @@
     /* ===== Responsive ===== */
     @media (max-width: 980px) {
       .status-bar { grid-template-columns: repeat(2, 1fr); }
-      .pipeline-wrap { grid-template-columns: 1fr; height: auto; min-height: 400px; }
-      .step-timeline { height: auto; max-height: 300px; }
-      .detail-panel { height: auto; min-height: 400px; }
+      .pipeline-wrap { grid-template-columns: 1fr; height: auto; min-height: 300px; }
+      .step-timeline { height: auto; }
+      .detail-panel { height: auto; }
       .detail-header { flex-wrap: wrap; }
       .detail-grid { grid-template-columns: 1fr; }
       .hero { padding: 18px 20px; }
@@ -591,7 +602,7 @@
         </div>
         <h1>按证据拆文献，按记录逐项提取</h1>
         <p class="hero-desc">
-          系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；Gemini / 第二 AI 和人工负责审核。
+          系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；Gemini、GLM、Codex 或第二 AI 和人工负责审核。
           候选数据不直接进入 DFT 数据库、ML 导出或可信可视化。
         </p>
         <div class="hero-badges">
@@ -613,7 +624,7 @@
           </span>
           <span class="hero-badge">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-            Gemini Audit
+            Second AI Audit
           </span>
         </div>
       </div>
@@ -674,7 +685,7 @@
         <div class="section-title-wrap">
           <div class="section-eyebrow">🔧 On-Demand MCP Tools</div>
           <div class="section-title">按需原子工具决策树</div>
-          <p class="section-desc">AI Agent 在提取流程中可随时调用以下工具查证。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
+          <p class="section-desc">AI Agent 在提取流程中可随时调用以下工具查证。Gemini、GLM、Codex 或其它 AI 的角色可按任务分配，但每次分析、审核、修正和图表判断都必须留下可追溯记录。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
         </div>
       </div>
       <div class="tool-grid">
@@ -863,12 +874,12 @@
       },
       {
         id: "audit",
-        title: "Gemini / Human Audit",
+        title: "Second AI / Human Audit",
         sub: "可信入库",
-        description: "Gemini 或人工依据明文协议和证据包复核。只有已审核、证据完整、PDF 定位准确的数据才进入 DFT 数据库和可信可视化。",
-        worker: ["读取 Gemini 审核协议。", "复核候选字段、证据、定位和重复。", "输出可否 promote_to_exportable_database。"],
-        review: ["accept 仍需满足项目设定的人审门槛。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心。"],
-        prompt: "任务：按 Gemini audit protocol 审核候选记录。不要发明值；不要从常识修复；只基于 evidence packet 给出 decision 和 reasons。完整协议请查看设置页 → 提取协议。"
+        description: "Gemini、GLM、Codex、其它第二 AI 或人工依据明文协议和证据包复核。Gemini 可重点审图，GLM/Codex 可重点审 DFT 行；角色可变，但记录必须可追溯。只有已审核、证据完整、PDF 定位准确且通过最终闸门的数据才进入 DFT 数据库和可信可视化。",
+        worker: ["读取第二 AI 审核协议。", "记录 agent_role、model_name、protocol version/hash。", "复核候选字段、证据、定位和重复。", "输出可否 promote_to_exportable_database。"],
+        review: ["accept 仍需满足项目设定的人审或最终门槛。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心、AuditLog、字段 review、共享笔记或外部分析记录。"],
+        prompt: "任务：按 second AI audit protocol 审核候选记录。声明 agent_role 和 model_name；不要发明值；不要从常识修复；只基于 evidence packet 给出 decision、reasons、protocol version/hash 和 evidence location。完整协议请查看设置页 → 提取协议。"
       }
     ];
     let currentStep = steps[0];

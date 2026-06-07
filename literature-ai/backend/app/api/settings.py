@@ -1,7 +1,8 @@
 """Settings API — user-facing configuration management.
 
-All API keys and service configuration are stored in the active SQLite
-database so that users never need to edit .env files manually.
+All API keys and service configuration are stored in the active runtime
+database, normally PostgreSQL in this project, so users never need to edit
+.env files manually.
 
 The ``Settings`` pydantic model still reads from env-vars at startup
 (via ``pydantic-settings``), but this API allows runtime updates that
@@ -9,7 +10,7 @@ persist across restarts by writing key-value pairs into a dedicated
 ``app_settings`` table.  On startup, the application reads any persisted
 overrides from that table and patches the cached Settings instance.
 
-Security: API keys are stored as-is in SQLite.  The GET endpoint masks
+Security: API keys are stored as-is in the runtime database.  The GET endpoint masks
 sensitive values (anything containing "key" or "secret").
 """
 from __future__ import annotations
@@ -111,7 +112,7 @@ class SettingsUpdateRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Persistent settings helpers (SQLite table ``app_settings``)
+# Persistent settings helpers (runtime database table ``app_settings``)
 # ---------------------------------------------------------------------------
 
 def _get_active_engine():

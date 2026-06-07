@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     # Stage-2 deep extraction (DFT/electrochemical/mechanism/writing-card) is skipped
     # and must be triggered later by AI via MCP or manual rerun_stage2.
     auto_run_stage2_extraction: bool = True
+    auto_enrich_ingested_metadata: bool = True
+    metadata_enrichment_timeout_seconds: float = 5.0
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

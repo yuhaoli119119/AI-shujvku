@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import String, cast, func, or_, select
@@ -42,9 +44,52 @@ from app.schemas.api import (
     FigureDataPointResponse,
 )
 from app.config import get_settings
-from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import writing_card_gate
+
+
+@lru_cache(maxsize=8192)
+def _cached_pdf_size_for_storage(stored_path: str, storage_root: str) -> int | None:
+    raw = str(stored_path or "").strip()
+    if not raw:
+        return None
+
+    root = Path(storage_root)
+    parts = [part for part in re.split(r"[\\/]+", raw) if part]
+    lowered = [part.lower() for part in parts]
+    basename = parts[-1] if parts else ""
+    candidates: list[Path] = []
+    raw_path = Path(raw)
+
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+    if "storage" in lowered:
+        idx = lowered.index("storage")
+        candidates.append(root.parent / Path(*parts[idx:]))
+    if "pdf" in lowered:
+        idx = lowered.index("pdf")
+        candidates.append(root / Path(*parts[idx + 1 :]))
+    if basename:
+        candidates.append(root / "pdf" / basename)
+        candidates.append(root / basename)
+    if not raw_path.is_absolute():
+        candidates.append(root / raw_path)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            if resolved.is_file():
+                return int(resolved.stat().st_size)
+        except OSError:
+            continue
+    return None
 
 
 class PaperQueryService:
@@ -119,9 +164,15 @@ class PaperQueryService:
         
         models_to_count = {
             "sections": PaperSection,
+            "tables": PaperTable,
             "figures": PaperFigure,
+            "dft_settings": DFTSetting,
+            "catalyst_samples": CatalystSample,
             "dft_results": DFTResult,
+            "electrochemical_performance": ElectrochemicalPerformance,
+            "mechanism_claims": MechanismClaim,
             "writing_cards": WritingCard,
+            "figure_data_points": FigureDataPoint,
         }
         
         counts_map = defaultdict(lambda: {k: 0 for k in models_to_count.keys()})
@@ -285,11 +336,11 @@ class PaperQueryService:
         return PaperDetailResponse(
             **base_payload,
             sections=[self._serialize_section(item) for item in sections],
-            tables=[PaperTableResponse.model_validate(item) for item in tables],
-            figures=[PaperFigureResponse.model_validate(item) for item in figures],
+            tables=[self._serialize_table(item) for item in tables],
+            figures=[self._serialize_figure(item) for item in figures],
             dft_settings_items=[DFTSettingResponse.model_validate(item) for item in dft_settings],
             catalyst_samples_items=[CatalystSampleResponse.model_validate(item) for item in catalyst_samples],
-            dft_results_items=[DFTResultResponse.model_validate(item) for item in dft_results],
+            dft_results_items=[self._serialize_dft_result(item) for item in dft_results],
             electrochemical_performance_items=[
                 ElectrochemicalPerformanceResponse.model_validate(item) for item in electrochemical_items
             ],
@@ -390,11 +441,55 @@ class PaperQueryService:
             page_end=item.page_end,
         )
 
+    @classmethod
+    def _serialize_table(cls, item: PaperTable) -> PaperTableResponse:
+        payload = PaperTableResponse.model_validate(item)
+        return payload.model_copy(
+            update={
+                "caption": cls._clean_pdf_text(payload.caption),
+                "markdown_content": cls._clean_pdf_layout_text(payload.markdown_content),
+            }
+        )
+
+    @classmethod
+    def _serialize_figure(cls, item: PaperFigure) -> PaperFigureResponse:
+        payload = PaperFigureResponse.model_validate(item)
+        return payload.model_copy(
+            update={
+                "caption": cls._clean_pdf_text(payload.caption),
+                "content_summary": cls._clean_pdf_text(payload.content_summary),
+            }
+        )
+
+    @classmethod
+    def _serialize_dft_result(cls, item: DFTResult) -> DFTResultResponse:
+        payload = DFTResultResponse.model_validate(item)
+        return payload.model_copy(
+            update={
+                "reaction_step": cls._clean_pdf_text(payload.reaction_step),
+                "source_section": cls._clean_pdf_text(payload.source_section),
+                "source_figure": cls._clean_pdf_text(payload.source_figure),
+                "evidence_text": cls._clean_pdf_text(payload.evidence_text),
+            }
+        )
+
     @staticmethod
     def _clean_pdf_text(value: str | None) -> str | None:
         if value is None:
             return None
-        text = str(value)
+        text = PaperQueryService._replace_pdf_text_artifacts(str(value))
+        text = re.sub(r"\s+([,.;:])", r"\1", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    @staticmethod
+    def _clean_pdf_layout_text(value: str | None) -> str | None:
+        if value is None:
+            return None
+        return PaperQueryService._replace_pdf_text_artifacts(str(value)).strip()
+
+    @staticmethod
+    def _replace_pdf_text_artifacts(text: str) -> str:
         replacements = {
             "/uniFB00": "ff",
             "/uniFB01": "fi",
@@ -411,11 +506,15 @@ class PaperQueryService:
             "\ue102": "fl",
             "\ue103": "fi",
             "\ue104": "fl",
+            "顒僩": "fi",
+            "顒僣": "fic",
+            "顒僴": "fi",
+            "顒剈": "flu",
+            "顒價": "fir",
+            "鈻?": "",
         }
         for source, target in replacements.items():
             text = text.replace(source, target)
-        text = re.sub(r"\s+([,.;:])", r"\1", text)
-        text = re.sub(r"\s+", " ", text).strip()
         return text
 
     def _build_list_item_with_counts(
@@ -429,15 +528,7 @@ class PaperQueryService:
         c = PaperCountsResponse(**counts)
         localized = self._localized_metadata(paper)
         
-        pdf_size = None
-        if paper.pdf_path:
-            try:
-                settings = get_settings()
-                file_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
-                if file_path and file_path.exists():
-                    pdf_size = file_path.stat().st_size
-            except Exception:
-                pass
+        pdf_size = self._cached_pdf_size(paper.pdf_path)
 
         return PaperListItemResponse(
             id=paper.id,
@@ -489,6 +580,13 @@ class PaperQueryService:
         if len(text) <= max_chars:
             return text
         return text[: max(0, max_chars - 1)].rstrip() + "..."
+
+    @staticmethod
+    def _cached_pdf_size(stored_path: str | None) -> int | None:
+        if not stored_path:
+            return None
+        settings = get_settings()
+        return _cached_pdf_size_for_storage(stored_path, str(settings.storage_root))
 
     def _latest_full_translation(self, paper_id: UUID) -> str | None:
         note = self.session.scalars(

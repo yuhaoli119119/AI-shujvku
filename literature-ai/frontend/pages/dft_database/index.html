@@ -13,7 +13,8 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1440px; margin: 0 auto; padding: 18px 18px 28px; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 18px 18px 28px; height: calc(100vh - 56px); display: flex; flex-direction: column; overflow: hidden; }
+    .scroll-area { flex: 1; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
     .panel-card, .filter-panel, .data-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-card); margin-bottom: 16px; }
     .filter-panel { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .filter-grid { flex: 1 1 860px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
@@ -33,13 +34,173 @@
     .export-panel .btn { height: 32px; padding: 0 12px; font-size: 13px; }
     .export-panel .export-status { color: var(--color-primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
     .export-note { flex-basis: 100%; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
-    .quality-panel { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; align-items: start; }
-    .quality-panel > div:first-child { border-right: 1px solid var(--color-border); padding-right: 16px; min-width: 0; }
-    .quality-panel > div:last-child { min-width: 0; }
-    .quality-summary { display: grid; grid-template-columns: repeat(2, minmax(100px, 1fr)); gap: 8px; }
-    .reason-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .reason-chip { border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 5px 9px; background: var(--color-surface-alt); cursor: pointer; font-size: 11px; font-weight: 700; color: var(--color-text-secondary); line-height: 1.4; }
-    .reason-chip.active { background: var(--color-primary-bg); border-color: var(--color-primary); color: var(--color-primary); }
+    .quality-panel { display: flex; flex-direction: column; gap: 14px; }
+    .quality-topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      background: linear-gradient(135deg, var(--color-surface-alt) 0%, var(--color-surface) 100%);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      position: relative;
+      overflow: hidden;
+    }
+    .quality-topbar::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--color-primary) 0%, #c084fc 50%, var(--color-primary) 100%);
+      opacity: 0.6;
+    }
+    /* Donut card */
+    .quality-topbar .donut-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .quality-topbar .donut-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .quality-topbar .donut-legend .lg-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 5px 9px;
+      font-size: 11px;
+      min-width: 120px;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .quality-topbar .donut-legend .lg-row:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+    .quality-topbar .donut-legend .lg-row .lg-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .quality-topbar .donut-legend .lg-row .lg-label {
+      color: var(--color-text-secondary);
+      font-weight: 700;
+    }
+    .quality-topbar .donut-legend .lg-row .lg-val {
+      font-weight: 800;
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+    /* Elegant divider */
+    .quality-topbar .stat-divider {
+      width: 1px;
+      height: 56px;
+      background: linear-gradient(180deg, transparent 0%, var(--color-border) 40%, var(--color-border) 60%, transparent 100%);
+      flex-shrink: 0;
+    }
+    /* Reason chips bar */
+    .quality-topbar .reason-chips-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      flex: 1;
+    }
+    .reason-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
+    .reason-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-pill);
+      padding: 5px 11px;
+      background: var(--color-surface);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--color-text-secondary);
+      line-height: 1.4;
+      transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    .reason-chip:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(0,0,0,0.06);
+      border-color: var(--color-primary-soft, rgba(139,92,246,0.3));
+      color: var(--color-text);
+    }
+    .reason-chip.active {
+      background: linear-gradient(135deg, var(--color-primary-bg), var(--color-surface));
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+      box-shadow: 0 2px 8px rgba(139,92,246,0.15);
+    }
+    .reason-chip .chip-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      font-size: 10px;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      color: var(--color-text-secondary);
+      transition: all 0.2s;
+    }
+    .reason-chip.active .chip-count {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: #fff;
+    }
+    /* Actions bar */
+    .quality-topbar .actions-bar {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+    .quality-topbar .actions-bar .btn {
+      height: 34px;
+      padding: 0 14px;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: var(--radius-sm);
+      transition: all 0.2s;
+    }
+    .quality-topbar .actions-bar .btn-primary {
+      background: linear-gradient(135deg, var(--color-primary) 0%, #9333ea 100%);
+      border: none;
+      box-shadow: 0 2px 8px rgba(139,92,246,0.25);
+    }
+    .quality-topbar .actions-bar .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(139,92,246,0.35);
+    }
+    .quality-topbar .actions-bar .btn-ghost {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border-strong);
+    }
+    .quality-topbar .actions-bar .btn-ghost:hover {
+      background: var(--color-surface-alt);
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+    }
     .quality-list { display: grid; gap: 8px; max-height: 240px; overflow: auto; padding-right: 4px; }
     .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 10px 12px; background: var(--color-surface-alt); }
     .quality-row.exportable { border-color: var(--color-success); background: var(--color-success-bg); }
@@ -53,8 +214,10 @@
     .readable-field { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 8px; background: var(--color-surface); }
     .readable-field .k { color: var(--color-text-muted); font-size: 12px; font-weight: 800; margin-bottom: 4px; }
     .readable-field .v { color: var(--color-text); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
-    .completeness-list { display: grid; gap: 8px; margin-top: 12px; }
+    .completeness-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
     .completeness-row { border: 1px dashed var(--color-border-strong); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
+    .completeness-row .quality-meta { font-size: 11.5px; line-height: 1.5; }
+    .completeness-row a { font-size: 12px; font-weight: 700; }
     .table-container { width: 100%; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 9px 10px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
@@ -68,15 +231,50 @@
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
     .empty-state { text-align: left; color: var(--color-text-secondary); padding: 8px 12px; min-height: auto; border: 1px dashed var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); line-height: 1.45; }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
+    /* Collapsible sections */
+    .collapse-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .collapse-header:hover { opacity: 0.85; }
+    .collapse-arrow {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px; height: 20px;
+      border-radius: 6px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      font-size: 10px;
+      color: var(--color-text-secondary);
+      transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), background 0.15s;
+      flex-shrink: 0;
+    }
+    .collapse-header:hover .collapse-arrow { background: var(--color-primary-bg); border-color: var(--color-primary-soft, rgba(139,92,246,0.3)); color: var(--color-primary); }
+    .collapse-header.collapsed .collapse-arrow { transform: rotate(-90deg); }
+    .collapse-body {
+      overflow: hidden;
+      transition: max-height 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.25s;
+      max-height: 2000px;
+      opacity: 1;
+    }
+    .collapse-body.hidden {
+      max-height: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
     @media (max-width: 768px) {
-      .quality-panel { grid-template-columns: 1fr; }
-      .quality-panel > div:first-child { border-right: 0; border-bottom: 1px solid var(--color-border); padding-right: 0; padding-bottom: 14px; }
+      .quality-topbar { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; }
+      .quality-topbar .donut-wrap { align-self: flex-start; }
+      .quality-topbar .stat-divider { display: none; }
+      .quality-topbar .actions-bar { margin-left: 0; width: 100%; justify-content: flex-end; }
       .filter-panel { align-items: flex-start; }
       .export-panel { margin-left: 0; }
-    }
-    @media (max-width: 980px) and (min-width: 769px) {
-      .quality-panel { grid-template-columns: 190px minmax(0, 1fr); gap: 12px; }
-      .quality-panel > div:first-child { padding-right: 12px; }
+      .completeness-list { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -98,6 +296,8 @@
       <div class="export-note">只导出人工已确认、证据完整、定位准确的记录；候选和需要处理的记录不会导出。</div>
     </section>
 
+    <div class="scroll-area">
+
     <section class="stats-banner" id="statsBanner" style="display:none;">
       <div class="stat-box"><div class="lbl">记录数</div><div id="statCount" class="val">-</div></div>
       <div class="stat-box"><div class="lbl">最小值</div><div id="statMin" class="val">-</div></div>
@@ -106,56 +306,92 @@
     </section>
 
     <section class="panel-card quality-panel" id="qualityPanel">
-      <div>
-        <div class="panel-actions" style="margin-bottom:8px;">
+      <!-- Top bar: donut + reasons + actions -->
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
+        <div style="display:flex; align-items:center; gap:8px;">
           <strong>候选审核概览</strong>
-          <span title="只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。" style="cursor:help;color:var(--color-text-muted);font-size:14px;">ⓘ</span>
-          <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="loadQualityPanel()">↻ 刷新面板</button>
+          <span title="只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。" style="cursor:help;color:var(--color-text-muted);font-size:13px;">ⓘ</span>
         </div>
-        <div id="qualityDonuts" style="display: flex; gap: 32px; align-items: center; margin-bottom: 12px; margin-top: 4px;">
-          <!-- Donuts injected via JS -->
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span id="qualityGateLabel" class="quality-meta"></span>
+          <button class="btn btn-ghost btn-sm" onclick="loadQualityPanel()">↻ 刷新</button>
         </div>
-        <div class="reason-chips" id="qualityReasonChips" style="margin-top:0;"></div>
       </div>
+
+      <div class="quality-topbar">
+        <div id="qualityDonuts"><!-- Donut + legend injected via JS --></div>
+        <div class="stat-divider"></div>
+        <div class="reason-chips-bar" id="qualityReasonChips"><!-- Reason chips --></div>
+        <div class="actions-bar">
+          <a class="btn btn-primary btn-sm" href="../review_center/index.html">打开审核中心</a>
+          <a class="btn btn-ghost btn-sm" href="../literature_library/index.html">回文献库核对证据</a>
+        </div>
+      </div>
+
+      <!-- Content area -->
       <div>
         <div class="panel-actions" style="margin-bottom:10px;">
-          <strong id="qualityListTitle">候选问题汇总</strong>
-          <span id="qualityGateLabel" class="quality-meta"></span>
+          <div class="collapse-header" onclick="toggleCollapse(this)">
+            <span class="collapse-arrow">▼</span>
+            <strong id="qualityListTitle">候选问题汇总</strong>
+          </div>
         </div>
-        <div id="qualityRows" class="quality-list">
-          <div class="empty-state">正在加载质量概览...</div>
+        <div class="collapse-body" id="qualityCollapse">
+          <div id="qualityRows" class="quality-list">
+            <div class="empty-state">正在加载质量概览...</div>
+          </div>
+          <div id="qualityCompleteness" class="completeness-list"></div>
         </div>
-        <div id="qualityCompleteness" class="completeness-list"></div>
       </div>
     </section>
 
     <section class="data-panel">
       <div class="panel-actions">
-        <strong id="resultSummary">0 条已审核可导出 DFT 记录</strong>
+        <div class="collapse-header" onclick="toggleCollapse(this)">
+          <span class="collapse-arrow">▼</span>
+          <strong id="resultSummary">0 条已审核可导出 DFT 记录</strong>
+        </div>
         <button class="btn btn-ghost btn-sm" onclick="queryDFT()">↻ 刷新</button>
       </div>
-      <div class="table-container">
-        <table id="dftTable">
-          <thead>
-            <tr>
-              <th>催化剂</th><th>吸附物</th><th>能量类型</th><th>数值</th><th>章节 / 步骤</th><th>状态 / 置信度</th><th>证据</th><th>来源文献</th>
-            </tr>
-          </thead>
-          <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载已审核可导出 DFT 记录中...</td></tr></tbody>
-        </table>
+      <div class="collapse-body" id="dftDataCollapse">
+        <div class="table-container">
+          <table id="dftTable">
+            <thead>
+              <tr>
+                <th>催化剂</th><th>吸附物</th><th>能量类型</th><th>数值</th><th>章节 / 步骤</th><th>状态 / 置信度</th><th>证据</th><th>来源文献</th>
+              </tr>
+            </thead>
+            <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载已审核可导出 DFT 记录中...</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
     <section class="panel-card">
-      <div class="panel-actions"><strong>证据详情</strong><span id="validationSummary" class="muted"></span></div>
-      <div id="evidenceDetail" class="mono">点击证据链接以查看原始证据文本及来源元数据。</div>
+      <div class="panel-actions">
+        <div class="collapse-header" onclick="toggleCollapse(this)">
+          <span class="collapse-arrow">▼</span>
+          <strong>证据详情</strong>
+        </div>
+        <span id="validationSummary" class="muted"></span>
+      </div>
+      <div class="collapse-body" id="evidenceCollapse">
+        <div id="evidenceDetail" class="mono">点击证据链接以查看原始证据文本及来源元数据。</div>
+      </div>
     </section>
+    </div>
   </main>
   <div id="toast" class="toast"></div>
   <script>
     const API_BASE = "/api/papers";
     const state = { items: [], qualityReason: "", currentLibrary: "" };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+    function toggleCollapse(header) {
+      const body = header.closest(".panel-actions")?.nextElementSibling || header.parentElement.nextElementSibling;
+      if (!body || !body.classList.contains("collapse-body")) return;
+      header.classList.toggle("collapsed");
+      body.classList.toggle("hidden");
+    }
     const REASON_LABELS = {
       missing_review: "缺少人工确认",
       unsafe_review: "人工确认未通过",
@@ -315,24 +551,22 @@
     }
     function getTechDonutHTML(exportable, blocked) {
       const total = exportable + blocked;
-      const radius = 24;
+      const radius = 26;
       const circumference = 2 * Math.PI * radius;
-      const svgSize = 64;
+      const svgSize = 68;
       const cx = svgSize / 2;
       const cy = svgSize / 2;
 
       let greenPercent = total === 0 ? 0 : exportable / total;
       let redPercent = total === 0 ? 0 : blocked / total;
 
-      // Calculate offsets for dasharray
       const greenOffset = circumference * (1 - greenPercent);
       const redOffset = circumference * (1 - redPercent);
-      const redRotation = greenPercent * 360; // start red after green
+      const redRotation = greenPercent * 360;
 
       return `
-        <div style="display:flex; align-items:center; gap: 10px; width:100%; margin-top: 4px; margin-bottom: 8px;">
-          <!-- High-tech Donut -->
-          <div style="position:relative; width:${svgSize}px; height:${svgSize}px; display:inline-flex; align-items:center; justify-content:center; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.05)); flex-shrink:0;">
+        <div class="donut-wrap">
+          <div style="position:relative; width:${svgSize}px; height:${svgSize}px; display:inline-flex; align-items:center; justify-content:center; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.08)); flex-shrink:0;">
             <svg width="${svgSize}" height="${svgSize}" viewBox="0 0 ${svgSize} ${svgSize}" style="transform: rotate(-90deg);">
               <defs>
                 <linearGradient id="gradRedPremium" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -344,44 +578,35 @@
                   <stop offset="100%" stop-color="#389e0d" />
                 </linearGradient>
               </defs>
-              <!-- Background Track -->
               <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="var(--color-border)" stroke-width="5"></circle>
-
               ${total === 0 ? '' : `
-              <!-- Green Segment -->
               <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="url(#gradGreenPremium)" stroke-width="5"
                       stroke-dasharray="${circumference}" stroke-dashoffset="${greenOffset}"
                       style="transition: stroke-dashoffset 1s cubic-bezier(0.34, 1.56, 0.64, 1); stroke-linecap: round;"></circle>
-
-              <!-- Red Segment -->
               <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="url(#gradRedPremium)" stroke-width="5"
                       stroke-dasharray="${circumference}" stroke-dashoffset="${redOffset}"
                       style="transform: rotate(${redRotation}deg); transform-origin: 50% 50%; transition: stroke-dashoffset 1s cubic-bezier(0.34, 1.56, 0.64, 1); stroke-linecap: round;"></circle>
               `}
             </svg>
-            <!-- Center Text -->
             <div style="position:absolute; display:flex; flex-direction:column; align-items:center; pointer-events:none;">
               <span style="font-size:7px; color:var(--color-text-muted); font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:-1px;">TOTAL</span>
-              <span style="font-size:17px; font-weight:900; color:var(--color-text); line-height:1; font-family:var(--font-mono, monospace);">${total}</span>
+              <span style="font-size:18px; font-weight:900; color:var(--color-text); line-height:1; font-family:var(--font-mono, monospace);">${total}</span>
             </div>
           </div>
-
-          <!-- Legend / Breakdown -->
-          <div style="display:flex; flex-direction:column; gap:6px; flex: 1; min-width:0;">
-            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-surface-alt); padding:5px 9px; border-radius:var(--radius-sm); border: 1px solid var(--color-border);">
+          <div class="donut-legend">
+            <div class="lg-row">
               <div style="display:flex; align-items:center; gap:6px;">
-                <div style="width:7px; height:7px; border-radius:50%; background:linear-gradient(135deg, #52c41a, #389e0d); box-shadow: 0 0 4px rgba(82,196,26,0.4);"></div>
-                <span style="font-size:11px; color:var(--color-text-secondary); font-weight:700;">可导出</span>
+                <div class="lg-dot" style="background:linear-gradient(135deg, #52c41a, #389e0d); box-shadow: 0 0 4px rgba(82,196,26,0.4);"></div>
+                <span class="lg-label">可导出</span>
               </div>
-              <strong id="qualityExportable" style="font-size:13px; color:var(--color-text); font-family:var(--font-mono, monospace);">${exportable}</strong>
+              <span class="lg-val" id="qualityExportable" style="color:var(--color-success);">${exportable}</span>
             </div>
-
-            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--color-surface-alt); padding:5px 9px; border-radius:var(--radius-sm); border: 1px solid var(--color-border);">
+            <div class="lg-row">
               <div style="display:flex; align-items:center; gap:6px;">
-                <div style="width:7px; height:7px; border-radius:50%; background:linear-gradient(135deg, #ff4d4f, #f5222d); box-shadow: 0 0 4px rgba(255,77,79,0.4);"></div>
-                <span style="font-size:11px; color:var(--color-text-secondary); font-weight:700;">需处理</span>
+                <div class="lg-dot" style="background:linear-gradient(135deg, #ff4d4f, #f5222d); box-shadow: 0 0 4px rgba(255,77,79,0.4);"></div>
+                <span class="lg-label">需处理</span>
               </div>
-              <strong id="qualityBlocked" style="font-size:13px; color:var(--color-text); font-family:var(--font-mono, monospace);">${blocked}</strong>
+              <span class="lg-val" id="qualityBlocked" style="color:var(--color-danger);">${blocked}</span>
             </div>
           </div>
         </div>
@@ -401,9 +626,6 @@
         const donutsContainer = document.getElementById("qualityDonuts");
         if (donutsContainer) {
           donutsContainer.innerHTML = getTechDonutHTML(exportable, blocked);
-          // Adjust container styles to fit the new design
-          donutsContainer.style.gap = "0";
-          donutsContainer.style.display = "block";
         }
         document.getElementById("qualityGateLabel").textContent = "导出门槛：" + gateLabel(metadata.safety_gate);
         renderReasonChips(metadata.blocked_reasons || {});
@@ -421,10 +643,10 @@
         el.innerHTML = "";
         return;
       }
-      let html = '<button type="button" class="reason-chip ' + (!state.qualityReason ? "active" : "") + '" onclick="setQualityReason(\'\')">全部原因</button>';
+      let html = '<button type="button" class="reason-chip ' + (!state.qualityReason ? "active" : "") + '" onclick="setQualityReason(\'\')">全部原因<span class="chip-count">全部</span></button>';
       html += entries.map(([reason, count]) => {
         const active = state.qualityReason === reason ? " active" : "";
-        return '<button type="button" class="reason-chip' + active + '" onclick="setQualityReason(\'' + esc(reason) + '\')">' + esc(reasonLabel(reason)) + ' ' + esc(count) + '</button>';
+        return '<button type="button" class="reason-chip' + active + '" onclick="setQualityReason(\'' + esc(reason) + '\')">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></button>';
       }).join("");
       el.innerHTML = html;
     }
@@ -448,17 +670,13 @@
         });
       });
       const chips = Object.entries(issueCounts).slice(0, 8).map(([reason, count]) => {
-        return '<span class="reason-chip" style="cursor:default;">' + esc(reasonLabel(reason)) + ' ' + esc(count) + '</span>';
+        return '<span class="reason-chip" style="cursor:default;">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>';
       }).join("");
       el.innerHTML = '<div class="quality-row">' +
         '<div class="quality-pill">候选区已隔离</div>' +
         '<h4>候选 DFT 数据不在正式数据库页展开</h4>' +
         '<div class="quality-meta">当前筛选下有 ' + esc(rows.length) + ' 条候选需要审核。请到审核中心执行确认入库、合并重复、退回重抽、重新定位证据或拒绝候选。</div>' +
-        '<div class="reason-chips">' + (chips || '<span class="quality-meta">暂无问题分类。</span>') + '</div>' +
-        '<div class="quality-actions">' +
-          '<a class="btn btn-primary btn-sm" href="../review_center/index.html">打开审核中心</a>' +
-          '<a class="btn btn-ghost btn-sm" href="../literature_library/index.html">回文献库核对证据</a>' +
-        '</div>' +
+        '<div class="reason-chips" style="margin-top:10px;">' + (chips || '<span class="quality-meta">暂无问题分类。</span>') + '</div>' +
       '</div>';
     }
     function renderCompletenessHints(items) {
@@ -532,6 +750,13 @@
     }
     function showEvidence(index) {
       const item = state.items[index];
+      // Auto-expand evidence section
+      const collapseEl = document.getElementById("evidenceCollapse");
+      const header = collapseEl?.previousElementSibling?.querySelector(".collapse-header");
+      if (collapseEl && collapseEl.classList.contains("hidden")) {
+        collapseEl.classList.remove("hidden");
+        if (header) header.classList.remove("collapsed");
+      }
       document.getElementById("evidenceDetail").innerHTML =
         '<div class="quality-status-grid">' +
           '<div class="readable-field"><div class="k">来源章节</div><div class="v">' + esc(item.source_section || "-") + '</div></div>' +

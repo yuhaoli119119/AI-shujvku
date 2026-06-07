@@ -117,6 +117,14 @@ def resolve_persisted_artifact_path(
         direct_candidates.append(runtime_settings.storage_root / stripped_path)
     basename = _basename(stripped)
     if basename:
+        storage_paths = runtime_settings.storage_paths
+        if category and category in storage_paths:
+            direct_candidates.append(storage_paths[category] / basename)
+        elif not category:
+            for category_name in KNOWN_STORAGE_CATEGORIES:
+                category_root = storage_paths.get(category_name)
+                if category_root is not None:
+                    direct_candidates.append(category_root / basename)
         for root in _search_roots(runtime_settings, category):
             direct_candidates.append(root / basename)
 
@@ -131,14 +139,6 @@ def resolve_persisted_artifact_path(
         seen.add(resolved)
         if resolved.exists():
             return resolved
-
-    if basename:
-        for root in _search_roots(runtime_settings, category):
-            if not root.exists():
-                continue
-            for match in root.rglob(basename):
-                if match.is_file():
-                    return match.resolve()
 
     if must_exist:
         return None

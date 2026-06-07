@@ -94,7 +94,12 @@ class Retriever:
         if paper_ids:
             query = query.where(PaperSection.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, PaperSection, paper_type_filter)
-        rows = self.session.scalars(query).all()
+        rows = self._scalars_with_token_prefilter(
+            query,
+            tokens,
+            [PaperSection.section_title, PaperSection.section_type, PaperSection.text],
+            fallback_limit=max(limit * 20, 200),
+        )
         results = []
         for row in rows:
             text = row.text or ""
@@ -126,7 +131,7 @@ class Retriever:
         limit: int,
         paper_type_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        rows = self._candidate_chunks(query_embedding, paper_ids, max(limit * 10, 50), paper_type_filter)
+        rows = self._candidate_chunks(tokens, query_embedding, paper_ids, max(limit * 10, 50), paper_type_filter)
         results = []
         for row in rows:
             haystack = row.text or ""
@@ -154,6 +159,7 @@ class Retriever:
 
     def _candidate_chunks(
         self,
+        tokens: set[str],
         query_embedding: list[float],
         paper_ids: list[UUID] | None,
         limit: int,
@@ -165,7 +171,12 @@ class Retriever:
             query = query.where(PaperChunk.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, PaperChunk, paper_type_filter)
         if dialect_name != "postgresql" or not query_embedding:
-            return list(self.session.scalars(query).all())
+            base_query = query
+            filtered_query = self._apply_token_prefilter(base_query, tokens, [PaperChunk.text])
+            rows = list(self.session.scalars(filtered_query.limit(max(limit * 2, 100))).all())
+            if rows or not tokens:
+                return rows
+            return list(self.session.scalars(base_query.limit(max(limit * 2, 100))).all())
 
         vector_literal = "[" + ",".join(f"{float(item):.8f}" for item in query_embedding) + "]"
         query_vector = sa.cast(sa.literal(vector_literal), PaperChunk.embedding.type)
@@ -184,7 +195,12 @@ class Retriever:
         try:
             return list(self.session.scalars(pg_query).all())
         except Exception:
-            return list(self.session.scalars(query).all())
+            base_query = query
+            filtered_query = self._apply_token_prefilter(base_query, tokens, [PaperChunk.text])
+            rows = list(self.session.scalars(filtered_query.limit(max(limit * 2, 100))).all())
+            if rows or not tokens:
+                return rows
+            return list(self.session.scalars(base_query.limit(max(limit * 2, 100))).all())
 
     def _retrieve_dft_results(
         self,
@@ -199,7 +215,19 @@ class Retriever:
         if paper_ids:
             query = query.where(DFTResult.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, DFTResult, paper_type_filter)
-        rows = self.session.scalars(query).all()
+        rows = self._scalars_with_token_prefilter(
+            query,
+            tokens,
+            [
+                DFTResult.adsorbate,
+                DFTResult.property_type,
+                DFTResult.reaction_step,
+                DFTResult.source_section,
+                DFTResult.source_figure,
+                DFTResult.evidence_text,
+            ],
+            fallback_limit=max(limit * 20, 200),
+        )
         gate_by_id = bulk_export_gate_results(self.session, rows, target_type="dft_results")
         results = []
         for row in rows:
@@ -261,7 +289,16 @@ class Retriever:
         if paper_ids:
             query = query.where(ElectrochemicalPerformance.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, ElectrochemicalPerformance, paper_type_filter)
-        rows = self.session.scalars(query).all()
+        rows = self._scalars_with_token_prefilter(
+            query,
+            tokens,
+            [
+                ElectrochemicalPerformance.rate,
+                ElectrochemicalPerformance.electrolyte_sulfur_ratio,
+                ElectrochemicalPerformance.evidence_text,
+            ],
+            fallback_limit=max(limit * 20, 200),
+        )
         gate_by_id = bulk_export_gate_results(self.session, rows, target_type="electrochemical_performance")
         results = []
         for row in rows:
@@ -308,7 +345,12 @@ class Retriever:
         if paper_ids:
             query = query.where(MechanismClaim.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, MechanismClaim, paper_type_filter)
-        rows = self.session.scalars(query).all()
+        rows = self._scalars_with_token_prefilter(
+            query,
+            tokens,
+            [MechanismClaim.claim_type, MechanismClaim.claim_text, MechanismClaim.evidence_text],
+            fallback_limit=max(limit * 20, 200),
+        )
         gate_by_id = bulk_export_gate_results(self.session, rows, target_type="mechanism_claims")
         results = []
         for row in rows:
@@ -346,7 +388,20 @@ class Retriever:
         if paper_ids:
             query = query.where(WritingCard.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, WritingCard, paper_type_filter)
-        rows = self.session.scalars(query).all()
+        rows = self._scalars_with_token_prefilter(
+            query,
+            tokens,
+            [
+                WritingCard.paper_type,
+                WritingCard.research_gap,
+                WritingCard.proposed_solution,
+                WritingCard.core_hypothesis,
+                WritingCard.abstract_logic,
+                WritingCard.introduction_logic,
+                WritingCard.discussion_logic,
+            ],
+            fallback_limit=max(limit * 20, 200),
+        )
         results = []
         for row in rows:
             gate = writing_card_gate(row)
@@ -405,7 +460,14 @@ class Retriever:
         if paper_ids:
             query = query.where(FigureDataPoint.paper_id.in_(paper_ids))
         query = self._apply_type_filter(query, FigureDataPoint, paper_type_filter)
-        rows = self.session.execute(query).all()
+        filtered_query = self._apply_token_prefilter(
+            query,
+            tokens,
+            [FigureDataPoint.metric_name, FigureDataPoint.unit, FigureDataPoint.sample_label, PaperFigure.caption],
+        )
+        rows = self.session.execute(filtered_query).all()
+        if not rows and tokens:
+            rows = self.session.execute(query.limit(max(limit * 20, 200))).all()
         results = []
         for row, caption in rows:
             fig_caption = caption or ""
@@ -552,6 +614,37 @@ class Retriever:
                 
             retrieved[type_name] = Retriever._top_k(filtered, limit_per_type)
         return retrieved
+
+    @staticmethod
+    def _apply_token_prefilter(query: Any, tokens: set[str], columns: list[Any], *, max_terms: int = 8) -> Any:
+        terms = [
+            token
+            for token in sorted(tokens, key=lambda item: (-len(item), item))
+            if len(token) >= 2
+        ][:max_terms]
+        if not terms:
+            return query
+        conditions = []
+        for token in terms:
+            pattern = f"%{token}%"
+            conditions.extend(column.ilike(pattern) for column in columns if column is not None)
+        if not conditions:
+            return query
+        return query.where(sa.or_(*conditions))
+
+    def _scalars_with_token_prefilter(
+        self,
+        query: Any,
+        tokens: set[str],
+        columns: list[Any],
+        *,
+        fallback_limit: int,
+    ) -> list[Any]:
+        filtered_query = self._apply_token_prefilter(query, tokens, columns)
+        rows = list(self.session.scalars(filtered_query).all())
+        if rows or not tokens:
+            return rows
+        return list(self.session.scalars(query.limit(fallback_limit)).all())
 
     @staticmethod
     def _top_k(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:

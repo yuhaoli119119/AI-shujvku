@@ -25,6 +25,64 @@ evidence_first_rules:
   - Cropped figures are candidate locators only; verify them against the full PDF page and caption.
   - Data without evidence location must not be promoted.
 
+workflow_stages:
+  scope_gate:
+    goal: Decide whether the paper is in scope before extracting rows.
+    required_output:
+      - graphdiyne_related
+      - computation_or_experiment_plus_computation
+      - extractable_dft_or_property_data
+      - direct_evidence_excerpt
+      - stop_reason_when_out_of_scope
+  record_plan:
+    goal: Plan material states, catalysts, structures, reaction systems, and expected row groups before extracting values.
+    required_output:
+      - planned_records
+      - expected_property_groups
+      - expected_tables_or_figures
+      - known_missing
+      - source_anchors
+  record_one_by_one:
+    goal: Extract one material or catalytic state at a time, without mixing different structures, dopants, methods, or conditions.
+    required_output:
+      - one_record_identity
+      - normalized_names
+      - source_anchors
+      - candidate_rows
+      - row_check
+  row_check:
+    goal: Validate syntax and evidence before any AI or human audit.
+    required_output:
+      - numeric_value
+      - unit
+      - property_type
+      - catalyst_or_material
+      - adsorbate
+      - reaction_or_condition
+      - pdf_page_or_locator
+      - evidence_text
+      - needs_fix_reason
+  duplicate_guard:
+    goal: Merge repeated candidates from the same paper instead of creating duplicate final rows.
+    required_output:
+      - duplicate_key
+      - duplicate_group_id
+      - primary_candidate_id
+      - merged_evidence_sources
+  second_ai_or_human_audit:
+    goal: A second AI or a human reviews the evidence packet and candidate rows before promotion.
+    required_output:
+      - reviewer_role
+      - reviewer_model
+      - accept_reject_needs_fix
+      - audit_notes
+      - human_confirmation_required
+
+MCP_tooling_context:
+  purpose: MCP tools expose evidence packets, page reads, figure crops, chart audits, share tokens, and repair actions to AI workers.
+  rule: MCP tool output is supporting evidence, not final truth.
+  traceability: Every MCP-assisted AI action must be recorded in AuditLog, task center, field review, external analysis run, or PaperNote.
+
 required_fields_per_dft_record:
   - catalyst_or_material
   - normalized_catalyst_or_material
@@ -44,6 +102,11 @@ required_fields_per_dft_record:
   - bbox_or_locator_if_available
   - confidence
   - extraction_source
+  - source_anchors
+  - known_missing
+  - extraction_protocol_version
+  - protocol_sha256
+  - human_confirmation_required
   - notes
 
 property_types:
@@ -84,6 +147,7 @@ completeness_audit_keywords:
 
 deduplication_policy:
   key: paper_id + normalized_catalyst + normalized_adsorbate + property_type + value + unit + method_or_condition + evidence_location
+  duplicate_key: paper_id + normalized_catalyst + normalized_adsorbate + normalized_property_type + normalized_value + normalized_unit + normalized_condition + locator
   normalization_examples:
     - GDY, graphdiyne, pristine GDY -> GDY
     - H2O, water -> H2O
@@ -92,6 +156,22 @@ deduplication_policy:
   rule: Do not delete duplicates silently. Merge into a primary candidate and keep all evidence sources.
 
 ai_worker_protocol:
+  multi_ai_collaboration:
+    - AI roles are assignable per task. Codex, Gemini, GLM, or another model may act as extractor, reviewer, image auditor, DFT auditor, or judge.
+    - Role names must be recorded explicitly, for example gemini_image_auditor, glm_dft_auditor, codex_extractor, or second_ai_judge.
+    - A model that extracted a record should not be the only reviewer of that same record.
+    - AI outputs are recommendations and candidate records only; they do not write final truth.
+    - Persisted AI payloads must include writes_final_truth: false and human_confirmation_required: true unless a separate human/final gate has explicitly promoted the row.
+    - Every AI operation must leave a trace in task center, audit logs, field reviews, shared notes, correction proposals, or external analysis runs.
+    - Review suggestions are inspected from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, PaperNote records, and AuditLog entries.
+  image_audit:
+    - Gemini or another VLM-capable model may audit figure crops, captions, full-page screenshots, and chart interpretations.
+    - Figure audit must record figure_id, page, crop status, question, answer, and whether the crop is verified, incomplete, or incorrect.
+    - Incorrect crops must trigger recrop_figure or a repair task before values from that figure can be trusted.
+  dft_data_audit:
+    - GLM, Gemini, Codex, or another text/science model may audit DFT rows if it receives the evidence packet and this protocol.
+    - The reviewer must check exact numeric value, unit, catalyst/material, adsorbate, property type, method/condition, locator, duplicates, and suspected missing rows.
+    - PASS/accept from an AI does not unlock export unless the configured human/final gate also passes.
   ai_a_initial_extract:
     - Read abstract, methods, results/discussion, all tables, all captions, DFT-related text, and supporting evidence package.
     - Output structured candidate records only when evidence is located.
@@ -135,6 +215,19 @@ output_schema:
       figure: string
       caption: string
       bbox: object
+    source_anchors:
+      markdown_line: string
+      pdf_page: integer
+      section: string
+      table_or_figure: string
+      locator_id: string
+    known_missing:
+      reason: string
+      checked_locations: list
+    extraction_protocol_version: string
+    protocol_sha256: string
+    writes_final_truth: false
+    human_confirmation_required: true
     confidence: number
     notes: string
   report:

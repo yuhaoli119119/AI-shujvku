@@ -24,66 +24,66 @@
       margin: 0 auto;
       padding: 22px 20px 34px;
     }
-    .page-head {
+    .metrics-row {
       display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
+      gap: 10px;
+      margin-bottom: 14px;
+      align-items: stretch;
     }
-    .eyebrow {
-      color: var(--color-text-secondary);
-      font-size: 13px;
-      font-weight: 800;
-      margin-bottom: 4px;
+    .metrics {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
     }
-    h1 {
-      margin: 0;
-      font-size: 30px;
-      line-height: 1.2;
+    .control-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
     .head-meta {
-      color: var(--color-text-secondary);
+      color: var(--color-text);
       font-size: 13px;
-      margin-top: 8px;
-      max-width: 760px;
+      font-weight: 800;
     }
     .library-control {
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
+      gap: 6px;
     }
     .library-control select {
-      min-width: 210px;
-      height: 36px;
+      flex: 1;
+      min-width: 160px;
+      max-width: 220px;
+      height: 30px;
       border: 1px solid var(--color-border-strong);
-      border-radius: var(--radius);
+      border-radius: var(--radius-sm);
       background: var(--color-surface);
       color: var(--color-text);
-      padding: 0 10px;
+      padding: 0 8px;
       font: inherit;
-    }
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(130px, 1fr));
-      gap: 10px;
-      margin-bottom: 14px;
+      font-size: 13px;
     }
     .metric {
       background: var(--color-surface);
       border: 1px solid var(--color-border);
       border-radius: var(--radius);
       box-shadow: var(--shadow-card);
-      padding: 12px;
-      min-height: 94px;
+      padding: 10px 12px;
+      min-height: 72px;
     }
     .metric .value {
-      font-size: 28px;
+      font-size: 22px;
       line-height: 1;
       font-weight: 900;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
       color: var(--color-text);
     }
     .metric .label {
@@ -94,8 +94,8 @@
     }
     .metric .sub {
       color: var(--color-text-muted);
-      font-size: 12px;
-      margin-top: 6px;
+      font-size: 11px;
+      margin-top: 2px;
     }
     .tabs {
       display: flex;
@@ -480,28 +480,24 @@
       .grid-2 { grid-template-columns: 1fr; }
       .donut-row { grid-template-columns: 1fr; }
       .bar-row { grid-template-columns: minmax(92px, 0.9fr) minmax(0, 1.6fr) 42px; }
-      h1 { font-size: 24px; }
     }
   </style>
 </head>
 <body>
   <div id="topnav-mount"></div>
   <main class="shell">
-    <div class="page-head">
-      <div>
-        <div class="eyebrow">分析</div>
-        <h1>数据可视化</h1>
+    <div class="metrics-row">
+      <section class="metrics" id="metrics"></section>
+      <div class="control-card">
         <div class="head-meta" id="libraryMeta">正在读取文献库...</div>
-      </div>
-      <div class="library-control">
-        <select id="librarySelect" onchange="handleLibraryChange(this.value)">
-          <option value="">加载中...</option>
-        </select>
-        <button class="btn btn-ghost btn-sm" onclick="reloadAll()">刷新</button>
+        <div class="library-control">
+          <select id="librarySelect" onchange="handleLibraryChange(this.value)">
+            <option value="">加载中...</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="reloadAll()">刷新</button>
+        </div>
       </div>
     </div>
-
-    <section class="metrics" id="metrics"></section>
 
     <nav class="tabs">
       <button class="tab-btn active" data-view="overview" onclick="switchView('overview')">概览</button>

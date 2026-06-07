@@ -7,10 +7,10 @@ from uuid import UUID
 
 from fastapi.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from app.config import get_settings
-from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.rag.retriever import Retriever
@@ -33,6 +33,7 @@ from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.services.review_service import ReviewService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
+from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 mcp_server = FastMCP(
     get_settings().mcp_server_name,
@@ -1086,15 +1087,34 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
         pid = UUID(paper_id)
         effective_page_end = page_end if page_end is not None else page_start
 
-        # Fetch sections whose page range overlaps with the requested page range
+        # Fetch sections whose known page range overlaps with the requested range.
+        # If only one side of the range is known, use that page as a precise anchor;
+        # fully unknown sections are excluded to avoid returning the whole paper.
+        section_overlap = or_(
+            and_(
+                PaperSection.page_start.is_not(None),
+                PaperSection.page_end.is_not(None),
+                PaperSection.page_start <= effective_page_end,
+                PaperSection.page_end >= page_start,
+            ),
+            and_(
+                PaperSection.page_start.is_not(None),
+                PaperSection.page_end.is_(None),
+                PaperSection.page_start >= page_start,
+                PaperSection.page_start <= effective_page_end,
+            ),
+            and_(
+                PaperSection.page_start.is_(None),
+                PaperSection.page_end.is_not(None),
+                PaperSection.page_end >= page_start,
+                PaperSection.page_end <= effective_page_end,
+            ),
+        )
         sections = session.scalars(
             select(PaperSection)
             .where(PaperSection.paper_id == pid)
-            .where(
-                (PaperSection.page_start <= effective_page_end)
-                & (PaperSection.page_end >= page_start)
-            )
-            .order_by(PaperSection.page_start, PaperSection.section_title)
+            .where(section_overlap)
+            .order_by(PaperSection.page_start.asc().nulls_last(), PaperSection.section_title.asc())
         ).all()
 
         # Fetch tables on this page range
@@ -1132,7 +1152,7 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
                 f"## {label} (p. {fig.page})\n"
                 f"Role: {role}\n"
                 f"AI Visual Summary: {summary}\n"
-                f"Figure ID: {fig.id}  ← use analyze_chart with this ID for targeted VLM questions"
+                f"Figure ID: {fig.id} -> use analyze_chart with this ID for targeted VLM questions"
             )
             figure_refs.append({
                 "figure_id": str(fig.id),
@@ -1180,9 +1200,13 @@ async def analyze_chart(figure_id: str, custom_question: str) -> dict[str, Any]:
         if not fig.image_path:
             raise ValueError("This figure has no associated image file.")
 
-        abs_path = settings.storage_paths["figures"] / fig.image_path
-        if not abs_path.exists():
-            raise ValueError(f"Image file not found on disk: {abs_path}")
+        abs_path = resolve_persisted_artifact_path(
+            fig.image_path,
+            category="figures",
+            settings=settings,
+        )
+        if not abs_path or not abs_path.exists():
+            raise ValueError(f"Image file not found on disk: {fig.image_path}")
 
         fig_meta = {
             "paper_id": str(fig.paper_id),
@@ -1328,9 +1352,13 @@ def recrop_figure(
         if not paper or not paper.pdf_path:
             raise ValueError("Associated paper or PDF path not found")
 
-        pdf_abs_path = settings.storage_paths["pdf"] / paper.pdf_path
-        if not pdf_abs_path.exists():
-            raise ValueError(f"PDF file not found: {pdf_abs_path}")
+        pdf_abs_path = resolve_persisted_artifact_path(
+            paper.pdf_path,
+            category="pdf",
+            settings=settings,
+        )
+        if not pdf_abs_path or not pdf_abs_path.exists():
+            raise ValueError(f"PDF file not found: {paper.pdf_path}")
 
         if fig.page is None or fig.page < 1:
             raise ValueError("Figure does not have a valid page number")

@@ -21,6 +21,7 @@ from app.db.models import (
     PaperRelationship,
 )
 from app.services.llm_service import LLMService
+from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 
 
@@ -117,7 +118,13 @@ class ExternalAnalysisService:
                 source=source,
                 target_type="external_analysis_run",
                 target_id=str(run.id),
-                payload={"source_label": source_label, "mapping_status": mapping_status},
+                payload={
+                    "source_label": source_label,
+                    "mapping_status": mapping_status,
+                    "protocol": protocol_snapshot("gemini_audit_protocol"),
+                    "writes_final_truth": False,
+                    "requires_human_confirmation": True,
+                },
             )
         )
         self.session.flush()
@@ -218,7 +225,10 @@ class ExternalAnalysisService:
                     operation=payload.get("operation", "replace"),
                     proposed_value=payload.get("proposed_value"),
                     reason=payload.get("reason", ""),
-                    evidence_payload=payload.get("evidence_payload"),
+                    evidence_payload=self._external_candidate_evidence_payload(
+                        run,
+                        payload.get("evidence_payload"),
+                    ),
                     status="pending",
                 )
                 self.session.add(correction)
@@ -263,11 +273,39 @@ class ExternalAnalysisService:
                     "created_corrections": result.created_corrections,
                     "created_relationships": result.created_relationships,
                     "skipped_candidates": result.skipped_candidates,
+                    "source_run_id": str(run.id),
+                    "protocol": protocol_snapshot("gemini_audit_protocol"),
+                    "writes_final_truth": False,
+                    "requires_human_confirmation": True,
                 },
             )
         )
         self.session.flush()
         return result
+
+    @staticmethod
+    def _external_candidate_evidence_payload(
+        run: ExternalAnalysisRun,
+        raw_payload: dict[str, Any] | list[Any] | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any]
+        if isinstance(raw_payload, dict):
+            payload = dict(raw_payload)
+        elif raw_payload is None:
+            payload = {}
+        else:
+            payload = {"external_evidence_payload": raw_payload}
+        payload.update(
+            {
+                "source_external_analysis_run_id": str(run.id),
+                "source": run.source,
+                "source_label": run.source_label,
+                "protocol": protocol_snapshot("gemini_audit_protocol"),
+                "writes_final_truth": False,
+                "requires_human_confirmation": True,
+            }
+        )
+        return payload
 
     def _normalize_input(
         self,

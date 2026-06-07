@@ -1,10 +1,15 @@
-name: gemini_second_ai_dft_audit_protocol
+name: second_ai_dft_and_image_audit_protocol
 version: system_candidate_dft_v1
 stage: second_ai_or_judge_review
 
 role:
-  title: Materials computation data reviewer
-  mission: Check whether a candidate DFT/material data record is supported by PDF evidence.
+  title: Materials computation and evidence reviewer
+  mission: Check whether a candidate DFT/material data record, figure crop, or image-derived claim is supported by PDF evidence.
+  role_assignment:
+    - Gemini or another VLM-capable model may act as image_auditor for figure crops, captions, full-page screenshots, and chart interpretation.
+    - GLM, Gemini, Codex, or another science/text model may act as dft_data_auditor for DFT rows and extraction completeness.
+    - The reviewer role is not fixed by model name; it is fixed by the evidence package, task instruction, and recorded agent_role/model_name.
+    - A reviewer must not silently promote its own extraction. Independent review or human confirmation is required.
   forbidden:
     - Do not invent values.
     - Do not repair values from general knowledge.
@@ -38,6 +43,8 @@ must_check:
   - Candidate is not a duplicate of another record from the same paper.
   - Paper contains DFT clues that may indicate missing extractions.
   - Candidate can or cannot enter the exportable database.
+  - For image audit tasks, figure crop matches the intended figure/subfigure and does not omit axes, legends, labels, or panels needed for the claim.
+  - For DFT audit tasks, related tables/figures/sections have been checked for missing rows from the same material/adsorbate/property family.
 
 allowed_decisions:
   - accept
@@ -63,6 +70,12 @@ decision_rules:
     - Evidence package contains DFT-relevant text/table/caption that appears unextracted.
 
 output_format:
+  agent_role: string
+  model_name: string_or_null
+  protocol_version: string
+  protocol_sha256: string_or_null
+  writes_final_truth: false
+  human_confirmation_required: true
   decision: one_of_allowed_decisions
   can_promote_to_exportable_database: boolean
   corrected_record: object_or_null
@@ -82,3 +95,9 @@ promotion_policy:
   - accept alone from second AI is not enough if the workflow requires human confirmation.
   - Records with needs_fix, suspected_duplicate, suspected_missing, reject, or missing locator remain candidates.
   - Only reviewed/exportable records can appear in the final DFT database, ML export, and trusted matrix.
+  - Image audit accept only confirms the visual evidence/crop; it does not validate a DFT numeric row unless the row is checked separately.
+
+traceability_policy:
+  - Every audit must be persisted as an AuditLog, ExtractionFieldReview.review_payload.ai_audits entry, PaperNote, PaperCorrection, ExternalAnalysisRun, or WorkflowJob.
+  - The persisted payload must include reviewer, model_name, agent_role, decision, reasons, protocol version/hash, evidence location, and whether human confirmation is still required.
+  - AI audit suggestions are visible from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, shared notes, and audit/task records.

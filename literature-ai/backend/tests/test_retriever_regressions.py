@@ -5,6 +5,13 @@ from app.services.retrieval_service import RetrievalService
 from app.schemas.retrieval import RetrievalSearchRequest
 from unittest.mock import MagicMock
 import uuid
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.orm import Session
+
+from app.db.models import Base, DFTResult, Paper
 
 def test_global_dedup_truncation():
     long_prefix = "A" * 80
@@ -89,6 +96,55 @@ def test_query_embedding_failure_falls_back_to_lexical():
     assert query_embedding == []
     assert score > 0
     assert breakdown["semantic"] == 0.0
+
+
+def test_structured_token_prefilter_empty_result_falls_back_with_paper_scope():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retriever.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            p1 = Paper(title="Target Paper", pdf_path="target.pdf", authors=["A"])
+            p2 = Paper(title="Other Paper", pdf_path="other.pdf", authors=["B"])
+            session.add_all([p1, p2])
+            session.flush()
+            session.add(
+                DFTResult(
+                    paper_id=p1.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H2O",
+                    value=-0.5,
+                    unit="eV",
+                    evidence_text="No matching query token appears here.",
+                )
+            )
+            session.add(
+                DFTResult(
+                    paper_id=p2.id,
+                    property_type="band_gap",
+                    value=1.1,
+                    unit="eV",
+                    evidence_text="This row is outside the requested paper.",
+                )
+            )
+            session.commit()
+
+            retriever = Retriever(session)
+            query = select(DFTResult).where(DFTResult.paper_id == p1.id)
+            rows = retriever._scalars_with_token_prefilter(
+                query,
+                {"zzzzzz"},
+                [DFTResult.evidence_text],
+                fallback_limit=20,
+            )
+
+            assert len(rows) == 1
+            assert rows[0].paper_id == p1.id
+            assert rows[0].value == -0.5
+
+        engine.dispose()
 
 def test_full_context_mode():
     session = MagicMock()
