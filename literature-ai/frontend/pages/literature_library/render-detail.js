@@ -38,12 +38,13 @@ function renderWorkspaceHeader(paper) {
     if (topicEl) topicEl.value = paper.title_zh || paper.title || "";
 }
 
-function renderListBlock(title, items, formatter) {
+function renderListBlock(title, items, formatter, titleFormatter) {
     if (!items || !items.length) {
         return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">暂无内容。</div></div>';
     }
     return items.map(function(item, index) {
-        return '<details class="section-card"><summary><h3 style="margin:0;">' + esc(title) + " " + (items.length > 1 ? (index + 1) : "") + '</h3></summary><div style="margin-top:10px;">' + formatter(item) + '</div></details>';
+        var h3Title = titleFormatter ? titleFormatter(item, index) : (esc(title) + " " + (items.length > 1 ? (index + 1) : ""));
+        return '<details class="section-card"><summary><h3 style="margin:0;">' + h3Title + '</h3></summary><div style="margin-top:10px;">' + formatter(item) + '</div></details>';
     }).join("");
 }
 
@@ -1001,12 +1002,11 @@ function renderDetail(detail, audit) {
     if (activeTab === "sections") {
         const displaySections = (detail.sections || []).filter(isDisplayBodySection).sort(compareDisplaySections).slice(0, 8);
         sectionCards = renderListBlock("正文节选", displaySections, function(item) {
-            const title = cleanPdfExtractedText(item.section_title || item.section_type || "未命名章节");
             const text = cleanPdfExtractedText(item.text || "");
-            return (
-                '<div class="subtle">标题：' + esc(title) + "</div>" +
-                '<div class="prewrap" style="margin-top:8px;">' + esc(ellipsis(text, 2200) || "暂无文本。") + "</div>"
-            );
+            return '<div class="prewrap">' + esc(ellipsis(text, 2200) || "暂无文本。") + "</div>";
+        }, function(item) {
+            const title = cleanPdfExtractedText(item.section_title || item.section_type || "未命名章节");
+            return esc(title);
         });
     }
 
