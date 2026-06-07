@@ -155,7 +155,7 @@ async def list_browse_roots() -> list[dict]:
 
 
 @router.get("", response_model=list[LibraryInfoResponse])
-async def list_libraries() -> list[LibraryInfoResponse]:
+def list_libraries() -> list[LibraryInfoResponse]:
     mgr = _get_manager()
     libs = mgr.list_libraries()
     return [_effective_active_library_response(lib) for lib in libs]

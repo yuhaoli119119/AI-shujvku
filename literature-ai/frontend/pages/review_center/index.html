@@ -313,24 +313,11 @@
         <div class="filterbar">
           <select id="statusFilter" onchange="renderRows()">
             <option value="">全部流程状态</option>
-            <option value="Imported">已导入</option>
-            <option value="Quality_Checked">已检质量</option>
-            <option value="Unparsed">未解析</option>
-            <option value="Initial_Parsed">初步解析</option>
-            <option value="Suspected_Missing">疑似漏提</option>
-            <option value="AI_Rescanned">AI 已重扫</option>
-            <option value="Human_Complete">人工确认完整</option>
-            <option value="DB_Ready">可入库</option>
-            <option value="Needs_Human_Confirmation">待人工确认</option>
-            <option value="Codex_Candidate">系统候选（旧）</option>
-            <option value="Gemini_Verified">Gemini 已核验</option>
-            <option value="Gemini_Revised">Gemini 已修订</option>
-            <option value="Gemini_Flagged">Gemini 标红</option>
-            <option value="Evidence_Insufficient">证据不足</option>
-            <option value="Human_Confirmed">已人工确认</option>
-            <option value="Rejected">已拒绝</option>
-            <option value="ML_Ready">可进机器学习</option>
-            <option value="Citation_Ready">可用于引用</option>
+            <option value="group:needs_action">🚨 需要我处理</option>
+            <option value="group:needs_attention">⚠️ 需要关注</option>
+            <option value="group:ai_processing">⚙️ AI 正在处理</option>
+            <option value="group:approved">✅ 已审核通过</option>
+            <option value="group:deprecated">🗑️ 废弃旧状态</option>
           </select>
           <select id="qualityFilter" onchange="renderRows()">
             <option value="">全部 PDF 质量</option>
@@ -434,9 +421,9 @@
         Human_Complete: { label: "人工确认完整", tip: "人工已确认当前候选覆盖完整。" },
         DB_Ready: { label: "可入库", tip: "已达到正式数据库入库条件。" },
         Codex_Candidate: { label: "系统候选（旧）", tip: "旧状态：系统规则候选，只能作为审核线索。" },
-        Gemini_Verified: { label: "Gemini 已核验", tip: "Gemini 已通过证据核验，但还不等于最终正式确认。" },
-        Gemini_Revised: { label: "Gemini 已修订", tip: "Gemini 认为候选内容需要调整后再确认。" },
-        Gemini_Flagged: { label: "Gemini 标红", tip: "Gemini 发现明显疑点，建议优先人工复核。" },
+        Gemini_Verified: { label: "AI 已核验", tip: "AI 已通过证据核验，但还不等于最终正式确认。" },
+        Gemini_Revised: { label: "AI 已修订", tip: "AI 认为候选内容需要调整后再确认。" },
+        Gemini_Flagged: { label: "AI 标红", tip: "AI 发现明显疑点，建议优先人工复核。" },
         Evidence_Insufficient: { label: "证据不足", tip: "当前材料不足以支持可靠判断。" },
         Needs_Human_Confirmation: { label: "待人工确认", tip: "系统已把这篇文献留给你做最后拍板。" },
         Human_Confirmed: { label: "已人工确认", tip: "这篇文献的当前候选内容已经过人工确认。" },
@@ -513,13 +500,27 @@
       }).join("");
     }
 
+    const STATUS_GROUPS = {
+      "group:needs_action": ["Needs_Human_Confirmation", "Evidence_Insufficient", "Gemini_Flagged"],
+      "group:needs_attention": ["Suspected_Missing", "Rejected"],
+      "group:ai_processing": ["Imported", "Quality_Checked", "Unparsed", "Initial_Parsed", "AI_Rescanned"],
+      "group:approved": ["Human_Complete", "DB_Ready", "Human_Confirmed", "ML_Ready", "Citation_Ready", "Gemini_Verified", "Gemini_Revised"],
+      "group:deprecated": ["Codex_Candidate"]
+    };
+
     function filteredRows() {
       const status = getValue("statusFilter");
       const quality = getValue("qualityFilter");
       const q = getValue("searchBox").toLowerCase();
       return state.rows.filter(function (row) {
-        if (status === "Needs_Human_Confirmation" && !row.needs_human_confirmation) return false;
-        if (status && status !== "Needs_Human_Confirmation" && row.workflow_status !== status) return false;
+        if (status) {
+          if (status === "Needs_Human_Confirmation" && !row.needs_human_confirmation) return false;
+          if (STATUS_GROUPS[status]) {
+            if (!STATUS_GROUPS[status].includes(row.workflow_status)) return false;
+          } else if (status !== "Needs_Human_Confirmation") {
+            if (row.workflow_status !== status) return false;
+          }
+        }
         if (quality && row.pdf_quality_status !== quality) return false;
         if (!q) return true;
         const haystack = [row.title, row.journal, row.year, row.workflow_status, row.pdf_quality_status].join(" ").toLowerCase();

@@ -30,12 +30,13 @@ router = APIRouter()
 
 
 @router.get("/", response_model=list[PaperListItemResponse])
-async def list_papers(
+def list_papers(
     q: str | None = Query(default=None, description="Keyword search across title, DOI, journal, abstract, authors, and sections"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
     source_path: str | None = Query(default=None, description="Exact local source path used during ingest/path"),
     year: int | None = Query(default=None, description="Filter by publication year"),
     journal: str | None = Query(default=None, description="Filter by journal name (fuzzy)"),
+    paper_type: str | None = Query(default=None, description="Filter by paper type (A/B/C/R etc)"),
     has_dft_results: bool | None = Query(default=None, description="Only papers with/without DFT results"),
     has_writing_cards: bool | None = Query(default=None, description="Only papers with/without writing cards"),
     sort_by: str = Query(default="year_serial", description="Sort papers by year+serial, created_at, or title"),
@@ -50,6 +51,7 @@ async def list_papers(
         source_path=source_path,
         year=year,
         journal=journal,
+        paper_type=paper_type,
         has_dft_results=has_dft_results,
         has_writing_cards=has_writing_cards,
         sort_by=sort_by,
@@ -61,7 +63,7 @@ async def list_papers(
 
 
 @router.get("/libraries", response_model=list[PaperLibraryResponse])
-async def list_libraries(session: Session = Depends(get_db_session)) -> list[PaperLibraryResponse]:
+def list_libraries(session: Session = Depends(get_db_session)) -> list[PaperLibraryResponse]:
     rows = session.execute(
         select(Paper.library_name, func.count(Paper.id))
         .group_by(Paper.library_name)

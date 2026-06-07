@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def get_engine(database_url: str):
     if database_url not in _engines:
-        engine = create_engine(database_url, future=True)
+        engine = create_engine(database_url, future=True, pool_size=20, max_overflow=50)
         _engines[database_url] = engine
         _session_factories[database_url] = sessionmaker(
             bind=engine,

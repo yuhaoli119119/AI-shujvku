@@ -143,6 +143,7 @@
         <div class="status-grid">
           <div class="status-cell"><strong id="protocolCount">-</strong><span class="muted">协议</span></div>
           <div class="status-cell"><strong>7</strong><span class="muted">步骤</span></div>
+          <div class="status-cell"><strong id="stage2Mode">-</strong><span class="muted">深度解析</span></div>
           <div class="status-cell"><strong style="color:var(--color-success);">✓</strong><span class="muted">需人工确认入库</span></div>
         </div>
         <div id="protocolList" class="protocol-list" style="margin-top:12px;"><div class="muted">读取协议中...</div></div>
@@ -332,12 +333,32 @@
         document.getElementById("protocolList").innerHTML = '<div class="muted">协议读取失败：' + esc(error.message) + '</div>';
       }
     }
+    async function loadAgentGuide() {
+      try {
+        const response = await fetch("/api/system/agent-guide");
+        const data = await response.json();
+        const autoStage2 = data?.ingestion_config?.auto_run_stage2_extraction;
+        const el = document.getElementById("stage2Mode");
+        if (autoStage2 === true) {
+          el.textContent = "自动";
+          el.style.color = "var(--color-success)";
+        } else if (autoStage2 === false) {
+          el.textContent = "AI按需";
+          el.style.color = "var(--color-warning)";
+        } else {
+          el.textContent = "未知";
+        }
+      } catch (error) {
+        document.getElementById("stage2Mode").textContent = "-";
+      }
+    }
     document.addEventListener("DOMContentLoaded", () => {
       ThemeManager.init();
       TopNav.init({ currentPage: "extraction-workflow", mountId: "topnav-mount" });
       renderSteps();
       selectStep("scope");
       loadProtocols();
+      loadAgentGuide();
     });
   </script>
 </body>

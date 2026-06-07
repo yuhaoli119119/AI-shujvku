@@ -673,9 +673,20 @@ function renderMetadataDiagnostics(data, container) {
             </thead>
             <tbody>
     `;
-    
+    const fieldNames = {
+        "title": "标题",
+        "authors": "作者",
+        "journal": "期刊",
+        "year": "年份",
+        "DOI": "DOI",
+        "impact factor": "影响因子"
+    };
+
     data.items.forEach(item => {
-        const missingList = item.missing_fields.map(m => `<span class="tag" style="background:var(--color-warning-bg);color:var(--color-warning);">${esc(m)}</span>`).join(" ");
+        const missingList = item.missing_fields.map(m => {
+            const zhName = fieldNames[m] || m;
+            return `<span class="tag" style="background:var(--color-warning-bg);color:var(--color-warning);">${esc(zhName)}</span>`;
+        }).join(" ");
         html += `
             <tr style="border-bottom:1px solid var(--color-border-subtle);">
                 <td style="padding:10px;vertical-align:top;">${esc(item.title)}<div class="muted" style="margin-top:4px;">${esc(item.evidence_status_disclaimer)}</div></td>
@@ -773,7 +784,7 @@ window.addEventListener("beforeunload", disconnectSSE);
 document.addEventListener("click", closeDropdowns);
 document.addEventListener("click", function(event) {
     if (event.target.closest(".paper-row") || 
-        event.target.closest(".workspace-container") ||
+        event.target.closest(".workspace") ||
         event.target.closest(".sidebar") ||
         event.target.closest(".toolbar") ||
         event.target.closest(".topnav") ||
@@ -793,6 +804,14 @@ const searchInput = $("searchInput");
 if (searchInput) {
     searchInput.addEventListener("keydown", function(event) { if (event.key === "Enter") searchLocal(); });
 }
+["filterYear", "filterJournal"].forEach(function(id) {
+    const el = $(id);
+    if (el) el.addEventListener("keydown", function(event) { if (event.key === "Enter") searchLocal(); });
+});
+["filterPaperType", "filterDFT", "filterWC"].forEach(function(id) {
+    const el = $(id);
+    if (el) el.addEventListener("change", searchLocal);
+});
 
 initLayoutState();
 applyQueryParams();

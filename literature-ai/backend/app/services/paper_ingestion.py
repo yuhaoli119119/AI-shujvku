@@ -15,7 +15,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import Paper, PaperChunk, PaperFigure, PaperSection, PaperTable, FigureDataPoint, EvidenceSpan
+from app.db.models import AuditLog, Paper, PaperChunk, PaperFigure, PaperSection, PaperTable, FigureDataPoint, EvidenceSpan
 from app.parsers.docling_parser import DoclingParser
 from app.parsers.grobid_parser import GrobidParseResult, GrobidParser
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
@@ -521,7 +521,24 @@ class PaperIngestionService:
                 logger.exception("Failed to prepare Codex workspace for paper %s", paper.id)
             return paper
         self._persist_document_entities(paper, document)
-        summary = self.extraction_pipeline.run_stage2(paper, document)
+        if self.settings.auto_run_stage2_extraction:
+            summary = self.extraction_pipeline.run_stage2(paper, document)
+        else:
+            summary = {}
+            logger.info(
+                "Stage-2 extraction skipped for paper %s (auto_run_stage2_extraction=False)",
+                paper.id,
+            )
+            self.session.add(
+                AuditLog(
+                    paper_id=paper.id,
+                    action="stage2_skipped",
+                    source="paper_ingestion",
+                    target_type="paper",
+                    target_id=str(paper.id),
+                    payload={"reason": "auto_run_stage2_extraction disabled"},
+                )
+            )
         self.workbench.mark_parsed_ready(
             paper,
             candidate_count=self._stage2_candidate_count(summary),
@@ -574,7 +591,26 @@ class PaperIngestionService:
 
         self._clear_document_entities(paper.id)
         self._persist_document_entities(paper, document)
-        summary = self.extraction_pipeline.replace_stage2(paper, document)
+        if self.settings.auto_run_stage2_extraction:
+            summary = self.extraction_pipeline.replace_stage2(paper, document)
+        else:
+            summary = {}
+            self.extraction_pipeline._delete_existing_stage2(paper.id)
+            paper.comprehensive_analysis = None
+            logger.info(
+                "Stage-2 extraction skipped for paper %s (auto_run_stage2_extraction=False); existing stage2 cleared",
+                paper.id,
+            )
+            self.session.add(
+                AuditLog(
+                    paper_id=paper.id,
+                    action="stage2_skipped",
+                    source="paper_ingestion",
+                    target_type="paper",
+                    target_id=str(paper.id),
+                    payload={"reason": "auto_run_stage2_extraction disabled", "merge": True},
+                )
+            )
         self.workbench.mark_parsed_ready(
             paper,
             candidate_count=self._stage2_candidate_count(summary),

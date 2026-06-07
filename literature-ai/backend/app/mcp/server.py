@@ -1921,6 +1921,42 @@ def export_ml_dataset(
 
 
 # ---------------------------------------------------------------------------
+# scan_duplicate_dois — find papers with duplicate DOIs
+# ---------------------------------------------------------------------------
+
+@mcp_server.tool(
+    name="scan_duplicate_dois",
+    description="Scan the database for papers that share the same DOI. Returns groups of duplicate papers.",
+)
+def scan_duplicate_dois() -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        from sqlalchemy import text
+        query = text("""
+            SELECT doi, COUNT(*) as cnt, array_agg(id) as paper_ids
+            FROM papers
+            WHERE doi IS NOT NULL
+            GROUP BY doi
+            HAVING COUNT(*) > 1
+        """)
+        results = session.execute(query).fetchall()
+        
+        duplicates = []
+        for row in results:
+            duplicates.append({
+                "doi": row.doi,
+                "count": row.cnt,
+                "paper_ids": [str(pid) for pid in row.paper_ids]
+            })
+            
+        return {
+            "duplicate_groups_count": len(duplicates),
+            "duplicates": duplicates
+        }
+
+
+# ---------------------------------------------------------------------------
 # create_share_token — generate a read-only share link
 # ---------------------------------------------------------------------------
 

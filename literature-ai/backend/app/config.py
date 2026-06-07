@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     settings_admin_token: str | None = None
     browse_roots: str = "/host/users,/data,/legacy"
 
+    # When False, ingestion only runs basic extraction (metadata/sections/tables/figures/chunks).
+    # Stage-2 deep extraction (DFT/electrochemical/mechanism/writing-card) is skipped
+    # and must be triggered later by AI via MCP or manual rerun_stage2.
+    auto_run_stage2_extraction: bool = True
+
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_prefix="LITAI_",

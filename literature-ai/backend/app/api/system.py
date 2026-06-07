@@ -121,6 +121,9 @@ async def upload_db(file: UploadFile = File(...)) -> dict:
 
 @router.get("/agent-guide")
 async def get_agent_guide() -> dict:
+    from app.config import get_settings
+
+    settings = get_settings()
     return {
         "system_name": "Literature AI",
         "positioning": (
@@ -135,7 +138,7 @@ async def get_agent_guide() -> dict:
             "method": "MCP",
             "path": "/mcp",
             "json_schema_hint": {
-                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "analyze_chart", "review_figure", "get_review_coverage", "get_field_disputes"],
+                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "analyze_chart", "review_figure", "get_review_coverage", "get_field_disputes", "scan_duplicate_dois"],
                 "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure"],
                 "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper", "get_parse_status", "recrop_figure"],
                 "writing_tools": ["insert_word_citation"],
@@ -273,6 +276,7 @@ async def get_agent_guide() -> dict:
                 "get_parse_status",
                 "recrop_figure",
                 "create_share_token",
+                "scan_duplicate_dois",
             ],
         },
         "desktop_sync": {
@@ -292,6 +296,10 @@ async def get_agent_guide() -> dict:
                 "LITAI_WRITER_API_KEY=<api_key>",
             ],
         },
+        "ingestion_config": {
+            "auto_run_stage2_extraction": settings.auto_run_stage2_extraction,
+            "description": "When True, ingestion automatically runs Stage-2 deep extraction (DFT/electrochemical/mechanism/writing-card). When False, only basic extraction (metadata/sections/tables/figures/chunks) is performed during ingestion, and deep extraction must be triggered later by AI via MCP or manual rerun_stage2.",
+        },
         "suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
             "Then connect to /mcp and prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections, export_ml_dataset to export verified data as JSON or CSV for machine learning. "
@@ -301,7 +309,9 @@ async def get_agent_guide() -> dict:
             "Use review_figure to store structured human/AI judgements on whether a figure's analysis is correct. "
             "Use get_review_coverage to check which figures, tables, and sections have been reviewed. "
             "Use get_field_disputes to find conflicting values proposed by different AIs. Includes historically resolved disputes (status='resolved') so later AIs know what was already settled. "
+            "Use scan_duplicate_dois to find papers that share the same DOI, which may indicate duplicates in the system. "
             "Use create_share_token to generate a read-only share link for others to view papers, figures, DFT data, and audit logs without MCP access. "
+            "IMPORTANT: If the server is configured with auto_run_stage2_extraction=False, the system only performs basic extraction (metadata, sections, tables, figures) during ingestion. Deep extraction (DFT results, electrochemical performance, mechanism claims, writing cards) is NOT run automatically. In that mode, YOU (the AI) must perform deep extraction on demand using the available tools: read paper sections and figures, analyze charts, and propose corrections or DFT results as needed. The paper's workflow_status will be 'Unparsed' until deep data is added. "
             "Use /api/papers/ai_workflow only when batch acquisition is explicitly needed."
         ),
     }

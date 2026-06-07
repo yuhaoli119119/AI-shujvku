@@ -32,7 +32,7 @@ def _split_terms(value: str | None) -> tuple[str, ...]:
 
 
 @router.get("/filter")
-async def filter_papers(
+def filter_papers(
     year_min: int | None = Query(default=None),
     year_max: int | None = Query(default=None),
     journal_includes: str | None = Query(default=None, description="Comma-separated journal include terms"),
@@ -209,7 +209,7 @@ async def citation_metadata_preview(
 
 
 @router.get("/metadata-diagnostics")
-async def metadata_diagnostics(
+def metadata_diagnostics(
     session: Session = Depends(get_db_session)
 ) -> dict:
     papers = session.scalars(select(Paper)).all()
@@ -229,9 +229,6 @@ async def metadata_diagnostics(
         if not paper.year: missing.append("year")
         if not paper.doi: missing.append("DOI")
         
-        # Currently unsupported DB fields
-        missing.extend(["volume", "issue", "pages", "publisher"])
-        
         if not impact or impact.impact_factor is None: 
             missing.append("impact factor")
             
@@ -240,8 +237,8 @@ async def metadata_diagnostics(
                 "paper_id": paper.id,
                 "title": paper.title or "Unknown Title",
                 "missing_fields": missing,
-                "metadata_source": "user_import", # Assuming static until DB supports tracking
-                "evidence_status_disclaimer": "Completeness of metadata does NOT imply evidence safety or verification.",
+                "metadata_source": "user_import",
+                "evidence_status_disclaimer": "注：元数据完整仅代表字段已填，不代表其内容已被人工核验通过。",
             })
             
     return {
@@ -251,6 +248,6 @@ async def metadata_diagnostics(
             "online_scraping_enabled": False,
             "auto_completion_enabled": False,
             "safety_upgrade_on_completion": False,
-            "message": "This endpoint is strictly read-only diagnostics. It performs no external lookups and does not alter paper statuses."
+            "message": "本诊断仅提供本地数据库的只读扫描，不会执行任何自动联网查询，也不会改变文献的审核状态。"
         }
     }

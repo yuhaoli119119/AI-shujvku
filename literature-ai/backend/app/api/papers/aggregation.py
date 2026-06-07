@@ -91,7 +91,7 @@ async def export_dft_dataset(
 
 
 @router.get("/export/dft-quality")
-async def dft_dataset_quality(
+def dft_dataset_quality(
     property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
@@ -356,7 +356,7 @@ async def compare_dft_results(
 
 
 @router.get("/aggregate")
-async def aggregate_papers(
+def aggregate_papers(
     library_name: str | None = Query(default=None, description="Filter by literature library"),
     session: Session = Depends(get_db_session),
 ):

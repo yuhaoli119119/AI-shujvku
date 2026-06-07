@@ -2,18 +2,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 import logging
 
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-
-from app.api.corrections import router as corrections_router
-from app.api.external_analysis import router as external_analysis_router
-from app.api.evidence import router as evidence_router
-from app.api.extraction import router as extraction_router
-from app.api.health import router as health_router
-from contextlib import AsyncExitStack, asynccontextmanager
-from pathlib import Path
-import logging
-
+import anyio
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
@@ -32,22 +21,22 @@ from app.api.retrieval import router as retrieval_router
 from app.api.share import router as share_router
 from app.api.settings import router as settings_router
 from app.api.system import router as system_router
-from app.api.writing import router as writing_router
-from app.api.writer import router as writer_router
 from app.api.verification import router as verification_router
 from app.api.visuals import router as visuals_router
 from app.api.workbench import router as workbench_router
+from app.api.writer import router as writer_router
+from app.api.writing import router as writing_router
 from app.config import get_settings
 from app.mcp import mcp_http_app, mcp_server
 from app.mcp.auth import enforce_mcp_auth
 from app.utils.active_database import activate_active_library_database
 
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    info = activate_active_library_database()
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    limiter.total_tokens = 200
 
-    # Log the actual active database after startup
+    info = activate_active_library_database()
     startup_logger = logging.getLogger("app.startup")
     startup_logger.info(
         "Database source-of-truth: kind=%s, library=%s, configured=%s, effective=%s",
@@ -56,11 +45,9 @@ async def lifespan(_: FastAPI):
         info["db_url_masked"],
         info.get("effective_db_path"),
     )
-
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(mcp_server.session_manager.run())
         yield
-
 
 app = FastAPI(
     title="Literature AI Backend",
@@ -69,7 +56,6 @@ app = FastAPI(
 )
 
 app.middleware("http")(enforce_mcp_auth)
-
 
 @app.middleware("http")
 async def no_cache_frontend_assets(request, call_next):
