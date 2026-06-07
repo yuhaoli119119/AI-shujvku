@@ -39,12 +39,12 @@ AI-shujvku/
   literature-ai/       ← 核心项目（FastAPI + PostgreSQL + MCP）
     backend/           ← FastAPI 后端、MCP 服务、解析管线
     frontend/          ← 静态工作台页面
-    docs/              ← 文档（mcp/ 有效，archive/ 历史）
+    docs/              ← 文档（mcp/ 有效，plans/ 当前计划）
   .workbuddy/          ← 工作日志与记忆
 ```
 
 ## 给新协作者的提醒
 
 1. **先读 `AGENTS.md`** — 它定义了数据安全红线、权限边界和文档同步原则
-2. **以 `git status` 和 `git log` 为准** — 不要依赖 archive 里的旧计划
+2. **以 `git status` 和 `git log` 为准** — 当前真实状态以代码和提交历史为准，不要依赖已被删除的历史文档
 3. **数据库是 PostgreSQL，不是 SQLite** — SQLite 文件若存在，仅为历史遗留，不作为活跃数据源
