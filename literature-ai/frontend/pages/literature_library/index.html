@@ -137,9 +137,9 @@
 
                     <div class="tabs">
                         <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
-                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">章节</button>
                         <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
                         <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">AI 候选 DFT 数据</button>
+                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">章节</button>
                         <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
                         <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
                         <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI 审阅与确认</button>
@@ -149,10 +149,6 @@
                         <div id="summaryContent"></div>
                     </section>
 
-                    <section id="tab-sections" class="tab-panel">
-                        <div id="sectionsContent"></div>
-                    </section>
-
                     <section id="tab-figures" class="tab-panel">
                         <div id="figuresContent"></div>
                     </section>
@@ -160,6 +156,10 @@
                     <section id="tab-dft" class="tab-panel">
                         <div id="dftContent"></div>
                         <div id="aggregateResult"></div>
+                    </section>
+
+                    <section id="tab-sections" class="tab-panel">
+                        <div id="sectionsContent"></div>
                     </section>
 
                     <section id="tab-writing" class="tab-panel">
