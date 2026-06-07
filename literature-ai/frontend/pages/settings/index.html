@@ -938,6 +938,22 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             loadIdePrompts();
             loadExtractionProtocols();
             document.getElementById("embedding_provider").addEventListener("change", toggleEmbeddingFields);
+
+            // 支持 URL hash 跳转到指定标签
+            const hash = window.location.hash.replace("#", "");
+            const validSections = ["api", "ide", "protocol", "theme", "guide"];
+            if (hash && validSections.includes(hash)) {
+                showSection(hash);
+                document.querySelectorAll(".section-nav button").forEach(btn => {
+                    btn.classList.toggle("active", btn.textContent.includes(
+                        hash === "api" ? "API" :
+                        hash === "ide" ? "IDE" :
+                        hash === "protocol" ? "提取协议" :
+                        hash === "theme" ? "主题" :
+                        hash === "guide" ? "使用说明" : ""
+                    ));
+                });
+            }
         });
     </script>
 </body>
