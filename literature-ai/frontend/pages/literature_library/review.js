@@ -433,7 +433,11 @@ async function loadAggregate() {
     const aggResult = $("aggregateResult");
     if (aggResult) aggResult.innerHTML = '<div class="workspace-empty">正在加载聚合视图...</div>';
     try {
-        state.aggregateData = await fetchJSON(API_BASE + "/aggregate");
+        const params = new URLSearchParams();
+        const libraryName = getCurrentLibraryName();
+        if (libraryName) params.set("library_name", libraryName);
+        const query = params.toString();
+        state.aggregateData = await fetchJSON(API_BASE + "/aggregate" + (query ? "?" + query : ""));
         if (aggResult) {
             aggResult.innerHTML =
                 renderAggregateGroups("吸附物聚合", state.aggregateData.adsorbate_groups || {}, "暂无吸附物聚合结果。") +

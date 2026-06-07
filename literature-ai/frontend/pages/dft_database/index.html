@@ -150,7 +150,7 @@
   <div id="toast" class="toast"></div>
   <script>
     const API_BASE = "/api/papers";
-    const state = { items: [], qualityReason: "" };
+    const state = { items: [], qualityReason: "", currentLibrary: "" };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     const REASON_LABELS = {
       missing_review: "缺少人工确认",
@@ -254,17 +254,37 @@
       if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
       return data;
     }
+    async function ensureCurrentLibraryName() {
+      if (state.currentLibrary) return state.currentLibrary;
+      try {
+        const libraries = await fetchJSON("/api/libraries");
+        const active = (libraries || []).find(item => item && item.is_active) || (libraries || [])[0];
+        state.currentLibrary = active && active.name ? active.name : "";
+      } catch (_) {
+        state.currentLibrary = "";
+      }
+      return state.currentLibrary;
+    }
+    function applyLibraryParam(params) {
+      if (state.currentLibrary) params.set("library_name", state.currentLibrary);
+      return params;
+    }
     async function queryDFT() {
+      await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
       const catalyst = document.getElementById("catalystType").value;
       const minConf = document.getElementById("minConfidence").value || 0.3;
       const validationStatus = document.getElementById("validationStatus").value;
       const backendStatus = validationStatus === "validated" ? "exportable" : (validationStatus === "needs_review" ? "needs_review" : "all");
-      let url = `${API_BASE}/compare?min_confidence=${minConf}&limit=300&status=${encodeURIComponent(backendStatus)}`;
-      if (prop) url += `&property_type=${encodeURIComponent(prop)}`;
-      if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
-      if (catalyst) url += `&catalyst_type=${encodeURIComponent(catalyst)}`;
+      const params = applyLibraryParam(new URLSearchParams());
+      params.set("min_confidence", minConf);
+      params.set("limit", "300");
+      params.set("status", backendStatus);
+      if (prop) params.set("property_type", prop);
+      if (adsorbate) params.set("adsorbate", adsorbate);
+      if (catalyst) params.set("catalyst_type", catalyst);
+      const url = `${API_BASE}/compare?${params.toString()}`;
       const list = document.getElementById("dftList");
       list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询已审核可导出 DFT 数据...</td></tr>';
       try {
@@ -283,6 +303,7 @@
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
       let url = `/api/papers/export/dft-review-queue?limit=100&status=needs_review`;
+      if (state.currentLibrary) url += `&library_name=${encodeURIComponent(state.currentLibrary)}`;
       if (prop) url += `&property_type=${encodeURIComponent(prop)}`;
       if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
       if (state.qualityReason) url += `&reason=${encodeURIComponent(state.qualityReason)}`;
@@ -361,6 +382,7 @@
     }
 
     async function loadQualityPanel() {
+      await ensureCurrentLibraryName();
       const rowsEl = document.getElementById("qualityRows");
       if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">正在加载质量概览...</div>';
       try {
@@ -595,11 +617,13 @@
       }
     }
     async function exportCSV() {
+      await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
       const params = new URLSearchParams();
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
+      applyLibraryParam(params);
       let url = `/api/papers/export/csv?${params.toString()}`;
       const headers = {};
       const token = sessionStorage.getItem("litai-settings-token");
@@ -664,11 +688,13 @@
       }
     }
     async function exportMLDataset() {
+      await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
       const params = new URLSearchParams();
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
+      applyLibraryParam(params);
       let url = `/api/papers/export/dft-dataset?${params.toString()}`;
       const headers = {};
       const token = sessionStorage.getItem("litai-settings-token");

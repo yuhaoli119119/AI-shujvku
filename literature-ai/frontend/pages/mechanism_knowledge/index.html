@@ -365,6 +365,7 @@
         const state = {
             activeTab: "catalysts",
             aggregateData: null,
+            currentLibrary: "",
         };
 
         function esc(value) {
@@ -403,6 +404,18 @@
                 throw new Error((data && data.detail) || (`HTTP ${resp.status}`));
             }
             return data;
+        }
+
+        async function ensureCurrentLibraryName() {
+            if (state.currentLibrary) return state.currentLibrary;
+            try {
+                const libraries = await fetchJSON("/api/libraries");
+                const active = (libraries || []).find(item => item && item.is_active) || (libraries || [])[0];
+                state.currentLibrary = active && active.name ? active.name : "";
+            } catch (_) {
+                state.currentLibrary = "";
+            }
+            return state.currentLibrary;
         }
 
         function switchTab(tab) {
@@ -485,7 +498,11 @@
         async function loadAggregationData() {
             setStatus("loading", "正在加载机理知识聚合数据...");
             try {
-                const data = await fetchJSON(`${API_BASE}/aggregate`);
+                await ensureCurrentLibraryName();
+                const params = new URLSearchParams();
+                if (state.currentLibrary) params.set("library_name", state.currentLibrary);
+                const query = params.toString();
+                const data = await fetchJSON(`${API_BASE}/aggregate${query ? "?" + query : ""}`);
                 state.aggregateData = data || {};
                 setStatus("", "");
                 renderAggregation();
