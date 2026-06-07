@@ -1,60 +1,50 @@
-﻿# Literature AI
+# AI-shujvku
 
-`AI-shujvku / literature-ai` 当前处于 `D2 数据底座 / migration readiness` 阶段。本轮文档以降低误导风险为目标，当前活跃业务库仍然是每个文献库目录下的 `SQLite database.sqlite`；`PostgreSQL + pgvector` 仅作为可选能力存在，不是默认活跃库。
+这是个人科研工具仓库，当前核心项目是 `literature-ai`（文献 AI 工具台）。
 
-## 当前事实
+## 核心项目：Literature AI
 
-- 当前活跃数据源：`literature-ai/data/libraries/<library>/database.sqlite`
-- 当前默认文献库 source of truth：active library 的 SQLite
-- `PostgreSQL + pgvector`：可启动、可实验，但不是当前默认业务主库
-- 当前阶段：`D2 migration readiness`
-- 当前禁止事项：
-  - 不要直接执行 migration apply
-  - 不要移动 active SQLite
-  - 不要改 canonical registry
-  - 不要删除真实 `data/`、`artifacts/`、shadow report 或历史审计产物
+面向 Codex / IDE AI 的本地文献工具台，包含文献采集、PDF 解析、结构化抽取、外部解析导入和 MCP 协作接口。软件负责文献入库、PDF 转换、证据检索、候选结构化数据和导出；最终阅读、核对、归纳、写作和数据整理由 Codex 或人工完成。
+
+**当前基线**：
+- **数据库**：`PostgreSQL + pgvector` 是唯一且默认的活跃业务数据源（Docker Compose 中 `postgres` 容器必须启动）
+- **MCP 工具**：27 个，覆盖提取→裁切→审核→分享的完整闭环
+- **权限体系**：6 级 capability（`read_papers` / `append_notes` / `propose_corrections` / `request_parse` / `review_corrections` / `review_dft`）
+- **多 AI 协作**：Blackboard 模式，AI 分析结果自动落盘为 PaperNote（"雁过留声"）
+- **只读分享**：通过 `create_share_token` 生成安全链接，外部用户可查看论文/图表/DFT/审阅记录，不可修改
 
 ## 快速启动
 
-1. 进入项目目录：
-
 ```bash
 cd literature-ai
-```
-
-2. 启动本地服务：
-
-```bash
 docker compose up --build
-```
-
-3. 健康检查：
-
-```bash
 curl http://localhost:8000/api/health
 ```
 
-4. 打开主工作台：
-
-- 文献库工作台：<http://localhost:8000/pages/literature_library/index.html>
-- 外部 AI 工作台：<http://localhost:8000/pages/external_analysis_workbench/index.html>
+主工作台：<http://localhost:8000/pages/literature_library/index.html>
 
 ## 文档入口
 
-- 项目协作规则：[literature-ai/AGENTS.md](./literature-ai/AGENTS.md)
-- 子项目技术说明：[literature-ai/README.md](./literature-ai/README.md)
-- 中文使用说明：[literature-ai/使用说明.md](./literature-ai/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
-- 文档索引：[literature-ai/docs/README.md](./literature-ai/docs/README.md)
+| 文档 | 内容 |
+|------|------|
+| [literature-ai/AGENTS.md](./literature-ai/AGENTS.md) | AI 协作者规则与交付边界（新 AI 必读） |
+| [literature-ai/README.md](./literature-ai/README.md) | 子项目技术说明 |
+| [literature-ai/使用说明.md](./literature-ai/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md) | 中文使用说明 |
+| [literature-ai/docs/README.md](./literature-ai/docs/README.md) | 文档索引 |
 
-## 当前建议工作方式
+## 仓库结构
 
-- 每轮开始前先执行：
-
-```bash
-git status --short
-git log -1 --oneline
-git branch -vv
+```
+AI-shujvku/
+  literature-ai/       ← 核心项目（FastAPI + PostgreSQL + MCP）
+    backend/           ← FastAPI 后端、MCP 服务、解析管线
+    frontend/          ← 静态工作台页面
+    docs/              ← 文档（mcp/ 有效，archive/ 历史）
+  .workbuddy/          ← 工作日志与记忆
 ```
 
-- 若任务涉及数据库或迁移，先把目标限定为“审计 / readiness / 文档 / 测试”，不要默认进入 apply。
-- 当前真实进度以 `README + AGENTS + git history` 为准，不再依赖旧版 `CHANGES.md`。
+## 给新协作者的提醒
+
+1. **先读 `AGENTS.md`** — 它定义了数据安全红线、权限边界和文档同步原则
+2. **以 `git status` 和 `git log` 为准** — 不要依赖 archive 里的旧计划
+3. **数据库是 PostgreSQL，不是 SQLite** — SQLite 文件若存在，仅为历史遗留，不作为活跃数据源
