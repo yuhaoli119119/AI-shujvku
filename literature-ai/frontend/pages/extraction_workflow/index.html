@@ -159,6 +159,10 @@
           <p>用 <code>retrieve_evidence(query)</code> 跨文献语义检索证据切片。适合定位"哪些论文提到 X"。</p>
         </div>
         <div class="tool-card">
+          <h3>🌐 外部文献发现</h3>
+          <p>用 <code>search_external_papers(query, year_min, year_max, target_types)</code> 从 OpenAlex、arXiv 等外部数据库检索新文献。支持年份过滤和类型分类（computational/experimental/review）。<strong>只检索不入库</strong>，后续用 <code>parse_paper</code> 或 <code>ingest_pdf_batch</code> 导入。</p>
+        </div>
+        <div class="tool-card">
           <h3>📖 翻页查证</h3>
           <p>当 RAG 片段被截断或缺上下文时，用 <code>read_paper_page(paper_id, page)</code> 翻开原文指定页。返回该页所有 sections、tables 和 figures 的摘要。</p>
         </div>
@@ -181,6 +185,14 @@
         <div class="tool-card">
           <h3>⚔️ 分歧检测</h3>
           <p>用 <code>get_field_disputes(paper_id)</code> 找出多个 AI 对同一字段给出了不同值的冲突，包括已裁决的历史分歧（status='resolved'）。后续 AI 可避免重复踩坑。</p>
+        </div>
+        <div class="tool-card">
+          <h3>✅ 批量确认</h3>
+          <p>用 <code>verify_dft_results_batch</code> / <code>reject_dft_results_batch</code> 批量审核 DFT 结果；用 <code>approve_corrections_batch</code> / <code>reject_corrections_batch</code> 批量处理修正提案。减少重复操作。</p>
+        </div>
+        <div class="tool-card">
+          <h3>📊 ML 数据集导出</h3>
+          <p>用 <code>export_ml_dataset(target_types=['dft_results'], format='json')</code> 导出已审核通过的 ML 就绪数据。支持按年份、库名过滤，输出 JSON 或 CSV。</p>
         </div>
       </div>
     </section>

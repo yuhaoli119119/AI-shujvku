@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.db.models import AuditLog, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.rag.retriever import Retriever
@@ -92,13 +92,22 @@ def _ensure_paper_exists(session, paper_id: UUID) -> Paper:
     return paper
 
 
-@mcp_server.tool(name="query_papers", description="Query parsed papers in the local library.")
+@mcp_server.tool(
+    name="query_papers",
+    description=(
+        "Query parsed papers in the local library. "
+        "Supports sorting by year_serial (default), created_at (newest first), or title. "
+        "Use sort_by='created_at' + sort_order='desc' to get the most recently ingested papers."
+    ),
+)
 def query_papers(
     q: str | None = None,
     year: int | None = None,
     journal: str | None = None,
     has_dft_results: bool | None = None,
     has_writing_cards: bool | None = None,
+    sort_by: str = "year_serial",
+    sort_order: str = "desc",
     limit: int = 20,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -114,6 +123,8 @@ def query_papers(
                 journal=journal,
                 has_dft_results=has_dft_results,
                 has_writing_cards=has_writing_cards,
+                sort_by=sort_by,
+                sort_order=sort_order,
                 limit=limit,
                 offset=offset,
             )
@@ -225,6 +236,86 @@ def get_paper_knowledge(
         return context
 
 
+@mcp_server.tool(
+    name="search_external_papers",
+    description=(
+        "Search external literature databases (OpenAlex, arXiv, etc.) for papers matching a query. "
+        "Supports year filtering and target type classification (computational/experimental/review). "
+        "Results include title, DOI, year, journal, abstract, and open-access status. "
+        "This tool only searches—use parse_paper, ingest_pdf_batch, or ai_workflow to actually import papers."
+    ),
+)
+def search_external_papers(
+    query: str,
+    providers: list[str] | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    target_types: list[str] | None = None,
+    max_results: int = 20,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+
+    service = DiscoveryService()
+    active_providers = providers or service.DEFAULT_SEARCH_PROVIDERS
+
+    # Validate target_types
+    valid_types = {"computational", "experimental", "review"}
+    if target_types:
+        target_types = [t for t in target_types if t in valid_types]
+
+    raw_results = service.search(
+        query=query,
+        providers=active_providers,
+        limit=max(1, min(max_results * 2, 100)),  # Fetch more to allow post-filtering
+        target_types=target_types or None,
+    )
+
+    # Apply year filtering (client-side; not all provider APIs expose year filters)
+    filtered = []
+    for item in raw_results:
+        year = item.get("year")
+        if year_min is not None and (year is None or year < year_min):
+            continue
+        if year_max is not None and (year is None or year > year_max):
+            continue
+        filtered.append(item)
+
+    # Trim to requested limit after filtering
+    filtered = filtered[:max_results]
+
+    # Record search in audit log for traceability
+    with session_scope(settings.database_url) as session:
+        audit = AuditLog(
+            action="search_external_papers",
+            source="mcp",
+            target_id=None,
+            payload={
+                "query": query,
+                "providers": active_providers,
+                "year_min": year_min,
+                "year_max": year_max,
+                "target_types": target_types,
+                "max_results_requested": max_results,
+                "raw_results": len(raw_results),
+                "filtered_results": len(filtered),
+            },
+        )
+        session.add(audit)
+        session.flush()
+
+    return {
+        "query": query,
+        "providers": active_providers,
+        "year_min": year_min,
+        "year_max": year_max,
+        "target_types": target_types,
+        "total_found": len(raw_results),
+        "results_after_filter": len(filtered),
+        "results": filtered,
+    }
+
+
 @mcp_server.tool(name="insert_word_citation", description="Insert a safe draft citation into a DOCX copy using the local literature database citation guardrails.")
 def insert_word_citation(
     docx_path: str,
@@ -299,6 +390,54 @@ def reject_dft_result(
         return DFTResultReviewService(session).reject_result(
             paper_id=UUID(paper_id),
             result_id=UUID(dft_result_id),
+            confirm_reject_candidate=confirm_reject_candidate,
+            reviewer=auth.source_prefix,
+            reviewer_note=reviewer_note,
+            field_names=field_names,
+        )
+
+
+@mcp_server.tool(
+    name="verify_dft_results_batch",
+    description="Batch-verify multiple DFT result candidates for the same paper in one call. Skips individual failures and reports them.",
+)
+def verify_dft_results_batch(
+    paper_id: str,
+    dft_result_ids: list[str],
+    confirm_reviewed_against_pdf: bool,
+    reviewer_note: str | None = None,
+    field_names: list[str] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability_any("review_corrections", "review_dft")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTResultReviewService(session).verify_results_batch(
+            paper_id=UUID(paper_id),
+            result_ids=[UUID(rid) for rid in dft_result_ids],
+            confirm_reviewed_against_pdf=confirm_reviewed_against_pdf,
+            reviewer=auth.source_prefix,
+            reviewer_note=reviewer_note,
+            field_names=field_names,
+        )
+
+
+@mcp_server.tool(
+    name="reject_dft_results_batch",
+    description="Batch-reject multiple DFT result candidates for the same paper in one call. Skips individual failures and reports them.",
+)
+def reject_dft_results_batch(
+    paper_id: str,
+    dft_result_ids: list[str],
+    confirm_reject_candidate: bool,
+    reviewer_note: str | None = None,
+    field_names: list[str] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability_any("review_corrections", "review_dft")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTResultReviewService(session).reject_results_batch(
+            paper_id=UUID(paper_id),
+            result_ids=[UUID(rid) for rid in dft_result_ids],
             confirm_reject_candidate=confirm_reject_candidate,
             reviewer=auth.source_prefix,
             reviewer_note=reviewer_note,
@@ -512,6 +651,35 @@ def reject_correction(correction_id: str, reason: str | None = None) -> dict[str
             reason=reason,
         )
         return _serialize_correction(item)
+
+
+@mcp_server.tool(
+    name="approve_corrections_batch",
+    description="Approve multiple pending correction proposals in one call. Skips non-pending or failed items and reports them.",
+)
+def approve_corrections_batch(correction_ids: list[str]) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return ReviewService(session).approve_corrections_batch(
+            correction_ids=[UUID(cid) for cid in correction_ids],
+            reviewer=auth.source_prefix,
+        )
+
+
+@mcp_server.tool(
+    name="reject_corrections_batch",
+    description="Reject multiple pending correction proposals in one call. Skips non-pending or failed items and reports them.",
+)
+def reject_corrections_batch(correction_ids: list[str], reason: str | None = None) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return ReviewService(session).reject_corrections_batch(
+            correction_ids=[UUID(cid) for cid in correction_ids],
+            reviewer=auth.source_prefix,
+            reason=reason,
+        )
 
 
 @mcp_server.tool(name="parse_paper", description="Parse a paper from DOI or arXiv identifier.")
@@ -1610,6 +1778,141 @@ def get_field_disputes(paper_id: str) -> dict[str, Any]:
             "figure_dispute_count": len(figure_disputes),
             "total_disputes": len(correction_disputes) + len(figure_disputes),
         }
+
+
+# ---------------------------------------------------------------------------
+# export_ml_dataset — export verified data for machine learning
+# ---------------------------------------------------------------------------
+
+@mcp_server.tool(
+    name="export_ml_dataset",
+    description=(
+        "Export verified DFT results and electrochemical performance data as a structured dataset "
+        "for machine learning. Only includes candidates that have passed human/AI review (ML_Ready status). "
+        "Returns JSON array; optionally writes CSV to a file path."
+    ),
+)
+def export_ml_dataset(
+    paper_id: str | None = None,
+    library_name: str | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    target_types: list[str] | None = None,
+    format: str = "json",
+    limit: int = 1000,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    valid_targets = {"dft_results", "electrochemical_performance"}
+    targets = [t for t in (target_types or ["dft_results"]) if t in valid_targets]
+    if not targets:
+        targets = ["dft_results"]
+
+    with session_scope(settings.database_url) as session:
+        # Build base paper query
+        paper_query = select(Paper)
+        if paper_id:
+            paper_query = paper_query.where(Paper.id == UUID(paper_id))
+        if library_name:
+            paper_query = paper_query.where(Paper.library_name == library_name)
+        if year_min is not None:
+            paper_query = paper_query.where(Paper.year >= year_min)
+        if year_max is not None:
+            paper_query = paper_query.where(Paper.year <= year_max)
+        papers = session.scalars(paper_query).all()
+        paper_ids = [p.id for p in papers]
+
+        records: list[dict[str, Any]] = []
+
+        if "dft_results" in targets:
+            dft_query = select(DFTResult).where(DFTResult.paper_id.in_(paper_ids))
+            dft_query = dft_query.where(DFTResult.candidate_status == "ML_Ready")
+            dft_query = dft_query.limit(max(1, min(limit, 5000)))
+            for row in session.scalars(dft_query).all():
+                paper = next((p for p in papers if p.id == row.paper_id), None)
+                records.append({
+                    "target_type": "dft_result",
+                    "paper_id": str(row.paper_id),
+                    "paper_title": paper.title if paper else None,
+                    "paper_year": paper.year if paper else None,
+                    "paper_doi": paper.doi if paper else None,
+                    "dft_result_id": str(row.id),
+                    "adsorbate": row.adsorbate,
+                    "property_type": row.property_type,
+                    "value": row.value,
+                    "unit": row.unit,
+                    "reaction_step": row.reaction_step,
+                    "evidence_text": row.evidence_text,
+                    "confidence": row.confidence,
+                    "candidate_status": row.candidate_status,
+                })
+
+        if "electrochemical_performance" in targets:
+            ec_query = select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id.in_(paper_ids))
+            ec_query = ec_query.where(ElectrochemicalPerformance.validation_status == "verified")
+            ec_query = ec_query.limit(max(1, min(limit, 5000)))
+            for row in session.scalars(ec_query).all():
+                paper = next((p for p in papers if p.id == row.paper_id), None)
+                records.append({
+                    "target_type": "electrochemical_performance",
+                    "paper_id": str(row.paper_id),
+                    "paper_title": paper.title if paper else None,
+                    "paper_year": paper.year if paper else None,
+                    "paper_doi": paper.doi if paper else None,
+                    "ec_id": str(row.id),
+                    "sulfur_loading_mg_cm2": row.sulfur_loading_mg_cm2,
+                    "sulfur_content_wt_percent": row.sulfur_content_wt_percent,
+                    "electrolyte_sulfur_ratio": row.electrolyte_sulfur_ratio,
+                    "capacity_value": row.capacity_value,
+                    "cycle_number": row.cycle_number,
+                    "rate": row.rate,
+                    "decay_per_cycle": row.decay_per_cycle,
+                    "evidence_text": row.evidence_text,
+                    "validation_status": row.validation_status,
+                })
+
+        # Record export in audit log
+        audit = AuditLog(
+            action="export_ml_dataset",
+            source="mcp",
+            target_id=paper_id,
+            payload={
+                "library_name": library_name,
+                "year_min": year_min,
+                "year_max": year_max,
+                "target_types": targets,
+                "format": format,
+                "record_count": len(records),
+            },
+        )
+        session.add(audit)
+        session.flush()
+
+        result = {
+            "record_count": len(records),
+            "target_types": targets,
+            "filters": {
+                "paper_id": paper_id,
+                "library_name": library_name,
+                "year_min": year_min,
+                "year_max": year_max,
+            },
+            "records": records,
+        }
+
+        if format.lower() == "csv":
+            import csv
+            import io
+            if not records:
+                result["csv"] = ""
+            else:
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=records[0].keys())
+                writer.writeheader()
+                writer.writerows(records)
+                result["csv"] = output.getvalue()
+
+        return result
 
 
 # ---------------------------------------------------------------------------

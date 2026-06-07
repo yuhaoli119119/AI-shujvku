@@ -195,6 +195,80 @@ class DFTResultReviewService:
             "audit_log_id": str(audit.id),
         }
 
+    def verify_results_batch(
+        self,
+        *,
+        paper_id: UUID,
+        result_ids: list[UUID],
+        confirm_reviewed_against_pdf: bool,
+        reviewer: str | None = None,
+        reviewer_note: str | None = None,
+        field_names: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if not confirm_reviewed_against_pdf:
+            raise ValueError("Explicit PDF/evidence review confirmation is required.")
+
+        verified: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for rid in result_ids:
+            try:
+                result = self.verify_result(
+                    paper_id=paper_id,
+                    result_id=rid,
+                    confirm_reviewed_against_pdf=True,
+                    reviewer=reviewer,
+                    reviewer_note=reviewer_note,
+                    field_names=field_names,
+                )
+                verified.append(result)
+            except Exception as exc:
+                skipped.append({"dft_result_id": str(rid), "reason": str(exc)})
+        return {
+            "paper_id": str(paper_id),
+            "total_requested": len(result_ids),
+            "verified": len(verified),
+            "skipped": len(skipped),
+            "verified_items": verified,
+            "skipped_items": skipped,
+        }
+
+    def reject_results_batch(
+        self,
+        *,
+        paper_id: UUID,
+        result_ids: list[UUID],
+        confirm_reject_candidate: bool,
+        reviewer: str | None = None,
+        reviewer_note: str | None = None,
+        field_names: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if not confirm_reject_candidate:
+            raise ValueError("Explicit DFT candidate rejection confirmation is required.")
+
+        rejected: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for rid in result_ids:
+            try:
+                result = self.reject_result(
+                    paper_id=paper_id,
+                    result_id=rid,
+                    confirm_reject_candidate=True,
+                    reviewer=reviewer,
+                    reviewer_note=reviewer_note,
+                    field_names=field_names,
+                )
+                rejected.append(result)
+            except Exception as exc:
+                skipped.append({"dft_result_id": str(rid), "reason": str(exc)})
+        return {
+            "paper_id": str(paper_id),
+            "total_requested": len(result_ids),
+            "rejected": len(rejected),
+            "skipped": len(skipped),
+            "rejected_items": rejected,
+            "skipped_items": skipped,
+        }
+
     def propose_correction(
         self,
         *,

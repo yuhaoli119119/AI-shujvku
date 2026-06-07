@@ -135,8 +135,8 @@ async def get_agent_guide() -> dict:
             "method": "MCP",
             "path": "/mcp",
             "json_schema_hint": {
-                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "get_dft_review_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "analyze_chart", "review_figure", "get_review_coverage", "get_field_disputes"],
-                "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result", "recrop_figure"],
+                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "analyze_chart", "review_figure", "get_review_coverage", "get_field_disputes"],
+                "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure"],
                 "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper", "get_parse_status", "recrop_figure"],
                 "writing_tools": ["insert_word_citation"],
             },
@@ -244,6 +244,7 @@ async def get_agent_guide() -> dict:
                 "get_codex_context",
                 "get_codex_item",
                 "get_paper_knowledge",
+                "search_external_papers",
                 "get_dft_review_queue",
                 "retrieve_evidence",
                 "compare_papers",
@@ -259,6 +260,13 @@ async def get_agent_guide() -> dict:
                 "import_analysis",
                 "verify_dft_result",
                 "reject_dft_result",
+                "verify_dft_results_batch",
+                "reject_dft_results_batch",
+                "approve_correction",
+                "reject_correction",
+                "approve_corrections_batch",
+                "reject_corrections_batch",
+                "export_ml_dataset",
                 "parse_paper",
                 "scan_local_pdfs",
                 "ingest_pdf_batch",
@@ -286,7 +294,7 @@ async def get_agent_guide() -> dict:
         },
         "suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
-            "Then connect to /mcp and prefer query_papers, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, and reject_dft_result for bad candidates. "
+            "Then connect to /mcp and prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections, export_ml_dataset to export verified data as JSON or CSV for machine learning. "
             "Use read_paper_page to read a specific page when evidence is truncated or missing context. "
             "Use analyze_chart for targeted VLM analysis of figures when the stored AI summary is insufficient. "
             "Use recrop_figure to recalculate and persist an image crop. You can use 'full_page', 'wider', or 'ai_bbox' strategies. "

@@ -156,6 +156,47 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert [item.action for item in audit_logs] == ["append_note", "propose_correction"]
 
 
+def test_mcp_query_papers_sort_by_created_at(mcp_test_env):
+    """Verify query_papers supports sort_by='created_at' and sort_order."""
+    from datetime import datetime, timezone
+
+    with Session(mcp_test_env["engine"]) as session:
+        paper1 = Paper(
+            doi="10.1000/old",
+            title="Old Paper",
+            year=2020,
+            pdf_path="old.pdf",
+        )
+        session.add(paper1)
+        session.flush()
+        # Force older created_at
+        paper1.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        paper2 = Paper(
+            doi="10.1000/new",
+            title="New Paper",
+            year=2025,
+            pdf_path="new.pdf",
+        )
+        session.add(paper2)
+        session.flush()
+        paper2.created_at = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        session.commit()
+
+    with mcp_auth_context(_auth()):
+        # Descending: newest first
+        desc = query_papers(sort_by="created_at", sort_order="desc", limit=10)
+        assert desc["returned"] == 2
+        assert desc["items"][0]["title"] == "New Paper"
+        assert desc["items"][1]["title"] == "Old Paper"
+
+        # Ascending: oldest first
+        asc = query_papers(sort_by="created_at", sort_order="asc", limit=10)
+        assert asc["returned"] == 2
+        assert asc["items"][0]["title"] == "Old Paper"
+        assert asc["items"][1]["title"] == "New Paper"
+
+
 def test_mcp_get_codex_item_returns_low_token_dft_context(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="MCP Codex Item Paper", pdf_path="codex-item.pdf")

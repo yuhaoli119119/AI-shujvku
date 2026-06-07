@@ -197,6 +197,40 @@ class ReviewService:
         self.session.refresh(correction)
         return correction
 
+    def approve_corrections_batch(self, correction_ids: list[UUID], reviewer: str) -> dict[str, Any]:
+        approved: list[PaperCorrection] = []
+        skipped: list[dict[str, Any]] = []
+        for cid in correction_ids:
+            try:
+                correction = self.approve_correction(cid, reviewer)
+                approved.append(correction)
+            except Exception as exc:
+                skipped.append({"correction_id": str(cid), "reason": str(exc)})
+        return {
+            "total_requested": len(correction_ids),
+            "approved": len(approved),
+            "skipped": len(skipped),
+            "approved_ids": [str(c.id) for c in approved],
+            "skipped_items": skipped,
+        }
+
+    def reject_corrections_batch(self, correction_ids: list[UUID], reviewer: str, reason: str | None = None) -> dict[str, Any]:
+        rejected: list[PaperCorrection] = []
+        skipped: list[dict[str, Any]] = []
+        for cid in correction_ids:
+            try:
+                correction = self.reject_correction(cid, reviewer, reason)
+                rejected.append(correction)
+            except Exception as exc:
+                skipped.append({"correction_id": str(cid), "reason": str(exc)})
+        return {
+            "total_requested": len(correction_ids),
+            "rejected": len(rejected),
+            "skipped": len(skipped),
+            "rejected_ids": [str(c.id) for c in rejected],
+            "skipped_items": skipped,
+        }
+
     def _apply_correction(self, correction: PaperCorrection) -> None:
         if correction.operation != "replace":
             raise ValueError("Only replace corrections are supported in the current review flow")
