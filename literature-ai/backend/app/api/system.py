@@ -292,7 +292,7 @@ async def get_agent_guide() -> dict:
             "Use recrop_figure to recalculate and persist an image crop. You can use 'full_page', 'wider', or 'ai_bbox' strategies. "
             "Use review_figure to store structured human/AI judgements on whether a figure's analysis is correct. "
             "Use get_review_coverage to check which figures, tables, and sections have been reviewed. "
-            "Use get_field_disputes to find conflicting values proposed by different AIs. "
+            "Use get_field_disputes to find conflicting values proposed by different AIs. Includes historically resolved disputes (status='resolved') so later AIs know what was already settled. "
             "Use create_share_token to generate a read-only share link for others to view papers, figures, DFT data, and audit logs without MCP access. "
             "Use /api/papers/ai_workflow only when batch acquisition is explicitly needed."
         ),

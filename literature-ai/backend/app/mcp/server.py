@@ -1028,10 +1028,49 @@ async def analyze_chart(figure_id: str, custom_question: str) -> dict[str, Any]:
     import asyncio
 
     vlm = VLMService(settings)
-    result = await asyncio.to_thread(vlm.analyze_image, fig_meta["image_abs_path"], custom_question)
+    
+    vlm_failed = False
+    vlm_error = ""
+    result = ""
+    try:
+        result = await asyncio.to_thread(vlm.analyze_image, fig_meta["image_abs_path"], custom_question)
+        if not result:
+            vlm_failed = True
+            vlm_error = "VLM analysis returned empty result"
+    except Exception as e:
+        vlm_failed = True
+        vlm_error = str(e)
 
-    if not result:
-        raise ValueError("VLM analysis returned no result")
+    if vlm_failed:
+        note_content = (
+            f"[VLM Fallback] Question: {custom_question}\n"
+            f"Failed to analyze chart due to VLM error: {vlm_error}"
+        )
+        with session_scope(settings.database_url) as session:
+            note = PaperNote(
+                paper_id=UUID(fig_meta["paper_id"]),
+                source=f"analyze_chart_fallback:{auth.source_prefix}",
+                content=note_content,
+                field_name="figure_analysis",
+                page=fig_meta.get("page"),
+                section_title=fig_meta.get("caption"),
+                quoted_text=custom_question,
+            )
+            session.add(note)
+            session.flush()
+        
+        return {
+            "figure_id": figure_id,
+            "paper_id": fig_meta["paper_id"],
+            "caption": fig_meta["caption"],
+            "figure_role": fig_meta["figure_role"],
+            "custom_question": custom_question,
+            "vlm_status": "failed",
+            "vlm_error": vlm_error,
+            "vlm_response": None,
+            "auto_note_created": True,
+            "fallback_used": True,
+        }
 
     # Phase 3: Auto-persist the VLM response as a shared PaperNote (Blackboard pattern).
     # This is a system-level action, not an agent-initiated write, so we bypass the
@@ -1073,6 +1112,7 @@ async def analyze_chart(figure_id: str, custom_question: str) -> dict[str, Any]:
         "caption": fig_meta["caption"],
         "figure_role": fig_meta["figure_role"],
         "custom_question": custom_question,
+        "vlm_status": "success",
         "vlm_response": result,
         "auto_note_created": True,
     }
@@ -1453,7 +1493,7 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
 
 @mcp_server.tool(
     name="get_field_disputes",
-    description="Find fields where multiple AIs or reviewers have proposed different values. Returns conflicting PaperCorrection records and figure review disagreements for the same paper.",
+    description="Find fields where multiple AIs or reviewers have proposed different values. Returns conflicting PaperCorrection records (including historically resolved ones marked as status='resolved') and figure review disagreements for the same paper.",
 )
 def get_field_disputes(paper_id: str) -> dict[str, Any]:
     require_mcp_capability("read_papers")
@@ -1464,10 +1504,10 @@ def get_field_disputes(paper_id: str) -> dict[str, Any]:
         _ensure_paper_exists(session, pid)
 
         # --- Correction disputes: same target_path, different proposed values ---
+        # L-3 fix: include resolved corrections so later AIs see historical disputes
         all_corrections = session.scalars(
             select(PaperCorrection)
             .where(PaperCorrection.paper_id == pid)
-            .where(PaperCorrection.status == "pending")
         ).all()
 
         # Group by target_path
@@ -1475,7 +1515,7 @@ def get_field_disputes(paper_id: str) -> dict[str, Any]:
         for c in all_corrections:
             by_path.setdefault(c.target_path, []).append(c)
 
-        # Find paths with >1 pending correction (potential dispute)
+        # Find paths with >1 correction and differing proposed values
         correction_disputes = []
         for path, corrections in by_path.items():
             if len(corrections) < 2:
@@ -1485,21 +1525,43 @@ def get_field_disputes(paper_id: str) -> dict[str, Any]:
             for c in corrections:
                 val = str(c.proposed_value) if c.proposed_value is not None else ""
                 values.add(val)
-            if len(values) > 1:
-                correction_disputes.append({
-                    "target_path": path,
-                    "conflict_count": len(corrections),
-                    "proposals": [
-                        {
-                            "correction_id": str(c.id),
-                            "source": c.source,
-                            "proposed_value": c.proposed_value,
-                            "reason": c.reason,
-                            "created_at": str(c.created_at),
-                        }
-                        for c in corrections
-                    ],
-                })
+            if len(values) <= 1:
+                continue
+
+            # Determine dispute status: active if any pending involved, else resolved
+            has_pending = any(c.status == "pending" for c in corrections)
+            dispute_status = "active" if has_pending else "resolved"
+
+            # Build resolution info from approved corrections (if resolved)
+            resolution = None
+            if not has_pending:
+                approved = [c for c in corrections if c.status == "approved"]
+                if approved:
+                    # Pick the most recent approved value as the resolution
+                    latest = max(approved, key=lambda c: c.created_at)
+                    resolution = {
+                        "resolved_value": latest.proposed_value,
+                        "resolved_by": latest.reviewed_by,
+                        "resolved_at": str(latest.reviewed_at) if latest.reviewed_at else None,
+                    }
+
+            correction_disputes.append({
+                "target_path": path,
+                "status": dispute_status,
+                "conflict_count": len(corrections),
+                "resolution": resolution,
+                "proposals": [
+                    {
+                        "correction_id": str(c.id),
+                        "source": c.source,
+                        "proposed_value": c.proposed_value,
+                        "reason": c.reason,
+                        "status": c.status,
+                        "created_at": str(c.created_at),
+                    }
+                    for c in corrections
+                ],
+            })
 
         # --- Figure review disputes: conflicting verdicts for same figure ---
         figure_review_logs = session.scalars(

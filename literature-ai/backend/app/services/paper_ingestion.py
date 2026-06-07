@@ -454,13 +454,16 @@ class PaperIngestionService:
                 if figure.image_path:
                     abs_path = self.artifacts.settings.storage_paths["figures"] / figure.image_path
                     if abs_path.exists():
-                        res = await asyncio.to_thread(vlm.analyze_image, str(abs_path), prompt)
-                        if res:
-                            figure.figure_role = res.get("figure_role", figure.figure_role)
-                            figure.role_confidence = res.get("role_confidence")
-                            figure.content_summary = res.get("content_summary")
-                            figure.key_elements = res.get("key_elements")
-                            figure.numerical_data_points = res.get("numerical_data_points")
+                        try:
+                            res = await asyncio.to_thread(vlm.analyze_image, str(abs_path), prompt)
+                            if res:
+                                figure.figure_role = res.get("figure_role", figure.figure_role)
+                                figure.role_confidence = res.get("role_confidence")
+                                figure.content_summary = res.get("content_summary")
+                                figure.key_elements = res.get("key_elements")
+                                figure.numerical_data_points = res.get("numerical_data_points")
+                        except Exception as e:
+                            logger.warning(f"VLM analysis failed for figure {figure.caption} during ingestion: {e}")
 
         return UnifiedPaperDocument(
             metadata=normalized_metadata,
