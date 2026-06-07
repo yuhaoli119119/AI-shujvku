@@ -1,16 +1,14 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 本文件定义 `literature-ai` 的 AI 协作者最低协作规则。目标是减少误操作、减少误报、减少对当前 D2 数据底座状态的误导。
 
 ## 0. 当前基线
 
-- active library 的 `SQLite database.sqlite` 是当前 source of truth
-- `PostgreSQL + pgvector` 不是默认活跃业务库
-- 当前阶段是 `D2 数据底座 / migration readiness`
-- 默认不做 migration apply
-- 默认不移动 active SQLite
-- 默认不改 canonical registry
-- 默认不删除真实 `data/`、`artifacts/`、shadow report
+- **PostgreSQL + pgvector** 是当前唯一的 source of truth 和活跃业务库。
+- SQLite 已经被全面弃用，不再是活跃数据库。
+- 默认不改 canonical registry。
+- 默认不删除真实 `data/`、`artifacts/`、shadow report。
+- **27-Tool MCP 系统** 已全面激活，涵盖提取、裁切、审核流程。
 
 ## 1. 每轮开始前必须执行
 
@@ -52,9 +50,7 @@ git branch -vv
 
 未经明确授权，不要做以下操作：
 
-- migration apply
 - extraction apply
-- 移动或替换 active SQLite
 - 修改 registry / shadow report
 - 删除真实数据文件、真实解析产物、真实 artifacts
 - 破坏性 git 操作

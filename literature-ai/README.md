@@ -1,4 +1,4 @@
-﻿# Literature AI
+# Literature AI
 
 `literature-ai` 是一个面向 Codex 的本地文献工具台，包含文献采集、PDF 解析、结构化候选抽取、外部解析导入和 MCP 协作接口。它不再以网页内 AI 自动给出最终结论为核心，而是为 Codex 提供可读、可查、可核对的文献资料底座。
 
@@ -7,10 +7,9 @@
 - Codex 是主分析者：阅读、筛选、核对、归纳、写作和数据整理由 Codex 或人工完成
 - 软件是工具台：负责文献入库、PDF 转换、证据检索、候选结构化数据和导出
 - 网页内 AI / 自动解析：只作为辅助候选，不作为最终可信结论
-- 当前活跃业务数据库：每个文献库目录下的 `SQLite database.sqlite`
-- `PostgreSQL + pgvector`：保留为可选能力，不是默认活跃库
-- 当前阶段：`D2 数据底座 / migration readiness`
-- 当前不应直接执行 migration apply
+- **当前核心数据库**：`PostgreSQL + pgvector` 是唯一且绝对的活跃业务数据源，SQLite 已被全面弃用。
+- **27-Tool MCP 系统**：包含 `recrop_figure` 等强大工具的四层架构闭环。
+- **多终端协作**：支持细粒度的基于角色的 API 权限拆分，并提供面向外部协作者的只读分享链接 (`ShareToken`)。
 
 ## 主要组件
 
