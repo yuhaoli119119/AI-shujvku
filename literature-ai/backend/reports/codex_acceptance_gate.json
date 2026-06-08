@@ -1,6 +1,6 @@
 {
   "schema_version": "codex_acceptance_gate_v1",
-  "created_at": "2026-06-08T16:47:07.445507+00:00",
+  "created_at": "2026-06-08T17:28:28.047801+00:00",
   "library_name": "chain_realpaper_smoke_20260608",
   "paper_ids": [
     "2d977b15-7715-4a27-87e3-985dc77c4da1",
@@ -13,8 +13,8 @@
       "python_executable": "D:\\Python\\python.exe",
       "python_version": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
       "cwd": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend",
-      "git_commit": "b646361c6008aaf403b62f04c3341d7eda22cf0e",
-      "git_status_short": "M app/api/library_filter.py\n M app/api/papers/aggregation.py\n M app/api/system.py\n M app/config.py\n M app/mcp/server.py\n M app/parsers/docling_parser.py\n M app/rag/retriever.py\n M app/schemas/api.py\n M app/services/artifact_store.py\n M app/services/codex_context_service.py\n M app/services/dft_export_service.py\n M app/services/external_analysis_service.py\n M app/services/paper_ingestion.py\n M app/services/paper_query.py\n M app/services/paper_workbench_service.py\n M app/utils/artifact_paths.py\n M app/utils/figure_filtering.py\n M app/utils/library_names.py\n M app/utils/workbench_status.py\n M scripts/audit_ai_workflow_boundary.py\n M scripts/audit_evidence_extraction_quality.py\n M scripts/d2_historical_mirror_migration_readiness.py\n M tests/test_active_database_recovery.py\n M tests/test_external_analysis.py\n?? app/utils/artifact_status.py\n?? reports/active_database_check.json\n?? reports/active_database_check.md\n?? reports/active_database_check_after_real_smoke.json\n?? reports/active_database_check_after_real_smoke.md\n?? reports/artifact_integrity_recent10.json\n?? reports/artifact_integrity_recent10.md\n?? reports/artifact_integrity_recent10_after_fix.json\n?? reports/artifact_integrity_recent10_after_fix.md\n?? reports/external_audit_roundtrip.json\n?? reports/external_audit_roundtrip.md\n?? reports/external_audit_roundtrip_after_fix.json\n?? reports/external_audit_roundtrip_after_fix.md\n?? reports/fresh_chain_smoke.json\n?? reports/fresh_chain_smoke.md\n?? reports/fresh_real_paper_smoke_20260608.json\n?? reports/fresh_real_paper_smoke_20260608.md\n?? reports/mark_unrecoverable_dryrun.json\n?? reports/mark_unrecoverable_dryrun.md\n?? reports/parse_chain_report.json\n?? reports/parse_chain_report.md\n?? reports/parse_chain_report_recent.json\n?? reports/parse_chain_report_recent.md\n?? reports/real_paper_chain_report_20260608.json\n?? reports/real_paper_chain_report_20260608.md\n?? reports/real_paper_external_audit_roundtrip_20260608.json\n?? reports/real_paper_external_audit_roundtrip_20260608.md\n?? reports/real_paper_parse_chain_report_20260608.json\n?? reports/real_paper_parse_chain_report_20260608.md\n?? reports/realpaper_chain_smoke.json\n?? reports/realpaper_chain_smoke.md\n?? reports/table_triage_recent10.json\n?? reports/table_triage_recent10.md\n?? scripts/check_active_database.py\n?? scripts/check_external_audit_roundtrip.py\n?? scripts/diagnose_live_artifact_mismatch.py\n?? scripts/fresh_realpaper_chain_acceptance.py\n?? scripts/mark_unrecoverable_artifacts.py\n?? scripts/run_parse_chain_smoke.py\n?? scripts/triage_artifact_integrity.py\n?? scripts/verify_parse_chain.py\n?? tests/test_active_database_guard.py\n?? tests/test_artifact_integrity_marking.py\n?? tests/test_artifact_paths.py\n?? tests/test_mcp_artifact_status.py\n?? tests/test_paper_ingestion_artifacts.py\n?? tests/test_parse_chain_verification.py\n?? tests/test_review_coverage_external_audit.py\n?? ../../reports/\n?? ../../scripts/crosscheck_realpaper_artifact_status.py",
+      "git_commit": "43021fd0fdc8710ae3f2ae793d9ffb2b5fb698a4",
+      "git_status_short": "M app/api/library_filter.py\n M app/api/papers/aggregation.py\n M app/api/system.py\n M app/config.py\n M app/mcp/server.py\n M app/parsers/docling_parser.py\n M app/rag/retriever.py\n M app/schemas/api.py\n M app/services/artifact_store.py\n M app/services/codex_context_service.py\n M app/services/dft_export_service.py\n M app/services/external_analysis_service.py\n M app/services/paper_ingestion.py\n M app/services/paper_query.py\n M app/services/paper_workbench_service.py\n M app/utils/artifact_paths.py\n M app/utils/figure_filtering.py\n M app/utils/library_names.py\n M app/utils/workbench_status.py\n M scripts/audit_ai_workflow_boundary.py\n M scripts/audit_evidence_extraction_quality.py\n M scripts/d2_historical_mirror_migration_readiness.py\n M tests/test_active_database_recovery.py\n M tests/test_external_analysis.py\n?? app/utils/artifact_status.py\n?? reports/active_database_check.json\n?? reports/active_database_check.md\n?? reports/active_database_check_after_real_smoke.json\n?? reports/active_database_check_after_real_smoke.md\n?? reports/artifact_integrity_recent10.json\n?? reports/artifact_integrity_recent10.md\n?? reports/artifact_integrity_recent10_after_fix.json\n?? reports/artifact_integrity_recent10_after_fix.md\n?? reports/external_audit_roundtrip.json\n?? reports/external_audit_roundtrip.md\n?? reports/external_audit_roundtrip_after_fix.json\n?? reports/external_audit_roundtrip_after_fix.md\n?? reports/fresh_chain_repeatability_acceptance.json\n?? reports/fresh_chain_repeatability_acceptance.md\n?? reports/fresh_chain_smoke.json\n?? reports/fresh_chain_smoke.md\n?? reports/fresh_real_paper_smoke_20260608.json\n?? reports/fresh_real_paper_smoke_20260608.md\n?? reports/mark_unrecoverable_dryrun.json\n?? reports/mark_unrecoverable_dryrun.md\n?? reports/parse_chain_report.json\n?? reports/parse_chain_report.md\n?? reports/parse_chain_report_recent.json\n?? reports/parse_chain_report_recent.md\n?? reports/real_paper_chain_report_20260608.json\n?? reports/real_paper_chain_report_20260608.md\n?? reports/real_paper_external_audit_roundtrip_20260608.json\n?? reports/real_paper_external_audit_roundtrip_20260608.md\n?? reports/real_paper_parse_chain_report_20260608.json\n?? reports/real_paper_parse_chain_report_20260608.md\n?? reports/realpaper_chain_smoke.json\n?? reports/realpaper_chain_smoke.md\n?? reports/table_triage_recent10.json\n?? reports/table_triage_recent10.md\n?? scripts/check_active_database.py\n?? scripts/check_external_audit_roundtrip.py\n?? scripts/diagnose_live_artifact_mismatch.py\n?? scripts/fresh_chain_repeatability_acceptance.py\n?? scripts/mark_unrecoverable_artifacts.py\n?? scripts/run_parse_chain_smoke.py\n?? scripts/triage_artifact_integrity.py\n?? scripts/verify_parse_chain.py\n?? tests/test_active_database_guard.py\n?? tests/test_artifact_integrity_marking.py\n?? tests/test_artifact_paths.py\n?? tests/test_mcp_artifact_status.py\n?? tests/test_paper_ingestion_artifacts.py\n?? tests/test_parse_chain_verification.py\n?? tests/test_review_coverage_external_audit.py\n?? ../../reports/\n?? ../../scripts/crosscheck_realpaper_artifact_status.py",
       "database_url_masked": "postgresql+psycopg://literature_ai:***@localhost:5432/literature_ai",
       "database_dialect": "postgresql+psycopg",
       "storage_root": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage",
@@ -30,7 +30,7 @@
       "json": {
         "schema_version": "runtime_debug_v1",
         "app_env": "dev",
-        "app_started_at": "2026-06-08T16:46:54.712792+00:00",
+        "app_started_at": "2026-06-08T17:28:13.682041+00:00",
         "process_id": 10,
         "python_executable": "/usr/local/bin/python3.11",
         "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
@@ -63,7 +63,7 @@
         "effective_db_path": null,
         "effective_storage_root": "/data/storage",
         "effective_db_papers_total": 30,
-        "configured_db_papers_total": 39,
+        "configured_db_papers_total": 52,
         "effective_matches_active_library_db_path": false,
         "recovered_from_candidate_scan": false,
         "force_configured_database": true
@@ -71,7 +71,7 @@
     },
     "runtime_comparison": {
       "git_commit": {
-        "local": "b646361c6008aaf403b62f04c3341d7eda22cf0e",
+        "local": "43021fd0fdc8710ae3f2ae793d9ffb2b5fb698a4",
         "api": null,
         "same": false
       },
@@ -435,7 +435,7 @@
   },
   "live_diagnosis": {
     "schema_version": "live_artifact_mismatch_v1",
-    "created_at": "2026-06-08T16:47:07.151809+00:00",
+    "created_at": "2026-06-08T17:28:27.776061+00:00",
     "library_name": "chain_realpaper_smoke_20260608",
     "paper_ids": [
       "2d977b15-7715-4a27-87e3-985dc77c4da1",
@@ -452,8 +452,8 @@
       "python_executable": "D:\\Python\\python.exe",
       "python_version": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
       "cwd": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend",
-      "git_commit": "b646361c6008aaf403b62f04c3341d7eda22cf0e",
-      "git_status_short": "M app/api/library_filter.py\n M app/api/papers/aggregation.py\n M app/api/system.py\n M app/config.py\n M app/mcp/server.py\n M app/parsers/docling_parser.py\n M app/rag/retriever.py\n M app/schemas/api.py\n M app/services/artifact_store.py\n M app/services/codex_context_service.py\n M app/services/dft_export_service.py\n M app/services/external_analysis_service.py\n M app/services/paper_ingestion.py\n M app/services/paper_query.py\n M app/services/paper_workbench_service.py\n M app/utils/artifact_paths.py\n M app/utils/figure_filtering.py\n M app/utils/library_names.py\n M app/utils/workbench_status.py\n M scripts/audit_ai_workflow_boundary.py\n M scripts/audit_evidence_extraction_quality.py\n M scripts/d2_historical_mirror_migration_readiness.py\n M tests/test_active_database_recovery.py\n M tests/test_external_analysis.py\n?? app/utils/artifact_status.py\n?? reports/active_database_check.json\n?? reports/active_database_check.md\n?? reports/active_database_check_after_real_smoke.json\n?? reports/active_database_check_after_real_smoke.md\n?? reports/artifact_integrity_recent10.json\n?? reports/artifact_integrity_recent10.md\n?? reports/artifact_integrity_recent10_after_fix.json\n?? reports/artifact_integrity_recent10_after_fix.md\n?? reports/external_audit_roundtrip.json\n?? reports/external_audit_roundtrip.md\n?? reports/external_audit_roundtrip_after_fix.json\n?? reports/external_audit_roundtrip_after_fix.md\n?? reports/fresh_chain_smoke.json\n?? reports/fresh_chain_smoke.md\n?? reports/fresh_real_paper_smoke_20260608.json\n?? reports/fresh_real_paper_smoke_20260608.md\n?? reports/mark_unrecoverable_dryrun.json\n?? reports/mark_unrecoverable_dryrun.md\n?? reports/parse_chain_report.json\n?? reports/parse_chain_report.md\n?? reports/parse_chain_report_recent.json\n?? reports/parse_chain_report_recent.md\n?? reports/real_paper_chain_report_20260608.json\n?? reports/real_paper_chain_report_20260608.md\n?? reports/real_paper_external_audit_roundtrip_20260608.json\n?? reports/real_paper_external_audit_roundtrip_20260608.md\n?? reports/real_paper_parse_chain_report_20260608.json\n?? reports/real_paper_parse_chain_report_20260608.md\n?? reports/realpaper_chain_smoke.json\n?? reports/realpaper_chain_smoke.md\n?? reports/table_triage_recent10.json\n?? reports/table_triage_recent10.md\n?? scripts/check_active_database.py\n?? scripts/check_external_audit_roundtrip.py\n?? scripts/diagnose_live_artifact_mismatch.py\n?? scripts/fresh_realpaper_chain_acceptance.py\n?? scripts/mark_unrecoverable_artifacts.py\n?? scripts/run_parse_chain_smoke.py\n?? scripts/triage_artifact_integrity.py\n?? scripts/verify_parse_chain.py\n?? tests/test_active_database_guard.py\n?? tests/test_artifact_integrity_marking.py\n?? tests/test_artifact_paths.py\n?? tests/test_mcp_artifact_status.py\n?? tests/test_paper_ingestion_artifacts.py\n?? tests/test_parse_chain_verification.py\n?? tests/test_review_coverage_external_audit.py\n?? ../../reports/\n?? ../../scripts/crosscheck_realpaper_artifact_status.py",
+      "git_commit": "43021fd0fdc8710ae3f2ae793d9ffb2b5fb698a4",
+      "git_status_short": "M app/api/library_filter.py\n M app/api/papers/aggregation.py\n M app/api/system.py\n M app/config.py\n M app/mcp/server.py\n M app/parsers/docling_parser.py\n M app/rag/retriever.py\n M app/schemas/api.py\n M app/services/artifact_store.py\n M app/services/codex_context_service.py\n M app/services/dft_export_service.py\n M app/services/external_analysis_service.py\n M app/services/paper_ingestion.py\n M app/services/paper_query.py\n M app/services/paper_workbench_service.py\n M app/utils/artifact_paths.py\n M app/utils/figure_filtering.py\n M app/utils/library_names.py\n M app/utils/workbench_status.py\n M scripts/audit_ai_workflow_boundary.py\n M scripts/audit_evidence_extraction_quality.py\n M scripts/d2_historical_mirror_migration_readiness.py\n M tests/test_active_database_recovery.py\n M tests/test_external_analysis.py\n?? app/utils/artifact_status.py\n?? reports/active_database_check.json\n?? reports/active_database_check.md\n?? reports/active_database_check_after_real_smoke.json\n?? reports/active_database_check_after_real_smoke.md\n?? reports/artifact_integrity_recent10.json\n?? reports/artifact_integrity_recent10.md\n?? reports/artifact_integrity_recent10_after_fix.json\n?? reports/artifact_integrity_recent10_after_fix.md\n?? reports/external_audit_roundtrip.json\n?? reports/external_audit_roundtrip.md\n?? reports/external_audit_roundtrip_after_fix.json\n?? reports/external_audit_roundtrip_after_fix.md\n?? reports/fresh_chain_repeatability_acceptance.json\n?? reports/fresh_chain_repeatability_acceptance.md\n?? reports/fresh_chain_smoke.json\n?? reports/fresh_chain_smoke.md\n?? reports/fresh_real_paper_smoke_20260608.json\n?? reports/fresh_real_paper_smoke_20260608.md\n?? reports/mark_unrecoverable_dryrun.json\n?? reports/mark_unrecoverable_dryrun.md\n?? reports/parse_chain_report.json\n?? reports/parse_chain_report.md\n?? reports/parse_chain_report_recent.json\n?? reports/parse_chain_report_recent.md\n?? reports/real_paper_chain_report_20260608.json\n?? reports/real_paper_chain_report_20260608.md\n?? reports/real_paper_external_audit_roundtrip_20260608.json\n?? reports/real_paper_external_audit_roundtrip_20260608.md\n?? reports/real_paper_parse_chain_report_20260608.json\n?? reports/real_paper_parse_chain_report_20260608.md\n?? reports/realpaper_chain_smoke.json\n?? reports/realpaper_chain_smoke.md\n?? reports/table_triage_recent10.json\n?? reports/table_triage_recent10.md\n?? scripts/check_active_database.py\n?? scripts/check_external_audit_roundtrip.py\n?? scripts/diagnose_live_artifact_mismatch.py\n?? scripts/fresh_chain_repeatability_acceptance.py\n?? scripts/mark_unrecoverable_artifacts.py\n?? scripts/run_parse_chain_smoke.py\n?? scripts/triage_artifact_integrity.py\n?? scripts/verify_parse_chain.py\n?? tests/test_active_database_guard.py\n?? tests/test_artifact_integrity_marking.py\n?? tests/test_artifact_paths.py\n?? tests/test_mcp_artifact_status.py\n?? tests/test_paper_ingestion_artifacts.py\n?? tests/test_parse_chain_verification.py\n?? tests/test_review_coverage_external_audit.py\n?? ../../reports/\n?? ../../scripts/crosscheck_realpaper_artifact_status.py",
       "database_url_masked": "postgresql+psycopg://literature_ai:***@localhost:5432/literature_ai",
       "database_dialect": "postgresql+psycopg",
       "storage_root": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage",
@@ -469,7 +469,7 @@
       "json": {
         "schema_version": "runtime_debug_v1",
         "app_env": "dev",
-        "app_started_at": "2026-06-08T16:46:54.712792+00:00",
+        "app_started_at": "2026-06-08T17:28:13.682041+00:00",
         "process_id": 10,
         "python_executable": "/usr/local/bin/python3.11",
         "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
@@ -502,7 +502,7 @@
         "effective_db_path": null,
         "effective_storage_root": "/data/storage",
         "effective_db_papers_total": 30,
-        "configured_db_papers_total": 39,
+        "configured_db_papers_total": 52,
         "effective_matches_active_library_db_path": false,
         "recovered_from_candidate_scan": false,
         "force_configured_database": true
@@ -512,7 +512,7 @@
       "ok": true,
       "status": 200,
       "error": null,
-      "row_count": 39
+      "row_count": 52
     },
     "items": [
       {
@@ -747,7 +747,7 @@
             "json": {
               "schema_version": "runtime_debug_v1",
               "app_env": "dev",
-              "app_started_at": "2026-06-08T16:46:54.712792+00:00",
+              "app_started_at": "2026-06-08T17:28:13.682041+00:00",
               "process_id": 10,
               "python_executable": "/usr/local/bin/python3.11",
               "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
@@ -1004,7 +1004,7 @@
             "json": {
               "schema_version": "runtime_debug_v1",
               "app_env": "dev",
-              "app_started_at": "2026-06-08T16:46:54.712792+00:00",
+              "app_started_at": "2026-06-08T17:28:13.682041+00:00",
               "process_id": 10,
               "python_executable": "/usr/local/bin/python3.11",
               "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
@@ -1261,7 +1261,7 @@
             "json": {
               "schema_version": "runtime_debug_v1",
               "app_env": "dev",
-              "app_started_at": "2026-06-08T16:46:54.712792+00:00",
+              "app_started_at": "2026-06-08T17:28:13.682041+00:00",
               "process_id": 10,
               "python_executable": "/usr/local/bin/python3.11",
               "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
