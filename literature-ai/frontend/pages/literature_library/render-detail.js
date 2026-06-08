@@ -1193,6 +1193,9 @@ function renderDetail(detail, audit) {
         sectionsEl.innerHTML =
             sectionCards +
             referenceCards +
+            '<div style="margin-bottom:16px;">' +
+            '<button class="btn primary small" onclick="promptAddRelationship(\'' + detail.id + '\')">添加关联文献</button>' +
+            '</div>' +
             renderJSONCards("出向关系", detail.outgoing_relationships || []) +
             renderJSONCards("入向关系", detail.incoming_relationships || []);
     }
@@ -1585,5 +1588,29 @@ async function recropPaperFigures(paperId) {
         await loadPaperDetail(paperId);
     } catch (error) {
         showToast("图片重裁失败：" + error.message, "error");
+    }
+}
+
+async function promptAddRelationship(paperId) {
+    const targetId = window.prompt("请输入目标文献的 ID (例如您刚上传的补充材料):");
+    if (!targetId) return;
+    const relType = window.prompt("请输入关联类型 (如: supplementary, citation):", "supplementary");
+    if (!relType) return;
+    
+    try {
+        showToast("正在创建关联...", "info");
+        await fetchJSON(API_BASE + "/" + encodeURIComponent(paperId) + "/relationships", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                target_paper_id: targetId.trim(),
+                relationship_type: relType.trim(),
+                note: "Manual frontend binding"
+            })
+        });
+        showToast("关联创建成功", "success");
+        await loadPaperDetail(paperId);
+    } catch (e) {
+        showToast("创建失败: " + e.message, "error");
     }
 }

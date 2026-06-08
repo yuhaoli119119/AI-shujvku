@@ -28,6 +28,17 @@ from app.schemas.api import (
     PaperTranslationPreviewRequest,
     PaperTranslationPreviewResponse,
 )
+from pydantic import BaseModel
+
+class RelationshipCreateRequest(BaseModel):
+    target_paper_id: UUID
+    relationship_type: str
+    note: str | None = None
+
+class RelationshipCreateResponse(BaseModel):
+    status: str
+    id: UUID
+
 from app.services.codex_context_service import CodexContextService
 from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
@@ -550,3 +561,27 @@ async def get_paper_pdf(
     """Serve the PDF file for a paper, for in-browser preview."""
     file_path = _resolve_paper_pdf_path(paper_id, session)
     return FileResponse(str(file_path), media_type="application/pdf")
+
+
+@router.post("/{paper_id}/relationships", response_model=RelationshipCreateResponse)
+async def create_paper_relationship(
+    paper_id: UUID,
+    payload: RelationshipCreateRequest,
+    session: Session = Depends(get_db_session),
+):
+    from app.db.models import PaperRelationship
+    source = session.get(Paper, paper_id)
+    target = session.get(Paper, payload.target_paper_id)
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    
+    rel = PaperRelationship(
+        source_paper_id=paper_id,
+        target_paper_id=payload.target_paper_id,
+        relationship_type=payload.relationship_type,
+        note=payload.note,
+        created_by="user_manual"
+    )
+    session.add(rel)
+    session.commit()
+    return RelationshipCreateResponse(status="created", id=rel.id)
