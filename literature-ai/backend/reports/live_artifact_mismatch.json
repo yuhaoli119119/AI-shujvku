@@ -1,0 +1,858 @@
+{
+  "schema_version": "live_artifact_mismatch_v1",
+  "created_at": "2026-06-08T16:17:51.326354+00:00",
+  "library_name": "chain_realpaper_smoke_20260608",
+  "paper_ids": [
+    "2d977b15-7715-4a27-87e3-985dc77c4da1",
+    "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+    "e636ff33-55fc-436d-b4ec-1b4f064f4050"
+  ],
+  "api_base": "http://localhost:8000",
+  "smoke_report_selected_paper_ids": [
+    "2d977b15-7715-4a27-87e3-985dc77c4da1",
+    "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+    "e636ff33-55fc-436d-b4ec-1b4f064f4050"
+  ],
+  "local_runtime": {
+    "python_executable": "D:\\Python\\python.exe",
+    "python_version": "3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]",
+    "cwd": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend",
+    "git_commit": "b9bd0165c4bfd60a31f7ecb5f729607630da7f84",
+    "git_status_short": "M app/api/library_filter.py\n M app/api/papers/aggregation.py\n M app/api/system.py\n M app/config.py\n M app/mcp/server.py\n M app/parsers/docling_parser.py\n M app/rag/retriever.py\n M app/schemas/api.py\n M app/services/artifact_store.py\n M app/services/codex_context_service.py\n M app/services/dft_export_service.py\n M app/services/external_analysis_service.py\n M app/services/paper_ingestion.py\n M app/services/paper_query.py\n M app/services/paper_workbench_service.py\n M app/utils/artifact_paths.py\n M app/utils/figure_filtering.py\n M app/utils/library_names.py\n M app/utils/workbench_status.py\n M scripts/audit_ai_workflow_boundary.py\n M scripts/audit_evidence_extraction_quality.py\n M scripts/d2_historical_mirror_migration_readiness.py\n M tests/test_active_database_recovery.py\n M tests/test_external_analysis.py\n?? app/utils/artifact_status.py\n?? reports/\n?? scripts/check_active_database.py\n?? scripts/check_external_audit_roundtrip.py\n?? scripts/codex_acceptance_gate.py\n?? scripts/diagnose_live_artifact_mismatch.py\n?? scripts/mark_unrecoverable_artifacts.py\n?? scripts/run_parse_chain_smoke.py\n?? scripts/triage_artifact_integrity.py\n?? scripts/verify_parse_chain.py\n?? tests/test_active_database_guard.py\n?? tests/test_artifact_integrity_marking.py\n?? tests/test_artifact_paths.py\n?? tests/test_mcp_artifact_status.py\n?? tests/test_paper_ingestion_artifacts.py\n?? tests/test_parse_chain_verification.py\n?? tests/test_review_coverage_external_audit.py\n?? ../../reports/\n?? ../../scripts/crosscheck_realpaper_artifact_status.py",
+    "database_url_masked": "postgresql+psycopg://literature_ai:***@localhost:5432/literature_ai",
+    "database_dialect": "postgresql+psycopg",
+    "storage_root": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage",
+    "storage_root_absolute": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage",
+    "storage_root_exists": true,
+    "settings_module_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\app\\config.py",
+    "artifact_status_module_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\app\\utils\\artifact_status.py"
+  },
+  "api_runtime_debug": {
+    "ok": true,
+    "status": 200,
+    "url": "http://localhost:8000/api/system/runtime-debug",
+    "json": {
+      "schema_version": "runtime_debug_v1",
+      "app_env": "dev",
+      "app_started_at": "2026-06-08T16:17:41.015592+00:00",
+      "process_id": 9,
+      "python_executable": "/usr/local/bin/python3.11",
+      "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
+      "cwd": "/app",
+      "git_commit": null,
+      "database_url_masked": "postgresql+psycopg://literature_ai:***@postgres:5432/literature_ai",
+      "database_dialect": "postgresql+psycopg",
+      "storage_root": "/data/storage",
+      "storage_root_absolute": "/data/storage",
+      "storage_root_exists": true,
+      "settings_module_path": "/app/app/config.py",
+      "artifact_status_module_path": "/app/app/utils/artifact_status.py",
+      "legacy_sqlite_paths_found": [],
+      "legacy_sqlite_ignored": true
+    }
+  },
+  "api_db_info": {
+    "ok": true,
+    "status": 200,
+    "url": "http://localhost:8000/api/system/db-info",
+    "json": {
+      "database_url_masked": "postgres:5432/literature_ai",
+      "dialect": "postgresql",
+      "db_path": null,
+      "storage_root": "/data/storage",
+      "active_library": "石墨炔",
+      "active_library_db_path": null,
+      "is_active_library_sqlite": false,
+      "matches_active_library_db_path": false,
+      "effective_db_path": null,
+      "effective_storage_root": "/data/storage",
+      "effective_db_papers_total": 30,
+      "configured_db_papers_total": 39,
+      "effective_matches_active_library_db_path": false,
+      "recovered_from_candidate_scan": false,
+      "force_configured_database": true
+    }
+  },
+  "api_review_center_summary": {
+    "ok": true,
+    "status": 200,
+    "error": null,
+    "row_count": 39
+  },
+  "items": [
+    {
+      "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1",
+      "title": "69_10.1038_s41467-018-07790-x",
+      "library_name": "chain_realpaper_smoke_20260608",
+      "root_cause": "no_live_mismatch_detected",
+      "db": {
+        "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1",
+        "title": "69_10.1038_s41467-018-07790-x",
+        "doi": "10.1038/s41467-018-07790-x",
+        "library_name": "chain_realpaper_smoke_20260608",
+        "created_at": "2026-06-08T13:24:51.233805",
+        "updated_at": null,
+        "status": null,
+        "workflow_status": "Initial_Parsed",
+        "parse_status": null,
+        "pdf_quality_status": "A_text_readable",
+        "raw_artifact_fields": {
+          "pdf_path": "storage/pdf/2d977b15-7715-4a27-87e3-985dc77c4da1.pdf",
+          "source_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\test-artifacts\\real_pdfs\\69_10.1038_s41467-018-07790-x.pdf",
+          "markdown_path": "storage/markdown/2d977b15-7715-4a27-87e3-985dc77c4da1.md",
+          "docling_json_path": "storage/docling_json/2d977b15-7715-4a27-87e3-985dc77c4da1.docling.json",
+          "grobid_tei_path": null,
+          "tei_path": "storage/tei/2d977b15-7715-4a27-87e3-985dc77c4da1.tei.xml",
+          "workspace_path": "by_id/2d977b15-7715-4a27-87e3-985dc77c4da1"
+        },
+        "field_flags": {
+          "pdf_path": {
+            "value": "storage/pdf/2d977b15-7715-4a27-87e3-985dc77c4da1.pdf",
+            "public_reference": "storage/pdf/2d977b15-7715-4a27-87e3-985dc77c4da1.pdf",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/pdf/2d977b15-7715-4a27-87e3-985dc77c4da1.pdf",
+            "resolved_exists": true,
+            "resolved_size": 3786808,
+            "path_kind": "storage_relative"
+          },
+          "source_path": {
+            "value": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\test-artifacts\\real_pdfs\\69_10.1038_s41467-018-07790-x.pdf",
+            "public_reference": "absolute_path_masked",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": true,
+            "field_is_storage_relative": false,
+            "field_points_outside_storage": true,
+            "resolved_path_masked": "absolute_path_masked",
+            "resolved_exists": true,
+            "resolved_size": 3786808,
+            "path_kind": "absolute"
+          },
+          "markdown_path": {
+            "value": "storage/markdown/2d977b15-7715-4a27-87e3-985dc77c4da1.md",
+            "public_reference": "storage/markdown/2d977b15-7715-4a27-87e3-985dc77c4da1.md",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/markdown/2d977b15-7715-4a27-87e3-985dc77c4da1.md",
+            "resolved_exists": true,
+            "resolved_size": 59955,
+            "path_kind": "storage_relative"
+          },
+          "docling_json_path": {
+            "value": "storage/docling_json/2d977b15-7715-4a27-87e3-985dc77c4da1.docling.json",
+            "public_reference": "storage/docling_json/2d977b15-7715-4a27-87e3-985dc77c4da1.docling.json",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/docling_json/2d977b15-7715-4a27-87e3-985dc77c4da1.docling.json",
+            "resolved_exists": true,
+            "resolved_size": 64622,
+            "path_kind": "storage_relative"
+          },
+          "grobid_tei_path": {
+            "value": null,
+            "public_reference": null,
+            "field_is_null": true,
+            "field_is_empty": true,
+            "field_is_absolute": false,
+            "field_is_storage_relative": false,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": null,
+            "resolved_exists": false,
+            "resolved_size": null,
+            "path_kind": "missing"
+          },
+          "tei_path": {
+            "value": "storage/tei/2d977b15-7715-4a27-87e3-985dc77c4da1.tei.xml",
+            "public_reference": "storage/tei/2d977b15-7715-4a27-87e3-985dc77c4da1.tei.xml",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/tei/2d977b15-7715-4a27-87e3-985dc77c4da1.tei.xml",
+            "resolved_exists": true,
+            "resolved_size": 135559,
+            "path_kind": "storage_relative"
+          },
+          "workspace_path": {
+            "value": "by_id/2d977b15-7715-4a27-87e3-985dc77c4da1",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "resolved_path_masked": "storage/by_id/2d977b15-7715-4a27-87e3-985dc77c4da1",
+            "resolved_exists": true,
+            "path_kind": "storage_relative"
+          }
+        }
+      },
+      "local_resolver": {
+        "pdf_exists": true,
+        "pdf_file_size": 3786808,
+        "pdf_path_kind": "storage_relative",
+        "markdown_has_content": true,
+        "docling_json_has_content": true,
+        "grobid_tei_has_content": true,
+        "ai_reading_package_exists": true,
+        "workspace_exists": true,
+        "artifact_ready_for_external_audit": true,
+        "blocking_errors": [],
+        "warnings": [],
+        "pdf_path_masked": "storage/pdf/2d977b15-7715-4a27-87e3-985dc77c4da1.pdf",
+        "markdown_path_masked": "storage/markdown/2d977b15-7715-4a27-87e3-985dc77c4da1.md",
+        "docling_json_path_masked": "storage/docling_json/2d977b15-7715-4a27-87e3-985dc77c4da1.docling.json",
+        "grobid_tei_path_masked": "storage/tei/2d977b15-7715-4a27-87e3-985dc77c4da1.tei.xml",
+        "ai_reading_package_path_masked": "storage/by_id/2d977b15-7715-4a27-87e3-985dc77c4da1/extraction/ai_reading_package.json",
+        "markdown_size": 59955,
+        "docling_json_size": 64622,
+        "grobid_tei_size": 135559,
+        "ai_reading_package_size": 71887,
+        "markdown_path_kind": "storage_relative",
+        "docling_json_path_kind": "storage_relative",
+        "grobid_tei_path_kind": "storage_relative",
+        "ai_reading_package_path_kind": "storage_relative",
+        "docling_json_has_content_rechecked": true,
+        "ai_reading_package_exists_rechecked": true
+      },
+      "api": {
+        "api_get_paper": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 3786808,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "pdf_path": "storage/pdf/2d977b15-7715-4a27-87e3-985dc77c4da1.pdf",
+          "markdown_path": "storage/markdown/2d977b15-7715-4a27-87e3-985dc77c4da1.md",
+          "docling_json_path": "storage/docling_json/2d977b15-7715-4a27-87e3-985dc77c4da1.docling.json",
+          "workspace_path": "by_id/2d977b15-7715-4a27-87e3-985dc77c4da1"
+        },
+        "api_get_codex_context": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 3786808,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "source_assets_artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 3786808,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "external_audit_precondition": {
+            "status": "ready",
+            "blocking_errors": []
+          }
+        },
+        "api_review_coverage": {
+          "ok": false,
+          "note": "No HTTP review coverage endpoint exists; MCP get_review_coverage is not part of the REST API surface."
+        },
+        "api_review_center": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "contains_paper": true,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 3786808,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "external_audit_count": 1
+        },
+        "api_runtime_debug": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "json": {
+            "schema_version": "runtime_debug_v1",
+            "app_env": "dev",
+            "app_started_at": "2026-06-08T16:17:41.015592+00:00",
+            "process_id": 9,
+            "python_executable": "/usr/local/bin/python3.11",
+            "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
+            "cwd": "/app",
+            "git_commit": null,
+            "database_url_masked": "postgresql+psycopg://literature_ai:***@postgres:5432/literature_ai",
+            "database_dialect": "postgresql+psycopg",
+            "storage_root": "/data/storage",
+            "storage_root_absolute": "/data/storage",
+            "storage_root_exists": true,
+            "settings_module_path": "/app/app/config.py",
+            "artifact_status_module_path": "/app/app/utils/artifact_status.py",
+            "legacy_sqlite_paths_found": [],
+            "legacy_sqlite_ignored": true
+          }
+        }
+      },
+      "parity": {
+        "local_ready": true,
+        "api_get_paper_ready": true,
+        "api_get_codex_context_ready": true,
+        "api_review_center_ready": true
+      }
+    },
+    {
+      "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+      "title": "44_10.1016_j.ijhydene.2022.03.209",
+      "library_name": "chain_realpaper_smoke_20260608",
+      "root_cause": "no_live_mismatch_detected",
+      "db": {
+        "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+        "title": "44_10.1016_j.ijhydene.2022.03.209",
+        "doi": null,
+        "library_name": "chain_realpaper_smoke_20260608",
+        "created_at": "2026-06-08T13:24:20.728284",
+        "updated_at": null,
+        "status": null,
+        "workflow_status": "Unparsed",
+        "parse_status": null,
+        "pdf_quality_status": "A_text_readable",
+        "raw_artifact_fields": {
+          "pdf_path": "storage/pdf/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.pdf",
+          "source_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\test-artifacts\\real_pdfs\\44_10.1016_j.ijhydene.2022.03.209.pdf",
+          "markdown_path": "storage/markdown/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.md",
+          "docling_json_path": "storage/docling_json/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.docling.json",
+          "grobid_tei_path": null,
+          "tei_path": "storage/tei/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.tei.xml",
+          "workspace_path": "by_id/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab"
+        },
+        "field_flags": {
+          "pdf_path": {
+            "value": "storage/pdf/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.pdf",
+            "public_reference": "storage/pdf/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.pdf",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/pdf/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.pdf",
+            "resolved_exists": true,
+            "resolved_size": 1072992,
+            "path_kind": "storage_relative"
+          },
+          "source_path": {
+            "value": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\test-artifacts\\real_pdfs\\44_10.1016_j.ijhydene.2022.03.209.pdf",
+            "public_reference": "absolute_path_masked",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": true,
+            "field_is_storage_relative": false,
+            "field_points_outside_storage": true,
+            "resolved_path_masked": "absolute_path_masked",
+            "resolved_exists": true,
+            "resolved_size": 1072992,
+            "path_kind": "absolute"
+          },
+          "markdown_path": {
+            "value": "storage/markdown/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.md",
+            "public_reference": "storage/markdown/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.md",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/markdown/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.md",
+            "resolved_exists": true,
+            "resolved_size": 220303,
+            "path_kind": "storage_relative"
+          },
+          "docling_json_path": {
+            "value": "storage/docling_json/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.docling.json",
+            "public_reference": "storage/docling_json/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.docling.json",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/docling_json/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.docling.json",
+            "resolved_exists": true,
+            "resolved_size": 226918,
+            "path_kind": "storage_relative"
+          },
+          "grobid_tei_path": {
+            "value": null,
+            "public_reference": null,
+            "field_is_null": true,
+            "field_is_empty": true,
+            "field_is_absolute": false,
+            "field_is_storage_relative": false,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": null,
+            "resolved_exists": false,
+            "resolved_size": null,
+            "path_kind": "missing"
+          },
+          "tei_path": {
+            "value": "storage/tei/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.tei.xml",
+            "public_reference": "storage/tei/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.tei.xml",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/tei/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.tei.xml",
+            "resolved_exists": true,
+            "resolved_size": 232216,
+            "path_kind": "storage_relative"
+          },
+          "workspace_path": {
+            "value": "by_id/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "resolved_path_masked": "storage/by_id/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+            "resolved_exists": true,
+            "path_kind": "storage_relative"
+          }
+        }
+      },
+      "local_resolver": {
+        "pdf_exists": true,
+        "pdf_file_size": 1072992,
+        "pdf_path_kind": "storage_relative",
+        "markdown_has_content": true,
+        "docling_json_has_content": true,
+        "grobid_tei_has_content": true,
+        "ai_reading_package_exists": true,
+        "workspace_exists": true,
+        "artifact_ready_for_external_audit": true,
+        "blocking_errors": [],
+        "warnings": [],
+        "pdf_path_masked": "storage/pdf/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.pdf",
+        "markdown_path_masked": "storage/markdown/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.md",
+        "docling_json_path_masked": "storage/docling_json/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.docling.json",
+        "grobid_tei_path_masked": "storage/tei/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.tei.xml",
+        "ai_reading_package_path_masked": "storage/by_id/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab/extraction/ai_reading_package.json",
+        "markdown_size": 220303,
+        "docling_json_size": 226918,
+        "grobid_tei_size": 232216,
+        "ai_reading_package_size": 18084,
+        "markdown_path_kind": "storage_relative",
+        "docling_json_path_kind": "storage_relative",
+        "grobid_tei_path_kind": "storage_relative",
+        "ai_reading_package_path_kind": "storage_relative",
+        "docling_json_has_content_rechecked": true,
+        "ai_reading_package_exists_rechecked": true
+      },
+      "api": {
+        "api_get_paper": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 1072992,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "pdf_path": "storage/pdf/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.pdf",
+          "markdown_path": "storage/markdown/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.md",
+          "docling_json_path": "storage/docling_json/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab.docling.json",
+          "workspace_path": "by_id/d5d5c467-8a91-4f9a-9c93-4e4c84a30bab"
+        },
+        "api_get_codex_context": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 1072992,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "source_assets_artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 1072992,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "external_audit_precondition": {
+            "status": "ready",
+            "blocking_errors": []
+          }
+        },
+        "api_review_coverage": {
+          "ok": false,
+          "note": "No HTTP review coverage endpoint exists; MCP get_review_coverage is not part of the REST API surface."
+        },
+        "api_review_center": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "contains_paper": true,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 1072992,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "external_audit_count": 1
+        },
+        "api_runtime_debug": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "json": {
+            "schema_version": "runtime_debug_v1",
+            "app_env": "dev",
+            "app_started_at": "2026-06-08T16:17:41.015592+00:00",
+            "process_id": 9,
+            "python_executable": "/usr/local/bin/python3.11",
+            "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
+            "cwd": "/app",
+            "git_commit": null,
+            "database_url_masked": "postgresql+psycopg://literature_ai:***@postgres:5432/literature_ai",
+            "database_dialect": "postgresql+psycopg",
+            "storage_root": "/data/storage",
+            "storage_root_absolute": "/data/storage",
+            "storage_root_exists": true,
+            "settings_module_path": "/app/app/config.py",
+            "artifact_status_module_path": "/app/app/utils/artifact_status.py",
+            "legacy_sqlite_paths_found": [],
+            "legacy_sqlite_ignored": true
+          }
+        }
+      },
+      "parity": {
+        "local_ready": true,
+        "api_get_paper_ready": true,
+        "api_get_codex_context_ready": true,
+        "api_review_center_ready": true
+      }
+    },
+    {
+      "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050",
+      "title": "22_10.1016_j.mtcomm.2024.108787",
+      "library_name": "chain_realpaper_smoke_20260608",
+      "root_cause": "no_live_mismatch_detected",
+      "db": {
+        "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050",
+        "title": "22_10.1016_j.mtcomm.2024.108787",
+        "doi": "10.1016/j.mtcomm.2024.108787",
+        "library_name": "chain_realpaper_smoke_20260608",
+        "created_at": "2026-06-08T13:23:52.244356",
+        "updated_at": null,
+        "status": null,
+        "workflow_status": "Initial_Parsed",
+        "parse_status": null,
+        "pdf_quality_status": "A_text_readable",
+        "raw_artifact_fields": {
+          "pdf_path": "storage/pdf/e636ff33-55fc-436d-b4ec-1b4f064f4050.pdf",
+          "source_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\test-artifacts\\real_pdfs\\22_10.1016_j.mtcomm.2024.108787.pdf",
+          "markdown_path": "storage/markdown/e636ff33-55fc-436d-b4ec-1b4f064f4050.md",
+          "docling_json_path": "storage/docling_json/e636ff33-55fc-436d-b4ec-1b4f064f4050.docling.json",
+          "grobid_tei_path": null,
+          "tei_path": "storage/tei/e636ff33-55fc-436d-b4ec-1b4f064f4050.tei.xml",
+          "workspace_path": "by_id/e636ff33-55fc-436d-b4ec-1b4f064f4050"
+        },
+        "field_flags": {
+          "pdf_path": {
+            "value": "storage/pdf/e636ff33-55fc-436d-b4ec-1b4f064f4050.pdf",
+            "public_reference": "storage/pdf/e636ff33-55fc-436d-b4ec-1b4f064f4050.pdf",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/pdf/e636ff33-55fc-436d-b4ec-1b4f064f4050.pdf",
+            "resolved_exists": true,
+            "resolved_size": 2443448,
+            "path_kind": "storage_relative"
+          },
+          "source_path": {
+            "value": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\test-artifacts\\real_pdfs\\22_10.1016_j.mtcomm.2024.108787.pdf",
+            "public_reference": "absolute_path_masked",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": true,
+            "field_is_storage_relative": false,
+            "field_points_outside_storage": true,
+            "resolved_path_masked": "absolute_path_masked",
+            "resolved_exists": true,
+            "resolved_size": 2443448,
+            "path_kind": "absolute"
+          },
+          "markdown_path": {
+            "value": "storage/markdown/e636ff33-55fc-436d-b4ec-1b4f064f4050.md",
+            "public_reference": "storage/markdown/e636ff33-55fc-436d-b4ec-1b4f064f4050.md",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/markdown/e636ff33-55fc-436d-b4ec-1b4f064f4050.md",
+            "resolved_exists": true,
+            "resolved_size": 57811,
+            "path_kind": "storage_relative"
+          },
+          "docling_json_path": {
+            "value": "storage/docling_json/e636ff33-55fc-436d-b4ec-1b4f064f4050.docling.json",
+            "public_reference": "storage/docling_json/e636ff33-55fc-436d-b4ec-1b4f064f4050.docling.json",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/docling_json/e636ff33-55fc-436d-b4ec-1b4f064f4050.docling.json",
+            "resolved_exists": true,
+            "resolved_size": 70202,
+            "path_kind": "storage_relative"
+          },
+          "grobid_tei_path": {
+            "value": null,
+            "public_reference": null,
+            "field_is_null": true,
+            "field_is_empty": true,
+            "field_is_absolute": false,
+            "field_is_storage_relative": false,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": null,
+            "resolved_exists": false,
+            "resolved_size": null,
+            "path_kind": "missing"
+          },
+          "tei_path": {
+            "value": "storage/tei/e636ff33-55fc-436d-b4ec-1b4f064f4050.tei.xml",
+            "public_reference": "storage/tei/e636ff33-55fc-436d-b4ec-1b4f064f4050.tei.xml",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "field_is_storage_relative": true,
+            "field_points_outside_storage": false,
+            "resolved_path_masked": "storage/tei/e636ff33-55fc-436d-b4ec-1b4f064f4050.tei.xml",
+            "resolved_exists": true,
+            "resolved_size": 121675,
+            "path_kind": "storage_relative"
+          },
+          "workspace_path": {
+            "value": "by_id/e636ff33-55fc-436d-b4ec-1b4f064f4050",
+            "field_is_null": false,
+            "field_is_empty": false,
+            "field_is_absolute": false,
+            "resolved_path_masked": "storage/by_id/e636ff33-55fc-436d-b4ec-1b4f064f4050",
+            "resolved_exists": true,
+            "path_kind": "storage_relative"
+          }
+        }
+      },
+      "local_resolver": {
+        "pdf_exists": true,
+        "pdf_file_size": 2443448,
+        "pdf_path_kind": "storage_relative",
+        "markdown_has_content": true,
+        "docling_json_has_content": true,
+        "grobid_tei_has_content": true,
+        "ai_reading_package_exists": true,
+        "workspace_exists": true,
+        "artifact_ready_for_external_audit": true,
+        "blocking_errors": [],
+        "warnings": [],
+        "pdf_path_masked": "storage/pdf/e636ff33-55fc-436d-b4ec-1b4f064f4050.pdf",
+        "markdown_path_masked": "storage/markdown/e636ff33-55fc-436d-b4ec-1b4f064f4050.md",
+        "docling_json_path_masked": "storage/docling_json/e636ff33-55fc-436d-b4ec-1b4f064f4050.docling.json",
+        "grobid_tei_path_masked": "storage/tei/e636ff33-55fc-436d-b4ec-1b4f064f4050.tei.xml",
+        "ai_reading_package_path_masked": "storage/by_id/e636ff33-55fc-436d-b4ec-1b4f064f4050/extraction/ai_reading_package.json",
+        "markdown_size": 57811,
+        "docling_json_size": 70202,
+        "grobid_tei_size": 121675,
+        "ai_reading_package_size": 88618,
+        "markdown_path_kind": "storage_relative",
+        "docling_json_path_kind": "storage_relative",
+        "grobid_tei_path_kind": "storage_relative",
+        "ai_reading_package_path_kind": "storage_relative",
+        "docling_json_has_content_rechecked": true,
+        "ai_reading_package_exists_rechecked": true
+      },
+      "api": {
+        "api_get_paper": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 2443448,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "pdf_path": "storage/pdf/e636ff33-55fc-436d-b4ec-1b4f064f4050.pdf",
+          "markdown_path": "storage/markdown/e636ff33-55fc-436d-b4ec-1b4f064f4050.md",
+          "docling_json_path": "storage/docling_json/e636ff33-55fc-436d-b4ec-1b4f064f4050.docling.json",
+          "workspace_path": "by_id/e636ff33-55fc-436d-b4ec-1b4f064f4050"
+        },
+        "api_get_codex_context": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 2443448,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "source_assets_artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 2443448,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "external_audit_precondition": {
+            "status": "ready",
+            "blocking_errors": []
+          }
+        },
+        "api_review_coverage": {
+          "ok": false,
+          "note": "No HTTP review coverage endpoint exists; MCP get_review_coverage is not part of the REST API surface."
+        },
+        "api_review_center": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "contains_paper": true,
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 2443448,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": true,
+            "blocking_errors": [],
+            "warnings": []
+          },
+          "external_audit_count": 1
+        },
+        "api_runtime_debug": {
+          "ok": true,
+          "status": 200,
+          "error": null,
+          "json": {
+            "schema_version": "runtime_debug_v1",
+            "app_env": "dev",
+            "app_started_at": "2026-06-08T16:17:41.015592+00:00",
+            "process_id": 9,
+            "python_executable": "/usr/local/bin/python3.11",
+            "python_version": "3.11.15 (main, May 19 2026, 23:49:45) [GCC 14.2.0]",
+            "cwd": "/app",
+            "git_commit": null,
+            "database_url_masked": "postgresql+psycopg://literature_ai:***@postgres:5432/literature_ai",
+            "database_dialect": "postgresql+psycopg",
+            "storage_root": "/data/storage",
+            "storage_root_absolute": "/data/storage",
+            "storage_root_exists": true,
+            "settings_module_path": "/app/app/config.py",
+            "artifact_status_module_path": "/app/app/utils/artifact_status.py",
+            "legacy_sqlite_paths_found": [],
+            "legacy_sqlite_ignored": true
+          }
+        }
+      },
+      "parity": {
+        "local_ready": true,
+        "api_get_paper_ready": true,
+        "api_get_codex_context_ready": true,
+        "api_review_center_ready": true
+      }
+    }
+  ],
+  "root_cause_counts": {
+    "no_live_mismatch_detected": 3
+  }
+}
