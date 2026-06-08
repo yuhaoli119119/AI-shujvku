@@ -2,7 +2,7 @@
 
 ACCEPTANCE_GATE=PASS
 
-- Created at: 2026-06-08T17:28:28.047801+00:00
+- Created at: 2026-06-08T18:24:06.660909+00:00
 - Library: `chain_realpaper_smoke_20260608`
 - API base: `http://localhost:8000`
 - Paper IDs: `2d977b15-7715-4a27-87e3-985dc77c4da1, d5d5c467-8a91-4f9a-9c93-4e4c84a30bab, e636ff33-55fc-436d-b4ec-1b4f064f4050`

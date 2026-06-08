@@ -1,0 +1,777 @@
+{
+  "schema_version": "failure_recovery_acceptance_v1",
+  "created_at": "2026-06-08T18:23:29.574306+00:00",
+  "library_prefix": "chain_failure_recovery_acceptance_20260608",
+  "library_name": "chain_failure_recovery_acceptance_20260608_001",
+  "api_base": "http://localhost:8000",
+  "database_guard": {
+    "ok": true,
+    "drivername": "postgresql+psycopg"
+  },
+  "cases": [
+    {
+      "case": "case_api_unreachable",
+      "status": "PASS",
+      "root_cause": "api_server_unreachable",
+      "reason": null,
+      "details": {
+        "expected_root_cause": "api_server_unreachable",
+        "traceback": false,
+        "probe": {
+          "ok": false,
+          "status": null,
+          "url": "http://localhost:9/api/system/runtime-debug",
+          "error": "ConnectTimeout: timed out"
+        }
+      }
+    },
+    {
+      "case": "case_database_unreachable",
+      "status": "PASS",
+      "root_cause": "database_unreachable",
+      "reason": null,
+      "details": {
+        "expected_root_cause": "database_unreachable",
+        "traceback": false,
+        "database_guard": {
+          "ok": false,
+          "drivername": "postgresql+psycopg",
+          "host": "127.0.0.1",
+          "port": 9,
+          "error": "ConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。"
+        }
+      }
+    },
+    {
+      "case": "case_invalid_pdf_source",
+      "status": "PASS",
+      "root_cause": "invalid_pdf_source",
+      "reason": null,
+      "details": {
+        "library_name": "chain_failure_recovery_acceptance_20260608_001",
+        "before_count": 0,
+        "after_count": 0,
+        "created_paper_ids": [],
+        "exception": "FileNotFoundError: PDF path does not exist: D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\backend\\test-artifacts\\failure_recovery_missing_source.pdf",
+        "ready_created_paper_ids": [],
+        "pollution": {
+          "paper_ids": [],
+          "run_count": 0,
+          "candidate_count": 0,
+          "external_audit_candidate_count": 0,
+          "verified_count": 0,
+          "safe_verified_count": 0,
+          "review_verified_count": 0,
+          "review_safe_verified_count": 0,
+          "candidate_status_distribution": {},
+          "verification_status_distribution": {}
+        }
+      }
+    },
+    {
+      "case": "case_invalid_pdf_content",
+      "status": "PASS",
+      "root_cause": "artifact_precondition_failed",
+      "reason": null,
+      "details": {
+        "upload": {
+          "ok": true,
+          "status": 200,
+          "url": "http://localhost:8000/api/papers/ingest/upload",
+          "json": {
+            "paper_id": "3088a59e-36d6-4aca-a390-c3bd543e8aca",
+            "title": "[Warning] Failed to read PDF text with pypdf: Stream has ended unexpectedly",
+            "status": "completed"
+          }
+        },
+        "paper_id": "3088a59e-36d6-4aca-a390-c3bd543e8aca",
+        "created_paper_ids": [
+          "3088a59e-36d6-4aca-a390-c3bd543e8aca"
+        ],
+        "local": {
+          "ok": true,
+          "paper_id": "3088a59e-36d6-4aca-a390-c3bd543e8aca",
+          "title": "[Warning] Failed to read PDF text with pypdf: Stream has ended unexpectedly",
+          "doi": null,
+          "library_name": "chain_failure_recovery_acceptance_20260608_001",
+          "workflow_status": "Needs_Human_Confirmation",
+          "oa_status": "uploaded",
+          "raw_artifact_fields": {
+            "pdf_path": "storage/pdf/3088a59e-36d6-4aca-a390-c3bd543e8aca.pdf",
+            "markdown_path": "storage/markdown/3088a59e-36d6-4aca-a390-c3bd543e8aca.md",
+            "docling_json_path": "storage/docling_json/3088a59e-36d6-4aca-a390-c3bd543e8aca.docling.json",
+            "tei_path": "storage/tei/3088a59e-36d6-4aca-a390-c3bd543e8aca.tei.xml",
+            "workspace_path": "by_id/3088a59e-36d6-4aca-a390-c3bd543e8aca"
+          },
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 32,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": false,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": false,
+            "blocking_errors": [
+              "invalid_pdf_content",
+              "workflow_blocked_for_external_audit"
+            ],
+            "warnings": [
+              "missing_or_empty_grobid_tei",
+              "pdf_quality_status:Broken",
+              "pdf_quality_reason:pdf_open_failed:FileDataError"
+            ]
+          },
+          "artifact_sizes": {
+            "pdf": 32,
+            "markdown": 86,
+            "docling_json": 292,
+            "grobid_tei": 0
+          }
+        },
+        "review_center_row": {
+          "paper_id": "3088a59e-36d6-4aca-a390-c3bd543e8aca",
+          "title": "[Warning] Failed to read PDF text with pypdf: Stream has ended unexpectedly",
+          "year": null,
+          "journal": null,
+          "workflow_status": "Needs_Human_Confirmation",
+          "pdf_quality_status": "Broken",
+          "pdf_quality_score": 0.0,
+          "quality_reason": "pdf_open_failed:FileDataError",
+          "needs_human_confirmation": true,
+          "has_dft_candidates": false,
+          "dft_candidate_count": 0,
+          "dft_candidate_status_counts": {},
+          "dft_audit": {
+            "schema_version": "dft_completeness_audit_v1",
+            "coverage_status": "Unparsed",
+            "status_label": "未解析",
+            "detected_signal_count": 0,
+            "detected_sections": 0,
+            "detected_tables": 0,
+            "detected_figures": 0,
+            "parsed_dft_count": 0,
+            "exportable_dft_count": 0,
+            "blocked_dft_count": 0,
+            "suspected_missing_count": 0,
+            "signal_examples": [],
+            "audit_policy": "Signals are a recall-oriented checklist for AI rescanning; they do not prove a value exists unless the AI/human reviewer anchors it to PDF evidence."
+          },
+          "dft_completeness_status": "Unparsed",
+          "dft_completeness_label": "未解析",
+          "suspected_missing_dft_count": 0,
+          "external_audit_count": 0,
+          "external_audit_source_counts": {},
+          "external_audit_opinions": [],
+          "artifact_status": {
+            "pdf_exists": true,
+            "pdf_file_size": 32,
+            "pdf_path_kind": "storage_relative",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": false,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": false,
+            "blocking_errors": [
+              "invalid_pdf_content",
+              "workflow_blocked_for_external_audit"
+            ],
+            "warnings": [
+              "missing_or_empty_grobid_tei",
+              "pdf_quality_status:Broken",
+              "pdf_quality_reason:pdf_open_failed:FileDataError"
+            ]
+          },
+          "figure_count": 0,
+          "figure_crop_status_counts": {},
+          "unreliable_figure_count": 0,
+          "table_count": 0,
+          "evidence_count": 0,
+          "workspace_path": "by_id/3088a59e-36d6-4aca-a390-c3bd543e8aca",
+          "detail_url": "../literature_library/index.html?paper_id=3088a59e-36d6-4aca-a390-c3bd543e8aca&tab=review",
+          "dft_review_queue_url": "../review_center/index.html?paper_id=3088a59e-36d6-4aca-a390-c3bd543e8aca"
+        },
+        "pollution": {
+          "paper_ids": [
+            "3088a59e-36d6-4aca-a390-c3bd543e8aca"
+          ],
+          "run_count": 0,
+          "candidate_count": 0,
+          "external_audit_candidate_count": 0,
+          "verified_count": 0,
+          "safe_verified_count": 0,
+          "review_verified_count": 0,
+          "review_safe_verified_count": 0,
+          "candidate_status_distribution": {},
+          "verification_status_distribution": {}
+        },
+        "checks": {
+          "artifact_ready_for_external_audit": false,
+          "markdown_has_content": true,
+          "docling_json_has_content": true,
+          "external_audit_candidate_count": 0,
+          "verified_count": 0,
+          "safe_verified_count": 0
+        }
+      }
+    },
+    {
+      "case": "case_artifact_file_missing",
+      "status": "PASS",
+      "root_cause": "artifact_precondition_failed",
+      "reason": null,
+      "details": {
+        "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+        "seed": {
+          "ok": true,
+          "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+          "ingestion": {
+            "real_pdf_source": "local_real_pdf_candidate"
+          },
+          "attempts": [
+            {
+              "source": "local_real_pdf_candidate",
+              "path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\test-artifacts\\pdf-eval\\semantic_lis_mxene_dft_2023.pdf",
+              "size": 4177677,
+              "upload": {
+                "ok": true,
+                "status": 200,
+                "url": "http://localhost:8000/api/papers/ingest/upload",
+                "json": {
+                  "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+                  "title": "Enhancing Lithium-Sulfur Battery Performance by MXene, Graphene, and Ionic Liquids: A DFT Investigation",
+                  "status": "completed"
+                }
+              },
+              "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+              "prepare": {
+                "ok": true,
+                "status": 200,
+                "url": "http://localhost:8000/api/workbench/papers/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c/prepare",
+                "json": {
+                  "schema_version": "codex_workbench_v1",
+                  "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+                  "title": "Enhancing Lithium-Sulfur Battery Performance by MXene, Graphene, and Ionic Liquids: A DFT Investigation",
+                  "workflow_status": "Initial_Parsed",
+                  "pdf_quality_status": "A_text_readable",
+                  "pdf_quality_score": 1.0,
+                  "pdf_quality_report": {
+                    "reason": "native_text_is_readable",
+                    "metrics": {
+                      "path": "/data/storage/pdf/c689dc36-5684-4ef0-a8e8-64c5c47bccfe.pdf",
+                      "page_count": 16,
+                      "text_pages": 16,
+                      "file_exists": true,
+                      "image_pages": 8,
+                      "file_size_bytes": 4177677,
+                      "text_page_ratio": 1.0,
+                      "image_page_ratio": 0.5,
+                      "total_text_chars": 58465,
+                      "text_chars_by_page": [
+                        4526,
+                        4746,
+                        4518,
+                        1980,
+                        4552,
+                        2109,
+                        4600,
+                        2256,
+                        1958,
+                        3313,
+                        1851,
+                        4799,
+                        2537,
+                        4180,
+                        5660,
+                        4880
+                      ],
+                      "image_blocks_by_page": [
+                        1,
+                        0,
+                        0,
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0
+                      ],
+                      "raster_images_by_page": [
+                        1,
+                        0,
+                        0,
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                        1,
+                        1,
+                        1,
+                        0,
+                        1,
+                        0,
+                        0,
+                        0
+                      ],
+                      "avg_text_chars_per_page": 3654.06
+                    },
+                    "created_at": "2026-06-08T18:20:20.713735+00:00",
+                    "ocr_policy": {
+                      "ocr_enabled": false,
+                      "ocr_required": false,
+                      "ocr_text_must_be_marked": true
+                    },
+                    "parse_allowed": true,
+                    "quality_score": 1.0,
+                    "markdown_trust": "high_native_text",
+                    "quality_status": "A_text_readable",
+                    "schema_version": "codex_workbench_v1",
+                    "needs_human_confirmation": false
+                  },
+                  "workspace_path": "by_id/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+                  "workspace_abs_path": "/data/storage/by_id/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+                  "exists": true,
+                  "counts": {
+                    "figures": 7,
+                    "dft_candidates": 3,
+                    "evidence_locators": 18
+                  },
+                  "figure_crop_status_counts": {
+                    "candidate_crop": 7
+                  },
+                  "dft_candidate_status_counts": {
+                    "system_candidate": 3
+                  }
+                }
+              },
+              "local": {
+                "ok": true,
+                "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+                "title": "Enhancing Lithium-Sulfur Battery Performance by MXene, Graphene, and Ionic Liquids: A DFT Investigation",
+                "doi": "10.3390/molecules29010002",
+                "library_name": "chain_failure_recovery_acceptance_20260608_001",
+                "workflow_status": "Initial_Parsed",
+                "oa_status": "uploaded",
+                "raw_artifact_fields": {
+                  "pdf_path": "storage/pdf/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.pdf",
+                  "markdown_path": "storage/markdown/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.md",
+                  "docling_json_path": "storage/docling_json/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.docling.json",
+                  "tei_path": "storage/tei/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.tei.xml",
+                  "workspace_path": "by_id/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+                },
+                "artifact_status": {
+                  "pdf_exists": true,
+                  "pdf_file_size": 4177677,
+                  "pdf_path_kind": "storage_relative",
+                  "markdown_has_content": true,
+                  "docling_json_has_content": true,
+                  "grobid_tei_has_content": true,
+                  "ai_reading_package_exists": true,
+                  "workspace_exists": true,
+                  "artifact_ready_for_external_audit": true,
+                  "blocking_errors": [],
+                  "warnings": [
+                    "pdf_quality_status:A_text_readable",
+                    "pdf_quality_reason:native_text_is_readable"
+                  ]
+                },
+                "artifact_sizes": {
+                  "pdf": 4177677,
+                  "markdown": 59232,
+                  "docling_json": 66307,
+                  "grobid_tei": 134673
+                }
+              }
+            }
+          ]
+        },
+        "missing_access_flags": {
+          "api_get_paper_ok": true,
+          "api_get_codex_context_ok": true,
+          "api_review_center_ok": true,
+          "mcp_get_paper_ok": true,
+          "mcp_get_codex_context_ok": true,
+          "mcp_get_review_coverage_ok": true
+        },
+        "missing_ready_flags": {
+          "local_ready": false,
+          "api_get_paper_ready": false,
+          "api_get_codex_context_ready": false,
+          "api_review_center_ready": false,
+          "mcp_get_paper_ready": false,
+          "mcp_get_codex_context_ready": false,
+          "mcp_get_review_coverage_ready": false
+        },
+        "missing_blocking_errors": [
+          "missing_pdf"
+        ],
+        "restored_access_flags": {
+          "api_get_paper_ok": true,
+          "api_get_codex_context_ok": true,
+          "api_review_center_ok": true,
+          "mcp_get_paper_ok": true,
+          "mcp_get_codex_context_ok": true,
+          "mcp_get_review_coverage_ok": true
+        },
+        "restored_ready_flags": {
+          "local_ready": true,
+          "api_get_paper_ready": true,
+          "api_get_codex_context_ready": true,
+          "api_review_center_ready": true,
+          "mcp_get_paper_ready": true,
+          "mcp_get_codex_context_ready": true,
+          "mcp_get_review_coverage_ready": true
+        },
+        "restored_blocking_errors": [],
+        "restore": {
+          "attempted": true,
+          "succeeded": true,
+          "path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage\\pdf\\b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.pdf",
+          "backup_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage\\pdf\\b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.pdf.bak_failure_recovery"
+        }
+      }
+    },
+    {
+      "case": "case_external_audit_import_blocked",
+      "status": "PASS",
+      "root_cause": "external_audit_blocked_by_artifact_precondition",
+      "reason": null,
+      "details": {
+        "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+        "import_result": {
+          "ok": true,
+          "status": 200,
+          "url": "http://localhost:8000/api/external-analysis/import",
+          "json": {
+            "id": "da428e04-7fe2-4b16-8753-c943a620eb59",
+            "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+            "source": "codex_failure_recovery_acceptance_audit",
+            "source_label": "Codex failure recovery acceptance audit",
+            "raw_text": null,
+            "raw_payload": {
+              "source": "codex_failure_recovery_acceptance_audit",
+              "verdict": "WARN",
+              "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+              "confidence": 0.5,
+              "dft_status": "blocked",
+              "table_status": "blocked",
+              "figure_status": "blocked",
+              "metadata_status": "unknown",
+              "evidence_examples": [
+                {
+                  "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+                  "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+                }
+              ],
+              "suspected_missing": [
+                "artifact_precondition_failed"
+              ],
+              "recommended_action": "human_confirm_after_artifact_recovery",
+              "verification_status": "unverified",
+              "section_structure_status": "blocked"
+            },
+            "normalized_payload": {
+              "review_notes": [],
+              "unmapped_items": [],
+              "supporting_papers": [],
+              "correction_proposals": [],
+              "external_audit_opinions": [
+                {
+                  "source": "codex_failure_recovery_acceptance_audit",
+                  "status": "candidate",
+                  "verdict": "WARN",
+                  "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+                  "confidence": 0.5,
+                  "dft_status": "blocked",
+                  "raw_payload": {
+                    "source": "codex_failure_recovery_acceptance_audit",
+                    "verdict": "WARN",
+                    "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+                    "confidence": 0.5,
+                    "dft_status": "blocked",
+                    "table_status": "blocked",
+                    "figure_status": "blocked",
+                    "metadata_status": "unknown",
+                    "evidence_examples": [
+                      {
+                        "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+                        "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+                      }
+                    ],
+                    "suspected_missing": [
+                      "artifact_precondition_failed"
+                    ],
+                    "recommended_action": "human_confirm_after_artifact_recovery",
+                    "verification_status": "unverified",
+                    "section_structure_status": "blocked"
+                  },
+                  "table_status": "blocked",
+                  "figure_status": "blocked",
+                  "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+                  "metadata_status": "unknown",
+                  "evidence_examples": [
+                    {
+                      "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+                      "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+                    }
+                  ],
+                  "suspected_missing": [
+                    "artifact_precondition_failed"
+                  ],
+                  "recommended_action": "human_confirm_after_artifact_recovery",
+                  "verification_status": "unverified",
+                  "section_structure_status": "blocked"
+                }
+              ],
+              "external_audit_precondition": {
+                "status": "artifact_precondition_failed",
+                "blocking_errors": [
+                  "missing_pdf"
+                ],
+                "artifact_ready_for_external_audit": false
+              }
+            },
+            "mapping_status": "artifact_precondition_failed",
+            "mapping_error": "artifact_precondition_failed:missing_pdf",
+            "created_at": "2026-06-08T18:22:33.139297Z",
+            "candidates": []
+          }
+        },
+        "before": {
+          "paper_ids": [
+            "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+          ],
+          "run_count": 0,
+          "candidate_count": 0,
+          "external_audit_candidate_count": 0,
+          "verified_count": 0,
+          "safe_verified_count": 0,
+          "review_verified_count": 0,
+          "review_safe_verified_count": 0,
+          "candidate_status_distribution": {},
+          "verification_status_distribution": {}
+        },
+        "after": {
+          "paper_ids": [
+            "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+          ],
+          "run_count": 0,
+          "candidate_count": 0,
+          "external_audit_candidate_count": 0,
+          "verified_count": 0,
+          "safe_verified_count": 0,
+          "review_verified_count": 0,
+          "review_safe_verified_count": 0,
+          "candidate_status_distribution": {},
+          "verification_status_distribution": {}
+        },
+        "candidate_delta": 0,
+        "review_center_row": {
+          "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+          "title": "Enhancing Lithium-Sulfur Battery Performance by MXene, Graphene, and Ionic Liquids: A DFT Investigation",
+          "year": 2023,
+          "journal": null,
+          "workflow_status": "Initial_Parsed",
+          "pdf_quality_status": "A_text_readable",
+          "pdf_quality_score": 1.0,
+          "quality_reason": "native_text_is_readable",
+          "needs_human_confirmation": true,
+          "has_dft_candidates": true,
+          "dft_candidate_count": 3,
+          "dft_candidate_status_counts": {
+            "system_candidate": 3
+          },
+          "dft_audit": {
+            "schema_version": "dft_completeness_audit_v1",
+            "coverage_status": "Suspected_Missing",
+            "status_label": "疑似漏提",
+            "detected_signal_count": 18,
+            "detected_sections": 12,
+            "detected_tables": 0,
+            "detected_figures": 6,
+            "parsed_dft_count": 3,
+            "exportable_dft_count": 0,
+            "blocked_dft_count": 3,
+            "suspected_missing_count": 15,
+            "signal_examples": [
+              {
+                "source_type": "section",
+                "source_id": "58a7d288-82ab-4b5b-a7b2-649149290389",
+                "page": null,
+                "label": "Introduction",
+                "keywords": [
+                  "DFT",
+                  "density functional",
+                  "binding energ",
+                  "charge transfer"
+                ],
+                "excerpt": "Introduction introduction Even though lithium-ion batteries (LIBs) have been a major success in portable devices and electric vehicles, more energy density is still necessary. The intrinsically determined topological intercalation chemistry of LIBs during the past three decades has almost reached its predicted energy density limit [1] [2] [3] [4] [5] [6] [7..."
+              },
+              {
+                "source_type": "section",
+                "source_id": "6a0fc0d1-5e0b-4dd5-9b13-ec9951c416d1",
+                "page": null,
+                "label": "Graphite Oxide Materials Frontier Molecular Orbital Analysis",
+                "keywords": [
+                  "HOMO",
+                  "LUMO"
+                ],
+                "excerpt": "Graphite Oxide Materials Frontier Molecular Orbital Analysis body Building upon pristine Gr, oxygen-functional groups, encompassing hydroxyl and carboxyl moieties, were externally appended to the pyridine, pyrrole, and graphite sites of Gr. This resulted in the design of fifteen distinct Gr oxide configurations. The criteria for selecting promising candidat..."
+              },
+              {
+                "source_type": "section",
+                "source_id": "5db39a0d-caf9-453c-9d4f-c21ea07c70f8",
+                "page": null,
+                "label": "Ionic Liquid Frontier Molecular Orbital Analysis",
+                "keywords": [
+                  "binding energ",
+                  "HOMO",
+                  "LUMO"
+                ],
+                "excerpt": "Ionic Liquid Frontier Molecular Orbital Analysis body Within this module, a systematic exploration was conducted holding the anionic species constant while varying the cationic components. Six distinct combinations were meticulously examined. The initial group encompassed Py 3+ (pyridine) structures in tandem with anions BF 4 -, PF 6 -, and TFSI -. The seco..."
+              },
+              {
+                "source_type": "section",
+                "source_id": "62960eb3-f9cc-4236-a244-d05068d3ad9f",
+                "page": null,
+                "label": "Adsorption of Polysulfide with Graphite Oxide",
+                "keywords": [
+                  "binding energ"
+                ],
+                "excerpt": "Adsorption of Polysulfide with Graphite Oxide body In the pursuit of improved adsorption performance, graphene structures externally modified with oxygen-containing groups have been meticulously screened, i.e., graphitesite externally attached hydroxyl group and carboxyl group, pyridine-site externally attached hydroxyl group and carboxyl group, and pyrrole..."
+              },
+              {
+                "source_type": "section",
+                "source_id": "5aaf27d0-5904-4a29-833a-fefbade2c0e2",
+                "page": null,
+                "label": "Dissolution Behavior of Polysulfides in Electrolyte Solutions",
+                "keywords": [
+                  "adsorption energ",
+                  "binding energ"
+                ],
+                "excerpt": "Dissolution Behavior of Polysulfides in Electrolyte Solutions body Upon meticulous analysis of the data presented in Figure 4i , it becomes evident that DOL exhibits notably enhanced adsorption affinity towards LiS, Li 2 S, Li 2 S 8 , Li 2 S 8 -2, in comparison to Li 2 S 4 and S 8 , where its performance is relatively weaker. Conversely, DME demonstrates su..."
+              },
+              {
+                "source_type": "section",
+                "source_id": "9f388150-edc3-4098-a268-4359d1e925c7",
+                "page": null,
+                "label": "Conclusions",
+                "keywords": [
+                  "binding energ"
+                ],
+                "excerpt": "Conclusions conclusion In this work, we summarized the appropriate combinations of the distinctive monolayer cathode materials and electrolytes that we selected, which underscore the significant adsorption performance of the six-membered ring d-Ti 3 C 2 MXene material, particularly in its interaction with five polysulfides. We delved into solving one of the..."
+              },
+              {
+                "source_type": "section",
+                "source_id": "b58d33b0-db6d-419f-a760-fd9da9c99bd9",
+                "page": 6,
+                "label": "Figure 2. In the pictures, the gray atoms refer to carbon atoms, the red is oxygen, the white is hydrogen (a) Pyridine-...",
+                "keywords": [
+                  "binding energ"
+                ],
+                "excerpt": "Figure 2. In the pictures, the gray atoms refer to carbon atoms, the red is oxygen, the white is hydrogen (a) Pyridine-site externally attached hydroxyl group Gr. (b) Pyrrole-site externally attached double hydroxyl group Gr. (c) Graphite-sites externally attached hydroxyl and carboxyl group Gr. (d) The binding energy of Gr and polysulfide. (e) The binding..."
+              },
+              {
+                "source_type": "section",
+                "source_id": "3ced7e49-536c-411a-94f2-230b3c057c00",
+                "page": 8,
+                "label": "Figure 3. (a) LiS binding energy with Gr and Gr oxide. (b) Li2S binding energy to v and Gr oxide. (c) Li2S4 binding ene...",
+                "keywords": [
+                  "binding energ"
+                ],
+                "excerpt": "Figure 3. (a) LiS binding energy with Gr and Gr oxide. (b) Li2S binding energy to v and Gr oxide. (c) Li2S4 binding energy with Gr and Gr oxide. (d) The binding energy of Li2S8 with Gr and Gr oxide. (e) Li2S8-2 binding energy to Gr and Gr oxide. (f) S8 binding energy with Gr and Gr oxide. figure_caption Figure 3. (a) LiS binding energy with Gr and Gr oxide...."
+              }
+            ],
+            "audit_policy": "Signals are a recall-oriented checklist for AI rescanning; they do not prove a value exists unless the AI/human reviewer anchors it to PDF evidence."
+          },
+          "dft_completeness_status": "Suspected_Missing",
+          "dft_completeness_label": "疑似漏提",
+          "suspected_missing_dft_count": 15,
+          "external_audit_count": 0,
+          "external_audit_source_counts": {},
+          "external_audit_opinions": [],
+          "artifact_status": {
+            "pdf_exists": false,
+            "pdf_file_size": null,
+            "pdf_path_kind": "missing",
+            "markdown_has_content": true,
+            "docling_json_has_content": true,
+            "grobid_tei_has_content": true,
+            "ai_reading_package_exists": true,
+            "workspace_exists": true,
+            "artifact_ready_for_external_audit": false,
+            "blocking_errors": [
+              "missing_pdf"
+            ],
+            "warnings": [
+              "pdf_quality_status:A_text_readable",
+              "pdf_quality_reason:native_text_is_readable"
+            ]
+          },
+          "figure_count": 7,
+          "figure_crop_status_counts": {
+            "candidate_crop": 7
+          },
+          "unreliable_figure_count": 0,
+          "table_count": 0,
+          "evidence_count": 18,
+          "workspace_path": "by_id/b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+          "detail_url": "../literature_library/index.html?paper_id=b002cdda-b5f8-4c5e-ad71-c5085b5cda8c&tab=review",
+          "dft_review_queue_url": "../review_center/index.html?paper_id=b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+        },
+        "checks": {
+          "candidate_not_created_or_blocked": true,
+          "review_center_not_visible_as_normal_candidate": true,
+          "verified_count": 0,
+          "safe_verified_count": 0
+        }
+      }
+    }
+  ],
+  "restore": {
+    "attempted": true,
+    "succeeded": true,
+    "path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage\\pdf\\b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.pdf",
+    "backup_path": "D:\\Desktop\\03_代码与开发\\AI-shujvku\\literature-ai\\data\\storage\\pdf\\b002cdda-b5f8-4c5e-ad71-c5085b5cda8c.pdf.bak_failure_recovery"
+  },
+  "legacy_codex_gate": {
+    "acceptance_gate": "PASS",
+    "root_cause": null,
+    "paper_ids": [
+      "2d977b15-7715-4a27-87e3-985dc77c4da1",
+      "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+      "e636ff33-55fc-436d-b4ec-1b4f064f4050"
+    ],
+    "library_name": "chain_realpaper_smoke_20260608"
+  },
+  "pollution": {
+    "paper_ids": [
+      "3088a59e-36d6-4aca-a390-c3bd543e8aca",
+      "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+    ],
+    "run_count": 0,
+    "candidate_count": 0,
+    "external_audit_candidate_count": 0,
+    "verified_count": 0,
+    "safe_verified_count": 0,
+    "review_verified_count": 0,
+    "review_safe_verified_count": 0,
+    "candidate_status_distribution": {},
+    "verification_status_distribution": {}
+  },
+  "verified_pollution": false,
+  "safe_verified_pollution": false,
+  "failure_recovery_acceptance": "PASS",
+  "root_cause": null,
+  "failed_case": null
+}

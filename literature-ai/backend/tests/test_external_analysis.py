@@ -7,10 +7,27 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
-from app.db.models import Base, Paper, PaperCorrection, PaperNote, PaperRelationship
+from app.db.models import Base, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperNote, PaperRelationship
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel
+
+
+def _make_external_audit_ready(paper: Paper, root: Path) -> None:
+    pdf_path = root / f"{paper.id}.pdf"
+    markdown_path = root / f"{paper.id}.md"
+    docling_path = root / f"{paper.id}.docling.json"
+    workspace_path = root / "workspace" / str(paper.id)
+    pdf_path.write_bytes(b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")
+    markdown_path.write_text("# Ready paper\n\nDFT evidence is available.", encoding="utf-8")
+    docling_path.write_text('{"texts": [{"text": "DFT evidence is available."}]}', encoding="utf-8")
+    package_path = workspace_path / "extraction" / "ai_reading_package.json"
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    package_path.write_text('{"sections": [{"title": "Results"}]}', encoding="utf-8")
+    paper.pdf_path = str(pdf_path)
+    paper.markdown_path = str(markdown_path)
+    paper.docling_json_path = str(docling_path)
+    paper.workspace_path = str(workspace_path)
 
 
 def test_external_analysis_import_and_materialize_flow():
@@ -179,6 +196,86 @@ def test_external_analysis_materialize_rejects_empty_or_implicit_all():
 
             with Session(engine) as session:
                 assert session.query(PaperNote).count() == 0
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_paper_level_audit_payload_creates_unverified_candidate():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_audit.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Gemini Audit Paper", pdf_path="paper.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                _make_external_audit_ready(paper, Path(tmpdir))
+                session.commit()
+                session.refresh(paper)
+                paper_id = paper.id
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "gemini_external_audit",
+                    "raw_payload": {
+                        "paper_id": str(paper_id),
+                        "verdict": "WARN",
+                        "recommended_action": "needs_dft_review",
+                        "suspected_missing": ["dft_result"],
+                        "metadata_status": "ok",
+                        "section_structure_status": "warn",
+                        "table_status": "warn",
+                        "figure_status": "ok",
+                        "dft_status": "warn",
+                        "evidence_examples": [{"text": "DFT was mentioned but no DFT result was found."}],
+                    },
+                },
+            )
+
+            assert imported.status_code == 200
+            payload = imported.json()
+            assert len(payload["candidates"]) == 1
+            candidate = payload["candidates"][0]
+            assert candidate["candidate_type"] == "external_audit_opinion"
+            assert candidate["status"] == "candidate"
+            assert candidate["normalized_payload"]["source"] == "gemini_external_audit"
+            assert candidate["normalized_payload"]["verdict"] == "WARN"
+            assert candidate["normalized_payload"]["recommended_action"] == "needs_dft_review"
+            assert candidate["normalized_payload"]["verification_status"] == "unverified"
+
+            center = client.get("/api/workbench/review-center")
+            assert center.status_code == 200
+            row = next(item for item in center.json()["rows"] if item["paper_id"] == str(paper_id))
+            assert row["external_audit_count"] == 1
+            assert row["external_audit_source_counts"] == {"gemini_external_audit": 1}
+            assert row["external_audit_opinions"][0]["candidate_type"] == "external_audit_opinion"
+            assert row["external_audit_opinions"][0]["verification_status"] == "unverified"
+
+            with Session(engine) as session:
+                candidate_row = session.query(ExternalAnalysisCandidate).one()
+                assert candidate_row.status == "candidate"
+                assert candidate_row.candidate_type == "external_audit_opinion"
+                assert candidate_row.materialized_target_type is None
+                assert candidate_row.materialized_target_id is None
+                assert candidate_row.normalized_payload["verification_status"] == "unverified"
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

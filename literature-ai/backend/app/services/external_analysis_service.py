@@ -21,6 +21,7 @@ from app.db.models import (
     PaperRelationship,
 )
 from app.services.llm_service import LLMService
+from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 
@@ -56,10 +57,30 @@ class ExternalSupportingPaperModel(BaseModel):
     mapping_reason: str | None = None
 
 
+class ExternalAuditOpinionModel(BaseModel):
+    paper_id: str | None = None
+    source: str | None = None
+    verdict: str | None = None
+    recommended_action: str | None = None
+    suspected_missing: list[Any] = Field(default_factory=list)
+    metadata_status: str | None = None
+    section_structure_status: str | None = None
+    table_status: str | None = None
+    figure_status: str | None = None
+    dft_status: str | None = None
+    evidence_examples: list[Any] = Field(default_factory=list)
+    raw_payload: dict[str, Any] | list[Any] | str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    status: str = "candidate"
+    verification_status: str = "unverified"
+    mapping_reason: str | None = None
+
+
 class ExternalAnalysisNormalizedModel(BaseModel):
     review_notes: list[ExternalReviewNoteModel] = Field(default_factory=list)
     correction_proposals: list[ExternalCorrectionProposalModel] = Field(default_factory=list)
     supporting_papers: list[ExternalSupportingPaperModel] = Field(default_factory=list)
+    external_audit_opinions: list[ExternalAuditOpinionModel] = Field(default_factory=list)
     unmapped_items: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -109,7 +130,26 @@ class ExternalAnalysisService:
         self.session.flush()
 
         if normalized:
-            self._create_candidates(run, normalized)
+            normalized = self._with_paper_level_audit_opinion(
+                normalized,
+                raw_payload=sanitized_raw_payload,
+                source=source,
+                paper_id=paper_id,
+            )
+            normalized_payload = normalized.model_dump(mode="json")
+            external_audit_precondition = self._external_audit_precondition(paper) if normalized.external_audit_opinions else None
+            if external_audit_precondition and external_audit_precondition["status"] != "ready":
+                run.mapping_status = "artifact_precondition_failed"
+                run.mapping_error = "artifact_precondition_failed:" + ",".join(
+                    external_audit_precondition["blocking_errors"] or ["unknown"]
+                )
+                run.normalized_payload = {
+                    **normalized_payload,
+                    "external_audit_precondition": external_audit_precondition,
+                }
+            else:
+                run.normalized_payload = normalized_payload
+                self._create_candidates(run, normalized)
 
         self.session.add(
             AuditLog(
@@ -120,7 +160,8 @@ class ExternalAnalysisService:
                 target_id=str(run.id),
                 payload={
                     "source_label": source_label,
-                    "mapping_status": mapping_status,
+                    "mapping_status": run.mapping_status,
+                    "mapping_error": run.mapping_error,
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
                     "writes_final_truth": False,
                     "requires_human_confirmation": True,
@@ -174,6 +215,42 @@ class ExternalAnalysisService:
             .where(ExternalAnalysisCandidate.run_id == run_id)
             .order_by(ExternalAnalysisCandidate.created_at.asc())
         ).all()
+
+    def backfill_paper_level_audit_candidates(self, *, source: str | None = None, limit: int | None = None) -> int:
+        """Create missing external_audit_opinion candidates for already-imported paper-level audit runs."""
+        stmt = select(ExternalAnalysisRun).order_by(ExternalAnalysisRun.created_at.desc())
+        if source:
+            stmt = stmt.where(ExternalAnalysisRun.source == source)
+        if limit:
+            stmt = stmt.limit(limit)
+        runs = self.session.scalars(stmt).all()
+        created = 0
+        for run in runs:
+            existing_count = self.session.scalar(
+                select(ExternalAnalysisCandidate.id)
+                .where(
+                    ExternalAnalysisCandidate.run_id == run.id,
+                    ExternalAnalysisCandidate.candidate_type == "external_audit_opinion",
+                )
+                .limit(1)
+            )
+            if existing_count is not None:
+                continue
+            opinion = self._paper_level_audit_opinion(
+                raw_payload=run.raw_payload,
+                source=run.source,
+                paper_id=run.paper_id,
+            )
+            if opinion is None:
+                continue
+            normalized = self._normalized_from_run(run)
+            normalized.external_audit_opinions.append(opinion)
+            run.normalized_payload = normalized.model_dump(mode="json")
+            self.session.add(run)
+            self._create_external_audit_candidate(run, opinion)
+            created += 1
+        self.session.flush()
+        return created
 
     def materialize_candidates(
         self,
@@ -349,7 +426,18 @@ class ExternalAnalysisService:
             )
         return normalized.model_copy(update={"supporting_papers": supporting})
 
+    def _external_audit_precondition(self, paper: Paper) -> dict[str, Any]:
+        artifact_status = build_paper_artifact_status(paper, settings=self.settings)
+        blocking_errors = list(artifact_status.get("blocking_errors") or [])
+        return {
+            "status": "ready" if artifact_status.get("artifact_ready_for_external_audit") else "artifact_precondition_failed",
+            "blocking_errors": blocking_errors,
+            "artifact_ready_for_external_audit": bool(artifact_status.get("artifact_ready_for_external_audit")),
+        }
+
     def _create_candidates(self, run: ExternalAnalysisRun, normalized: ExternalAnalysisNormalizedModel) -> None:
+        for opinion in normalized.external_audit_opinions:
+            self._create_external_audit_candidate(run, opinion)
         for note in normalized.review_notes:
             self.session.add(
                 ExternalAnalysisCandidate(
@@ -406,6 +494,123 @@ class ExternalAnalysisService:
                     status="requires_resolution",
                 )
             )
+
+    def _create_external_audit_candidate(self, run: ExternalAnalysisRun, opinion: ExternalAuditOpinionModel) -> None:
+        payload = opinion.model_dump(mode="json")
+        payload.update(
+            {
+                "paper_id": str(run.paper_id),
+                "run_id": str(run.id),
+                "source": run.source,
+                "source_label": run.source_label,
+                "candidate_type": "external_audit_opinion",
+                "status": "candidate",
+                "verification_status": "unverified",
+                "writes_final_truth": False,
+                "requires_human_confirmation": True,
+            }
+        )
+        evidence_payload = {
+            "source": run.source,
+            "source_label": run.source_label,
+            "verdict": payload.get("verdict"),
+            "recommended_action": payload.get("recommended_action"),
+            "suspected_missing": payload.get("suspected_missing") or [],
+            "evidence_examples": payload.get("evidence_examples") or [],
+            "verification_status": "unverified",
+            "raw_payload": payload.get("raw_payload"),
+            "protocol": protocol_snapshot("gemini_audit_protocol"),
+            "writes_final_truth": False,
+            "requires_human_confirmation": True,
+        }
+        self.session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=run.paper_id,
+                candidate_type="external_audit_opinion",
+                normalized_payload=payload,
+                confidence=opinion.confidence,
+                mapping_reason=opinion.mapping_reason or "Imported paper-level external audit opinion",
+                evidence_payload=evidence_payload,
+                status="candidate",
+            )
+        )
+
+    def _with_paper_level_audit_opinion(
+        self,
+        normalized: ExternalAnalysisNormalizedModel,
+        *,
+        raw_payload: dict[str, Any] | list[Any] | str | None,
+        source: str,
+        paper_id: UUID,
+    ) -> ExternalAnalysisNormalizedModel:
+        if normalized.external_audit_opinions:
+            return normalized
+        opinion = self._paper_level_audit_opinion(raw_payload=raw_payload, source=source, paper_id=paper_id)
+        if opinion is None:
+            return normalized
+        return normalized.model_copy(update={"external_audit_opinions": [opinion]})
+
+    @staticmethod
+    def _normalized_from_run(run: ExternalAnalysisRun) -> ExternalAnalysisNormalizedModel:
+        if isinstance(run.normalized_payload, dict):
+            try:
+                return ExternalAnalysisNormalizedModel.model_validate(run.normalized_payload)
+            except Exception:
+                pass
+        return ExternalAnalysisNormalizedModel()
+
+    @staticmethod
+    def _paper_level_audit_opinion(
+        *,
+        raw_payload: dict[str, Any] | list[Any] | str | None,
+        source: str,
+        paper_id: UUID,
+    ) -> ExternalAuditOpinionModel | None:
+        if not isinstance(raw_payload, dict):
+            return None
+        if isinstance(raw_payload.get("candidates"), list) and raw_payload.get("candidates"):
+            return None
+        audit_keys = {
+            "verdict",
+            "recommended_action",
+            "suspected_missing",
+            "metadata_status",
+            "section_structure_status",
+            "table_status",
+            "figure_status",
+            "dft_status",
+            "evidence_examples",
+        }
+        if not any(key in raw_payload for key in audit_keys):
+            return None
+        suspected_missing = raw_payload.get("suspected_missing") or raw_payload.get("missing_items") or []
+        if isinstance(suspected_missing, (str, int, float, bool)):
+            suspected_missing = [suspected_missing]
+        evidence_examples = raw_payload.get("evidence_examples") or raw_payload.get("evidence") or []
+        if isinstance(evidence_examples, (str, int, float, bool, dict)):
+            evidence_examples = [evidence_examples]
+        confidence = raw_payload.get("confidence")
+        try:
+            confidence = float(confidence) if confidence not in (None, "") else None
+        except (TypeError, ValueError):
+            confidence = None
+        return ExternalAuditOpinionModel(
+            paper_id=str(raw_payload.get("paper_id") or paper_id),
+            source=source,
+            verdict=str(raw_payload.get("verdict") or "").strip().upper() or None,
+            recommended_action=raw_payload.get("recommended_action"),
+            suspected_missing=list(suspected_missing) if isinstance(suspected_missing, list) else [],
+            metadata_status=raw_payload.get("metadata_status"),
+            section_structure_status=raw_payload.get("section_structure_status"),
+            table_status=raw_payload.get("table_status"),
+            figure_status=raw_payload.get("figure_status"),
+            dft_status=raw_payload.get("dft_status"),
+            evidence_examples=list(evidence_examples) if isinstance(evidence_examples, list) else [],
+            raw_payload=raw_payload,
+            confidence=confidence,
+            mapping_reason="Paper-level external audit payload imported as candidate opinion",
+        )
 
     def _resolve_target_paper_id(self, relationship: ExternalSupportingPaperModel) -> str | None:
         if relationship.target_paper_id:
@@ -555,6 +760,15 @@ def build_internal_ai_review_blob(detail) -> str:
             "abstract": _truncate(detail.abstract, 2200),
             "oa_status": detail.oa_status,
             "counts": detail.counts.model_dump(mode="json"),
+            "artifact_status": detail.artifact_status.model_dump(mode="json")
+            if hasattr(detail.artifact_status, "model_dump")
+            else detail.artifact_status,
+        },
+        "external_audit_precondition": {
+            "status": "ready"
+            if getattr(detail.artifact_status, "artifact_ready_for_external_audit", False)
+            else "artifact_precondition_failed",
+            "blocking_errors": list(getattr(detail.artifact_status, "blocking_errors", []) or []),
         },
         "comprehensive_analysis": detail.comprehensive_analysis,
         "dft_settings_items": [item.model_dump(mode="json") for item in detail.dft_settings_items[:20]],

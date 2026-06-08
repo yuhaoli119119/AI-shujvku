@@ -230,6 +230,11 @@ class CodexContextService:
     ) -> dict[str, Any]:
         counts = detail.counts.model_dump(mode="json") if detail.counts else {}
         dft_export_readiness = self._build_dft_export_readiness(detail, limit=max_candidates)
+        artifact_status = (
+            detail.artifact_status.model_dump(mode="json")
+            if hasattr(detail.artifact_status, "model_dump")
+            else dict(detail.artifact_status or {})
+        )
         warnings = self._build_warnings(detail, locators, dft_export_readiness)
         locator_status_counts = dict(Counter(item.get("locator_status") or "unknown" for item in locators))
         dft_results = self._dump_items(detail.dft_results_items, max_candidates)
@@ -277,16 +282,24 @@ class CodexContextService:
                 "created_at": detail.created_at.isoformat() if detail.created_at else None,
             },
             "source_assets": {
-                "has_pdf": bool(detail.pdf_path),
+                "has_pdf": bool(artifact_status.get("pdf_exists")),
                 "pdf_path": detail.pdf_path,
                 "tei_path": detail.tei_path,
                 "docling_json_path": detail.docling_json_path,
                 "markdown_path": detail.markdown_path,
                 "workspace_path": detail.workspace_path,
+                "artifact_status": artifact_status,
                 "markdown_trust": (
                     detail.pdf_quality_report or {}
                 ).get("markdown_trust") if isinstance(detail.pdf_quality_report, dict) else None,
                 "full_translation_available": bool(detail.full_translation_zh),
+            },
+            "artifact_status": artifact_status,
+            "external_audit_precondition": {
+                "status": "ready"
+                if artifact_status.get("artifact_ready_for_external_audit")
+                else "artifact_precondition_failed",
+                "blocking_errors": artifact_status.get("blocking_errors") or [],
             },
             "counts": counts,
             "warnings": warnings,
@@ -372,8 +385,42 @@ class CodexContextService:
         dft_export_readiness: dict[str, Any],
     ) -> list[dict[str, str]]:
         warnings: list[dict[str, str]] = []
-        if not detail.pdf_path or detail.oa_status in {"metadata_only", "needs_upload"}:
+        artifact_status = (
+            detail.artifact_status.model_dump(mode="json")
+            if hasattr(detail.artifact_status, "model_dump")
+            else dict(detail.artifact_status or {})
+        )
+        artifact_errors = set(artifact_status.get("blocking_errors") or [])
+        if "missing_pdf" in artifact_errors or not detail.pdf_path or detail.oa_status in {"metadata_only", "needs_upload"}:
             warnings.append({"code": "missing_pdf", "message": "PDF is missing or this record is metadata-only."})
+        if "missing_markdown_and_docling_json" in artifact_errors:
+            warnings.append(
+                {
+                    "code": "missing_markdown_and_docling_json",
+                    "message": "Neither Markdown nor Docling JSON contains readable parsed content.",
+                }
+            )
+        if "missing_ai_reading_package" in artifact_errors:
+            warnings.append(
+                {
+                    "code": "missing_ai_reading_package",
+                    "message": "The AI reading package is missing; external audit must stop at the artifact precondition.",
+                }
+            )
+        if "invalid_pdf_content" in artifact_errors:
+            warnings.append(
+                {
+                    "code": "invalid_pdf_content",
+                    "message": "The stored PDF failed the quality/openability check and cannot be used as audit evidence.",
+                }
+            )
+        if "workflow_blocked_for_external_audit" in artifact_errors:
+            warnings.append(
+                {
+                    "code": "workflow_blocked_for_external_audit",
+                    "message": "The paper workflow is still blocked and must not be treated as externally auditable.",
+                }
+            )
         if not detail.sections:
             warnings.append({"code": "missing_sections", "message": "No parsed body sections are available."})
         if not detail.figures:
@@ -408,6 +455,14 @@ class CodexContextService:
     ) -> list[str]:
         codes = {item["code"] for item in warnings}
         actions: list[str] = []
+        if {
+            "missing_pdf",
+            "missing_markdown_and_docling_json",
+            "missing_ai_reading_package",
+            "invalid_pdf_content",
+            "workflow_blocked_for_external_audit",
+        } & codes:
+            actions.append("Return artifact_precondition_failed before auditing; the artifact_status blocking_errors list explains why.")
         if "missing_pdf" in codes:
             actions.append("Attach or download the PDF before treating this paper as readable evidence.")
         if "missing_sections" in codes:
@@ -441,6 +496,18 @@ class CodexContextService:
             f"- PDF: {'available' if context['source_assets']['has_pdf'] else 'missing'}",
             "",
         ]
+        artifact_status = context.get("artifact_status") or {}
+        lines.extend(
+            [
+                "## Artifact Status",
+                f"- External audit precondition: `{context.get('external_audit_precondition', {}).get('status')}`",
+                f"- PDF exists / size / path kind: {artifact_status.get('pdf_exists')} / {artifact_status.get('pdf_file_size') or '-'} / {artifact_status.get('pdf_path_kind')}",
+                f"- Markdown / Docling / GROBID content: {artifact_status.get('markdown_has_content')} / {artifact_status.get('docling_json_has_content')} / {artifact_status.get('grobid_tei_has_content')}",
+                f"- AI reading package / workspace: {artifact_status.get('ai_reading_package_exists')} / {artifact_status.get('workspace_exists')}",
+                f"- Blocking errors: {artifact_status.get('blocking_errors') or 'none'}",
+                "",
+            ]
+        )
         if context["warnings"]:
             lines.extend(["## Warnings"])
             lines.extend(f"- `{item['code']}`: {item['message']}" for item in context["warnings"])
