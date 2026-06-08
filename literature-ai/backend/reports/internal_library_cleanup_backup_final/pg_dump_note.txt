@@ -1,0 +1,1 @@
+pg_dump was not executed by this cleanup script. The final targeted JSON backups and paper/artifact manifests were written before deletion.

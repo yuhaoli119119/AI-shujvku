@@ -1,0 +1,10 @@
+{
+  "status": "DRY_RUN_BACKUP_MANIFEST",
+  "generated_at": "2026-06-08T20:37:18+00:00",
+  "must_backup_before_delete": true,
+  "paper_ids": [],
+  "candidate_delete_libraries": [],
+  "artifact_paths": [],
+  "db_target_records": [],
+  "optional_pg_dump_note": "Before confirmed cleanup, run pg_dump against the active PostgreSQL database or export the target tables filtered by paper_id/library_name."
+}

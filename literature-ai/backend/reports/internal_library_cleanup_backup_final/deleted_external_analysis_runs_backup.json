@@ -1,0 +1,2702 @@
+[
+  {
+    "id": "11ec5435-c946-4992-9f10-f822f3deb8cc",
+    "paper_id": "5060875c-5615-41b4-aa74-053b8721ec7f",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "PASS",
+      "paper_id": "5060875c-5615-41b4-aa74-053b8721ec7f",
+      "dft_status": "PASS",
+      "table_status": "PASS",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "chain_smoke_003",
+          "paper_id": "5060875c-5615-41b4-aa74-053b8721ec7f"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "5060875c-5615-41b4-aa74-053b8721ec7f",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "PASS",
+            "paper_id": "5060875c-5615-41b4-aa74-053b8721ec7f",
+            "dft_status": "PASS",
+            "table_status": "PASS",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "chain_smoke_003",
+                "paper_id": "5060875c-5615-41b4-aa74-053b8721ec7f"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "PASS",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "chain_smoke_003",
+              "paper_id": "5060875c-5615-41b4-aa74-053b8721ec7f"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T12:27:27.977214"
+  },
+  {
+    "id": "08384aa4-5ab6-433a-8812-56d190e010eb",
+    "paper_id": "0a8144dc-5728-4f05-a641-489858af486b",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "PASS",
+      "paper_id": "0a8144dc-5728-4f05-a641-489858af486b",
+      "dft_status": "PASS",
+      "table_status": "PASS",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "chain_smoke_002",
+          "paper_id": "0a8144dc-5728-4f05-a641-489858af486b"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "0a8144dc-5728-4f05-a641-489858af486b",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "PASS",
+            "paper_id": "0a8144dc-5728-4f05-a641-489858af486b",
+            "dft_status": "PASS",
+            "table_status": "PASS",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "chain_smoke_002",
+                "paper_id": "0a8144dc-5728-4f05-a641-489858af486b"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "PASS",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "chain_smoke_002",
+              "paper_id": "0a8144dc-5728-4f05-a641-489858af486b"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T12:27:27.999092"
+  },
+  {
+    "id": "83afe976-21ca-4816-a5dc-179ba912790f",
+    "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "WARN",
+      "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1",
+      "dft_status": "PASS",
+      "table_status": "WARN",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "69_10.1038_s41467-018-07790-x",
+          "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1"
+        }
+      ],
+      "suspected_missing": [
+        "tables"
+      ],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "WARN",
+            "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1",
+            "dft_status": "PASS",
+            "table_status": "WARN",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "69_10.1038_s41467-018-07790-x",
+                "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1"
+              }
+            ],
+            "suspected_missing": [
+              "tables"
+            ],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "WARN",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "69_10.1038_s41467-018-07790-x",
+              "paper_id": "2d977b15-7715-4a27-87e3-985dc77c4da1"
+            }
+          ],
+          "suspected_missing": [
+            "tables"
+          ],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T13:24:55.938738"
+  },
+  {
+    "id": "00bc091a-7314-4d27-adf6-92c68e46f2ff",
+    "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "WARN",
+      "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+      "dft_status": "WARN",
+      "table_status": "PASS",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "44_10.1016_j.ijhydene.2022.03.209",
+          "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab"
+        }
+      ],
+      "suspected_missing": [
+        "dft_results"
+      ],
+      "recommended_action": "needs_dft_review",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+          "confidence": null,
+          "dft_status": "WARN",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "WARN",
+            "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab",
+            "dft_status": "WARN",
+            "table_status": "PASS",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "44_10.1016_j.ijhydene.2022.03.209",
+                "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab"
+              }
+            ],
+            "suspected_missing": [
+              "dft_results"
+            ],
+            "recommended_action": "needs_dft_review",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "PASS",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "44_10.1016_j.ijhydene.2022.03.209",
+              "paper_id": "d5d5c467-8a91-4f9a-9c93-4e4c84a30bab"
+            }
+          ],
+          "suspected_missing": [
+            "dft_results"
+          ],
+          "recommended_action": "needs_dft_review",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T13:24:55.967272"
+  },
+  {
+    "id": "c141c9a5-187a-410a-908e-b1e96a2c3e24",
+    "paper_id": "8019ffef-fce7-4183-96cf-27a37bb6452c",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "PASS",
+      "paper_id": "8019ffef-fce7-4183-96cf-27a37bb6452c",
+      "dft_status": "PASS",
+      "table_status": "PASS",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "chain_smoke_001",
+          "paper_id": "8019ffef-fce7-4183-96cf-27a37bb6452c"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "8019ffef-fce7-4183-96cf-27a37bb6452c",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "PASS",
+            "paper_id": "8019ffef-fce7-4183-96cf-27a37bb6452c",
+            "dft_status": "PASS",
+            "table_status": "PASS",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "chain_smoke_001",
+                "paper_id": "8019ffef-fce7-4183-96cf-27a37bb6452c"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "PASS",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "chain_smoke_001",
+              "paper_id": "8019ffef-fce7-4183-96cf-27a37bb6452c"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T12:27:28.013070"
+  },
+  {
+    "id": "077df169-4a9f-49a3-a3fb-f046521e474d",
+    "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "PASS",
+      "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050",
+      "dft_status": "PASS",
+      "table_status": "PASS",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "22_10.1016_j.mtcomm.2024.108787",
+          "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "PASS",
+            "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050",
+            "dft_status": "PASS",
+            "table_status": "PASS",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "22_10.1016_j.mtcomm.2024.108787",
+                "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "PASS",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "22_10.1016_j.mtcomm.2024.108787",
+              "paper_id": "e636ff33-55fc-436d-b4ec-1b4f064f4050"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T13:24:55.986037"
+  },
+  {
+    "id": "31c89fb8-dbdd-4776-8934-621b6538ec9e",
+    "paper_id": "cd4888b0-eebf-40c4-b112-e34df9cb3bed",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "PASS",
+      "paper_id": "cd4888b0-eebf-40c4-b112-e34df9cb3bed",
+      "dft_status": "PASS",
+      "table_status": "PASS",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "09_10.1038_s41598-024-59756-3",
+          "paper_id": "cd4888b0-eebf-40c4-b112-e34df9cb3bed"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "cd4888b0-eebf-40c4-b112-e34df9cb3bed",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "PASS",
+            "paper_id": "cd4888b0-eebf-40c4-b112-e34df9cb3bed",
+            "dft_status": "PASS",
+            "table_status": "PASS",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "09_10.1038_s41598-024-59756-3",
+                "paper_id": "cd4888b0-eebf-40c4-b112-e34df9cb3bed"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "PASS",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "09_10.1038_s41598-024-59756-3",
+              "paper_id": "cd4888b0-eebf-40c4-b112-e34df9cb3bed"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T13:00:51.419424"
+  },
+  {
+    "id": "93974ed0-40a5-4ce8-9eee-624a7c039e96",
+    "paper_id": "b1cd5066-81cb-49f9-8646-3ed443afd4cc",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "PASS",
+      "paper_id": "b1cd5066-81cb-49f9-8646-3ed443afd4cc",
+      "dft_status": "PASS",
+      "table_status": "PASS",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "02_10.1016_j.surfin.2025.107127",
+          "paper_id": "b1cd5066-81cb-49f9-8646-3ed443afd4cc"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "b1cd5066-81cb-49f9-8646-3ed443afd4cc",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "PASS",
+            "paper_id": "b1cd5066-81cb-49f9-8646-3ed443afd4cc",
+            "dft_status": "PASS",
+            "table_status": "PASS",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "02_10.1016_j.surfin.2025.107127",
+                "paper_id": "b1cd5066-81cb-49f9-8646-3ed443afd4cc"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "PASS",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "02_10.1016_j.surfin.2025.107127",
+              "paper_id": "b1cd5066-81cb-49f9-8646-3ed443afd4cc"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T13:00:51.446573"
+  },
+  {
+    "id": "1152e86a-0f74-4a27-948b-deac2b64cc16",
+    "paper_id": "316dc16c-d627-4ea2-98e2-b07079264e96",
+    "source": "gemini_external_audit",
+    "source_label": "Fresh chain smoke",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "gemini_external_audit",
+      "verdict": "WARN",
+      "paper_id": "316dc16c-d627-4ea2-98e2-b07079264e96",
+      "dft_status": "PASS",
+      "table_status": "WARN",
+      "figure_status": "PASS",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Smoke audit keeps external AI output as candidate/unverified.",
+          "title": "01_10.1038_s41467-025-62785-9",
+          "paper_id": "316dc16c-d627-4ea2-98e2-b07079264e96"
+        }
+      ],
+      "suspected_missing": [
+        "tables"
+      ],
+      "recommended_action": "human_confirm",
+      "section_structure_status": "PASS"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "gemini_external_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "316dc16c-d627-4ea2-98e2-b07079264e96",
+          "confidence": null,
+          "dft_status": "PASS",
+          "raw_payload": {
+            "source": "gemini_external_audit",
+            "verdict": "WARN",
+            "paper_id": "316dc16c-d627-4ea2-98e2-b07079264e96",
+            "dft_status": "PASS",
+            "table_status": "WARN",
+            "figure_status": "PASS",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Smoke audit keeps external AI output as candidate/unverified.",
+                "title": "01_10.1038_s41467-025-62785-9",
+                "paper_id": "316dc16c-d627-4ea2-98e2-b07079264e96"
+              }
+            ],
+            "suspected_missing": [
+              "tables"
+            ],
+            "recommended_action": "human_confirm",
+            "section_structure_status": "PASS"
+          },
+          "table_status": "WARN",
+          "figure_status": "PASS",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Smoke audit keeps external AI output as candidate/unverified.",
+              "title": "01_10.1038_s41467-025-62785-9",
+              "paper_id": "316dc16c-d627-4ea2-98e2-b07079264e96"
+            }
+          ],
+          "suspected_missing": [
+            "tables"
+          ],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T13:00:51.472836"
+  },
+  {
+    "id": "6abb663e-a3a8-44f0-9c84-25e3b8a223b6",
+    "paper_id": "f1650377-6497-4e59-8039-b2aca2162402",
+    "source": "codex_fresh_chain_acceptance_audit",
+    "source_label": "Codex fresh real-paper chain acceptance audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_chain_acceptance_audit",
+      "verdict": "PASS",
+      "paper_id": "f1650377-6497-4e59-8039-b2aca2162402",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Oxygen Reduction Reaction on Single-Atom Catalysts From Density Functional Theory Calculations Combined with an Implicit Solvation Model",
+          "paper_id": "f1650377-6497-4e59-8039-b2aca2162402"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_chain_acceptance_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "f1650377-6497-4e59-8039-b2aca2162402",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_chain_acceptance_audit",
+            "verdict": "PASS",
+            "paper_id": "f1650377-6497-4e59-8039-b2aca2162402",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Oxygen Reduction Reaction on Single-Atom Catalysts From Density Functional Theory Calculations Combined with an Implicit Solvation Model",
+                "paper_id": "f1650377-6497-4e59-8039-b2aca2162402"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Oxygen Reduction Reaction on Single-Atom Catalysts From Density Functional Theory Calculations Combined with an Implicit Solvation Model",
+              "paper_id": "f1650377-6497-4e59-8039-b2aca2162402"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T16:56:26.329152"
+  },
+  {
+    "id": "99460e9a-9cef-402b-b74d-68041f6f563c",
+    "paper_id": "085011c1-b4bd-459e-9f19-3cdfa030ceb7",
+    "source": "codex_fresh_chain_acceptance_audit",
+    "source_label": "Codex fresh real-paper chain acceptance audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_chain_acceptance_audit",
+      "verdict": "PASS",
+      "paper_id": "085011c1-b4bd-459e-9f19-3cdfa030ceb7",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Assessment of the Accuracy of Density Functionals for Calculating Oxygen Reduction Reaction on Nitrogen-Doped Graphene.",
+          "paper_id": "085011c1-b4bd-459e-9f19-3cdfa030ceb7"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_chain_acceptance_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "085011c1-b4bd-459e-9f19-3cdfa030ceb7",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_chain_acceptance_audit",
+            "verdict": "PASS",
+            "paper_id": "085011c1-b4bd-459e-9f19-3cdfa030ceb7",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Assessment of the Accuracy of Density Functionals for Calculating Oxygen Reduction Reaction on Nitrogen-Doped Graphene.",
+                "paper_id": "085011c1-b4bd-459e-9f19-3cdfa030ceb7"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Assessment of the Accuracy of Density Functionals for Calculating Oxygen Reduction Reaction on Nitrogen-Doped Graphene.",
+              "paper_id": "085011c1-b4bd-459e-9f19-3cdfa030ceb7"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T16:56:28.858598"
+  },
+  {
+    "id": "30a1b2ab-ae43-4025-b7f5-b86460ca3b7a",
+    "paper_id": "783ab318-a4b7-44cb-a6d0-87db769e3a4f",
+    "source": "codex_fresh_chain_acceptance_audit",
+    "source_label": "Codex fresh real-paper chain acceptance audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_chain_acceptance_audit",
+      "verdict": "PASS",
+      "paper_id": "783ab318-a4b7-44cb-a6d0-87db769e3a4f",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Comparative density functional theory study for predicting oxygen reduction activity of single-atom catalyst",
+          "paper_id": "783ab318-a4b7-44cb-a6d0-87db769e3a4f"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_chain_acceptance_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "783ab318-a4b7-44cb-a6d0-87db769e3a4f",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_chain_acceptance_audit",
+            "verdict": "PASS",
+            "paper_id": "783ab318-a4b7-44cb-a6d0-87db769e3a4f",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Comparative density functional theory study for predicting oxygen reduction activity of single-atom catalyst",
+                "paper_id": "783ab318-a4b7-44cb-a6d0-87db769e3a4f"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Comparative density functional theory study for predicting oxygen reduction activity of single-atom catalyst",
+              "paper_id": "783ab318-a4b7-44cb-a6d0-87db769e3a4f"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T16:56:30.936946"
+  },
+  {
+    "id": "179dddac-321f-4285-a8ff-fe42403521c1",
+    "paper_id": "6efe53f3-5c28-4b36-8ebf-3bf9426087a5",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "6efe53f3-5c28-4b36-8ebf-3bf9426087a5",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "The rise of Single-Atom Catalysts",
+          "paper_id": "6efe53f3-5c28-4b36-8ebf-3bf9426087a5"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "6efe53f3-5c28-4b36-8ebf-3bf9426087a5",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "6efe53f3-5c28-4b36-8ebf-3bf9426087a5",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "The rise of Single-Atom Catalysts",
+                "paper_id": "6efe53f3-5c28-4b36-8ebf-3bf9426087a5"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "The rise of Single-Atom Catalysts",
+              "paper_id": "6efe53f3-5c28-4b36-8ebf-3bf9426087a5"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:18:30.417416"
+  },
+  {
+    "id": "d79d4340-0f2e-452d-a0bf-3ec4a2ecb968",
+    "paper_id": "76590237-aecc-4613-a456-a21fbd5e3d03",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "76590237-aecc-4613-a456-a21fbd5e3d03",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Transition metal-tetracyanoquinodimethane monolayers as single-atom catalysts for the electrocatalytic nitrogen reduction reaction",
+          "paper_id": "76590237-aecc-4613-a456-a21fbd5e3d03"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "76590237-aecc-4613-a456-a21fbd5e3d03",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "76590237-aecc-4613-a456-a21fbd5e3d03",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Transition metal-tetracyanoquinodimethane monolayers as single-atom catalysts for the electrocatalytic nitrogen reduction reaction",
+                "paper_id": "76590237-aecc-4613-a456-a21fbd5e3d03"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Transition metal-tetracyanoquinodimethane monolayers as single-atom catalysts for the electrocatalytic nitrogen reduction reaction",
+              "paper_id": "76590237-aecc-4613-a456-a21fbd5e3d03"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:18:32.234735"
+  },
+  {
+    "id": "707058bd-17af-4546-97c1-d64cbe90159d",
+    "paper_id": "be9916fe-3769-4835-98c8-fb9770f6d1b4",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "be9916fe-3769-4835-98c8-fb9770f6d1b4",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Highly Active Nanoperovskite Catalysts for Oxygen Evolution Reaction: Insights into Activity and Stability of Ba0.5Sr0.5Co0.8Fe0.2O2+δ and PrBaCo2O5+δ",
+          "paper_id": "be9916fe-3769-4835-98c8-fb9770f6d1b4"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "be9916fe-3769-4835-98c8-fb9770f6d1b4",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "be9916fe-3769-4835-98c8-fb9770f6d1b4",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Highly Active Nanoperovskite Catalysts for Oxygen Evolution Reaction: Insights into Activity and Stability of Ba0.5Sr0.5Co0.8Fe0.2O2+δ and PrBaCo2O5+δ",
+                "paper_id": "be9916fe-3769-4835-98c8-fb9770f6d1b4"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Highly Active Nanoperovskite Catalysts for Oxygen Evolution Reaction: Insights into Activity and Stability of Ba0.5Sr0.5Co0.8Fe0.2O2+δ and PrBaCo2O5+δ",
+              "paper_id": "be9916fe-3769-4835-98c8-fb9770f6d1b4"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:18:33.445528"
+  },
+  {
+    "id": "90eda4bb-8ad9-4b1f-9d78-834e4cc1190b",
+    "paper_id": "4342baad-cda9-414f-a8c4-5eafcc97c62f",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "4342baad-cda9-414f-a8c4-5eafcc97c62f",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Oxygen reduction reactions on pure and nitrogen-doped graphene: a first-principles modeling.",
+          "paper_id": "4342baad-cda9-414f-a8c4-5eafcc97c62f"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "4342baad-cda9-414f-a8c4-5eafcc97c62f",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "4342baad-cda9-414f-a8c4-5eafcc97c62f",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Oxygen reduction reactions on pure and nitrogen-doped graphene: a first-principles modeling.",
+                "paper_id": "4342baad-cda9-414f-a8c4-5eafcc97c62f"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Oxygen reduction reactions on pure and nitrogen-doped graphene: a first-principles modeling.",
+              "paper_id": "4342baad-cda9-414f-a8c4-5eafcc97c62f"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:23:03.251931"
+  },
+  {
+    "id": "3abb6c40-95d0-49c0-8636-499a83a55c63",
+    "paper_id": "895ebcfc-5067-434d-bb73-5a1592006059",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "895ebcfc-5067-434d-bb73-5a1592006059",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "First principles screening of transition metal single-atom catalysts for nitrogen reduction reaction",
+          "paper_id": "895ebcfc-5067-434d-bb73-5a1592006059"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "895ebcfc-5067-434d-bb73-5a1592006059",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "895ebcfc-5067-434d-bb73-5a1592006059",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "First principles screening of transition metal single-atom catalysts for nitrogen reduction reaction",
+                "paper_id": "895ebcfc-5067-434d-bb73-5a1592006059"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "First principles screening of transition metal single-atom catalysts for nitrogen reduction reaction",
+              "paper_id": "895ebcfc-5067-434d-bb73-5a1592006059"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:23:05.916435"
+  },
+  {
+    "id": "c64493ff-2f46-4800-9c1b-d36b6710c1ff",
+    "paper_id": "7041a455-2bdc-40ae-a65e-bb891decce9b",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "7041a455-2bdc-40ae-a65e-bb891decce9b",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Accelerating the Discovery of g-C$_3$N$_4$-Supported Single Atom Catalysts for Hydrogen Evolution Reaction: A Combined DFT and Machine Learning Strategy",
+          "paper_id": "7041a455-2bdc-40ae-a65e-bb891decce9b"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "7041a455-2bdc-40ae-a65e-bb891decce9b",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "7041a455-2bdc-40ae-a65e-bb891decce9b",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Accelerating the Discovery of g-C$_3$N$_4$-Supported Single Atom Catalysts for Hydrogen Evolution Reaction: A Combined DFT and Machine Learning Strategy",
+                "paper_id": "7041a455-2bdc-40ae-a65e-bb891decce9b"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Accelerating the Discovery of g-C$_3$N$_4$-Supported Single Atom Catalysts for Hydrogen Evolution Reaction: A Combined DFT and Machine Learning Strategy",
+              "paper_id": "7041a455-2bdc-40ae-a65e-bb891decce9b"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:27:06.189589"
+  },
+  {
+    "id": "44f9eb14-a26e-4b08-95ec-40acdc04f32d",
+    "paper_id": "f3105ef3-39e8-497d-9fc4-272d17100419",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "f3105ef3-39e8-497d-9fc4-272d17100419",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Spin State versus Potential of Zero Charge as Predictors of Density-Dependent Oxygen Reduction in M-N-C Electrocatalysts",
+          "paper_id": "f3105ef3-39e8-497d-9fc4-272d17100419"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "f3105ef3-39e8-497d-9fc4-272d17100419",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "f3105ef3-39e8-497d-9fc4-272d17100419",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Spin State versus Potential of Zero Charge as Predictors of Density-Dependent Oxygen Reduction in M-N-C Electrocatalysts",
+                "paper_id": "f3105ef3-39e8-497d-9fc4-272d17100419"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Spin State versus Potential of Zero Charge as Predictors of Density-Dependent Oxygen Reduction in M-N-C Electrocatalysts",
+              "paper_id": "f3105ef3-39e8-497d-9fc4-272d17100419"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:23:07.749206"
+  },
+  {
+    "id": "2759c6ba-f64a-43b5-a342-c430629c2090",
+    "paper_id": "c20187e0-c277-49d1-8f44-b8c7380813dc",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "c20187e0-c277-49d1-8f44-b8c7380813dc",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Boron-doped graphene as active electrocatalyst for oxygen reduction reaction at a fuel-cell cathode",
+          "paper_id": "c20187e0-c277-49d1-8f44-b8c7380813dc"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "c20187e0-c277-49d1-8f44-b8c7380813dc",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "c20187e0-c277-49d1-8f44-b8c7380813dc",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Boron-doped graphene as active electrocatalyst for oxygen reduction reaction at a fuel-cell cathode",
+                "paper_id": "c20187e0-c277-49d1-8f44-b8c7380813dc"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Boron-doped graphene as active electrocatalyst for oxygen reduction reaction at a fuel-cell cathode",
+              "paper_id": "c20187e0-c277-49d1-8f44-b8c7380813dc"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:27:03.649975"
+  },
+  {
+    "id": "307b9eaf-6bc5-4db6-86c9-48b448c79540",
+    "paper_id": "10204832-d7d4-4cc8-81a9-b0a47024393b",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "PASS",
+      "paper_id": "10204832-d7d4-4cc8-81a9-b0a47024393b",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Combining first-principles modeling and symbolic regression for designing efficient single-atom catalysts in Oxygen Evolution Reaction on Mo$_2$CO$_2$ MXenes",
+          "paper_id": "10204832-d7d4-4cc8-81a9-b0a47024393b"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "PASS",
+          "paper_id": "10204832-d7d4-4cc8-81a9-b0a47024393b",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "PASS",
+            "paper_id": "10204832-d7d4-4cc8-81a9-b0a47024393b",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Combining first-principles modeling and symbolic regression for designing efficient single-atom catalysts in Oxygen Evolution Reaction on Mo$_2$CO$_2$ MXenes",
+                "paper_id": "10204832-d7d4-4cc8-81a9-b0a47024393b"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Combining first-principles modeling and symbolic regression for designing efficient single-atom catalysts in Oxygen Evolution Reaction on Mo$_2$CO$_2$ MXenes",
+              "paper_id": "10204832-d7d4-4cc8-81a9-b0a47024393b"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T17:27:08.679670"
+  },
+  {
+    "id": "da428e04-7fe2-4b16-8753-c943a620eb59",
+    "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+    "source": "codex_failure_recovery_acceptance_audit",
+    "source_label": "Codex failure recovery acceptance audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_failure_recovery_acceptance_audit",
+      "verdict": "WARN",
+      "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+      "confidence": 0.5,
+      "dft_status": "blocked",
+      "table_status": "blocked",
+      "figure_status": "blocked",
+      "metadata_status": "unknown",
+      "evidence_examples": [
+        {
+          "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+          "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+        }
+      ],
+      "suspected_missing": [
+        "artifact_precondition_failed"
+      ],
+      "recommended_action": "human_confirm_after_artifact_recovery",
+      "verification_status": "unverified",
+      "section_structure_status": "blocked"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_failure_recovery_acceptance_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+          "confidence": 0.5,
+          "dft_status": "blocked",
+          "raw_payload": {
+            "source": "codex_failure_recovery_acceptance_audit",
+            "verdict": "WARN",
+            "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c",
+            "confidence": 0.5,
+            "dft_status": "blocked",
+            "table_status": "blocked",
+            "figure_status": "blocked",
+            "metadata_status": "unknown",
+            "evidence_examples": [
+              {
+                "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+                "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+              }
+            ],
+            "suspected_missing": [
+              "artifact_precondition_failed"
+            ],
+            "recommended_action": "human_confirm_after_artifact_recovery",
+            "verification_status": "unverified",
+            "section_structure_status": "blocked"
+          },
+          "table_status": "blocked",
+          "figure_status": "blocked",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "unknown",
+          "evidence_examples": [
+            {
+              "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+              "paper_id": "b002cdda-b5f8-4c5e-ad71-c5085b5cda8c"
+            }
+          ],
+          "suspected_missing": [
+            "artifact_precondition_failed"
+          ],
+          "recommended_action": "human_confirm_after_artifact_recovery",
+          "verification_status": "unverified",
+          "section_structure_status": "blocked"
+        }
+      ],
+      "external_audit_precondition": {
+        "status": "artifact_precondition_failed",
+        "blocking_errors": [
+          "missing_pdf"
+        ],
+        "artifact_ready_for_external_audit": false
+      }
+    },
+    "mapping_status": "artifact_precondition_failed",
+    "mapping_error": "artifact_precondition_failed:missing_pdf",
+    "created_at": "2026-06-08T18:22:33.139297"
+  },
+  {
+    "id": "49c50026-bd5d-439d-84bf-98c4b694c484",
+    "paper_id": "185c98b5-f228-4877-b819-9ea5cc178199",
+    "source": "codex_fresh_chain_acceptance_audit",
+    "source_label": "Codex fresh real-paper chain acceptance audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_chain_acceptance_audit",
+      "verdict": "WARN",
+      "paper_id": "185c98b5-f228-4877-b819-9ea5cc178199",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Single-atom catalysts boost nitrogen electroreduction reaction",
+          "paper_id": "185c98b5-f228-4877-b819-9ea5cc178199"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_chain_acceptance_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "185c98b5-f228-4877-b819-9ea5cc178199",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_chain_acceptance_audit",
+            "verdict": "WARN",
+            "paper_id": "185c98b5-f228-4877-b819-9ea5cc178199",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Single-atom catalysts boost nitrogen electroreduction reaction",
+                "paper_id": "185c98b5-f228-4877-b819-9ea5cc178199"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Single-atom catalysts boost nitrogen electroreduction reaction",
+              "paper_id": "185c98b5-f228-4877-b819-9ea5cc178199"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T18:48:55.843224"
+  },
+  {
+    "id": "d8936f75-79a1-40a9-b8d4-c3440e60386f",
+    "paper_id": "59dc1871-1cd6-4442-81b3-36c7951ee2d0",
+    "source": "codex_fresh_chain_acceptance_audit",
+    "source_label": "Codex fresh real-paper chain acceptance audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_chain_acceptance_audit",
+      "verdict": "WARN",
+      "paper_id": "59dc1871-1cd6-4442-81b3-36c7951ee2d0",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Identifying outstanding transition-metal-alloy heterogeneous catalysts\\n for the oxygen reduction and evolution reactions via subgroup discovery",
+          "paper_id": "59dc1871-1cd6-4442-81b3-36c7951ee2d0"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_chain_acceptance_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "59dc1871-1cd6-4442-81b3-36c7951ee2d0",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_chain_acceptance_audit",
+            "verdict": "WARN",
+            "paper_id": "59dc1871-1cd6-4442-81b3-36c7951ee2d0",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Identifying outstanding transition-metal-alloy heterogeneous catalysts\\n for the oxygen reduction and evolution reactions via subgroup discovery",
+                "paper_id": "59dc1871-1cd6-4442-81b3-36c7951ee2d0"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Identifying outstanding transition-metal-alloy heterogeneous catalysts\\n for the oxygen reduction and evolution reactions via subgroup discovery",
+              "paper_id": "59dc1871-1cd6-4442-81b3-36c7951ee2d0"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T18:49:00.148783"
+  },
+  {
+    "id": "b946e506-0047-4846-a8da-746e59ed2b10",
+    "paper_id": "3e786729-1226-4a63-9e2b-acef1eee09cb",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "WARN",
+      "paper_id": "3e786729-1226-4a63-9e2b-acef1eee09cb",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Cerium doped graphene-based materials towards oxygen reduction reaction catalysis",
+          "paper_id": "3e786729-1226-4a63-9e2b-acef1eee09cb"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "3e786729-1226-4a63-9e2b-acef1eee09cb",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "WARN",
+            "paper_id": "3e786729-1226-4a63-9e2b-acef1eee09cb",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Cerium doped graphene-based materials towards oxygen reduction reaction catalysis",
+                "paper_id": "3e786729-1226-4a63-9e2b-acef1eee09cb"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Cerium doped graphene-based materials towards oxygen reduction reaction catalysis",
+              "paper_id": "3e786729-1226-4a63-9e2b-acef1eee09cb"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T19:02:28.269155"
+  },
+  {
+    "id": "8069e5d0-1061-421b-a44a-ac4690e14062",
+    "paper_id": "94c51100-1857-4e4e-b3fb-e076269f9c9c",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "WARN",
+      "paper_id": "94c51100-1857-4e4e-b3fb-e076269f9c9c",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Carbon Mono and Dioxide Hydrogenation over Pure and Metal Oxide Decorated Graphene Oxide Substrates: Insight from DFT",
+          "paper_id": "94c51100-1857-4e4e-b3fb-e076269f9c9c"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "94c51100-1857-4e4e-b3fb-e076269f9c9c",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "WARN",
+            "paper_id": "94c51100-1857-4e4e-b3fb-e076269f9c9c",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Carbon Mono and Dioxide Hydrogenation over Pure and Metal Oxide Decorated Graphene Oxide Substrates: Insight from DFT",
+                "paper_id": "94c51100-1857-4e4e-b3fb-e076269f9c9c"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Carbon Mono and Dioxide Hydrogenation over Pure and Metal Oxide Decorated Graphene Oxide Substrates: Insight from DFT",
+              "paper_id": "94c51100-1857-4e4e-b3fb-e076269f9c9c"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T19:02:30.345860"
+  },
+  {
+    "id": "5ce30621-22cb-43b4-8274-574dc136c976",
+    "paper_id": "822b9aef-b07e-4a42-98bb-64318b473774",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "WARN",
+      "paper_id": "822b9aef-b07e-4a42-98bb-64318b473774",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Atom-by-atom design of metal oxide catalysts for the oxygen evolution reaction with machine learning",
+          "paper_id": "822b9aef-b07e-4a42-98bb-64318b473774"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "822b9aef-b07e-4a42-98bb-64318b473774",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "WARN",
+            "paper_id": "822b9aef-b07e-4a42-98bb-64318b473774",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Atom-by-atom design of metal oxide catalysts for the oxygen evolution reaction with machine learning",
+                "paper_id": "822b9aef-b07e-4a42-98bb-64318b473774"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Atom-by-atom design of metal oxide catalysts for the oxygen evolution reaction with machine learning",
+              "paper_id": "822b9aef-b07e-4a42-98bb-64318b473774"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T19:02:34.932294"
+  },
+  {
+    "id": "262f904d-3e1a-4c97-874d-6633c7a7f407",
+    "paper_id": "6933ba6c-e1aa-4133-8d6b-e47dfcc48dd8",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "WARN",
+      "paper_id": "6933ba6c-e1aa-4133-8d6b-e47dfcc48dd8",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Thickness-dependent catalytic activity of hydrogen evolution based on single atomic catalyst of Pt above MXene",
+          "paper_id": "6933ba6c-e1aa-4133-8d6b-e47dfcc48dd8"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "6933ba6c-e1aa-4133-8d6b-e47dfcc48dd8",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "WARN",
+            "paper_id": "6933ba6c-e1aa-4133-8d6b-e47dfcc48dd8",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Thickness-dependent catalytic activity of hydrogen evolution based on single atomic catalyst of Pt above MXene",
+                "paper_id": "6933ba6c-e1aa-4133-8d6b-e47dfcc48dd8"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Thickness-dependent catalytic activity of hydrogen evolution based on single atomic catalyst of Pt above MXene",
+              "paper_id": "6933ba6c-e1aa-4133-8d6b-e47dfcc48dd8"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T19:14:15.224385"
+  },
+  {
+    "id": "b90fb16e-ec38-447d-9e27-fcda627f23c4",
+    "paper_id": "efa16d42-add6-4d56-9adb-8b7d6321ec31",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "WARN",
+      "paper_id": "efa16d42-add6-4d56-9adb-8b7d6321ec31",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Water Facilitated Electrochemical Reduction of CO2 on Cobalt-Porphyrin Catalysts",
+          "paper_id": "efa16d42-add6-4d56-9adb-8b7d6321ec31"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "efa16d42-add6-4d56-9adb-8b7d6321ec31",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "WARN",
+            "paper_id": "efa16d42-add6-4d56-9adb-8b7d6321ec31",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Water Facilitated Electrochemical Reduction of CO2 on Cobalt-Porphyrin Catalysts",
+                "paper_id": "efa16d42-add6-4d56-9adb-8b7d6321ec31"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Water Facilitated Electrochemical Reduction of CO2 on Cobalt-Porphyrin Catalysts",
+              "paper_id": "efa16d42-add6-4d56-9adb-8b7d6321ec31"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T19:14:17.503012"
+  },
+  {
+    "id": "df0b08f7-76b7-4e05-969b-811c56e00e30",
+    "paper_id": "297892ea-25a5-4b7a-8f93-88380e1b9948",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "WARN",
+      "paper_id": "297892ea-25a5-4b7a-8f93-88380e1b9948",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "On the electrochemical CO2 reduction by Bi-based catalysts: single crystals or mixture phases",
+          "paper_id": "297892ea-25a5-4b7a-8f93-88380e1b9948"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "297892ea-25a5-4b7a-8f93-88380e1b9948",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "WARN",
+            "paper_id": "297892ea-25a5-4b7a-8f93-88380e1b9948",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "On the electrochemical CO2 reduction by Bi-based catalysts: single crystals or mixture phases",
+                "paper_id": "297892ea-25a5-4b7a-8f93-88380e1b9948"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "On the electrochemical CO2 reduction by Bi-based catalysts: single crystals or mixture phases",
+              "paper_id": "297892ea-25a5-4b7a-8f93-88380e1b9948"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T19:14:20.552726"
+  },
+  {
+    "id": "4ac49f69-663e-41d1-bde3-d22634502755",
+    "paper_id": "c960f2d3-ed97-4aa2-b22d-98dbc98f684a",
+    "source": "codex_failure_recovery_acceptance_audit",
+    "source_label": "Codex failure recovery acceptance audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_failure_recovery_acceptance_audit",
+      "verdict": "WARN",
+      "paper_id": "c960f2d3-ed97-4aa2-b22d-98dbc98f684a",
+      "confidence": 0.5,
+      "dft_status": "blocked",
+      "table_status": "blocked",
+      "figure_status": "blocked",
+      "metadata_status": "unknown",
+      "evidence_examples": [
+        {
+          "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+          "paper_id": "c960f2d3-ed97-4aa2-b22d-98dbc98f684a"
+        }
+      ],
+      "suspected_missing": [
+        "artifact_precondition_failed"
+      ],
+      "recommended_action": "human_confirm_after_artifact_recovery",
+      "verification_status": "unverified",
+      "section_structure_status": "blocked"
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_failure_recovery_acceptance_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "c960f2d3-ed97-4aa2-b22d-98dbc98f684a",
+          "confidence": 0.5,
+          "dft_status": "blocked",
+          "raw_payload": {
+            "source": "codex_failure_recovery_acceptance_audit",
+            "verdict": "WARN",
+            "paper_id": "c960f2d3-ed97-4aa2-b22d-98dbc98f684a",
+            "confidence": 0.5,
+            "dft_status": "blocked",
+            "table_status": "blocked",
+            "figure_status": "blocked",
+            "metadata_status": "unknown",
+            "evidence_examples": [
+              {
+                "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+                "paper_id": "c960f2d3-ed97-4aa2-b22d-98dbc98f684a"
+              }
+            ],
+            "suspected_missing": [
+              "artifact_precondition_failed"
+            ],
+            "recommended_action": "human_confirm_after_artifact_recovery",
+            "verification_status": "unverified",
+            "section_structure_status": "blocked"
+          },
+          "table_status": "blocked",
+          "figure_status": "blocked",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "unknown",
+          "evidence_examples": [
+            {
+              "text": "Failure recovery acceptance import should be blocked until artifacts are ready.",
+              "paper_id": "c960f2d3-ed97-4aa2-b22d-98dbc98f684a"
+            }
+          ],
+          "suspected_missing": [
+            "artifact_precondition_failed"
+          ],
+          "recommended_action": "human_confirm_after_artifact_recovery",
+          "verification_status": "unverified",
+          "section_structure_status": "blocked"
+        }
+      ],
+      "external_audit_precondition": {
+        "status": "artifact_precondition_failed",
+        "blocking_errors": [
+          "missing_pdf"
+        ],
+        "artifact_ready_for_external_audit": false
+      }
+    },
+    "mapping_status": "artifact_precondition_failed",
+    "mapping_error": "artifact_precondition_failed:missing_pdf",
+    "created_at": "2026-06-08T19:30:22.294256"
+  },
+  {
+    "id": "6d66c827-42f4-4d1c-b528-a7acb6f796d7",
+    "paper_id": "c0d6973c-03f4-486f-af21-8254ef716e67",
+    "source": "codex_fresh_repeatability_audit",
+    "source_label": "Codex fresh chain repeatability audit",
+    "raw_text": null,
+    "raw_payload": {
+      "source": "codex_fresh_repeatability_audit",
+      "verdict": "WARN",
+      "paper_id": "c0d6973c-03f4-486f-af21-8254ef716e67",
+      "confidence": 0.72,
+      "dft_status": "candidate_unverified",
+      "table_status": "candidate_unverified",
+      "figure_status": "candidate_unverified",
+      "metadata_status": "PASS",
+      "evidence_examples": [
+        {
+          "text": "Deterministic acceptance payload verifies import visibility only.",
+          "title": "Tuning the intermediate reaction barriers by a CuPd catalyst to improve the selectivity of CO2 electroreduction to C2 products",
+          "paper_id": "c0d6973c-03f4-486f-af21-8254ef716e67"
+        }
+      ],
+      "suspected_missing": [],
+      "recommended_action": "human_confirm",
+      "verification_status": "unverified",
+      "section_structure_status": "PASS",
+      "blocking_errors_at_import": []
+    },
+    "normalized_payload": {
+      "review_notes": [],
+      "unmapped_items": [],
+      "supporting_papers": [],
+      "correction_proposals": [],
+      "external_audit_opinions": [
+        {
+          "source": "codex_fresh_repeatability_audit",
+          "status": "candidate",
+          "verdict": "WARN",
+          "paper_id": "c0d6973c-03f4-486f-af21-8254ef716e67",
+          "confidence": 0.72,
+          "dft_status": "candidate_unverified",
+          "raw_payload": {
+            "source": "codex_fresh_repeatability_audit",
+            "verdict": "WARN",
+            "paper_id": "c0d6973c-03f4-486f-af21-8254ef716e67",
+            "confidence": 0.72,
+            "dft_status": "candidate_unverified",
+            "table_status": "candidate_unverified",
+            "figure_status": "candidate_unverified",
+            "metadata_status": "PASS",
+            "evidence_examples": [
+              {
+                "text": "Deterministic acceptance payload verifies import visibility only.",
+                "title": "Tuning the intermediate reaction barriers by a CuPd catalyst to improve the selectivity of CO2 electroreduction to C2 products",
+                "paper_id": "c0d6973c-03f4-486f-af21-8254ef716e67"
+              }
+            ],
+            "suspected_missing": [],
+            "recommended_action": "human_confirm",
+            "verification_status": "unverified",
+            "section_structure_status": "PASS",
+            "blocking_errors_at_import": []
+          },
+          "table_status": "candidate_unverified",
+          "figure_status": "candidate_unverified",
+          "mapping_reason": "Paper-level external audit payload imported as candidate opinion",
+          "metadata_status": "PASS",
+          "evidence_examples": [
+            {
+              "text": "Deterministic acceptance payload verifies import visibility only.",
+              "title": "Tuning the intermediate reaction barriers by a CuPd catalyst to improve the selectivity of CO2 electroreduction to C2 products",
+              "paper_id": "c0d6973c-03f4-486f-af21-8254ef716e67"
+            }
+          ],
+          "suspected_missing": [],
+          "recommended_action": "human_confirm",
+          "verification_status": "unverified",
+          "section_structure_status": "PASS"
+        }
+      ]
+    },
+    "mapping_status": "normalized",
+    "mapping_error": null,
+    "created_at": "2026-06-08T19:21:04.381983"
+  }
+]
