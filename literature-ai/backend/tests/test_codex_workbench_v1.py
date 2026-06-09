@@ -171,7 +171,11 @@ def test_prepare_workspace_writes_standard_materials(workbench_env):
 
 
 def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_env):
-    _, _, Session = workbench_env
+    _, storage_root, Session = workbench_env
+    Image = pytest.importorskip("PIL.Image")
+    figure_asset = storage_root / "figures" / "figure-2.png"
+    figure_asset.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (420, 260), color=(32, 64, 96)).save(figure_asset)
     with Session() as session:
         paper = Paper(title="Figure audit paper", pdf_path="paper.pdf", workflow_status="Parsed_Material_Ready")
         session.add(paper)
@@ -183,7 +187,11 @@ def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_e
             page=4,
             crop_status="candidate_crop",
             crop_confidence=0.82,
-            prov=[{"bbox": {"l": 10, "t": 20, "r": 300, "b": 200}}],
+            prov=[{
+                "bbox": {"l": 10, "t": 20, "r": 300, "b": 200},
+                "full_page_image_path": "page_004.png",
+                "pixel_size": {"width": 420, "height": 260},
+            }],
         )
         session.add(figure)
         session.flush()
@@ -244,6 +252,8 @@ def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_e
         assert figure_payload.asset_url == "/api/papers/assets/figures/figure-2.png"
         assert figure_payload.image_review["crop_status"] == "candidate_crop"
         assert figure_payload.review_required is False
+        assert figure_payload.figure_reliability_status == "reliable"
+        assert figure_payload.figure_reliability_warnings == []
         assert figure_payload.object_review_audit_count == 2
         assert figure_payload.latest_object_review_audit["source"] == "codex_figure_audit"
         assert figure_payload.latest_object_review_audit["decision"] == "REVISE"
@@ -548,6 +558,21 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
         session.add(human_confirmed)
         session.flush()
         session.add(DFTResult(paper_id=paper.id, property_type="band_gap", value=0.5, unit="eV"))
+        session.add(
+            PaperFigure(
+                paper_id=paper.id,
+                caption="Figure with a small crop and missing full-page snapshot.",
+                page=3,
+                image_path=None,
+                crop_status="candidate_crop",
+                prov=[
+                    {
+                        "bbox": {"l": 1, "t": 1, "r": 40, "b": 30},
+                        "pixel_size": {"width": 120, "height": 80},
+                    }
+                ],
+            )
+        )
         session.add(EvidenceLocator(paper_id=paper.id, source_type="text", evidence_text="candidate", locator_status="candidate"))
         run = ExternalAnalysisRun(
             paper_id=paper.id,
@@ -601,6 +626,13 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert by_title["Review center paper"]["locator_issue_count"] == 1
     assert by_title["Review center paper"]["locator_issue_counts"]["missing_page"] == 1
     assert by_title["Review center paper"]["top_locator_issues"][0]["code"] == "missing_page"
+    assert by_title["Review center paper"]["figure_issue_count"] >= 2
+    assert by_title["Review center paper"]["figure_issue_counts"]["missing_full_page_snapshot"] == 1
+    assert by_title["Review center paper"]["figure_issue_counts"]["small_crop"] == 1
+    assert {item["code"] for item in by_title["Review center paper"]["top_figure_issues"]} >= {
+        "missing_full_page_snapshot",
+        "small_crop",
+    }
     assert by_title["Review center paper"]["object_review_audit_count"] == 1
     assert by_title["Review center paper"]["object_review_audits"][0]["candidate_type"] == "object_review_audit"
     assert by_title["Review center paper"]["object_review_audits"][0]["decision"] == "FLAG"

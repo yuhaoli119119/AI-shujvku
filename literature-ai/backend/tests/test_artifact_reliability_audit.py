@@ -234,7 +234,9 @@ def test_artifact_reliability_audit_counts_known_issues_and_is_read_only(audit_e
     paper_id, before = _seed_reliability_cases(storage_root, Session)
 
     with Session() as session:
-        report = ArtifactReliabilityAuditService(session, get_settings()).audit_paper(UUID(paper_id))
+        service = ArtifactReliabilityAuditService(session, get_settings())
+        report = service.audit_paper(UUID(paper_id))
+        figure_summary = service.paper_figure_reliability_summary(UUID(paper_id))
 
     assert report["report_policy"]["read_only"] is True
     assert report["figure_count"] == 6
@@ -252,6 +254,10 @@ def test_artifact_reliability_audit_counts_known_issues_and_is_read_only(audit_e
     assert report["locator_issue_counts"]["missing_page"] == 1
     assert report["examples"]["small_crop"][0]["object_type"] == "figure"
     assert report["examples"]["text_only_locator"][0]["status"] == "text_only"
+    assert figure_summary["status"] == "needs_review"
+    assert figure_summary["issue_counts"]["missing_full_page_snapshot"] == 3
+    assert figure_summary["issue_counts"]["small_crop"] == 1
+    assert figure_summary["issue_count"] == sum(figure_summary["issue_counts"].values())
     assert _current_snapshot(Session, paper_id) == before
 
 

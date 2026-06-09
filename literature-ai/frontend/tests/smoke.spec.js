@@ -71,9 +71,18 @@ const PAPER_DETAIL = {
     asset_url: '/api/papers/assets/figures/figure-1.png',
     figure_role: 'structure',
     crop_status: 'needs_review',
-    image_review: { crop_status: 'needs_review', review_required: true, flags: ['missing_parser_bbox'] },
+    image_review: {
+      crop_status: 'needs_review',
+      review_required: true,
+      flags: ['missing_parser_bbox', 'missing_full_page_snapshot', 'small_crop_or_subfigure'],
+      pixel_size: { width: 120, height: 80 },
+      bbox_size_points: { width: 40, height: 30 },
+      full_page_image_path: null,
+    },
     review_required: true,
-    flags: ['missing_parser_bbox'],
+    flags: ['missing_parser_bbox', 'missing_full_page_snapshot', 'small_crop_or_subfigure'],
+    figure_reliability_status: 'needs_review',
+    figure_reliability_warnings: ['missing_bbox', 'missing_full_page_snapshot', 'small_crop'],
     object_review_audit_count: 1,
     latest_object_review_audit: {
       source: 'glm_figure_audit',
@@ -912,6 +921,24 @@ async function mockApi(route) {
           dft_completeness_label: 'Initial parsed',
           suspected_missing_dft_count: 0,
           figure_count: 1,
+          figure_reliability: {
+            status: 'needs_review',
+            figure_count: 1,
+            issue_count: 3,
+            issue_counts: { missing_full_page_snapshot: 1, small_crop: 1, missing_bbox: 1 },
+            top_issues: [
+              { code: 'missing_full_page_snapshot', count: 1 },
+              { code: 'small_crop', count: 1 },
+              { code: 'missing_bbox', count: 1 },
+            ],
+          },
+          figure_issue_count: 3,
+          figure_issue_counts: { missing_full_page_snapshot: 1, small_crop: 1, missing_bbox: 1 },
+          top_figure_issues: [
+            { code: 'missing_full_page_snapshot', count: 1 },
+            { code: 'small_crop', count: 1 },
+            { code: 'missing_bbox', count: 1 },
+          ],
           table_count: 1,
           evidence_count: 1,
           locator_reliability: {
@@ -2104,9 +2131,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#rows')).toContainText('External audit:');
     await expect(page.locator('#rows')).toContainText('Object audits:');
+    await expect(page.locator('#rows')).toContainText('Figure issues 3');
     await expect(page.locator('#rows')).toContainText('Locator issues 2');
     await expect(page.locator('#rows')).toContainText('1');
-    const locatorSummary = page.locator('#rows [title*="missing bbox"]').first();
+    const figureSummary = page.locator('#rows [title*="missing full-page snapshot"]').first();
+    await expect(figureSummary).toHaveAttribute('title', /missing full-page snapshot: 1/);
+    await expect(figureSummary).toHaveAttribute('title', /small crop: 1/);
+    await expect(figureSummary).toHaveAttribute('title', /missing bbox: 1/);
+    const locatorSummary = page.locator('#rows [title*="text-only"]').first();
     await expect(locatorSummary).toHaveAttribute('title', /missing bbox: 1/);
     await expect(locatorSummary).toHaveAttribute('title', /text-only: 1/);
     const auditSummary = page.locator('#rows [title*="Assigned AI DFT audit"]').first();
@@ -2343,8 +2375,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     const figures = page.locator('#figuresContent');
     await expect(figures).toContainText('Crop status: needs_review');
+    await expect(figures).toContainText('Figure reliability: needs review');
     await expect(figures).toContainText('Image review: required');
     await expect(figures).toContainText('Flags: missing_parser_bbox');
+    await expect(figures).toContainText('missing full-page snapshot');
+    await expect(figures).toContainText('small crop');
+    await expect(figures).toContainText('missing bbox');
+    await expect(figures).toContainText('Figure artifact detail: pixel 120x80');
     await expect(figures).toContainText('Object audits 1');
     await expect(figures).toContainText('Conflicts 1');
     await expect(figures).toContainText('Latest audit: GLM figure audit');

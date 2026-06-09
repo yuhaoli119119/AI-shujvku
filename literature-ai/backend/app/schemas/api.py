@@ -159,6 +159,8 @@ class PaperFigureResponse(BaseModel):
     image_review: dict[str, Any] | None = None
     review_required: bool | None = None
     flags: list[str] = Field(default_factory=list)
+    figure_reliability_status: str | None = None
+    figure_reliability_warnings: list[str] = Field(default_factory=list)
     object_review_audit_count: int = 0
     object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
     latest_object_review_audit: dict[str, Any] | None = None

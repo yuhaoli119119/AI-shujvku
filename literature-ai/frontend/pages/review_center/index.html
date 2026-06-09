@@ -586,6 +586,31 @@
       return '<span class="chip ' + chipClass + '" title="' + esc(title) + '">Locator issues ' + esc(issueCount) + '</span>';
     }
 
+    function figureIssueLabel(code) {
+      const mapping = {
+        missing_full_page_snapshot: "missing full-page snapshot",
+        small_crop: "small crop",
+        missing_bbox: "missing bbox",
+        extreme_aspect_ratio: "extreme aspect ratio",
+        caption_only: "caption only",
+        missing_image: "missing image",
+        missing_page: "missing page"
+      };
+      return mapping[code] || code;
+    }
+
+    function figureReliabilityInline(row) {
+      const issueCount = toCount(row.figure_issue_count);
+      const summary = row.figure_reliability || {};
+      const topIssues = Array.isArray(row.top_figure_issues) ? row.top_figure_issues : [];
+      const issueCounts = row.figure_issue_counts || summary.issue_counts || {};
+      const title = topIssues.length
+        ? topIssues.map(function (item) { return figureIssueLabel(item.code) + ": " + item.count; }).join("\n")
+        : Object.keys(issueCounts).map(function (key) { return figureIssueLabel(key) + ": " + issueCounts[key]; }).join("\n") || "No figure reliability warnings.";
+      const chipClass = issueCount > 0 ? "warn" : "ok";
+      return '<span class="chip ' + chipClass + '" title="' + esc(title) + '">Figure issues ' + esc(issueCount) + '</span>';
+    }
+
     function renderRows() {
       renderStats();
       const rows = filteredRows();
@@ -641,12 +666,12 @@
           '<td style="text-align: center;"><span class="muted" style="font-size: 13px;">' + (idx + 1) + '</span></td>' +
           '<td class="col-divider" style="text-align: center;"><span style="font-size: 13px;">' + yearDisp + '</span></td>' +
           '<td class="col-divider"><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
-          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + qlChip + dftChip + locatorReliabilityInline(row) + conflictChip + '</div></td>' +
+          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + qlChip + dftChip + figureReliabilityInline(row) + locatorReliabilityInline(row) + conflictChip + '</div></td>' +
           '<td class="col-divider"><div style="display:grid;gap:6px;">' +
             '<span class="chip ' + dftAuditChipClass + '" title="DFT 完整性状态">' + esc(dftStatus) + '</span>' +
             '<div class="muted">线索: <strong>' + esc(dftAudit.detected_signal_count || 0) + '</strong>；已解析: <strong>' + esc(dftAudit.parsed_dft_count || 0) + '</strong>；疑似漏提: <strong>' + esc(suspectedMissing) + '</strong></div>' +
             '<div class="muted" title="' + esc(candidateSummary) + '">候选状态：' + esc(candidateSummary) + '</div>' +
-            '<div class="muted" title="' + esc(figureSummary) + '">图片定位可靠性：可疑 ' + esc(row.unreliable_figure_count || 0) + ' / 图表 ' + esc(figureCount + tableCount) + '</div>' +
+            '<div class="muted" title="' + esc(figureSummary) + '">图片定位可靠性：可疑 ' + esc(row.unreliable_figure_count || 0) + ' / 图表 ' + esc(figureCount + tableCount) + '；Figure issues <strong>' + esc(row.figure_issue_count || 0) + '</strong></div>' +
             '<div class="muted">证据定位: <strong>' + esc(evidence) + '</strong>；Locator issues <strong>' + esc(row.locator_issue_count || 0) + '</strong></div>' +
           '</div></td>' +
           '<td><div class="muted" title="' + esc(auditSummary) + '" style="margin-bottom:6px;">External audit: <strong>' + esc(row.external_audit_count || 0) + '</strong></div>' + objectAuditInline(row) + '<div class="actions">' +

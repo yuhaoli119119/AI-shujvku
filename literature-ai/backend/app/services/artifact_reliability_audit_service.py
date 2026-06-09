@@ -181,6 +181,32 @@ class ArtifactReliabilityAuditService:
             "top_issues": top_issues,
         }
 
+    def paper_figure_reliability_summary(self, paper_id: UUID) -> dict[str, Any]:
+        figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper_id)).all()
+        issue_counts: Counter[str] = Counter()
+        for figure in figures:
+            review = build_figure_image_review(figure, settings=self.settings, check_asset_exists=True)
+            issue_counts.update(self._figure_issues(figure, review))
+        top_issues = [
+            {"code": code, "count": count}
+            for code, count in sorted(issue_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+        ]
+        return {
+            "status": "needs_review" if issue_counts else "reliable",
+            "figure_count": len(figures),
+            "issue_count": sum(issue_counts.values()),
+            "issue_counts": dict(sorted(issue_counts.items())),
+            "top_issues": top_issues,
+        }
+
+    @classmethod
+    def figure_reliability_from_review(cls, figure: Any, review: dict[str, Any] | None) -> dict[str, Any]:
+        issues = cls._figure_issues(figure, review or {})
+        return {
+            "status": "needs_review" if issues else "reliable",
+            "warnings": issues,
+        }
+
     @staticmethod
     def locator_reliability_from_payload(locator: dict[str, Any] | None) -> dict[str, Any]:
         if not locator:

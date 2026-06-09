@@ -564,6 +564,10 @@ function figureReviewSummaryHtml(item, paperId) {
     const imageReview = item.image_review || {};
     const cropStatus = item.crop_status || imageReview.crop_status || "unknown";
     const flags = Array.isArray(item.flags) && item.flags.length ? item.flags : (Array.isArray(imageReview.flags) ? imageReview.flags : []);
+    const reliabilityStatus = item.figure_reliability_status || (imageReview.review_required ? "needs_review" : "reliable");
+    const reliabilityWarnings = Array.isArray(item.figure_reliability_warnings) && item.figure_reliability_warnings.length
+        ? item.figure_reliability_warnings
+        : figureIssuesFromFlags(flags);
     const reviewRequired = item.review_required === true || imageReview.review_required === true;
     const auditCount = Number(item.object_review_audit_count || (item.object_review_audits && item.object_review_audits.length) || 0);
     const conflictCount = Number(item.conflict_count || (item.field_conflicts && item.field_conflicts.length) || 0);
@@ -585,19 +589,73 @@ function figureReviewSummaryHtml(item, paperId) {
     const conflictHtml = conflictCount
         ? '<div class="subtle">Conflict fields: ' + esc((item.field_conflicts || []).map(function(row) { return row.field_name || "-"; }).join(", ")) + '</div>'
         : "";
+    const issueChips = reliabilityWarnings.length
+        ? reliabilityWarnings.map(function(code) {
+            return '<span class="status-chip danger" title="' + esc(code) + '">' + esc(figureIssueLabel(code)) + '</span>';
+        }).join("")
+        : '<span class="status-chip ok">no figure warnings</span>';
+    const sizeBits = [
+        imageReview.pixel_size ? "pixel " + imageReview.pixel_size.width + "x" + imageReview.pixel_size.height : null,
+        imageReview.bbox_size_points ? "bbox " + imageReview.bbox_size_points.width + "x" + imageReview.bbox_size_points.height : null,
+        imageReview.full_page_image_path ? "full-page snapshot present" : "missing full-page snapshot"
+    ].filter(Boolean).join(" | ");
     return '<div class="figure-review-summary" style="margin-top:12px;display:grid;gap:8px;">' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
             '<span class="status-chip">Page ' + esc(item.page || "-") + '</span>' +
             '<span class="status-chip">Crop status: ' + esc(cropStatus) + '</span>' +
+            '<span class="status-chip ' + (reliabilityWarnings.length ? 'danger' : 'ok') + '">Figure reliability: ' + esc(figureReliabilityLabel(reliabilityStatus)) + '</span>' +
             '<span class="status-chip ' + (reviewRequired ? 'danger' : 'ok') + '">Image review: ' + (reviewRequired ? 'required' : 'not required') + '</span>' +
             '<span class="status-chip">Object audits ' + auditCount + '</span>' +
             '<span class="status-chip ' + (conflictCount ? 'danger' : '') + '">Conflicts ' + conflictCount + '</span>' +
         '</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + issueChips + '</div>' +
         (flags.length ? '<div class="subtle">Flags: ' + esc(flags.join(", ")) + '</div>' : '<div class="subtle">Flags: 0</div>') +
+        (sizeBits ? '<div class="subtle">Figure artifact detail: ' + esc(sizeBits) + '</div>' : '') +
         latestHtml +
         conflictHtml +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + openPdfAction + '</div>' +
     '</div>';
+}
+
+function figureReliabilityLabel(status) {
+    const mapping = {
+        reliable: "reliable candidate",
+        candidate_reliable: "reliable candidate",
+        needs_review: "needs review"
+    };
+    return mapping[status] || status || "unknown";
+}
+
+function figureIssueLabel(code) {
+    const mapping = {
+        missing_full_page_snapshot: "missing full-page snapshot",
+        small_crop: "small crop",
+        missing_bbox: "missing bbox",
+        extreme_aspect_ratio: "extreme aspect ratio",
+        caption_only: "caption only",
+        missing_image: "missing image",
+        missing_page: "missing page"
+    };
+    return mapping[code] || code;
+}
+
+function figureIssuesFromFlags(flags) {
+    const mapping = {
+        missing_full_page_snapshot: "missing_full_page_snapshot",
+        small_crop_or_subfigure: "small_crop",
+        missing_parser_bbox: "missing_bbox",
+        extreme_aspect_ratio: "extreme_aspect_ratio",
+        caption_only: "caption_only",
+        missing_image_path: "missing_image",
+        missing_image_file: "missing_image",
+        missing_pdf_page: "missing_page"
+    };
+    const issues = [];
+    (Array.isArray(flags) ? flags : []).forEach(function(flag) {
+        const issue = mapping[flag] || null;
+        if (issue && !issues.includes(issue)) issues.push(issue);
+    });
+    return issues;
 }
 
 function dftBlockedReasonText(reasons) {

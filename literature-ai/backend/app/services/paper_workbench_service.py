@@ -389,6 +389,7 @@ class PaperWorkbenchService:
                 blocked_count=blocked_count,
             )
             locator_reliability = reliability_auditor.paper_locator_reliability_summary(paper.id)
+            figure_reliability = reliability_auditor.paper_figure_reliability_summary(paper.id)
             rows.append(
                 {
                     "paper_id": str(paper.id),
@@ -410,6 +411,10 @@ class PaperWorkbenchService:
                     "figure_count": figure_count,
                     "figure_crop_status_counts": figure_crop_status_counts,
                     "unreliable_figure_count": unreliable_figure_count,
+                    "figure_reliability": figure_reliability,
+                    "figure_issue_count": figure_reliability["issue_count"],
+                    "figure_issue_counts": figure_reliability["issue_counts"],
+                    "top_figure_issues": figure_reliability["top_issues"],
                     "table_count": table_count,
                     "evidence_count": evidence_count,
                     "locator_reliability": locator_reliability,

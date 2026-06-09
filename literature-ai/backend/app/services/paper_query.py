@@ -46,6 +46,7 @@ from app.schemas.api import (
     FigureDataPointResponse,
 )
 from app.config import get_settings
+from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.figure_reliability import build_figure_image_review
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -517,6 +518,7 @@ class PaperQueryService:
     ) -> PaperFigureResponse:
         payload = PaperFigureResponse.model_validate(item)
         image_review = cls._figure_image_review_payload(payload)
+        figure_reliability = ArtifactReliabilityAuditService.figure_reliability_from_review(payload, image_review)
         audits = object_review_audits or []
         conflicts = field_conflicts or []
         return payload.model_copy(
@@ -527,6 +529,8 @@ class PaperQueryService:
                 "image_review": image_review,
                 "review_required": image_review["review_required"],
                 "flags": image_review["flags"],
+                "figure_reliability_status": figure_reliability["status"],
+                "figure_reliability_warnings": figure_reliability["warnings"],
                 "object_review_audit_count": len(audits),
                 "object_review_audits": audits[:5],
                 "latest_object_review_audit": audits[0] if audits else None,
@@ -617,7 +621,7 @@ class PaperQueryService:
 
     @staticmethod
     def _figure_image_review_payload(payload: PaperFigureResponse) -> dict[str, Any]:
-        return build_figure_image_review(payload, settings=get_settings(), check_asset_exists=False)
+        return build_figure_image_review(payload, settings=get_settings(), check_asset_exists=True)
 
     @classmethod
     def _serialize_dft_result(cls, item: DFTResult) -> DFTResultResponse:
