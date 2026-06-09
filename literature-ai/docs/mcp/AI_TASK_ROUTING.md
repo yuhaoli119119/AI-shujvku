@@ -69,7 +69,7 @@ Recommended tool order:
 3. `get_dft_review_queue` for rows needing review.
 4. `get_codex_item` with `item_type="dft_result"` for each target row.
 5. `retrieve_evidence` or `read_paper_page` for targeted evidence checks when needed.
-6. `propose_dft_result_correction` for concrete field changes, or `import_analysis` for a paper-level DFT audit opinion.
+6. `propose_dft_result_correction` for concrete field changes, or `import_analysis` for a paper-level or object-level DFT audit opinion.
 
 Required capability:
 
@@ -83,7 +83,7 @@ Recommended provenance:
 
 Standard output or writeback:
 
-Write paper-level audit results through `import_analysis` as an `external_audit_opinion`, or create pending row corrections through `propose_dft_result_correction`. The audit candidate must remain `verification_status=unverified`.
+Write paper-level audit results through `import_analysis` as an `external_audit_opinion`, write row/field checks through `import_analysis.raw_payload.object_review_audits`, or create pending row corrections through `propose_dft_result_correction`. The audit candidate must remain `verification_status=unverified`.
 
 Forbidden:
 
@@ -101,7 +101,7 @@ Recommended tool order:
 2. `get_codex_context` with enough `max_figures`.
 3. `get_codex_item` with `item_type="figure"` for each figure needing inspection.
 4. `read_paper_page` when page-level source context is needed.
-5. `append_note` for non-final visual caveats, `propose_correction` for concrete figure metadata fixes, or `import_analysis` for a paper-level image audit opinion.
+5. `append_note` for non-final visual caveats, `propose_correction` for concrete figure metadata fixes, or `import_analysis` for a paper-level or object-level image audit opinion.
 
 Required capability:
 
@@ -115,7 +115,7 @@ Recommended provenance:
 
 Standard output or writeback:
 
-Return inspected figure ids, crop/page/caption status, evidence notes, and proposed fixes. Use candidate notes or corrections; final figure trust remains a later review decision.
+Return inspected figure ids, crop/page/caption status, evidence notes, and proposed fixes. Use candidate notes, object-level audit candidates, or corrections; final figure trust remains a later review decision.
 
 Forbidden:
 
@@ -148,7 +148,7 @@ Recommended provenance:
 
 Standard output or writeback:
 
-Write review notes, candidate corrections, or an `external_audit_opinion` with evidence examples and confidence. Keep citation support as draft/candidate unless evidence gates are satisfied later.
+Write review notes, candidate corrections, or an object-level `object_review_audits` entry with evidence examples and confidence. Keep citation support as draft/candidate unless evidence gates are satisfied later.
 
 Forbidden:
 
@@ -181,7 +181,7 @@ Recommended provenance:
 
 Standard output or writeback:
 
-Flag overclaims, missing qualifiers, unsupported causality, or conflicting evidence. Proposed rewrites should remain pending corrections.
+Flag overclaims, missing qualifiers, unsupported causality, or conflicting evidence. Object-level audit payloads and proposed rewrites should remain pending candidates/corrections.
 
 Forbidden:
 
@@ -199,7 +199,7 @@ Recommended tool order:
 2. `get_codex_context` with enough `max_tables`.
 3. `get_codex_item` with `item_type="table"` for each target table.
 4. `retrieve_evidence` for table-derived structured rows.
-5. `propose_correction` or `propose_dft_result_correction` for concrete fixes; `import_analysis` for paper-level table audit.
+5. `propose_correction` or `propose_dft_result_correction` for concrete fixes; `import_analysis` for paper-level or object-level table audit.
 
 Required capability:
 
@@ -244,7 +244,36 @@ Recommended provenance:
 
 Standard output or writeback:
 
-`import_analysis` should create candidate records. Paper-level audit payloads should create `external_audit_opinion` candidates with `verification_status=unverified`.
+`import_analysis` should create candidate records. Paper-level audit payloads should create `external_audit_opinion` candidates with `verification_status=unverified`. Object-level payloads should create `object_review_audit` candidates with the same unverified safety boundary.
+
+Object-level payload example:
+
+```json
+{
+  "object_review_audits": [
+    {
+      "paper_id": "PAPER_UUID",
+      "target_type": "dft_results",
+      "target_id": "DFT_RESULT_UUID",
+      "field_name": "value",
+      "decision": "REVISE",
+      "evidence_checked": true,
+      "evidence_location": {"page": 7, "section": "Results", "table": "Table 1"},
+      "blocking_errors": ["value_mismatch"],
+      "recommended_action": "propose_correction",
+      "corrected_value": -1.35,
+      "confidence": 0.72,
+      "source": "assigned_dft_audit",
+      "source_label": "Assigned AI DFT audit",
+      "agent_role": "dft_auditor",
+      "model_name": "assigned-model",
+      "reason": "The table reports -1.35 eV, not the extracted -1.20 eV.",
+      "writes_final_truth": false,
+      "human_confirmation_required": true
+    }
+  ]
+}
+```
 
 Forbidden:
 

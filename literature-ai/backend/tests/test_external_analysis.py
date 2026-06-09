@@ -7,10 +7,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
-from app.db.models import Base, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperNote, PaperRelationship
+from app.db.models import Base, DFTResult, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperNote, PaperRelationship, WritingCard
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel
+from app.services.review_conflict_service import ReviewConflictAggregationService
 
 
 def _make_external_audit_ready(paper: Paper, root: Path) -> None:
@@ -276,6 +277,272 @@ def test_external_analysis_paper_level_audit_payload_creates_unverified_candidat
                 assert candidate_row.materialized_target_type is None
                 assert candidate_row.materialized_target_id is None
                 assert candidate_row.normalized_payload["verification_status"] == "unverified"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_object_level_dft_audit_payload_creates_unverified_candidate():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'object_dft_audit.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Object DFT Audit Paper", pdf_path="object-dft.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                row = DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S4",
+                    value=-1.20,
+                    unit="eV",
+                    evidence_text="The adsorption energy is reported in Table 1.",
+                    candidate_status="system_candidate",
+                )
+                session.add(row)
+                session.commit()
+                paper_id = paper.id
+                row_id = row.id
+
+            raw_item = {
+                "paper_id": str(paper_id),
+                "target_type": "dft_results",
+                "target_id": str(row_id),
+                "field_name": "value",
+                "decision": "REVISE",
+                "evidence_checked": True,
+                "evidence_location": {"page": 7, "section": "Results", "table": "Table 1"},
+                "blocking_errors": ["value_mismatch"],
+                "recommended_action": "propose_correction",
+                "corrected_value": -1.35,
+                "confidence": 0.72,
+                "source": "glm_dft_audit",
+                "source_label": "GLM DFT audit",
+                "agent_role": "dft_auditor",
+                "model_name": "glm-test",
+                "reason": "Table 1 reports -1.35 eV.",
+                "writes_final_truth": False,
+                "human_confirmation_required": True,
+            }
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "glm_dft_audit",
+                    "source_label": "GLM DFT audit",
+                    "raw_payload": {"object_review_audits": [raw_item]},
+                },
+            )
+
+            assert imported.status_code == 200
+            payload = imported.json()
+            assert len(payload["candidates"]) == 1
+            candidate = payload["candidates"][0]
+            assert candidate["candidate_type"] == "object_review_audit"
+            assert candidate["status"] == "candidate"
+            assert candidate["normalized_payload"]["target_type"] == "dft_results"
+            assert candidate["normalized_payload"]["target_id"] == str(row_id)
+            assert candidate["normalized_payload"]["field_name"] == "value"
+            assert candidate["normalized_payload"]["decision"] == "REVISE"
+            assert candidate["normalized_payload"]["verification_status"] == "unverified"
+            assert candidate["normalized_payload"]["writes_final_truth"] is False
+            assert candidate["normalized_payload"]["human_confirmation_required"] is True
+            assert candidate["normalized_payload"]["raw_payload"]["corrected_value"] == -1.35
+
+            with Session(engine) as session:
+                stored_row = session.get(DFTResult, row_id)
+                stored_candidate = session.query(ExternalAnalysisCandidate).one()
+                assert stored_row.value == -1.20
+                assert stored_row.candidate_status == "system_candidate"
+                assert stored_candidate.materialized_target_type is None
+                assert stored_candidate.materialized_target_id is None
+                assert stored_candidate.evidence_payload["verification_status"] == "unverified"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_object_level_writing_card_audit_payload_is_candidate_only():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'object_writing_audit.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Object Writing Audit Paper", pdf_path="object-writing.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                card = WritingCard(
+                    paper_id=paper.id,
+                    paper_type="research",
+                    research_gap="Lithium sulfur mechanism gap.",
+                    proposed_solution="Single atom catalyst.",
+                    core_hypothesis="Polar sites anchor polysulfides.",
+                )
+                session.add(card)
+                session.commit()
+                paper_id = paper.id
+                card_id = card.id
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "assigned_writing_card_audit",
+                    "source_label": "Assigned AI writing-card audit",
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "paper_id": str(paper_id),
+                                "target_type": "writing_cards",
+                                "target_id": str(card_id),
+                                "field_name": "core_hypothesis",
+                                "decision": "FLAG",
+                                "evidence_checked": True,
+                                "evidence_location": {"page": 3, "section": "Discussion"},
+                                "blocking_errors": ["unsupported_causality"],
+                                "recommended_action": "needs_human_review",
+                                "confidence": 0.64,
+                                "agent_role": "writing_card_auditor",
+                                "model_name": "claude-test",
+                                "reason": "The causal claim needs a qualifier.",
+                            }
+                        ]
+                    },
+                },
+            )
+
+            assert imported.status_code == 200
+            candidate = imported.json()["candidates"][0]
+            assert candidate["candidate_type"] == "object_review_audit"
+            assert candidate["normalized_payload"]["target_type"] == "writing_cards"
+            assert candidate["normalized_payload"]["field_name"] == "core_hypothesis"
+            assert candidate["normalized_payload"]["verification_status"] == "unverified"
+            assert candidate["normalized_payload"]["writes_final_truth"] is False
+
+            with Session(engine) as session:
+                stored_card = session.get(WritingCard, card_id)
+                assert stored_card.core_hypothesis == "Polar sites anchor polysulfides."
+                assert session.query(PaperCorrection).count() == 0
+                assert session.query(ExternalAnalysisCandidate).one().status == "candidate"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_object_level_audit_payloads_participate_in_conflict_aggregation():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'object_conflicts.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Object Conflict Paper", pdf_path="object-conflict.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                row = DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S8",
+                    value=-0.50,
+                    unit="eV",
+                    evidence_text="DFT evidence.",
+                    candidate_status="system_candidate",
+                )
+                session.add(row)
+                session.commit()
+                paper_id = paper.id
+                row_id = row.id
+
+            client = TestClient(app)
+            for source, decision, corrected_value in [
+                ("gemini_dft_audit", "PASS", -0.50),
+                ("glm_dft_audit", "REVISE", -0.70),
+            ]:
+                imported = client.post(
+                    "/api/external-analysis/import",
+                    json={
+                        "paper_id": str(paper_id),
+                        "source": source,
+                        "source_label": source,
+                        "raw_payload": {
+                            "object_review_audits": [
+                                {
+                                    "paper_id": str(paper_id),
+                                    "target_type": "dft_results",
+                                    "target_id": str(row_id),
+                                    "field_name": "value",
+                                    "decision": decision,
+                                    "evidence_checked": True,
+                                    "evidence_location": {"page": 5},
+                                    "recommended_action": "review_candidate",
+                                    "corrected_value": corrected_value,
+                                    "confidence": 0.7,
+                                    "source": source,
+                                    "agent_role": "dft_auditor",
+                                }
+                            ]
+                        },
+                    },
+                )
+                assert imported.status_code == 200
+
+            with Session(engine) as session:
+                payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper_id)
+                stored_row = session.get(DFTResult, row_id)
+
+            assert payload["conflict_count"] == 1
+            conflict = payload["rows"][0]
+            assert conflict["target_type"] == "dft_results"
+            assert conflict["field_name"] == "value"
+            assert "value_conflict" in conflict["conflict_types"]
+            assert "decision_conflict" in conflict["conflict_types"]
+            assert {item["source_type"] for item in conflict["opinions"]} == {"object_review_audit"}
+            assert stored_row.candidate_status == "system_candidate"
+            assert stored_row.value == -0.50
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

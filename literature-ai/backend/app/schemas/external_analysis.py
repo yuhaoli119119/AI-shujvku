@@ -12,7 +12,35 @@ class ExternalAnalysisImportRequest(BaseModel):
     source: str = Field(..., description="Source system, e.g. chatgpt, claude_web, manual")
     source_label: str | None = Field(default=None, description="Optional human-readable source label")
     raw_text: str | None = None
-    raw_payload: dict[str, Any] | list[Any] | str | None = None
+    raw_payload: dict[str, Any] | list[Any] | str | None = Field(
+        default=None,
+        description=(
+            "Structured or free-form external analysis. Object-level reviews may be supplied under "
+            "object_review_audits/object_reviews with target_type, target_id, field_name, decision, "
+            "evidence_location, and corrected_value."
+        ),
+    )
+
+
+class ExternalObjectReviewAuditPayload(BaseModel):
+    paper_id: str | None = None
+    target_type: str
+    target_id: str
+    field_name: str | None = None
+    decision: str | None = None
+    evidence_checked: bool | None = None
+    evidence_location: dict[str, Any] | list[Any] | str | None = None
+    blocking_errors: list[Any] = Field(default_factory=list)
+    recommended_action: str | None = None
+    corrected_value: Any = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    source: str | None = None
+    source_label: str | None = None
+    agent_role: str | None = None
+    model_name: str | None = None
+    reason: str | None = None
+    writes_final_truth: bool = False
+    human_confirmation_required: bool = True
 
 
 class ExternalAnalysisMaterializeRequest(BaseModel):

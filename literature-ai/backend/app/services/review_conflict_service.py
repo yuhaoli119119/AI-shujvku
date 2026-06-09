@@ -216,14 +216,17 @@ class ReviewConflictAggregationService:
         target_id: str | None,
         field_name: str | None,
     ) -> list[dict[str, Any]]:
-        stmt = select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.candidate_type == "external_audit_opinion")
+        stmt = select(ExternalAnalysisCandidate).where(
+            ExternalAnalysisCandidate.candidate_type.in_(("external_audit_opinion", "object_review_audit"))
+        )
         if paper_id:
             stmt = stmt.where(ExternalAnalysisCandidate.paper_id == paper_id)
         rows = self.session.scalars(stmt).all()
         opinions: list[dict[str, Any]] = []
         for row in rows:
             payload = row.normalized_payload if isinstance(row.normalized_payload, dict) else {}
-            for item in self._external_object_items(payload):
+            object_items = [payload] if row.candidate_type == "object_review_audit" and payload else self._external_object_items(payload)
+            for item in object_items:
                 parsed = self._object_target(item, default_paper_id=row.paper_id)
                 if parsed is None:
                     continue
@@ -236,7 +239,7 @@ class ReviewConflictAggregationService:
                         target_type=t_type,
                         target_id=t_id,
                         field_name=f_name,
-                        source_type="external_audit_opinion",
+                        source_type=row.candidate_type,
                         source=item.get("source") or payload.get("source"),
                         source_label=item.get("source_label") or payload.get("source_label"),
                         reviewer=item.get("reviewer"),

@@ -76,11 +76,37 @@ class ExternalAuditOpinionModel(BaseModel):
     mapping_reason: str | None = None
 
 
+class ExternalObjectReviewAuditModel(BaseModel):
+    paper_id: str | None = None
+    target_type: str
+    target_id: str
+    field_name: str | None = None
+    decision: str | None = None
+    evidence_checked: bool | None = None
+    evidence_location: dict[str, Any] | list[Any] | str | None = None
+    blocking_errors: list[Any] = Field(default_factory=list)
+    recommended_action: str | None = None
+    corrected_value: Any = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    source: str | None = None
+    source_label: str | None = None
+    agent_role: str | None = None
+    model_name: str | None = None
+    reason: str | None = None
+    raw_payload: dict[str, Any] | list[Any] | str | None = None
+    status: str = "candidate"
+    verification_status: str = "unverified"
+    writes_final_truth: bool = False
+    human_confirmation_required: bool = True
+    mapping_reason: str | None = None
+
+
 class ExternalAnalysisNormalizedModel(BaseModel):
     review_notes: list[ExternalReviewNoteModel] = Field(default_factory=list)
     correction_proposals: list[ExternalCorrectionProposalModel] = Field(default_factory=list)
     supporting_papers: list[ExternalSupportingPaperModel] = Field(default_factory=list)
     external_audit_opinions: list[ExternalAuditOpinionModel] = Field(default_factory=list)
+    object_review_audits: list[ExternalObjectReviewAuditModel] = Field(default_factory=list)
     unmapped_items: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -393,11 +419,11 @@ class ExternalAnalysisService:
         if isinstance(parsed, dict):
             try:
                 normalized = ExternalAnalysisNormalizedModel.model_validate(parsed)
-                return self._post_process_normalized(normalized), "normalized", None
+                return self._post_process_normalized(normalized, parsed), "normalized", None
             except Exception:
                 llm_normalized = self._llm_normalize(raw_text=raw_text, raw_payload=parsed)
                 if llm_normalized:
-                    return self._post_process_normalized(llm_normalized), "normalized_with_llm", None
+                    return self._post_process_normalized(llm_normalized, parsed), "normalized_with_llm", None
                 return self._heuristic_normalize(parsed), "heuristic", None
 
         if isinstance(parsed, list):
@@ -413,7 +439,11 @@ class ExternalAnalysisService:
 
         return ExternalAnalysisNormalizedModel(), "empty", None
 
-    def _post_process_normalized(self, normalized: ExternalAnalysisNormalizedModel) -> ExternalAnalysisNormalizedModel:
+    def _post_process_normalized(
+        self,
+        normalized: ExternalAnalysisNormalizedModel,
+        raw_payload: dict[str, Any] | None = None,
+    ) -> ExternalAnalysisNormalizedModel:
         supporting = []
         for item in normalized.supporting_papers:
             resolved_target = self._resolve_target_paper_id(item)
@@ -424,7 +454,22 @@ class ExternalAnalysisService:
                     }
                 )
             )
-        return normalized.model_copy(update={"supporting_papers": supporting})
+        object_reviews = list(normalized.object_review_audits)
+        if raw_payload is not None:
+            existing_keys = {
+                self._object_review_key(item.model_dump(mode="json")): index
+                for index, item in enumerate(object_reviews)
+            }
+            for item in self._extract_object_review_audits(raw_payload):
+                key = self._object_review_key(item)
+                if key in existing_keys:
+                    index = existing_keys[key]
+                    if object_reviews[index].raw_payload is None:
+                        object_reviews[index] = object_reviews[index].model_copy(update={"raw_payload": item})
+                    continue
+                object_reviews.append(ExternalObjectReviewAuditModel.model_validate(item))
+                existing_keys[key] = len(object_reviews) - 1
+        return normalized.model_copy(update={"supporting_papers": supporting, "object_review_audits": object_reviews})
 
     def _external_audit_precondition(self, paper: Paper) -> dict[str, Any]:
         artifact_status = build_paper_artifact_status(paper, settings=self.settings)
@@ -438,6 +483,8 @@ class ExternalAnalysisService:
     def _create_candidates(self, run: ExternalAnalysisRun, normalized: ExternalAnalysisNormalizedModel) -> None:
         for opinion in normalized.external_audit_opinions:
             self._create_external_audit_candidate(run, opinion)
+        for audit in normalized.object_review_audits:
+            self._create_object_review_candidate(run, audit)
         for note in normalized.review_notes:
             self.session.add(
                 ExternalAnalysisCandidate(
@@ -494,6 +541,51 @@ class ExternalAnalysisService:
                     status="requires_resolution",
                 )
             )
+
+    def _create_object_review_candidate(self, run: ExternalAnalysisRun, audit: ExternalObjectReviewAuditModel) -> None:
+        payload = audit.model_dump(mode="json")
+        payload.update(
+            {
+                "paper_id": str(run.paper_id),
+                "run_id": str(run.id),
+                "source": audit.source or run.source,
+                "source_label": audit.source_label or run.source_label,
+                "candidate_type": "object_review_audit",
+                "status": "candidate",
+                "verification_status": "unverified",
+                "writes_final_truth": False,
+                "human_confirmation_required": True,
+            }
+        )
+        evidence_payload = {
+            "source": payload.get("source"),
+            "source_label": payload.get("source_label"),
+            "target_type": payload.get("target_type"),
+            "target_id": payload.get("target_id"),
+            "field_name": payload.get("field_name"),
+            "decision": payload.get("decision"),
+            "evidence_checked": payload.get("evidence_checked"),
+            "evidence_location": payload.get("evidence_location"),
+            "blocking_errors": payload.get("blocking_errors") or [],
+            "recommended_action": payload.get("recommended_action"),
+            "verification_status": "unverified",
+            "raw_payload": payload.get("raw_payload"),
+            "protocol": protocol_snapshot("gemini_audit_protocol"),
+            "writes_final_truth": False,
+            "human_confirmation_required": True,
+        }
+        self.session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=run.paper_id,
+                candidate_type="object_review_audit",
+                normalized_payload=payload,
+                confidence=audit.confidence,
+                mapping_reason=audit.mapping_reason or "Imported object-level external review audit candidate",
+                evidence_payload=evidence_payload,
+                status="candidate",
+            )
+        )
 
     def _create_external_audit_candidate(self, run: ExternalAnalysisRun, opinion: ExternalAuditOpinionModel) -> None:
         payload = opinion.model_dump(mode="json")
@@ -570,6 +662,8 @@ class ExternalAnalysisService:
         if not isinstance(raw_payload, dict):
             return None
         if isinstance(raw_payload.get("candidates"), list) and raw_payload.get("candidates"):
+            return None
+        if ExternalAnalysisService._extract_object_review_audits(raw_payload):
             return None
         audit_keys = {
             "verdict",
@@ -660,9 +754,10 @@ class ExternalAnalysisService:
         notes = payload.get("review_notes") or payload.get("notes") or []
         corrections = payload.get("correction_proposals") or payload.get("corrections") or []
         supporting = payload.get("supporting_papers") or payload.get("relationships") or []
+        object_reviews = self._extract_object_review_audits(payload)
         unmapped = payload.get("unmapped_items") or []
 
-        if not any([notes, corrections, supporting, unmapped]):
+        if not any([notes, corrections, supporting, object_reviews, unmapped]):
             unmapped = [{"raw_payload": payload}]
 
         return ExternalAnalysisNormalizedModel(
@@ -676,7 +771,83 @@ class ExternalAnalysisService:
             supporting_papers=[
                 ExternalSupportingPaperModel.model_validate(item) for item in supporting if isinstance(item, dict)
             ],
+            object_review_audits=[
+                ExternalObjectReviewAuditModel.model_validate(item) for item in object_reviews if isinstance(item, dict)
+            ],
             unmapped_items=[item if isinstance(item, dict) else {"raw_item": str(item)} for item in unmapped],
+        )
+
+    @staticmethod
+    def _extract_object_review_audits(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        explicit = payload.get("object_review_audits") or payload.get("object_reviews") or payload.get("field_reviews")
+        if isinstance(explicit, dict):
+            explicit = [explicit]
+        if isinstance(explicit, list):
+            return [
+                ExternalAnalysisService._normalize_object_review_item(item)
+                for item in explicit
+                if isinstance(item, dict) and ExternalAnalysisService._is_object_review_item(item)
+            ]
+
+        candidates: list[dict[str, Any]] = []
+        for key in ("reviews", "audits", "opinions", "items"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                value = [value]
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                if isinstance(item, dict) and ExternalAnalysisService._is_object_review_item(item):
+                    candidates.append(ExternalAnalysisService._normalize_object_review_item(item))
+        if ExternalAnalysisService._is_object_review_item(payload):
+            candidates.append(ExternalAnalysisService._normalize_object_review_item(payload))
+        return candidates
+
+    @staticmethod
+    def _is_object_review_item(item: dict[str, Any]) -> bool:
+        return bool(
+            (item.get("target_type") or item.get("target_path"))
+            and (item.get("target_id") or item.get("target_path") or item.get("dft_result_id") or item.get("record_id"))
+            and (item.get("field_name") or item.get("target_path") or item.get("field"))
+            and any(key in item for key in ("decision", "verdict", "recommended_action", "corrected_value", "proposed_value", "evidence_checked"))
+        )
+
+    @staticmethod
+    def _normalize_object_review_item(item: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(item)
+        target_path = normalized.get("target_path")
+        if isinstance(target_path, str):
+            match = re.match(r"^([^:]+):([^:]+):([^:]+)$", target_path)
+            if match:
+                normalized.setdefault("target_type", match.group(1))
+                normalized.setdefault("target_id", match.group(2))
+                normalized.setdefault("field_name", match.group(3))
+        if "field_name" not in normalized and "field" in normalized:
+            normalized["field_name"] = normalized.get("field")
+        if "target_id" not in normalized:
+            normalized["target_id"] = normalized.get("dft_result_id") or normalized.get("record_id")
+        if "decision" not in normalized and "verdict" in normalized:
+            normalized["decision"] = normalized.get("verdict")
+        if "corrected_value" not in normalized and "proposed_value" in normalized:
+            normalized["corrected_value"] = normalized.get("proposed_value")
+        if "reason" not in normalized:
+            normalized["reason"] = normalized.get("reviewer_note") or normalized.get("mapping_reason")
+        blocking = normalized.get("blocking_errors") or normalized.get("blocking_error") or []
+        if isinstance(blocking, (str, int, float, bool)):
+            blocking = [blocking]
+        normalized["blocking_errors"] = blocking if isinstance(blocking, list) else []
+        normalized["writes_final_truth"] = False
+        normalized["human_confirmation_required"] = True
+        normalized["verification_status"] = "unverified"
+        normalized["status"] = "candidate"
+        normalized.setdefault("raw_payload", item)
+        return normalized
+
+    @staticmethod
+    def _object_review_key(item: dict[str, Any]) -> str:
+        return "|".join(
+            str(item.get(key) or "")
+            for key in ("paper_id", "target_type", "target_id", "field_name", "decision", "corrected_value")
         )
 
     @staticmethod

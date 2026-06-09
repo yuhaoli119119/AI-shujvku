@@ -79,7 +79,7 @@ Use this flow when any IDE AI needs to review already parsed literature:
 2. `get_codex_context` for a compact paper bundle with artifact status, sections, figures, tables, structured candidates, evidence locators, warnings, and Markdown.
 3. Optionally call `get_codex_item` for a low-token bundle for one section, figure, table, DFT result, mechanism claim, or writing card.
 4. Optionally call `retrieve_evidence`, `read_paper_page`, `get_paper_knowledge`, `get_review_coverage`, or `get_field_disputes` for targeted checks.
-5. Write the assigned AI's paper-level audit back through `import_analysis`.
+5. Write the assigned AI's paper-level or object-level audit back through `import_analysis`.
 
 Paper-level audit payload example:
 
@@ -109,6 +109,42 @@ Paper-level audit payload example:
 The `source` and `source_label` should describe the role you assigned for that run, such as `assigned_figure_audit`, `assigned_data_audit`, `assigned_parse_review`, or `manual_second_pass`.
 
 The import creates an `external_audit_opinion` candidate with `verification_status=unverified`. It is visible in the review center, but it does not write final truth and does not unlock ML export.
+
+Object-level audit payload example:
+
+```json
+{
+  "paper_id": "PAPER_UUID",
+  "source": "assigned_dft_audit",
+  "source_label": "Assigned AI DFT audit",
+  "raw_payload": {
+    "object_review_audits": [
+      {
+        "paper_id": "PAPER_UUID",
+        "target_type": "dft_results",
+        "target_id": "DFT_RESULT_UUID",
+        "field_name": "value",
+        "decision": "REVISE",
+        "evidence_checked": true,
+        "evidence_location": {"page": 7, "section": "Results", "table": "Table 1"},
+        "blocking_errors": ["value_mismatch"],
+        "recommended_action": "propose_correction",
+        "corrected_value": -1.35,
+        "confidence": 0.72,
+        "source": "assigned_dft_audit",
+        "source_label": "Assigned AI DFT audit",
+        "agent_role": "dft_auditor",
+        "model_name": "assigned-model",
+        "reason": "The table reports -1.35 eV, not the extracted -1.20 eV.",
+        "writes_final_truth": false,
+        "human_confirmation_required": true
+      }
+    ]
+  }
+}
+```
+
+Object-level imports create `object_review_audit` candidates with `verification_status=unverified`. They are comparison evidence for queues and conflict aggregation. They do not approve corrections, merge values, mark extraction reviews verified, or unlock export.
 
 ## Artifact Preconditions
 
@@ -145,6 +181,7 @@ Reader and AI review tools:
 - `read_paper_page`
 - `get_review_coverage`
 - `get_field_disputes`
+- `get_review_conflicts`
 - `import_analysis`
 - `append_note`
 - `propose_correction`

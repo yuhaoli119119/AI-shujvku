@@ -1004,7 +1004,11 @@ async def review_paper(
 
 @mcp_server.tool(
     name="import_analysis",
-    description="Import analysis results from an external AI agent (e.g. Cursor, DeepSeek chat, Claude) into the library. Supports free-text or structured JSON. The system will auto-normalize the input into structured notes, corrections, and relationships.",
+    description=(
+        "Import analysis results from an external AI agent (e.g. Cursor, DeepSeek chat, Claude) into the library. "
+        "Supports free-text or structured JSON, including object-level review audits with target_type, target_id, "
+        "field_name, decision, evidence_location, and corrected_value. Imported outputs remain candidates."
+    ),
 )
 def import_analysis(
     paper_id: str,
@@ -1037,7 +1041,17 @@ def import_analysis(
                     "type": c.candidate_type,
                     "confidence": c.confidence,
                     "status": c.status,
-                    "summary": (c.normalized_payload or {}).get("content") or (c.normalized_payload or {}).get("reason", ""),
+                    "target_type": (c.normalized_payload or {}).get("target_type"),
+                    "target_id": (c.normalized_payload or {}).get("target_id"),
+                    "field_name": (c.normalized_payload or {}).get("field_name"),
+                    "decision": (c.normalized_payload or {}).get("decision") or (c.normalized_payload or {}).get("verdict"),
+                    "verification_status": (c.normalized_payload or {}).get("verification_status"),
+                    "summary": (
+                        (c.normalized_payload or {}).get("content")
+                        or (c.normalized_payload or {}).get("reason")
+                        or (c.normalized_payload or {}).get("recommended_action")
+                        or ""
+                    ),
                 }
                 for c in candidates
             ],

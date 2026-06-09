@@ -420,6 +420,65 @@ def test_ordinary_ide_ai_reads_context_and_imports_unverified_audit_candidate(mc
         assert row.candidate_status == "system_candidate"
 
 
+def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Object Audit Paper", pdf_path="mcp-object.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "REVISE",
+                        "evidence_checked": True,
+                        "evidence_location": {"page": 8, "table": "Table 1"},
+                        "corrected_value": -1.35,
+                        "recommended_action": "propose_correction",
+                        "confidence": 0.71,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    candidate = imported["candidates"][0]
+    assert candidate["type"] == "object_review_audit"
+    assert candidate["target_type"] == "dft_results"
+    assert candidate["target_id"] == row_id
+    assert candidate["field_name"] == "value"
+    assert candidate["decision"] == "REVISE"
+    assert candidate["verification_status"] == "unverified"
+
+    with Session(mcp_test_env["engine"]) as session:
+        stored_row = session.get(DFTResult, UUID(row_id))
+        stored_candidate = session.scalar(select(ExternalAnalysisCandidate))
+        assert stored_row.candidate_status == "system_candidate"
+        assert stored_candidate.candidate_type == "object_review_audit"
+        assert stored_candidate.status == "candidate"
+        assert stored_candidate.normalized_payload["writes_final_truth"] is False
+
+
 def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="MCP DFT Queue Paper", doi="10.1000/dft-queue", year=2025, pdf_path="queue.pdf")
