@@ -18,6 +18,7 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     ExtractionFieldReview,
+    MechanismClaim,
     Paper,
     PaperCorrection,
     PaperFigure,
@@ -341,6 +342,90 @@ def test_paper_detail_exposes_writing_card_object_review_summary_read_only(workb
         assert card_payload.field_conflicts[0]["field_name"] == "core_hypothesis"
         assert conflict_payload["conflict_count"] == 1
         assert stored_card.core_hypothesis == "Polar sites anchor polysulfides."
+        assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
+        assert session.query(PaperCorrection).count() == 0
+
+
+def test_paper_detail_exposes_mechanism_claim_object_review_summary_read_only(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Mechanism audit paper", pdf_path="paper.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        claim = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="adsorption_mechanism",
+            claim_text="Defect sites strengthen polysulfide adsorption through charge redistribution.",
+            evidence_types=["section_text"],
+            confidence=0.71,
+            evidence_text="Charge redistribution around defect sites strengthens polysulfide adsorption.",
+        )
+        session.add(claim)
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="mechanism_object_review",
+            source_label="Mechanism object review",
+            normalized_payload={},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+        for source, decision, corrected_value in [
+            ("codex_mechanism_audit", "PASS", "supported_charge_redistribution"),
+            ("glm_mechanism_audit", "FLAG", "overstated_causality"),
+        ]:
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    status="candidate",
+                    confidence=0.7,
+                    mapping_reason="mechanism claim object review",
+                    normalized_payload={
+                        "target_type": "mechanism_claims",
+                        "mechanism_claim_id": str(claim.id),
+                        "field_name": "claim_text",
+                        "decision": decision,
+                        "corrected_value": corrected_value,
+                        "confidence": 0.7,
+                        "source": source,
+                        "source_label": source,
+                        "agent_role": "mechanism_claim_auditor",
+                        "verification_status": "unverified",
+                        "evidence_checked": True,
+                        "evidence_location": {"page": 6, "section": "Discussion"},
+                        "reason": "Mechanism claim reviewed as a candidate only.",
+                    },
+                )
+            )
+        session.commit()
+        paper_id = paper.id
+        claim_id = claim.id
+
+        detail = PaperQueryService(session).get_paper_detail(paper_id)
+        conflict_payload = ReviewConflictAggregationService(session).list_conflicts(
+            paper_id=paper_id,
+            target_type="mechanism_claims",
+            target_id=str(claim_id),
+            include_non_conflicts=True,
+        )
+        stored_claim = session.get(MechanismClaim, claim_id)
+
+        assert detail is not None
+        claim_payload = detail.mechanism_claims_items[0]
+        assert claim_payload.evidence_status == "present"
+        assert claim_payload.locator_status == "text_only"
+        assert claim_payload.confidence_status == "medium"
+        assert claim_payload.object_review_audit_count == 2
+        assert claim_payload.latest_object_review_audit["source"] == "glm_mechanism_audit"
+        assert claim_payload.latest_object_review_audit["decision"] == "FLAG"
+        assert claim_payload.latest_object_review_audit["verification_status"] == "unverified"
+        assert claim_payload.conflict_count == 1
+        assert claim_payload.field_conflicts[0]["field_name"] == "claim_text"
+        assert conflict_payload["conflict_count"] == 1
+        assert stored_claim.claim_text == "Defect sites strengthen polysulfide adsorption through charge redistribution."
         assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
         assert session.query(PaperCorrection).count() == 0
 

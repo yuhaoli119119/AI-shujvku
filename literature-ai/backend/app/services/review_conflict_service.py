@@ -352,7 +352,12 @@ class ReviewConflictAggregationService:
                     str(match.group(3)),
                 )
         target_type = item.get("target_type")
-        target_id = item.get("target_id") or item.get("dft_result_id") or item.get("record_id")
+        target_id = (
+            item.get("target_id")
+            or item.get("dft_result_id")
+            or item.get("mechanism_claim_id")
+            or item.get("record_id")
+        )
         field_name = item.get("field_name") or item.get("field")
         if not target_type or not target_id or not field_name:
             return None

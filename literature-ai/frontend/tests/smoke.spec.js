@@ -100,7 +100,36 @@ const PAPER_DETAIL = {
   catalyst_samples_items: [{ name: 'Pt(111)' }],
   dft_results_items: [{ id: 'dft-1', property_type: 'adsorption_energy', value: -1.23, unit: 'eV', evidence_text: 'The adsorption energy is -1.23 eV.' }],
   electrochemical_performance_items: [{ metric: 'onset_potential', value: 0.71, unit: 'V' }],
-  mechanism_claims_items: [{ claim: 'Associative pathway is favored.' }],
+  mechanism_claims_items: [{
+    id: 'mechanism-claim-1',
+    claim_type: 'adsorption_mechanism',
+    claim_text: 'Associative pathway is favored by defect-driven charge redistribution.',
+    evidence_text: 'The discussion links defect sites with charge redistribution and stronger adsorption.',
+    evidence_status: 'present',
+    locator_status: 'text_only',
+    confidence: 0.71,
+    confidence_status: 'medium',
+    object_review_audit_count: 1,
+    latest_object_review_audit: {
+      source: 'glm_mechanism_audit',
+      source_label: 'GLM mechanism audit',
+      decision: 'FLAG',
+      confidence: 0.7,
+      verification_status: 'unverified',
+    },
+    object_review_audits: [{
+      candidate_id: 'mechanism-audit-1',
+      candidate_type: 'object_review_audit',
+      source: 'glm_mechanism_audit',
+      source_label: 'GLM mechanism audit',
+      decision: 'FLAG',
+      confidence: 0.7,
+      verification_status: 'unverified',
+      evidence_location: { page: 6 },
+    }],
+    conflict_count: 1,
+    field_conflicts: [{ field_name: 'claim_text', conflict_types: ['decision_conflict'], opinions: [] }],
+  }],
   writing_cards_items: [{
     id: 'writing-card-1',
     paper_type: 'research',
@@ -2201,7 +2230,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#dftContent')).toContainText('AI 候选 DFT 入库安全状态');
     await expect(page.locator('#dftContent')).toContainText('可导出 0');
     await expect(page.locator('#dftContent')).toContainText('缺少人工核验');
-    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(1);
+    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(2);
     await expect(page.locator('#dftContent button:has-text("标记已核验")')).toHaveCount(1);
 
     page.once('dialog', dialog => dialog.accept());
@@ -2269,6 +2298,32 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(writing).toContainText('verification=unverified');
 
     await page.locator('#writingContent summary button').first().click();
+    await expect.poll(() => unsafeWrites.length).toBe(0);
+  });
+
+  test('business flow: literature library mechanism claims show read-only audit summaries', async ({ page }) => {
+    const unsafeWrites = [];
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/.*\/(verify|reject)$|\/api\/external-analysis\/runs\/.*\/materialize$|\/api\/papers\/paper-1\/corrections/, async route => {
+      unsafeWrites.push({ method: route.request().method(), url: route.request().url() });
+      return jsonResponse(route, { error: 'unexpected write' }, 500);
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-row');
+    await page.click('button[data-tab="dft"]');
+
+    const dft = page.locator('#dftContent');
+    await expect(dft).toContainText('Object audits 1');
+    await expect(dft).toContainText('Conflicts 1');
+    await expect(dft).toContainText('Evidence status: present');
+    await expect(dft).toContainText('Locator: text only');
+    await expect(dft).toContainText('Confidence: medium');
+    await expect(dft).toContainText('Latest audit: GLM mechanism audit');
+    await expect(dft).toContainText('decision=FLAG');
+    await expect(dft).toContainText('verification=unverified');
+
+    await page.locator('#dftContent button:has-text("复制审核提示")').last().click();
     await expect.poll(() => unsafeWrites.length).toBe(0);
   });
 

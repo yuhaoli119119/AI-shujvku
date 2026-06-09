@@ -223,6 +223,14 @@ class MechanismClaimResponse(BaseModel):
     evidence_types: list[Any] = Field(default_factory=list)
     confidence: float | None = None
     evidence_text: str | None = None
+    evidence_status: str = "missing"
+    locator_status: str = "missing_locator"
+    confidence_status: str = "missing"
+    object_review_audit_count: int = 0
+    object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
+    latest_object_review_audit: dict[str, Any] | None = None
+    conflict_count: int = 0
+    field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

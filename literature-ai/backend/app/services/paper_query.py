@@ -328,6 +328,17 @@ class PaperQueryService:
             target_type="writing_cards",
             target_ids=writing_card_ids,
         )
+        mechanism_claim_ids = {str(claim.id) for claim in mechanism_claims}
+        mechanism_claim_audits = self._object_review_audits_by_target(
+            paper_id,
+            mechanism_claim_ids,
+            target_types={"mechanism_claim", "mechanism_claims"},
+        )
+        mechanism_claim_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+            paper_ids={paper_id},
+            target_type="mechanism_claims",
+            target_ids=mechanism_claim_ids,
+        )
 
         base_counts = {
             "sections": len(sections),
@@ -373,7 +384,14 @@ class PaperQueryService:
             electrochemical_performance_items=[
                 ElectrochemicalPerformanceResponse.model_validate(item) for item in electrochemical_items
             ],
-            mechanism_claims_items=[MechanismClaimResponse.model_validate(item) for item in mechanism_claims],
+            mechanism_claims_items=[
+                self._serialize_mechanism_claim(
+                    item,
+                    object_review_audits=mechanism_claim_audits.get(str(item.id), []),
+                    field_conflicts=mechanism_claim_conflicts.get(str(item.id), []),
+                )
+                for item in mechanism_claims
+            ],
             writing_cards_items=[
                 self._serialize_writing_card(
                     item,
@@ -551,6 +569,7 @@ class PaperQueryService:
                 payload.get("target_id")
                 or payload.get("figure_id")
                 or payload.get("writing_card_id")
+                or payload.get("mechanism_claim_id")
                 or payload.get("record_id")
                 or ""
             )
@@ -571,7 +590,13 @@ class PaperQueryService:
             "candidate_type": candidate.candidate_type,
             "status": candidate.status,
             "target_type": payload.get("target_type"),
-            "target_id": payload.get("target_id") or payload.get("figure_id") or payload.get("writing_card_id") or payload.get("record_id"),
+            "target_id": (
+                payload.get("target_id")
+                or payload.get("figure_id")
+                or payload.get("writing_card_id")
+                or payload.get("mechanism_claim_id")
+                or payload.get("record_id")
+            ),
             "field_name": payload.get("field_name") or payload.get("field"),
             "source": str(payload.get("source") or "unknown"),
             "source_label": payload.get("source_label"),
@@ -790,6 +815,43 @@ class PaperQueryService:
             evidence_status=gate.evidence_chain_status,
             safety_status=gate.review_gate_status,
             safe_verified=gate.can_use_for_writing and gate.review_gate_status == "safe_verified",
+            object_review_audit_count=len(audits),
+            object_review_audits=audits[:5],
+            latest_object_review_audit=audits[0] if audits else None,
+            conflict_count=len(conflicts),
+            field_conflicts=conflicts[:5],
+        )
+
+    @staticmethod
+    def _serialize_mechanism_claim(
+        item: MechanismClaim,
+        *,
+        object_review_audits: list[dict[str, Any]] | None = None,
+        field_conflicts: list[dict[str, Any]] | None = None,
+    ) -> MechanismClaimResponse:
+        audits = object_review_audits or []
+        conflicts = field_conflicts or []
+        evidence_status = "present" if str(item.evidence_text or "").strip() else "missing"
+        confidence = item.confidence
+        if confidence is None:
+            confidence_status = "missing"
+        elif confidence >= 0.8:
+            confidence_status = "high"
+        elif confidence >= 0.5:
+            confidence_status = "medium"
+        else:
+            confidence_status = "low"
+        return MechanismClaimResponse(
+            id=item.id,
+            catalyst_sample_id=item.catalyst_sample_id,
+            claim_type=item.claim_type,
+            claim_text=item.claim_text,
+            evidence_types=item.evidence_types or [],
+            confidence=confidence,
+            evidence_text=item.evidence_text,
+            evidence_status=evidence_status,
+            locator_status="text_only" if evidence_status == "present" else "missing_locator",
+            confidence_status=confidence_status,
             object_review_audit_count=len(audits),
             object_review_audits=audits[:5],
             latest_object_review_audit=audits[0] if audits else None,

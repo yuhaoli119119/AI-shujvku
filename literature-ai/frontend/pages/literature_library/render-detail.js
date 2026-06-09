@@ -703,6 +703,37 @@ function writingCardAuditSummaryHtml(item) {
     '</div>';
 }
 
+function mechanismClaimAuditSummaryHtml(item) {
+    const auditCount = Number(item && (item.object_review_audit_count || (item.object_review_audits && item.object_review_audits.length)) || 0);
+    const conflictCount = Number(item && (item.conflict_count || (item.field_conflicts && item.field_conflicts.length)) || 0);
+    const latest = (item && (item.latest_object_review_audit || ((item.object_review_audits || [])[0]))) || null;
+    const evidenceStatus = item && item.evidence_status ? item.evidence_status : (compactText(item && item.evidence_text) ? "present" : "missing");
+    const locatorStatus = item && item.locator_status ? item.locator_status : (compactText(item && item.evidence_text) ? "text_only" : "missing_locator");
+    const confidenceStatus = item && item.confidence_status ? item.confidence_status : (item && item.confidence != null ? "candidate" : "missing");
+    const latestHtml = latest
+        ? '<div class="figure-review-latest"><strong>Latest audit:</strong> ' +
+            esc(latest.source_label || latest.source || "unknown") +
+            ' | decision=' + esc(latest.decision || "-") +
+            ' | confidence=' + esc(latest.confidence == null ? "-" : latest.confidence) +
+            ' | verification=' + esc(latest.verification_status || "unverified") +
+            '</div>'
+        : '<div class="subtle">Latest audit: none</div>';
+    const conflictHtml = conflictCount
+        ? '<div class="subtle">Conflict fields: ' + esc((item.field_conflicts || []).map(function(row) { return row.field_name || "-"; }).join(", ")) + '</div>'
+        : "";
+    return '<div class="figure-review-summary" style="margin-top:12px;display:grid;gap:8px;">' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<span class="status-chip">Object audits ' + auditCount + '</span>' +
+            '<span class="status-chip ' + (conflictCount ? 'danger' : '') + '">Conflicts ' + conflictCount + '</span>' +
+            '<span class="status-chip">Evidence status: ' + esc(prettifyToken(evidenceStatus)) + '</span>' +
+            '<span class="status-chip">Locator: ' + esc(prettifyToken(locatorStatus)) + '</span>' +
+            '<span class="status-chip">Confidence: ' + esc(prettifyToken(confidenceStatus)) + '</span>' +
+        '</div>' +
+        latestHtml +
+        conflictHtml +
+    '</div>';
+}
+
 function renderWritingCardsCompact(items) {
     if (!items || !items.length) {
         return '<div class="section-card"><h3>写作卡片</h3><div class="muted">暂无内容。</div></div>';
@@ -788,12 +819,14 @@ function renderReadableCards(title, items) {
         const heading = title + (items.length > 1 ? " " + (index + 1) : "");
         const itemType = CODEX_ITEM_TYPE_BY_CARD_TITLE[title];
         const action = codexItemActionHtml(itemType, item);
+        const mechanismAuditSummary = itemType === "mechanism_claim" ? mechanismClaimAuditSummaryHtml(item || {}) : "";
         const safety = (title === "DFT 结果" || title === "AI 候选 DFT 数据" || title === "DFT 候选结果") ? renderDftItemSafety(item) : "";
         const openAttr = (title === "AI 候选 DFT 数据" || title === "DFT 候选结果") ? " open" : "";
         return '<details class="section-card readable-card"' + openAttr + '>' +
             '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3>' + action + '</div></summary>' +
             '<div style="margin-top:10px;">' +
             renderReadableFields(item || {}, keys) +
+            mechanismAuditSummary +
             safety +
             '</div>' +
         '</details>';
