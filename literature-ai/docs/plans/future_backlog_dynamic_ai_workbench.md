@@ -35,6 +35,18 @@ Create a read-only audit report for a sample of parsed papers:
 - list candidates that rely on caption-only or text-only evidence
 - show examples where section text references a figure/table that is not attached to the item context
 
+Initial report contract:
+
+- Endpoint: `GET /api/workbench/papers/{paper_id}/artifact-reliability`
+- Optional aggregate endpoint: `GET /api/workbench/artifact-reliability`
+- Schema version: `artifact_reliability_audit_v1`
+- Paper summary fields: `figure_count`, `table_count`, `locator_count`, `figure_issue_counts`, `table_issue_counts`, `locator_issue_counts`, and `examples`.
+- Example rows should include the object type, id, page, caption or evidence preview, status, and reason.
+- Figure issues should quantify `missing_image`, `caption_only`, `small_crop`, `extreme_aspect_ratio`, `missing_bbox`, `missing_full_page_snapshot`, and `missing_page`.
+- Locator issues should quantify `text_only_locator`, `missing_page`, `missing_locator`, `approximate_locator`, `unresolved_locator`, and missing bbox where applicable.
+
+Boundary: this report is read-only. It must not recrop figures, repair locators, trust OCR or bbox automatically, mark candidates verified, approve corrections, or merge candidate values. It exists to quantify issue distribution before any repair workflow is designed.
+
 ### Not Yet
 
 - Do not rebuild the PDF parser from scratch.

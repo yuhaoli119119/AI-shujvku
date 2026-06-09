@@ -47,6 +47,7 @@ from app.schemas.api import (
 )
 from app.config import get_settings
 from app.utils.artifact_status import build_paper_artifact_status
+from app.utils.figure_reliability import build_figure_image_review
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import writing_card_gate
@@ -616,30 +617,7 @@ class PaperQueryService:
 
     @staticmethod
     def _figure_image_review_payload(payload: PaperFigureResponse) -> dict[str, Any]:
-        flags: list[str] = []
-        if not payload.image_path:
-            flags.append("missing_image_path")
-        if payload.page is None:
-            flags.append("missing_pdf_page")
-        if not payload.crop_status:
-            flags.append("missing_crop_status")
-        if payload.crop_status in {"needs_recrop", "caption_only", "needs_review"}:
-            flags.append(payload.crop_status)
-        if not any(isinstance(item, dict) and item.get("bbox") for item in (payload.prov or [])):
-            flags.append("missing_parser_bbox")
-
-        crop_status = payload.crop_status or ("candidate_crop" if payload.image_path else "caption_only")
-        review_required = bool(flags) or crop_status in {"needs_recrop", "caption_only", "needs_review"}
-        return {
-            "crop_status": crop_status,
-            "review_required": review_required,
-            "flags": list(dict.fromkeys(flags)),
-            "crop_confidence": payload.crop_confidence,
-            "crop_source": payload.crop_source,
-            "note": "Verify this figure against the PDF page before treating it as evidence."
-            if review_required
-            else "Parser crop is available; still treat it as an unverified figure candidate.",
-        }
+        return build_figure_image_review(payload, settings=get_settings(), check_asset_exists=False)
 
     @classmethod
     def _serialize_dft_result(cls, item: DFTResult) -> DFTResultResponse:

@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.db.models import Paper
 from app.db.session import get_db_session
 from app.schemas.workbench import GeminiAuditRequest, HumanConfirmRequest, WorkbenchPrepareRequest
+from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.gemini_audit_service import GeminiAuditService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -45,6 +46,27 @@ def get_review_conflicts(
         include_non_conflicts=include_non_conflicts,
         limit=limit,
     )
+
+
+@router.get("/artifact-reliability")
+def get_artifact_reliability_audit(
+    limit: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    return ArtifactReliabilityAuditService(session, settings).audit_library(limit=limit)
+
+
+@router.get("/papers/{paper_id}/artifact-reliability")
+def get_paper_artifact_reliability_audit(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return ArtifactReliabilityAuditService(session, settings).audit_paper(paper_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/papers/{paper_id}/workspace")

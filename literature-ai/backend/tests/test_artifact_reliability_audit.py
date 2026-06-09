@@ -1,0 +1,276 @@
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+from uuid import UUID
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.config import get_settings
+from app.db.models import Base, EvidenceLocator, Paper, PaperFigure, PaperTable
+from app.db.session import get_db_session
+from app.main import app
+from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
+
+
+@pytest.fixture
+def audit_env(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        db_path = root / "audit.db"
+        storage_root = root / "storage"
+        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+        monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+        get_settings.cache_clear()
+
+        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
+
+        def override_get_db_session():
+            db = Session()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+        yield root, storage_root, Session
+
+        app.dependency_overrides.clear()
+        engine.dispose()
+        from app.db.session import _engines, _session_factories
+
+        for cached_engine in list(_engines.values()):
+            cached_engine.dispose()
+        _engines.clear()
+        _session_factories.clear()
+        get_settings.cache_clear()
+
+
+def _write_png(path: Path, size: tuple[int, int]) -> None:
+    Image = pytest.importorskip("PIL.Image")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", size, color=(32, 64, 96))
+    image.save(path)
+
+
+def _seed_reliability_cases(storage_root: Path, Session) -> tuple[str, dict[str, dict]]:
+    figure_dir = storage_root / "figures"
+    _write_png(figure_dir / "small.png", (120, 80))
+    _write_png(figure_dir / "extreme.png", (1300, 180))
+    _write_png(figure_dir / "normal.png", (420, 260))
+    _write_png(figure_dir / "nobbox.png", (420, 260))
+    _write_png(figure_dir / "nofull.png", (420, 260))
+
+    with Session() as session:
+        paper = Paper(title="Artifact reliability paper", pdf_path="paper.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        figures = [
+            PaperFigure(
+                paper_id=paper.id,
+                caption="Figure missing image.",
+                page=1,
+                image_path=None,
+                crop_status="candidate_crop",
+                prov=[{"bbox": {"l": 1, "t": 1, "r": 200, "b": 180}}],
+            ),
+            PaperFigure(
+                paper_id=paper.id,
+                caption="Figure caption only.",
+                page=2,
+                image_path=None,
+                crop_status="caption_only",
+                prov=[],
+            ),
+            PaperFigure(
+                paper_id=paper.id,
+                caption="Figure small crop.",
+                page=3,
+                image_path="small.png",
+                crop_status="candidate_crop",
+                crop_confidence=0.91,
+                crop_source="docling_bbox",
+                prov=[{
+                    "bbox": {"l": 1, "t": 1, "r": 40, "b": 30},
+                    "full_page_image_path": "page_003.png",
+                    "pixel_size": {"width": 120, "height": 80},
+                }],
+            ),
+            PaperFigure(
+                paper_id=paper.id,
+                caption="Figure extreme aspect.",
+                page=4,
+                image_path="extreme.png",
+                crop_status="candidate_crop",
+                prov=[{
+                    "bbox": {"l": 1, "t": 1, "r": 320, "b": 90},
+                    "full_page_image_path": "page_004.png",
+                    "pixel_size": {"width": 1300, "height": 180},
+                }],
+            ),
+            PaperFigure(
+                paper_id=paper.id,
+                caption="Figure missing bbox.",
+                page=5,
+                image_path="nobbox.png",
+                crop_status="candidate_crop",
+                prov=[{"full_page_image_path": "page_005.png"}],
+            ),
+            PaperFigure(
+                paper_id=paper.id,
+                caption="Figure missing full page snapshot.",
+                page=6,
+                image_path="nofull.png",
+                crop_status="candidate_crop",
+                prov=[{"bbox": {"l": 1, "t": 1, "r": 320, "b": 220}}],
+            ),
+        ]
+        session.add_all(figures)
+        table = PaperTable(
+            paper_id=paper.id,
+            caption="Table missing page and bbox.",
+            markdown_content="| A | B |\n| - | - |",
+            page=None,
+            extraction_source="docling",
+            prov=[],
+        )
+        session.add(table)
+        locators = [
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="text",
+                target_type="dft_results",
+                target_id="row-text-only",
+                field_name="value",
+                evidence_text="Text-only evidence.",
+                page=None,
+                locator_status="text_only",
+                locator_confidence=0.3,
+                parser_source="test",
+            ),
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="text",
+                target_type="dft_results",
+                target_id="row-missing-page",
+                field_name="value",
+                evidence_text="Missing page evidence.",
+                page=None,
+                locator_status="missing_page",
+                locator_confidence=0.2,
+                parser_source="test",
+            ),
+        ]
+        session.add_all(locators)
+        session.commit()
+        paper_id = str(paper.id)
+        snapshot = {
+            "paper": {"workflow_status": paper.workflow_status},
+            "figures": {
+                str(item.id): {
+                    "crop_status": item.crop_status,
+                    "crop_confidence": item.crop_confidence,
+                    "crop_source": item.crop_source,
+                    "image_path": item.image_path,
+                    "prov": item.prov,
+                }
+                for item in figures
+            },
+            "tables": {str(table.id): {"page": table.page, "prov": table.prov}},
+            "locators": {
+                str(item.id): {
+                    "page": item.page,
+                    "bbox": item.bbox,
+                    "locator_status": item.locator_status,
+                    "locator_confidence": item.locator_confidence,
+                    "warning_reason": item.warning_reason,
+                }
+                for item in locators
+            },
+        }
+        return paper_id, snapshot
+
+
+def _current_snapshot(Session, paper_id: str) -> dict[str, dict]:
+    paper_uuid = UUID(paper_id)
+    with Session() as session:
+        paper = session.get(Paper, paper_uuid)
+        figures = session.query(PaperFigure).filter(PaperFigure.paper_id == paper_uuid).all()
+        tables = session.query(PaperTable).filter(PaperTable.paper_id == paper_uuid).all()
+        locators = session.query(EvidenceLocator).filter(EvidenceLocator.paper_id == paper_uuid).all()
+        return {
+            "paper": {"workflow_status": paper.workflow_status},
+            "figures": {
+                str(item.id): {
+                    "crop_status": item.crop_status,
+                    "crop_confidence": item.crop_confidence,
+                    "crop_source": item.crop_source,
+                    "image_path": item.image_path,
+                    "prov": item.prov,
+                }
+                for item in figures
+            },
+            "tables": {str(item.id): {"page": item.page, "prov": item.prov} for item in tables},
+            "locators": {
+                str(item.id): {
+                    "page": item.page,
+                    "bbox": item.bbox,
+                    "locator_status": item.locator_status,
+                    "locator_confidence": item.locator_confidence,
+                    "warning_reason": item.warning_reason,
+                }
+                for item in locators
+            },
+        }
+
+
+def test_artifact_reliability_audit_counts_known_issues_and_is_read_only(audit_env):
+    _, storage_root, Session = audit_env
+    paper_id, before = _seed_reliability_cases(storage_root, Session)
+
+    with Session() as session:
+        report = ArtifactReliabilityAuditService(session, get_settings()).audit_paper(UUID(paper_id))
+
+    assert report["report_policy"]["read_only"] is True
+    assert report["figure_count"] == 6
+    assert report["table_count"] == 1
+    assert report["locator_count"] == 2
+    assert report["figure_issue_counts"]["missing_image"] == 2
+    assert report["figure_issue_counts"]["caption_only"] == 2
+    assert report["figure_issue_counts"]["small_crop"] == 1
+    assert report["figure_issue_counts"]["extreme_aspect_ratio"] == 1
+    assert report["figure_issue_counts"]["missing_bbox"] == 2
+    assert report["figure_issue_counts"]["missing_full_page_snapshot"] == 3
+    assert report["table_issue_counts"]["missing_page"] == 1
+    assert report["table_issue_counts"]["missing_bbox"] == 1
+    assert report["locator_issue_counts"]["text_only_locator"] == 1
+    assert report["locator_issue_counts"]["missing_page"] == 1
+    assert report["examples"]["small_crop"][0]["object_type"] == "figure"
+    assert report["examples"]["text_only_locator"][0]["status"] == "text_only"
+    assert _current_snapshot(Session, paper_id) == before
+
+
+def test_artifact_reliability_audit_api_is_read_only(audit_env):
+    _, storage_root, Session = audit_env
+    paper_id, before = _seed_reliability_cases(storage_root, Session)
+
+    client = TestClient(app)
+    response = client.get(f"/api/workbench/papers/{paper_id}/artifact-reliability")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "artifact_reliability_audit_v1"
+    assert payload["summary"]["status"] == "needs_review"
+    assert payload["figure_issue_counts"]["missing_image"] == 2
+
+    list_response = client.get("/api/workbench/artifact-reliability")
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert list_payload["metadata"]["read_only"] is True
+    assert list_payload["summary"]["paper_count"] == 1
+    assert list_payload["summary"]["locator_issue_counts"]["missing_page"] == 1
+    assert _current_snapshot(Session, paper_id) == before

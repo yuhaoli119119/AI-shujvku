@@ -12,7 +12,7 @@ from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate,
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
-from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.figure_reliability import build_figure_image_review
 from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
 
@@ -695,125 +695,7 @@ class CodexContextService:
         return ""
 
     def _build_figure_image_review(self, figure: PaperFigureResponse) -> dict[str, Any]:
-        bbox = self._first_bbox(figure.prov)
-        bbox_size = self._bbox_size_points(bbox)
-        full_page_image_path = self._first_prov_value(figure.prov, "full_page_image_path")
-        asset_path = resolve_persisted_artifact_path(
-            figure.image_path,
-            category="figures",
-            settings=self.settings,
-        )
-        pixel_size, file_size = self._image_file_summary(asset_path)
-        flags: list[str] = []
-        if not figure.image_path:
-            flags.append("missing_image_path")
-        elif asset_path is None:
-            flags.append("missing_image_file")
-        if bbox is None:
-            flags.append("missing_parser_bbox")
-        if figure.page is None:
-            flags.append("missing_pdf_page")
-        if not full_page_image_path:
-            flags.append("missing_full_page_snapshot")
-        if self._is_small_crop(pixel_size, bbox_size):
-            flags.append("small_crop_or_subfigure")
-        if self._is_extreme_aspect(pixel_size):
-            flags.append("extreme_aspect_ratio")
-
-        crop_status = "parser_bbox_crop_candidate" if bbox is not None else "caption_only_candidate"
-        if flags:
-            crop_status = "needs_review"
-
-        return {
-            "crop_status": crop_status,
-            "review_required": bool(flags),
-            "flags": flags,
-            "local_path": str(asset_path) if asset_path else None,
-            "full_page_image_path": full_page_image_path,
-            "file_size_bytes": file_size,
-            "pixel_size": pixel_size,
-            "bbox_points": bbox,
-            "bbox_size_points": bbox_size,
-            "locator_reliability": "needs_review" if flags else "candidate_reliable",
-            "note": "Verify this crop against the PDF page before using it in summaries or evidence."
-            if flags
-            else "Parser crop is available; still treat it as an unverified figure candidate.",
-        }
-
-    @staticmethod
-    def _first_bbox(prov: list[Any] | None) -> dict[str, Any] | None:
-        if not prov:
-            return None
-        for item in prov:
-            if not isinstance(item, dict):
-                continue
-            bbox = item.get("bbox")
-            if isinstance(bbox, dict):
-                return bbox
-        return None
-
-    @staticmethod
-    def _first_prov_value(prov: list[Any] | None, key: str) -> Any:
-        if not prov:
-            return None
-        for item in prov:
-            if isinstance(item, dict) and item.get(key):
-                return item.get(key)
-        return None
-
-    @staticmethod
-    def _bbox_size_points(bbox: dict[str, Any] | None) -> dict[str, float] | None:
-        if not bbox:
-            return None
-        try:
-            width = abs(float(bbox.get("r", 0)) - float(bbox.get("l", 0)))
-            height = abs(float(bbox.get("t", 0)) - float(bbox.get("b", 0)))
-        except (TypeError, ValueError):
-            return None
-        if width <= 0 or height <= 0:
-            return None
-        return {"width": round(width, 2), "height": round(height, 2)}
-
-    @staticmethod
-    def _image_file_summary(path: Any) -> tuple[dict[str, int] | None, int | None]:
-        if path is None:
-            return None, None
-        try:
-            file_size = path.stat().st_size
-        except OSError:
-            file_size = None
-        try:
-            from PIL import Image
-
-            with Image.open(path) as image:
-                return {"width": int(image.width), "height": int(image.height)}, file_size
-        except Exception:
-            return None, file_size
-
-    @staticmethod
-    def _is_small_crop(pixel_size: dict[str, int] | None, bbox_size: dict[str, float] | None) -> bool:
-        if pixel_size:
-            width = int(pixel_size.get("width") or 0)
-            height = int(pixel_size.get("height") or 0)
-            if width and height and (width < 280 or height < 160):
-                return True
-        if bbox_size:
-            width = float(bbox_size.get("width") or 0)
-            height = float(bbox_size.get("height") or 0)
-            if width and height and (width < 140 or height < 80):
-                return True
-        return False
-
-    @staticmethod
-    def _is_extreme_aspect(pixel_size: dict[str, int] | None) -> bool:
-        if not pixel_size:
-            return False
-        width = int(pixel_size.get("width") or 0)
-        height = int(pixel_size.get("height") or 0)
-        if width <= 0 or height <= 0:
-            return False
-        aspect = width / height
-        return aspect > 6.0 or aspect < 0.17
+        return build_figure_image_review(figure, settings=self.settings, check_asset_exists=True)
 
     def _dump_items(self, items: list[Any], limit: int) -> list[dict[str, Any]]:
         dumped: list[dict[str, Any]] = []
