@@ -28,6 +28,7 @@ This stage covered the first usable loop for dynamically assigned AI review work
 - `b1afecc test: cover DFT review evidence queue UI`
 - `6af3725 feat: aggregate multi-ai review conflicts`
 - `a23ac06 feat: standardize object-level review audits`
+- `0bc10e1 feat: show object-level review audits in queues`
 
 ## Current User-Facing Workflow
 
@@ -37,8 +38,9 @@ This stage covered the first usable loop for dynamically assigned AI review work
    - `append_note` for shared review notes.
    - `propose_correction` or `propose_dft_result_correction` for pending correction proposals.
    - `import_analysis` for paper-level `external_audit_opinion` or object-level `object_review_audit` candidates.
-4. Multiple AI or human reviewer opinions can be compared through review coverage and conflict aggregation.
-5. Human review and final gates still control verified state, export eligibility, and citation readiness.
+4. Object-level `object_review_audit` candidates are lightly visible in the DFT queue and Review center as read-only audit summaries.
+5. Multiple AI or human reviewer opinions can be compared through review coverage and conflict aggregation.
+6. Human review and final gates still control verified state, export eligibility, and citation readiness.
 
 ## Safety Boundaries
 
@@ -49,6 +51,7 @@ This stage covered the first usable loop for dynamically assigned AI review work
 - Ordinary IDE AI keys should not receive `review_corrections`; that capability remains reserved for trusted admin or human-review use.
 - `get_review_conflicts` is read-only and does not approve, merge, verify, or update review state.
 - Object-level `object_review_audit` candidates are forced to `verification_status=unverified`, `writes_final_truth=false`, and `human_confirmation_required=true`.
+- DFT queue and Review center object audit displays are read-only summaries; they do not automatically verify rows, approve corrections, or merge values.
 
 ## Verification Summary
 
@@ -64,6 +67,7 @@ Verification performed across this stage included:
   - Writing-card object review import.
   - Object-level conflict aggregation.
   - MCP `import_analysis` object-level candidate summary.
+- DFT queue and Review center UI smoke coverage for read-only `object_review_audit` display.
 - Latest object-level audit validation: `45 passed`.
 - `py_compile` checks for changed backend modules.
 - Inline script syntax checks for affected frontend pages where frontend scripts changed.
