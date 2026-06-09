@@ -1,0 +1,251 @@
+# AI Task Routing
+
+This document defines how natural-language user commands should be routed to MCP tools when the user dynamically assigns any IDE AI to a literature task.
+
+The system does not bind task ownership to a model name. Codex, Gemini, GLM, Claude, or another IDE AI may perform any task below when the user assigns it. Historical names such as `get_codex_context`, `GeminiAuditService`, `gemini_audit_protocol`, `Codex_Candidate`, and `Gemini_Verified` are compatibility names only.
+
+All AI output remains candidate or audit evidence until a later trusted review gate promotes it. Do not treat AI output as final verified data.
+
+## Common Routing Rules
+
+- Start with `query_papers` unless the user already provided a `paper_id`.
+- Use `get_codex_context` for the paper-level context bundle.
+- Use `get_codex_item` for focused checks of a section, figure, table, DFT row, mechanism claim, writing card, or figure data point.
+- Use `import_analysis` for paper-level AI audit opinions and other external AI review payloads.
+- Use `append_note` for non-final reviewer notes.
+- Use `propose_correction` or `propose_dft_result_correction` for suggested data changes.
+- Reserve `approve_correction`, `reject_correction`, `verify_dft_result`, and `reject_dft_result` for trusted admin or human-review keys.
+
+Recommended capability set for ordinary IDE AI keys:
+
+```text
+read_papers,append_notes,propose_corrections,request_parse
+```
+
+Do not grant `review_corrections` to an ordinary IDE AI key unless that client is intentionally acting as a trusted admin.
+
+## Command: "通过 MCP 解析文章"
+
+Meaning:
+
+The user wants the assigned AI/client to locate or ingest a paper and start parsing through MCP.
+
+Recommended tool order:
+
+1. `scan_local_pdfs` when the user gives a local folder.
+2. `ingest_pdf_batch` for local PDF batches, or `parse_paper` for DOI/arXiv/provider-based parsing.
+3. `get_parse_status` until the parse job finishes.
+4. `query_papers` to find the resulting paper row.
+5. `get_codex_context` to confirm parsed artifacts and candidate visibility.
+
+Required capability:
+
+`request_parse` for scan/ingest/parse, plus `read_papers` for status and context reads.
+
+Recommended provenance:
+
+- `source`: key source prefix, for example `ide_ai`, `glm`, or `codex`.
+- `source_label`: `Assigned AI parser`
+- `agent_role`: `paper_parser`
+
+Standard output or writeback:
+
+Return parse job status, `paper_id`, artifact precondition status, and blocking errors if any. Use `append_note` only for parse caveats that should remain visible to reviewers.
+
+Forbidden:
+
+Do not mark parsed output verified. Do not invent missing metadata when parser/provider evidence is absent.
+
+## Command: "核验 DFT 数据"
+
+Meaning:
+
+The user wants the assigned AI to compare DFT candidates against paper evidence.
+
+Recommended tool order:
+
+1. `query_papers` with `has_dft_results=true` or the supplied `paper_id`.
+2. `get_codex_context` to inspect artifact status and DFT export readiness.
+3. `get_dft_review_queue` for rows needing review.
+4. `get_codex_item` with `item_type="dft_result"` for each target row.
+5. `retrieve_evidence` or `read_paper_page` for targeted evidence checks when needed.
+6. `propose_dft_result_correction` for concrete field changes, or `import_analysis` for a paper-level DFT audit opinion.
+
+Required capability:
+
+`read_papers` and `propose_corrections`. Use `review_corrections` or `review_dft` only for trusted final reviewers.
+
+Recommended provenance:
+
+- `source`: `assigned_dft_audit`, or a model-specific label such as `gemini_dft_audit` when useful for logs.
+- `source_label`: `Assigned AI DFT audit`
+- `agent_role`: `dft_auditor`
+
+Standard output or writeback:
+
+Write paper-level audit results through `import_analysis` as an `external_audit_opinion`, or create pending row corrections through `propose_dft_result_correction`. The audit candidate must remain `verification_status=unverified`.
+
+Forbidden:
+
+Do not call final verification tools with an ordinary IDE AI key. Do not unlock ML export from external AI review alone. Do not infer precise numeric values from plots unless the value is explicitly readable in source evidence.
+
+## Command: "核验图片"
+
+Meaning:
+
+The user wants the assigned AI to inspect figure crops, captions, figure roles, image-derived claims, or visual evidence quality.
+
+Recommended tool order:
+
+1. `query_papers` or use the provided `paper_id`.
+2. `get_codex_context` with enough `max_figures`.
+3. `get_codex_item` with `item_type="figure"` for each figure needing inspection.
+4. `read_paper_page` when page-level source context is needed.
+5. `append_note` for non-final visual caveats, `propose_correction` for concrete figure metadata fixes, or `import_analysis` for a paper-level image audit opinion.
+
+Required capability:
+
+`read_papers`, `append_notes`, and `propose_corrections`.
+
+Recommended provenance:
+
+- `source`: `assigned_figure_audit`
+- `source_label`: `Assigned AI image audit`
+- `agent_role`: `figure_image_auditor`
+
+Standard output or writeback:
+
+Return inspected figure ids, crop/page/caption status, evidence notes, and proposed fixes. Use candidate notes or corrections; final figure trust remains a later review decision.
+
+Forbidden:
+
+Do not treat figure crops as exact evidence without checking page/caption context. Do not estimate hidden or unreadable values from image trends.
+
+## Command: "核验写作卡"
+
+Meaning:
+
+The user wants the assigned AI to check writing cards, knowledge candidates, and citation-support safety.
+
+Recommended tool order:
+
+1. `query_papers` with `has_writing_cards=true` or the supplied `paper_id`.
+2. `get_codex_context` to inspect writing cards and knowledge candidates.
+3. `get_paper_knowledge` for mechanism, gap, method, and writing logic candidates.
+4. `get_codex_item` with `item_type="writing_card"` for focused checks.
+5. `retrieve_evidence` for source-backed support.
+6. `append_note`, `propose_correction`, or `import_analysis` for candidate review output.
+
+Required capability:
+
+`read_papers`, `append_notes`, and `propose_corrections`.
+
+Recommended provenance:
+
+- `source`: `assigned_writing_card_audit`
+- `source_label`: `Assigned AI writing-card audit`
+- `agent_role`: `writing_card_auditor`
+
+Standard output or writeback:
+
+Write review notes, candidate corrections, or an `external_audit_opinion` with evidence examples and confidence. Keep citation support as draft/candidate unless evidence gates are satisfied later.
+
+Forbidden:
+
+Do not generate final bibliography or final citation-ready claims from unverified writing cards.
+
+## Command: "核验机制 claim"
+
+Meaning:
+
+The user wants mechanism claims checked against source sections, figures, tables, and evidence locators.
+
+Recommended tool order:
+
+1. `query_papers` or use the provided `paper_id`.
+2. `get_codex_context` to inspect mechanism candidates.
+3. `get_paper_knowledge` with mechanism-oriented categories when useful.
+4. `get_codex_item` with `item_type="mechanism_claim"`.
+5. `retrieve_evidence` or `read_paper_page` for support checks.
+6. `append_note`, `propose_correction`, or `import_analysis`.
+
+Required capability:
+
+`read_papers`, `append_notes`, and `propose_corrections`.
+
+Recommended provenance:
+
+- `source`: `assigned_mechanism_audit`
+- `source_label`: `Assigned AI mechanism-claim audit`
+- `agent_role`: `mechanism_claim_auditor`
+
+Standard output or writeback:
+
+Flag overclaims, missing qualifiers, unsupported causality, or conflicting evidence. Proposed rewrites should remain pending corrections.
+
+Forbidden:
+
+Do not promote mechanistic interpretation to final truth without direct evidence or human/final confirmation.
+
+## Command: "核验表格"
+
+Meaning:
+
+The user wants extracted tables, table captions, and table-derived candidates checked against the paper.
+
+Recommended tool order:
+
+1. `query_papers` or use the provided `paper_id`.
+2. `get_codex_context` with enough `max_tables`.
+3. `get_codex_item` with `item_type="table"` for each target table.
+4. `retrieve_evidence` for table-derived structured rows.
+5. `propose_correction` or `propose_dft_result_correction` for concrete fixes; `import_analysis` for paper-level table audit.
+
+Required capability:
+
+`read_papers`, `append_notes`, and `propose_corrections`.
+
+Recommended provenance:
+
+- `source`: `assigned_table_audit`
+- `source_label`: `Assigned AI table audit`
+- `agent_role`: `table_auditor`
+
+Standard output or writeback:
+
+Return table ids, row/column concerns, suspected missing candidates, and proposed fixes. Use candidate writes only.
+
+Forbidden:
+
+Do not apply table-derived corrections directly. Do not create verified values from ambiguous table text.
+
+## Command: "导入外部 AI 审核意见"
+
+Meaning:
+
+The user already has an AI review result from another chat, IDE, model, or script and wants it stored in the workbench.
+
+Recommended tool order:
+
+1. `query_papers` or use the supplied `paper_id`.
+2. `get_codex_context` to confirm artifact precondition status.
+3. `import_analysis` with `raw_text` or `raw_payload`.
+4. `get_review_coverage` or `get_codex_context` again to confirm the imported candidate is visible.
+
+Required capability:
+
+`read_papers` and `propose_corrections`.
+
+Recommended provenance:
+
+- `source`: role-specific, for example `external_ai_audit`, `glm_figure_audit`, `gemini_dft_audit`, or `manual_second_pass`.
+- `source_label`: human-readable task label.
+- `agent_role`: the assigned role, for example `external_audit_importer`.
+
+Standard output or writeback:
+
+`import_analysis` should create candidate records. Paper-level audit payloads should create `external_audit_opinion` candidates with `verification_status=unverified`.
+
+Forbidden:
+
+Do not import external AI output as final verified data. Do not bypass the artifact gate for paper-level audit. Do not overwrite prior audit opinions; preserve conflicts for later review.

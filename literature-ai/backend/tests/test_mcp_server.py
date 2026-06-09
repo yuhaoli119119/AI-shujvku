@@ -17,18 +17,24 @@ from app.db.models import (
     DFTResult,
     ElectrochemicalPerformance,
     EvidenceLocator,
+    ExternalAnalysisCandidate,
     MechanismClaim,
     Paper,
     PaperCorrection,
+    PaperFigure,
     PaperNote,
     PaperSection,
+    PaperTable,
+    WritingCard,
 )
 from app.main import app
+from app.mcp.auth import parse_mcp_api_keys
 from app.mcp.context import MCPAuthInfo, mcp_auth_context
 from app.mcp.server import (
     append_note,
     approve_correction,
     get_correction_detail,
+    get_codex_context,
     get_correction_queue,
     get_codex_item,
     get_dft_review_queue,
@@ -36,6 +42,7 @@ from app.mcp.server import (
     get_parse_status,
     ingest_pdf_batch,
     insert_word_citation,
+    import_analysis,
     list_notes,
     parse_paper,
     propose_correction,
@@ -89,6 +96,15 @@ def _auth() -> MCPAuthInfo:
     )
 
 
+def _ide_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="ide_ai",
+        display_name="IDE AI",
+        capabilities=frozenset({"read_papers", "append_notes", "propose_corrections", "request_parse"}),
+        raw_key="litmcp_ide_ai",
+    )
+
+
 def _admin_auth() -> MCPAuthInfo:
     return MCPAuthInfo(
         source_prefix="admin",
@@ -98,6 +114,23 @@ def _admin_auth() -> MCPAuthInfo:
         ),
         raw_key="litmcp_admin",
     )
+
+
+def _make_external_audit_ready(paper: Paper, root: Path) -> None:
+    pdf_path = root / f"{paper.id}.pdf"
+    markdown_path = root / f"{paper.id}.md"
+    docling_path = root / f"{paper.id}.docling.json"
+    workspace_path = root / "workspace" / str(paper.id)
+    pdf_path.write_bytes(b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")
+    markdown_path.write_text("# Ready paper\n\nDFT evidence is available.", encoding="utf-8")
+    docling_path.write_text('{"texts": [{"text": "DFT evidence is available."}]}', encoding="utf-8")
+    package_path = workspace_path / "extraction" / "ai_reading_package.json"
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    package_path.write_text('{"sections": [{"title": "Results"}]}', encoding="utf-8")
+    paper.pdf_path = str(pdf_path)
+    paper.markdown_path = str(markdown_path)
+    paper.docling_json_path = str(docling_path)
+    paper.workspace_path = str(workspace_path)
 
 
 def test_mcp_query_note_and_correction_workflow(mcp_test_env):
@@ -240,6 +273,150 @@ def test_mcp_get_codex_item_returns_low_token_dft_context(mcp_test_env):
     assert payload["context"]["item"]["value"] == 7.5
     assert payload["context"]["export_safety"]["blocked_reasons"] == ["missing_review"]
     assert payload["context"]["evidence_locators"]["items"][0]["page"] == 5
+
+
+def test_ordinary_ide_ai_reads_context_and_imports_unverified_audit_candidate(mcp_test_env):
+    configs = parse_mcp_api_keys(
+        "ide_ai|IDE AI|litmcp_ide_ai|read_papers,append_notes,propose_corrections,request_parse"
+    )
+    assert configs["litmcp_ide_ai"].capabilities == frozenset(
+        {"read_papers", "append_notes", "propose_corrections", "request_parse"}
+    )
+    assert "review_corrections" not in configs["litmcp_ide_ai"].capabilities
+
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(
+            title="Ordinary IDE AI MCP Workflow Paper",
+            doi="10.1000/ide-ai-workflow",
+            year=2026,
+            journal="Workflow Journal",
+            authors=["AI Reviewer"],
+            abstract="A paper with DFT, figures, tables, mechanism claims, and writing cards.",
+            pdf_path="workflow.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        _make_external_audit_ready(paper, mcp_test_env["tmpdir"])
+        section = PaperSection(
+            paper_id=paper.id,
+            section_title="Results",
+            section_type="results",
+            text="The adsorption energy of Li2S4 is -1.23 eV and the figure supports the trend.",
+            page_start=3,
+            page_end=4,
+        )
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Figure 2. Adsorption configuration and charge redistribution.",
+            image_path="figures/fig2.png",
+            page=4,
+            figure_role="data_figure",
+        )
+        table = PaperTable(
+            paper_id=paper.id,
+            caption="Table 1. DFT adsorption energies.",
+            markdown_content="| Species | Energy |\n| Li2S4 | -1.23 eV |",
+            page=5,
+        )
+        dft = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.23,
+            unit="eV",
+            evidence_text="The adsorption energy of Li2S4 is -1.23 eV.",
+            confidence=0.82,
+        )
+        claim = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="adsorption",
+            claim_text="The catalyst strengthens polysulfide adsorption.",
+            evidence_types=["dft", "figure"],
+            evidence_text="Charge redistribution indicates stronger adsorption.",
+        )
+        card = WritingCard(
+            paper_id=paper.id,
+            research_gap="Weak polysulfide adsorption remains a limitation.",
+            proposed_solution="Use defect sites to tune adsorption.",
+            core_hypothesis="Defect engineering improves sulfur conversion.",
+        )
+        session.add_all([section, figure, table, dft, claim, card])
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_result",
+                target_id=str(dft.id),
+                field_name="value",
+                page=5,
+                table_id=table.id,
+                evidence_text=dft.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.91,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        dft_id = str(dft.id)
+        claim_id = str(claim.id)
+
+    with mcp_auth_context(_ide_auth()):
+        papers = query_papers(q="Ordinary IDE AI", limit=5)
+        assert papers["returned"] == 1
+        assert papers["items"][0]["id"] == paper_id
+
+        context = get_codex_context(paper_id=paper_id)
+        assert context["context"]["external_audit_precondition"]["status"] == "ready"
+        assert len(context["context"]["content"]["sections"]) == 1
+        assert len(context["context"]["content"]["figures"]) == 1
+        assert len(context["context"]["content"]["tables"]) == 1
+
+        dft_context = get_codex_item(paper_id=paper_id, item_type="dft_result", item_id=dft_id)
+        assert dft_context["context"]["export_safety"]["eligible"] is False
+        assert "missing_review" in dft_context["context"]["export_safety"]["blocked_reasons"]
+
+        mechanism_context = get_codex_item(paper_id=paper_id, item_type="mechanism_claim", item_id=claim_id)
+        assert mechanism_context["context"]["item"]["claim_text"].startswith("The catalyst strengthens")
+
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            raw_payload={
+                "paper_id": paper_id,
+                "agent_role": "dft_auditor",
+                "verdict": "WARN",
+                "recommended_action": "needs_human_review",
+                "suspected_missing": [],
+                "metadata_status": "ok",
+                "section_structure_status": "ok",
+                "table_status": "ok",
+                "figure_status": "ok",
+                "dft_status": "warn",
+                "evidence_examples": [{"text": "DFT row needs final reviewer confirmation."}],
+                "confidence": 0.74,
+            },
+        )
+        assert imported["candidate_count"] == 1
+        assert imported["candidates"][0]["type"] == "external_audit_opinion"
+
+        with pytest.raises(PermissionError):
+            approve_correction(str(UUID(int=0)))
+
+    with Session(mcp_test_env["engine"]) as session:
+        candidate = session.scalar(select(ExternalAnalysisCandidate))
+        assert candidate is not None
+        assert candidate.candidate_type == "external_audit_opinion"
+        assert candidate.status == "candidate"
+        assert candidate.materialized_target_type is None
+        assert candidate.materialized_target_id is None
+        assert candidate.normalized_payload["verification_status"] == "unverified"
+        assert candidate.normalized_payload["source"] == "assigned_dft_audit"
+
+        row = session.get(DFTResult, UUID(dft_id))
+        assert row is not None
+        assert row.candidate_status == "system_candidate"
 
 
 def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):

@@ -1,73 +1,175 @@
-﻿# Literature AI MCP API
+# Literature AI MCP API
 
-## 服务地址
+## Service URL
 
 ```text
 http://localhost:8000/mcp
 ```
 
-传输方式：
+Transport:
 
 - Streamable HTTP
 
-认证方式：
+Authentication:
 
 - `Authorization: Bearer <MCP_API_KEY>`
 
-## 基本环境变量
+## Runtime Configuration
+
+Docker Compose is the recommended runtime. In Docker, the backend uses:
+
+```env
+LITAI_STORAGE_ROOT=/data/storage
+```
+
+The compose file mounts `./data:/data`, so parsed PDFs, Markdown, Docling JSON, workspaces, and `ai_reading_package.json` are resolved from `literature-ai/data/storage`.
+
+For local non-Docker runs, do not start the backend from `literature-ai/backend` with `LITAI_STORAGE_ROOT=./data/storage` unless you intentionally want `literature-ai/backend/data/storage`. Use one of these instead:
+
+```env
+# If running from literature-ai/backend
+LITAI_STORAGE_ROOT=../data/storage
+
+# Or use an absolute host path
+LITAI_STORAGE_ROOT=D:/path/to/literature-ai/data/storage
+```
+
+If this root is wrong, MCP may still list papers from PostgreSQL, but artifact checks will report errors such as `missing_pdf`, `missing_markdown_and_docling_json`, or `missing_ai_reading_package`.
+
+## Basic Environment Variables
 
 ```env
 LITAI_MCP_ENABLED=true
 LITAI_MCP_SERVER_NAME=Literature AI MCP
-LITAI_MCP_API_KEYS=claude|Claude Desktop|litmcp_claude|read_papers,append_notes,propose_corrections,request_parse;admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections
+LITAI_MCP_API_KEYS=ide_ai|IDE AI|litmcp_ide_ai|read_papers,append_notes,propose_corrections,request_parse;admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections
 ```
 
-单条 key 格式：
+Single key format:
 
 ```text
 source_prefix|display_name|raw_api_key|capability1,capability2
 ```
 
-## 支持的能力
+Recommended IDE AI key:
 
-- `read_papers`
-- `append_notes`
-- `propose_corrections`
-- `request_parse`
-- `review_corrections`
+```text
+ide_ai|IDE AI|<strong-random-key>|read_papers,append_notes,propose_corrections,request_parse
+```
 
-## 常见工具
+This lets any AI you run from the IDE read parsed paper context, request parsing, append notes, propose corrections, and import audit opinions as unverified candidates. It does not let that AI approve corrections or mark final verified data.
 
-贡献者常用：
+If you want audit logs to distinguish tools or agents, create multiple keys with the same safe capability set, for example `gemini|Gemini|...`, `glm|GLM|...`, or `codex|Codex|...`. This is optional; task assignment is controlled by your workflow, not by a fixed key name.
+
+## Capabilities
+
+- `read_papers`: read paper metadata, parsed sections, candidates, evidence, Codex context, review coverage, and queues.
+- `append_notes`: append non-final review notes.
+- `propose_corrections`: propose corrections and import external analysis/audit candidates.
+- `request_parse`: request local PDF scans, ingestion, or parsing.
+- `review_corrections`: approve or reject pending correction proposals; reserve this for an admin or human reviewer.
+- `review_dft`: optional narrower DFT review capability accepted by DFT verification tools.
+
+## Dynamic AI Review Flow
+
+Natural-language tasks such as "parse this paper", "audit DFT data", "check images", "check writing cards", "check mechanism claims", "check tables", or "import this external AI review" should be interpreted through [AI_TASK_ROUTING.md](./AI_TASK_ROUTING.md). Do not infer a fixed division of labor from model names. The user assigns the AI role per task, and `source`, `source_label`, `agent_role`, or `model_name` should record what happened in that run.
+
+Use this flow when any IDE AI needs to review already parsed literature:
+
+1. `query_papers` to find the paper.
+2. `get_codex_context` for a compact paper bundle with artifact status, sections, figures, tables, structured candidates, evidence locators, warnings, and Markdown.
+3. Optionally call `get_codex_item` for a low-token bundle for one section, figure, table, DFT result, mechanism claim, or writing card.
+4. Optionally call `retrieve_evidence`, `read_paper_page`, `get_paper_knowledge`, `get_review_coverage`, or `get_field_disputes` for targeted checks.
+5. Write the assigned AI's paper-level audit back through `import_analysis`.
+
+Paper-level audit payload example:
+
+```json
+{
+  "paper_id": "PAPER_UUID",
+  "source": "assigned_data_audit",
+  "source_label": "Assigned AI data audit",
+  "raw_payload": {
+    "paper_id": "PAPER_UUID",
+    "verdict": "WARN",
+    "recommended_action": "needs_dft_review",
+    "suspected_missing": ["dft_result"],
+    "metadata_status": "ok",
+    "section_structure_status": "ok",
+    "table_status": "warn",
+    "figure_status": "ok",
+    "dft_status": "warn",
+    "evidence_examples": [
+      {"text": "DFT is discussed, but no directly verified DFT result is available."}
+    ],
+    "confidence": 0.7
+  }
+}
+```
+
+The `source` and `source_label` should describe the role you assigned for that run, such as `assigned_figure_audit`, `assigned_data_audit`, `assigned_parse_review`, or `manual_second_pass`.
+
+The import creates an `external_audit_opinion` candidate with `verification_status=unverified`. It is visible in the review center, but it does not write final truth and does not unlock ML export.
+
+## Artifact Preconditions
+
+`get_codex_context` returns:
+
+```json
+{
+  "external_audit_precondition": {
+    "status": "ready",
+    "blocking_errors": []
+  }
+}
+```
+
+External paper-level audit imports are accepted only when the paper is ready for external audit. Required artifacts:
+
+- PDF exists and is readable.
+- Markdown or Docling JSON has content.
+- `by_id/<paper_id>/extraction/ai_reading_package.json` exists.
+- Workflow is not blocked as metadata-only, parse failed, or needs reingest.
+
+If the status is `artifact_precondition_failed`, the assigned AI should not perform a final audit. Use the `blocking_errors` list to decide whether to reparse, repair paths, or attach the missing PDF.
+
+## Common Tools
+
+Reader and AI review tools:
 
 - `query_papers`
 - `get_paper`
-- `list_notes`
+- `get_codex_context`
+- `get_codex_item`
+- `get_paper_knowledge`
+- `retrieve_evidence`
+- `read_paper_page`
+- `get_review_coverage`
+- `get_field_disputes`
+- `import_analysis`
 - `append_note`
 - `propose_correction`
-- `parse_paper`
-- `get_parse_status`
+
+Parsing tools:
+
 - `scan_local_pdfs`
 - `ingest_pdf_batch`
+- `parse_paper`
+- `get_parse_status`
 
-审核者常用：
+Reviewer and admin tools:
 
 - `get_correction_queue`
 - `get_correction_detail`
 - `approve_correction`
 - `reject_correction`
+- `verify_dft_result`
+- `reject_dft_result`
+- `propose_dft_result_correction`
+- `get_dft_review_queue`
 
-## 协作原则
+## Collaboration Rules
 
-- 外部 AI 可以读、记笔记、提修正建议、请求解析
-- 外部 AI 不应被视为自动 verified 审核者
-- 任何修正建议都应区分“候选提案”和“已人工确认”
-
-## 推荐流程
-
-1. `query_papers`
-2. `get_paper`
-3. `append_note` 记录软性问题
-4. `propose_correction` 提交明确修改建议
-5. 审核者使用 `get_correction_queue`
-6. 审核者使用 `approve_correction` 或 `reject_correction`
+- External AI outputs are candidates, not verified facts.
+- External audit imports must remain unverified until a human/final review step confirms them.
+- Do not grant `review_corrections` to external AI clients unless that client is intentionally acting as a trusted admin.
+- DFT export remains gated by safe verified evidence and exact locators.

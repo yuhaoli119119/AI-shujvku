@@ -602,7 +602,7 @@
         </div>
         <h1>按证据拆文献，按记录逐项提取</h1>
         <p class="hero-desc">
-          系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；Gemini、GLM、Codex 或第二 AI 和人工负责审核。
+          系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；指定 AI 或第二 AI 和人工负责审核。
           候选数据不直接进入 DFT 数据库、ML 导出或可信可视化。
         </p>
         <div class="hero-badges">
@@ -685,7 +685,7 @@
         <div class="section-title-wrap">
           <div class="section-eyebrow">🔧 On-Demand MCP Tools</div>
           <div class="section-title">按需原子工具决策树</div>
-          <p class="section-desc">AI Agent 在提取流程中可随时调用以下工具查证。Gemini、GLM、Codex 或其它 AI 的角色可按任务分配，但每次分析、审核、修正和图表判断都必须留下可追溯记录。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
+          <p class="section-desc">AI Agent 在提取流程中可随时调用以下工具查证。指定 AI 或其它 AI 的角色可按任务分配，但每次分析、审核、修正和图表判断都必须留下可追溯记录。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
         </div>
       </div>
       <div class="tool-grid">
@@ -701,14 +701,14 @@
             <div class="tool-icon indigo">🌐</div>
             <h3 class="tool-name">外部文献发现</h3>
           </div>
-          <p class="tool-desc">用 <code>search_external_papers(query, year_min, year_max, target_types)</code> 从 OpenAlex、arXiv 等外部数据库检索新文献。<strong>只检索不入库</strong>，后续用 <code>parse_paper</code> 或 <code>ingest_pdf_batch</code> 导入。</p>
+          <p class="tool-desc">用 <code>search_external_papers(query, year_min, year_max, target_types)</code> 从 OpenAlex、arXiv 等外部数据库检索新文献。<strong>只检索不入库</strong>；收录必须走 Intake 候选确认流程，先生成候选、再人工 approve、最后触发 ingest。</p>
         </div>
         <div class="tool-item">
           <div class="tool-top">
             <div class="tool-icon teal">📖</div>
             <h3 class="tool-name">翻页查证</h3>
           </div>
-          <p class="tool-desc">当 RAG 片段被截断或缺上下文时，用 <code>read_paper_page(paper_id, page)</code> 翻开原文指定页。返回该页所有 sections、tables 和 figures 的摘要。</p>
+          <p class="tool-desc">当 RAG 片段被截断或缺上下文时，用 <code>read_paper_page(paper_id, page)</code> 翻开原文指定页。返回该页所有 sections、tables 和 figures 的摘要；若内部解析数据不可读，必须阻断审核并记录缺失。</p>
         </div>
         <div class="tool-item">
           <div class="tool-top">
@@ -736,7 +736,7 @@
             <div class="tool-icon violet">📋</div>
             <h3 class="tool-name">审核覆盖率</h3>
           </div>
-          <p class="tool-desc">用 <code>get_review_coverage(paper_id)</code> 查看哪些图表、表格、章节已被审核、哪些还没人碰。快速定位盲区。</p>
+          <p class="tool-desc">用 <code>get_review_coverage(paper_id)</code> 查看图表、表格、章节审核覆盖，并读取 <code>latest_external_audits</code>、<code>external_audit_count</code> 和来源分布。外部 AI 必须先看这些内部核验意见，再给出新审核结论。</p>
         </div>
         <div class="tool-item">
           <div class="tool-top">
@@ -832,9 +832,9 @@
         title: "Paper Evidence Packet",
         sub: "系统拆材料",
         description: "系统准备元数据、章节、表格、图注、图片、页码、PDF 定位和附近上下文；VLM 自动生成图表摘要和数值点；长表完整保留不截断；图文联合向量索引可跨模态检索。这些只是证据材料，不等于可信数据。",
-        worker: ["核对 DOI、期刊、年份、PDF 可读性。", "检查章节、表格、图片是否按文献归档。", "检查 VLM 图表摘要 (content_summary) 和数值点 (numerical_data_points) 是否完整。", "长表已自动按 token 窗口分块，不再截断，可跨页检索。", "标记短 caption、缺页码、缺截图等风险。"],
-        review: ["证据包不完整时不得直接抽最终数据。", "图片裁剪只是候选定位，必须回到 PDF 原页确认（可用 read_paper_page）。", "VLM 摘要不足时可用 analyze_chart 追问原图。", "解析错误要记录为修复任务。"],
-        prompt: "任务：检查 evidence packet 完整性。核对 sections/tables/figures/VLM summaries/numerical data points。列出缺失项，判断是否需要 read_paper_page 补读或 analyze_chart 追问。完整协议请查看设置页 → 提取协议。"
+        worker: ["核对 DOI、期刊、年份、PDF 可读性。", "检查 artifact_status：PDF、Markdown、Docling JSON、GROBID TEI、AI reading package 是否可供外部 AI 审核。", "检查章节、表格、图片是否按文献归档。", "检查 VLM 图表摘要 (content_summary) 和数值点 (numerical_data_points) 是否完整。", "长表已自动按 token 窗口分块，不再截断，可跨页检索。", "标记短 caption、缺页码、缺截图、内部数据不可读等风险。"],
+        review: ["证据包不完整时不得直接抽最终数据。", "artifact_ready_for_external_audit 为 false 时，外部 AI 只能输出阻断原因，不能 accept。", "图片裁剪只是候选定位，必须回到 PDF 原页确认（可用 read_paper_page）。", "VLM 摘要不足时可用 analyze_chart 追问原图。", "解析错误要记录为修复任务。"],
+        prompt: "任务：检查 evidence packet 和内部核验数据完整性。核对 artifact_status、sections/tables/figures/VLM summaries/numerical data points。列出 blocking_errors/warnings，判断是否需要 read_paper_page 补读或 analyze_chart 追问；若 artifact_ready_for_external_audit 为 false，输出 internal_data_read_status=incomplete 或 unreadable。完整协议请查看设置页 → 提取协议。"
       },
       {
         id: "plan",
@@ -876,10 +876,10 @@
         id: "audit",
         title: "Second AI / Human Audit",
         sub: "可信入库",
-        description: "Gemini、GLM、Codex、其它第二 AI 或人工依据明文协议和证据包复核。Gemini 可重点审图，GLM/Codex 可重点审 DFT 行；角色可变，但记录必须可追溯。只有已审核、证据完整、PDF 定位准确且通过最终闸门的数据才进入 DFT 数据库和可信可视化。",
-        worker: ["读取第二 AI 审核协议。", "记录 agent_role、model_name、protocol version/hash。", "复核候选字段、证据、定位和重复。", "输出可否 promote_to_exportable_database。"],
-        review: ["accept 仍需满足项目设定的人审或最终门槛。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心、AuditLog、字段 review、共享笔记或外部分析记录。"],
-        prompt: "任务：按 second AI audit protocol 审核候选记录。声明 agent_role 和 model_name；不要发明值；不要从常识修复；只基于 evidence packet 给出 decision、reasons、protocol version/hash 和 evidence location。完整协议请查看设置页 → 提取协议。"
+        description: "指定 AI、其它第二 AI 或人工依据明文协议和证据包复核。AI 可重点审图，指定 AI 可重点审 DFT 行；角色可变，但记录必须可追溯。只有已审核、证据完整、PDF 定位准确且通过最终闸门的数据才进入 DFT 数据库和可信可视化。",
+        worker: ["读取第二 AI 审核协议。", "记录 agent_role、model_name、protocol version/hash。", "先用 get_review_coverage 查看 latest_external_audits、external_audit_count、source_distribution 和未审核盲区。", "复核候选字段、证据、定位、重复和既有外部审核意见。", "输出 internal_data_read_status 与可否 promote_to_exportable_database。"],
+        review: ["accept 仍需满足项目设定的人审或最终门槛。", "未读取到 artifact_status、review coverage 或 prior external audits 时，不得输出可入库。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心、AuditLog、字段 review、共享笔记或外部分析记录。"],
+        prompt: "任务：按 second AI audit protocol 审核候选记录。声明 agent_role 和 model_name；先读取 artifact_status 与 get_review_coverage，检查 latest_external_audits/external_audit_count/source_distribution。不要发明值；不要从常识修复；只基于 evidence packet 和内部核验数据给出 decision、reasons、internal_data_read_status、prior_external_audit_summary、protocol version/hash 和 evidence location。完整协议请查看设置页 → 提取协议。"
       }
     ];
     let currentStep = steps[0];

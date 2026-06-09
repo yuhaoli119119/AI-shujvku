@@ -1486,7 +1486,7 @@ async function copyCodexItem(itemType, itemId) {
         );
         const value = data && data.markdown ? data.markdown : JSON.stringify(data, null, 2);
         await navigator.clipboard.writeText(value);
-        showToast("审核提示已复制，可发给 AI/Gemini 审核。", "success");
+        showToast("审核提示已复制，可发给指定 AI 审核。", "success");
     } catch (error) {
         showToast("审核包生成失败：" + error.message, "error");
     }
@@ -1503,7 +1503,7 @@ function renderAiAuditTrail(items) {
     return (
         '<div id="aiAuditTrailPanel" class="section-card" style="border:1px solid var(--color-border);margin-bottom:16px;">' +
             '<h3>AI 审核建议记录</h3>' +
-            '<div class="subtle">这里显示 Gemini / GLM / 第二 AI 写入的审核意见。AI 结论不会直接进入可信数据库；冲突项会标记为 review_conflict 并要求人工确认。</div>' +
+            '<div class="subtle">这里显示 AI / GLM / 第二 AI 写入的审核意见。AI 结论不会直接进入可信数据库；冲突项会标记为 review_conflict 并要求人工确认。</div>' +
             '<div style="display:grid;gap:10px;margin-top:12px;">' +
                 aiItems.map(renderAiAuditTrailItem).join("") +
             '</div>' +

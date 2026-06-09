@@ -1,5 +1,5 @@
 name: dft_material_ai_extraction_protocol
-version: system_candidate_dft_v1
+version: system_candidate_dft_v1_1
 stage: ai_extraction_and_review_gate
 
 role_boundary:
@@ -16,6 +16,18 @@ role_boundary:
     - Deduplicate candidates.
     - Run completeness audit.
     - Require human or second-AI confirmation before promotion to exportable database.
+
+intake_boundary:
+  current_rule: Literature discovery is a controlled candidate workflow, not direct ingestion.
+  legacy_disabled:
+    - The old /api/papers/ai_workflow and /api/papers/ai_workflow/jobs direct-ingest routes are disabled with HTTP 410.
+    - External AI workers must not assume that search results have entered the library.
+  approved_flow:
+    - Search or AI expansion creates LiteratureIntakeCandidate rows only.
+    - Candidate status pending_review means not downloaded, not parsed, not citeable, and not usable as evidence.
+    - A candidate must be explicitly approved before download or ingestion can start.
+    - Rejected and duplicate candidates must not be ingested unless a curator deliberately changes their state.
+    - Only papers that already exist in the active library can be used for DFT extraction, review, writing, export, or MCP evidence retrieval.
 
 evidence_first_rules:
   - Every non-empty scientific field must be supported by a text/table/figure locator.
@@ -77,11 +89,19 @@ workflow_stages:
       - accept_reject_needs_fix
       - audit_notes
       - human_confirmation_required
+      - internal_data_read_status
+      - prior_external_audit_summary
 
 MCP_tooling_context:
   purpose: MCP tools expose evidence packets, page reads, figure crops, chart audits, share tokens, and repair actions to AI workers.
   rule: MCP tool output is supporting evidence, not final truth.
   traceability: Every MCP-assisted AI action must be recorded in AuditLog, task center, field review, external analysis run, or PaperNote.
+  internal_verification_read_path:
+    - Before auditing, external AI workers should read paper readiness through get_paper or get_codex_context and inspect artifact_status when present.
+    - artifact_ready_for_external_audit must be true, or the worker must report blocking_errors and warnings instead of pretending the paper was fully readable.
+    - get_review_coverage(paper_id) now exposes latest_external_audits, external_audit_count, and external_audit_source_distribution so other AI workers can see prior internal verification opinions.
+    - external_audit_opinion candidates are visible review evidence, not final truth; they remain subject to conflict checks and human/final gates.
+    - If MCP cannot read sections, tables, figures, locators, artifacts, or previous audit opinions, the correct output is needs_fix or blocked_by_unreadable_internal_data, not accept.
 
 required_fields_per_dft_record:
   - catalyst_or_material
@@ -157,19 +177,21 @@ deduplication_policy:
 
 ai_worker_protocol:
   multi_ai_collaboration:
-    - AI roles are assignable per task. Codex, Gemini, GLM, or another model may act as extractor, reviewer, image auditor, DFT auditor, or judge.
-    - Role names must be recorded explicitly, for example gemini_image_auditor, glm_dft_auditor, codex_extractor, or second_ai_judge.
+    - AI roles are assignable per task. Any IDE AI or external model may act as extractor, reviewer, image auditor, DFT auditor, or judge when assigned by the user.
+    - Role names must be recorded explicitly, for example assigned_image_auditor, assigned_dft_auditor, assigned_extractor, or second_ai_judge.
     - A model that extracted a record should not be the only reviewer of that same record.
     - AI outputs are recommendations and candidate records only; they do not write final truth.
-    - Persisted AI payloads must include writes_final_truth: false and human_confirmation_required: true unless a separate human/final gate has explicitly promoted the row.
+    - "Persisted AI payloads must include writes_final_truth: false and human_confirmation_required: true unless a separate human/final gate has explicitly promoted the row."
     - Every AI operation must leave a trace in task center, audit logs, field reviews, shared notes, correction proposals, or external analysis runs.
     - Review suggestions are inspected from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, PaperNote records, and AuditLog entries.
+    - External AI workers must first confirm they can read the active library paper, artifact status, parsed content, review coverage, and prior external_audit_opinion records through MCP or API.
+    - "A second AI review that did not read the internal verification data must declare internal_data_read_status: unreadable or incomplete and cannot return can_promote_to_exportable_database: true."
   image_audit:
-    - Gemini or another VLM-capable model may audit figure crops, captions, full-page screenshots, and chart interpretations.
+    - The assigned VLM-capable model may audit figure crops, captions, full-page screenshots, and chart interpretations.
     - Figure audit must record figure_id, page, crop status, question, answer, and whether the crop is verified, incomplete, or incorrect.
     - Incorrect crops must trigger recrop_figure or a repair task before values from that figure can be trusted.
   dft_data_audit:
-    - GLM, Gemini, Codex, or another text/science model may audit DFT rows if it receives the evidence packet and this protocol.
+    - The assigned text/science model may audit DFT rows if it receives the evidence packet and this protocol.
     - The reviewer must check exact numeric value, unit, catalyst/material, adsorbate, property type, method/condition, locator, duplicates, and suspected missing rows.
     - PASS/accept from an AI does not unlock export unless the configured human/final gate also passes.
   ai_a_initial_extract:
@@ -194,6 +216,11 @@ paper_statuses:
 promotion_rule:
   chain: PDF original evidence -> AI protocol extraction -> deduplicate/merge -> completeness audit -> human or second-AI review -> exportable database
   final_database_filter: Only reviewed/exportable records are visible by default in the DFT database, exports, ML dataset, and trusted matrix.
+  blocked_when:
+    - candidate came only from Literature Intake and has not been ingested into papers.
+    - artifact_ready_for_external_audit is false.
+    - MCP/API output does not expose the parsed evidence packet or prior internal verification/audit opinions.
+    - external AI audit conflicts with previous AI or human reviews.
 
 output_schema:
   record:
@@ -230,6 +257,8 @@ output_schema:
     human_confirmation_required: true
     confidence: number
     notes: string
+    internal_data_read_status: readable | incomplete | unreadable
+    prior_external_audits_checked: boolean
   report:
     detected_dft_signal_count: integer
     parsed_candidate_count: integer
@@ -237,3 +266,4 @@ output_schema:
     conflicts: list
     duplicate_groups: list
     promotion_recommendation: needs_human_review
+    unreadable_internal_data: list

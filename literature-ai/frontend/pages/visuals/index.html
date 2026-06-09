@@ -857,7 +857,7 @@
       const box = document.getElementById("correlationScatter");
       const points = payload.points || [];
       if (!payload.ready) {
-        box.innerHTML = '<div class="matrix-note">' + esc(payload.target_property) + ' vs ' + esc(payload.descriptor) + '：当前只有 n=' + esc(payload.n || 0) + ' 个已审核配对样本，未达到最小样本数 ' + esc(payload.min_n || 5) + '。可先完成 Gemini/人工审核，或放宽反应/吸附物筛选。</div>';
+        box.innerHTML = '<div class="matrix-note">' + esc(payload.target_property) + ' vs ' + esc(payload.descriptor) + '：当前只有 n=' + esc(payload.n || 0) + ' 个已审核配对样本，未达到最小样本数 ' + esc(payload.min_n || 5) + '。可先完成 AI/人工审核，或放宽反应/吸附物筛选。</div>';
         return;
       }
       const xs = points.map(p => Number(p.x)).filter(Number.isFinite);

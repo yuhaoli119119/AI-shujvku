@@ -31,8 +31,8 @@ function renderPaperList() {
             Imported: "已导入", Quality_Checked: "已检质量", Parsed_Material_Ready: "材料已就绪",
             Unparsed: "未解析", Initial_Parsed: "初步解析", Suspected_Missing: "疑似漏提",
             AI_Rescanned: "AI已重扫", Human_Complete: "人工已确认", DB_Ready: "可入库",
-            Codex_Candidate: "系统候选", Gemini_Verified: "Gemini核验", Gemini_Revised: "Gemini修订",
-            Gemini_Flagged: "Gemini标红", Evidence_Insufficient: "证据不足", Rejected: "已废弃",
+            Codex_Candidate: "系统候选", Gemini_Verified: "AI核验", Gemini_Revised: "AI修订",
+            Gemini_Flagged: "AI标红", Evidence_Insufficient: "证据不足", Rejected: "已废弃",
             Needs_Human_Confirmation: "待人工审核"
         };
         return mapping[status] || status || "Imported";
