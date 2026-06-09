@@ -764,33 +764,37 @@
                         <div class="search-row">
                             <input type="text" id="searchQuery" class="form-control" placeholder="输入关键词、DOI、期刊名或论文标题">
                             <input type="number" id="searchLimit" class="form-control" value="10" min="1" max="100" title="检索上限">
-                            <button class="btn btn-primary" onclick="runOnlineSearch()">检索</button>
+                            <button class="btn btn-primary" onclick="runOnlineSearch()">&#26816;&#32034;</button>
                         </div>
                         <div class="search-results" id="searchResults">
-                            <div class="empty-state">输入关键词后点击检索。结果会从 OpenAlex、arXiv 等公开来源返回，收录前仍会走去重逻辑。</div>
+                            <div class="empty-state">&#36755;&#20837;&#20851;&#38190;&#35789;&#21518;&#28857;&#20987;&#26816;&#32034;&#12290;&#32467;&#26524;&#20250;&#20174; OpenAlex&#12289;arXiv &#31561;&#20844;&#24320;&#26469;&#28304;&#36820;&#22238;&#65292;&#25910;&#24405;&#21069;&#20173;&#20250;&#36208;&#21435;&#37325;&#36827;&#36923;&#36753;&#12290;</div>
                         </div>
                     </div>
 
                     <div id="tab-ai" class="tab-content">
+                        <div style="background:var(--color-warning-bg,#fff8e1);border-left:3px solid var(--color-warning,#f59e0b);border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--color-text-secondary);">
+                            &#9888;&#65039; <strong>候选模式</strong>：点击"生成 AI 候选"后，文献<strong>不会立刻入库</strong>，需逐一确认后才触发下载与入库。
+                        </div>
+                        <div class="form-group" style="margin-bottom: 6px;">
+                            <label for="aiUserNeed">研究需求描述（可选，帮助 AI 筛选）</label>
+                            <textarea id="aiUserNeed" class="form-control" placeholder="例如：研究锂硫电池多硫化物吸附机理的第一性原理计算文献" style="height: 32px; min-height: 32px; padding: 4px 10px; resize: none;"></textarea>
+                        </div>
                         <div class="form-group" style="margin-bottom: 6px;">
                             <label for="aiQuery">批量文献扩展查询</label>
                             <textarea id="aiQuery" class="form-control" placeholder="例如 lithium sulfur battery single atom catalyst polysulfide adsorption mechanism" style="height: 32px; min-height: 32px; padding: 4px 10px; resize: none;"></textarea>
                         </div>
                         <div class="form-grid" style="gap: 8px;">
                             <div class="form-group" style="margin-bottom: 6px;">
-                                <label for="aiMaxResults">检索并去重上限</label>
+                                <label for="aiMaxResults">候选上限</label>
                                 <input type="number" id="aiMaxResults" class="form-control" value="20" min="1" max="100" style="min-height: 30px; height: 30px; padding: 4px 10px;">
-                            </div>
-                            <div class="form-group" style="margin-bottom: 6px;">
-                                <label for="aiMaxDownloads">最大下载 / 入库尝试数</label>
-                                <input type="number" id="aiMaxDownloads" class="form-control" value="5" min="1" max="100" style="min-height: 30px; height: 30px; padding: 4px 10px;">
                             </div>
                         </div>
                         <div class="actions" style="margin-top: 4px;">
-                            <button class="btn btn-primary btn-sm" onclick="triggerAIWorkflow()">发起后台收录任务</button>
-                            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('aiQuery').value = ''">清空查询</button>
+                            <button class="btn btn-primary btn-sm" id="generateCandidatesBtn" onclick="generateAICandidates()">&#128269; 生成 AI 候选</button>
+                            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('aiQuery').value = ''; document.getElementById('aiUserNeed').value = '';">清空</button>
                         </div>
-                        <p class="help-note" style="margin: 4px 0 0;">后台任务会记录为 workflow job。下载失败不会自动删除已有文献，通常会保留为“仅元数据”。</p>
+                        <p class="help-note" style="margin: 4px 0 0;">候选列表生成后请逐一确认或拒绝；只有"确认收录"后才触发 PDF 下载和入库。</p>
+                        <div id="intakeCandidatePanel" style="margin-top: 16px;"></div>
                     </div>
                 </div>
 
@@ -870,6 +874,7 @@
             calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
             pollTimer: null,
             statsPollTick: 0,
+            refreshSeq: 0,
         };
 
         let calendarVisible = true;
@@ -945,7 +950,8 @@
             if (label) label.textContent = "当前文献库";
         }
 
-        async function loadLibraries() {
+        async function loadLibraries(options = {}) {
+            const refreshData = options.refreshData !== false;
             const select = document.getElementById("librarySelect");
             try {
                 const data = await fetchJSON(LIB_API);
@@ -953,7 +959,7 @@
                 if (!libs.length) {
                     select.innerHTML = '<option value="">未发现可用文献库</option>';
                     state.currentLibrary = "";
-                    await loadArticleStats();
+                    if (refreshData) await refreshCurrentLibraryData();
                     renderAllJobs();
                     return;
                 }
@@ -965,8 +971,7 @@
                     return `<option value="${esc(name)}" ${name === active.name ? "selected" : ""}>${esc(label)}</option>`;
                 }).join("");
                 state.currentLibrary = active.name || "";
-                await loadArticleStats();
-                await pollJobs();
+                if (refreshData) await refreshCurrentLibraryData();
             } catch (error) {
                 select.innerHTML = '<option value="">文献库加载失败</option>';
                 showToast(`加载文献库失败：${error.message}`, "error");
@@ -974,14 +979,17 @@
             }
         }
 
-        async function loadArticleStats() {
+        async function loadArticleStats(seq = state.refreshSeq) {
             const container = document.getElementById("articleStats");
             if (!container) return;
+            const libraryAtRequest = state.currentLibrary;
             try {
                 const query = state.currentLibrary ? `?library_name=${encodeURIComponent(state.currentLibrary)}` : "";
                 const data = await fetchJSON(`${API_BASE}/type-stats${query}`);
+                if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
                 renderArticleStats(data);
             } catch (error) {
+                if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
                 if (error && (error.status === 404 || error.status === 422)) {
                     renderArticleStats({ items: [] });
                     return;
@@ -1063,8 +1071,10 @@
             `;
         }
 
-        async function switchLibrary(name) {
+        async function legacySwitchLibraryUnused(name) {
             if (!name) return;
+            if (name === state.currentLibrary) return;
+            const seq = ++state.refreshSeq;
             try {
                 await fetchJSON(`${LIB_API}/${encodeURIComponent(name)}/activate`, { method: "POST" });
                 state.currentLibrary = name;
@@ -1072,6 +1082,33 @@
                 await loadLibraries();
             } catch (error) {
                 showToast(`切换文献库失败：${error.message}`, "error");
+            }
+        }
+
+        async function refreshCurrentLibraryData(seq = ++state.refreshSeq) {
+            await Promise.all([
+                loadArticleStats(seq),
+                pollJobs({ refreshStats: false, seq }),
+            ]);
+        }
+
+        async function switchLibrary(name) {
+            if (!name || name === state.currentLibrary) return;
+            const seq = ++state.refreshSeq;
+            try {
+                await fetchJSON(`${LIB_API}/${encodeURIComponent(name)}/activate`, { method: "POST" });
+                if (seq !== state.refreshSeq) return;
+                state.currentLibrary = name;
+                state.jobs = [];
+                state.statsPollTick = 0;
+                renderAllJobs();
+                showToast(`Switched library: ${name}`);
+                await loadLibraries({ refreshData: false });
+                if (seq !== state.refreshSeq) return;
+                await refreshCurrentLibraryData(seq);
+            } catch (error) {
+                if (seq !== state.refreshSeq) return;
+                showToast(`Switch library failed: ${error.message}`, "error");
             }
         }
 
@@ -1269,40 +1306,217 @@
             }
         }
 
-        async function triggerAIWorkflow() {
-            const query = document.getElementById("aiQuery").value.trim();
-            const maxResults = Number(document.getElementById("aiMaxResults").value || 20);
-            const maxDownloads = Number(document.getElementById("aiMaxDownloads").value || 5);
+        // -----------------------------------------------------------------------
+        // Intake MVP: 生成 AI 候选（不入库）
+        // -----------------------------------------------------------------------
+        let _intakeSessionId = null;
+
+        async function generateAICandidates() {
+            const query = (document.getElementById("aiQuery") || {}).value.trim();
+            const userNeed = (document.getElementById("aiUserNeed") || {}).value.trim();
+            const maxResults = Number((document.getElementById("aiMaxResults") || {}).value || 20);
             if (!query) {
                 showToast("请先输入批量文献扩展查询。", "error");
                 return;
             }
             state.lastAiQuery = query;
+            _intakeSessionId = null;
+            const panel = document.getElementById("intakeCandidatePanel");
+            if (panel) panel.innerHTML = '<div class="empty-state">正在从 OpenAlex / arXiv 检索并 AI 筛选候选，请稍候...</div>';
 
-            showToast("正在创建后台收录任务。");
+            const btn = document.getElementById("generateCandidatesBtn");
+            if (btn) btn.disabled = true;
             try {
-                const job = await fetchJSON(`${API_BASE}/ai_workflow/jobs`, {
+                const data = await fetchJSON(`/api/intake/search`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         query,
+                        user_need: userNeed || query,
                         library_name: state.currentLibrary || "",
-                        model: "deepseek-chat",
                         max_results: maxResults,
-                        max_downloads: maxDownloads,
                         providers: [],
-                        skip_existing: true,
                     }),
                 });
-                showToast(`任务已创建：${job && job.job_id ? job.job_id.slice(0, 8) : "queued"}`);
-                document.getElementById("aiQuery").value = "";
-                await pollJobs();
+                _intakeSessionId = data.id;
+                renderIntakeCandidates(data);
             } catch (error) {
-                showToast(`任务创建失败：${error.message}`, "error");
+                if (panel) panel.innerHTML = `<div class="empty-state" style="color:var(--color-danger);">候选生成失败：${escHtml(error.message)}</div>`;
+                showToast(`候选生成失败：${error.message}`, "error");
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 
-        async function pollJobs() {
+        function escHtml(str) {
+            return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        }
+
+        function renderIntakeCandidates(data) {
+            const panel = document.getElementById("intakeCandidatePanel");
+            if (!panel) return;
+            const candidates = data.candidates || [];
+            if (!candidates.length) {
+                panel.innerHTML = '<div class="empty-state">没有找到候选文献。</div>';
+                return;
+            }
+
+            const tierLabel = { recommended: "推荐", maybe: "待定", weak: "弱相关" };
+            const tierClass = { recommended: "status-chip parsed", maybe: "status-chip meta", weak: "status-chip none" };
+
+            let html = `<div style="background:var(--color-warning-bg,#fff8e1);border-left:3px solid var(--color-warning,#f59e0b);
+                border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:12px;">
+                &#9888;&#65039; <strong>${escHtml(data.intake_notice || "以下候选文献尚未入库，确认后才会触发下载。")}</strong>
+            </div>`;
+
+            // 批量操作行
+            const approvedCount = candidates.filter(c => c.status === "approved").length;
+            const recommendedCount = candidates.filter(c => c.screening_tier === "recommended" && c.status === "pending_review").length;
+            html += `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                <span style="font-size:13px;color:var(--color-text-secondary);">共 ${candidates.length} 篇候选</span>
+                <button class="btn btn-primary btn-sm" onclick="batchApproveRecommended()" ${recommendedCount === 0 ? "disabled" : ""}>
+                    &#9989; 批量确认推荐候选（${recommendedCount} 篇）
+                </button>
+                <button class="btn btn-primary btn-sm" style="background:var(--color-success,#16a34a);" onclick="batchIngestApproved()" ${approvedCount === 0 ? "disabled" : ""}>
+                    &#128229; 批量收录已确认（${approvedCount} 篇）
+                </button>
+            </div>`;
+
+            // 候选卡片
+            candidates.forEach(c => {
+                const tier = c.screening_tier || "weak";
+                const badgeClass = tierClass[tier] || "status-chip none";
+                const badgeText = tierLabel[tier] || tier;
+                const isDup = c.status === "duplicate";
+                const isApproved = c.status === "approved";
+                const isRejected = c.status === "rejected";
+                const isIngesting = ["ingesting","ingested","metadata_only","failed"].includes(c.status);
+
+                const riskHtml = (c.risk_flags || []).length
+                    ? `<span style="font-size:11px;color:var(--color-danger);">${c.risk_flags.map(f => escHtml(f)).join(" &middot; ")}</span>`
+                    : "";
+
+                const dupHtml = isDup
+                    ? `<div style="font-size:11px;color:var(--color-warning);margin-top:4px;">&#9888;&#65039; 已存在于库中（paper_id: ${escHtml(c.duplicate_paper_id || "")}）</div>` : "";
+
+                const btnApprove = (!isApproved && !isRejected && !isIngesting && !isDup)
+                    ? `<button class="btn btn-primary btn-sm" style="font-size:11px;padding:2px 10px;" onclick="approveCandidate('${c.id}')">确认收录</button>` : "";
+                const btnReject = (!isRejected && !isIngesting)
+                    ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 10px;" onclick="rejectCandidate('${c.id}')">拒绝</button>` : "";
+                const btnIngest = isApproved
+                    ? `<button class="btn btn-primary btn-sm" style="font-size:11px;padding:2px 10px;background:var(--color-success,#16a34a);" onclick="ingestCandidate('${c.id}')">&#128229; 入库</button>` : "";
+                const statusBadge = isIngesting
+                    ? `<span class="status-chip parsed" style="font-size:11px;">${escHtml(c.status)}</span>`
+                    : isRejected ? `<span class="status-chip failed" style="font-size:11px;">已拒绝</span>`
+                    : isApproved ? `<span class="status-chip parsed" style="font-size:11px;">已确认</span>` : "";
+
+                html += `<div class="section-card" id="intake-card-${c.id}" style="margin-bottom:10px;border-left:3px solid ${isDup ? "var(--color-warning)" : tier === "recommended" ? "var(--color-success,#16a34a)" : "var(--color-border)"}">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:600;font-size:13px;margin-bottom:3px;">${escHtml(c.title || "未命名")}</div>
+                            <div style="font-size:12px;color:var(--color-text-secondary);">${escHtml(c.year || "-")} | ${escHtml(c.journal || "-")} | ${escHtml((c.authors || []).slice(0,3).join(", ") || "-")}</div>
+                            ${c.doi ? `<div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;">DOI: ${escHtml(c.doi)}</div>` : ""}
+                        </div>
+                        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                            <span class="${badgeClass}" style="font-size:11px;">${badgeText}</span>
+                            ${statusBadge}
+                        </div>
+                    </div>
+                    ${c.abstract ? `<div style="font-size:12px;color:var(--color-text-secondary);margin-top:6px;line-height:1.4;">${escHtml((c.abstract || "").slice(0,280))}${c.abstract.length > 280 ? "..." : ""}</div>` : ""}
+                    ${c.screening_reason ? `<div style="font-size:11px;color:var(--color-text-secondary);margin-top:5px;font-style:italic;">&#128202; ${escHtml(c.screening_reason)}</div>` : ""}
+                    ${riskHtml ? `<div style="margin-top:4px;">${riskHtml}</div>` : ""}
+                    ${dupHtml}
+                    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center;">
+                        ${btnApprove}${btnIngest}${btnReject}
+                        ${c.pdf_url ? `<a href="${escHtml(c.pdf_url)}" target="_blank" style="font-size:11px;color:var(--color-primary);">PDF 链接</a>` : ""}
+                    </div>
+                </div>`;
+            });
+
+            panel.innerHTML = html;
+        }
+
+        async function approveCandidate(candidateId) {
+            try {
+                const c = await fetchJSON(`/api/intake/candidates/${candidateId}/approve`, { method: "POST" });
+                showToast("已确认：" + (c.title || candidateId));
+                updateCandidateCard();
+            } catch (e) {
+                showToast("确认失败：" + e.message, "error");
+            }
+        }
+
+        async function rejectCandidate(candidateId) {
+            try {
+                const c = await fetchJSON(`/api/intake/candidates/${candidateId}/reject`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ reason: "" }),
+                });
+                showToast("已拒绝：" + (c.title || candidateId));
+                updateCandidateCard();
+            } catch (e) {
+                showToast("拒绝失败：" + e.message, "error");
+            }
+        }
+
+        async function ingestCandidate(candidateId) {
+            try {
+                const data = await fetchJSON(`/api/intake/candidates/${candidateId}/ingest`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ library_name: state.currentLibrary || null }),
+                });
+                showToast("入库任务已创建：" + (data.job && data.job.job_id ? data.job.job_id.slice(0,8) : "queued"));
+                updateCandidateCard();
+                await pollJobs();
+            } catch (e) {
+                showToast("入库失败：" + e.message, "error");
+            }
+        }
+
+        async function batchApproveRecommended() {
+            if (!_intakeSessionId) return;
+            try {
+                const data = await fetchJSON(`/api/intake/sessions/${_intakeSessionId}`);
+                const toApprove = (data.candidates || []).filter(c => c.screening_tier === "recommended" && c.status === "pending_review");
+                for (const c of toApprove) {
+                    await fetchJSON(`/api/intake/candidates/${c.id}/approve`, { method: "POST" });
+                }
+                showToast(`已批量确认 ${toApprove.length} 篇推荐候选。`);
+                updateCandidateCard();
+            } catch (e) {
+                showToast("批量确认失败：" + e.message, "error");
+            }
+        }
+
+        async function batchIngestApproved() {
+            if (!_intakeSessionId) return;
+            try {
+                const data = await fetchJSON(
+                    `/api/intake/sessions/${_intakeSessionId}/ingest-approved?library_name=${encodeURIComponent(state.currentLibrary || "")}`,
+                    { method: "POST" }
+                );
+                showToast(data.message || `已触发 ${data.triggered_count} 篇入库。`);
+                updateCandidateCard();
+                await pollJobs();
+            } catch (e) {
+                showToast("批量收录失败：" + e.message, "error");
+            }
+        }
+
+        function updateCandidateCard() {
+            if (_intakeSessionId) {
+                fetchJSON(`/api/intake/sessions/${_intakeSessionId}`).then(renderIntakeCandidates).catch(() => {});
+            }
+        }
+
+        // [LEGACY]
+        async function triggerAIWorkflow() {
+            showToast("此功能已升级为候选模式，请使用 生成 AI 候选 按钮。");
+        }
+
+        async function legacyPollJobsUnused() {
             if (!state.currentLibrary) {
                 state.jobs = [];
                 await loadArticleStats();
@@ -1317,7 +1531,7 @@
                     if (!error || (error.status !== 404 && error.status !== 422)) {
                         throw error;
                     }
-                    data = await fetchJSON(`${API_BASE}/ai_workflow/jobs?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                    data = [];
                 }
                 state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
                 syncSelectedJobDateWithJobs();
@@ -1329,6 +1543,34 @@
             } catch (error) {
                 state.jobs = [];
                 showToast(`任务列表加载失败：${error.message}`, "error");
+            }
+            renderAllJobs();
+        }
+
+        async function pollJobs(options = {}) {
+            const refreshStats = options.refreshStats !== false;
+            const seq = options.seq || state.refreshSeq;
+            const libraryAtRequest = state.currentLibrary;
+            if (!state.currentLibrary) {
+                state.jobs = [];
+                if (refreshStats) await loadArticleStats(seq);
+                renderAllJobs();
+                return;
+            }
+            try {
+                const data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
+                state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
+                syncSelectedJobDateWithJobs();
+                state.statsPollTick += 1;
+                const hasActiveJobs = state.jobs.some(job => ["queued", "running"].includes(job.status));
+                if (refreshStats && (state.statsPollTick === 1 || !hasActiveJobs || state.statsPollTick % 3 === 0)) {
+                    await loadArticleStats(seq);
+                }
+            } catch (error) {
+                if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
+                state.jobs = [];
+                showToast(`Job list load failed: ${error.message}`, "error");
             }
             renderAllJobs();
         }

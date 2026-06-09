@@ -1447,9 +1447,22 @@ def test_default_library_aliases_are_merged_in_listing(setup_test_db):
     assert libraries["默认文献库"] == 2
 
 
-def test_ai_workflow_downloads_and_ingests_results(setup_test_db, monkeypatch):
+def test_legacy_ai_workflow_direct_ingest_endpoint_is_disabled(setup_test_db, monkeypatch):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ai_workflow",
+        json={"query": "find workflow papers", "library_name": "AILibrary", "max_results": 3, "max_downloads": 1},
+    )
+    assert response.status_code == 410
+    data = response.json()
+    assert data["detail"]["code"] == "legacy_direct_ingest_disabled"
+    assert data["detail"]["replacement"]["search"] == "POST /api/intake/search"
+    with Session() as session:
+        assert session.scalar(select(Paper).where(Paper.title == "Workflow Paper")) is None
+    return
+
     monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
     monkeypatch.setenv("LITAI_WRITER_API_KEY", "")
     get_settings.cache_clear()
@@ -1539,7 +1552,16 @@ def test_ai_workflow_downloads_and_ingests_results(setup_test_db, monkeypatch):
         assert paper.library_name == "AI库"
 
 
-def test_ai_workflow_job_endpoint_runs_without_blocking_request(setup_test_db, monkeypatch):
+def test_legacy_ai_workflow_job_start_endpoint_is_disabled(setup_test_db, monkeypatch):
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ai_workflow/jobs",
+        json={"query": "background workflow", "library_name": "JobLibrary", "max_results": 100, "max_downloads": 100},
+    )
+    assert response.status_code == 410
+    assert response.json()["detail"]["code"] == "legacy_direct_ingest_disabled"
+    return
+
     monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
     monkeypatch.setenv("LITAI_WRITER_API_KEY", "")
     get_settings.cache_clear()
@@ -1643,18 +1665,11 @@ def test_ai_workflow_job_list_retry_and_cancel_endpoints(setup_test_db, monkeypa
     assert cancelled["cancel_mode"] == "soft"
 
     response = client.post(f"/api/papers/ai_workflow/jobs/{failed_job_id}/retry")
-    assert response.status_code == 200
-    retried = response.json()
-    assert retried["job_id"] != failed_job_id
-    assert retried["status"] in {"queued", "running", "completed"}
-    assert retried["dispatch_mode"] in {"celery", "background_tasks"}
-    assert captured["query"] == "retry workflow"
+    assert response.status_code == 410
+    assert response.json()["detail"]["code"] == "legacy_direct_ingest_disabled"
 
     with Session() as session:
-        retried_job = session.get(WorkflowJob, retried["job_id"])
-        assert retried_job is not None
-        assert retried_job.library_name == "JobLibrary"
-        assert retried_job.type == "ai_workflow"
+        assert session.get(WorkflowJob, failed_job_id).status == "failed"
 
 
 def test_discovery_download_falls_back_to_direct_pdf_url(setup_test_db, monkeypatch):
@@ -1798,6 +1813,28 @@ def test_metadata_only_same_doi_upsert_reuses_paper(setup_test_db):
         assert len(papers) == 1
 
 
+def test_metadata_only_same_doi_isolated_between_libraries(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        service = PaperIngestionService(session=session, settings=get_settings())
+        first = service.ingest_metadata_only(
+            {"title": "Shared DOI Paper", "doi": "10.1000/shared-meta", "year": 2024},
+            library_name="MetaLibraryA",
+        )
+        second = service.ingest_metadata_only(
+            {"title": "Shared DOI Paper", "doi": "10.1000/shared-meta", "year": 2024},
+            library_name="MetaLibraryB",
+        )
+
+        assert second.id != first.id
+        papers_a = session.scalars(select(Paper).where(Paper.library_name == "MetaLibraryA")).all()
+        papers_b = session.scalars(select(Paper).where(Paper.library_name == "MetaLibraryB")).all()
+        assert len(papers_a) == 1
+        assert len(papers_b) == 1
+
+
 def test_metadata_only_doi_url_variants_normalize_to_same_paper(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -1818,9 +1855,22 @@ def test_metadata_only_doi_url_variants_normalize_to_same_paper(setup_test_db):
         assert len(papers) == 1
 
 
-def test_ai_workflow_metadata_only_fallback_does_not_duplicate(setup_test_db, monkeypatch):
+def test_legacy_ai_workflow_metadata_only_fallback_is_disabled(setup_test_db, monkeypatch):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
+    client = TestClient(app)
+    payload = {"query": "workflow metadata", "library_name": "WorkflowMeta", "max_results": 1, "max_downloads": 1}
+    first = client.post("/api/papers/ai_workflow", json=payload)
+    second = client.post("/api/papers/ai_workflow", json=payload)
+    assert first.status_code == 410
+    assert second.status_code == 410
+    assert first.json()["detail"]["code"] == "legacy_direct_ingest_disabled"
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "WorkflowMeta")).all()
+        assert papers == []
+    return
+
     monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
     monkeypatch.setenv("LITAI_WRITER_API_KEY", "")
     get_settings.cache_clear()

@@ -25,13 +25,33 @@ from app.services.workflow_jobs import (
 router = APIRouter()
 
 
+def _raise_legacy_ai_workflow_disabled() -> None:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_direct_ingest_disabled",
+            "message": (
+                "The legacy AI workflow directly searched and ingested papers. "
+                "Use the controlled Literature Intake flow instead: "
+                "POST /api/intake/search, then approve candidates, then ingest approved candidates."
+            ),
+            "replacement": {
+                "search": "POST /api/intake/search",
+                "approve": "POST /api/intake/candidates/{candidate_id}/approve",
+                "ingest": "POST /api/intake/candidates/{candidate_id}/ingest",
+                "batch_ingest": "POST /api/intake/sessions/{session_id}/ingest-approved",
+            },
+        },
+    )
+
+
 @router.post("/ai_workflow", response_model=AIWorkflowResponse)
 async def ai_workflow(
     payload: AIWorkflowPayload,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> AIWorkflowResponse:
-    return await execute_ai_workflow(payload, session=session, settings=settings)
+    _raise_legacy_ai_workflow_disabled()
 
 
 @router.post("/ai_workflow/jobs")
@@ -41,6 +61,7 @@ async def start_ai_workflow_job(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    _raise_legacy_ai_workflow_disabled()
     job, reused = create_job_or_reuse_active(
         session,
         job_type=JOB_TYPE_AI_WORKFLOW,
@@ -102,6 +123,7 @@ async def retry_ai_workflow_job(
     job = get_job(session, job_id)
     if not job or job.type != JOB_TYPE_AI_WORKFLOW:
         raise HTTPException(status_code=404, detail="AI workflow job not found")
+    _raise_legacy_ai_workflow_disabled()
     try:
         retry_job, reused = clone_job_for_retry_with_status(session, job_id)
     except ValueError as exc:

@@ -278,6 +278,20 @@ class PaperCountsResponse(BaseModel):
     figure_data_points: int = 0
 
 
+class PaperArtifactStatusResponse(BaseModel):
+    pdf_exists: bool = False
+    pdf_file_size: int | None = None
+    pdf_path_kind: str = "missing"
+    markdown_has_content: bool = False
+    docling_json_has_content: bool = False
+    grobid_tei_has_content: bool = False
+    ai_reading_package_exists: bool = False
+    workspace_exists: bool = False
+    artifact_ready_for_external_audit: bool = False
+    blocking_errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class PaperListItemResponse(BaseModel):
     id: UUID
     library_name: str | None = None
@@ -328,6 +342,7 @@ class PaperDetailResponse(PaperListItemResponse):
     outgoing_relationships: list[PaperRelationshipItemResponse] = Field(default_factory=list)
     incoming_relationships: list[PaperRelationshipItemResponse] = Field(default_factory=list)
     references: list[ReferenceEntryResponse] = Field(default_factory=list)
+    artifact_status: PaperArtifactStatusResponse = Field(default_factory=PaperArtifactStatusResponse)
 
 
 class CodexContextResponse(BaseModel):

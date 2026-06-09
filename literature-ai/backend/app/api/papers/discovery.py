@@ -35,10 +35,10 @@ from .common import rewrite_ai_search_query
 router = APIRouter()
 
 
-def _find_existing_paper(session: Session, doi: str | None, title: str | None):
+def _find_existing_paper(session: Session, doi: str | None, title: str | None, library_name: str | None):
     from app.services.workflow_jobs import _find_existing_paper as find_existing_paper
 
-    return find_existing_paper(session, doi, title)
+    return find_existing_paper(session, doi, title, library_name=library_name)
 
 
 @router.get("/discovery/search", response_model=DiscoverySearchResponse)
@@ -100,13 +100,8 @@ async def discovery_download_and_ingest(
 
     target_library = normalize_library_name(payload.library_name)
     doi = metadata.get("doi")
-    existing = _find_existing_paper(session, doi=doi, title=metadata.get("title"))
+    existing = _find_existing_paper(session, doi=doi, title=metadata.get("title"), library_name=target_library)
     if existing:
-        if existing.library_name != target_library:
-            existing.library_name = target_library
-            session.add(existing)
-            session.commit()
-            session.refresh(existing)
         return IngestResponse(paper_id=existing.id, title=existing.title, status="already_exists")
 
     ingestion = PaperIngestionService(session=session, settings=settings)

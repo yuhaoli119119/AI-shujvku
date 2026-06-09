@@ -66,6 +66,9 @@ EMBEDDING_DIMENSION = int(os.getenv("LITAI_EMBEDDING_DIMENSION", "1024"))
 
 class Paper(Base):
     __tablename__ = "papers"
+    __table_args__ = (
+        sa.UniqueConstraint("library_name", "doi", name="uq_papers_library_doi"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     library_name: Mapped[str] = mapped_column(
@@ -75,7 +78,7 @@ class Paper(Base):
         server_default="\u9ed8\u8ba4\u6587\u732e\u5e93",
         index=True,
     )
-    doi: Mapped[str | None] = mapped_column(sa.String(512), unique=True, nullable=True)
+    doi: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
     title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     journal: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
@@ -598,3 +601,100 @@ class ShareToken(Base):
     expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
     created_by: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Literature Intake MVP — 两张检索/候选表，不入 papers，等待用户确认后才入库
+# ---------------------------------------------------------------------------
+
+class LiteratureIntakeSession(Base):
+    """记录一次用户研究需求驱动的检索会话。
+
+    状态机：searching → pending_review → reviewing → completed / cancelled
+    """
+    __tablename__ = "literature_intake_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    library_name: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+        default="默认文献库",
+        server_default="默认文献库",
+        index=True,
+    )
+    user_need: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    original_query: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    rewritten_query: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    providers: Mapped[list] = mapped_column(json_type(), default=list)
+    target_types: Mapped[list | None] = mapped_column(json_type(), nullable=True)
+    max_results: Mapped[int] = mapped_column(sa.Integer, default=20, nullable=False)
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        default="searching",
+        server_default="searching",
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )
+
+
+class LiteratureIntakeCandidate(Base):
+    """记录检索返回的单篇候选文献。
+
+    状态机：
+        pending_review → approved → ingesting → ingested / metadata_only / failed
+        pending_review → rejected
+        pending_review → duplicate（系统发现重复时自动标记）
+
+    注意：candidates 不写入 papers 表，只有 ingesting 阶段才触发真正入库。
+    """
+    __tablename__ = "literature_intake_candidates"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("literature_intake_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # --- 元数据字段 ---
+    title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    doi: Mapped[str | None] = mapped_column(sa.String(512), nullable=True, index=True)
+    year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    journal: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    authors: Mapped[list] = mapped_column(json_type(), default=list)
+    abstract: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    identifier: Mapped[str | None] = mapped_column(sa.String(512), nullable=True, index=True)
+    url: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    pdf_url: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    providers: Mapped[list] = mapped_column(json_type(), default=list)
+    # --- AI 筛选字段 ---
+    relevance_score: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    screening_tier: Mapped[str | None] = mapped_column(
+        sa.String(16), nullable=True, index=True
+    )  # recommended / maybe / weak
+    screening_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    risk_flags: Mapped[list] = mapped_column(json_type(), default=list)
+    # --- 状态 ---
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        default="pending_review",
+        server_default="pending_review",
+        nullable=False,
+        index=True,
+    )
+    reject_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    # --- 关联 ---
+    duplicate_paper_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    ingest_job_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    ingested_paper_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )

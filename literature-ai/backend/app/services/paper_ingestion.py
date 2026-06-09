@@ -1085,15 +1085,6 @@ class PaperIngestionService:
             arxiv_id=arxiv_id,
             library_name=library_name,
         )
-        if candidate is None and (doi or arxiv_id):
-            candidate = self.identity.find_existing_paper(
-                self.session,
-                doi=doi,
-                title=None,
-                year=None,
-                arxiv_id=arxiv_id,
-                library_name=None,
-            )
         if candidate is None:
             return None
         if exclude_paper_id is not None and candidate.id == exclude_paper_id:

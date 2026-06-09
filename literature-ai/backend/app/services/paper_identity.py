@@ -215,15 +215,6 @@ class PaperIdentityService:
             arxiv_id=arxiv_id,
             library_name=library,
         )
-        if existing is None and (doi or arxiv_id):
-            existing = cls.find_existing_paper(
-                session,
-                doi=doi,
-                title=title,
-                year=year,
-                arxiv_id=arxiv_id,
-                library_name=None,
-            )
 
         if existing is not None:
             if existing.oa_status == "metadata_only":

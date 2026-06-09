@@ -12,6 +12,7 @@ from app.api.evidence import router as evidence_router
 from app.api.extraction import router as extraction_router
 from app.api.health import router as health_router
 from app.api.impact_metadata import router as impact_metadata_router
+from app.api.intake import router as intake_router
 from app.api.jobs import router as jobs_router
 from app.api.libraries import router as libraries_router
 from app.api.library_filter import router as library_filter_router
@@ -73,6 +74,7 @@ app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(impact_metadata_router, prefix="/api/library/impact-metadata", tags=["impact-metadata"])
 app.include_router(library_filter_router, prefix="/api/library/papers", tags=["library-filter"])
+app.include_router(intake_router, prefix="/api/intake", tags=["intake"])
 app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(papers_router, prefix="/api/papers", tags=["papers"])
 app.include_router(references_router, prefix="/api/papers", tags=["references"])
