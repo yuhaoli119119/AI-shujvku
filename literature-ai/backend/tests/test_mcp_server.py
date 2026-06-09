@@ -538,6 +538,33 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
                 confidence=0.72,
             )
         )
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "paper_id": str(paper.id),
+                    "target_type": "dft_results",
+                    "target_id": str(row.id),
+                    "field_name": "value",
+                    "source": "assigned_dft_audit",
+                    "source_label": "Assigned AI DFT audit",
+                    "agent_role": "dft_auditor",
+                    "model_name": "glm-test",
+                    "decision": "REVISE",
+                    "recommended_action": "propose_correction",
+                    "verification_status": "unverified",
+                    "confidence": 0.71,
+                    "reason": "Object-level check says the numeric value needs PDF review.",
+                    "evidence_location": {"page": 7, "table": "Table 1"},
+                    "writes_final_truth": False,
+                    "human_confirmation_required": True,
+                },
+                status="candidate",
+                confidence=0.71,
+            )
+        )
         session.commit()
         paper_id = str(paper.id)
         row_id = str(row.id)
@@ -560,8 +587,17 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
     assert row["pdf_page_url"].endswith(f"/api/papers/{paper_id}/pdf#page=7")
     assert row["latest_external_audit_opinions"][0]["source"] == "assigned_dft_audit"
     assert row["latest_external_audit_opinions"][0]["verification_status"] == "unverified"
+    assert row["object_review_audits_count"] == 1
+    assert row["object_review_audits"][0]["candidate_type"] == "object_review_audit"
+    assert row["object_review_audits"][0]["decision"] == "REVISE"
+    assert row["object_review_audits"][0]["verification_status"] == "unverified"
+    assert row["object_review_audits"][0]["evidence_location"]["page"] == 7
     assert row["codex_item_url"].endswith(f"/codex-item/dft_result/{row_id}")
     assert row["correction_url"].endswith(f"/dft-results/{row_id}/corrections")
+
+    with Session(mcp_test_env["engine"]) as session:
+        stored_row = session.get(DFTResult, UUID(row_id))
+        assert stored_row.candidate_status == "system_candidate"
 
 
 def test_mcp_get_paper_knowledge_returns_section_fallback_candidates(mcp_test_env):

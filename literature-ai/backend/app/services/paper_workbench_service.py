@@ -305,6 +305,12 @@ class PaperWorkbenchService:
                 .where(ExternalAnalysisCandidate.candidate_type == "external_audit_opinion")
                 .order_by(ExternalAnalysisCandidate.created_at.desc())
             ).all()
+            object_review_candidates = self.session.scalars(
+                select(ExternalAnalysisCandidate)
+                .where(ExternalAnalysisCandidate.paper_id == paper.id)
+                .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
+                .order_by(ExternalAnalysisCandidate.created_at.desc())
+            ).all()
             external_audit_source_counts: Counter[str] = Counter()
             external_audit_opinions: list[dict[str, Any]] = []
             for candidate in external_audit_candidates:
@@ -321,6 +327,40 @@ class PaperWorkbenchService:
                         "recommended_action": payload.get("recommended_action"),
                         "verification_status": payload.get("verification_status", "unverified"),
                         "normalized_payload": payload,
+                        "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+                    }
+                )
+            object_review_source_counts: Counter[str] = Counter()
+            object_review_audits: list[dict[str, Any]] = []
+            for candidate in object_review_candidates:
+                payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+                source = str(payload.get("source") or "unknown")
+                object_review_source_counts[source] += 1
+                if len(object_review_audits) >= 5:
+                    continue
+                object_review_audits.append(
+                    {
+                        "candidate_id": str(candidate.id),
+                        "candidate_type": candidate.candidate_type,
+                        "status": candidate.status,
+                        "target_type": payload.get("target_type"),
+                        "target_id": payload.get("target_id"),
+                        "field_name": payload.get("field_name"),
+                        "source": source,
+                        "source_label": payload.get("source_label"),
+                        "agent_role": payload.get("agent_role"),
+                        "model_name": payload.get("model_name"),
+                        "decision": payload.get("decision") or payload.get("verdict"),
+                        "recommended_action": payload.get("recommended_action"),
+                        "verification_status": payload.get("verification_status", "unverified"),
+                        "confidence": (
+                            payload.get("confidence")
+                            if payload.get("confidence") is not None
+                            else candidate.confidence
+                        ),
+                        "reason": payload.get("reason") or payload.get("reviewer_note") or payload.get("summary"),
+                        "evidence_checked": payload.get("evidence_checked"),
+                        "evidence_location": payload.get("evidence_location"),
                         "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
                     }
                 )
@@ -372,6 +412,9 @@ class PaperWorkbenchService:
                     "external_audit_count": len(external_audit_candidates),
                     "external_audit_source_counts": dict(sorted(external_audit_source_counts.items())),
                     "external_audit_opinions": external_audit_opinions,
+                    "object_review_audit_count": len(object_review_candidates),
+                    "object_review_audit_source_counts": dict(sorted(object_review_source_counts.items())),
+                    "object_review_audits": object_review_audits,
                     "review_conflict_count": conflict_counts.get(str(paper.id), 0),
                     "workspace_path": paper.workspace_path,
                     "detail_url": f"../literature_library/index.html?paper_id={paper.id}&tab=review",

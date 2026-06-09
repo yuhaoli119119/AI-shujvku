@@ -699,6 +699,27 @@ async function mockApi(route) {
               confidence: 0.72,
             },
           ],
+          object_review_audits_count: 1,
+          object_review_audits: [
+            {
+              candidate_id: 'object-audit-1',
+              candidate_type: 'object_review_audit',
+              status: 'candidate',
+              target_type: 'dft_results',
+              target_id: 'dft-blocked-1',
+              field_name: 'value',
+              source: 'assigned_dft_audit',
+              source_label: 'Assigned AI DFT audit',
+              agent_role: 'dft_auditor',
+              model_name: 'glm-test',
+              decision: 'REVISE',
+              recommended_action: 'propose_correction',
+              verification_status: 'unverified',
+              confidence: 0.71,
+              reason: 'Object-level audit says the value should be checked against Table 1.',
+              evidence_location: { page: 4, table: 'Table 1' },
+            },
+          ],
           library_detail_url: '../literature_library/index.html?paper_id=paper-1&tab=dft',
           review_workbench_url: '../external_analysis_workbench/index.html?paper_id=paper-1',
         },
@@ -750,6 +771,26 @@ async function mockApi(route) {
               verdict: 'WARN',
               recommended_action: 'verify_against_pdf',
               verification_status: 'unverified',
+            },
+          ],
+          object_review_audit_count: 1,
+          object_review_audits: [
+            {
+              candidate_id: 'object-audit-1',
+              candidate_type: 'object_review_audit',
+              status: 'candidate',
+              target_type: 'dft_results',
+              target_id: 'dft-blocked-1',
+              field_name: 'value',
+              source: 'assigned_dft_audit',
+              source_label: 'Assigned AI DFT audit',
+              agent_role: 'dft_auditor',
+              model_name: 'glm-test',
+              decision: 'REVISE',
+              recommended_action: 'propose_correction',
+              verification_status: 'unverified',
+              confidence: 0.71,
+              reason: 'Object-level audit says the value should be checked against Table 1.',
             },
           ],
           workspace_path: '/workspace/paper-1',
@@ -1855,6 +1896,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityRows')).toContainText('缺少人工确认');
     await expect(page.locator('#qualityRows')).toContainText('Assigned AI DFT audit');
     await expect(page.locator('#qualityRows')).toContainText('WARN');
+    await expect(page.locator('#qualityRows')).toContainText('Object audits 1');
+    await expect(page.locator('#qualityRows')).toContainText('REVISE');
     await expect(page.locator('#qualityRows button:has-text("Review evidence")')).toHaveCount(1);
     await expect(page.locator('#qualityRows button:has-text("Open PDF page 4")')).toHaveCount(1);
     await expect(page.locator('#qualityRows button:has-text("Approve")')).toHaveCount(1);
@@ -1869,6 +1912,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#evidenceDetail')).toContainText('figure');
     await expect(page.locator('#evidenceDetail')).toContainText('Export safety');
     await expect(page.locator('#evidenceDetail')).toContainText('Latest external audit opinions');
+    await expect(page.locator('#evidenceDetail')).toContainText('Object-level AI audits');
+    await expect(page.locator('#evidenceDetail')).toContainText('object_review_audit');
+    await expect(page.locator('#evidenceDetail')).toContainText('Object-level audit says the value should be checked against Table 1.');
     await expect(page.locator('#evidenceDetail')).toContainText('unverified');
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少催化剂样本');
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少 DFT 设置');
@@ -1882,11 +1928,16 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
 
     await expect(page.locator('#rows')).toContainText('External audit:');
+    await expect(page.locator('#rows')).toContainText('Object audits:');
     await expect(page.locator('#rows')).toContainText('1');
     const auditSummary = page.locator('#rows [title*="Assigned AI DFT audit"]').first();
     await expect(auditSummary).toHaveAttribute('title', /Assigned AI DFT audit/);
     await expect(auditSummary).toHaveAttribute('title', /WARN/);
     await expect(auditSummary).toHaveAttribute('title', /unverified/);
+    const objectAuditSummary = page.locator('#rows [title*="object_review_audit"]').first();
+    await expect(objectAuditSummary).toHaveAttribute('title', /Assigned AI DFT audit/);
+    await expect(objectAuditSummary).toHaveAttribute('title', /REVISE/);
+    await expect(objectAuditSummary).toHaveAttribute('title', /unverified/);
   });
 
   test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {

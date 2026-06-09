@@ -76,6 +76,10 @@ class DFTReviewQueueService:
         gate_by_id = bulk_export_gate_results(self.session, dft_rows, target_type="dft_results")
         locators_by_id = self._bulk_locator_payloads(dft_rows)
         external_audits_by_paper = self._bulk_external_audit_payloads({paper.id for _row, paper in rows})
+        object_audits_by_target = self._bulk_object_review_audit_payloads(
+            {paper.id for _row, paper in rows},
+            target_ids={str(row.id) for row in dft_rows},
+        )
         conflicts_by_target = ReviewConflictAggregationService(self.session).conflicts_by_target(
             paper_ids={paper.id for _row, paper in rows},
             target_type="dft_results",
@@ -113,6 +117,7 @@ class DFTReviewQueueService:
                     gate,
                     locators_by_id.get(str(row.id), []),
                     external_audits_by_paper.get(str(paper.id), []),
+                    object_audits_by_target.get(str(row.id), []),
                     conflicts_by_target.get(str(row.id), []),
                 )
             )
@@ -236,6 +241,7 @@ class DFTReviewQueueService:
         gate: Any,
         locators: list[dict[str, Any]] | None = None,
         external_audits: list[dict[str, Any]] | None = None,
+        object_review_audits: list[dict[str, Any]] | None = None,
         conflicts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         paper_id = str(paper.id)
@@ -289,6 +295,8 @@ class DFTReviewQueueService:
             "recommended_action": self._recommended_action(reasons, gate, sanity_flags),
             "evidence_locators": locators,
             "latest_external_audit_opinions": (external_audits or [])[:5],
+            "object_review_audits_count": len(object_review_audits or []),
+            "object_review_audits": (object_review_audits or [])[:5],
             "conflicts_count": len(conflicts or []),
             "field_conflicts": conflicts or [],
             "evidence_check": {
@@ -413,6 +421,60 @@ class DFTReviewQueueService:
                 }
             )
         return audits_by_paper
+
+    def _bulk_object_review_audit_payloads(
+        self,
+        paper_ids: set[UUID],
+        *,
+        target_ids: set[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not paper_ids or not target_ids:
+            return {}
+        audits_by_target: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
+            .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
+            .order_by(ExternalAnalysisCandidate.created_at.desc())
+        ).all()
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = str(payload.get("target_type") or "")
+            target_id = str(payload.get("target_id") or payload.get("dft_result_id") or payload.get("record_id") or "")
+            if target_id not in target_ids or target_type not in DFT_TARGET_TYPES:
+                continue
+            if len(audits_by_target.setdefault(target_id, [])) >= 5:
+                continue
+            audits_by_target[target_id].append(self._object_review_audit_payload(candidate, payload))
+        return audits_by_target
+
+    @staticmethod
+    def _object_review_audit_payload(
+        candidate: ExternalAnalysisCandidate,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "candidate_id": str(candidate.id),
+            "candidate_type": candidate.candidate_type,
+            "status": candidate.status,
+            "target_type": payload.get("target_type"),
+            "target_id": payload.get("target_id"),
+            "field_name": payload.get("field_name"),
+            "source": str(payload.get("source") or "unknown"),
+            "source_label": payload.get("source_label"),
+            "agent_role": payload.get("agent_role"),
+            "model_name": payload.get("model_name"),
+            "decision": payload.get("decision") or payload.get("verdict"),
+            "recommended_action": payload.get("recommended_action"),
+            "verification_status": payload.get("verification_status", "unverified"),
+            "confidence": payload.get("confidence") if payload.get("confidence") is not None else candidate.confidence,
+            "reason": payload.get("reason") or payload.get("reviewer_note") or payload.get("summary"),
+            "evidence_checked": payload.get("evidence_checked"),
+            "evidence_location": payload.get("evidence_location"),
+            "blocking_errors": payload.get("blocking_errors") or [],
+            "corrected_value": payload.get("corrected_value"),
+            "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+        }
 
     @staticmethod
     def _locator_to_payload(locator: EvidenceLocator) -> dict[str, Any]:

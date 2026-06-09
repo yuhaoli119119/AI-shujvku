@@ -529,6 +529,39 @@
       });
     }
 
+    function objectAuditSummary(row) {
+      const audits = Array.isArray(row.object_review_audits) ? row.object_review_audits : [];
+      if (!audits.length) return "no object_review_audit";
+      return audits.slice(0, 5).map(function (audit) {
+        return [
+          audit.candidate_type || "object_review_audit",
+          audit.source_label || audit.source || audit.agent_role || audit.model_name || "object_review_audit",
+          audit.target_type,
+          audit.field_name,
+          audit.decision || audit.recommended_action || "review",
+          audit.verification_status || "unverified",
+          audit.reason
+        ].filter(Boolean).join(" / ");
+      }).join("\n");
+    }
+
+    function objectAuditInline(row) {
+      const count = toCount(row.object_review_audit_count);
+      const audits = Array.isArray(row.object_review_audits) ? row.object_review_audits : [];
+      if (!count) {
+        return '<div class="muted" title="no object_review_audit" style="margin-bottom:6px;">Object audits: <strong>0</strong></div>';
+      }
+      const latest = audits[0] || {};
+      const latestText = [
+        latest.source_label || latest.source || latest.agent_role || latest.model_name || "object_review_audit",
+        latest.target_type,
+        latest.field_name,
+        latest.decision || latest.recommended_action || "review",
+        latest.verification_status || "unverified"
+      ].filter(Boolean).join(" / ");
+      return '<div class="muted" title="' + esc(objectAuditSummary(row)) + '" style="margin-bottom:6px;">Object audits: <strong>' + esc(count) + '</strong>' + (latestText ? '<br><span>' + esc(latestText) + '</span>' : '') + '</div>';
+    }
+
     function renderRows() {
       renderStats();
       const rows = filteredRows();
@@ -592,7 +625,7 @@
             '<div class="muted" title="' + esc(figureSummary) + '">图片定位可靠性：可疑 ' + esc(row.unreliable_figure_count || 0) + ' / 图表 ' + esc(figureCount + tableCount) + '</div>' +
             '<div class="muted">证据定位: <strong>' + esc(evidence) + '</strong></div>' +
           '</div></td>' +
-          '<td><div class="muted" title="' + esc(auditSummary) + '" style="margin-bottom:6px;">External audit: <strong>' + esc(row.external_audit_count || 0) + '</strong></div><div class="actions">' +
+          '<td><div class="muted" title="' + esc(auditSummary) + '" style="margin-bottom:6px;">External audit: <strong>' + esc(row.external_audit_count || 0) + '</strong></div>' + objectAuditInline(row) + '<div class="actions">' +
             '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">审核候选</a>' +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
             '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">确认完整</button>' +

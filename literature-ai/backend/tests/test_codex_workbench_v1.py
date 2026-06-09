@@ -286,6 +286,42 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
         session.flush()
         session.add(DFTResult(paper_id=paper.id, property_type="band_gap", value=0.5, unit="eV"))
         session.add(EvidenceLocator(paper_id=paper.id, source_type="text", evidence_text="candidate", locator_status="candidate"))
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            normalized_payload={},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "paper_id": str(paper.id),
+                    "target_type": "dft_results",
+                    "target_id": "row-1",
+                    "field_name": "value",
+                    "source": "assigned_dft_audit",
+                    "source_label": "Assigned AI DFT audit",
+                    "agent_role": "dft_auditor",
+                    "model_name": "glm-test",
+                    "decision": "FLAG",
+                    "recommended_action": "needs_human_review",
+                    "verification_status": "unverified",
+                    "confidence": 0.62,
+                    "reason": "Check this value against the source PDF.",
+                    "evidence_location": {"page": 4},
+                    "writes_final_truth": False,
+                    "human_confirmation_required": True,
+                },
+                status="candidate",
+                confidence=0.62,
+            )
+        )
         session.commit()
 
     client = TestClient(app)
@@ -299,8 +335,102 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert by_title["Review center paper"]["needs_human_confirmation"] is True
     assert by_title["Review center paper"]["has_dft_candidates"] is True
     assert by_title["Review center paper"]["evidence_count"] == 1
+    assert by_title["Review center paper"]["object_review_audit_count"] == 1
+    assert by_title["Review center paper"]["object_review_audits"][0]["candidate_type"] == "object_review_audit"
+    assert by_title["Review center paper"]["object_review_audits"][0]["decision"] == "FLAG"
+    assert by_title["Review center paper"]["object_review_audits"][0]["verification_status"] == "unverified"
     assert by_title["Codex candidate still needs human review"]["needs_human_confirmation"] is True
     assert by_title["Human confirmed paper"]["needs_human_confirmation"] is False
+
+
+def test_dft_review_queue_api_exposes_object_review_audit_summary(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT queue object audit paper", pdf_path="queue-object.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.20,
+            unit="eV",
+            evidence_text="Table 1 reports the adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="table",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=5,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.9,
+            )
+        )
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            normalized_payload={},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "paper_id": str(paper.id),
+                    "target_type": "dft_results",
+                    "target_id": str(row.id),
+                    "field_name": "value",
+                    "source": "assigned_dft_audit",
+                    "source_label": "Assigned AI DFT audit",
+                    "agent_role": "dft_auditor",
+                    "model_name": "glm-test",
+                    "decision": "REVISE",
+                    "recommended_action": "propose_correction",
+                    "verification_status": "unverified",
+                    "confidence": 0.74,
+                    "reason": "The imported object-level audit remains a candidate.",
+                    "evidence_location": {"page": 5, "table": "Table 1"},
+                    "writes_final_truth": False,
+                    "human_confirmation_required": True,
+                },
+                status="candidate",
+                confidence=0.74,
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = row.id
+
+    client = TestClient(app)
+    response = client.get(f"/api/papers/export/dft-review-queue?paper_id={paper_id}&limit=10&status=needs_review")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata"]["schema_version"] == "dft_review_queue_v1"
+    assert len(payload["rows"]) == 1
+    row_payload = payload["rows"][0]
+    assert row_payload["object_review_audits_count"] == 1
+    assert row_payload["object_review_audits"][0]["candidate_type"] == "object_review_audit"
+    assert row_payload["object_review_audits"][0]["decision"] == "REVISE"
+    assert row_payload["object_review_audits"][0]["verification_status"] == "unverified"
+    assert row_payload["object_review_audits"][0]["evidence_location"]["page"] == 5
+
+    with Session() as session:
+        stored_row = session.get(DFTResult, row_id)
+        assert stored_row.candidate_status == "system_candidate"
+        assert stored_row.value == -1.20
 
 
 def test_review_conflict_aggregation_is_read_only_for_dft_fields(workbench_env):

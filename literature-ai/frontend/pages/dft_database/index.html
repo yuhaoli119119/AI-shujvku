@@ -698,6 +698,53 @@
         return '<span class="audit-chip ' + auditClass(audit) + '" title="' + esc(status) + '">' + esc(label) + ': ' + esc(verdict) + '</span>';
       }).join("");
     }
+    function objectAuditClass(audit) {
+      const decision = String((audit && (audit.decision || audit.recommended_action)) || "").toLowerCase();
+      if (decision.includes("pass") || decision.includes("accept") || decision.includes("ok")) return "ok";
+      if (decision.includes("reject") || decision.includes("revise") || decision.includes("fix") || decision.includes("flag")) return "bad";
+      return "warn";
+    }
+    function objectAuditLabel(audit) {
+      const who = audit.source_label || audit.source || audit.agent_role || audit.model_name || "object_review_audit";
+      const target = [audit.field_name, audit.decision || audit.recommended_action || "review"].filter(Boolean).join(": ");
+      return who + (target ? " / " + target : "");
+    }
+    function renderObjectAuditChips(audits, count) {
+      const items = Array.isArray(audits) ? audits : [];
+      const total = Number(count == null ? items.length : count) || 0;
+      if (!total) return '<span class="audit-chip">Object audits 0</span>';
+      const chips = items.slice(0, 3).map(audit => {
+        const status = audit.verification_status || "unverified";
+        const title = [
+          "object_review_audit",
+          audit.agent_role,
+          audit.model_name,
+          "status=" + status,
+          audit.reason
+        ].filter(Boolean).join(" / ");
+        return '<span class="audit-chip ' + objectAuditClass(audit) + '" title="' + esc(title) + '">' + esc(objectAuditLabel(audit)) + '</span>';
+      }).join("");
+      return '<span class="audit-chip warn" title="Object-level AI review candidates; read-only, unverified.">Object audits ' + esc(total) + '</span>' + (chips ? " " + chips : "");
+    }
+    function renderObjectAuditRows(audits) {
+      const items = Array.isArray(audits) ? audits : [];
+      if (!items.length) return '<div class="quality-meta">No object-level AI audit is attached to this DFT row.</div>';
+      return items.map(audit => {
+        const who = audit.source_label || audit.source || audit.agent_role || audit.model_name || "object_review_audit";
+        const decision = audit.decision || audit.recommended_action || "-";
+        const confidence = audit.confidence == null ? "-" : audit.confidence;
+        const evidence = audit.evidence_location == null ? "-" : JSON.stringify(audit.evidence_location);
+        const corrected = audit.corrected_value == null ? "" : " / corrected=" + JSON.stringify(audit.corrected_value);
+        const reason = audit.reason ? '<div class="quality-meta">' + esc(audit.reason) + '</div>' : "";
+        return '<div style="margin-bottom:8px;">' +
+          '<div class="quality-meta"><strong>' + esc(who) + '</strong>: ' + esc(decision) + ' / confidence ' + esc(confidence) + ' / ' + esc(audit.verification_status || "unverified") + esc(corrected) + '</div>' +
+          '<div class="quality-meta">' + esc(audit.candidate_type || "object_review_audit") + '</div>' +
+          '<div class="quality-meta">' + esc([audit.field_name || "field", audit.agent_role, audit.model_name].filter(Boolean).join(" / ")) + '</div>' +
+          '<div class="quality-meta">evidence: ' + esc(evidence) + '</div>' +
+          reason +
+        '</div>';
+      }).join("");
+    }
     function renderConflictChips(conflicts) {
       const items = Array.isArray(conflicts) ? conflicts : [];
       if (!items.length) return '<span class="audit-chip ok">no AI conflicts</span>';
@@ -737,6 +784,7 @@
       const page = item.evidence_page || (locator && locator.page);
       const locators = Array.isArray(item.evidence_locators) ? item.evidence_locators : [];
       const audits = Array.isArray(item.latest_external_audit_opinions) ? item.latest_external_audit_opinions : [];
+      const objectAudits = Array.isArray(item.object_review_audits) ? item.object_review_audits : [];
       const conflicts = Array.isArray(item.field_conflicts) ? item.field_conflicts : [];
       const collapseEl = document.getElementById("evidenceCollapse");
       const header = collapseEl?.previousElementSibling?.querySelector(".collapse-header");
@@ -766,6 +814,7 @@
         '<div class="readable-field" style="margin-top:10px;"><div class="k">Evidence text</div><div class="v">' + esc(item.evidence_text || "No evidence text.") + '</div></div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">Locators</div><div class="v">' + locatorRows + '</div></div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">Latest external audit opinions</div><div class="v">' + auditRows + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">Object-level AI audits</div><div class="v">' + renderObjectAuditRows(objectAudits) + '</div></div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">AI conflicts</div><div class="v">' + renderConflictRows(conflicts) + '</div></div>';
       document.getElementById("validationSummary").textContent = item.evidence_text ? "DFT queue evidence loaded." : "This DFT row is missing evidence text.";
     }
@@ -802,6 +851,7 @@
           '</div>' +
           '<div class="queue-evidence-preview">' + esc(evidencePreview) + '</div>' +
           '<div class="audit-strip">' + renderAuditChips(row.latest_external_audit_opinions) + '</div>' +
+          '<div class="audit-strip">' + renderObjectAuditChips(row.object_review_audits, row.object_review_audits_count) + '</div>' +
           '<div class="audit-strip">' + renderConflictChips(row.field_conflicts) + '</div>' +
           '<div class="quality-actions">' +
             '<button class="btn btn-primary btn-sm" type="button" onclick="showQueueEvidence(' + idx + ')">Review evidence</button>' +
