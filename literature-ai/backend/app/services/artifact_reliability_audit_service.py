@@ -154,6 +154,87 @@ class ArtifactReliabilityAuditService:
             "rows": rows,
         }
 
+    def paper_locator_reliability_summary(self, paper_id: UUID) -> dict[str, Any]:
+        locators = self.session.scalars(select(EvidenceLocator).where(EvidenceLocator.paper_id == paper_id)).all()
+        issue_counts: Counter[str] = Counter()
+        for locator in locators:
+            summary = self.locator_reliability_from_payload(
+                {
+                    "page": locator.page,
+                    "bbox": locator.bbox,
+                    "locator_status": locator.locator_status,
+                    "locator_confidence": locator.locator_confidence,
+                    "warning_reason": locator.warning_reason,
+                    "evidence_text": locator.evidence_text,
+                }
+            )
+            issue_counts.update(summary["warnings"])
+        top_issues = [
+            {"code": code, "count": count}
+            for code, count in sorted(issue_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+        ]
+        return {
+            "status": "needs_review" if issue_counts else "reliable",
+            "locator_count": len(locators),
+            "issue_count": sum(issue_counts.values()),
+            "issue_counts": dict(sorted(issue_counts.items())),
+            "top_issues": top_issues,
+        }
+
+    @staticmethod
+    def locator_reliability_from_payload(locator: dict[str, Any] | None) -> dict[str, Any]:
+        if not locator:
+            return {
+                "status": "missing",
+                "warnings": ["missing_locator"],
+                "primary_locator": {
+                    "page": None,
+                    "bbox": None,
+                    "status": "missing_locator",
+                    "confidence": None,
+                },
+            }
+        degradation = locator_degradation(
+            page=locator.get("page"),
+            locator_status=locator.get("locator_status"),
+            evidence_text=locator.get("evidence_text"),
+            bbox=locator.get("bbox"),
+            warning_reason=locator.get("warning_reason"),
+        )
+        warnings: list[str] = []
+        status = degradation.locator_status
+        if status == "text_only":
+            warnings.append("text_only_locator")
+        elif status == "missing_page":
+            warnings.append("missing_page")
+        elif status == "missing_locator":
+            warnings.append("missing_locator")
+        elif status == "approximate":
+            warnings.append("approximate_locator")
+        elif status == "unresolved":
+            warnings.append("unresolved_locator")
+        if status == "exact_page" and locator.get("bbox") is None:
+            warnings.append("missing_bbox")
+
+        if not warnings:
+            reliability_status = "reliable"
+        elif status == "text_only":
+            reliability_status = "text_only"
+        elif status in {"missing_page", "missing_locator", "unresolved"}:
+            reliability_status = "missing"
+        else:
+            reliability_status = "weak"
+        return {
+            "status": reliability_status,
+            "warnings": list(dict.fromkeys(warnings)),
+            "primary_locator": {
+                "page": locator.get("page"),
+                "bbox": locator.get("bbox"),
+                "status": status,
+                "confidence": locator.get("locator_confidence"),
+            },
+        }
+
     @staticmethod
     def _figure_issues(figure: PaperFigure, review: dict[str, Any]) -> list[str]:
         issues: list[str] = []

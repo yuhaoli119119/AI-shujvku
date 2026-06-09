@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample, DFTResult, DFTSetting, EvidenceLocator, ExternalAnalysisCandidate, Paper
+from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
@@ -249,6 +250,7 @@ class DFTReviewQueueService:
         reasons = list(gate.reasons)
         locators = locators if locators is not None else self._locator_payloads(row)
         primary_locator = self._primary_locator(locators)
+        locator_reliability = ArtifactReliabilityAuditService.locator_reliability_from_payload(primary_locator)
         sanity_flags = self._sanity_flags(row)
         issues = self._issue_payloads(row, reasons, sanity_flags, locators, gate)
         figure_reliability = self._figure_reliability(row, locators, gate)
@@ -270,6 +272,9 @@ class DFTReviewQueueService:
             "evidence_text": row.evidence_text,
             "evidence_preview": self._shorten(row.evidence_text),
             "primary_evidence_locator": primary_locator,
+            "primary_locator_reliability": locator_reliability["primary_locator"],
+            "locator_reliability_status": locator_reliability["status"],
+            "locator_reliability_warnings": locator_reliability["warnings"],
             "evidence_page": primary_locator.get("page") if primary_locator else None,
             "pdf_page_url": (
                 f"/api/papers/{paper_id}/pdf#page={primary_locator.get('page')}"

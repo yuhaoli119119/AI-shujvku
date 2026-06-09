@@ -762,6 +762,14 @@ async function mockApi(route) {
             locator_confidence: 0.93,
             evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
           },
+          primary_locator_reliability: {
+            page: 4,
+            bbox: null,
+            status: 'exact_page',
+            confidence: 0.93,
+          },
+          locator_reliability_status: 'weak',
+          locator_reliability_warnings: ['missing_bbox'],
           evidence_page: 4,
           pdf_page_url: '/api/papers/paper-1/pdf#page=4',
           codex_item_url: '/api/papers/paper-1/codex-item/dft_result/dft-blocked-1',
@@ -816,6 +824,57 @@ async function mockApi(route) {
           library_detail_url: '../literature_library/index.html?paper_id=paper-1&tab=dft',
           review_workbench_url: '../external_analysis_workbench/index.html?paper_id=paper-1',
         },
+        {
+          record_id: 'dft-blocked-text-only',
+          paper_id: 'paper-1',
+          title: 'Test Paper for Smoke Validation',
+          property_type: 'band_gap',
+          adsorbate: 'graphdiyne',
+          value: 0.44,
+          unit: 'eV',
+          review_status: 'missing',
+          review_gate_status: 'blocked',
+          provenance_level: 'text_evidence_only',
+          locator_status: 'text_only',
+          blocked_reasons: ['unsafe_locator'],
+          is_exportable: false,
+          can_mark_verified: false,
+          recommended_action: 'repair_pdf_locator',
+          evidence_text: 'The band gap is reported in the text, but the parser did not retain a page locator.',
+          evidence_preview: 'The band gap is reported in the text, but the parser did not retain a page locator.',
+          primary_evidence_locator: {
+            page: null,
+            source_type: 'text',
+            locator_status: 'text_only',
+            locator_confidence: 0.31,
+            evidence_text: 'The band gap is reported in the text, but the parser did not retain a page locator.',
+          },
+          primary_locator_reliability: {
+            page: null,
+            bbox: null,
+            status: 'text_only',
+            confidence: 0.31,
+          },
+          locator_reliability_status: 'text_only',
+          locator_reliability_warnings: ['text_only_locator'],
+          evidence_page: null,
+          pdf_page_url: null,
+          evidence_locators: [
+            {
+              page: null,
+              source_type: 'text',
+              locator_status: 'text_only',
+              locator_confidence: 0.31,
+              evidence_text: 'The band gap is reported in the text, but the parser did not retain a page locator.',
+              warning_reason: 'page missing; only evidence text is available',
+            },
+          ],
+          latest_external_audit_opinions: [],
+          object_review_audits_count: 0,
+          object_review_audits: [],
+          library_detail_url: '../literature_library/index.html?paper_id=paper-1&tab=dft',
+          review_workbench_url: '../external_analysis_workbench/index.html?paper_id=paper-1',
+        },
       ],
       paper_completeness: [
         {
@@ -855,6 +914,22 @@ async function mockApi(route) {
           figure_count: 1,
           table_count: 1,
           evidence_count: 1,
+          locator_reliability: {
+            status: 'needs_review',
+            locator_count: 3,
+            issue_count: 2,
+            issue_counts: { text_only_locator: 1, missing_bbox: 1 },
+            top_issues: [
+              { code: 'missing_bbox', count: 1 },
+              { code: 'text_only_locator', count: 1 },
+            ],
+          },
+          locator_issue_count: 2,
+          locator_issue_counts: { text_only_locator: 1, missing_bbox: 1 },
+          top_locator_issues: [
+            { code: 'missing_bbox', count: 1 },
+            { code: 'text_only_locator', count: 1 },
+          ],
           external_audit_count: 1,
           external_audit_opinions: [
             {
@@ -1991,15 +2066,22 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityRows')).toContainText('WARN');
     await expect(page.locator('#qualityRows')).toContainText('Object audits 1');
     await expect(page.locator('#qualityRows')).toContainText('REVISE');
-    await expect(page.locator('#qualityRows button:has-text("Review evidence")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows')).toContainText('Locator reliability: weak locator');
+    await expect(page.locator('#qualityRows')).toContainText('missing bbox');
+    await expect(page.locator('#qualityRows')).toContainText('Locator reliability: text-only');
+    await expect(page.locator('#qualityRows')).toContainText('text-only');
+    await expect(page.locator('#qualityRows button:has-text("Review evidence")')).toHaveCount(2);
     await expect(page.locator('#qualityRows button:has-text("Open PDF page 4")')).toHaveCount(1);
-    await expect(page.locator('#qualityRows button:has-text("Approve")')).toHaveCount(1);
-    await expect(page.locator('#qualityRows button:has-text("Reject")')).toHaveCount(1);
-    await expect(page.locator('#qualityRows button:has-text("Needs fix")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("Open PDF page -")')).toBeDisabled();
+    await expect(page.locator('#qualityRows button:has-text("Approve")')).toHaveCount(2);
+    await expect(page.locator('#qualityRows button:has-text("Reject")')).toHaveCount(2);
+    await expect(page.locator('#qualityRows button:has-text("Needs fix")')).toHaveCount(2);
 
     await page.click('#qualityRows button:has-text("Review evidence")');
     await expect(page.locator('#evidenceDetail')).toContainText('Evidence text');
     await expect(page.locator('#evidenceDetail')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.');
+    await expect(page.locator('#evidenceDetail')).toContainText('Locator warnings');
+    await expect(page.locator('#evidenceDetail')).toContainText('missing bbox');
     await expect(page.locator('#evidenceDetail')).toContainText('Locators');
     await expect(page.locator('#evidenceDetail')).toContainText('table');
     await expect(page.locator('#evidenceDetail')).toContainText('figure');
@@ -2022,7 +2104,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#rows')).toContainText('External audit:');
     await expect(page.locator('#rows')).toContainText('Object audits:');
+    await expect(page.locator('#rows')).toContainText('Locator issues 2');
     await expect(page.locator('#rows')).toContainText('1');
+    const locatorSummary = page.locator('#rows [title*="missing bbox"]').first();
+    await expect(locatorSummary).toHaveAttribute('title', /missing bbox: 1/);
+    await expect(locatorSummary).toHaveAttribute('title', /text-only: 1/);
     const auditSummary = page.locator('#rows [title*="Assigned AI DFT audit"]').first();
     await expect(auditSummary).toHaveAttribute('title', /Assigned AI DFT audit/);
     await expect(auditSummary).toHaveAttribute('title', /WARN/);
@@ -2355,7 +2441,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await page.click('.paper-card');
+    await page.locator('.paper-card, .paper-row').first().click();
     await page.click('button[data-tab="review"]');
     await page.click('#tab-review button[onclick="runInternalAIParse()"]');
 
@@ -2396,7 +2482,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await page.click('.paper-card');
+    await page.locator('.paper-card, .paper-row').first().click();
     await page.click('button[data-tab="review"]');
     await page.click('#tab-review button[onclick="runInternalAIParse()"]');
 
@@ -2426,7 +2512,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await page.click('.paper-card');
+    await page.locator('.paper-card, .paper-row').first().click();
     await page.click('button:has-text("更多操作")');
     await page.click('#paperMoreMenu button:has-text("删除当前文献")');
 
@@ -3539,7 +3625,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
-      await page.click('.paper-card');
+      await page.locator('.paper-card, .paper-row').first().click();
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
@@ -3666,7 +3752,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
-      await page.click('.paper-card');
+      await page.locator('.paper-card, .paper-row').first().click();
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
@@ -3728,7 +3814,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
-      await page.click('.paper-card');
+      await page.locator('.paper-card, .paper-row').first().click();
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
@@ -3767,7 +3853,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
-      await page.click('.paper-card');
+      await page.locator('.paper-card, .paper-row').first().click();
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
@@ -3806,7 +3892,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
-      await page.click('.paper-card');
+      await page.locator('.paper-card, .paper-row').first().click();
       await page.waitForTimeout(800);
 
       const panel = page.locator('#evidenceLocatorsPanel');
@@ -3852,7 +3938,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
-      await page.click('.paper-card');
+      await page.locator('.paper-card, .paper-row').first().click();
       await page.waitForTimeout(800);
 
       // Page should not crash

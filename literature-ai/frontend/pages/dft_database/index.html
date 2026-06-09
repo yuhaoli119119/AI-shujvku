@@ -671,15 +671,67 @@
     }
     function locatorSummary(row) {
       const locator = firstLocator(row);
-      const status = (row && row.locator_status) || (locator && locator.locator_status) || "missing_locator";
+      const primary = row && row.primary_locator_reliability ? row.primary_locator_reliability : {};
+      const status = primary.status || (row && row.locator_status) || (locator && locator.locator_status) || "missing_locator";
       const page = row && row.evidence_page ? row.evidence_page : (locator && locator.page);
+      const reliability = row && row.locator_reliability_status ? row.locator_reliability_status : "";
       const parts = ["locator: " + locatorStatusLabel(status)];
+      if (reliability) parts.push(locatorReliabilityLabel(reliability));
       if (page) parts.push("page " + page);
       if (locator && locator.source_type) parts.push(locator.source_type);
       if (locator && locator.section) parts.push(locator.section);
       if (locator && locator.table_id) parts.push("table");
       if (locator && locator.figure_id) parts.push("figure");
       return parts.join(" / ");
+    }
+    function locatorReliabilityLabel(status) {
+      const mapping = {
+        reliable: "exact page",
+        weak: "weak locator",
+        text_only: "text-only",
+        missing: "missing locator"
+      };
+      return mapping[status] || status || "unknown";
+    }
+    function locatorWarningLabel(code) {
+      const mapping = {
+        text_only_locator: "text-only",
+        missing_bbox: "missing bbox",
+        missing_page: "missing page",
+        missing_locator: "missing locator",
+        approximate_locator: "approximate locator",
+        unresolved_locator: "unresolved locator"
+      };
+      return mapping[code] || code;
+    }
+    function locatorWarningClass(code) {
+      if (code === "missing_page" || code === "missing_locator" || code === "unresolved_locator" || code === "text_only_locator") return "bad";
+      return "warn";
+    }
+    function canJumpToDftPdf(row) {
+      const locator = firstLocator(row);
+      const primary = row && row.primary_locator_reliability ? row.primary_locator_reliability : {};
+      const status = primary.status || (locator && locator.locator_status);
+      const page = row && row.evidence_page ? row.evidence_page : (locator && locator.page);
+      return Boolean(row && row.paper_id && page && status === "exact_page");
+    }
+    function renderLocatorReliabilityChips(row) {
+      const status = row && row.locator_reliability_status ? row.locator_reliability_status : "missing";
+      const warnings = Array.isArray(row && row.locator_reliability_warnings) ? row.locator_reliability_warnings : [];
+      const chips = ['<span class="audit-chip ' + (warnings.length ? "warn" : "ok") + '" title="' + esc(locatorSummary(row)) + '">Locator reliability: ' + esc(locatorReliabilityLabel(status)) + '</span>'];
+      warnings.forEach(code => {
+        chips.push('<span class="audit-chip ' + locatorWarningClass(code) + '" title="' + esc(code) + '">' + esc(locatorWarningLabel(code)) + '</span>');
+      });
+      return chips.join(" ");
+    }
+    function renderDftPdfButton(row, cssClass) {
+      const locator = firstLocator(row);
+      const page = row && row.evidence_page ? row.evidence_page : (locator && locator.page);
+      const klass = cssClass || "btn btn-ghost btn-sm";
+      if (!canJumpToDftPdf(row)) {
+        return '<button class="' + klass + '" type="button" disabled title="No exact PDF page locator is available for this DFT row.">Open PDF page ' + esc(page || "-") + '</button>';
+      }
+      return '<button class="' + klass + '" type="button" onclick="openDftPdfPage(\'' + esc(row.paper_id) + '\',' + esc(page || 0) + ')">Open PDF page ' + esc(page || "-") + '</button>';
     }
     function auditClass(audit) {
       const verdict = String((audit && audit.verdict) || "").toLowerCase();
@@ -793,8 +845,11 @@
         if (header) header.classList.remove("collapsed");
       }
       const locatorRows = locators.length
-        ? locators.map(loc => '<div class="quality-meta">page ' + esc(loc.page || "-") + ' / ' + esc(locatorStatusLabel(loc.locator_status)) + ' / ' + esc(loc.source_type || "-") + (loc.section ? ' / ' + esc(loc.section) : '') + (loc.table_id ? ' / table' : '') + (loc.figure_id ? ' / figure' : '') + '</div>').join("")
+        ? locators.map(loc => '<div class="quality-meta">page ' + esc(loc.page || "-") + ' / ' + esc(locatorStatusLabel(loc.locator_status)) + ' / ' + esc(loc.source_type || "-") + (loc.section ? ' / ' + esc(loc.section) : '') + (loc.table_id ? ' / table' : '') + (loc.figure_id ? ' / figure' : '') + (loc.warning_reason ? ' / warning: ' + esc(loc.warning_reason) : '') + '</div>').join("")
         : '<div class="quality-meta">No evidence locator is attached to this row.</div>';
+      const locatorWarnings = Array.isArray(item.locator_reliability_warnings) && item.locator_reliability_warnings.length
+        ? item.locator_reliability_warnings.map(locatorWarningLabel).join(", ")
+        : "none";
       const auditRows = audits.length
         ? audits.map(audit => '<div class="quality-meta"><strong>' + esc(audit.source_label || audit.source || "external audit") + '</strong>: ' + esc(audit.verdict || "-") + ' / ' + esc(audit.recommended_action || "-") + ' / ' + esc(audit.verification_status || "unverified") + '</div>').join("")
         : '<div class="quality-meta">No external audit opinion has been imported for this paper.</div>';
@@ -802,11 +857,12 @@
         '<div class="quality-status-grid">' +
           '<div class="readable-field"><div class="k">DFT row</div><div class="v">' + esc(item.property_type || "-") + ' / ' + esc(item.adsorbate || "-") + ' = ' + esc(item.value == null ? "-" : item.value) + ' ' + esc(item.unit || "") + '</div></div>' +
           '<div class="readable-field"><div class="k">PDF locator</div><div class="v">' + esc(locatorSummary(item)) + '</div></div>' +
+          '<div class="readable-field"><div class="k">Locator warnings</div><div class="v">' + esc(locatorWarnings) + '</div></div>' +
           '<div class="readable-field"><div class="k">Export safety</div><div class="v">' + esc(item.is_exportable ? "exportable" : "blocked") + ' / ' + esc((item.blocked_reasons || []).map(reasonLabel).join(", ") || "none") + '</div></div>' +
           '<div class="readable-field"><div class="k">Review status</div><div class="v">' + esc(reviewStatusLabel(item.review_status)) + ' / ' + esc(item.recommended_action || "-") + '</div></div>' +
         '</div>' +
         '<div class="quality-actions">' +
-          '<button class="btn btn-primary btn-sm" type="button" onclick="openDftPdfPage(\'' + esc(item.paper_id) + '\',' + esc(page || 0) + ')">Open PDF page ' + esc(page || "-") + '</button>' +
+          renderDftPdfButton(item, "btn btn-primary btn-sm") +
           '<button class="btn btn-ghost btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Approve</button>' +
           '<button class="btn btn-ghost btn-sm" type="button" onclick="rejectDftQueueRow(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Reject</button>' +
           '<button class="btn btn-tinted btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Needs fix</button>' +
@@ -851,11 +907,12 @@
           '</div>' +
           '<div class="queue-evidence-preview">' + esc(evidencePreview) + '</div>' +
           '<div class="audit-strip">' + renderAuditChips(row.latest_external_audit_opinions) + '</div>' +
+          '<div class="audit-strip">' + renderLocatorReliabilityChips(row) + '</div>' +
           '<div class="audit-strip">' + renderObjectAuditChips(row.object_review_audits, row.object_review_audits_count) + '</div>' +
           '<div class="audit-strip">' + renderConflictChips(row.field_conflicts) + '</div>' +
           '<div class="quality-actions">' +
             '<button class="btn btn-primary btn-sm" type="button" onclick="showQueueEvidence(' + idx + ')">Review evidence</button>' +
-            '<button class="btn btn-ghost btn-sm" type="button" onclick="openDftPdfPage(\'' + esc(row.paper_id) + '\',' + esc(page || 0) + ')">Open PDF page ' + esc(page || "-") + '</button>' +
+            renderDftPdfButton(row, "btn btn-ghost btn-sm") +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Approve</button>' +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="rejectDftQueueRow(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Reject</button>' +
             '<button class="btn btn-tinted btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Needs fix</button>' +

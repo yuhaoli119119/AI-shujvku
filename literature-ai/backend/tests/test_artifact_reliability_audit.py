@@ -274,3 +274,41 @@ def test_artifact_reliability_audit_api_is_read_only(audit_env):
     assert list_payload["summary"]["paper_count"] == 1
     assert list_payload["summary"]["locator_issue_counts"]["missing_page"] == 1
     assert _current_snapshot(Session, paper_id) == before
+
+
+def test_locator_reliability_summary_classifies_core_statuses():
+    exact = ArtifactReliabilityAuditService.locator_reliability_from_payload(
+        {
+            "page": 4,
+            "bbox": {"l": 1, "t": 2, "r": 3, "b": 4},
+            "locator_status": "exact_page",
+            "locator_confidence": 0.94,
+            "evidence_text": "Exact evidence.",
+        }
+    )
+    assert exact["status"] == "reliable"
+    assert exact["warnings"] == []
+    assert exact["primary_locator"] == {
+        "page": 4,
+        "bbox": {"l": 1, "t": 2, "r": 3, "b": 4},
+        "status": "exact_page",
+        "confidence": 0.94,
+    }
+
+    text_only = ArtifactReliabilityAuditService.locator_reliability_from_payload(
+        {"page": None, "bbox": None, "locator_status": "text_only", "evidence_text": "Text-only evidence."}
+    )
+    assert text_only["status"] == "text_only"
+    assert text_only["warnings"] == ["text_only_locator"]
+
+    missing_page = ArtifactReliabilityAuditService.locator_reliability_from_payload(
+        {"page": None, "bbox": None, "locator_status": "missing_page", "evidence_text": "Missing page evidence."}
+    )
+    assert missing_page["status"] == "missing"
+    assert missing_page["warnings"] == ["missing_page"]
+
+    missing_bbox = ArtifactReliabilityAuditService.locator_reliability_from_payload(
+        {"page": 5, "bbox": None, "locator_status": "exact_page", "evidence_text": "Page-only evidence."}
+    )
+    assert missing_bbox["status"] == "weak"
+    assert missing_bbox["warnings"] == ["missing_bbox"]

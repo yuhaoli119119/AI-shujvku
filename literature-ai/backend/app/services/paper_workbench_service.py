@@ -23,6 +23,7 @@ from app.db.models import (
     PaperSection,
     PaperTable,
 )
+from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
@@ -283,6 +284,7 @@ class PaperWorkbenchService:
         status_counts: Counter[str] = Counter()
         quality_counts: Counter[str] = Counter()
         auditor = DFTCompletenessAuditor(self.session)
+        reliability_auditor = ArtifactReliabilityAuditService(self.session, self.settings)
         conflict_counts = ReviewConflictAggregationService(self.session).count_conflicts_by_paper({paper.id for paper in papers})
         for paper in papers:
             status_counts[paper.workflow_status or "Imported"] += 1
@@ -386,6 +388,7 @@ class PaperWorkbenchService:
                 exportable_count=exportable_count,
                 blocked_count=blocked_count,
             )
+            locator_reliability = reliability_auditor.paper_locator_reliability_summary(paper.id)
             rows.append(
                 {
                     "paper_id": str(paper.id),
@@ -409,6 +412,10 @@ class PaperWorkbenchService:
                     "unreliable_figure_count": unreliable_figure_count,
                     "table_count": table_count,
                     "evidence_count": evidence_count,
+                    "locator_reliability": locator_reliability,
+                    "locator_issue_count": locator_reliability["issue_count"],
+                    "locator_issue_counts": locator_reliability["issue_counts"],
+                    "top_locator_issues": locator_reliability["top_issues"],
                     "external_audit_count": len(external_audit_candidates),
                     "external_audit_source_counts": dict(sorted(external_audit_source_counts.items())),
                     "external_audit_opinions": external_audit_opinions,

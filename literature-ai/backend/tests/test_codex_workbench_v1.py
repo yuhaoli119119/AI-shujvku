@@ -598,6 +598,9 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert by_title["Review center paper"]["needs_human_confirmation"] is True
     assert by_title["Review center paper"]["has_dft_candidates"] is True
     assert by_title["Review center paper"]["evidence_count"] == 1
+    assert by_title["Review center paper"]["locator_issue_count"] == 1
+    assert by_title["Review center paper"]["locator_issue_counts"]["missing_page"] == 1
+    assert by_title["Review center paper"]["top_locator_issues"][0]["code"] == "missing_page"
     assert by_title["Review center paper"]["object_review_audit_count"] == 1
     assert by_title["Review center paper"]["object_review_audits"][0]["candidate_type"] == "object_review_audit"
     assert by_title["Review center paper"]["object_review_audits"][0]["decision"] == "FLAG"
@@ -631,6 +634,7 @@ def test_dft_review_queue_api_exposes_object_review_audit_summary(workbench_env)
                 target_id=str(row.id),
                 field_name="value",
                 page=5,
+                bbox={"l": 10, "t": 20, "r": 120, "b": 80},
                 evidence_text=row.evidence_text,
                 locator_status="exact_page",
                 locator_confidence=0.9,
@@ -689,6 +693,11 @@ def test_dft_review_queue_api_exposes_object_review_audit_summary(workbench_env)
     assert row_payload["object_review_audits"][0]["decision"] == "REVISE"
     assert row_payload["object_review_audits"][0]["verification_status"] == "unverified"
     assert row_payload["object_review_audits"][0]["evidence_location"]["page"] == 5
+    assert row_payload["locator_reliability_status"] == "reliable"
+    assert row_payload["locator_reliability_warnings"] == []
+    assert row_payload["primary_locator_reliability"]["page"] == 5
+    assert row_payload["primary_locator_reliability"]["bbox"] == {"l": 10, "t": 20, "r": 120, "b": 80}
+    assert row_payload["primary_locator_reliability"]["status"] == "exact_page"
 
     with Session() as session:
         stored_row = session.get(DFTResult, row_id)
