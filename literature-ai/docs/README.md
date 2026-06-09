@@ -12,6 +12,10 @@
 - [plans/litai_extraction_review_protocol_v0_1.md](./plans/litai_extraction_review_protocol_v0_1.md)：LitAI 当前提取与审核协议草案
 - [plans/future_backlog_dynamic_ai_workbench.md](./plans/future_backlog_dynamic_ai_workbench.md)：动态 AI 文献工作台后续改进 backlog
 
+## 近期阶段性完成记录
+
+- [audits/D6_dynamic_ai_mcp_review_workflow_closure.md](./audits/D6_dynamic_ai_mcp_review_workflow_closure.md)：动态 AI/MCP 审核工作流阶段性 closure，覆盖任务路由、DFT evidence queue、外部审核覆盖、冲突聚合、对象级 review payload 与剩余 backlog
+
 ## 历史/参考计划
 
 - [plans/codex_centered_refocus.md](./plans/codex_centered_refocus.md)：历史 Codex 中心化改造方向；其中固定 Codex 角色表述已被当前动态 AI 分工基线取代
