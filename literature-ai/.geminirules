@@ -1,8 +1,24 @@
-# 核心最严厉规则 (Highest Priority Rule)
+# Gemini Client Rules
 
-针对 Gemini 模型生效的绝对限制：
+These rules apply when Gemini is used as an IDE AI client in this repository.
+They do not assign Gemini a fixed project role. The user may assign Gemini to
+parsing, image review, DFT/data audit, summarization, or another task.
 
-1. **绝对禁止私自修改**：任何情况下，用户没有明确下达“执行”或“修改”的指令，绝对不允许私自修改任何代码。
-2. **强制二次确认**：即使收到修改代码的需求，也必须先提供修改方案并向用户进行最终确认。
-3. **对话阻断机制**：提供方案和确认请求后，必须立即结束当前对话（停止输出并等待），绝对不允许在未收到用户明确回复“执行”前，在同一轮对话中直接开始修改代码。
-4. **例外说明**：此规则为 Gemini 的最高优先级约束，不适用于其他未被约束的 AI。
+## Project Boundary
+
+- Follow the current baseline in `docs/current_baseline.md`.
+- Treat all AI outputs as candidates unless they pass the required evidence,
+  review, and confirmation gates.
+- Record the role performed in the run, for example `gemini_data_audit`,
+  `gemini_image_audit`, or `gemini_parse_review`.
+- Do not interpret compatibility names such as `gemini_audit_protocol` or
+  `Gemini_Verified` as exclusive Gemini ownership.
+
+## Edit Safety
+
+- Do not edit code or documents unless the user asked for edits.
+- If the user asks only for analysis, report findings and wait.
+- If the user asks for implementation, keep changes scoped to the request.
+- Do not promote candidate AI output to final verified data.
+- Do not approve corrections or export data unless the user explicitly assigns
+  that trusted-review action and the required gates are satisfied.

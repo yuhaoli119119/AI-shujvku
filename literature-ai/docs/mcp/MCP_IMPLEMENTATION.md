@@ -1,38 +1,99 @@
-# Literature AI MCP 实现说明
+# Literature AI MCP Implementation Notes
 
-## 当前定位
+## Current Role
 
-MCP 层用于让外部 AI 或 IDE 协作者以受控方式访问文献库、追加笔记、提交修正建议和请求解析任务。
+The MCP layer lets external AI clients and IDE collaborators access the local literature workbench in a controlled way. It supports reading parsed literature, appending notes, proposing corrections, requesting parsing, importing external analysis, and exposing review queues.
 
-## 实现边界
+MCP is a collaboration boundary, not a final-truth writer.
 
-- MCP 是协作入口，不是默认主数据写入口
-- **当前活跃业务库是 PostgreSQL**。
-- MCP 提交的内容应以审阅队列、提案或候选结果的形式进入系统
-- AI 侧输出不能自动等同于人工 verified
+## Data Boundary
 
-## 设计重点
+- PostgreSQL is the active business database.
+- Parser artifacts live under the configured `LITAI_STORAGE_ROOT`.
+- Docker Compose uses `LITAI_STORAGE_ROOT=/data/storage` with `./data:/data`.
+- Local non-Docker runs must point `LITAI_STORAGE_ROOT` at the same real storage directory. From `literature-ai/backend`, use `../data/storage`.
 
-- Bearer token + capability 控制
-- 读写能力分离
-- 提案与审核分离
-- 尽量复用现有后端服务，不绕开业务校验
+If the storage root is wrong, paper rows may still be visible through PostgreSQL while artifact checks fail. Typical symptoms are `missing_pdf`, `missing_markdown_and_docling_json`, and `missing_ai_reading_package`.
 
-## 当前实现范围
+## Authorization Model
 
-- 论文查询与详情读取
-- 共享笔记追加
-- 修正建议提交
-- 解析任务请求与状态查询
-- 本地 PDF 扫描与批量入库辅助
-- 审核队列读取与审核动作
+MCP uses Bearer tokens configured in `LITAI_MCP_API_KEYS`.
 
-## 当前已知事实
+Each key has:
 
-- PostgreSQL 是当前唯一且默认的活跃业务库
+```text
+source_prefix|display_name|raw_api_key|capability1,capability2
+```
 
-## 当前不应假设
+Capabilities are checked inside tool handlers:
 
-- 不应假设 MCP 客户端拥有直接 verified 权限
-- 不应假设所有建议都已自动 materialize
-- 不应假设当前阶段允许直接 migration apply（需人工确认）
+- `read_papers` for read-only paper and evidence tools.
+- `append_notes` for note creation.
+- `propose_corrections` for correction proposals, AI review imports, and paper-level external audit candidates.
+- `request_parse` for ingestion and parse requests.
+- `review_corrections` for approving or rejecting corrections.
+- `review_dft` as a narrower DFT review capability where accepted.
+
+Recommended IDE AI capability set:
+
+```text
+read_papers,append_notes,propose_corrections,request_parse
+```
+
+This is enough for any IDE AI to read parsed context, request parsing, append notes, propose corrections, and import audit opinions. It is not enough to approve corrections or write final verified data.
+
+## Dynamic AI Read And Audit Path
+
+For parsed-paper review, the AI assigned to the current task should use:
+
+- `query_papers`
+- `get_codex_context`
+- `get_codex_item`
+- `retrieve_evidence`
+- `read_paper_page`
+- `get_paper_knowledge`
+- `get_review_coverage`
+- `get_field_disputes`
+- `import_analysis`
+
+`get_codex_context` returns a compact paper bundle with:
+
+- metadata and artifact status
+- external audit precondition status
+- sections, figures, tables, and Markdown
+- structured candidates
+- evidence locators
+- DFT export readiness
+- imported external analysis candidates
+- warnings and recommended next actions
+
+`import_analysis` can accept a paper-level audit payload from any assigned AI. When the payload has audit fields such as `verdict`, `recommended_action`, `suspected_missing`, or `evidence_examples`, the service creates an `external_audit_opinion` candidate.
+
+The `source` and `source_label` fields record the role for that run, for example `glm_figure_audit`, `gemini_data_audit`, `codex_parse_review`, or `manual_second_pass`. The system does not hard-code a fixed job for Gemini, GLM, Codex, or any other AI.
+
+## Artifact Gate
+
+Paper-level external audit imports require the artifact gate to be ready:
+
+- PDF exists and passes the basic quality/openability check.
+- Markdown or Docling JSON has readable content.
+- `by_id/<paper_id>/extraction/ai_reading_package.json` exists.
+- Workflow status is not blocked for external audit.
+
+When the gate fails, the import records `artifact_precondition_failed` instead of creating a trusted audit candidate. This prevents external AI from reviewing metadata-only or broken artifact records as if they were parsed papers.
+
+## Safety Boundary
+
+- External AI outputs are candidates.
+- External AI audit opinions are stored as `external_audit_opinion` candidates with `verification_status=unverified`.
+- External AI does not automatically mark papers, fields, DFT rows, or citations as final verified truth.
+- DFT export remains protected by review, evidence, and locator gates.
+- `review_corrections` should remain reserved for trusted admin or human-review keys.
+
+## Current Verification Snapshot
+
+The current MCP/external-AI path was verified with:
+
+- MCP and external analysis regression tests.
+- Docker runtime artifact gate check against the active PostgreSQL database.
+- A rollback probe that read a real paper via `get_codex_context` and simulated an `external_audit_opinion` import without committing.

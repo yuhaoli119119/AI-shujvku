@@ -1,338 +1,146 @@
-# LitAI 提取与审核协议 v0.1
+# LitAI Extraction And Review Protocol v0.1
 
-## 文档定位
+## Purpose
 
-这是一份面向 `literature-ai` 当前阶段的执行协议草案，用于统一文献提取、证据追溯、审核入库、DFT 导出、写作引用和前端展示行为。
+This protocol defines the current extraction, evidence, review, DFT export, citation, and workbench behavior for `literature-ai`.
 
-本协议不是纯人工录入规范，而是面向以下工作流：
+It is not a manual data-entry protocol. It is a multi-agent workbench protocol:
 
-- 软件负责导入、拆解、定位、候选抽取
-- Codex 负责组织、筛选、阅读、归纳
-- Gemini 或其他外部模型负责审核和标红
-- 用户负责最终确认和争议拍板
+- The software imports papers, parses PDFs, prepares artifacts, extracts candidates, and exposes evidence.
+- The user assigns AI workers per task. Codex, Gemini, GLM, Claude, or another IDE AI may act as parser, image auditor, DFT auditor, knowledge summarizer, or second-pass reviewer.
+- AI outputs are candidates and audit evidence, not final truth.
+- Human/final confirmation resolves disputes and controls trusted promotion.
 
-## 参考来源
+## Core Principles
 
-参考页面：
+1. Automatic parser, extraction, and AI review outputs are candidates by default.
+2. Every trusted field must be traceable to source evidence or explicit human/final confirmation.
+3. A value visible only in an image trend is not directly exportable as a numeric database value.
+4. Structured data, long text, evidence bundles, and audit records must be stored in separate layers.
+5. The frontend is a workbench, not the source of truth.
+6. Model names do not assign permanent jobs or trust. The assigned role for a run must be recorded in `source`, `source_label`, `agent_role`, or `model_name`.
 
-- [TiAl Data / Parameters & Properties / Extraction Protocol](http://101.42.36.213:3391/#properties)
+## Dynamic Role Assignment
 
-本协议吸收其优点，但不照搬其“人工逐篇提取员”模式。
+Examples of valid task assignments:
 
-## 核心原则
+- "Codex parses this paper and proposes DFT candidates."
+- "GLM audits figure crops and chart interpretation."
+- "Gemini checks DFT rows against the evidence packet."
+- "Claude writes a second-pass summary and flags missing evidence."
+- "A human reviewer confirms which candidates can be trusted."
 
-1. 所有自动解析结果默认都是候选，不是最终事实。
-2. 所有正式字段必须可追溯到原文、图表或人工确认。
-3. 图中看见趋势不等于可入库数值。
-4. 结构化数据与长文本材料必须分层保存。
-5. 前端页面是工作台，不是数据真源。
-6. Codex 负责组织候选，Gemini 负责审核，用户负责最终确认。
+The same model may perform different roles in different runs. The system should track the role performed, not assume it from the model name.
 
-## 建议保留
+## Status Model
 
-### 1. 状态流锁定
+Legacy workflow status names may still exist for compatibility:
 
-保留原因：
+```text
+Imported -> Quality_Checked -> Parsed_Material_Ready -> Codex_Candidate
+-> Gemini_Verified / Gemini_Revised / Gemini_Flagged / Evidence_Insufficient
+-> Human_Confirmed -> ML_Ready / Citation_Ready
+```
 
-- 防止重复解析
-- 防止重复审核
-- 防止重复入库
-- 为多智能体协作提供互斥边界
+Interpretation:
 
-本项目标准状态流：
+- `Codex_Candidate` means "AI/system candidate", not necessarily produced by Codex.
+- `Gemini_*` means "external/second AI review state", not necessarily reviewed by Gemini.
+- `Human_Confirmed`, `ML_Ready`, and `Citation_Ready` are promotion states guarded by review and evidence rules.
 
-`Imported -> Quality_Checked -> Parsed_Material_Ready -> Codex_Candidate -> Gemini_Verified / Gemini_Revised / Gemini_Flagged / Evidence_Insufficient -> Human_Confirmed -> ML_Ready / Citation_Ready`
+New docs and UI copy should prefer generic labels such as "AI candidate", "external AI reviewed", "needs human confirmation", and "safe verified".
 
-### 2. 一篇文献拆成多条独立记录
+## Artifact Gate
 
-保留原因：
+Before any AI performs a paper-level audit, it must confirm that the workbench exposes readable artifacts:
 
-- 同一篇文献可能包含多个构型、多个吸附物、多个测试条件、多个结论片段
-- 不拆分会导致记录混杂、字段含义漂移
+- PDF exists and is readable.
+- Markdown or Docling JSON has content.
+- `by_id/<paper_id>/extraction/ai_reading_package.json` exists.
+- Parsed sections, figures, tables, evidence locators, and prior audit opinions are visible when available.
 
-本项目拆分规则：
+If `artifact_ready_for_external_audit` is false, the correct output is `artifact_precondition_failed`, `needs_fix`, or a blocking note. The AI must not pretend it fully reviewed the paper.
 
-- DFT 结果按“材料/构型/性质/条件/吸附物”拆记录
-- 图表按图号独立记录
-- 知识候选按“研究空白/机理/方法/结论/写作逻辑”拆记录
+## Record Granularity
 
-### 3. 原始值与归一化值并存
+Split a paper into independent records when needed:
 
-保留原因：
+- DFT results by material, structure, property, condition, adsorbate, and reaction step.
+- Figures by figure/subfigure and evidence role.
+- Tables by table and row group.
+- Knowledge candidates by research gap, mechanism, method, conclusion, or writing logic.
 
-- 机器学习需要标准化字段
-- 人工复核需要原始表达
-- 单位转换需要留痕
+Do not collapse multiple materials, conditions, or values into one ambiguous row.
 
-推荐字段：
+## Evidence Requirements
 
-- `value_original`
-- `unit_original`
-- `value_normalized`
-- `unit_normalized`
-- `normalization_note`
+Every non-empty trusted field should have:
 
-### 4. 不从图中硬猜数值
+- source text or quote
+- PDF page
+- section, figure, or table locator when available
+- source type
+- confidence
+- review status
 
-保留原因：
+Text-only evidence can support a candidate, but exact page/table/figure locators are required before export or final trust where the relevant gate demands it.
 
-- 这是避免幻觉和脏数据的底线
-- 当前截图裁剪和图像解析仍然存在误差
+## Figure And Image Policy
 
-本项目执行规则：
+Figure records should be classified as:
 
-- 若数值仅存在于曲线图、散点图、扫描表格或图像中，不直接写入正式数值库
-- 可记录图像链接、图号、页码、候选说明
-- 标记为 `figure_pending`、`needs_digitization` 或 `evidence_insufficient`
+- `data_figure`: may contain extractable numeric or comparative evidence.
+- `knowledge_figure`: supports mechanism, structure, workflow, or interpretation.
+- `invalid_crop`: header/footer/logo/noise/partial crop or unrelated image.
+- `needs_review`: crop, bbox, label, axes, legend, or panel coverage must be checked.
 
-### 5. 每个非空字段都要可追溯
+Do not estimate precise numeric values from plots unless the value is explicitly readable in the source.
 
-保留原因：
+## DFT Export Policy
 
-- 是 Codex、Gemini、用户三方协作的前提
-- 是避免“看起来提取了，实际无法核对”的核心约束
+A DFT row can enter trusted export only when it satisfies the export gate:
 
-每个正式字段至少应挂接：
+- direct supporting evidence exists
+- value and unit are clear
+- material/adsorbate/property/reaction step are correctly normalized
+- exact locator requirements are met
+- review state is safe verified
+- no blocking duplicate, schema, unit, or suspicious-value flags remain
 
-- 原文摘录
-- 页码
-- 图号或表号
-- 来源类型
-- 置信度
-- 审核状态
+Rejected, `needs_fix`, suspected duplicate, suspected missing, text-only, or unreviewed rows remain candidates.
 
-### 6. 展示层不是数据源
+## External AI Audit Imports
 
-保留原因：
+External AI audit imports through MCP/API should be stored as `external_audit_opinion` or review payload entries.
 
-- 页面可能缓存、简化、裁剪、聚合
-- 真实可信数据应来自数据库与标准材料包
+Required behavior:
 
-本项目数据真源：
+- Keep `verification_status=unverified` until a later confirmation gate promotes it.
+- Record `source`, `source_label`, `agent_role`, `model_name`, protocol version/hash when available, decision, reasons, and evidence location.
+- Preserve prior audit opinions so later AI workers can see conflicts or agreement.
+- Never let an external AI import directly unlock final export or final citation readiness.
 
-- SQLite 结构化表
-- 标准工作目录材料
-- Evidence bundle
-- 候选导出包
+## Review Checklist
 
-### 7. 审核清单化
+For DFT/data records:
 
-保留原因：
+1. Is there direct source evidence?
+2. Is the numeric value explicit?
+3. Is the unit explicit and normalized correctly?
+4. Can the evidence be located to page, section, table, figure, or bbox?
+5. Is this only inferred from an image?
+6. Is it a duplicate of another record?
+7. Does the paper contain related evidence that suggests missing rows?
+8. Is the row eligible for ML export after safety gates?
 
-- 便于人类审核
-- 便于 Gemini 审核
-- 便于 Codex 生成统一审核报告
+For knowledge/writing candidates:
 
-审核问题应固定化，例如：
+1. Is this an original-paper fact, an interpretation, or an AI summary?
+2. Does source text support the claim?
+3. Is the category correct: gap, mechanism, method, conclusion, or writing logic?
+4. Is it safe for citation support, or only useful as a drafting hint?
+5. Does it need another AI or human review?
 
-- 该字段是否有直接证据？
-- 证据是否可定位到 PDF 页、图、表或正文？
-- 该值是否只来自图像推测？
-- 该候选是否适合正式入库？
-- 该候选是否适合机器学习？
-- 该候选是否适合引用与写作？
+## Current Conclusion
 
-## 建议改写
-
-### 1. 将“逐句人工阅读”改为“机器先粗提，AI 审核，人类拍板”
-
-不直接采用的原因：
-
-- 纯人工流程不符合当前项目“以 Codex 为核心”的目标
-- 会把系统重新做回录入器，而不是工作台
-
-改写为：
-
-- 软件先拆 PDF、抽正文、图表、表格、候选字段
-- Codex 组织候选与证据链
-- Gemini 审核候选与证据冲突
-- 用户仅处理争议项或最终确认
-
-### 2. 将记录粒度扩展为“双轨”
-
-原协议重点是“材料-条件-性质记录”。
-
-本项目必须扩展为：
-
-- 数据记录轨：DFT、参数、性质、实验条件、结构化数值
-- 知识记录轨：研究空白、机理解释、方法概括、写作逻辑、结论要点
-
-### 3. 将“不要存长文本”改成“长文本分层保存”
-
-不直接采用的原因：
-
-- 本项目需要支持阅读、翻译、综述、写作卡和证据核对
-
-改写为：
-
-- 结构化数据库只保留摘要字段
-- 长正文与长证据保存在标准材料层
-- 前端按需折叠展示，不直接把长段塞入主表
-
-### 4. 将图像保留策略改成三层
-
-原协议偏向数值图保留。
-
-本项目应区分：
-
-- `data_figure`：适合数值提取
-- `knowledge_figure`：适合机理理解或写作参考
-- `invalid_crop`：无效截图、噪声图、页眉页脚、标识残片
-
-### 5. 将交付物扩展为“工作台产物”
-
-不只交付 JSON 和 SQLite，还应交付：
-
-- 标准工作目录
-- PDF 质量报告
-- Evidence bundle
-- DFT candidate bundle
-- Knowledge candidate bundle
-- Audit log
-- Review center 状态
-
-## 不建议采用
-
-### 1. 不建议把人工逐篇通读设为刚性前提
-
-原因：
-
-- 与 Codex 中心化目标冲突
-- 难扩展
-- 无法支撑批量工作
-
-### 2. 不建议把所有长文本排除在系统外
-
-原因：
-
-- 不利于全文阅读
-- 不利于中文翻译核对
-- 不利于综述与写作卡生成
-
-### 3. 不建议只保留可直接数值化的图
-
-原因：
-
-- 机理图、结构图、流程图对本项目同样重要
-- 这些图虽然不适合直接入 DFT 数值库，但非常适合知识理解和写作支持
-
-### 4. 不建议把网站只定位成 review meeting 展示板
-
-原因：
-
-- 本项目的网页是 Codex 的工作台
-- 同时服务阅读、审核、入库、写作和引用
-
-## 系统落点
-
-### 数据库层
-
-- DFT 表保留原始值和归一化值
-- 每条记录挂 evidence 引用
-- 图像记录区分 `source_kind`
-- 审核状态字段统一枚举化
-
-### 标准工作目录层
-
-每篇文献应至少拥有：
-
-- `pdf/`
-- `markdown/`
-- `figures/`
-- `tables/`
-- `evidence/`
-- `quality_report/`
-- `dft_candidates/`
-- `knowledge_candidates/`
-- `audit/`
-
-### 审核中心
-
-应显示并可筛选：
-
-- 候选类型
-- 证据是否充分
-- 是否只来自图像
-- 是否适合入 ML
-- 是否适合 Citation
-- Gemini 审核结果
-- 人工最终状态
-
-### 文献详情页
-
-应明确区分：
-
-- 候选摘要
-- 原始证据
-- 来源类型
-- 当前审核状态
-- 是否可直接用于写作
-
-### DFT 导出层
-
-只有同时满足以下条件，才允许进入正式导出或 ML-ready：
-
-- 有证据
-- 有页码或图表定位
-- 有单位
-- 有审核状态
-- 不是从图中硬猜的数值
-
-### 写作引用层
-
-只有 `Citation_Ready` 的条目才参与：
-
-- Word 引用推荐
-- 自动插文献
-- 写作助手证据召回
-
-## 审核清单
-
-### DFT 数据审核
-
-1. 该值是否存在明确原文或表格证据？
-2. 该值单位是否明确？
-3. 是否能定位到页码、图号或表号？
-4. 是否需要单位归一化？
-5. 是否只来自图像估计？
-6. 是否适合进入 ML 导出？
-
-### 知识候选审核
-
-1. 这条内容是原文事实，还是候选归纳？
-2. 原文是否支持这条总结？
-3. 是否属于研究空白、机理、方法、结论或写作逻辑？
-4. 是否可以直接用于写作？
-5. 是否需要 Gemini 或人工标红？
-
-## 暂停中的前端打磨项
-
-当前已暂停但需要继续的任务：
-
-- 文献详情页中“写作卡 / 知识候选”的可读化打磨
-
-后续继续方向：
-
-- 默认显示短摘要而非原始长文本
-- 按写作用途分组
-- 证据与原文折叠展开
-- 可信度标签人类可读化
-- 写作卡和知识候选统一成“候选层”展示
-
-## 当前结论
-
-TiAl Data 的这份协议，最值得本项目吸收的是：
-
-- 去重意识
-- 粒度拆分意识
-- 单位规范意识
-- 字段追溯意识
-- 展示层与数据层分离意识
-
-最不适合直接照搬的是：
-
-- 纯人工逐句提取模式
-- 过度压缩长文本材料
-- 只保留数值图的单一目标
-
-因此，本项目应采用“结构化候选 + 证据追溯 + 多智能体审核 + 人类确认”的协议形态，而不是传统人工录入协议。
+The project uses a "structured candidates + evidence traceability + dynamic multi-agent review + human/final confirmation" protocol. It should not revert to a fixed human-entry workflow or a fixed Codex/Gemini division of labor.

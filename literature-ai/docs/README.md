@@ -10,6 +10,7 @@
 - [mcp/AI_TASK_ROUTING.md](./mcp/AI_TASK_ROUTING.md)：自然语言 AI 任务到 MCP 工具的动态路由说明
 - [mcp/MCP_IMPLEMENTATION.md](./mcp/MCP_IMPLEMENTATION.md)：当前 MCP 实现与安全边界
 - [plans/litai_extraction_review_protocol_v0_1.md](./plans/litai_extraction_review_protocol_v0_1.md)：LitAI 当前提取与审核协议草案
+- [plans/future_backlog_dynamic_ai_workbench.md](./plans/future_backlog_dynamic_ai_workbench.md)：动态 AI 文献工作台后续改进 backlog
 
 ## 历史/参考计划
 

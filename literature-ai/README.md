@@ -1,52 +1,55 @@
 # Literature AI
 
-`literature-ai` 是一个面向 Codex 的本地文献工具台，包含文献采集、PDF 解析、结构化候选抽取、外部解析导入和 MCP 协作接口。它不再以网页内 AI 自动给出最终结论为核心，而是为 Codex 提供可读、可查、可核对的文献资料底座。
+`literature-ai` is a local literature workbench for AI-assisted reading, parsing, evidence review, data curation, and writing support. It collects papers, parses PDFs, stores traceable candidates, exposes review queues, and provides MCP tools for IDE-based AI collaboration.
 
-## 当前定位
+The application does not treat any AI output as final truth by default.
 
-- Codex 是主分析者：阅读、筛选、核对、归纳、写作和数据整理由 Codex 或人工完成
-- 软件是工具台：负责文献入库、PDF 转换、证据检索、候选结构化数据和导出
-- 网页内 AI / 自动解析：只作为辅助候选，不作为最终可信结论
-- **当前核心数据库**：`PostgreSQL + pgvector` 是唯一且绝对的活跃业务数据源，SQLite 已被全面弃用。
-- **27-Tool MCP 系统**：包含 `recrop_figure` 等强大工具的四层架构闭环。
-- **多终端协作**：支持细粒度的基于角色的 API 权限拆分，并提供面向外部协作者的只读分享链接 (`ShareToken`)。
+## Current Position
 
-## 主要组件
+- The software is the workbench: it handles paper intake, PDF parsing, artifact preparation, evidence retrieval, candidate extraction, queues, and guarded export.
+- AI roles are assigned per task by the user. Codex, Gemini, GLM, Claude, or another IDE AI may parse, inspect figures, audit DFT data, summarize evidence, or perform a second pass.
+- Model names do not grant trust. All AI outputs remain candidates until they pass the required evidence, review, and confirmation gates.
+- PostgreSQL with pgvector is the active business database. SQLite is legacy/import/test infrastructure only.
+- MCP is the controlled collaboration surface for IDE AI workers and other clients.
 
-- `backend/`：FastAPI 后端、解析管线、抽取服务、MCP 服务
-- `frontend/`：静态工作台页面
-- `prompts/`：抽取与写作相关提示词
-- `data/`：当前 Docker 默认宿主机数据目录，包含 `library_registry.json`、`libraries/`、`storage/`
-- `storage/`：历史目录；当前建议以 `data/storage/` 为准
-- `docs/`：当前文档、MCP 文档、执行计划
+## Main Components
 
-## 入口
+- `backend/`: FastAPI backend, parsing pipeline, extraction services, MCP server.
+- `frontend/`: static workbench pages.
+- `prompts/`: extraction, audit, and writing protocols.
+- `data/`: Docker-mounted runtime data, including `library_registry.json`, `libraries/`, and `storage/`.
+- `storage/`: legacy directory; current runtime artifacts should use `data/storage/`.
+- `docs/`: current docs, MCP docs, baseline, plans, and historical audit records.
 
-- 根说明：[../README.md](../README.md)
-- AI 协作规则：[AGENTS.md](./AGENTS.md)
-- 中文使用说明：[使用说明.md](./%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
-- 文档索引：[docs/README.md](./docs/README.md)
-- Codex 中心化重定位：[docs/plans/codex_centered_refocus.md](./docs/plans/codex_centered_refocus.md)
+## Entry Points
 
-## 快速启动
+- Root guidance: [../README.md](../README.md)
+- AI collaboration rules: [AGENTS.md](./AGENTS.md)
+- Chinese usage guide: [使用说明.md](./%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
+- Documentation index: [docs/README.md](./docs/README.md)
+- Current baseline: [docs/current_baseline.md](./docs/current_baseline.md)
+- MCP API: [docs/mcp/MCP_API.md](./docs/mcp/MCP_API.md)
+
+## Quick Start
 
 ```bash
 docker compose up --build
 curl http://localhost:8000/api/health
 ```
 
-主工作台：
+Main workbench:
 
 - <http://localhost:8000/pages/literature_library/index.html>
 
-Codex 文献包：
+AI paper context bundle:
 
-- HTTP：`GET /api/papers/{paper_id}/codex-context`
-- MCP：`get_codex_context`
+- HTTP: `GET /api/papers/{paper_id}/codex-context`
+- MCP: `get_codex_context`
 
-## 文档说明
+The tool name still uses `codex-context` for compatibility, but the bundle is available to any assigned AI reviewer or parser.
 
-- `docs/mcp/`：当前仍有效的 MCP 文档
-- `docs/plans/`：当前执行计划与协议草案
+## Documentation Rules
 
-如果你要协作修改本项目，请先读 `AGENTS.md`，当前真实进度以 `README + AGENTS + git history` 为准。
+- `docs/current_baseline.md`, `docs/mcp/`, this README, `AGENTS.md`, and `使用说明.md` describe the current architecture.
+- `docs/plans/` and `docs/audits/` contain mixed historical and current planning records. If they conflict with the current baseline, follow the baseline.
+- Files and code that still use names such as `GeminiAuditService`, `gemini_audit_protocol`, or `Codex context` may be compatibility names. They do not imply fixed model ownership.
