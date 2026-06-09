@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -10,7 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from sqlalchemy import and_, or_, select
 
 from app.config import get_settings
-from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.rag.retriever import Retriever
@@ -244,7 +245,7 @@ def get_paper_knowledge(
         "Search external literature databases (OpenAlex, arXiv, etc.) for papers matching a query. "
         "Supports year filtering and target type classification (computational/experimental/review). "
         "Results include title, DOI, year, journal, abstract, and open-access status. "
-        "This tool only searches—use parse_paper, ingest_pdf_batch, or ai_workflow to actually import papers."
+        "This tool only searches; use the controlled Literature Intake endpoints to review and approve candidates before import."
     ),
 )
 def search_external_papers(
@@ -1659,6 +1660,32 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                 "review_status": "has_correction" if str(sec.id) in reviewed_section_ids else "unreviewed",
             })
 
+        external_audit_candidates = session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.paper_id == pid)
+            .where(ExternalAnalysisCandidate.candidate_type == "external_audit_opinion")
+            .order_by(ExternalAnalysisCandidate.created_at.desc())
+        ).all()
+        external_audit_source_distribution: Counter[str] = Counter()
+        latest_external_audits: list[dict[str, Any]] = []
+        for candidate in external_audit_candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            source = str(payload.get("source") or "unknown")
+            external_audit_source_distribution[source] += 1
+            latest_external_audits.append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate_type": candidate.candidate_type,
+                    "status": candidate.status,
+                    "source": source,
+                    "verdict": payload.get("verdict"),
+                    "recommended_action": payload.get("recommended_action"),
+                    "verification_status": payload.get("verification_status", "unverified"),
+                    "normalized_payload": payload,
+                    "created_at": str(candidate.created_at) if candidate.created_at else None,
+                }
+            )
+
         # --- Summary ---
         fig_reviewed = sum(1 for f in figure_report if f["review_status"] == "reviewed")
         fig_analyzed = sum(1 for f in figure_report if f["review_status"] == "analyzed")
@@ -1685,6 +1712,13 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                 "unreviewed": len(all_sections) - len(reviewed_section_ids),
                 "details": section_report,
             },
+            "external_audit_count": len(external_audit_candidates),
+            "external_audit_source_distribution": dict(sorted(external_audit_source_distribution.items())),
+            "external_audits": {
+                "total": len(external_audit_candidates),
+                "source_distribution": dict(sorted(external_audit_source_distribution.items())),
+            },
+            "latest_external_audits": latest_external_audits[:10],
         }
 
 
