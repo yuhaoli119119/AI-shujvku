@@ -6,6 +6,7 @@ import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,6 +20,35 @@ from app.utils.library_names import build_library_name_clause, normalize_library
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
 
 logger = logging.getLogger(__name__)
+
+
+def _fastapi_default(value: Any) -> Any:
+    if value.__class__.__module__.startswith("fastapi.") and hasattr(value, "default"):
+        default = value.default
+        if str(default) == "PydanticUndefined":
+            return None
+        return default
+    return value
+
+
+def _optional_text_filter(value: Any) -> str | None:
+    value = _fastapi_default(value)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _optional_int_filter(value: Any) -> int | None:
+    value = _fastapi_default(value)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _authors_text(authors) -> str:
@@ -76,6 +106,11 @@ def _dft_rows_statement(
     year_max: int | None,
     library_name: str | None,
 ):
+    property_type = _optional_text_filter(property_type)
+    adsorbate = _optional_text_filter(adsorbate)
+    year_min = _optional_int_filter(year_min)
+    year_max = _optional_int_filter(year_max)
+    library_name = _optional_text_filter(library_name)
     stmt = select(DR, P).join(P, DR.paper_id == P.id).order_by(P.year.desc().nulls_last(), P.title)
     if property_type:
         stmt = stmt.where(DR.property_type.ilike(f"%{property_type}%"))
@@ -163,6 +198,11 @@ def build_dft_ml_dataset(
     Shared core logic used by both the REST API (/export/dft-dataset) and MCP (export_ml_dataset).
     `limit` caps the number of eligible (gated) records returned.
     """
+    property_type = _optional_text_filter(property_type)
+    adsorbate = _optional_text_filter(adsorbate)
+    year_min = _optional_int_filter(year_min)
+    year_max = _optional_int_filter(year_max)
+    library_name = _optional_text_filter(library_name)
     stmt = _dft_rows_statement(
         property_type=property_type,
         adsorbate=adsorbate,
@@ -295,6 +335,11 @@ def build_dft_csv_rows(
 
     Returns (csv_string, gate_summary_dict).
     """
+    property_type = _optional_text_filter(property_type)
+    adsorbate = _optional_text_filter(adsorbate)
+    year_min = _optional_int_filter(year_min)
+    year_max = _optional_int_filter(year_max)
+    library_name = _optional_text_filter(library_name)
     stmt = _dft_rows_statement(
         property_type=property_type,
         adsorbate=adsorbate,

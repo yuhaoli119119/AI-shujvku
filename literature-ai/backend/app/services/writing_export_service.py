@@ -47,11 +47,11 @@ class WritingExportService:
 
             compiled_markdown_lines.append(text)
 
-            if card.paper_id and card.paper_id not in processed_paper_ids:
+            if is_verified and card.paper_id and card.paper_id not in processed_paper_ids:
                 processed_paper_ids.add(card.paper_id)
                 paper = self.session.get(Paper, card.paper_id)
                 if paper:
-                    csl, bib = self._generate_bibliography_entry(paper, not is_verified)
+                    csl, bib = self._generate_bibliography_entry(paper)
                     csl_json_list.append(csl)
                     bibtex_blocks.append(bib)
 
@@ -67,7 +67,7 @@ class WritingExportService:
 
         bibliography_text = ""
         if request.include_bibliography and bibtex_blocks:
-            final_markdown += "\n\n## References\n\n```bibtex\n"
+            final_markdown += "\n\n## Draft References Preview\n\n```bibtex\n"
             final_markdown += "\n\n".join(bibtex_blocks)
             final_markdown += "\n```"
             bibliography_text = "\n\n".join(bibtex_blocks)
@@ -80,15 +80,17 @@ class WritingExportService:
             },
             "safety": {
                 "contains_unverified": contains_unverified,
-                "generates_bibliography": True,
+                "generates_bibliography": bool(bibtex_blocks),
+                "bibliography_scope": "safe_verified_only",
+                "skips_unverified_bibliography": True,
                 "read_only": True,
             }
         }
 
-    def _generate_bibliography_entry(self, paper: Paper, unverified: bool) -> tuple[dict, str]:
+    def _generate_bibliography_entry(self, paper: Paper) -> tuple[dict, str]:
         author_str = " and ".join(paper.authors) if paper.authors else "Unknown"
         bib_id = f"ref_{str(paper.id)[:8]}"
-        note = "UNVERIFIED DRAFT CITATION" if unverified else "Verified Evidence-backed Citation"
+        note = "Draft reference preview from safe_verified evidence"
         
         bibtex = f"""@article{{{bib_id},
   title={{{paper.title or 'Unknown'}}},

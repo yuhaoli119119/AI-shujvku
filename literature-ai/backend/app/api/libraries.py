@@ -10,7 +10,7 @@ from app.db.models import Paper
 from app.db.session import session_scope
 from app.schemas.api import LibraryCreateRequest, LibraryImportRequest, LibraryInfoResponse
 from app.services.library_manager import LibraryManager
-from app.utils.library_names import build_library_name_clause
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.active_database import activate_active_library_database, get_active_database_info
 from app.utils.project_paths import resolve_data_mount_path
 
@@ -26,31 +26,43 @@ def _get_manager() -> LibraryManager:
     return _manager
 
 
-def _configured_database_library_count(library_name: str) -> int | None:
+def _configured_database_library_counts(library_names: list[str]) -> dict[str, int] | None:
     settings = get_settings()
     if not bool(getattr(settings, "force_configured_database", False)):
         return None
+    normalized_names = [normalize_library_name(name) for name in library_names]
+    if not normalized_names:
+        return {}
     with session_scope(settings.database_url) as session:
-        stmt = select(func.count(Paper.id)).where(build_library_name_clause(Paper.library_name, library_name))
-        return int(session.scalar(stmt) or 0)
+        counts: dict[str, int] = {}
+        for library_name in normalized_names:
+            stmt = select(func.count(Paper.id)).where(build_library_name_clause(Paper.library_name, library_name))
+            counts[library_name] = int(session.scalar(stmt) or 0)
+        return counts
 
 
-def _effective_active_library_response(lib) -> LibraryInfoResponse:
+def _effective_active_library_response(
+    lib,
+    *,
+    active_db_info: dict | None = None,
+    configured_counts: dict[str, int] | None = None,
+) -> LibraryInfoResponse:
     payload = lib.model_dump()
-    info = get_active_database_info()
+    info = active_db_info or get_active_database_info()
     effective_db_path = info.get("effective_db_path")
     effective_total = info.get("effective_db_papers_total")
-    active_name = info.get("active_library")
-    configured_count = _configured_database_library_count(str(payload.get("name") or ""))
+    active_name = normalize_library_name(info.get("active_library"))
+    library_name = normalize_library_name(str(payload.get("name") or ""))
+    configured_count = configured_counts.get(library_name) if configured_counts is not None else None
 
     if configured_count is not None:
         payload["paper_count"] = configured_count
-        if active_name and payload.get("name") == active_name:
+        if active_name and library_name == active_name:
             payload["is_active"] = True
     elif payload.get("is_active") and effective_db_path:
         payload["root_path"] = str(Path(str(effective_db_path)).resolve().parent)
         payload["paper_count"] = int(effective_total or 0)
-    elif active_name and payload.get("name") == active_name and effective_db_path:
+    elif active_name and library_name == active_name and effective_db_path:
         payload["is_active"] = True
         payload["root_path"] = str(Path(str(effective_db_path)).resolve().parent)
         payload["paper_count"] = int(effective_total or 0)
@@ -158,7 +170,16 @@ async def list_browse_roots() -> list[dict]:
 def list_libraries() -> list[LibraryInfoResponse]:
     mgr = _get_manager()
     libs = mgr.list_libraries()
-    return [_effective_active_library_response(lib) for lib in libs]
+    active_db_info = get_active_database_info()
+    configured_counts = _configured_database_library_counts([str(lib.name) for lib in libs])
+    return [
+        _effective_active_library_response(
+            lib,
+            active_db_info=active_db_info,
+            configured_counts=configured_counts,
+        )
+        for lib in libs
+    ]
 
 
 @router.post("", response_model=LibraryInfoResponse, status_code=201)
@@ -186,8 +207,13 @@ async def activate_library(name: str) -> LibraryInfoResponse:
         lib = mgr.activate_library(name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    activate_active_library_database()
-    return _effective_active_library_response(lib)
+    active_db_info = activate_active_library_database()
+    configured_counts = _configured_database_library_counts([str(lib.name)])
+    return _effective_active_library_response(
+        lib,
+        active_db_info=active_db_info,
+        configured_counts=configured_counts,
+    )
 
 
 @router.post("/import", response_model=LibraryInfoResponse, status_code=201)

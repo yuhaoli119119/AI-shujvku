@@ -44,6 +44,7 @@ from app.schemas.api import (
     FigureDataPointResponse,
 )
 from app.config import get_settings
+from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import writing_card_gate
 
@@ -354,6 +355,7 @@ class PaperQueryService:
             ],
             references=[ReferenceEntryResponse.model_validate(item) for item in references],
             figure_data_points_items=[FigureDataPointResponse.model_validate(item) for item in figure_data_points],
+            artifact_status=build_paper_artifact_status(paper),
         )
 
     @classmethod

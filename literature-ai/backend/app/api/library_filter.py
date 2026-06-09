@@ -228,6 +228,7 @@ def metadata_diagnostics(
         if not paper.journal: missing.append("journal")
         if not paper.year: missing.append("year")
         if not paper.doi: missing.append("DOI")
+        if not getattr(paper, "volume", None): missing.append("volume")
         
         if not impact or impact.impact_factor is None: 
             missing.append("impact factor")

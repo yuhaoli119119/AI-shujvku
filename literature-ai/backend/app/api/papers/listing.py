@@ -83,7 +83,7 @@ def list_libraries(session: Session = Depends(get_db_session)) -> list[PaperLibr
 
 
 @router.get("/type-stats")
-async def get_paper_type_stats(
+def get_paper_type_stats(
     library_name: str | None = Query(default=None, description="Filter by literature library"),
     session: Session = Depends(get_db_session),
 ) -> dict:
@@ -124,7 +124,7 @@ async def get_paper_type_stats(
 
 
 @router.delete("/libraries/{library_name}")
-async def delete_library(library_name: str, session: Session = Depends(get_db_session)) -> dict:
+def delete_library(library_name: str, session: Session = Depends(get_db_session)) -> dict:
     target = normalize_library_name(library_name)
     if target == DEFAULT_LIBRARY_NAME:
         raise HTTPException(status_code=400, detail="Cannot delete the default library")
@@ -228,7 +228,7 @@ async def stream_papers(
 
 
 @router.get("/status")
-async def get_papers_status(session: Session = Depends(get_db_session)):
+def get_papers_status(session: Session = Depends(get_db_session)):
     total = session.scalar(select(func.count(Paper.id))) or 0
     last_paper = session.scalars(select(Paper).order_by(Paper.created_at.desc()).limit(1)).first()
     return {

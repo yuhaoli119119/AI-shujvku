@@ -572,7 +572,7 @@ class Retriever:
         def _get_content_key(item: dict[str, Any]) -> str:
             pid = str(item.get("paper_id", ""))
             text_content = str(item.get("text") or item.get("evidence_text") or "")
-            normalized = re.sub(r"\s+", " ", text_content.strip().lower())
+            normalized = re.sub(r"\s+", " ", text_content.strip().lower())[:80]
             fingerprint = hashlib.md5(normalized.encode('utf-8')).hexdigest()
             return f"{pid}::{fingerprint}"
 

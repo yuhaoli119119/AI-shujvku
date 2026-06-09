@@ -33,13 +33,14 @@ SHORT_CAPTION_RE = re.compile(r"^\s*(figure|fig\.?|scheme)\s*\d+\s*[\.:：-]?\s*
 
 def decorative_figure_reason(caption: str | None, prov: list[Any] | None = None) -> str | None:
     """Return why a figure should be treated as decorative, or None when kept."""
-    del prov
     if not caption or not caption.strip():
         return "missing caption"
 
     caption_lower = caption.lower().strip()
     if SHORT_CAPTION_RE.match(caption_lower):
-        return None
+        if prov:
+            return None
+        return "bare figure label"
 
     for keyword in DECORATIVE_CAPTION_KEYWORDS:
         if keyword in caption_lower:

@@ -25,7 +25,7 @@
             <div class="disclaimer-icon">!</div>
             <div class="disclaimer-content">
                 <strong>安全提示：</strong>即使是系统评估的高置信度候选，在作为学术引用前也建议人工核对原文。需要补充元数据的建议，在复核前绝对不能作为证据使用。
-                <span><strong>说明：</strong>本工具只生成引用建议草稿，不会验证证据、不写入数据库、不生成最终参考文献，也不会解锁写作或导出能力。</span>
+                <span><strong>说明：</strong>本工具只生成证据驱动写作建议草稿，不会验证证据、不写入数据库；参考文献仅作为 safe_verified 来源的待核验预览。</span>
             </div>
         </div>
 
@@ -196,13 +196,13 @@
                 <div id="writingCardsSection" class="cards-section" style="display: none; margin-bottom: 24px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <h3>Evidence-backed Writing Cards (Drafts)</h3>
-                        <button id="btnExportCards" class="btn btn-primary" type="button" onclick="exportWritingCards()">最终导出 (编译参考文献)</button>
+                        <button id="btnExportCards" class="btn btn-primary" type="button" onclick="exportWritingCards()">草稿导出 (待核验参考文献预览)</button>
                     </div>
                     <div id="writingCardsContainer" class="cards-container"></div>
                 </div>
 
                 <div id="exportResultSection" class="export-section" style="display: none; margin-bottom: 24px;">
-                    <h3>最终导出文档 (Markdown & Bibliography)</h3>
+                    <h3>草稿导出文档 (Markdown & Reference Preview)</h3>
                     <div id="exportSafetyWarning" class="safety-disclaimer-banner" style="display: none; margin-bottom: 16px;">
                         <div class="disclaimer-icon">!</div>
                         <div class="disclaimer-content">
@@ -211,7 +211,7 @@
                         </div>
                     </div>
                     <textarea id="exportedMarkdown" class="input" rows="12" readonly style="margin-bottom: 16px; font-family: monospace;"></textarea>
-                    <h4>参考文献 (BibTeX)</h4>
+                    <h4>待核验参考文献预览 (BibTeX)</h4>
                     <textarea id="exportedBibtex" class="input" rows="8" readonly style="font-family: monospace;"></textarea>
                 </div>
 

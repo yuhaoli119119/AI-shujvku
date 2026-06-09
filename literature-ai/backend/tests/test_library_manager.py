@@ -20,6 +20,8 @@ def isolated_manager(tmp_path, monkeypatch):
     default_root = tmp_path / "default-library"
     monkeypatch.setattr(LibraryManager, "REGISTRY_PATH", registry_path)
     monkeypatch.setattr(LibraryManager, "DEFAULT_LIBRARY_ROOT", default_root)
+    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "false")
+    get_settings.cache_clear()
     return LibraryManager()
 
 

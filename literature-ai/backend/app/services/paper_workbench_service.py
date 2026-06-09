@@ -17,6 +17,7 @@ from app.db.models import (
     AuditLog,
     DFTResult,
     EvidenceLocator,
+    ExternalAnalysisCandidate,
     Paper,
     PaperFigure,
     PaperSection,
@@ -296,6 +297,31 @@ class PaperWorkbenchService:
                 self.session.scalar(select(func.count(EvidenceLocator.id)).where(EvidenceLocator.paper_id == paper.id))
                 or 0
             )
+            external_audit_candidates = self.session.scalars(
+                select(ExternalAnalysisCandidate)
+                .where(ExternalAnalysisCandidate.paper_id == paper.id)
+                .where(ExternalAnalysisCandidate.candidate_type == "external_audit_opinion")
+                .order_by(ExternalAnalysisCandidate.created_at.desc())
+            ).all()
+            external_audit_source_counts: Counter[str] = Counter()
+            external_audit_opinions: list[dict[str, Any]] = []
+            for candidate in external_audit_candidates:
+                payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+                source = str(payload.get("source") or "unknown")
+                external_audit_source_counts[source] += 1
+                external_audit_opinions.append(
+                    {
+                        "candidate_id": str(candidate.id),
+                        "candidate_type": candidate.candidate_type,
+                        "status": candidate.status,
+                        "source": source,
+                        "verdict": payload.get("verdict"),
+                        "recommended_action": payload.get("recommended_action"),
+                        "verification_status": payload.get("verification_status", "unverified"),
+                        "normalized_payload": payload,
+                        "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+                    }
+                )
             quality_report = paper.pdf_quality_report if isinstance(paper.pdf_quality_report, dict) else {}
             needs_human_confirmation = workflow_needs_human_confirmation(paper.workflow_status, quality_report)
             figure_crop_status_counts = dict(
@@ -341,6 +367,9 @@ class PaperWorkbenchService:
                     "unreliable_figure_count": unreliable_figure_count,
                     "table_count": table_count,
                     "evidence_count": evidence_count,
+                    "external_audit_count": len(external_audit_candidates),
+                    "external_audit_source_counts": dict(sorted(external_audit_source_counts.items())),
+                    "external_audit_opinions": external_audit_opinions,
                     "workspace_path": paper.workspace_path,
                     "detail_url": f"../literature_library/index.html?paper_id={paper.id}&tab=review",
                     "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
@@ -744,7 +773,7 @@ class PaperWorkbenchService:
                     "confidence": item.get("confidence"),
                 }
             ],
-            "policy": "Candidate values require Codex/Gemini review and human confirmation before ML export.",
+            "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
             "ai_protocol_policy": (
                 "System rule extraction only creates system_candidate records. Final DFT/ML data must pass "
                 "PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, "

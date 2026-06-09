@@ -594,7 +594,7 @@
 
     async function loadReviewCenter() {
       try {
-        const data = await fetchJSON("/api/workbench/review-center?limit=500");
+        const data = await fetchJSON("/api/workbench/review-center?limit=50");
         state.rows = data.rows || [];
         state.metadata = data.metadata || {};
         renderRows();
@@ -621,7 +621,7 @@
 
     async function prepareLibrary() {
       try {
-        const data = await fetchJSON("/api/workbench/prepare-active-library?render_pages=false&limit=500", { method: "POST" });
+        const data = await fetchJSON("/api/workbench/prepare-active-library?render_pages=false&limit=50", { method: "POST" });
         showToast("当前库材料重建完成：" + Number(data.prepared || 0) + " 篇。");
         await loadReviewCenter();
       } catch (error) {

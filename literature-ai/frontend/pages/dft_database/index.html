@@ -519,7 +519,7 @@
       const backendStatus = validationStatus === "validated" ? "exportable" : (validationStatus === "needs_review" ? "needs_review" : "all");
       const params = applyLibraryParam(new URLSearchParams());
       params.set("min_confidence", minConf);
-      params.set("limit", "300");
+      params.set("limit", "50");
       params.set("status", backendStatus);
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
@@ -684,10 +684,10 @@
       if (!el) return;
       const flagged = (items || []).filter(item => (item.hints || []).length);
       if (!flagged.length) {
-        el.innerHTML = '<div class="quality-meta">论文级处理提示：当前筛选下没有发现含 DFT 候选且需要补材料的论文。</div>';
+        el.innerHTML = '<div class="quality-meta" style="grid-column: 1 / -1; margin-bottom: -4px;">论文级处理提示：当前筛选下没有发现含 DFT 候选且需要补材料的论文。</div>';
         return;
       }
-      el.innerHTML = '<div class="quality-meta"><strong>论文级处理提示</strong>：仅列出当前筛选下含 DFT 候选且存在风险的 ' + esc(flagged.length) + ' 篇论文。</div>' + flagged.slice(0, 8).map(item => {
+      el.innerHTML = '<div class="quality-meta" style="grid-column: 1 / -1; margin-bottom: -4px;"><strong>论文级处理提示</strong>：仅列出当前筛选下含 DFT 候选且存在风险的 ' + esc(flagged.length) + ' 篇论文。</div>' + flagged.slice(0, 8).map(item => {
         return '<div class="completeness-row">' +
           '<div class="quality-meta"><a href="' + esc(item.library_detail_url || "#") + '">' + esc(item.title || item.paper_id || "Paper") + '</a></div>' +
           '<div class="quality-meta">完整性状态：' + esc(item.dft_completeness_label || item.dft_completeness_status || "-") + '；检测线索：' + esc((item.dft_audit && item.dft_audit.detected_signal_count) || 0) + '；疑似漏提：' + esc((item.dft_audit && item.dft_audit.suspected_missing_count) || 0) + '</div>' +

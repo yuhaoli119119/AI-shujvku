@@ -87,7 +87,7 @@ def test_export_successful_verified_drafts(setup_test_db):
     bibtex = data["bibliography"]["bibtex"]
     assert "Paper 1" in bibtex
     assert "Paper 2" in bibtex
-    assert "Verified Evidence-backed Citation" in bibtex
+    assert "Draft reference preview from safe_verified evidence" in bibtex
 
 
 def test_export_flags_unverified_drafts(setup_test_db):
@@ -122,6 +122,8 @@ def test_export_flags_unverified_drafts(setup_test_db):
     assert "contains unverified draft citations" in md
     assert "**[UNVERIFIED]** Alice might have said X." in md
     
-    # Assert bibtex has warning note
+    # Assert unverified cards do not generate bibliography entries
     bibtex = data["bibliography"]["bibtex"]
-    assert "UNVERIFIED DRAFT CITATION" in bibtex
+    assert bibtex == ""
+    assert data["safety"]["generates_bibliography"] is False
+    assert data["safety"]["skips_unverified_bibliography"] is True

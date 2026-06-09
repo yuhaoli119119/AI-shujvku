@@ -647,15 +647,6 @@ def _find_existing_paper(
     )
     if existing is not None:
         return existing
-    if doi:
-        return identity.find_existing_paper(
-            session,
-            doi=identity.normalize_doi(doi),
-            title=title,
-            year=year,
-            arxiv_id=arxiv_id,
-            library_name=None,
-        )
     return None
 
 
@@ -861,11 +852,6 @@ def run_discovery_download_ingest_job(job_id: str, control_database_url: str | N
                 library_name=target_library,
             )
             if existing:
-                if existing.library_name != target_library:
-                    existing.library_name = target_library
-                    job_session.add(existing)
-                    job_session.commit()
-                    job_session.refresh(existing)
                 result = {"paper_id": str(existing.id), "title": existing.title, "status": "already_exists"}
             else:
                 ingestion = PaperIngestionService(session=job_session, settings=runtime_settings)
@@ -926,6 +912,8 @@ def run_discovery_download_ingest_job(job_id: str, control_database_url: str | N
             )
 
 
+# NOTE: [LEGACY DIRECT-INGEST] 本函数保留向后兼容。
+# 新流程请使用 /api/intake/search → approve → ingest 三步走。
 async def execute_ai_workflow(
     payload: AIWorkflowPayload,
     *,
@@ -984,11 +972,6 @@ async def execute_ai_workflow(
             library_name=target_library,
         )
         if payload.skip_existing and existing:
-            if existing.library_name != target_library:
-                existing.library_name = target_library
-                session.add(existing)
-                session.commit()
-                session.refresh(existing)
             ingested.append(
                 AIWorkflowIngestedPaperResponse(
                     paper_id=existing.id,
@@ -1020,11 +1003,6 @@ async def execute_ai_workflow(
                 else None
             )
             if existing:
-                if existing.library_name != target_library:
-                    existing.library_name = target_library
-                    session.add(existing)
-                    session.commit()
-                    session.refresh(existing)
                 ingested.append(
                     AIWorkflowIngestedPaperResponse(
                         paper_id=existing.id,
@@ -1097,6 +1075,8 @@ async def execute_ai_workflow(
 
 
 def run_ai_workflow_job(job_id: str, control_database_url: str | None = None) -> None:
+    """[LEGACY DIRECT-INGEST] 保留向后兼容，新流程请用 /api/intake。"""
+
     base_settings = get_settings()
     control_db_url = control_database_url or base_settings.database_url
     with session_scope(control_db_url) as control_session:
@@ -1481,3 +1461,107 @@ def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None)
         run_discovery_download_ingest_job(job_id, control_database_url)
         return
     raise ValueError(f"Unsupported workflow job type: {job_type}")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 Intake: 候选生成 workflow（绝不调用 PaperIngestionService）
+# ---------------------------------------------------------------------------
+
+async def execute_intake_search_workflow(
+    query: str,
+    *,
+    session: Session,
+    library_name: str | None = None,
+    user_need: str | None = None,
+    providers: list[str] | None = None,
+    max_results: int = 20,
+    target_types: list[str] | None = None,
+) -> dict:
+    """只生成候选，绝不调用 PaperIngestionService。
+
+    检索 -> AI/规则筛选 -> 写入 literature_intake_candidates。
+    所有候选状态为 pending_review，等待用户通过 /api/intake 确认后才触发入库。
+    """
+    from uuid import UUID as _UUID
+
+    from app.db.models import LiteratureIntakeCandidate, LiteratureIntakeSession
+    from app.services.intake_screening_service import IntakeScreeningService
+
+    target_library = normalize_library_name(library_name)
+    effective_need = user_need or query
+
+    # 1. 建会话记录
+    s = LiteratureIntakeSession(
+        library_name=target_library,
+        user_need=effective_need,
+        original_query=query,
+        providers=providers or DiscoveryService.DEFAULT_SEARCH_PROVIDERS,
+        target_types=target_types,
+        max_results=max_results,
+        status="searching",
+    )
+    session.add(s)
+    session.flush()
+
+    try:
+        # 2. 检索（不入库）
+        disc = DiscoveryService()
+        active_providers = providers or disc.DEFAULT_SEARCH_PROVIDERS
+        raw_results = await run_in_threadpool(
+            disc.search, query, active_providers, max_results, target_types
+        )
+
+        # 3. AI/规则筛选
+        screener = IntakeScreeningService(session, library_name=target_library)
+        screening_results = await run_in_threadpool(
+            screener.screen,
+            raw_results,
+            user_need=effective_need,
+            query=query,
+            target_types=target_types,
+        )
+
+        # 4. 写候选，不写 papers
+        candidates = []
+        for sr, raw in zip(screening_results, raw_results):
+            status = "duplicate" if sr.is_duplicate else "pending_review"
+            c = LiteratureIntakeCandidate(
+                session_id=s.id,
+                title=raw.get("title"),
+                doi=raw.get("doi"),
+                year=raw.get("year"),
+                journal=raw.get("journal"),
+                authors=raw.get("authors") or [],
+                abstract=raw.get("abstract"),
+                identifier=raw.get("identifier") or raw.get("doi") or raw.get("url"),
+                url=raw.get("url"),
+                pdf_url=raw.get("pdf_url"),
+                providers=raw.get("databases") or [],
+                relevance_score=sr.relevance_score,
+                screening_tier=sr.screening_tier,
+                screening_reason=sr.screening_reason,
+                risk_flags=sr.risk_flags,
+                status=status,
+                duplicate_paper_id=_UUID(sr.duplicate_paper_id) if sr.duplicate_paper_id else None,
+            )
+            session.add(c)
+            candidates.append(c)
+
+        s.status = "pending_review"
+        session.commit()
+        for c in candidates:
+            session.refresh(c)
+        session.refresh(s)
+
+        return {
+            "session_id": str(s.id),
+            "candidate_count": len(candidates),
+            "searched_total": len(raw_results),
+            "library_name": target_library,
+            "status": "pending_review",
+        }
+
+    except Exception as exc:
+        s.status = "cancelled"
+        session.commit()
+        raise exc

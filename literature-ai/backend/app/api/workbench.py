@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 @router.get("/review-center")
-async def review_center(
+def review_center(
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -27,7 +27,7 @@ async def review_center(
 
 
 @router.get("/papers/{paper_id}/workspace")
-async def get_paper_workspace(
+def get_paper_workspace(
     paper_id: UUID,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -39,7 +39,7 @@ async def get_paper_workspace(
 
 
 @router.post("/papers/{paper_id}/prepare")
-async def prepare_paper_workspace(
+def prepare_paper_workspace(
     paper_id: UUID,
     payload: WorkbenchPrepareRequest,
     session: Session = Depends(get_db_session),
@@ -55,7 +55,7 @@ async def prepare_paper_workspace(
 
 
 @router.post("/papers/{paper_id}/gemini-audit")
-async def submit_gemini_audit(
+def submit_gemini_audit(
     paper_id: UUID,
     payload: GeminiAuditRequest,
     session: Session = Depends(get_db_session),
@@ -84,7 +84,7 @@ async def submit_gemini_audit(
 
 
 @router.post("/papers/{paper_id}/human-confirm")
-async def human_confirm_workbench_status(
+def human_confirm_workbench_status(
     paper_id: UUID,
     payload: HumanConfirmRequest,
     session: Session = Depends(get_db_session),
@@ -104,7 +104,7 @@ async def human_confirm_workbench_status(
 
 
 @router.post("/prepare-active-library")
-async def prepare_active_library(
+def prepare_active_library(
     render_pages: bool = False,
     limit: int = Query(default=500, ge=1, le=5000),
     session: Session = Depends(get_db_session),

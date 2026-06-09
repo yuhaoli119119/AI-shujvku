@@ -23,6 +23,8 @@ from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_export_service import (
     _dft_quality_row_payload,
     _dft_rows_statement,
+    _optional_int_filter,
+    _optional_text_filter,
     build_dft_csv_rows,
     build_dft_ml_dataset,
 )
@@ -91,7 +93,7 @@ async def export_dft_dataset(
 
 
 @router.get("/export/dft-quality")
-def dft_dataset_quality(
+async def dft_dataset_quality(
     property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
@@ -101,6 +103,13 @@ def dft_dataset_quality(
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
 ):
+    property_type = _optional_text_filter(property_type)
+    adsorbate = _optional_text_filter(adsorbate)
+    year_min = _optional_int_filter(year_min)
+    year_max = _optional_int_filter(year_max)
+    library_name = _optional_text_filter(library_name)
+    reason = _optional_text_filter(reason)
+    limit = _optional_int_filter(limit) or 100
     rows = session.execute(
         _dft_rows_statement(
             property_type=property_type,
