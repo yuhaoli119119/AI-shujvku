@@ -913,6 +913,13 @@ async function mockApi(route) {
           workflow_status: 'Initial_Parsed',
           pdf_quality_status: 'Good',
           pdf_quality_score: 0.92,
+          pdf_exists: true,
+          pdf_artifact_status: {
+            pdf_exists: true,
+            pdf_path_kind: 'storage_relative',
+            pdf_file_size: 123456,
+            blocking_errors: [],
+          },
           has_dft_candidates: true,
           dft_candidate_count: 1,
           dft_candidate_status_counts: { system_candidate: 1 },
@@ -988,7 +995,60 @@ async function mockApi(route) {
               reason: 'Object-level audit says the value should be checked against Table 1.',
             },
           ],
+          review_conflict_count: 0,
           workspace_path: '/workspace/paper-1',
+        },
+        {
+          paper_id: 'paper-2',
+          title: 'Missing PDF But Has Clues',
+          year: 2024,
+          journal: 'Journal of Edge Cases',
+          workflow_status: 'Unparsed',
+          pdf_quality_status: 'Broken',
+          pdf_quality_score: 0.0,
+          pdf_exists: false,
+          pdf_artifact_status: {
+            pdf_exists: false,
+            pdf_path_kind: 'unknown',
+            pdf_file_size: null,
+            blocking_errors: ['missing_pdf'],
+          },
+          has_dft_candidates: false,
+          dft_candidate_count: 0,
+          dft_candidate_status_counts: {},
+          dft_audit: { status_label: 'Unparsed', detected_signal_count: 0, parsed_dft_count: 0, suspected_missing_count: 0 },
+          dft_completeness_status: 'Unparsed',
+          dft_completeness_label: 'Unparsed',
+          suspected_missing_dft_count: 0,
+          figure_count: 0,
+          figure_reliability: {
+            status: 'reliable',
+            figure_count: 0,
+            issue_count: 0,
+            issue_counts: {},
+            top_issues: [],
+          },
+          figure_issue_count: 0,
+          figure_issue_counts: {},
+          top_figure_issues: [],
+          table_count: 0,
+          evidence_count: 0,
+          locator_reliability: {
+            status: 'reliable',
+            locator_count: 0,
+            issue_count: 0,
+            issue_counts: {},
+            top_issues: [],
+          },
+          locator_issue_count: 0,
+          locator_issue_counts: {},
+          top_locator_issues: [],
+          external_audit_count: 0,
+          external_audit_opinions: [],
+          object_review_audit_count: 0,
+          object_review_audits: [],
+          review_conflict_count: 2,
+          workspace_path: '/workspace/paper-2',
         },
       ],
     });
@@ -2125,15 +2185,34 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(correctionPayload).toBeNull();
   });
 
-  test('business flow: review center shows latest external audit count and tooltip', async ({ page }) => {
+  test('business flow: review center simplifies first-screen statuses and exposes read-only details', async ({ page }) => {
+    const writeCalls = [];
+    await page.route(/\/api\/papers\/.*\/dft-results\/.*\/(verify|reject)$|\/api\/papers\/.*\/dft-results\/.*\/corrections$/, async route => {
+      writeCalls.push(route.request().url());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
     await page.waitForTimeout(500);
 
-    await expect(page.locator('#rows')).toContainText('External audit:');
-    await expect(page.locator('#rows')).toContainText('Object audits:');
-    await expect(page.locator('#rows')).toContainText('Figure issues 3');
-    await expect(page.locator('#rows')).toContainText('Locator issues 2');
-    await expect(page.locator('#rows')).toContainText('1');
+    const rows = page.locator('#rows tr');
+    const firstStatus = rows.nth(0).locator('td').nth(3);
+    await expect(firstStatus).toContainText('PDF ready');
+    await expect(firstStatus).toContainText('待审 DFT');
+    await expect(firstStatus).toContainText('定位风险 2');
+    await expect(firstStatus).toContainText('图像风险 3');
+    await expect(firstStatus).toContainText('冲突 0');
+    await expect(firstStatus).not.toContainText('Figure issues 3');
+    await expect(firstStatus).not.toContainText('Locator issues 2');
+    await expect(firstStatus).not.toContainText('External audit:');
+    await expect(firstStatus).not.toContainText('Object audits:');
+
+    const secondStatus = rows.nth(1).locator('td').nth(3);
+    await expect(secondStatus).toContainText('No PDF');
+    await expect(secondStatus).toContainText('无 DFT');
+    await expect(secondStatus).toContainText('冲突 2');
+    await expect(secondStatus).not.toContainText('疑似漏提');
+
     const figureSummary = page.locator('#rows [title*="missing full-page snapshot"]').first();
     await expect(figureSummary).toHaveAttribute('title', /missing full-page snapshot: 1/);
     await expect(figureSummary).toHaveAttribute('title', /small crop: 1/);
@@ -2141,14 +2220,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const locatorSummary = page.locator('#rows [title*="text-only"]').first();
     await expect(locatorSummary).toHaveAttribute('title', /missing bbox: 1/);
     await expect(locatorSummary).toHaveAttribute('title', /text-only: 1/);
-    const auditSummary = page.locator('#rows [title*="Assigned AI DFT audit"]').first();
-    await expect(auditSummary).toHaveAttribute('title', /Assigned AI DFT audit/);
-    await expect(auditSummary).toHaveAttribute('title', /WARN/);
-    await expect(auditSummary).toHaveAttribute('title', /unverified/);
-    const objectAuditSummary = page.locator('#rows [title*="object_review_audit"]').first();
-    await expect(objectAuditSummary).toHaveAttribute('title', /Assigned AI DFT audit/);
-    await expect(objectAuditSummary).toHaveAttribute('title', /REVISE/);
-    await expect(objectAuditSummary).toHaveAttribute('title', /unverified/);
+
+    const detailsSummary = page.locator('#rows details.inline-details summary').first();
+    await detailsSummary.click();
+    const detailBody = page.locator('#rows details.inline-details .detail-body').first();
+    await expect(detailBody).toContainText('External audit: 1');
+    await expect(detailBody).toContainText('Object audits: 1');
+    await expect(detailBody).toContainText('Assigned AI DFT audit');
+    await expect(detailBody).toContainText('unverified');
+    await expect(detailBody).toContainText('system_candidate: 1');
+    await expect(detailBody).toContainText('Figure issues');
+    await expect(detailBody).toContainText('Locator issues');
+    expect(writeCalls).toEqual([]);
   });
 
   test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {
