@@ -27,7 +27,7 @@ def _write_sqlite(path: Path, *, paper_count: int) -> None:
     engine.dispose()
 
 
-def test_activate_active_library_database_repairs_empty_default_sqlite_from_populated_mirror(tmp_path, monkeypatch):
+def test_activate_active_library_database_does_not_repair_or_switch_to_sqlite_candidates(tmp_path, monkeypatch):
     workspace_root = tmp_path
     backend_root = workspace_root / "backend"
     backend_root.mkdir(parents=True, exist_ok=True)
@@ -69,21 +69,23 @@ def test_activate_active_library_database_repairs_empty_default_sqlite_from_popu
     monkeypatch.setattr(active_database_module, "default_library_root", lambda: library_root.resolve())
     monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
     monkeypatch.setattr(active_database_module, "WORKSPACE_ROOT", workspace_root)
+    monkeypatch.setattr(db_session_module, "init_db", lambda database_url: None)
 
     info = active_database_module.activate_active_library_database()
 
-    assert info["db_kind"] == "sqlite"
-    assert Path(info["db_path"]) == (library_root / "database.sqlite").resolve()
-    assert info["effective_db_papers_total"] == 1
+    assert info["db_kind"] == "postgresql"
+    assert info["db_path"] is None
+    assert info["effective_db_path"] is None
+    assert info["effective_db_papers_total"] == 0
     assert info["recovered_from_candidate_scan"] is False
     repaired = sqlite3.connect(str((library_root / "database.sqlite").resolve()))
     try:
-        assert repaired.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
+        assert repaired.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 0
     finally:
         repaired.close()
 
 
-def test_get_active_database_info_prefers_registered_active_sqlite_without_candidate_recovery(tmp_path, monkeypatch):
+def test_get_active_database_info_ignores_registered_active_sqlite_for_postgresql_config(tmp_path, monkeypatch):
     workspace_root = tmp_path
     backend_root = workspace_root / "backend"
     backend_root.mkdir(parents=True, exist_ok=True)
@@ -123,14 +125,14 @@ def test_get_active_database_info_prefers_registered_active_sqlite_without_candi
 
     info = active_database_module.get_active_database_info()
 
-    assert info["db_kind"] == "sqlite"
-    assert Path(str(info["db_path"])) == (library_root / "database.sqlite").resolve()
+    assert info["db_kind"] == "postgresql"
+    assert info["db_path"] is None
     assert info["configured_db_kind"] == "postgresql"
     assert info["active_library"] == "默认文献库"
-    assert Path(str(info["active_library_db_path"])) == (library_root / "database.sqlite").resolve()
-    assert info["effective_matches_active_library_db_path"] is True
+    assert info["active_library_db_path"] is None
+    assert info["effective_db_path"] is None
+    assert info["effective_matches_active_library_db_path"] is False
     assert info["recovered_from_candidate_scan"] is False
-
 
 def test_force_configured_database_bypasses_registered_active_library(tmp_path, monkeypatch):
     workspace_root = tmp_path
@@ -291,14 +293,13 @@ def test_get_active_database_info_keeps_empty_non_default_active_library(tmp_pat
 
     info = active_database_module.get_active_database_info()
 
-    assert info["db_kind"] == "sqlite"
+    assert info["db_kind"] == "postgresql"
     assert info["active_library"] == "graphite-validation"
-    assert Path(str(info["db_path"])) == (active_root / "database.sqlite").resolve()
-    assert Path(str(info["effective_db_path"])) == (active_root / "database.sqlite").resolve()
+    assert info["db_path"] is None
+    assert info["effective_db_path"] is None
     assert info["effective_db_papers_total"] == 0
-    assert info["effective_matches_active_library_db_path"] is True
+    assert info["effective_matches_active_library_db_path"] is False
     assert info["recovered_from_candidate_scan"] is False
-
 
 def test_get_active_database_info_maps_container_path_to_registry_data_root(tmp_path, monkeypatch):
     workspace_root = tmp_path
@@ -339,13 +340,12 @@ def test_get_active_database_info_maps_container_path_to_registry_data_root(tmp_
 
     info = active_database_module.get_active_database_info()
 
-    assert info["db_kind"] == "sqlite"
-    assert Path(str(info["active_library_db_path"])) == (library_root / "database.sqlite").resolve()
-    assert Path(str(info["effective_db_path"])) == (library_root / "database.sqlite").resolve()
-    assert Path(str(info["effective_storage_root"])) == (library_root / "papers").resolve()
-    assert info["effective_matches_active_library_db_path"] is True
+    assert info["db_kind"] == "postgresql"
+    assert info["active_library_db_path"] is None
+    assert info["effective_db_path"] is None
+    assert info["effective_storage_root"] == str(Path(get_settings().storage_root).resolve())
+    assert info["effective_matches_active_library_db_path"] is False
     assert info["recovered_from_candidate_scan"] is False
-
 
 def test_resolve_persisted_artifact_path_finds_mirrored_file(tmp_path, monkeypatch):
     workspace_root = tmp_path

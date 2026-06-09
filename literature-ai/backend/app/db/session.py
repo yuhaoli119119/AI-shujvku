@@ -57,6 +57,14 @@ def init_db(database_url: str) -> None:
     Base.metadata.create_all(engine)
     if engine.dialect.name == "postgresql":
         with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE papers DROP CONSTRAINT IF EXISTS papers_doi_key"))
+            connection.execute(text("DROP INDEX IF EXISTS ix_papers_doi"))
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_library_doi "
+                    "ON papers (library_name, doi) WHERE doi IS NOT NULL"
+                )
+            )
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_paper_id ON paper_chunks(paper_id)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_section_id ON paper_chunks(section_id)"))
             try:

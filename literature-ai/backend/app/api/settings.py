@@ -58,6 +58,12 @@ _PROTOCOL_FILES = [
         "scope": "多硫化物吸附、LiPS 转化、Li2S 成核/分解、穿梭抑制等机理",
     },
     {
+        "key": "paper_writer",
+        "title": "论文写作协议",
+        "path": "prompts/paper_writer.yaml",
+        "scope": "写作引用、证据约束、段落生成和不可引用/未核验内容的阻断规则",
+    },
+    {
         "key": "writing_card",
         "title": "写作卡提取",
         "path": "prompts/writing_card.yaml",
@@ -320,8 +326,7 @@ def _is_local_request_host(client_host: str) -> bool:
     except ValueError:
         return False
 
-    # Treat private/link-local Docker/WSL bridge addresses as local-mode access.
-    return ip.is_loopback or ip.is_private or ip.is_link_local
+    return ip.is_loopback
 
 
 def _enforce_settings_write_access(request: Request) -> None:
@@ -335,11 +340,13 @@ def _enforce_settings_write_access(request: Request) -> None:
             raise HTTPException(status_code=403, detail="Invalid settings admin token")
         return
 
-    if not _is_local_request_host(client_host):
-        raise HTTPException(
-            status_code=403,
-            detail="Settings writes are limited to local requests unless LITAI_SETTINGS_ADMIN_TOKEN is configured.",
-        )
+    if _is_local_request_host(client_host):
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail="Settings writes from non-loopback clients require LITAI_SETTINGS_ADMIN_TOKEN.",
+    )
 
 
 @router.get("")
@@ -489,19 +496,7 @@ async def get_ide_prompts() -> dict[str, Any]:
     base_url = f"http://{local_ip}:8000"
     mcp_url = f"{base_url}/mcp"
 
-    # Read persisted MCP keys to provide a sample key
-    persisted = _read_persisted_settings()
-    from app.config import get_settings
-
-    settings = get_settings()
-    mcp_keys_raw = persisted.get("mcp_api_keys") or settings.mcp_api_keys
     sample_key = "litmcp_your_key"
-    if mcp_keys_raw:
-        # Format: name|label|key|scopes;...
-        first_entry = mcp_keys_raw.split(";")[0]
-        parts = first_entry.split("|")
-        if len(parts) >= 3:
-            sample_key = parts[2]
 
     cursor_config = {
         "mcpServers": {

@@ -212,10 +212,10 @@ async def get_agent_guide() -> dict:
                 "purpose": "Upload a DOCX and generate a copy with a guarded draft citation inserted from the local literature database.",
             },
             {
-                "name": "ai_workflow",
+                "name": "literature_intake",
                 "method": "POST",
-                "path": "/api/papers/ai_workflow",
-                "purpose": "Optional batch acquisition helper: rewrite query with LLM, search, download candidate PDFs, ingest, and parse.",
+                "path": "/api/intake/search",
+                "purpose": "Controlled literature intake: search external sources into review candidates only; users must approve candidates before any download or ingest job can start.",
             },
             {
                 "name": "ai_search",
@@ -312,6 +312,6 @@ async def get_agent_guide() -> dict:
             "Use scan_duplicate_dois to find papers that share the same DOI, which may indicate duplicates in the system. "
             "Use create_share_token to generate a read-only share link for others to view papers, figures, DFT data, and audit logs without MCP access. "
             "IMPORTANT: If the server is configured with auto_run_stage2_extraction=False, the system only performs basic extraction (metadata, sections, tables, figures) during ingestion. Deep extraction (DFT results, electrochemical performance, mechanism claims, writing cards) is NOT run automatically. In that mode, YOU (the AI) must perform deep extraction on demand using the available tools: read paper sections and figures, analyze charts, and propose corrections or DFT results as needed. The paper's workflow_status will be 'Unparsed' until deep data is added. "
-            "Use /api/papers/ai_workflow only when batch acquisition is explicitly needed."
+            "Use /api/intake/search for external candidate discovery, then approve and ingest candidates through the controlled intake endpoints. Do not use the legacy /api/papers/ai_workflow direct-ingest endpoint."
         ),
     }

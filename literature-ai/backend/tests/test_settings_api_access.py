@@ -20,10 +20,10 @@ def _make_request(host: str, headers: dict[str, str] | None = None):
         ("127.0.0.1", True),
         ("::1", True),
         ("localhost", True),
-        ("172.17.0.1", True),
-        ("192.168.1.10", True),
-        ("10.0.0.8", True),
-        ("169.254.0.2", True),
+        ("172.17.0.1", False),
+        ("192.168.1.10", False),
+        ("10.0.0.8", False),
+        ("169.254.0.2", False),
         ("8.8.8.8", False),
         ("example.com", False),
         ("", False),
@@ -33,11 +33,15 @@ def test_is_local_request_host(host: str, expected: bool):
     assert _is_local_request_host(host) is expected
 
 
-def test_settings_write_allows_private_docker_bridge_when_no_token(monkeypatch):
+def test_settings_write_rejects_private_docker_bridge_when_no_token(monkeypatch):
     monkeypatch.delenv("LITAI_SETTINGS_ADMIN_TOKEN", raising=False)
     get_settings.cache_clear()
 
-    _enforce_settings_write_access(_make_request("172.17.0.1"))
+    with pytest.raises(HTTPException) as exc_info:
+        _enforce_settings_write_access(_make_request("172.17.0.1"))
+
+    assert exc_info.value.status_code == 403
+    assert "non-loopback" in str(exc_info.value.detail)
 
 
 def test_settings_write_rejects_public_host_when_no_token(monkeypatch):
@@ -48,7 +52,7 @@ def test_settings_write_rejects_public_host_when_no_token(monkeypatch):
         _enforce_settings_write_access(_make_request("8.8.8.8"))
 
     assert exc_info.value.status_code == 403
-    assert "local requests" in str(exc_info.value.detail)
+    assert "non-loopback" in str(exc_info.value.detail)
 
 
 def test_settings_write_requires_matching_token_when_configured(monkeypatch):
@@ -62,3 +66,20 @@ def test_settings_write_requires_matching_token_when_configured(monkeypatch):
     assert exc_info.value.detail == "Invalid settings admin token"
 
     _enforce_settings_write_access(_make_request("8.8.8.8", {"X-Settings-Token": "secret-token"}))
+
+
+def test_ide_prompts_never_return_real_mcp_key(monkeypatch):
+    import asyncio
+
+    from app.api import settings as settings_api
+
+    monkeypatch.setenv("LITAI_MCP_API_KEYS", "admin|Admin|litmcp_real_secret|read_papers")
+    get_settings.cache_clear()
+    monkeypatch.setattr(settings_api, "_read_persisted_settings", lambda: {})
+
+    payload = asyncio.run(settings_api.get_ide_prompts())
+
+    assert payload["sample_key"] == "litmcp_your_key"
+    assert "litmcp_real_secret" not in payload["cursor_config_json"]
+    assert "litmcp_real_secret" not in payload["suggested_prompt"]
+    get_settings.cache_clear()

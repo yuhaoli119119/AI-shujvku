@@ -299,7 +299,7 @@ def get_active_database_info() -> dict[str, Any]:
     configured_runtime_is_sqlite = configured_kind == "sqlite" and configured_path is not None
     force_configured_database = bool(getattr(settings, "force_configured_database", False))
 
-    if force_configured_database and configured_kind != "sqlite":
+    if configured_kind != "sqlite":
         configured_counts = _configured_database_paper_counts(database_url, active_library)
         return {
             "db_kind": configured_kind,
@@ -321,17 +321,13 @@ def get_active_database_info() -> dict[str, Any]:
             "configured_db_papers_total": configured_counts["papers_total"],
             "effective_matches_active_library_db_path": False,
             "recovered_from_candidate_scan": False,
-            "force_configured_database": True,
+            "force_configured_database": force_configured_database,
         }
 
-    if force_configured_database and configured_sqlite_path is not None:
+    if configured_sqlite_path is not None:
         effective = _sqlite_candidate_summary(configured_sqlite_path)
     else:
-        effective = _choose_effective_sqlite_candidate(
-            active_library=active_library,
-            active_library_root=active_library_root,
-            configured_sqlite_path=configured_sqlite_path,
-        )
+        effective = None
     effective_db_path = effective["path"] if effective is not None else None
     if force_configured_database and effective_db_path:
         effective_storage_root = str(Path(settings.storage_root).resolve())
@@ -348,13 +344,7 @@ def get_active_database_info() -> dict[str, Any]:
         and active_library_database_path is not None
         and Path(configured_path) == Path(active_library_database_path)
     )
-    recovered_from_candidate_scan = False if force_configured_database else bool(
-        effective_db_path is not None
-        and (
-            active_library_database_path is None
-            or Path(effective_db_path) != Path(active_library_database_path)
-        )
-    )
+    recovered_from_candidate_scan = False
 
     return {
         "db_kind": resolved_db_kind,
@@ -391,54 +381,13 @@ def get_active_database_info() -> dict[str, Any]:
 
 
 def activate_active_library_database() -> dict[str, Any]:
-    """Switch process settings to the registered active library SQLite DB if available."""
+    """Initialize the configured database without runtime SQLite auto-switching."""
     from app.config import get_settings
-    from app.db.session import switch_database
-    from app.services.library_manager import LibraryManager
+    from app.db.session import init_db
 
     settings = get_settings()
-    if bool(getattr(settings, "force_configured_database", False)):
-        if _kind_from_url(settings.database_url) != "sqlite":
-            from app.db.session import init_db
-
-            init_db(settings.database_url)
-            info = get_active_database_info()
-            info["force_configured_database"] = True
-            return info
-        info = get_active_database_info()
-        configured_path = info.get("configured_db_path")
-        if info.get("configured_db_kind") == "sqlite" and configured_path:
-            switch_database(
-                f"sqlite:///{Path(str(configured_path)).as_posix()}",
-                storage_root=str(Path(settings.storage_root).resolve()),
-            )
-            info = get_active_database_info()
-        info["force_configured_database"] = True
-        return info
-
-    manager = LibraryManager()
-    active = manager.get_active_library()
-    activation_error: str | None = None
-    recovered = False
-    if active:
-        try:
-            manager.activate_library(active.name)
-        except Exception as exc:
-            activation_error = f"{type(exc).__name__}: {exc}"
-
+    init_db(settings.database_url)
     info = get_active_database_info()
-    if _maybe_repair_registered_default_sqlite(info):
-        info = get_active_database_info()
-    effective_path = info.get("effective_db_path")
-    configured_path = info.get("configured_db_path")
-    if effective_path and (configured_path is None or Path(effective_path) != Path(configured_path)):
-        switch_database(f"sqlite:///{Path(effective_path).as_posix()}", storage_root=info.get("effective_storage_root"))
-        recovered = True
-        info = get_active_database_info()
-    if activation_error is not None:
-        info["activation_warning"] = activation_error
-    if recovered:
-        info["recovered_from_candidate_scan"] = True
     return info
 
 

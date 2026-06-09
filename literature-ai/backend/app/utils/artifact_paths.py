@@ -10,6 +10,9 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_ROOT = BACKEND_ROOT.parent
 CONTAINER_PREFIXES = ("/app/", "\\app\\", "/app\\", "\\app/")
 KNOWN_STORAGE_CATEGORIES = ("pdf", "tei", "docling_json", "figures", "tables", "markdown", "text")
+WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+WINDOWS_MIRROR_COLON = "\uf03a"
+WINDOWS_MIRROR_SEP = "\uf05c"
 
 
 def _strip_container_prefix(path_str: str) -> str:
@@ -54,6 +57,11 @@ def _storage_relative_suffix(path_str: str, category: str | None) -> Path | None
         if category_name in lowered:
             index = lowered.index(category_name)
             return Path("storage", *parts[index:])
+
+    if "by_id" in lowered:
+        index = lowered.index("by_id")
+        return Path("storage", *parts[index:])
+
     return None
 
 
@@ -62,10 +70,49 @@ def _storage_relative_candidates(settings: Settings, path_str: str, category: st
     if suffix is None:
         return []
 
-    candidates: list[Path] = [_library_root(settings) / suffix]
+    candidates: list[Path] = [
+        _library_root(settings) / suffix,
+        WORKSPACE_ROOT / "data" / suffix,
+        WORKSPACE_ROOT / suffix,
+        BACKEND_ROOT / "data" / suffix,
+        BACKEND_ROOT / suffix,
+    ]
     parts = suffix.parts
-    if len(parts) >= 3 and parts[0].lower() == "storage" and parts[1].lower() in KNOWN_STORAGE_CATEGORIES:
-        candidates.append(settings.storage_root / Path(*parts[2:]))
+    if len(parts) >= 3 and parts[0].lower() == "storage" and (parts[1].lower() in KNOWN_STORAGE_CATEGORIES or parts[1].lower() == "by_id"):
+        rel_path = Path(*parts[2:])
+        candidates.extend([
+            settings.storage_root / rel_path,
+            WORKSPACE_ROOT / "data" / "storage" / rel_path,
+            WORKSPACE_ROOT / "storage" / rel_path,
+            BACKEND_ROOT / "data" / "storage" / rel_path,
+            BACKEND_ROOT / "storage" / rel_path,
+        ])
+    return candidates
+
+
+def _windows_mirror_candidates(path_str: str) -> list[Path]:
+    stripped = _strip_container_prefix(path_str)
+    if not WINDOWS_ABSOLUTE_RE.match(stripped):
+        return []
+    candidates: list[Path] = []
+    parts = _path_parts(stripped)
+    lowered = [part.lower() for part in parts]
+    if "storage" in lowered:
+        index = lowered.index("storage")
+        root_text = "\\".join(parts[:index])
+        suffix = Path(*parts[index:])
+        mirrored_root = (
+            root_text.replace(":", WINDOWS_MIRROR_COLON)
+            .replace("\\", WINDOWS_MIRROR_SEP)
+            .replace("/", WINDOWS_MIRROR_SEP)
+        )
+        candidates.extend([BACKEND_ROOT / mirrored_root / suffix, WORKSPACE_ROOT / mirrored_root / suffix])
+    mirrored = (
+        stripped.replace(":", WINDOWS_MIRROR_COLON)
+        .replace("\\", WINDOWS_MIRROR_SEP)
+        .replace("/", WINDOWS_MIRROR_SEP)
+    )
+    candidates.extend([BACKEND_ROOT / mirrored, WORKSPACE_ROOT / mirrored])
     return candidates
 
 
@@ -111,10 +158,22 @@ def resolve_persisted_artifact_path(
     direct_candidates = [Path(raw), Path(stripped)]
     direct_candidates.extend(_storage_relative_candidates(runtime_settings, raw, category))
     direct_candidates.extend(_storage_relative_candidates(runtime_settings, stripped, category))
+    direct_candidates.extend(_windows_mirror_candidates(raw))
+    direct_candidates.extend(_windows_mirror_candidates(stripped))
+
     stripped_path = Path(stripped)
-    if category and category in runtime_settings.storage_paths and not stripped_path.is_absolute():
+    first_part = stripped_path.parts[0].lower() if stripped_path.parts else ""
+    if category and category in runtime_settings.storage_paths and not stripped_path.is_absolute() and first_part not in ("storage", category.lower()):
         direct_candidates.append(runtime_settings.storage_paths[category] / stripped_path)
         direct_candidates.append(runtime_settings.storage_root / stripped_path)
+        
+    if first_part == "by_id":
+        direct_candidates.extend([
+            runtime_settings.storage_root / stripped_path,
+            WORKSPACE_ROOT / "data" / "storage" / stripped_path,
+            BACKEND_ROOT / "data" / "storage" / stripped_path,
+        ])
+        
     basename = _basename(stripped)
     if basename:
         storage_paths = runtime_settings.storage_paths
