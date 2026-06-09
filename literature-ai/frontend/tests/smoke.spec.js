@@ -1054,6 +1054,79 @@ async function mockApi(route) {
     });
   }
 
+  if (pathname === '/api/workbench/review-conflicts') {
+    const paperId = requestUrl.searchParams.get('paper_id');
+    if (paperId === 'paper-2') {
+      return jsonResponse(route, {
+        rows: [
+          {
+            target_type: 'dft_results',
+            target_id: 'dft-paper-2-1',
+            field_name: 'value',
+            reviewer_count: 2,
+            conflict_types: ['value_conflict', 'decision_conflict'],
+            opinions: [
+              {
+                source: 'assigned_dft_audit',
+                source_label: 'Gemini data audit',
+                model_name: 'gemini-test',
+                agent_role: 'data_auditor',
+                decision: 'accept',
+                confidence: 0.82,
+                value: '-1.80',
+                unit: 'eV',
+                reason: 'Matches Table 2.',
+                evidence: { locator: { page: 5, locator_status: 'exact_page' } },
+              },
+              {
+                source: 'external_analysis',
+                source_label: 'GLM review',
+                model_name: 'glm-test',
+                agent_role: 'cross_checker',
+                decision: 'revise',
+                confidence: 0.64,
+                value: '-1.75',
+                unit: 'eV',
+                reason: 'Caption and table disagree.',
+                evidence: { locator: { page: 5, locator_status: 'text_only' } },
+              },
+            ],
+          },
+          {
+            target_type: 'writing_card',
+            target_id: 'writing-card-2',
+            field_name: 'core_hypothesis',
+            reviewer_count: 2,
+            conflict_types: ['mapping_conflict'],
+            opinions: [
+              {
+                source: 'assigned_writing_audit',
+                source_label: 'Claude writing audit',
+                model_name: 'claude-test',
+                agent_role: 'writing_auditor',
+                decision: 'review',
+                confidence: 0.58,
+                reason: 'Hypothesis may map to mechanism claim instead.',
+                evidence: { locator: { page: 2, locator_status: 'exact_page' } },
+              },
+              {
+                source: 'external_analysis',
+                source_label: 'Gemini writing review',
+                model_name: 'gemini-test',
+                agent_role: 'writing_checker',
+                decision: 'review',
+                confidence: 0.61,
+                reason: 'Current mapping still looks valid.',
+                evidence: { locator: { page: 2, locator_status: 'exact_page' } },
+              },
+            ],
+          },
+        ],
+      });
+    }
+    return jsonResponse(route, { rows: [] });
+  }
+
   if (pathname === '/api/papers/stream') {
     return route.fulfill({
       status: 200,
@@ -2197,7 +2270,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     const rows = page.locator('#rows tr');
     const firstStatus = rows.nth(0).locator('td').nth(3);
-    await expect(firstStatus).toContainText('PDF ready');
+    await expect(firstStatus).toContainText('PDF 可用');
     await expect(firstStatus).toContainText('待审 DFT');
     await expect(firstStatus).toContainText('定位风险 2');
     await expect(firstStatus).toContainText('图像风险 3');
@@ -2208,8 +2281,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(firstStatus).not.toContainText('Object audits:');
 
     const secondStatus = rows.nth(1).locator('td').nth(3);
-    await expect(secondStatus).toContainText('No PDF');
-    await expect(secondStatus).toContainText('无 DFT');
+    await expect(secondStatus).toContainText('PDF 缺失');
+    await expect(secondStatus).toContainText('未见 DFT');
     await expect(secondStatus).toContainText('冲突 2');
     await expect(secondStatus).not.toContainText('疑似漏提');
 
@@ -2221,16 +2294,37 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(locatorSummary).toHaveAttribute('title', /missing bbox: 1/);
     await expect(locatorSummary).toHaveAttribute('title', /text-only: 1/);
 
-    const detailsSummary = page.locator('#rows details.inline-details summary').first();
-    await detailsSummary.click();
-    const detailBody = page.locator('#rows details.inline-details .detail-body').first();
-    await expect(detailBody).toContainText('External audit: 1');
-    await expect(detailBody).toContainText('Object audits: 1');
-    await expect(detailBody).toContainText('Assigned AI DFT audit');
-    await expect(detailBody).toContainText('unverified');
-    await expect(detailBody).toContainText('system_candidate: 1');
-    await expect(detailBody).toContainText('Figure issues');
-    await expect(detailBody).toContainText('Locator issues');
+    await rows.nth(0).locator('[data-action="open-details"]').click();
+    const overlay = page.locator('#infoOverlay.open');
+    await expect(overlay).toBeVisible();
+    await expect(page.locator('#infoModalTitle')).toHaveText('Test Paper for Smoke Validation');
+    await expect(page.locator('#infoModalSubtitle')).toContainText('Journal of Testing | 2025');
+    await expect(overlay).toContainText('External audit: 1');
+    await expect(overlay).toContainText('Object audits: 1');
+    await expect(overlay).toContainText('Assigned AI DFT audit');
+    await expect(overlay).toContainText('unverified');
+    await expect(overlay).toContainText('system_candidate: 1');
+    await expect(overlay).toContainText('Figure 风险');
+    await expect(overlay).toContainText('Locator 风险');
+    await expect(overlay).toContainText('线索 1');
+    await expect(overlay).toContainText('已解析 1');
+    await expect(overlay).toContainText('疑似漏提 0');
+    await page.locator('#infoOverlay .modal-close').click();
+    await expect(page.locator('#infoOverlay')).not.toHaveClass(/open/);
+
+    await rows.nth(1).locator('[data-action="open-conflicts"]').click();
+    const conflictOverlay = page.locator('#infoOverlay.open');
+    await expect(conflictOverlay).toBeVisible();
+    await expect(conflictOverlay).toContainText('冲突详情');
+    await expect(conflictOverlay).toContainText('只读聚合，不自动合并');
+    await expect(conflictOverlay).toContainText('dft_results / value');
+    await expect(conflictOverlay).toContainText('value_conflict, decision_conflict');
+    await expect(conflictOverlay).toContainText('Gemini data audit');
+    await expect(conflictOverlay).toContainText('GLM review');
+    await expect(conflictOverlay).toContainText('writing_card / core_hypothesis');
+    await expect(conflictOverlay).toContainText('mapping_conflict');
+    await page.locator('#infoOverlay .modal-close').click();
+
     expect(writeCalls).toEqual([]);
   });
 

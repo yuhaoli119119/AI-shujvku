@@ -20,7 +20,7 @@
       font-family: var(--font-body);
     }
     .shell {
-      width: min(1500px, 100%);
+      width: min(1520px, 100%);
       margin: 0 auto;
       padding: 14px 18px 28px;
     }
@@ -31,50 +31,40 @@
       gap: 8px;
       margin-bottom: 12px;
     }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .stat {
+      min-height: 40px;
+      padding: 0 14px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+    }
+    .stat-label {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: 900;
+      line-height: 1;
+    }
     .page-actions {
       display: flex;
       align-items: stretch;
       justify-content: flex-end;
       gap: 8px;
       flex: 0 0 auto;
-    }
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 8px;
-      margin-bottom: 0;
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-    .stat {
-      height: 40px;
-      padding: 0 14px;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius);
-      background: var(--color-surface);
-      display: grid;
-      grid-template-columns: 1.5fr auto 1fr;
-      align-items: center;
-    }
-    .stat-label {
-      color: var(--color-text-secondary);
-      font-size: 13px;
-      font-weight: 800;
-      grid-column: 1;
-      text-align: left;
-    }
-    .stat-value {
-      font-size: 18px;
-      font-weight: 900;
-      line-height: 1;
-      grid-column: 2;
-      text-align: center;
     }
     .page-actions .btn {
       min-width: 96px;
@@ -103,13 +93,8 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 6px 14px;
+      padding: 8px 14px;
       border-bottom: 1px solid var(--color-border);
-      background: transparent;
-    }
-    .panel-title {
-      font-weight: 900;
-      display: none;
     }
     .filterbar {
       display: flex;
@@ -118,7 +103,7 @@
     }
     .filterbar select,
     .filterbar input {
-      height: 28px;
+      height: 30px;
       min-width: 120px;
       border: 1px solid var(--color-border);
       border-radius: var(--radius);
@@ -127,23 +112,9 @@
       padding: 0 8px;
       font: inherit;
       font-size: 12px;
-      transition: all 0.2s;
     }
     .filterbar input {
-      min-width: 180px;
-    }
-    .filterbar select:hover,
-    .filterbar input:hover {
-      background: var(--color-surface-alt);
-      color: var(--color-text);
-    }
-    .filterbar select:focus,
-    .filterbar input:focus {
-      border-color: var(--color-primary-light);
-      background: var(--color-surface);
-      color: var(--color-text);
-      outline: none;
-      box-shadow: 0 0 0 2px var(--color-primary-bg);
+      min-width: 190px;
     }
     .table-wrap {
       width: 100%;
@@ -151,7 +122,7 @@
     }
     table {
       width: 100%;
-      min-width: 1120px;
+      min-width: 1180px;
       table-layout: fixed;
       border-collapse: separate;
       border-spacing: 0;
@@ -170,31 +141,19 @@
       font-weight: 900;
       white-space: nowrap;
       position: sticky;
-      top: var(--nav-height);
+      top: 0;
       z-index: 10;
     }
     .col-divider {
       border-right: 1px solid var(--color-border);
     }
-    th:nth-child(3),
-    td:nth-child(3) {
-      width: 30%;
-    }
-    th:nth-child(4),
-    td:nth-child(4) {
-      width: 30%;
-    }
-    th:nth-child(5),
-    td:nth-child(5) {
-      width: 22%;
-    }
-    th:nth-child(6),
-    td:nth-child(6) {
-      width: 18%;
-    }
+    th:nth-child(1), td:nth-child(1) { width: 46px; }
+    th:nth-child(2), td:nth-child(2) { width: 68px; }
+    th:nth-child(3), td:nth-child(3) { width: 30%; }
+    th:nth-child(4), td:nth-child(4) { width: 28%; }
+    th:nth-child(5), td:nth-child(5) { width: 20%; }
+    th:nth-child(6), td:nth-child(6) { width: 22%; }
     .paper-title {
-      max-width: none;
-      min-width: 0;
       font-weight: 900;
       line-height: 1.45;
       overflow-wrap: anywhere;
@@ -204,8 +163,9 @@
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
-      margin-top: 4px;
+      margin-top: 6px;
       font-size: 12px;
+      color: var(--color-text-secondary);
     }
     .paper-doi-inline {
       max-width: 360px;
@@ -225,7 +185,6 @@
     .chip {
       display: inline-flex;
       align-items: center;
-      max-width: 100%;
       min-height: 24px;
       padding: 3px 9px;
       border-radius: var(--radius-pill);
@@ -234,9 +193,7 @@
       font-size: 12px;
       font-weight: 900;
       white-space: nowrap;
-    }
-    .chip.compact {
-      min-width: 0;
+      max-width: 100%;
     }
     .chip.ok {
       background: var(--color-success-bg);
@@ -249,6 +206,12 @@
     .chip.bad {
       background: var(--color-danger-bg);
       color: var(--color-danger);
+    }
+    .chip.compact {
+      min-width: 0;
+    }
+    .chip[data-action] {
+      cursor: pointer;
     }
     .status-cell,
     .audit-cell,
@@ -265,9 +228,6 @@
       gap: 6px;
       align-items: flex-start;
     }
-    .status-row[data-role="risk"] .chip {
-      min-width: 0;
-    }
     .audit-summary {
       display: grid;
       gap: 8px;
@@ -280,32 +240,118 @@
     .audit-metrics span {
       white-space: nowrap;
     }
-    .inline-details {
-      margin: 0;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius);
-      background: var(--color-surface-alt);
-      overflow: hidden;
+    .detail-trigger-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      flex-wrap: wrap;
     }
-    .inline-details summary {
-      cursor: pointer;
-      list-style: none;
-      padding: 8px 10px;
+    .btn.btn-chip {
+      min-height: 26px;
+      padding: 4px 10px;
       font-size: 12px;
       font-weight: 800;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+    }
+    .empty,
+    .error {
+      margin: 14px;
+      padding: 18px;
+      border: 1px dashed var(--color-border);
+      border-radius: var(--radius);
       color: var(--color-text-secondary);
+      background: var(--color-surface-alt);
     }
-    .inline-details summary::-webkit-details-marker {
+    .error {
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+    }
+    .toast {
+      position: fixed;
+      top: calc(var(--nav-height) + 16px);
+      right: 22px;
+      z-index: 140;
       display: none;
+      max-width: min(420px, calc(100vw - 44px));
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      background: var(--color-primary);
+      color: #fff;
+      box-shadow: var(--shadow-elevated);
+      font-size: 13px;
+      line-height: 1.45;
     }
-    .inline-details[open] summary {
-      border-bottom: 1px solid var(--color-border);
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 150;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(15, 23, 42, 0.34);
+      backdrop-filter: blur(3px);
+    }
+    .overlay.open {
+      display: flex;
+    }
+    .modal-card {
+      width: min(980px, calc(100vw - 40px));
+      max-height: min(82vh, 920px);
+      overflow: hidden;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
       background: var(--color-surface);
-    }
-    .detail-body {
+      box-shadow: var(--shadow-elevated);
       display: grid;
-      gap: 10px;
-      padding: 10px;
+      grid-template-rows: auto 1fr auto;
+    }
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .modal-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 900;
+      line-height: 1.35;
+    }
+    .modal-subtitle {
+      margin-top: 6px;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .modal-close {
+      flex: 0 0 auto;
+      min-width: 40px;
+    }
+    .modal-body {
+      overflow: auto;
+      padding: 16px 18px 18px;
+    }
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 12px 18px 16px;
+      border-top: 1px solid var(--color-border);
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
     }
     .detail-block {
       display: grid;
@@ -330,51 +376,56 @@
       font-size: 12px;
       line-height: 1.45;
     }
-    .actions {
+    .conflict-stack {
+      display: grid;
+      gap: 12px;
+    }
+    .conflict-card {
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: var(--color-surface-alt);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .conflict-head {
       display: flex;
-      flex-direction: row;
       flex-wrap: wrap;
-      align-items: center;
-      justify-content: flex-start;
       gap: 8px;
+      align-items: center;
     }
-    .actions .btn,
-    .actions a.btn {
-      flex: 0 0 auto;
+    .conflict-title {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--color-text);
     }
-    .action-note {
-      width: 100%;
+    .conflict-meta {
       color: var(--color-text-secondary);
       font-size: 12px;
-      line-height: 1.45;
+      line-height: 1.5;
     }
-    .empty,
-    .error {
-      margin: 14px;
-      padding: 18px;
-      border: 1px dashed var(--color-border);
-      border-radius: var(--radius);
-      color: var(--color-text-secondary);
-      background: var(--color-surface-alt);
+    .opinion-list {
+      display: grid;
+      gap: 8px;
     }
-    .error {
-      border-color: var(--color-danger);
-      color: var(--color-danger);
+    .opinion-item {
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: var(--color-surface);
+      padding: 10px;
+      display: grid;
+      gap: 6px;
     }
-    .toast {
-      position: fixed;
-      top: calc(var(--nav-height) + 16px);
-      right: 22px;
-      z-index: 120;
-      display: none;
-      max-width: min(420px, calc(100vw - 44px));
-      padding: 12px 14px;
-      border-radius: var(--radius);
-      background: var(--color-primary);
-      color: #fff;
-      box-shadow: var(--shadow-elevated);
-      font-size: 13px;
-      line-height: 1.45;
+    .opinion-topline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .opinion-source {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--color-text);
     }
     @media (max-width: 820px) {
       .shell {
@@ -392,9 +443,7 @@
       .page-actions .btn {
         height: 34px;
       }
-      .toolbar,
       .filterbar {
-        justify-content: flex-start;
         margin-top: 12px;
       }
       .filterbar select,
@@ -402,7 +451,14 @@
         width: 100%;
       }
       table {
-        min-width: 960px;
+        min-width: 980px;
+      }
+      .overlay {
+        padding: 12px;
+      }
+      .modal-card {
+        width: min(100vw - 16px, 980px);
+        max-height: calc(100vh - 24px);
       }
     }
   </style>
@@ -412,7 +468,7 @@
   <main class="shell">
     <div class="review-topline">
       <section class="stats" id="stats"></section>
-      <div class="page-actions toolbar">
+      <div class="page-actions">
         <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()">刷新</button>
         <button class="btn btn-tinted" type="button" onclick="prepareLibrary()">重建当前库材料</button>
       </div>
@@ -420,15 +476,15 @@
 
     <section class="panel">
       <div class="panel-head">
-        <div class="muted mono" id="queueMeta" style="font-size: 12px; font-weight: 700; letter-spacing: 0.5px;">正在读取当前库...</div>
+        <div class="muted mono" id="queueMeta" style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">正在读取当前库...</div>
         <div class="filterbar">
           <select id="statusFilter" onchange="renderRows()">
             <option value="">全部流程状态</option>
-            <option value="group:needs_action">🚨 需要我处理</option>
-            <option value="group:needs_attention">⚠️ 需要关注</option>
-            <option value="group:ai_processing">⚙️ AI 正在处理</option>
-            <option value="group:approved">✅ 已审核通过</option>
-            <option value="group:deprecated">🗑️ 废弃旧状态</option>
+            <option value="group:needs_action">需要我处理</option>
+            <option value="group:needs_attention">需要关注</option>
+            <option value="group:ai_processing">AI 处理中</option>
+            <option value="group:approved">已审核通过</option>
+            <option value="group:deprecated">历史旧状态</option>
           </select>
           <select id="qualityFilter" onchange="renderRows()">
             <option value="">全部 PDF 质量</option>
@@ -445,12 +501,12 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 40px; text-align: center;">#</th>
-              <th class="col-divider" style="width: 60px; text-align: center;">年份</th>
-              <th class="col-divider" style="text-align: center;">文献标题</th>
-              <th class="col-divider" style="width: 300px; text-align: center;">流程与质量</th>
-              <th class="col-divider" style="width: 230px; text-align: center;">DFT 审计</th>
-              <th style="width: 280px; text-align: center;">操作</th>
+              <th style="text-align:center;">#</th>
+              <th class="col-divider" style="text-align:center;">年份</th>
+              <th class="col-divider" style="text-align:center;">文献标题</th>
+              <th class="col-divider" style="text-align:center;">首屏信号</th>
+              <th class="col-divider" style="text-align:center;">DFT 审计</th>
+              <th style="text-align:center;">操作</th>
             </tr>
           </thead>
           <tbody id="rows">
@@ -460,7 +516,24 @@
       </div>
     </section>
   </main>
+
   <div class="toast" id="toast"></div>
+
+  <div class="overlay" id="infoOverlay" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 class="modal-title" id="infoModalTitle">详情</h3>
+          <div class="modal-subtitle" id="infoModalSubtitle"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm modal-close" type="button" onclick="closeInfoOverlay()">关闭</button>
+      </div>
+      <div class="modal-body" id="infoModalBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost btn-sm" type="button" onclick="closeInfoOverlay()">关闭</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const state = { rows: [], metadata: {} };
@@ -479,6 +552,10 @@
     function toCount(value) {
       const count = Number(value || 0);
       return Number.isFinite(count) ? count : 0;
+    }
+
+    function hasOwnValue(value) {
+      return value !== null && value !== undefined;
     }
 
     function showToast(message) {
@@ -501,7 +578,7 @@
         data = null;
       }
       if (!response.ok) {
-        throw new Error((data && data.detail) || "HTTP " + response.status);
+        throw new Error((data && data.detail) || ("HTTP " + response.status));
       }
       return data;
     }
@@ -522,36 +599,36 @@
 
     function workflowMeta(status) {
       const mapping = {
-        Imported: { label: "已导入", tip: "文献已进入当前库，但还没完成后续准备。" },
-        Quality_Checked: { label: "已检质量", tip: "已经做过 PDF 质量判断。" },
-        Parsed_Material_Ready: { label: "材料已就绪", tip: "标准工作目录、证据和图表材料已准备好。" },
-        Unparsed: { label: "未解析", tip: "尚未完成 DFT/材料数据解析。" },
-        Initial_Parsed: { label: "初步解析", tip: "已有候选，但还需要完整性审计和证据核对。" },
-        Suspected_Missing: { label: "疑似漏提", tip: "检测到 DFT 线索多于已解析候选，建议 AI 重扫全文。" },
-        AI_Rescanned: { label: "AI 已重扫", tip: "AI 已按协议重新扫描过全文，需要继续合并和审核。" },
-        Human_Complete: { label: "人工确认完整", tip: "人工已确认当前候选覆盖完整。" },
+        Imported: { label: "已导入", tip: "文献已经进入当前库，但还没有完成后续准备。" },
+        Quality_Checked: { label: "已检质量", tip: "已经完成 PDF 质量判断。" },
+        Parsed_Material_Ready: { label: "材料已就绪", tip: "工作目录、证据和图表材料已经准备好。" },
+        Unparsed: { label: "未解析", tip: "尚未完成 DFT 或材料数据解析。" },
+        Initial_Parsed: { label: "初步解析", tip: "已经有候选，但还需要完整性审计和证据核对。" },
+        Suspected_Missing: { label: "疑似漏提", tip: "检测到 DFT 线索多于已解析候选，建议优先复核全文。" },
+        AI_Rescanned: { label: "AI 已重扫", tip: "AI 已按协议重新扫描全文，仍需要继续合并和审核。" },
+        Human_Complete: { label: "人工确认完整", tip: "人工已经确认当前候选覆盖完整。" },
         DB_Ready: { label: "可入库", tip: "已达到正式数据库入库条件。" },
-        Codex_Candidate: { label: "系统候选（旧）", tip: "旧状态：系统规则候选，只能作为审核线索。" },
-        Gemini_Verified: { label: "AI 已核验", tip: "AI 已通过证据核验，但还不等于最终正式确认。" },
+        Codex_Candidate: { label: "系统候选", tip: "旧状态，仅作为审核线索，不代表最终结论。" },
+        Gemini_Verified: { label: "AI 已核验", tip: "AI 已核验证据，但仍不等于最终正式确认。" },
         Gemini_Revised: { label: "AI 已修订", tip: "AI 认为候选内容需要调整后再确认。" },
         Gemini_Flagged: { label: "AI 标红", tip: "AI 发现明显疑点，建议优先人工复核。" },
         Evidence_Insufficient: { label: "证据不足", tip: "当前材料不足以支持可靠判断。" },
         Needs_Human_Confirmation: { label: "待人工确认", tip: "系统已把这篇文献留给你做最后拍板。" },
-        Human_Confirmed: { label: "已人工确认", tip: "这篇文献的当前候选内容已经过人工确认。" },
+        Human_Confirmed: { label: "已人工确认", tip: "这篇文献的当前候选已经过人工确认。" },
         ML_Ready: { label: "可进机器学习", tip: "确认后的结构化数据已达到机器学习使用条件。" },
-        Citation_Ready: { label: "可用于引用", tip: "元数据和审核状态已足够支持写作引用。" },
+        Citation_Ready: { label: "可用于引用", tip: "元数据和审核状态已经足够支持写作引用。" },
         Rejected: { label: "已拒绝", tip: "当前候选内容被判定不应进入正式库。" }
       };
-      return mapping[status] || { label: status || "未知状态", tip: "这是系统内部状态码，后续可以继续细化说明。" };
+      return mapping[status] || { label: status || "未知状态", tip: "这是系统内部状态码，仍建议查看详情。" };
     }
 
     function qualityMeta(status) {
       const mapping = {
-        A_text_readable: { label: "A 可直接读", tip: "PDF 自带可读文字层，复制、检索和定位都比较可靠。" },
+        A_text_readable: { label: "A 可直接读", tip: "PDF 自带文字层，搜索和定位都比较可靠。" },
         B_text_partial: { label: "B 部分可读", tip: "只有部分页面或部分区域文字可直接读取，后续要谨慎核对。" },
-        C_scan_clear: { label: "C 扫描清晰", tip: "是扫描版，但页面清晰，适合 OCR 辅助处理。" },
-        D_scan_unclear: { label: "D 扫描不清", tip: "扫描质量较差，自动解析很容易出错。" },
-        Broken: { label: "文件异常", tip: "PDF 本身存在损坏或无法稳定读取的问题。" }
+        C_scan_clear: { label: "C 扫描清晰", tip: "扫描版较清晰，适合 OCR 辅助处理。" },
+        D_scan_unclear: { label: "D 扫描不清", tip: "扫描质量较差，自动解析容易出错。" },
+        Broken: { label: "文件异常", tip: "PDF 可能损坏或无法稳定读取。" }
       };
       return mapping[status] || { label: status || "未知", tip: "尚未获得明确的 PDF 质量判断。" };
     }
@@ -570,13 +647,7 @@
         missing_pdf_reference: "文献没有 PDF 路径记录",
         file_broken_or_unreadable: "文件异常或无法读取"
       };
-      return mapping[reason] || reason || "未提供原因说明";
-    }
-
-    function formatBibMeta(year, journal) {
-      const yearText = year ? esc(year) : '<span title="这篇文献当前没有写入出版年份，通常是导入元数据时没提取到。">年份待补</span>';
-      const journalText = journal ? esc(journal) : '<span title="这篇文献当前没有写入期刊名，通常是导入元数据时没提取到。">期刊待补</span>';
-      return yearText + " | " + journalText;
+      return mapping[reason] || reason || "未提供具体原因。";
     }
 
     function getInspectTarget(row) {
@@ -584,15 +655,15 @@
       const tableCount = toCount(row.table_count);
       const evidenceCount = toCount(row.evidence_count);
       if (row.has_dft_candidates) {
-        return { tab: "dft", label: "检查 DFT", note: "跳到 DFT 数据页，优先核对候选字段和证据。" };
+        return { tab: "dft", note: "跳到 DFT 数据页，优先核对候选字段和证据。" };
       }
       if (figureCount > 0 || tableCount > 0) {
-        return { tab: "figures", label: "检查图表", note: "当前无 DFT 候选，先核对图表、图注和裁剪结果。" };
+        return { tab: "figures", note: "当前没有 DFT 候选，先核对图表和图注。" };
       }
       if (evidenceCount > 0) {
-        return { tab: "sections", label: "检查正文", note: "当前只有正文证据定位，跳到正文节选继续检查。" };
+        return { tab: "sections", note: "当前只有正文证据定位，跳到正文继续检查。" };
       }
-      return { tab: "summary", label: "查看摘要", note: "这篇文献暂时没有更多候选材料，先看摘要和基础信息。" };
+      return { tab: "summary", note: "当前没有更多候选材料，先看摘要和基础信息。" };
     }
 
     function renderStats() {
@@ -604,7 +675,7 @@
         ["A/B 可读", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0)],
         ["有 DFT 候选", rows.filter(function (row) { return row.has_dft_candidates; }).length],
         ["疑似漏提", rows.reduce(function (sum, row) { return sum + Number(row.suspected_missing_dft_count || 0); }, 0)],
-        ["图片可疑", rows.reduce(function (sum, row) { return sum + Number(row.unreliable_figure_count || 0); }, 0)],
+        ["图像风险", rows.reduce(function (sum, row) { return sum + Number(row.figure_issue_count || 0); }, 0)],
         ["AI 冲突", rows.reduce(function (sum, row) { return sum + Number(row.review_conflict_count || 0); }, 0)]
       ];
       document.getElementById("stats").innerHTML = items.map(function (item) {
@@ -629,8 +700,8 @@
           if (status === "Needs_Human_Confirmation" && !row.needs_human_confirmation) return false;
           if (STATUS_GROUPS[status]) {
             if (!STATUS_GROUPS[status].includes(row.workflow_status)) return false;
-          } else if (status !== "Needs_Human_Confirmation") {
-            if (row.workflow_status !== status) return false;
+          } else if (status !== "Needs_Human_Confirmation" && row.workflow_status !== status) {
+            return false;
           }
         }
         if (quality && row.pdf_quality_status !== quality) return false;
@@ -656,23 +727,6 @@
       }).join("\n");
     }
 
-    function objectAuditInline(row) {
-      const count = toCount(row.object_review_audit_count);
-      const audits = Array.isArray(row.object_review_audits) ? row.object_review_audits : [];
-      if (!count) {
-        return '<div class="muted" title="no object_review_audit" style="margin-bottom:6px;">Object audits: <strong>0</strong></div>';
-      }
-      const latest = audits[0] || {};
-      const latestText = [
-        latest.source_label || latest.source || latest.agent_role || latest.model_name || "object_review_audit",
-        latest.target_type,
-        latest.field_name,
-        latest.decision || latest.recommended_action || "review",
-        latest.verification_status || "unverified"
-      ].filter(Boolean).join(" / ");
-      return '<div class="muted" title="' + esc(objectAuditSummary(row)) + '" style="margin-bottom:6px;">Object audits: <strong>' + esc(count) + '</strong>' + (latestText ? '<br><span>' + esc(latestText) + '</span>' : '') + '</div>';
-    }
-
     function locatorIssueLabel(code) {
       const mapping = {
         text_only_locator: "text-only",
@@ -683,18 +737,6 @@
         unresolved_locator: "unresolved locator"
       };
       return mapping[code] || code;
-    }
-
-    function locatorReliabilityInline(row) {
-      const issueCount = toCount(row.locator_issue_count);
-      const summary = row.locator_reliability || {};
-      const topIssues = Array.isArray(row.top_locator_issues) ? row.top_locator_issues : [];
-      const issueCounts = row.locator_issue_counts || summary.issue_counts || {};
-      const title = topIssues.length
-        ? topIssues.map(function (item) { return locatorIssueLabel(item.code) + ": " + item.count; }).join("\n")
-        : Object.keys(issueCounts).map(function (key) { return locatorIssueLabel(key) + ": " + issueCounts[key]; }).join("\n") || "No locator reliability warnings.";
-      const chipClass = issueCount > 0 ? "warn" : "ok";
-      return '<span class="chip ' + chipClass + '" title="' + esc(title) + '">Locator issues ' + esc(issueCount) + '</span>';
     }
 
     function figureIssueLabel(code) {
@@ -710,31 +752,221 @@
       return mapping[code] || code;
     }
 
-    function figureReliabilityInline(row) {
-      const issueCount = toCount(row.figure_issue_count);
-      const summary = row.figure_reliability || {};
-      const topIssues = Array.isArray(row.top_figure_issues) ? row.top_figure_issues : [];
-      const issueCounts = row.figure_issue_counts || summary.issue_counts || {};
-      const title = topIssues.length
-        ? topIssues.map(function (item) { return figureIssueLabel(item.code) + ": " + item.count; }).join("\n")
-        : Object.keys(issueCounts).map(function (key) { return figureIssueLabel(key) + ": " + issueCounts[key]; }).join("\n") || "No figure reliability warnings.";
-      const chipClass = issueCount > 0 ? "warn" : "ok";
-      return '<span class="chip ' + chipClass + '" title="' + esc(title) + '">Figure issues ' + esc(issueCount) + '</span>';
+    function compactPdfStatus(row) {
+      const status = row.pdf_artifact_status && typeof row.pdf_artifact_status === "object" ? row.pdf_artifact_status : {};
+      return {
+        hasPdf: row.pdf_exists === true || status.pdf_exists === true,
+        pathKind: hasOwnValue(row.pdf_path_kind) ? row.pdf_path_kind : (status.pdf_path_kind || "unknown"),
+        size: hasOwnValue(row.pdf_file_size) ? row.pdf_file_size : status.pdf_file_size,
+        blockers: Array.isArray(status.blocking_errors) ? status.blocking_errors : []
+      };
     }
 
-    function pdfAvailabilityInline(row) {
-      const status = row.pdf_artifact_status || row.artifact_status || {};
-      const hasPdf = row.pdf_exists === true || status.pdf_exists === true;
-      const pathKind = row.pdf_path_kind || status.pdf_path_kind || "unknown";
-      const size = row.pdf_file_size || status.pdf_file_size || null;
-      const blockers = Array.isArray(status.blocking_errors) ? status.blocking_errors : [];
+    function compactPdfChip(row) {
+      const pdf = compactPdfStatus(row);
       const title = [
-        hasPdf ? "PDF exists" : "PDF missing or unresolved",
-        "path kind: " + pathKind,
-        size ? "size: " + size + " bytes" : null,
-        blockers.length ? "blockers: " + blockers.join(", ") : null
+        pdf.hasPdf ? "PDF exists" : "PDF missing or unresolved",
+        "path kind: " + pdf.pathKind,
+        hasOwnValue(pdf.size) ? "size: " + pdf.size + " bytes" : null,
+        pdf.blockers.length ? "blockers: " + pdf.blockers.join(", ") : null
       ].filter(Boolean).join("\n");
-      return '<span class="chip ' + (hasPdf ? "ok" : "bad") + '" title="' + esc(title) + '">' + (hasPdf ? "PDF ready" : "No PDF") + '</span>';
+      return '<span class="chip compact ' + (pdf.hasPdf ? "ok" : "bad") + '" title="' + esc(title) + '">' + (pdf.hasPdf ? "PDF 可用" : "PDF 缺失") + '</span>';
+    }
+
+    function compactSummarizeCounts(counts, formatter) {
+      return Object.keys(counts || {}).map(function (key) {
+        return { key: key, count: toCount(counts[key]) };
+      }).filter(function (item) {
+        return item.count > 0;
+      }).sort(function (left, right) {
+        if (right.count !== left.count) return right.count - left.count;
+        return left.key.localeCompare(right.key);
+      }).map(function (item) {
+        return (formatter ? formatter(item.key) : item.key) + ": " + item.count;
+      });
+    }
+
+    function compactIssueTitle(topIssues, issueCounts, formatter, emptyText) {
+      const lines = Array.isArray(topIssues) && topIssues.length
+        ? topIssues.map(function (item) { return (formatter ? formatter(item.code) : item.code) + ": " + toCount(item.count); })
+        : compactSummarizeCounts(issueCounts || {}, formatter);
+      return lines.length ? lines.join("\n") : emptyText;
+    }
+
+    function compactIssueList(topIssues, issueCounts, formatter, emptyText) {
+      const lines = Array.isArray(topIssues) && topIssues.length
+        ? topIssues.map(function (item) { return (formatter ? formatter(item.code) : item.code) + ": " + toCount(item.count); })
+        : compactSummarizeCounts(issueCounts || {}, formatter);
+      if (!lines.length) {
+        return '<div class="detail-value muted">' + esc(emptyText) + '</div>';
+      }
+      return '<ul class="detail-list">' + lines.map(function (line) {
+        return '<li>' + esc(line) + '</li>';
+      }).join("") + '</ul>';
+    }
+
+    function compactExtractionMeta(row) {
+      const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
+      const suspectedMissing = hasOwnValue(row.suspected_missing_dft_count)
+        ? toCount(row.suspected_missing_dft_count)
+        : toCount(dftAudit.suspected_missing_count);
+      if (suspectedMissing > 0) {
+        return { label: "疑似漏提", className: "bad", tip: "检测到 DFT 线索多于已解析候选，建议优先复核全文。", suspectedMissing: suspectedMissing };
+      }
+      if (row.has_dft_candidates === true) {
+        return { label: "待审 DFT", className: "warn", tip: "已有待审 DFT 候选，下一步去证据页核对字段和定位。", suspectedMissing: suspectedMissing };
+      }
+      if (row.has_dft_candidates === false) {
+        return { label: "未见 DFT", className: "", tip: "当前没有可审核的 DFT 候选。", suspectedMissing: suspectedMissing };
+      }
+      if (row.dft_completeness_status === "Initial_Parsed" || dftAudit.coverage_status === "Initial_Parsed") {
+        return { label: "初步解析", className: "warn", tip: "已完成初步解析，但候选状态仍需继续确认。", suspectedMissing: suspectedMissing };
+      }
+      return { label: "未解析", className: "", tip: "尚未形成稳定的 DFT 提取结果。", suspectedMissing: suspectedMissing };
+    }
+
+    function compactRiskChip(label, count, title, options) {
+      const config = options || {};
+      const chipClass = count > 0 ? (config.activeClass || "warn") : (config.zeroClass || "ok");
+      const attrs = config.dataAction ? ' data-action="' + esc(config.dataAction) + '"' : "";
+      return '<span class="chip compact ' + chipClass + '"' + attrs + ' title="' + esc(title) + '">' + esc(label) + " " + esc(count) + '</span>';
+    }
+
+    function compactDetailSection(label, content) {
+      return '<div class="detail-block"><div class="detail-label">' + esc(label) + '</div>' + content + '</div>';
+    }
+
+    function compactInfoList(items, emptyText) {
+      const lines = (items || []).filter(Boolean);
+      if (!lines.length) {
+        return '<div class="detail-value muted">' + esc(emptyText) + '</div>';
+      }
+      return '<ul class="detail-list">' + lines.map(function (line) {
+        return '<li>' + esc(line) + '</li>';
+      }).join("") + '</ul>';
+    }
+
+    function modalContent(title, subtitle, html) {
+      document.getElementById("infoModalTitle").textContent = title || "详情";
+      document.getElementById("infoModalSubtitle").textContent = subtitle || "";
+      document.getElementById("infoModalBody").innerHTML = html || "";
+      const overlay = document.getElementById("infoOverlay");
+      overlay.classList.add("open");
+      overlay.setAttribute("aria-hidden", "false");
+    }
+
+    function closeInfoOverlay() {
+      const overlay = document.getElementById("infoOverlay");
+      overlay.classList.remove("open");
+      overlay.setAttribute("aria-hidden", "true");
+      document.getElementById("infoModalBody").innerHTML = "";
+    }
+
+    function buildRowDetailModal(row) {
+      const workflow = workflowMeta(row.workflow_status);
+      const quality = qualityMeta(row.pdf_quality_status);
+      const qualityReasonText = qualityReasonLabel(row.quality_reason);
+      const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
+      const detectedSignals = hasOwnValue(dftAudit.detected_signal_count) ? toCount(dftAudit.detected_signal_count) : 0;
+      const parsedCount = hasOwnValue(dftAudit.parsed_dft_count) ? toCount(dftAudit.parsed_dft_count) : 0;
+      const suspectedMissing = hasOwnValue(row.suspected_missing_dft_count)
+        ? toCount(row.suspected_missing_dft_count)
+        : toCount(dftAudit.suspected_missing_count);
+      const latestAudit = (row.external_audit_opinions || [])[0] || null;
+      const latestAuditText = latestAudit
+        ? [
+            latestAudit.source_label || latestAudit.source || "external audit",
+            latestAudit.verdict || latestAudit.recommended_action || "review",
+            latestAudit.verification_status || "unverified"
+          ].filter(Boolean).join(" / ")
+        : "no external audit";
+      const objectAuditLines = (row.object_review_audits || []).slice(0, 5).map(function (audit) {
+        return [
+          audit.source_label || audit.source || audit.agent_role || audit.model_name || "object_review_audit",
+          audit.target_type,
+          audit.field_name,
+          audit.decision || audit.recommended_action || "review",
+          audit.verification_status || "unverified"
+        ].filter(Boolean).join(" / ");
+      });
+      const candidateSummaryLines = compactSummarizeCounts(row.dft_candidate_status_counts || {}, null);
+      const cropSummaryLines = compactSummarizeCounts(row.figure_crop_status_counts || {}, null);
+      const html = '<div class="detail-grid">' +
+        compactDetailSection("PDF 状态", '<div class="detail-value">' + esc(quality.label) + ' | ' + esc(qualityReasonText) + '</div><div class="detail-value muted">' + esc(workflow.label) + ' | ' + esc(workflow.tip) + '</div>') +
+        compactDetailSection("Figure 风险", compactIssueList(row.top_figure_issues, (row.figure_reliability || {}).issue_counts || row.figure_issue_counts || {}, figureIssueLabel, "No figure reliability warnings.")) +
+        compactDetailSection("Locator 风险", compactIssueList(row.top_locator_issues, (row.locator_reliability || {}).issue_counts || row.locator_issue_counts || {}, locatorIssueLabel, "No locator reliability warnings.")) +
+        compactDetailSection("External audit", '<div class="detail-value">External audit: ' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>') +
+        compactDetailSection("Object audit", '<div class="detail-value">Object audits: ' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "No object-level AI audits.")) +
+        compactDetailSection("候选状态", '<div class="detail-value">' + esc(candidateSummaryLines.length ? candidateSummaryLines.join(", ") : "无候选") + '</div>') +
+        compactDetailSection("提取概览", '<div class="detail-value">线索 ' + esc(detectedSignals) + ' | 已解析 ' + esc(parsedCount) + ' | 疑似漏提 ' + esc(suspectedMissing) + '</div><div class="detail-value muted">图表 ' + esc(toCount(row.figure_count) + toCount(row.table_count)) + ' | 证据定位 ' + esc(toCount(row.evidence_count)) + ' | figure crop ' + esc(cropSummaryLines.length ? cropSummaryLines.join(", ") : "none") + '</div>') +
+      '</div>';
+      return {
+        title: row.title || "文献详情",
+        subtitle: [row.journal || "", row.year || "", row.doi || ""].filter(Boolean).join(" | "),
+        html: html
+      };
+    }
+
+    async function openRowConflictModal(row) {
+      modalContent("冲突详情", [row.title || "", "正在读取只读冲突聚合…"].filter(Boolean).join(" | "), '<div class="detail-value muted">加载中...</div>');
+      try {
+        const params = new URLSearchParams({
+          paper_id: row.paper_id,
+          include_non_conflicts: "false",
+          limit: "200"
+        });
+        const payload = await fetchJSON("/api/workbench/review-conflicts?" + params.toString());
+        const conflictRows = Array.isArray(payload.rows) ? payload.rows : [];
+        const html = conflictRows.length
+          ? '<div class="conflict-stack">' + conflictRows.map(function (item) {
+              const opinions = Array.isArray(item.opinions) ? item.opinions : [];
+              return '<div class="conflict-card">' +
+                '<div class="conflict-head">' +
+                  '<div class="conflict-title">' + esc((item.target_type || "target") + " / " + (item.field_name || "field")) + '</div>' +
+                  '<span class="chip bad">' + esc((item.conflict_types || []).join(", ") || "conflict") + '</span>' +
+                  '<span class="chip">reviewers ' + esc(toCount(item.reviewer_count)) + '</span>' +
+                '</div>' +
+                '<div class="conflict-meta">target_id: ' + esc(item.target_id || "-") + '</div>' +
+                '<div class="opinion-list">' + opinions.map(function (opinion) {
+                  const evidence = opinion.evidence && typeof opinion.evidence === "object" ? opinion.evidence : {};
+                  const locator = evidence.locator && typeof evidence.locator === "object" ? evidence.locator : evidence;
+                  const pageText = hasOwnValue(locator.page) ? ("page " + locator.page) : "";
+                  return '<div class="opinion-item">' +
+                    '<div class="opinion-topline">' +
+                      '<div class="opinion-source">' + esc(opinion.source_label || opinion.source || opinion.agent_role || opinion.model_name || opinion.source_type || "review") + '</div>' +
+                      '<span class="chip">' + esc(opinion.decision || opinion.status || "review") + '</span>' +
+                      (hasOwnValue(opinion.confidence) ? '<span class="chip">confidence ' + esc(opinion.confidence) + '</span>' : '') +
+                    '</div>' +
+                    '<div class="detail-value muted">' + esc([opinion.value, opinion.unit].filter(Boolean).join(" ")) + '</div>' +
+                    '<div class="detail-value muted">' + esc([pageText, locator.locator_status || "", opinion.reason || ""].filter(Boolean).join(" | ")) + '</div>' +
+                  '</div>';
+                }).join("") + '</div>' +
+              '</div>';
+            }).join("") + '</div>'
+          : '<div class="detail-value muted">当前没有可展示的字段冲突明细。</div>';
+        modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), html);
+      } catch (error) {
+        modalContent("冲突详情", row.title || "", '<div class="error" style="margin:0;">加载冲突失败：' + esc(error.message) + '</div>');
+      }
+    }
+
+    function handleRowAction(event) {
+      const actionNode = event.target.closest("[data-action]");
+      if (!actionNode) return;
+      const action = actionNode.getAttribute("data-action");
+      const rowNode = event.target.closest("tr[data-paper-id]");
+      if (!rowNode) return;
+      const row = state.rows.find(function (item) {
+        return String(item.paper_id) === String(rowNode.getAttribute("data-paper-id"));
+      });
+      if (!row) return;
+      event.preventDefault();
+      if (action === "open-details") {
+        const payload = buildRowDetailModal(row);
+        modalContent(payload.title, payload.subtitle, payload.html);
+      } else if (action === "open-conflicts") {
+        openRowConflictModal(row);
+      }
     }
 
     function renderRows() {
@@ -746,65 +978,78 @@
         tbody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无匹配文献</div></td></tr>';
         return;
       }
+
       tbody.innerHTML = rows.map(function (row, idx) {
         const inspectTarget = getInspectTarget(row);
         const detailUrl = "../literature_library/index.html?paper_id=" + encodeURIComponent(row.paper_id) + "&tab=" + encodeURIComponent(inspectTarget.tab);
-        const evidence = toCount(row.evidence_count);
-        const figureCount = toCount(row.figure_count);
-        const tableCount = toCount(row.table_count);
-        const workspace = row.workspace_path || "-";
         const workflow = workflowMeta(row.workflow_status);
-        const quality = qualityMeta(row.pdf_quality_status);
-        const dftAudit = row.dft_audit || {};
-        const dftStatus = row.dft_completeness_label || dftAudit.status_label || "未解析";
-        const suspectedMissing = toCount(row.suspected_missing_dft_count || dftAudit.suspected_missing_count);
-        const candidateStatusCounts = row.dft_candidate_status_counts || {};
-        const candidateSummary = Object.keys(candidateStatusCounts).length
-          ? Object.keys(candidateStatusCounts).map(function (key) { return key + ":" + candidateStatusCounts[key]; }).join("；")
-          : "无候选";
-        const latestAudit = (row.external_audit_opinions || [])[0] || null;
-        const auditSummary = latestAudit
-          ? [(latestAudit.source_label || latestAudit.source || "external audit"), (latestAudit.verdict || latestAudit.recommended_action || "review"), (latestAudit.verification_status || "unverified")].filter(Boolean).join(" / ")
-          : "no external audit";
+        const extraction = compactExtractionMeta(row);
+        const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
+        const detectedSignals = hasOwnValue(dftAudit.detected_signal_count) ? toCount(dftAudit.detected_signal_count) : 0;
+        const parsedCount = hasOwnValue(dftAudit.parsed_dft_count) ? toCount(dftAudit.parsed_dft_count) : 0;
+        const suspectedMissing = extraction.suspectedMissing;
+        const figureIssueCount = toCount(row.figure_issue_count);
+        const locatorIssueCount = toCount(row.locator_issue_count);
         const conflictCount = toCount(row.review_conflict_count);
-        const conflictChip = conflictCount > 0
-          ? '<span class="chip bad" title="只读聚合：不同 AI/审核来源对同一字段存在分歧，不会自动共识或合并。">AI 冲突 ' + esc(conflictCount) + '</span>'
-          : '<span class="chip ok" title="未检测到多审核来源字段冲突。">AI 冲突 0</span>';
-        const figureStatusCounts = row.figure_crop_status_counts || {};
-        const figureSummary = Object.keys(figureStatusCounts).length
-          ? Object.keys(figureStatusCounts).map(function (key) { return key + ":" + figureStatusCounts[key]; }).join("；")
-          : "无图片裁剪";
-        const qualityReasonText = qualityReasonLabel(row.quality_reason);
-        const dftChip = row.has_dft_candidates
-          ? '<span class="chip warn" title="待审 DFT 候选：系统规则/AI 候选必须经过证据审核才能入库。">待审 DFT 候选</span>'
-          : '<span class="chip" title="无 DFT 候选：当前轮次未抽出可核对的 DFT 字段。">无 DFT 候选</span>';
-        const dftAuditChipClass = suspectedMissing > 0 ? "bad" : (row.dft_completeness_status === "DB_Ready" ? "ok" : "warn");
-        const wfChip = '<span class="chip ' + workflowClass(row.workflow_status, row.needs_human_confirmation) + '" title="' + esc(workflow.tip + " 原始状态码: " + (row.workflow_status || "Imported")) + '">' + esc(workflow.label) + '</span>';
-        const qlChip = '<span class="chip ' + qualityClass(row.pdf_quality_status) + '" title="质量分: ' + esc(row.pdf_quality_score == null ? "-" : row.pdf_quality_score) + '。原因: ' + esc(qualityReasonText) + '。' + esc(quality.tip) + '">' + esc(quality.label) + '</span>';
-        let wsDisp = workspace;
-        if (wsDisp.length > 8) { wsDisp = "... " + wsDisp.slice(-8); }
+        const figureIssueTitle = compactIssueTitle(
+          row.top_figure_issues,
+          (row.figure_reliability || {}).issue_counts || row.figure_issue_counts || {},
+          figureIssueLabel,
+          "No figure reliability warnings."
+        );
+        const locatorIssueTitle = compactIssueTitle(
+          row.top_locator_issues,
+          (row.locator_reliability || {}).issue_counts || row.locator_issue_counts || {},
+          locatorIssueLabel,
+          "No locator reliability warnings."
+        );
+        const dftBadgeLabel = extraction.label;
+        const dftBadgeClass = extraction.className || (row.dft_completeness_status === "DB_Ready" ? "ok" : "warn");
+        const dftBadgeTitle = extraction.tip || "当前 DFT 提取状态摘要。";
+        const workspace = row.workspace_path || "-";
+        const shortWorkspace = workspace.length > 12 ? ("... " + workspace.slice(-12)) : workspace;
         const doiInline = row.doi
-          ? '<span class="mono paper-doi-inline" title="DOI：' + esc(row.doi) + '">DOI: ' + esc(row.doi) + '</span>'
+          ? '<span class="mono paper-doi-inline" title="DOI: ' + esc(row.doi) + '">DOI: ' + esc(row.doi) + '</span>'
           : '';
-        let yearDisp = row.year ? esc(row.year) : '<span class="muted">-</span>';
+        const titleText = row.title || "未命名文献";
+        const journalText = row.journal || "未知期刊";
+        const yearText = row.year ? esc(row.year) : '<span class="muted">-</span>';
 
-        return '<tr>' +
-          '<td style="text-align: center;"><span class="muted" style="font-size: 13px;">' + (idx + 1) + '</span></td>' +
-          '<td class="col-divider" style="text-align: center;"><span style="font-size: 13px;">' + yearDisp + '</span></td>' +
-          '<td class="col-divider"><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
-          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + pdfAvailabilityInline(row) + qlChip + dftChip + figureReliabilityInline(row) + locatorReliabilityInline(row) + conflictChip + '</div></td>' +
-          '<td class="col-divider"><div style="display:grid;gap:6px;">' +
-            '<span class="chip ' + dftAuditChipClass + '" title="DFT 完整性状态">' + esc(dftStatus) + '</span>' +
-            '<div class="muted">线索: <strong>' + esc(dftAudit.detected_signal_count || 0) + '</strong>；已解析: <strong>' + esc(dftAudit.parsed_dft_count || 0) + '</strong>；疑似漏提: <strong>' + esc(suspectedMissing) + '</strong></div>' +
-            '<div class="muted" title="' + esc(candidateSummary) + '">候选状态：' + esc(candidateSummary) + '</div>' +
-            '<div class="muted" title="' + esc(figureSummary) + '">图片定位可靠性：可疑 ' + esc(row.unreliable_figure_count || 0) + ' / 图表 ' + esc(figureCount + tableCount) + '；Figure issues <strong>' + esc(row.figure_issue_count || 0) + '</strong></div>' +
-            '<div class="muted">证据定位: <strong>' + esc(evidence) + '</strong>；Locator issues <strong>' + esc(row.locator_issue_count || 0) + '</strong></div>' +
-          '</div></td>' +
-          '<td><div class="muted" title="' + esc(auditSummary) + '" style="margin-bottom:6px;">External audit: <strong>' + esc(row.external_audit_count || 0) + '</strong></div>' + objectAuditInline(row) + '<div class="actions">' +
-            '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">审核候选</a>' +
-            '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
-            '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">确认完整</button>' +
-          '</div></td>' +
+        return '<tr data-paper-id="' + esc(row.paper_id) + '">' +
+          '<td style="text-align:center;"><span class="muted" style="font-size:13px;">' + (idx + 1) + '</span></td>' +
+          '<td class="col-divider" style="text-align:center;"><span style="font-size:13px;">' + yearText + '</span></td>' +
+          '<td class="col-divider">' +
+            '<div class="paper-title" title="' + esc(titleText) + '">' + esc(titleText) + '</div>' +
+            '<div class="paper-meta-line"><span>' + esc(journalText) + '</span><span>|</span><span class="mono" title="Workspace: ' + esc(workspace) + '">' + esc(shortWorkspace) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div>' +
+          '</td>' +
+          '<td class="col-divider status-cell">' +
+            '<div class="status-cluster">' +
+              '<div class="status-row">' +
+                '<span class="chip compact ' + workflowClass(row.workflow_status, row.needs_human_confirmation) + '" title="' + esc(workflow.tip) + '">' + esc(workflow.label) + '</span>' +
+                compactPdfChip(row) +
+                '<span class="chip compact ' + esc(extraction.className) + '" title="' + esc(extraction.tip) + '">' + esc(extraction.label) + '</span>' +
+              '</div>' +
+              '<div class="status-row">' +
+                compactRiskChip("定位风险", locatorIssueCount, locatorIssueTitle, { activeClass: "warn", zeroClass: "ok" }) +
+                compactRiskChip("图像风险", figureIssueCount, figureIssueTitle, { activeClass: "warn", zeroClass: "ok" }) +
+                compactRiskChip("冲突", conflictCount, conflictCount > 0 ? "点击查看只读冲突聚合详情。" : "未检测到多审核来源字段冲突。", { activeClass: "bad", zeroClass: "ok", dataAction: conflictCount > 0 ? "open-conflicts" : "" }) +
+              '</div>' +
+            '</div>' +
+          '</td>' +
+          '<td class="col-divider audit-cell">' +
+            '<div class="audit-summary">' +
+              '<span class="chip compact ' + dftBadgeClass + '" title="' + esc(dftBadgeTitle) + '">' + esc(dftBadgeLabel) + '</span>' +
+              '<div class="muted audit-metrics"><span>线索 ' + esc(detectedSignals) + '</span><span>已解析 ' + esc(parsedCount) + '</span><span>漏提 ' + esc(suspectedMissing) + '</span></div>' +
+              '<div class="detail-trigger-row"><button class="btn btn-ghost btn-sm btn-chip" type="button" data-action="open-details">查看详情</button></div>' +
+            '</div>' +
+          '</td>' +
+          '<td class="action-cell">' +
+            '<div class="actions">' +
+              '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">审核候选</a>' +
+              '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
+              '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">确认完整</button>' +
+            '</div>' +
+          '</td>' +
         '</tr>';
       }).join("");
     }
@@ -829,7 +1074,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ render_pages: false })
         });
-        showToast("已重建这篇文献的审核材料：工作目录、证据定位和候选包已刷新。");
+        showToast("已重建这篇文献的审核材料。");
         await loadReviewCenter();
       } catch (error) {
         showToast("重建材料失败：" + error.message);
@@ -861,204 +1106,15 @@
       }
     }
 
-    function compactHasOwnValue(value) {
-      return value !== null && value !== undefined;
-    }
-
-    function compactPdfStatus(row) {
-      const status = row.pdf_artifact_status && typeof row.pdf_artifact_status === "object" ? row.pdf_artifact_status : {};
-      return {
-        hasPdf: row.pdf_exists === true || status.pdf_exists === true,
-        pathKind: compactHasOwnValue(row.pdf_path_kind) ? row.pdf_path_kind : (status.pdf_path_kind || "unknown"),
-        size: compactHasOwnValue(row.pdf_file_size) ? row.pdf_file_size : status.pdf_file_size,
-        blockers: Array.isArray(status.blocking_errors) ? status.blocking_errors : []
-      };
-    }
-
-    function compactPdfChip(row) {
-      const pdf = compactPdfStatus(row);
-      const title = [
-        pdf.hasPdf ? "PDF exists" : "PDF missing or unresolved",
-        "path kind: " + pdf.pathKind,
-        compactHasOwnValue(pdf.size) ? "size: " + pdf.size + " bytes" : null,
-        pdf.blockers.length ? "blockers: " + pdf.blockers.join(", ") : null
-      ].filter(Boolean).join("\n");
-      return '<span class="chip compact ' + (pdf.hasPdf ? "ok" : "bad") + '" title="' + esc(title) + '">' + (pdf.hasPdf ? "PDF ready" : "No PDF") + '</span>';
-    }
-
-    function compactSummarizeCounts(counts, formatter) {
-      return Object.keys(counts || {}).map(function (key) {
-        return { key: key, count: toCount(counts[key]) };
-      }).filter(function (item) {
-        return item.count > 0;
-      }).sort(function (left, right) {
-        if (right.count !== left.count) return right.count - left.count;
-        return left.key.localeCompare(right.key);
-      }).map(function (item) {
-        return (formatter ? formatter(item.key) : item.key) + ": " + item.count;
-      });
-    }
-
-    function compactIssueTitle(topIssues, issueCounts, formatter, emptyText) {
-      const lines = Array.isArray(topIssues) && topIssues.length
-        ? topIssues.map(function (item) {
-            return (formatter ? formatter(item.code) : item.code) + ": " + toCount(item.count);
-          })
-        : compactSummarizeCounts(issueCounts || {}, formatter);
-      return lines.length ? lines.join("\n") : emptyText;
-    }
-
-    function compactIssueList(topIssues, issueCounts, formatter, emptyText) {
-      const lines = Array.isArray(topIssues) && topIssues.length
-        ? topIssues.map(function (item) {
-            return (formatter ? formatter(item.code) : item.code) + ": " + toCount(item.count);
-          })
-        : compactSummarizeCounts(issueCounts || {}, formatter);
-      if (!lines.length) {
-        return '<div class="detail-value muted">' + esc(emptyText) + '</div>';
-      }
-      return '<ul class="detail-list">' + lines.map(function (line) {
-        return '<li>' + esc(line) + '</li>';
-      }).join("") + '</ul>';
-    }
-
-    function compactExtractionMeta(row) {
-      const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
-      const suspectedMissing = compactHasOwnValue(row.suspected_missing_dft_count)
-        ? toCount(row.suspected_missing_dft_count)
-        : toCount(dftAudit.suspected_missing_count);
-      if (suspectedMissing > 0) {
-        return { label: "疑似漏提", className: "bad", tip: "检测到 DFT 线索多于已解析候选，建议优先复核全文。", suspectedMissing: suspectedMissing };
-      }
-      if (row.has_dft_candidates === true) {
-        return { label: "待审 DFT", className: "warn", tip: "已有待审 DFT 候选，下一步去证据页核对字段和定位。", suspectedMissing: suspectedMissing };
-      }
-      if (row.has_dft_candidates === false) {
-        return { label: "无 DFT", className: "", tip: "当前没有可审核的 DFT 候选。", suspectedMissing: suspectedMissing };
-      }
-      if (row.dft_completeness_status === "Initial_Parsed" || dftAudit.coverage_status === "Initial_Parsed") {
-        return { label: "初步解析", className: "warn", tip: "已完成初步解析，但候选状态仍需继续确认。", suspectedMissing: suspectedMissing };
-      }
-      return { label: "未解析", className: "", tip: "尚未形成稳定的 DFT 提取结果。", suspectedMissing: suspectedMissing };
-    }
-
-    function compactRiskChip(label, count, title, options) {
-      const config = options || {};
-      const chipClass = count > 0 ? (config.activeClass || "warn") : (config.zeroClass || "ok");
-      const attrs = config.dataAction ? ' data-action="' + esc(config.dataAction) + '"' : "";
-      return '<span class="chip compact ' + chipClass + '"' + attrs + ' title="' + esc(title) + '">' + esc(label) + " " + esc(count) + '</span>';
-    }
-
-    function compactDetailSection(label, content) {
-      return '<div class="detail-block"><div class="detail-label">' + esc(label) + '</div>' + content + '</div>';
-    }
-
-    function compactSyncHeaders() {
-      const headers = document.querySelectorAll("thead th");
-      if (headers[3]) headers[3].textContent = "首屏信号";
-      if (headers[4]) headers[4].textContent = "DFT 审计";
-    }
-
-    function renderRows() {
-      compactSyncHeaders();
-      renderStats();
-      const rows = filteredRows();
-      document.getElementById("queueMeta").textContent = "显示 " + rows.length + " / " + state.rows.length + " 篇";
-      const tbody = document.getElementById("rows");
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无匹配文献</div></td></tr>';
-        return;
-      }
-      tbody.innerHTML = rows.map(function (row, idx) {
-        const inspectTarget = getInspectTarget(row);
-        const detailUrl = "../literature_library/index.html?paper_id=" + encodeURIComponent(row.paper_id) + "&tab=" + encodeURIComponent(inspectTarget.tab);
-        const workflow = workflowMeta(row.workflow_status);
-        const quality = qualityMeta(row.pdf_quality_status);
-        const qualityReasonText = qualityReasonLabel(row.quality_reason);
-        const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
-        const extraction = compactExtractionMeta(row);
-        const detectedSignals = compactHasOwnValue(dftAudit.detected_signal_count) ? toCount(dftAudit.detected_signal_count) : 0;
-        const parsedCount = compactHasOwnValue(dftAudit.parsed_dft_count) ? toCount(dftAudit.parsed_dft_count) : 0;
-        const suspectedMissing = extraction.suspectedMissing;
-        const figureIssueCount = toCount(row.figure_issue_count);
-        const locatorIssueCount = toCount(row.locator_issue_count);
-        const conflictCount = toCount(row.review_conflict_count);
-        const figureCount = toCount(row.figure_count);
-        const tableCount = toCount(row.table_count);
-        const evidenceCount = toCount(row.evidence_count);
-        const figureIssueTitle = compactIssueTitle(
-          row.top_figure_issues,
-          (row.figure_reliability || {}).issue_counts || row.figure_issue_counts || {},
-          figureIssueLabel,
-          "No figure reliability warnings."
-        );
-        const locatorIssueTitle = compactIssueTitle(
-          row.top_locator_issues,
-          (row.locator_reliability || {}).issue_counts || row.locator_issue_counts || {},
-          locatorIssueLabel,
-          "No locator reliability warnings."
-        );
-        const latestAudit = (row.external_audit_opinions || [])[0] || null;
-        const latestAuditText = latestAudit
-          ? [
-              latestAudit.source_label || latestAudit.source || "external audit",
-              latestAudit.verdict || latestAudit.recommended_action || "review",
-              latestAudit.verification_status || "unverified"
-            ].filter(Boolean).join(" / ")
-          : "no external audit";
-        const candidateSummaryLines = compactSummarizeCounts(row.dft_candidate_status_counts || {}, null);
-        const cropSummaryLines = compactSummarizeCounts(row.figure_crop_status_counts || {}, null);
-        const dftBadgeLabel = row.dft_completeness_label || dftAudit.status_label || extraction.label;
-        const dftBadgeClass = suspectedMissing > 0 ? "bad" : (row.dft_completeness_status === "DB_Ready" ? "ok" : "warn");
-        const detailsMarkup = [
-          compactDetailSection("PDF quality", '<div class="detail-value">' + esc(quality.label) + ' | ' + esc(qualityReasonText) + '</div><div class="detail-value muted">' + esc(workflow.label) + ' | ' + esc(workflow.tip) + '</div>'),
-          compactDetailSection("Figure issues", compactIssueList(row.top_figure_issues, (row.figure_reliability || {}).issue_counts || row.figure_issue_counts || {}, figureIssueLabel, "No figure reliability warnings.")),
-          compactDetailSection("Locator issues", compactIssueList(row.top_locator_issues, (row.locator_reliability || {}).issue_counts || row.locator_issue_counts || {}, locatorIssueLabel, "No locator reliability warnings.")),
-          compactDetailSection("External audit", '<div class="detail-value">External audit: ' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>'),
-          compactDetailSection("Object audit", '<div class="detail-value">Object audits: ' + esc(toCount(row.object_review_audit_count)) + '</div><div class="detail-value muted">' + esc(objectAuditSummary(row)) + '</div>'),
-          compactDetailSection("Candidate status", '<div class="detail-value">' + esc(candidateSummaryLines.length ? candidateSummaryLines.join(", ") : "无候选") + '</div>'),
-          compactDetailSection("Lineage", '<div class="detail-value">线索 ' + esc(detectedSignals) + ' | 已解析 ' + esc(parsedCount) + ' | 疑似漏提 ' + esc(suspectedMissing) + '</div><div class="detail-value muted">图表 ' + esc(figureCount + tableCount) + ' | 证据定位 ' + esc(evidenceCount) + ' | figure crop ' + esc(cropSummaryLines.length ? cropSummaryLines.join(", ") : "none") + '</div>')
-        ].join("");
-        const workspace = row.workspace_path || "-";
-        const shortWorkspace = workspace.length > 8 ? "... " + workspace.slice(-8) : workspace;
-        const doiInline = row.doi
-          ? '<span class="mono paper-doi-inline" title="DOI: ' + esc(row.doi) + '">DOI: ' + esc(row.doi) + '</span>'
-          : "";
-        const titleText = row.title || "未命名文献";
-        const journalText = row.journal || "未知期刊";
-        const yearText = row.year ? esc(row.year) : '<span class="muted">-</span>';
-
-        return '<tr>' +
-          '<td style="text-align: center;"><span class="muted" style="font-size: 13px;">' + (idx + 1) + '</span></td>' +
-          '<td class="col-divider" style="text-align: center;"><span style="font-size: 13px;">' + yearText + '</span></td>' +
-          '<td class="col-divider"><div class="paper-title" title="' + esc(titleText) + '">' + esc(titleText) + '</div><div class="muted paper-meta-line"><span>' + esc(journalText) + '</span><span>|</span><span class="mono" title="Workspace: ' + esc(workspace) + '">' + esc(shortWorkspace) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
-          '<td class="col-divider status-cell"><div class="status-cluster">' +
-            '<div class="status-row" data-role="core">' +
-              compactPdfChip(row) +
-              '<span class="chip compact ' + esc(extraction.className) + '" title="' + esc(extraction.tip) + '">' + esc(extraction.label) + '</span>' +
-            '</div>' +
-            '<div class="status-row" data-role="risk">' +
-              compactRiskChip("定位风险", locatorIssueCount, locatorIssueTitle, { activeClass: "warn", zeroClass: "ok" }) +
-              compactRiskChip("图像风险", figureIssueCount, figureIssueTitle, { activeClass: "warn", zeroClass: "ok" }) +
-              compactRiskChip("冲突", conflictCount, conflictCount > 0 ? "只读预留入口：当前仅提示有字段冲突，完整冲突抽屉后续再接。" : "未检测到多审核来源字段冲突。", { activeClass: "bad", zeroClass: "ok", dataAction: conflictCount > 0 ? "open-conflicts" : "" }) +
-            '</div>' +
-          '</div></td>' +
-          '<td class="col-divider audit-cell"><div class="audit-summary">' +
-            '<span class="chip compact ' + dftBadgeClass + '" title="DFT completeness">' + esc(dftBadgeLabel) + '</span>' +
-            '<div class="muted audit-metrics"><span>线索 ' + esc(detectedSignals) + '</span><span>已解析 ' + esc(parsedCount) + '</span><span>漏提 ' + esc(suspectedMissing) + '</span></div>' +
-            '<details class="inline-details"><summary>查看详情</summary><div class="detail-body">' + detailsMarkup + '</div></details>' +
-          '</div></td>' +
-          '<td class="action-cell"><div class="actions">' +
-            '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">审核候选</a>' +
-            '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
-            '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">确认完整</button>' +
-          '</div></td>' +
-        '</tr>';
-      }).join("");
-    }
-
     document.addEventListener("DOMContentLoaded", function () {
       TopNav.init({ currentPage: "review-center", mountId: "topnav-mount" });
+      document.getElementById("rows").addEventListener("click", handleRowAction);
+      document.getElementById("infoOverlay").addEventListener("click", function (event) {
+        if (event.target && event.target.id === "infoOverlay") closeInfoOverlay();
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeInfoOverlay();
+      });
       loadReviewCenter();
     });
   </script>
