@@ -101,7 +101,40 @@ const PAPER_DETAIL = {
   dft_results_items: [{ id: 'dft-1', property_type: 'adsorption_energy', value: -1.23, unit: 'eV', evidence_text: 'The adsorption energy is -1.23 eV.' }],
   electrochemical_performance_items: [{ metric: 'onset_potential', value: 0.71, unit: 'V' }],
   mechanism_claims_items: [{ claim: 'Associative pathway is favored.' }],
-  writing_cards_items: [{ title: 'Key insight', summary: 'A concise validation card.' }],
+  writing_cards_items: [{
+    id: 'writing-card-1',
+    paper_type: 'research',
+    research_gap: 'Existing catalysts lack durable polysulfide anchoring.',
+    proposed_solution: 'Use defect-rich graphene to stabilize intermediates.',
+    core_hypothesis: 'Defect sites alter adsorption and charge redistribution.',
+    evidence_chain_status: 'present',
+    review_gate_status: 'blocked',
+    evidence_status: 'present',
+    safety_status: 'blocked',
+    safe_verified: false,
+    can_use_for_writing: false,
+    blocked_reasons: ['unsafe_review'],
+    object_review_audit_count: 1,
+    latest_object_review_audit: {
+      source: 'codex_writing_audit',
+      source_label: 'Codex writing audit',
+      decision: 'FLAG',
+      confidence: 0.66,
+      verification_status: 'unverified',
+    },
+    object_review_audits: [{
+      candidate_id: 'writing-audit-1',
+      candidate_type: 'object_review_audit',
+      source: 'codex_writing_audit',
+      source_label: 'Codex writing audit',
+      decision: 'FLAG',
+      confidence: 0.66,
+      verification_status: 'unverified',
+      evidence_location: { page: 5 },
+    }],
+    conflict_count: 1,
+    field_conflicts: [{ field_name: 'core_hypothesis', conflict_types: ['decision_conflict'], opinions: [] }],
+  }],
 };
 
 const EVIDENCE_ITEMS = [
@@ -1397,7 +1430,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await expect(page.locator('#addLiteratureDialog')).toBeVisible();
           await page.click('#addLiteratureDialog button:has-text("关闭")');
 
-          await page.click('.paper-card');
+          await page.click('.paper-row');
           await page.click('button[data-tab="writing"]');
           await expect(page.locator('#tab-writing')).toBeVisible();
 
@@ -2073,7 +2106,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     async function openReviewCandidates() {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
-      await page.click('.paper-card');
+      await page.click('.paper-row');
       await page.click('button[data-tab="review"]');
       await expect(page.locator('#externalRuns')).toContainText('外部 AI 候选建议');
       await page.click('button:has-text("展开审阅项")');
@@ -2211,6 +2244,31 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.evaluate(() => window.closePdfViewer && window.closePdfViewer());
 
     await page.locator('#figuresContent summary button').first().click();
+    await expect.poll(() => unsafeWrites.length).toBe(0);
+  });
+
+  test('business flow: literature library writing cards show read-only audit summaries', async ({ page }) => {
+    const unsafeWrites = [];
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/.*\/(verify|reject)$|\/api\/external-analysis\/runs\/.*\/materialize$|\/api\/papers\/paper-1\/corrections/, async route => {
+      unsafeWrites.push({ method: route.request().method(), url: route.request().url() });
+      return jsonResponse(route, { error: 'unexpected write' }, 500);
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-row');
+    await page.click('button[data-tab="writing"]');
+
+    const writing = page.locator('#writingContent');
+    await expect(writing).toContainText('Object audits 1');
+    await expect(writing).toContainText('Conflicts 1');
+    await expect(writing).toContainText('Evidence status: present');
+    await expect(writing).toContainText('Safety: blocked');
+    await expect(writing).toContainText('Latest audit: Codex writing audit');
+    await expect(writing).toContainText('decision=FLAG');
+    await expect(writing).toContainText('verification=unverified');
+
+    await page.locator('#writingContent summary button').first().click();
     await expect.poll(() => unsafeWrites.length).toBe(0);
   });
 
@@ -2372,7 +2430,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.status-chip.meta')).toContainText('仅元数据');
+    await expect(page.locator('.status-chip.meta')).toContainText('无 PDF');
   });
 
   test('business flow: metadata-only attach pdf and workflow status checks', async ({ page }) => {
@@ -3110,8 +3168,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
 
-      // Click on paper card to load detail
-      await page.click('.paper-card');
+      // Click on paper row to load detail
+      await page.click('.paper-row');
       await page.waitForTimeout(500);
 
       // Verify the warning banner inside summaryContent is visible

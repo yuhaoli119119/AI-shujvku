@@ -258,6 +258,14 @@ class WritingCardResponse(BaseModel):
     review_gate_status: str = "blocked"
     can_use_for_writing: bool = False
     blocked_reasons: list[str] = Field(default_factory=list)
+    evidence_status: str = "missing"
+    safety_status: str = "blocked"
+    safe_verified: bool = False
+    object_review_audit_count: int = 0
+    object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
+    latest_object_review_audit: dict[str, Any] | None = None
+    conflict_count: int = 0
+    field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FigureDataPointResponse(BaseModel):

@@ -22,6 +22,7 @@ from app.db.models import (
     PaperCorrection,
     PaperFigure,
     PaperSection,
+    WritingCard,
 )
 from app.db.session import get_db_session
 from app.main import app
@@ -251,6 +252,97 @@ def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_e
         assert conflict_payload["conflict_count"] == 1
         assert stored_figure.crop_status == "candidate_crop"
         assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
+
+
+def test_paper_detail_exposes_writing_card_object_review_summary_read_only(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Writing audit paper", pdf_path="paper.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        card = WritingCard(
+            paper_id=paper.id,
+            paper_type="research",
+            research_gap="Catalyst writing gap.",
+            proposed_solution="Use a stronger evidence chain.",
+            core_hypothesis="Polar sites anchor polysulfides.",
+            evidence_chain=[
+                {
+                    "reviewer_status": "pending",
+                    "locator_status": "exact_page",
+                    "page": 3,
+                    "evidence_text": "Polar sites anchor polysulfides.",
+                }
+            ],
+        )
+        session.add(card)
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="writing_card_object_review",
+            source_label="Writing-card object review",
+            normalized_payload={},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+        for source, decision, corrected_value in [
+            ("codex_writing_audit", "PASS", "supported_with_qualifier"),
+            ("glm_writing_audit", "FLAG", "unsupported_causality"),
+        ]:
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    status="candidate",
+                    confidence=0.68,
+                    mapping_reason="writing card object review",
+                    normalized_payload={
+                        "target_type": "writing_cards",
+                        "target_id": str(card.id),
+                        "field_name": "core_hypothesis",
+                        "decision": decision,
+                        "corrected_value": corrected_value,
+                        "confidence": 0.68,
+                        "source": source,
+                        "source_label": source,
+                        "agent_role": "writing_card_auditor",
+                        "verification_status": "unverified",
+                        "evidence_checked": True,
+                        "evidence_location": {"page": 3, "section": "Discussion"},
+                        "reason": "Writing card claim reviewed as a candidate only.",
+                    },
+                )
+            )
+        session.commit()
+        paper_id = paper.id
+        card_id = card.id
+
+        detail = PaperQueryService(session).get_paper_detail(paper_id)
+        conflict_payload = ReviewConflictAggregationService(session).list_conflicts(
+            paper_id=paper_id,
+            target_type="writing_cards",
+            target_id=str(card_id),
+            include_non_conflicts=True,
+        )
+        stored_card = session.get(WritingCard, card_id)
+
+        assert detail is not None
+        card_payload = detail.writing_cards_items[0]
+        assert card_payload.evidence_status == "present"
+        assert card_payload.safety_status == "blocked"
+        assert card_payload.safe_verified is False
+        assert card_payload.object_review_audit_count == 2
+        assert card_payload.latest_object_review_audit["source"] == "glm_writing_audit"
+        assert card_payload.latest_object_review_audit["decision"] == "FLAG"
+        assert card_payload.latest_object_review_audit["verification_status"] == "unverified"
+        assert card_payload.conflict_count == 1
+        assert card_payload.field_conflicts[0]["field_name"] == "core_hypothesis"
+        assert conflict_payload["conflict_count"] == 1
+        assert stored_card.core_hypothesis == "Polar sites anchor polysulfides."
+        assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
+        assert session.query(PaperCorrection).count() == 0
 
 
 def test_gemini_audit_flags_candidate_without_human_confirmation(workbench_env):

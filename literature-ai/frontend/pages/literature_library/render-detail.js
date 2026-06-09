@@ -673,6 +673,36 @@ function writingCardLogicBlock(label, value) {
     return '<div class="knowledge-detail-block"><div class="knowledge-detail-title">' + esc(label) + '</div><div class="knowledge-detail-text">' + esc(textValue) + '</div></div>';
 }
 
+function writingCardAuditSummaryHtml(item) {
+    const auditCount = Number(item && (item.object_review_audit_count || (item.object_review_audits && item.object_review_audits.length)) || 0);
+    const conflictCount = Number(item && (item.conflict_count || (item.field_conflicts && item.field_conflicts.length)) || 0);
+    const latest = (item && (item.latest_object_review_audit || ((item.object_review_audits || [])[0]))) || null;
+    const evidenceStatus = item && (item.evidence_status || item.evidence_chain_status) || "missing";
+    const safetyStatus = item && (item.safety_status || item.review_gate_status) || "blocked";
+    const safeVerified = Boolean(item && (item.safe_verified || item.can_use_for_writing));
+    const latestHtml = latest
+        ? '<div class="figure-review-latest"><strong>Latest audit:</strong> ' +
+            esc(latest.source_label || latest.source || "unknown") +
+            ' | decision=' + esc(latest.decision || "-") +
+            ' | confidence=' + esc(latest.confidence == null ? "-" : latest.confidence) +
+            ' | verification=' + esc(latest.verification_status || "unverified") +
+            '</div>'
+        : '<div class="subtle">Latest audit: none</div>';
+    const conflictHtml = conflictCount
+        ? '<div class="subtle">Conflict fields: ' + esc((item.field_conflicts || []).map(function(row) { return row.field_name || "-"; }).join(", ")) + '</div>'
+        : "";
+    return '<div class="figure-review-summary" style="margin-top:12px;display:grid;gap:8px;">' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<span class="status-chip">Object audits ' + auditCount + '</span>' +
+            '<span class="status-chip ' + (conflictCount ? 'danger' : '') + '">Conflicts ' + conflictCount + '</span>' +
+            '<span class="status-chip">Evidence status: ' + esc(prettifyToken(evidenceStatus)) + '</span>' +
+            '<span class="status-chip ' + (safeVerified ? 'ok' : 'danger') + '">Safety: ' + esc(prettifyToken(safetyStatus)) + '</span>' +
+        '</div>' +
+        latestHtml +
+        conflictHtml +
+    '</div>';
+}
+
 function renderWritingCardsCompact(items) {
     if (!items || !items.length) {
         return '<div class="section-card"><h3>写作卡片</h3><div class="muted">暂无内容。</div></div>';
@@ -696,6 +726,7 @@ function renderWritingCardsCompact(items) {
             writingCardLogicBlock("引言写法", item && item.introduction_logic),
             writingCardLogicBlock("讨论写法", item && item.discussion_logic)
         ].filter(Boolean).join("");
+        const auditSummary = writingCardAuditSummaryHtml(item || {});
         const blocked = Array.isArray(item && item.blocked_reasons) && item.blocked_reasons.length
             ? '<div class="knowledge-detail-block"><div class="knowledge-detail-title">当前限制</div><div class="knowledge-detail-text">' + esc(item.blocked_reasons.join("、")) + '</div></div>'
             : "";
@@ -713,6 +744,7 @@ function renderWritingCardsCompact(items) {
                     '</div>' +
                 '</div>' +
             '</summary>' +
+            auditSummary +
             '<div class="writing-card-summary-grid">' + (summaryBlocks || '<div class="muted">这张写作卡还没有生成可直接阅读的短摘要。</div>') + '</div>' +
             '<details class="knowledge-details">' +
                 '<summary>展开写作逻辑与限制</summary>' +
