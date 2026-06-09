@@ -658,10 +658,47 @@ async function mockApi(route) {
           is_exportable: false,
           can_mark_verified: true,
           recommended_action: 'verify_against_pdf',
+          evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+          evidence_preview: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+          primary_evidence_locator: {
+            page: 4,
+            source_type: 'table',
+            table_id: 'table-1',
+            figure_id: 'figure-1',
+            locator_status: 'exact_page',
+            locator_confidence: 0.93,
+            evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+          },
+          evidence_page: 4,
+          pdf_page_url: '/api/papers/paper-1/pdf#page=4',
           codex_item_url: '/api/papers/paper-1/codex-item/dft_result/dft-blocked-1',
           verify_url: '/api/papers/paper-1/dft-results/dft-blocked-1/verify',
+          reject_url: '/api/papers/paper-1/dft-results/dft-blocked-1/reject',
           correction_url: '/api/papers/paper-1/dft-results/dft-blocked-1/corrections',
-          evidence_locators: [{ page: 4, locator_status: 'exact_page', evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.' }],
+          evidence_locators: [
+            {
+              page: 4,
+              source_type: 'table',
+              table_id: 'table-1',
+              figure_id: 'figure-1',
+              locator_status: 'exact_page',
+              locator_confidence: 0.93,
+              evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+            },
+          ],
+          latest_external_audit_opinions: [
+            {
+              candidate_id: 'audit-1',
+              source: 'assigned_dft_audit',
+              source_label: 'Assigned AI DFT audit',
+              agent_role: 'dft_auditor',
+              model_name: 'glm-test',
+              verdict: 'WARN',
+              recommended_action: 'verify_against_pdf',
+              verification_status: 'unverified',
+              confidence: 0.72,
+            },
+          ],
           library_detail_url: '../literature_library/index.html?paper_id=paper-1&tab=dft',
           review_workbench_url: '../external_analysis_workbench/index.html?paper_id=paper-1',
         },
@@ -676,6 +713,46 @@ async function mockApi(route) {
           catalyst_samples: 0,
           dft_settings: 0,
           hints: ['missing_catalyst_sample', 'missing_dft_setting', 'has_blocked_dft_results'],
+        },
+      ],
+    });
+  }
+
+  if (pathname === '/api/workbench/review-center') {
+    return jsonResponse(route, {
+      schema_version: 'workbench_review_center_v1',
+      metadata: { returned: 1, status_counts: { Imported: 1 }, quality_counts: { Good: 1 } },
+      rows: [
+        {
+          paper_id: 'paper-1',
+          title: 'Test Paper for Smoke Validation',
+          year: 2025,
+          journal: 'Journal of Testing',
+          workflow_status: 'Initial_Parsed',
+          pdf_quality_status: 'Good',
+          pdf_quality_score: 0.92,
+          has_dft_candidates: true,
+          dft_candidate_count: 1,
+          dft_candidate_status_counts: { system_candidate: 1 },
+          dft_audit: { status_label: 'Initial parsed', detected_signal_count: 1, parsed_dft_count: 1, suspected_missing_count: 0 },
+          dft_completeness_status: 'Initial_Parsed',
+          dft_completeness_label: 'Initial parsed',
+          suspected_missing_dft_count: 0,
+          figure_count: 1,
+          table_count: 1,
+          evidence_count: 1,
+          external_audit_count: 1,
+          external_audit_opinions: [
+            {
+              candidate_id: 'audit-1',
+              source: 'assigned_dft_audit',
+              source_label: 'Assigned AI DFT audit',
+              verdict: 'WARN',
+              recommended_action: 'verify_against_pdf',
+              verification_status: 'unverified',
+            },
+          ],
+          workspace_path: '/workspace/paper-1',
         },
       ],
     });
@@ -1769,19 +1846,47 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityExportable')).toContainText('1');
     await expect(page.locator('#qualityBlocked')).toContainText('2');
     await expect(page.locator('#qualityReasonChips')).toContainText('缺少人工确认');
-    await expect(page.locator('#qualityRows')).toContainText('候选区已隔离');
-    await expect(page.locator('#qualityRows')).toContainText('候选 DFT 数据不在正式数据库页展开');
+    await expect(page.locator('#qualityRows')).toContainText('blocked');
+    await expect(page.locator('#qualityRows')).toContainText('adsorption_energy Li2S4 -1.23 eV');
+    await expect(page.locator('#qualityRows')).toContainText('Evidence locator');
+    await expect(page.locator('#qualityRows')).toContainText('PDF 页码准确');
+    await expect(page.locator('#qualityRows')).toContainText('page 4');
+    await expect(page.locator('#qualityRows')).toContainText('Blocked reasons');
     await expect(page.locator('#qualityRows')).toContainText('缺少人工确认');
+    await expect(page.locator('#qualityRows')).toContainText('Assigned AI DFT audit');
+    await expect(page.locator('#qualityRows')).toContainText('WARN');
+    await expect(page.locator('#qualityRows button:has-text("Review evidence")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("Open PDF page 4")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("Approve")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("Reject")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("Needs fix")')).toHaveCount(1);
+
+    await page.click('#qualityRows button:has-text("Review evidence")');
+    await expect(page.locator('#evidenceDetail')).toContainText('Evidence text');
+    await expect(page.locator('#evidenceDetail')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.');
+    await expect(page.locator('#evidenceDetail')).toContainText('Locators');
+    await expect(page.locator('#evidenceDetail')).toContainText('table');
+    await expect(page.locator('#evidenceDetail')).toContainText('figure');
+    await expect(page.locator('#evidenceDetail')).toContainText('Export safety');
+    await expect(page.locator('#evidenceDetail')).toContainText('Latest external audit opinions');
+    await expect(page.locator('#evidenceDetail')).toContainText('unverified');
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少催化剂样本');
     await expect(page.locator('#qualityCompleteness')).toContainText('缺少 DFT 设置');
-    await expect(page.locator('#qualityRows a:has-text("打开审核中心")')).toHaveAttribute('href', /review_center/);
-    await expect(page.locator('#qualityRows a:has-text("回文献库核对证据")')).toHaveAttribute('href', /literature_library/);
-    await expect(page.locator('#qualityRows button:has-text("标记已核验")')).toHaveCount(0);
-    await expect(page.locator('#qualityRows button:has-text("拒绝候选")')).toHaveCount(0);
-    await expect(page.locator('#qualityRows button:has-text("提出修正")')).toHaveCount(0);
     expect(verifyPayload).toBeNull();
     expect(rejectPayload).toBeNull();
     expect(correctionPayload).toBeNull();
+  });
+
+  test('business flow: review center shows latest external audit count and tooltip', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#rows')).toContainText('External audit:');
+    await expect(page.locator('#rows')).toContainText('1');
+    const auditSummary = page.locator('#rows [title*="Assigned AI DFT audit"]').first();
+    await expect(auditSummary).toHaveAttribute('title', /Assigned AI DFT audit/);
+    await expect(auditSummary).toHaveAttribute('title', /WARN/);
+    await expect(auditSummary).toHaveAttribute('title', /unverified/);
   });
 
   test('business flow: DFT export empty state shows correct wording and status', async ({ page }) => {
