@@ -205,8 +205,18 @@
     .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 10px 12px; background: var(--color-surface-alt); }
     .quality-row.exportable { border-color: var(--color-success); background: var(--color-success-bg); }
     .quality-row h4 { margin: 0 0 6px; font-size: 14px; }
+    .quality-row-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .quality-row-title { min-width: 0; }
+    .quality-row-title h4 { overflow-wrap: anywhere; }
     .quality-meta { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .queue-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
+    .queue-evidence-preview { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
+    .audit-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .audit-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 4px 8px; background: var(--color-surface); color: var(--color-text-secondary); font-size: 11px; font-weight: 800; }
+    .audit-chip.warn { border-color: var(--color-warning); color: var(--color-warning); background: var(--color-warning-bg); }
+    .audit-chip.ok { border-color: var(--color-success); color: var(--color-success); background: var(--color-success-bg); }
+    .audit-chip.bad { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-danger-bg); }
     .quality-help { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; margin-top: 8px; }
     .quality-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
     .quality-pill { display: inline-flex; align-items: center; width: fit-content; border-radius: var(--radius-pill); padding: 4px 9px; background: var(--color-warning-bg); color: var(--color-warning); font-size: 12px; font-weight: 800; }
@@ -384,7 +394,7 @@
   <div id="toast" class="toast"></div>
   <script>
     const API_BASE = "/api/papers";
-    const state = { items: [], qualityReason: "", currentLibrary: "" };
+    const state = { items: [], qualityRows: [], qualityReason: "", currentLibrary: "" };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function toggleCollapse(header) {
       const body = header.closest(".panel-actions")?.nextElementSibling || header.parentElement.nextElementSibling;
@@ -654,11 +664,128 @@
       state.qualityReason = reason || "";
       loadQualityPanel();
     }
+    function firstLocator(row) {
+      if (row && row.primary_evidence_locator) return row.primary_evidence_locator;
+      const locators = row && Array.isArray(row.evidence_locators) ? row.evidence_locators : [];
+      return locators.find(item => item && item.locator_status === "exact_page" && item.page) || locators.find(item => item && item.page) || locators[0] || null;
+    }
+    function locatorSummary(row) {
+      const locator = firstLocator(row);
+      const status = (row && row.locator_status) || (locator && locator.locator_status) || "missing_locator";
+      const page = row && row.evidence_page ? row.evidence_page : (locator && locator.page);
+      const parts = ["locator: " + locatorStatusLabel(status)];
+      if (page) parts.push("page " + page);
+      if (locator && locator.source_type) parts.push(locator.source_type);
+      if (locator && locator.section) parts.push(locator.section);
+      if (locator && locator.table_id) parts.push("table");
+      if (locator && locator.figure_id) parts.push("figure");
+      return parts.join(" / ");
+    }
+    function auditClass(audit) {
+      const verdict = String((audit && audit.verdict) || "").toLowerCase();
+      const action = String((audit && audit.recommended_action) || "").toLowerCase();
+      if (verdict.includes("pass") || verdict.includes("ok") || action.includes("accept")) return "ok";
+      if (verdict.includes("reject") || action.includes("reject") || action.includes("fix")) return "bad";
+      return "warn";
+    }
+    function renderAuditChips(audits) {
+      const items = Array.isArray(audits) ? audits : [];
+      if (!items.length) return '<span class="audit-chip">no external audit</span>';
+      return items.slice(0, 3).map(audit => {
+        const label = audit.source_label || audit.source || "external audit";
+        const verdict = audit.verdict || audit.recommended_action || "review";
+        const status = audit.verification_status || "unverified";
+        return '<span class="audit-chip ' + auditClass(audit) + '" title="' + esc(status) + '">' + esc(label) + ': ' + esc(verdict) + '</span>';
+      }).join("");
+    }
+    function openDftPdfPage(paperId, page) {
+      const pageNumber = Number(page || 0);
+      if (!paperId || !pageNumber) {
+        showToast("No PDF page locator is available for this DFT row.");
+        return;
+      }
+      window.open("/api/papers/" + encodeURIComponent(paperId) + "/pdf#page=" + pageNumber, "_blank", "noopener");
+    }
+    function showQueueEvidence(index) {
+      const item = state.qualityRows[index];
+      if (!item) return;
+      const locator = firstLocator(item);
+      const page = item.evidence_page || (locator && locator.page);
+      const locators = Array.isArray(item.evidence_locators) ? item.evidence_locators : [];
+      const audits = Array.isArray(item.latest_external_audit_opinions) ? item.latest_external_audit_opinions : [];
+      const collapseEl = document.getElementById("evidenceCollapse");
+      const header = collapseEl?.previousElementSibling?.querySelector(".collapse-header");
+      if (collapseEl && collapseEl.classList.contains("hidden")) {
+        collapseEl.classList.remove("hidden");
+        if (header) header.classList.remove("collapsed");
+      }
+      const locatorRows = locators.length
+        ? locators.map(loc => '<div class="quality-meta">page ' + esc(loc.page || "-") + ' / ' + esc(locatorStatusLabel(loc.locator_status)) + ' / ' + esc(loc.source_type || "-") + (loc.section ? ' / ' + esc(loc.section) : '') + (loc.table_id ? ' / table' : '') + (loc.figure_id ? ' / figure' : '') + '</div>').join("")
+        : '<div class="quality-meta">No evidence locator is attached to this row.</div>';
+      const auditRows = audits.length
+        ? audits.map(audit => '<div class="quality-meta"><strong>' + esc(audit.source_label || audit.source || "external audit") + '</strong>: ' + esc(audit.verdict || "-") + ' / ' + esc(audit.recommended_action || "-") + ' / ' + esc(audit.verification_status || "unverified") + '</div>').join("")
+        : '<div class="quality-meta">No external audit opinion has been imported for this paper.</div>';
+      document.getElementById("evidenceDetail").innerHTML =
+        '<div class="quality-status-grid">' +
+          '<div class="readable-field"><div class="k">DFT row</div><div class="v">' + esc(item.property_type || "-") + ' / ' + esc(item.adsorbate || "-") + ' = ' + esc(item.value == null ? "-" : item.value) + ' ' + esc(item.unit || "") + '</div></div>' +
+          '<div class="readable-field"><div class="k">PDF locator</div><div class="v">' + esc(locatorSummary(item)) + '</div></div>' +
+          '<div class="readable-field"><div class="k">Export safety</div><div class="v">' + esc(item.is_exportable ? "exportable" : "blocked") + ' / ' + esc((item.blocked_reasons || []).map(reasonLabel).join(", ") || "none") + '</div></div>' +
+          '<div class="readable-field"><div class="k">Review status</div><div class="v">' + esc(reviewStatusLabel(item.review_status)) + ' / ' + esc(item.recommended_action || "-") + '</div></div>' +
+        '</div>' +
+        '<div class="quality-actions">' +
+          '<button class="btn btn-primary btn-sm" type="button" onclick="openDftPdfPage(\'' + esc(item.paper_id) + '\',' + esc(page || 0) + ')">Open PDF page ' + esc(page || "-") + '</button>' +
+          '<button class="btn btn-ghost btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Approve</button>' +
+          '<button class="btn btn-ghost btn-sm" type="button" onclick="rejectDftQueueRow(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Reject</button>' +
+          '<button class="btn btn-tinted btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Needs fix</button>' +
+        '</div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">Evidence text</div><div class="v">' + esc(item.evidence_text || "No evidence text.") + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">Locators</div><div class="v">' + locatorRows + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">Latest external audit opinions</div><div class="v">' + auditRows + '</div></div>';
+      document.getElementById("validationSummary").textContent = item.evidence_text ? "DFT queue evidence loaded." : "This DFT row is missing evidence text.";
+    }
     function renderQualityRows(rows) {
       const el = document.getElementById("qualityRows");
       const title = document.getElementById("qualityListTitle");
       if (title) title.textContent = state.qualityReason ? ("处理原因：" + reasonLabel(state.qualityReason)) : "候选问题汇总";
       if (!el) return;
+      state.qualityRows = rows || [];
+      if (!rows.length) {
+        el.innerHTML = '<div class="empty-state">No DFT candidates need review for the current filters.</div>';
+        return;
+      }
+      el.innerHTML = rows.slice(0, 30).map((row, idx) => {
+        const locator = firstLocator(row);
+        const page = row.evidence_page || (locator && locator.page);
+        const reasons = (row.blocked_reasons || row.issue_flags || []).map(reasonLabel).join(", ") || "none";
+        const rowClass = row.is_exportable ? "quality-row exportable" : "quality-row";
+        const valueText = [row.property_type || "-", row.adsorbate || "-", row.value == null ? "-" : row.value, row.unit || ""].join(" ");
+        const evidencePreview = row.evidence_preview || row.evidence_text || "No evidence text.";
+        return '<div class="' + rowClass + '">' +
+          '<div class="quality-row-header">' +
+            '<div class="quality-row-title">' +
+              '<div class="quality-pill">' + esc(row.is_exportable ? "exportable" : "blocked") + '</div>' +
+              '<h4>' + esc(valueText) + '</h4>' +
+              '<div class="quality-meta">' + esc(row.title || "Paper") + '</div>' +
+            '</div>' +
+            '<div class="quality-meta" style="text-align:right;min-width:120px;">' + esc(row.year || "-") + '<br>' + esc(row.candidate_source_label || row.candidate_status || "candidate") + '</div>' +
+          '</div>' +
+          '<div class="queue-field-grid">' +
+            '<div class="readable-field"><div class="k">Evidence locator</div><div class="v">' + esc(locatorSummary(row)) + '</div></div>' +
+            '<div class="readable-field"><div class="k">Blocked reasons</div><div class="v">' + esc(reasons) + '</div></div>' +
+            '<div class="readable-field"><div class="k">Review action</div><div class="v">' + esc(row.recommended_action || "-") + '</div></div>' +
+          '</div>' +
+          '<div class="queue-evidence-preview">' + esc(evidencePreview) + '</div>' +
+          '<div class="audit-strip">' + renderAuditChips(row.latest_external_audit_opinions) + '</div>' +
+          '<div class="quality-actions">' +
+            '<button class="btn btn-primary btn-sm" type="button" onclick="showQueueEvidence(' + idx + ')">Review evidence</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" onclick="openDftPdfPage(\'' + esc(row.paper_id) + '\',' + esc(page || 0) + ')">Open PDF page ' + esc(page || "-") + '</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Approve</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" onclick="rejectDftQueueRow(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Reject</button>' +
+            '<button class="btn btn-tinted btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Needs fix</button>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+      return;
       if (!rows.length) {
         el.innerHTML = '<div class="empty-state">当前筛选下没有需要处理的 DFT 候选。正式库仍只显示已审核可导出数据。</div>';
         return;

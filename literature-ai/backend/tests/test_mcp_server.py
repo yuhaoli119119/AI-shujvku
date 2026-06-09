@@ -18,6 +18,7 @@ from app.db.models import (
     ElectrochemicalPerformance,
     EvidenceLocator,
     ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
     MechanismClaim,
     Paper,
     PaperCorrection,
@@ -449,6 +450,35 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
                 parser_source="test",
             )
         )
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            normalized_payload={"verdict": "WARN"},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="external_audit_opinion",
+                normalized_payload={
+                    "source": "assigned_dft_audit",
+                    "source_label": "Assigned AI DFT audit",
+                    "agent_role": "dft_auditor",
+                    "model_name": "glm-test",
+                    "verdict": "WARN",
+                    "recommended_action": "verify_against_pdf",
+                    "verification_status": "unverified",
+                    "confidence": 0.72,
+                    "summary": "Check the migration barrier against the source PDF.",
+                },
+                status="candidate",
+                confidence=0.72,
+            )
+        )
         session.commit()
         paper_id = str(paper.id)
         row_id = str(row.id)
@@ -466,6 +496,11 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
     assert row["sanity_flags"] == []
     assert row["can_mark_verified"] is True
     assert row["evidence_locators"][0]["page"] == 7
+    assert row["primary_evidence_locator"]["page"] == 7
+    assert row["evidence_page"] == 7
+    assert row["pdf_page_url"].endswith(f"/api/papers/{paper_id}/pdf#page=7")
+    assert row["latest_external_audit_opinions"][0]["source"] == "assigned_dft_audit"
+    assert row["latest_external_audit_opinions"][0]["verification_status"] == "unverified"
     assert row["codex_item_url"].endswith(f"/codex-item/dft_result/{row_id}")
     assert row["correction_url"].endswith(f"/dft-results/{row_id}/corrections")
 

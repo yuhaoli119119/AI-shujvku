@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import CatalystSample, DFTResult, DFTSetting, EvidenceLocator, Paper
+from app.db.models import CatalystSample, DFTResult, DFTSetting, EvidenceLocator, ExternalAnalysisCandidate, Paper
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
@@ -74,6 +74,7 @@ class DFTReviewQueueService:
         dft_rows = [row for row, _paper in rows]
         gate_by_id = bulk_export_gate_results(self.session, dft_rows, target_type="dft_results")
         locators_by_id = self._bulk_locator_payloads(dft_rows)
+        external_audits_by_paper = self._bulk_external_audit_payloads({paper.id for _row, paper in rows})
 
         for row, paper in rows:
             gate = gate_by_id.get(str(row.id))
@@ -99,7 +100,15 @@ class DFTReviewQueueService:
                 continue
             if not self._status_matches(status, gate):
                 continue
-            queue_rows.append(self._row_payload(row, paper, gate, locators_by_id.get(str(row.id), [])))
+            queue_rows.append(
+                self._row_payload(
+                    row,
+                    paper,
+                    gate,
+                    locators_by_id.get(str(row.id), []),
+                    external_audits_by_paper.get(str(paper.id), []),
+                )
+            )
 
         queue_rows.sort(
             key=lambda item: (
@@ -213,11 +222,19 @@ class DFTReviewQueueService:
             stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
         return stmt
 
-    def _row_payload(self, row: DFTResult, paper: Paper, gate: Any, locators: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def _row_payload(
+        self,
+        row: DFTResult,
+        paper: Paper,
+        gate: Any,
+        locators: list[dict[str, Any]] | None = None,
+        external_audits: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         paper_id = str(paper.id)
         result_id = str(row.id)
         reasons = list(gate.reasons)
         locators = locators if locators is not None else self._locator_payloads(row)
+        primary_locator = self._primary_locator(locators)
         sanity_flags = self._sanity_flags(row)
         issues = self._issue_payloads(row, reasons, sanity_flags, locators, gate)
         figure_reliability = self._figure_reliability(row, locators, gate)
@@ -238,6 +255,13 @@ class DFTReviewQueueService:
             "source_figure": row.source_figure,
             "evidence_text": row.evidence_text,
             "evidence_preview": self._shorten(row.evidence_text),
+            "primary_evidence_locator": primary_locator,
+            "evidence_page": primary_locator.get("page") if primary_locator else None,
+            "pdf_page_url": (
+                f"/api/papers/{paper_id}/pdf#page={primary_locator.get('page')}"
+                if primary_locator and primary_locator.get("page")
+                else None
+            ),
             "confidence": row.confidence,
             "candidate_status": row.candidate_status or "system_candidate",
             "candidate_source_label": self._candidate_source_label(row.candidate_status),
@@ -256,10 +280,13 @@ class DFTReviewQueueService:
             "can_mark_verified": set(reasons) == {"missing_review"} and not sanity_flags,
             "recommended_action": self._recommended_action(reasons, gate, sanity_flags),
             "evidence_locators": locators,
+            "latest_external_audit_opinions": (external_audits or [])[:5],
             "evidence_check": {
                 "has_evidence_text": bool((row.evidence_text or "").strip()),
                 "locator_count": len(locators),
                 "has_exact_page_locator": gate.locator_status == "exact_page",
+                "primary_page": primary_locator.get("page") if primary_locator else None,
+                "primary_locator_status": primary_locator.get("locator_status") if primary_locator else None,
             },
             "paper_detail_url": f"../paper_detail/index.html?paper_id={paper_id}",
             "library_detail_url": f"../literature_library/index.html?paper_id={paper_id}&tab=dft",
@@ -330,6 +357,52 @@ class DFTReviewQueueService:
                 continue
             locators_by_id[target_id].append(self._locator_to_payload(locator))
         return locators_by_id
+
+    @staticmethod
+    def _primary_locator(locators: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not locators:
+            return None
+        exact = [item for item in locators if item.get("locator_status") == "exact_page" and item.get("page")]
+        if exact:
+            return exact[0]
+        with_page = [item for item in locators if item.get("page")]
+        if with_page:
+            return with_page[0]
+        return locators[0]
+
+    def _bulk_external_audit_payloads(self, paper_ids: set[UUID]) -> dict[str, list[dict[str, Any]]]:
+        if not paper_ids:
+            return {}
+        audits_by_paper: dict[str, list[dict[str, Any]]] = {str(pid): [] for pid in paper_ids}
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
+            .where(ExternalAnalysisCandidate.candidate_type == "external_audit_opinion")
+            .order_by(ExternalAnalysisCandidate.paper_id.asc(), ExternalAnalysisCandidate.created_at.desc())
+        ).all()
+        for candidate in candidates:
+            paper_id = str(candidate.paper_id)
+            if len(audits_by_paper.setdefault(paper_id, [])) >= 5:
+                continue
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            audits_by_paper[paper_id].append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate_type": candidate.candidate_type,
+                    "status": candidate.status,
+                    "source": str(payload.get("source") or "unknown"),
+                    "source_label": payload.get("source_label"),
+                    "agent_role": payload.get("agent_role"),
+                    "model_name": payload.get("model_name"),
+                    "verdict": payload.get("verdict"),
+                    "recommended_action": payload.get("recommended_action"),
+                    "verification_status": payload.get("verification_status", "unverified"),
+                    "confidence": payload.get("confidence"),
+                    "summary": payload.get("summary"),
+                    "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+                }
+            )
+        return audits_by_paper
 
     @staticmethod
     def _locator_to_payload(locator: EvidenceLocator) -> dict[str, Any]:

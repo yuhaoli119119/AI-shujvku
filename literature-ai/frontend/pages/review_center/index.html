@@ -553,6 +553,10 @@
         const candidateSummary = Object.keys(candidateStatusCounts).length
           ? Object.keys(candidateStatusCounts).map(function (key) { return key + ":" + candidateStatusCounts[key]; }).join("；")
           : "无候选";
+        const latestAudit = (row.external_audit_opinions || [])[0] || null;
+        const auditSummary = latestAudit
+          ? [(latestAudit.source_label || latestAudit.source || "external audit"), (latestAudit.verdict || latestAudit.recommended_action || "review"), (latestAudit.verification_status || "unverified")].filter(Boolean).join(" / ")
+          : "no external audit";
         const figureStatusCounts = row.figure_crop_status_counts || {};
         const figureSummary = Object.keys(figureStatusCounts).length
           ? Object.keys(figureStatusCounts).map(function (key) { return key + ":" + figureStatusCounts[key]; }).join("；")
@@ -583,7 +587,7 @@
             '<div class="muted" title="' + esc(figureSummary) + '">图片定位可靠性：可疑 ' + esc(row.unreliable_figure_count || 0) + ' / 图表 ' + esc(figureCount + tableCount) + '</div>' +
             '<div class="muted">证据定位: <strong>' + esc(evidence) + '</strong></div>' +
           '</div></td>' +
-          '<td><div class="actions">' +
+          '<td><div class="muted" title="' + esc(auditSummary) + '" style="margin-bottom:6px;">External audit: <strong>' + esc(row.external_audit_count || 0) + '</strong></div><div class="actions">' +
             '<a class="btn btn-ghost btn-sm" href="' + esc(detailUrl) + '" title="' + esc(inspectTarget.note) + '">审核候选</a>' +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="preparePaper(\'' + esc(row.paper_id) + '\')">重建材料</button>' +
             '<button class="btn btn-tinted btn-sm" type="button" onclick="humanConfirm(\'' + esc(row.paper_id) + '\')">确认完整</button>' +
