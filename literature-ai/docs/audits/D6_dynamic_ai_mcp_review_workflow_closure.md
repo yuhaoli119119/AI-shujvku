@@ -16,6 +16,7 @@ This stage covered the first usable loop for dynamically assigned AI review work
 - External audit coverage: MCP and review surfaces expose unverified external audit coverage without granting final truth.
 - Multi-AI conflict aggregation: opinions are grouped by `paper_id + target_type + target_id + field_name` and surfaced read-only.
 - Object-level review audit payload: `import_analysis` accepts standardized object review payloads for DFT rows and other review targets.
+- Object-level read-only review visibility now covers DFT rows, figures, writing cards, and mechanism claims.
 
 ## Key Commits
 
@@ -29,6 +30,9 @@ This stage covered the first usable loop for dynamically assigned AI review work
 - `6af3725 feat: aggregate multi-ai review conflicts`
 - `a23ac06 feat: standardize object-level review audits`
 - `0bc10e1 feat: show object-level review audits in queues`
+- `7d3c4f1 feat: show figure review audit summaries`
+- `7e33730 feat: show writing card review audit summaries`
+- `3fd71e4 feat: show mechanism claim review audit summaries`
 
 ## Current User-Facing Workflow
 
@@ -38,9 +42,22 @@ This stage covered the first usable loop for dynamically assigned AI review work
    - `append_note` for shared review notes.
    - `propose_correction` or `propose_dft_result_correction` for pending correction proposals.
    - `import_analysis` for paper-level `external_audit_opinion` or object-level `object_review_audit` candidates.
-4. Object-level `object_review_audit` candidates are lightly visible in the DFT queue and Review center as read-only audit summaries.
+4. Object-level `object_review_audit` candidates are visible as read-only summaries across DFT rows, figures, writing cards, and mechanism claims.
 5. Multiple AI or human reviewer opinions can be compared through review coverage and conflict aggregation.
 6. Human review and final gates still control verified state, export eligibility, and citation readiness.
+
+## Object Review UI Coverage
+
+The read-only object review UI now covers:
+
+- DFT rows in the evidence/review queue.
+- Figure detail cards in the literature library.
+- Writing-card detail cards in the literature library.
+- Mechanism-claim detail cards in the literature library.
+
+These surfaces show object audit counts, latest audit source/source label, decision, confidence, verification status, conflict counts, and target-specific evidence/safety/locator/confidence state where available. Conflict summaries are produced through the object-level conflict aggregation path and are displayed without attempting consensus.
+
+This UI work did not add write interfaces. It does not automatically mark targets verified, approve correction proposals, materialize imported candidates, merge candidate values, or change DFT export and citation insertion gates.
 
 ## Safety Boundaries
 
@@ -65,10 +82,13 @@ Verification performed across this stage included:
 - Object-level audit tests covering:
   - DFT object review import.
   - Writing-card object review import.
+  - Figure object review detail summaries.
+  - Mechanism-claim object review detail summaries.
   - Object-level conflict aggregation.
   - MCP `import_analysis` object-level candidate summary.
 - DFT queue and Review center UI smoke coverage for read-only `object_review_audit` display.
-- Latest object-level audit validation: `45 passed`.
+- Literature library Playwright smoke coverage for DFT, figure, writing-card, and mechanism-claim read-only summaries.
+- Latest object-level audit validation: backend `49 passed`; Playwright smoke `30 passed` for the `mechanism|writing|literature library` slice.
 - `py_compile` checks for changed backend modules.
 - Inline script syntax checks for affected frontend pages where frontend scripts changed.
 - `git diff --check` passed; only expected Windows line-ending warnings were observed during closure.
@@ -87,18 +107,18 @@ These names do not imply fixed model ownership. They are historical or public co
 
 ## Remaining Backlog
 
-- Expand review UI and evidence jump workflows beyond DFT.
 - Improve multimodal parsing, figure/table bbox reliability, crop status, and locator quality.
 - Add a downstream feedback loop so reviewer outcomes can later inform prompts, routing, and quality metrics.
 - Add generic API aliases for compatibility names where useful, while preserving existing public names.
 - Build a richer conflict UI with filtering, target navigation, and evidence-location previews.
-- Broaden object-level audit examples and UI rendering for figure, table, writing-card, and mechanism-claim targets.
+- Broaden object-level audit examples and UI rendering for table targets.
 
 ## Next Recommended Task
 
-Recommended next work is one of:
+Recommended next work is the evidence-location and multimodal parsing reliability track:
 
-- Add a lightweight UI surface for `object_review_audit` candidates in the review center or target detail panels.
-- Extend the DFT evidence jump experience to `figure`, `writing_card`, and `mechanism_claim` review targets.
+- Add a read-only artifact, crop, and locator reliability audit report.
+- Classify weak figure/table crops and evidence locators without rewriting the parser.
+- Surface weak locator/crop reasons in review UI before adding any automatic repair workflow.
 
-Both options should remain read-only or candidate-only at first. Do not add automatic consensus, automatic merge, or automatic verification in the next step.
+This next track should remain read-only first. Do not rebuild the PDF parser, automatically trust OCR-derived coordinates, automatically recrop figures, or promote candidates to verified state.
