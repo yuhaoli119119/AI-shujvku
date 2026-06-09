@@ -63,7 +63,38 @@ const PAPER_DETAIL = {
     { id: 'chunk-1', section_title: 'Introduction', section_type: 'introduction', text: 'Smoke-test content.', page_start: 1, page_end: 1 },
     { id: 'chunk-2', section_title: 'Results', section_type: 'results', text: 'Selected section translation content.', page_start: 3, page_end: 4 }
   ],
-  figures: [{ id: 'figure-1', caption: 'Figure 1. Graphene defect model.', page: 3, figure_role: 'structure' }],
+  figures: [{
+    id: 'figure-1',
+    caption: 'Figure 1. Graphene defect model.',
+    page: 3,
+    image_path: 'figures/figure-1.png',
+    asset_url: '/api/papers/assets/figures/figure-1.png',
+    figure_role: 'structure',
+    crop_status: 'needs_review',
+    image_review: { crop_status: 'needs_review', review_required: true, flags: ['missing_parser_bbox'] },
+    review_required: true,
+    flags: ['missing_parser_bbox'],
+    object_review_audit_count: 1,
+    latest_object_review_audit: {
+      source: 'glm_figure_audit',
+      source_label: 'GLM figure audit',
+      decision: 'REVISE',
+      confidence: 0.72,
+      verification_status: 'unverified',
+    },
+    object_review_audits: [{
+      candidate_id: 'figure-audit-1',
+      candidate_type: 'object_review_audit',
+      source: 'glm_figure_audit',
+      source_label: 'GLM figure audit',
+      decision: 'REVISE',
+      confidence: 0.72,
+      verification_status: 'unverified',
+      evidence_location: { page: 3 },
+    }],
+    conflict_count: 1,
+    field_conflicts: [{ field_name: 'crop_status', conflict_types: ['decision_conflict'], opinions: [] }],
+  }],
   tables: [],
   dft_settings_items: [{ code: 'PBE', kpoints: '3x3x1' }],
   catalyst_samples_items: [{ name: 'Pt(111)' }],
@@ -2090,7 +2121,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: literature library UX is Chinese, clamps DOI, and exposes key entries', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await page.click('.paper-card');
+    await page.click('.paper-row');
     await page.waitForTimeout(500);
 
     await expect(page.locator('#paperMeta')).toContainText('10.1000/primary-doi');
@@ -2131,7 +2162,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await page.click('.paper-card');
+    await page.click('.paper-row');
     await page.click('button[data-tab="dft"]');
 
     await expect(page.locator('#dftContent')).toContainText('AI 候选 DFT 入库安全状态');
@@ -2148,6 +2179,39 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.click('button[data-tab="figures"]');
     await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
+  });
+
+  test('business flow: literature library figures tab shows read-only figure review summaries', async ({ page }) => {
+    const unsafeWrites = [];
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/.*\/(verify|reject)$|\/api\/external-analysis\/runs\/.*\/materialize$|\/api\/papers\/paper-1\/corrections/, async route => {
+      unsafeWrites.push({ method: route.request().method(), url: route.request().url() });
+      return jsonResponse(route, { error: 'unexpected write' }, 500);
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-row');
+    await page.click('button[data-tab="figures"]');
+
+    const figures = page.locator('#figuresContent');
+    await expect(figures).toContainText('Crop status: needs_review');
+    await expect(figures).toContainText('Image review: required');
+    await expect(figures).toContainText('Flags: missing_parser_bbox');
+    await expect(figures).toContainText('Object audits 1');
+    await expect(figures).toContainText('Conflicts 1');
+    await expect(figures).toContainText('Latest audit: GLM figure audit');
+    await expect(figures).toContainText('decision=REVISE');
+    await expect(figures).toContainText('verification=unverified');
+
+    await page.locator('#figuresContent details.figure-card').evaluateAll(details => {
+      details.forEach(item => item.setAttribute('open', ''));
+    });
+    await page.click('#figuresContent button:has-text("Open PDF page 3")');
+    await expect(page.locator('#pdfViewerOverlay')).toBeVisible();
+    await page.evaluate(() => window.closePdfViewer && window.closePdfViewer());
+
+    await page.locator('#figuresContent summary button').first().click();
+    await expect.poll(() => unsafeWrites.length).toBe(0);
   });
 
   test('business flow: unconfigured internal AI shows parser settings guide with writer fallback', async ({ page }) => {

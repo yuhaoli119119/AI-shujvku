@@ -560,6 +560,46 @@ function codexItemActionHtml(itemType, item) {
         escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">复制审核提示</button>';
 }
 
+function figureReviewSummaryHtml(item, paperId) {
+    const imageReview = item.image_review || {};
+    const cropStatus = item.crop_status || imageReview.crop_status || "unknown";
+    const flags = Array.isArray(item.flags) && item.flags.length ? item.flags : (Array.isArray(imageReview.flags) ? imageReview.flags : []);
+    const reviewRequired = item.review_required === true || imageReview.review_required === true;
+    const auditCount = Number(item.object_review_audit_count || (item.object_review_audits && item.object_review_audits.length) || 0);
+    const conflictCount = Number(item.conflict_count || (item.field_conflicts && item.field_conflicts.length) || 0);
+    const latest = item.latest_object_review_audit || ((item.object_review_audits || [])[0]) || null;
+    const page = Number(item.page || 0);
+    const openPdfAction = page
+        ? '<button class="btn ghost small" type="button" onclick="event.stopPropagation(); openPdfViewer(\'' +
+            escAttr(paperId) + '\', ' + page + ', false, null, \'exact_page\', \'' +
+            escAttr(clipText(item.caption || "", 160)) + '\')">Open PDF page ' + page + '</button>'
+        : "";
+    const latestHtml = latest
+        ? '<div class="figure-review-latest"><strong>Latest audit:</strong> ' +
+            esc(latest.source_label || latest.source || "unknown") +
+            ' | decision=' + esc(latest.decision || "-") +
+            ' | confidence=' + esc(latest.confidence == null ? "-" : latest.confidence) +
+            ' | verification=' + esc(latest.verification_status || "unverified") +
+            '</div>'
+        : '<div class="subtle">Latest audit: none</div>';
+    const conflictHtml = conflictCount
+        ? '<div class="subtle">Conflict fields: ' + esc((item.field_conflicts || []).map(function(row) { return row.field_name || "-"; }).join(", ")) + '</div>'
+        : "";
+    return '<div class="figure-review-summary" style="margin-top:12px;display:grid;gap:8px;">' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<span class="status-chip">Page ' + esc(item.page || "-") + '</span>' +
+            '<span class="status-chip">Crop status: ' + esc(cropStatus) + '</span>' +
+            '<span class="status-chip ' + (reviewRequired ? 'danger' : 'ok') + '">Image review: ' + (reviewRequired ? 'required' : 'not required') + '</span>' +
+            '<span class="status-chip">Object audits ' + auditCount + '</span>' +
+            '<span class="status-chip ' + (conflictCount ? 'danger' : '') + '">Conflicts ' + conflictCount + '</span>' +
+        '</div>' +
+        (flags.length ? '<div class="subtle">Flags: ' + esc(flags.join(", ")) + '</div>' : '<div class="subtle">Flags: 0</div>') +
+        latestHtml +
+        conflictHtml +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + openPdfAction + '</div>' +
+    '</div>';
+}
+
 function dftBlockedReasonText(reasons) {
     return (Array.isArray(reasons) ? reasons : []).map(function(reason) {
         return DFT_BLOCK_REASON_LABELS[reason] || reason;
@@ -1074,12 +1114,13 @@ function renderDetail(detail, audit) {
             var figNum = extractFigureNumber(item.caption);
             var figLabel = figNum !== null ? '图片 ' + figNum : '图片 ' + (index + 1);
             var codexAction = codexItemActionHtml("figure", item);
+            var reviewSummary = figureReviewSummaryHtml(item, detail.id);
 
             return '<details class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '">' +
                    '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + figLabel + '</h3>' + codexAction + '</div></summary>' +
                    '<div style="margin-top:10px;">' +
                    '<div class="prewrap">' + esc(item.caption || "无 caption") + "</div>" +
-                   summaryHtml + metaHtml + imgHtml + '</div></details>';
+                   summaryHtml + metaHtml + reviewSummary + imgHtml + '</div></details>';
         }).join("");
         
         const figureNotice = noisyCount

@@ -4,6 +4,7 @@ import json
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import String, cast, func, or_, select
@@ -14,6 +15,7 @@ from app.db.models import (
     DFTResult,
     DFTSetting,
     ElectrochemicalPerformance,
+    ExternalAnalysisCandidate,
     MechanismClaim,
     Paper,
     PaperRelationship,
@@ -45,6 +47,7 @@ from app.schemas.api import (
 )
 from app.config import get_settings
 from app.utils.artifact_status import build_paper_artifact_status
+from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import writing_card_gate
 
@@ -307,6 +310,13 @@ class PaperQueryService:
             select(ReferenceEntry).where(ReferenceEntry.paper_id == paper_id).order_by(ReferenceEntry.reference_number.asc().nulls_last(), ReferenceEntry.created_at.asc())
         ).all()
         full_translation = self._latest_full_translation(paper_id)
+        figure_ids = {str(figure.id) for figure in figures}
+        figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
+        figure_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+            paper_ids={paper_id},
+            target_type="figure",
+            target_ids=figure_ids,
+        )
 
         base_counts = {
             "sections": len(sections),
@@ -338,7 +348,14 @@ class PaperQueryService:
             **base_payload,
             sections=[self._serialize_section(item) for item in sections],
             tables=[self._serialize_table(item) for item in tables],
-            figures=[self._serialize_figure(item) for item in figures],
+            figures=[
+                self._serialize_figure(
+                    item,
+                    object_review_audits=figure_audits.get(str(item.id), []),
+                    field_conflicts=figure_conflicts.get(str(item.id), []),
+                )
+                for item in figures
+            ],
             dft_settings_items=[DFTSettingResponse.model_validate(item) for item in dft_settings],
             catalyst_samples_items=[CatalystSampleResponse.model_validate(item) for item in catalyst_samples],
             dft_results_items=[self._serialize_dft_result(item) for item in dft_results],
@@ -454,14 +471,112 @@ class PaperQueryService:
         )
 
     @classmethod
-    def _serialize_figure(cls, item: PaperFigure) -> PaperFigureResponse:
+    def _serialize_figure(
+        cls,
+        item: PaperFigure,
+        *,
+        object_review_audits: list[dict[str, Any]] | None = None,
+        field_conflicts: list[dict[str, Any]] | None = None,
+    ) -> PaperFigureResponse:
         payload = PaperFigureResponse.model_validate(item)
+        image_review = cls._figure_image_review_payload(payload)
+        audits = object_review_audits or []
+        conflicts = field_conflicts or []
         return payload.model_copy(
             update={
                 "caption": cls._clean_pdf_text(payload.caption),
                 "content_summary": cls._clean_pdf_text(payload.content_summary),
+                "asset_url": f"/api/papers/assets/{payload.image_path}" if payload.image_path else None,
+                "image_review": image_review,
+                "review_required": image_review["review_required"],
+                "flags": image_review["flags"],
+                "object_review_audit_count": len(audits),
+                "object_review_audits": audits[:5],
+                "latest_object_review_audit": audits[0] if audits else None,
+                "conflict_count": len(conflicts),
+                "field_conflicts": conflicts[:5],
             }
         )
+
+    def _figure_object_review_audits(
+        self,
+        paper_id: UUID,
+        figure_ids: set[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not figure_ids:
+            return {}
+        audits_by_target: dict[str, list[dict[str, Any]]] = {figure_id: [] for figure_id in figure_ids}
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.paper_id == paper_id)
+            .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
+            .order_by(ExternalAnalysisCandidate.created_at.desc())
+        ).all()
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = str(payload.get("target_type") or "").strip().lower()
+            target_id = str(payload.get("target_id") or payload.get("figure_id") or payload.get("record_id") or "")
+            if target_id not in figure_ids or target_type not in {"figure", "figures", "paper_figure", "paper_figures"}:
+                continue
+            if len(audits_by_target.setdefault(target_id, [])) >= 5:
+                continue
+            audits_by_target[target_id].append(self._object_review_audit_payload(candidate, payload))
+        return audits_by_target
+
+    @staticmethod
+    def _object_review_audit_payload(
+        candidate: ExternalAnalysisCandidate,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "candidate_id": str(candidate.id),
+            "candidate_type": candidate.candidate_type,
+            "status": candidate.status,
+            "target_type": payload.get("target_type"),
+            "target_id": payload.get("target_id") or payload.get("figure_id") or payload.get("record_id"),
+            "field_name": payload.get("field_name") or payload.get("field"),
+            "source": str(payload.get("source") or "unknown"),
+            "source_label": payload.get("source_label"),
+            "agent_role": payload.get("agent_role"),
+            "model_name": payload.get("model_name"),
+            "decision": payload.get("decision") or payload.get("verdict"),
+            "recommended_action": payload.get("recommended_action"),
+            "verification_status": payload.get("verification_status", "unverified"),
+            "confidence": payload.get("confidence") if payload.get("confidence") is not None else candidate.confidence,
+            "reason": payload.get("reason") or payload.get("reviewer_note") or payload.get("summary"),
+            "evidence_checked": payload.get("evidence_checked"),
+            "evidence_location": payload.get("evidence_location"),
+            "blocking_errors": payload.get("blocking_errors") or [],
+            "corrected_value": payload.get("corrected_value"),
+            "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+        }
+
+    @staticmethod
+    def _figure_image_review_payload(payload: PaperFigureResponse) -> dict[str, Any]:
+        flags: list[str] = []
+        if not payload.image_path:
+            flags.append("missing_image_path")
+        if payload.page is None:
+            flags.append("missing_pdf_page")
+        if not payload.crop_status:
+            flags.append("missing_crop_status")
+        if payload.crop_status in {"needs_recrop", "caption_only", "needs_review"}:
+            flags.append(payload.crop_status)
+        if not any(isinstance(item, dict) and item.get("bbox") for item in (payload.prov or [])):
+            flags.append("missing_parser_bbox")
+
+        crop_status = payload.crop_status or ("candidate_crop" if payload.image_path else "caption_only")
+        review_required = bool(flags) or crop_status in {"needs_recrop", "caption_only", "needs_review"}
+        return {
+            "crop_status": crop_status,
+            "review_required": review_required,
+            "flags": list(dict.fromkeys(flags)),
+            "crop_confidence": payload.crop_confidence,
+            "crop_source": payload.crop_source,
+            "note": "Verify this figure against the PDF page before treating it as evidence."
+            if review_required
+            else "Parser crop is available; still treat it as an unverified figure candidate.",
+        }
 
     @classmethod
     def _serialize_dft_result(cls, item: DFTResult) -> DFTResultResponse:

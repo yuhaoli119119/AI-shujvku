@@ -145,6 +145,7 @@ class PaperFigureResponse(BaseModel):
     id: UUID
     caption: str | None = None
     image_path: str | None = None
+    asset_url: str | None = None
     page: int | None = None
     figure_role: str | None = None
     role_confidence: float | None = None
@@ -155,6 +156,14 @@ class PaperFigureResponse(BaseModel):
     crop_status: str = "candidate_crop"
     crop_confidence: float | None = None
     crop_source: str | None = None
+    image_review: dict[str, Any] | None = None
+    review_required: bool | None = None
+    flags: list[str] = Field(default_factory=list)
+    object_review_audit_count: int = 0
+    object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
+    latest_object_review_audit: dict[str, Any] | None = None
+    conflict_count: int = 0
+    field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

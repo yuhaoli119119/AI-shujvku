@@ -26,6 +26,7 @@ from app.db.models import (
 from app.db.session import get_db_session
 from app.main import app
 from app.services.gemini_audit_service import GeminiAuditService
+from app.services.paper_query import PaperQueryService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.workbench_status import workflow_needs_human_confirmation
@@ -165,6 +166,91 @@ def test_prepare_workspace_writes_standard_materials(workbench_env):
         with (workspace_root / "quality_report.json").open("r", encoding="utf-8") as handle:
             quality = json.load(handle)
         assert quality["quality_status"] == "Broken"
+
+
+def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Figure audit paper", pdf_path="paper.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Figure 2. Reaction pathway image.",
+            image_path="figures/figure-2.png",
+            page=4,
+            crop_status="candidate_crop",
+            crop_confidence=0.82,
+            prov=[{"bbox": {"l": 10, "t": 20, "r": 300, "b": 200}}],
+        )
+        session.add(figure)
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="figure_object_review",
+            source_label="Figure object review",
+            normalized_payload={},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+        for source, decision, corrected_value in [
+            ("glm_figure_audit", "PASS", "usable_crop"),
+            ("codex_figure_audit", "REVISE", "needs_manual_crop_check"),
+        ]:
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    status="candidate",
+                    confidence=0.74,
+                    mapping_reason="figure object review",
+                    normalized_payload={
+                        "target_type": "figure",
+                        "target_id": str(figure.id),
+                        "field_name": "crop_status",
+                        "decision": decision,
+                        "corrected_value": corrected_value,
+                        "confidence": 0.74,
+                        "source": source,
+                        "source_label": source,
+                        "agent_role": "figure_reviewer",
+                        "verification_status": "unverified",
+                        "evidence_checked": True,
+                        "evidence_location": {"page": 4},
+                        "reason": "Figure crop reviewed as a candidate only.",
+                    },
+                )
+            )
+        session.commit()
+        paper_id = paper.id
+        figure_id = figure.id
+
+        detail = PaperQueryService(session).get_paper_detail(paper_id)
+        conflict_payload = ReviewConflictAggregationService(session).list_conflicts(
+            paper_id=paper_id,
+            target_type="figure",
+            target_id=str(figure_id),
+            include_non_conflicts=True,
+        )
+        stored_figure = session.get(PaperFigure, figure_id)
+
+        assert detail is not None
+        figure_payload = detail.figures[0]
+        assert figure_payload.page == 4
+        assert figure_payload.asset_url == "/api/papers/assets/figures/figure-2.png"
+        assert figure_payload.image_review["crop_status"] == "candidate_crop"
+        assert figure_payload.review_required is False
+        assert figure_payload.object_review_audit_count == 2
+        assert figure_payload.latest_object_review_audit["source"] == "codex_figure_audit"
+        assert figure_payload.latest_object_review_audit["decision"] == "REVISE"
+        assert figure_payload.latest_object_review_audit["verification_status"] == "unverified"
+        assert figure_payload.conflict_count == 1
+        assert figure_payload.field_conflicts[0]["field_name"] == "crop_status"
+        assert conflict_payload["conflict_count"] == 1
+        assert stored_figure.crop_status == "candidate_crop"
+        assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
 
 
 def test_gemini_audit_flags_candidate_without_human_confirmation(workbench_env):
