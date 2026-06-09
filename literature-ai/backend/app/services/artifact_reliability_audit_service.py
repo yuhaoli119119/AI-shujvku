@@ -156,6 +156,18 @@ class ArtifactReliabilityAuditService:
 
     def paper_locator_reliability_summary(self, paper_id: UUID) -> dict[str, Any]:
         locators = self.session.scalars(select(EvidenceLocator).where(EvidenceLocator.paper_id == paper_id)).all()
+        return self._locator_summary(locators)
+
+    def paper_locator_reliability_summaries(self, paper_ids: set[UUID]) -> dict[str, dict[str, Any]]:
+        if not paper_ids:
+            return {}
+        locators = self.session.scalars(select(EvidenceLocator).where(EvidenceLocator.paper_id.in_(paper_ids))).all()
+        grouped: dict[UUID, list[EvidenceLocator]] = defaultdict(list)
+        for locator in locators:
+            grouped[locator.paper_id].append(locator)
+        return {str(paper_id): self._locator_summary(grouped.get(paper_id, [])) for paper_id in paper_ids}
+
+    def _locator_summary(self, locators: list[EvidenceLocator]) -> dict[str, Any]:
         issue_counts: Counter[str] = Counter()
         for locator in locators:
             summary = self.locator_reliability_from_payload(
@@ -183,9 +195,33 @@ class ArtifactReliabilityAuditService:
 
     def paper_figure_reliability_summary(self, paper_id: UUID) -> dict[str, Any]:
         figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper_id)).all()
+        return self._figure_summary(figures, check_asset_exists=True)
+
+    def paper_figure_reliability_summaries(
+        self,
+        paper_ids: set[UUID],
+        *,
+        check_asset_exists: bool = False,
+    ) -> dict[str, dict[str, Any]]:
+        if not paper_ids:
+            return {}
+        figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(paper_ids))).all()
+        grouped: dict[UUID, list[PaperFigure]] = defaultdict(list)
+        for figure in figures:
+            grouped[figure.paper_id].append(figure)
+        return {
+            str(paper_id): self._figure_summary(grouped.get(paper_id, []), check_asset_exists=check_asset_exists)
+            for paper_id in paper_ids
+        }
+
+    def _figure_summary(self, figures: list[PaperFigure], *, check_asset_exists: bool) -> dict[str, Any]:
         issue_counts: Counter[str] = Counter()
         for figure in figures:
-            review = build_figure_image_review(figure, settings=self.settings, check_asset_exists=True)
+            review = build_figure_image_review(
+                figure,
+                settings=self.settings,
+                check_asset_exists=check_asset_exists,
+            )
             issue_counts.update(self._figure_issues(figure, review))
         top_issues = [
             {"code": code, "count": count}

@@ -26,6 +26,7 @@ from app.db.models import (
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.workbench_status import (
     EXTRACTION_PROTOCOL_VERSION,
@@ -280,39 +281,91 @@ class PaperWorkbenchService:
 
     def review_center(self, *, limit: int = 100) -> dict[str, Any]:
         papers = self.session.scalars(select(Paper).order_by(Paper.created_at.desc()).limit(limit)).all()
+        paper_ids = {paper.id for paper in papers}
         rows = []
         status_counts: Counter[str] = Counter()
         quality_counts: Counter[str] = Counter()
         auditor = DFTCompletenessAuditor(self.session)
         reliability_auditor = ArtifactReliabilityAuditService(self.session, self.settings)
-        conflict_counts = ReviewConflictAggregationService(self.session).count_conflicts_by_paper({paper.id for paper in papers})
+        conflict_counts = ReviewConflictAggregationService(self.session).count_conflicts_by_paper(paper_ids)
+        dft_rows_by_paper: dict[UUID, list[DFTResult]] = {paper_id: [] for paper_id in paper_ids}
+        for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id.in_(paper_ids))).all() if paper_ids else []:
+            dft_rows_by_paper.setdefault(row.paper_id, []).append(row)
+        figure_rows_by_paper: dict[UUID, list[PaperFigure]] = {paper_id: [] for paper_id in paper_ids}
+        for figure in self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(paper_ids))).all() if paper_ids else []:
+            figure_rows_by_paper.setdefault(figure.paper_id, []).append(figure)
+        table_counts = {
+            paper_id: count
+            for paper_id, count in (
+                self.session.execute(
+                    select(PaperTable.paper_id, func.count(PaperTable.id))
+                    .where(PaperTable.paper_id.in_(paper_ids))
+                    .group_by(PaperTable.paper_id)
+                ).all()
+                if paper_ids
+                else []
+            )
+        }
+        evidence_counts = {
+            paper_id: count
+            for paper_id, count in (
+                self.session.execute(
+                    select(EvidenceLocator.paper_id, func.count(EvidenceLocator.id))
+                    .where(EvidenceLocator.paper_id.in_(paper_ids))
+                    .group_by(EvidenceLocator.paper_id)
+                ).all()
+                if paper_ids
+                else []
+            )
+        }
+        candidates_by_paper: dict[UUID, list[ExternalAnalysisCandidate]] = {paper_id: [] for paper_id in paper_ids}
+        candidate_types = {"external_audit_opinion", "object_review_audit"}
+        for candidate in (
+            self.session.scalars(
+                select(ExternalAnalysisCandidate)
+                .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
+                .where(ExternalAnalysisCandidate.candidate_type.in_(candidate_types))
+                .order_by(ExternalAnalysisCandidate.created_at.desc())
+            ).all()
+            if paper_ids
+            else []
+        ):
+            candidates_by_paper.setdefault(candidate.paper_id, []).append(candidate)
+        locator_reliability_by_paper = reliability_auditor.paper_locator_reliability_summaries(paper_ids)
+        figure_reliability_by_paper = reliability_auditor.paper_figure_reliability_summaries(
+            paper_ids,
+            check_asset_exists=False,
+        )
+        all_dft_rows = [row for rows_for_paper in dft_rows_by_paper.values() for row in rows_for_paper]
+        gate_by_id = bulk_export_gate_results(self.session, all_dft_rows, target_type="dft_results")
+        exportable_counts: dict[UUID, int] = {}
+        blocked_counts: dict[UUID, int] = {}
+        for paper_id, rows_for_paper in dft_rows_by_paper.items():
+            exportable = sum(1 for row in rows_for_paper if gate_by_id.get(str(row.id)) and gate_by_id[str(row.id)].eligible)
+            exportable_counts[paper_id] = exportable
+            blocked_counts[paper_id] = max(0, len(rows_for_paper) - exportable)
+        dft_audits = auditor.audit_papers(
+            paper_ids,
+            parsed_counts={paper_id: len(rows_for_paper) for paper_id, rows_for_paper in dft_rows_by_paper.items()},
+            exportable_counts=exportable_counts,
+            blocked_counts=blocked_counts,
+        )
         for paper in papers:
             status_counts[paper.workflow_status or "Imported"] += 1
             quality_counts[paper.pdf_quality_status or "unknown"] += 1
-            dft_rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+            dft_rows = dft_rows_by_paper.get(paper.id, [])
             dft_count = len(dft_rows)
-            figure_count = (
-                self.session.scalar(select(func.count(PaperFigure.id)).where(PaperFigure.paper_id == paper.id)) or 0
-            )
-            table_count = (
-                self.session.scalar(select(func.count(PaperTable.id)).where(PaperTable.paper_id == paper.id)) or 0
-            )
-            evidence_count = (
-                self.session.scalar(select(func.count(EvidenceLocator.id)).where(EvidenceLocator.paper_id == paper.id))
-                or 0
-            )
-            external_audit_candidates = self.session.scalars(
-                select(ExternalAnalysisCandidate)
-                .where(ExternalAnalysisCandidate.paper_id == paper.id)
-                .where(ExternalAnalysisCandidate.candidate_type == "external_audit_opinion")
-                .order_by(ExternalAnalysisCandidate.created_at.desc())
-            ).all()
-            object_review_candidates = self.session.scalars(
-                select(ExternalAnalysisCandidate)
-                .where(ExternalAnalysisCandidate.paper_id == paper.id)
-                .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
-                .order_by(ExternalAnalysisCandidate.created_at.desc())
-            ).all()
+            figures = figure_rows_by_paper.get(paper.id, [])
+            figure_count = len(figures)
+            table_count = table_counts.get(paper.id, 0)
+            evidence_count = evidence_counts.get(paper.id, 0)
+            paper_candidates = candidates_by_paper.get(paper.id, [])
+            external_audit_candidates = [
+                candidate for candidate in paper_candidates if candidate.candidate_type == "external_audit_opinion"
+            ]
+            object_review_candidates = [
+                candidate for candidate in paper_candidates if candidate.candidate_type == "object_review_audit"
+            ]
             external_audit_source_counts: Counter[str] = Counter()
             external_audit_opinions: list[dict[str, Any]] = []
             for candidate in external_audit_candidates:
@@ -371,7 +424,7 @@ class PaperWorkbenchService:
             figure_crop_status_counts = dict(
                 Counter(
                     self._figure_crop_payload(figure)["crop_status"]
-                    for figure in self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper.id)).all()
+                    for figure in figures
                 )
             )
             unreliable_figure_count = sum(
@@ -379,27 +432,45 @@ class PaperWorkbenchService:
                 for status in ("needs_recrop", "caption_only", "needs_review")
             )
             dft_candidate_status_counts = dict(Counter(row.candidate_status or "system_candidate" for row in dft_rows))
-            gate_by_id = bulk_export_gate_results(self.session, dft_rows, target_type="dft_results")
-            exportable_count = sum(1 for gate in gate_by_id.values() if gate.eligible)
-            blocked_count = max(0, dft_count - exportable_count)
-            dft_audit = auditor.audit_paper(
+            exportable_count = exportable_counts.get(paper.id, 0)
+            blocked_count = blocked_counts.get(paper.id, 0)
+            dft_audit = dft_audits.get(str(paper.id)) or auditor.audit_paper(
                 paper.id,
                 parsed_count=dft_count,
                 exportable_count=exportable_count,
                 blocked_count=blocked_count,
             )
-            locator_reliability = reliability_auditor.paper_locator_reliability_summary(paper.id)
-            figure_reliability = reliability_auditor.paper_figure_reliability_summary(paper.id)
+            locator_reliability = locator_reliability_by_paper.get(str(paper.id)) or {
+                "status": "reliable",
+                "locator_count": 0,
+                "issue_count": 0,
+                "issue_counts": {},
+                "top_issues": [],
+            }
+            figure_reliability = figure_reliability_by_paper.get(str(paper.id)) or {
+                "status": "reliable",
+                "figure_count": 0,
+                "issue_count": 0,
+                "issue_counts": {},
+                "top_issues": [],
+            }
+            pdf_status = build_paper_pdf_status(paper, settings=self.settings)
             rows.append(
                 {
                     "paper_id": str(paper.id),
                     "title": paper.title,
+                    "doi": paper.doi,
                     "year": paper.year,
                     "journal": paper.journal,
                     "workflow_status": paper.workflow_status,
                     "pdf_quality_status": paper.pdf_quality_status,
                     "pdf_quality_score": paper.pdf_quality_score,
                     "quality_reason": quality_report.get("reason"),
+                    "pdf_artifact_status": pdf_status,
+                    "pdf_exists": bool(pdf_status.get("pdf_exists")),
+                    "pdf_file_size": pdf_status.get("pdf_file_size"),
+                    "pdf_path_kind": pdf_status.get("pdf_path_kind"),
+                    "pdf_url": f"/api/papers/{paper.id}/pdf" if pdf_status.get("pdf_exists") else None,
                     "needs_human_confirmation": needs_human_confirmation,
                     "has_dft_candidates": dft_count > 0,
                     "dft_candidate_count": dft_count,

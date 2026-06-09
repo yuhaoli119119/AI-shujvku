@@ -59,6 +59,31 @@ def _file_size(path: Path | None) -> int | None:
         return None
 
 
+def _resolve_artifact_for_status(raw_path: str | None, *, category: str, settings: Settings) -> Path | None:
+    raw = str(raw_path or "").strip()
+    if not raw or _is_url(raw):
+        return None
+    normalized = raw.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part]
+    candidates: list[Path] = []
+
+    if parts and parts[0].lower() == "storage":
+        candidates.append(settings.storage_root.joinpath(*parts[1:]))
+    elif parts and parts[0].lower() == category.lower():
+        candidates.append(settings.storage_root.joinpath(*parts))
+    elif not _is_absolute_like(raw) and category in settings.storage_paths:
+        candidates.append(settings.storage_paths[category] / normalized)
+
+    for candidate in candidates:
+        try:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+
+    return resolve_persisted_artifact_path(raw, category=category, settings=settings)
+
+
 def _path_kind(raw_path: str | None, resolved_path: Path | None) -> str:
     raw = str(raw_path or "").strip()
     if _is_url(raw):
@@ -148,6 +173,24 @@ def public_workspace_reference(paper: Paper, *, settings: Settings | None = None
         return f"by_id/{paper.id}"
 
 
+def build_paper_pdf_status(paper: Paper, *, settings: Settings | None = None) -> dict[str, Any]:
+    runtime_settings = settings or get_settings()
+    raw_pdf = paper.pdf_path
+    pdf_path = _resolve_artifact_for_status(raw_pdf, category="pdf", settings=runtime_settings)
+    pdf_exists = bool(pdf_path and pdf_path.exists() and pdf_path.is_file())
+    blocking_errors = [] if pdf_exists else ["missing_pdf"]
+    warnings: list[str] = []
+    if _path_kind(raw_pdf, pdf_path) == "absolute":
+        warnings.append("absolute_pdf_path_masked")
+    return {
+        "pdf_exists": pdf_exists,
+        "pdf_file_size": _file_size(pdf_path),
+        "pdf_path_kind": _path_kind(raw_pdf, pdf_path),
+        "blocking_errors": blocking_errors,
+        "warnings": warnings,
+    }
+
+
 def mask_local_absolute_paths(value: Any, *, settings: Settings | None = None) -> Any:
     """Recursively mask local absolute path strings before API/MCP serialization."""
     runtime_settings = settings or get_settings()
@@ -166,18 +209,18 @@ def build_paper_artifact_status(paper: Paper, *, settings: Settings | None = Non
     """Build the external-AI artifact gate using the same persisted-path resolver as smoke checks."""
     runtime_settings = settings or get_settings()
     raw_pdf = paper.pdf_path
-    pdf_path = resolve_persisted_artifact_path(raw_pdf, category="pdf", settings=runtime_settings)
-    markdown_path = resolve_persisted_artifact_path(
+    pdf_path = _resolve_artifact_for_status(raw_pdf, category="pdf", settings=runtime_settings)
+    markdown_path = _resolve_artifact_for_status(
         paper.markdown_path,
         category="markdown",
         settings=runtime_settings,
     )
-    docling_path = resolve_persisted_artifact_path(
+    docling_path = _resolve_artifact_for_status(
         paper.docling_json_path,
         category="docling_json",
         settings=runtime_settings,
     )
-    grobid_path = resolve_persisted_artifact_path(
+    grobid_path = _resolve_artifact_for_status(
         paper.tei_path,
         category="tei",
         settings=runtime_settings,

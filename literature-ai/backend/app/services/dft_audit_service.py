@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections import defaultdict
 from typing import Any
 from uuid import UUID
 
@@ -96,6 +97,56 @@ class DFTCompletenessAuditor:
             ),
         }
 
+    def audit_papers(
+        self,
+        paper_ids: set[UUID],
+        *,
+        parsed_counts: dict[UUID, int] | None = None,
+        exportable_counts: dict[UUID, int] | None = None,
+        blocked_counts: dict[UUID, int] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        if not paper_ids:
+            return {}
+        parsed_counts = parsed_counts or {}
+        exportable_counts = exportable_counts or {}
+        blocked_counts = blocked_counts or {}
+        signals_by_paper = self._collect_signals_for_papers(paper_ids)
+        audits: dict[str, dict[str, Any]] = {}
+        for paper_id in paper_ids:
+            parsed_count = int(parsed_counts.get(paper_id, 0) or 0)
+            exportable_count = int(exportable_counts.get(paper_id, 0) or 0)
+            blocked_count = int(blocked_counts.get(paper_id, 0) or 0)
+            signals = signals_by_paper.get(paper_id, [])
+            signal_count = len(signals)
+            suspected_missing_count = max(0, signal_count - parsed_count)
+            status = self._coverage_status(
+                signal_count=signal_count,
+                parsed_count=parsed_count,
+                suspected_missing_count=suspected_missing_count,
+                exportable_count=exportable_count,
+                blocked_count=blocked_count,
+            )
+            kind_counts = Counter(item["source_type"] for item in signals)
+            audits[str(paper_id)] = {
+                "schema_version": "dft_completeness_audit_v1",
+                "coverage_status": status,
+                "status_label": STATUS_LABELS.get(status, status),
+                "detected_signal_count": signal_count,
+                "detected_sections": kind_counts.get("section", 0),
+                "detected_tables": kind_counts.get("table", 0),
+                "detected_figures": kind_counts.get("figure", 0),
+                "parsed_dft_count": parsed_count,
+                "exportable_dft_count": exportable_count,
+                "blocked_dft_count": blocked_count,
+                "suspected_missing_count": suspected_missing_count,
+                "signal_examples": signals[:8],
+                "audit_policy": (
+                    "Signals are a recall-oriented checklist for AI rescanning; they do not prove a value "
+                    "exists unless the AI/human reviewer anchors it to PDF evidence."
+                ),
+            }
+        return audits
+
     def _collect_signals(self, paper_id: UUID) -> list[dict[str, Any]]:
         signals: list[dict[str, Any]] = []
         sections = self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper_id)).all()
@@ -133,6 +184,44 @@ class DFTCompletenessAuditor:
                 text=text,
             )
         return signals
+
+    def _collect_signals_for_papers(self, paper_ids: set[UUID]) -> dict[UUID, list[dict[str, Any]]]:
+        signals_by_paper: dict[UUID, list[dict[str, Any]]] = defaultdict(list)
+        sections = self.session.scalars(select(PaperSection).where(PaperSection.paper_id.in_(paper_ids))).all()
+        tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id.in_(paper_ids))).all()
+        figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(paper_ids))).all()
+
+        for section in sections:
+            text = " ".join([section.section_title or "", section.section_type or "", section.text or ""])
+            self._append_if_signal(
+                signals_by_paper[section.paper_id],
+                source_type="section",
+                source_id=str(section.id),
+                page=section.page_start,
+                label=section.section_title or section.section_type,
+                text=text,
+            )
+        for table in tables:
+            text = " ".join([table.caption or "", table.markdown_content or ""])
+            self._append_if_signal(
+                signals_by_paper[table.paper_id],
+                source_type="table",
+                source_id=str(table.id),
+                page=table.page,
+                label=table.caption,
+                text=text,
+            )
+        for figure in figures:
+            text = " ".join([figure.figure_label or "", figure.caption or "", figure.content_summary or ""])
+            self._append_if_signal(
+                signals_by_paper[figure.paper_id],
+                source_type="figure",
+                source_id=str(figure.id),
+                page=figure.page,
+                label=figure.figure_label or figure.caption,
+                text=text,
+            )
+        return signals_by_paper
 
     @classmethod
     def _append_if_signal(

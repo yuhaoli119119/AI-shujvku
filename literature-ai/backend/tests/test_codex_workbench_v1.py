@@ -529,7 +529,10 @@ def test_workflow_human_confirmation_gate_covers_candidate_statuses():
 
 
 def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
-    _, _, Session = workbench_env
+    _, storage_root, Session = workbench_env
+    pdf_path = storage_root / "pdf" / "paper.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4\n% review center fixture\n")
     with Session() as session:
         paper = Paper(
             title="Review center paper",
@@ -621,6 +624,10 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert data["metadata"]["status_counts"]["Needs_Human_Confirmation"] == 1
     by_title = {row["title"]: row for row in data["rows"]}
     assert by_title["Review center paper"]["needs_human_confirmation"] is True
+    assert by_title["Review center paper"]["pdf_exists"] is True
+    assert by_title["Review center paper"]["pdf_url"].endswith(f"/api/papers/{by_title['Review center paper']['paper_id']}/pdf")
+    assert by_title["Review center paper"]["pdf_artifact_status"]["pdf_exists"] is True
+    assert by_title["Review center paper"]["pdf_artifact_status"]["pdf_path_kind"] == "storage_relative"
     assert by_title["Review center paper"]["has_dft_candidates"] is True
     assert by_title["Review center paper"]["evidence_count"] == 1
     assert by_title["Review center paper"]["locator_issue_count"] == 1

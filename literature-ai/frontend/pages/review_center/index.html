@@ -611,6 +611,21 @@
       return '<span class="chip ' + chipClass + '" title="' + esc(title) + '">Figure issues ' + esc(issueCount) + '</span>';
     }
 
+    function pdfAvailabilityInline(row) {
+      const status = row.pdf_artifact_status || row.artifact_status || {};
+      const hasPdf = row.pdf_exists === true || status.pdf_exists === true;
+      const pathKind = row.pdf_path_kind || status.pdf_path_kind || "unknown";
+      const size = row.pdf_file_size || status.pdf_file_size || null;
+      const blockers = Array.isArray(status.blocking_errors) ? status.blocking_errors : [];
+      const title = [
+        hasPdf ? "PDF exists" : "PDF missing or unresolved",
+        "path kind: " + pathKind,
+        size ? "size: " + size + " bytes" : null,
+        blockers.length ? "blockers: " + blockers.join(", ") : null
+      ].filter(Boolean).join("\n");
+      return '<span class="chip ' + (hasPdf ? "ok" : "bad") + '" title="' + esc(title) + '">' + (hasPdf ? "PDF ready" : "No PDF") + '</span>';
+    }
+
     function renderRows() {
       renderStats();
       const rows = filteredRows();
@@ -666,7 +681,7 @@
           '<td style="text-align: center;"><span class="muted" style="font-size: 13px;">' + (idx + 1) + '</span></td>' +
           '<td class="col-divider" style="text-align: center;"><span style="font-size: 13px;">' + yearDisp + '</span></td>' +
           '<td class="col-divider"><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
-          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + qlChip + dftChip + figureReliabilityInline(row) + locatorReliabilityInline(row) + conflictChip + '</div></td>' +
+          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + pdfAvailabilityInline(row) + qlChip + dftChip + figureReliabilityInline(row) + locatorReliabilityInline(row) + conflictChip + '</div></td>' +
           '<td class="col-divider"><div style="display:grid;gap:6px;">' +
             '<span class="chip ' + dftAuditChipClass + '" title="DFT 完整性状态">' + esc(dftStatus) + '</span>' +
             '<div class="muted">线索: <strong>' + esc(dftAudit.detected_signal_count || 0) + '</strong>；已解析: <strong>' + esc(dftAudit.parsed_dft_count || 0) + '</strong>；疑似漏提: <strong>' + esc(suspectedMissing) + '</strong></div>' +

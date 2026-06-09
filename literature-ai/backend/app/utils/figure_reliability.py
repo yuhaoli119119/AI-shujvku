@@ -36,7 +36,7 @@ def build_figure_image_review(
         flags.append("missing_parser_bbox")
     if _get(figure, "page") is None:
         flags.append("missing_pdf_page")
-    if check_asset_exists and not full_page_image_path:
+    if not full_page_image_path:
         flags.append("missing_full_page_snapshot")
     if is_small_crop(pixel_size, bbox_size):
         flags.append("small_crop_or_subfigure")
