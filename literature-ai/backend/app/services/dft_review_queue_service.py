@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample, DFTResult, DFTSetting, EvidenceLocator, ExternalAnalysisCandidate, Paper
 from app.services.dft_audit_service import DFTCompletenessAuditor
+from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
 
@@ -75,6 +76,11 @@ class DFTReviewQueueService:
         gate_by_id = bulk_export_gate_results(self.session, dft_rows, target_type="dft_results")
         locators_by_id = self._bulk_locator_payloads(dft_rows)
         external_audits_by_paper = self._bulk_external_audit_payloads({paper.id for _row, paper in rows})
+        conflicts_by_target = ReviewConflictAggregationService(self.session).conflicts_by_target(
+            paper_ids={paper.id for _row, paper in rows},
+            target_type="dft_results",
+            target_ids={str(row.id) for row in dft_rows},
+        )
 
         for row, paper in rows:
             gate = gate_by_id.get(str(row.id))
@@ -107,6 +113,7 @@ class DFTReviewQueueService:
                     gate,
                     locators_by_id.get(str(row.id), []),
                     external_audits_by_paper.get(str(paper.id), []),
+                    conflicts_by_target.get(str(row.id), []),
                 )
             )
 
@@ -229,6 +236,7 @@ class DFTReviewQueueService:
         gate: Any,
         locators: list[dict[str, Any]] | None = None,
         external_audits: list[dict[str, Any]] | None = None,
+        conflicts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         paper_id = str(paper.id)
         result_id = str(row.id)
@@ -281,6 +289,8 @@ class DFTReviewQueueService:
             "recommended_action": self._recommended_action(reasons, gate, sanity_flags),
             "evidence_locators": locators,
             "latest_external_audit_opinions": (external_audits or [])[:5],
+            "conflicts_count": len(conflicts or []),
+            "field_conflicts": conflicts or [],
             "evidence_check": {
                 "has_evidence_text": bool((row.evidence_text or "").strip()),
                 "locator_count": len(locators),

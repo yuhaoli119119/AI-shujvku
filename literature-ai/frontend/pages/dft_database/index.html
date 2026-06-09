@@ -698,6 +698,30 @@
         return '<span class="audit-chip ' + auditClass(audit) + '" title="' + esc(status) + '">' + esc(label) + ': ' + esc(verdict) + '</span>';
       }).join("");
     }
+    function renderConflictChips(conflicts) {
+      const items = Array.isArray(conflicts) ? conflicts : [];
+      if (!items.length) return '<span class="audit-chip ok">no AI conflicts</span>';
+      return items.slice(0, 4).map(conflict => {
+        const types = (conflict.conflict_types || []).join(", ") || "conflict";
+        const label = (conflict.field_name || "field") + ": " + types;
+        return '<span class="audit-chip bad" title="只读冲突聚合；不会自动共识、合并或验证。' + esc(types) + '">' + esc(label) + '</span>';
+      }).join("");
+    }
+    function renderConflictRows(conflicts) {
+      const items = Array.isArray(conflicts) ? conflicts : [];
+      if (!items.length) return '<div class="quality-meta">No multi-AI field conflict was detected for this row.</div>';
+      return items.map(conflict => {
+        const opinionRows = (conflict.opinions || []).map(opinion => {
+          const who = opinion.source_label || opinion.source || opinion.reviewer || opinion.model_name || "reviewer";
+          const decision = opinion.decision || opinion.status || "-";
+          const value = opinion.value == null ? "-" : JSON.stringify(opinion.value);
+          const unit = opinion.unit ? (" " + opinion.unit) : "";
+          const reason = opinion.reason || "";
+          return '<div class="quality-meta"><strong>' + esc(who) + '</strong>: ' + esc(decision) + ' / ' + esc(value) + esc(unit) + (reason ? ' / ' + esc(reason) : '') + '</div>';
+        }).join("");
+        return '<div style="margin-bottom:8px;"><div class="quality-meta"><strong>' + esc(conflict.field_name || "field") + '</strong> · ' + esc((conflict.conflict_types || []).join(", ")) + '</div>' + opinionRows + '</div>';
+      }).join("");
+    }
     function openDftPdfPage(paperId, page) {
       const pageNumber = Number(page || 0);
       if (!paperId || !pageNumber) {
@@ -713,6 +737,7 @@
       const page = item.evidence_page || (locator && locator.page);
       const locators = Array.isArray(item.evidence_locators) ? item.evidence_locators : [];
       const audits = Array.isArray(item.latest_external_audit_opinions) ? item.latest_external_audit_opinions : [];
+      const conflicts = Array.isArray(item.field_conflicts) ? item.field_conflicts : [];
       const collapseEl = document.getElementById("evidenceCollapse");
       const header = collapseEl?.previousElementSibling?.querySelector(".collapse-header");
       if (collapseEl && collapseEl.classList.contains("hidden")) {
@@ -740,7 +765,8 @@
         '</div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">Evidence text</div><div class="v">' + esc(item.evidence_text || "No evidence text.") + '</div></div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">Locators</div><div class="v">' + locatorRows + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">Latest external audit opinions</div><div class="v">' + auditRows + '</div></div>';
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">Latest external audit opinions</div><div class="v">' + auditRows + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">AI conflicts</div><div class="v">' + renderConflictRows(conflicts) + '</div></div>';
       document.getElementById("validationSummary").textContent = item.evidence_text ? "DFT queue evidence loaded." : "This DFT row is missing evidence text.";
     }
     function renderQualityRows(rows) {
@@ -776,6 +802,7 @@
           '</div>' +
           '<div class="queue-evidence-preview">' + esc(evidencePreview) + '</div>' +
           '<div class="audit-strip">' + renderAuditChips(row.latest_external_audit_opinions) + '</div>' +
+          '<div class="audit-strip">' + renderConflictChips(row.field_conflicts) + '</div>' +
           '<div class="quality-actions">' +
             '<button class="btn btn-primary btn-sm" type="button" onclick="showQueueEvidence(' + idx + ')">Review evidence</button>' +
             '<button class="btn btn-ghost btn-sm" type="button" onclick="openDftPdfPage(\'' + esc(row.paper_id) + '\',' + esc(page || 0) + ')">Open PDF page ' + esc(page || "-") + '</button>' +

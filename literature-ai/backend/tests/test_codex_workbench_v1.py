@@ -15,8 +15,11 @@ from app.db.models import (
     Base,
     DFTResult,
     EvidenceLocator,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
     ExtractionFieldReview,
     Paper,
+    PaperCorrection,
     PaperFigure,
     PaperSection,
 )
@@ -24,6 +27,7 @@ from app.db.session import get_db_session
 from app.main import app
 from app.services.gemini_audit_service import GeminiAuditService
 from app.services.paper_workbench_service import PaperWorkbenchService
+from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.workbench_status import workflow_needs_human_confirmation
 
 
@@ -297,3 +301,204 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert by_title["Review center paper"]["evidence_count"] == 1
     assert by_title["Codex candidate still needs human review"]["needs_human_confirmation"] is True
     assert by_title["Human confirmed paper"]["needs_human_confirmation"] is False
+
+
+def test_review_conflict_aggregation_is_read_only_for_dft_fields(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Conflict Aggregation Paper", pdf_path="conflict.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.20,
+            unit="eV",
+            evidence_text="The adsorption energy of Li2S4 is -1.20 eV.",
+            confidence=0.7,
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    with Session() as session:
+        GeminiAuditService(session).submit(
+            paper_id=paper_id,
+            target_type="dft_results",
+            target_id=row_id,
+            decision="PASS",
+            reviewer="gemini_test",
+            agent_role="dft_auditor",
+            model_name="gemini-test",
+            field_names=["value"],
+            reviewer_note="Value matches the evidence sentence.",
+            confidence=0.8,
+        )
+
+    with Session() as session:
+        GeminiAuditService(session).submit(
+            paper_id=paper_id,
+            target_type="dft_results",
+            target_id=row_id,
+            decision="FLAG",
+            reviewer="glm_test",
+            agent_role="dft_auditor",
+            model_name="glm-test",
+            field_names=["value"],
+            reviewer_note="The cited evidence appears to support a different number.",
+            confidence=0.75,
+        )
+
+    with Session() as session:
+        run = ExternalAnalysisRun(
+            paper_id=paper_id,
+            source="claude_dft_audit",
+            source_label="Claude DFT audit",
+            normalized_payload={"verdict": "REVISE"},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper_id,
+                candidate_type="external_audit_opinion",
+                normalized_payload={
+                    "source": "claude_dft_audit",
+                    "source_label": "Claude DFT audit",
+                    "verdict": "REVISE",
+                    "raw_payload": {
+                        "reviews": [
+                            {
+                                "target_type": "dft_results",
+                                "target_id": str(row_id),
+                                "field_name": "value",
+                                "decision": "REVISE",
+                                "corrected_value": -1.35,
+                                "unit": "eV",
+                                "confidence": 0.66,
+                                "evidence_location": {"page": 4, "section": "Results"},
+                                "reason": "Table value differs from extracted value.",
+                            }
+                        ]
+                    },
+                },
+                confidence=0.66,
+                status="candidate",
+            )
+        )
+        session.add_all(
+            [
+                PaperCorrection(
+                    paper_id=paper_id,
+                    source="glm_test",
+                    field_name="dft_results",
+                    target_path=f"dft_results:{row_id}:value",
+                    operation="replace",
+                    proposed_value=-1.35,
+                    reason="GLM proposed corrected value.",
+                    evidence_payload={"source_label": "GLM DFT audit", "confidence": 0.75},
+                    status="pending",
+                ),
+                PaperCorrection(
+                    paper_id=paper_id,
+                    source="gemini_test",
+                    field_name="dft_results",
+                    target_path=f"dft_results:{row_id}:value",
+                    operation="replace",
+                    proposed_value=-1.20,
+                    reason="Gemini kept extracted value.",
+                    evidence_payload={"source_label": "Gemini DFT audit", "confidence": 0.8},
+                    status="rejected",
+                ),
+            ]
+        )
+        before = session.get(DFTResult, row_id)
+        before_status = before.candidate_status
+        before_value = before.value
+
+        session.flush()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper_id)
+
+        after = session.get(DFTResult, row_id)
+        review = session.scalar(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_id == str(row_id),
+                ExtractionFieldReview.field_name == "value",
+            )
+        )
+
+    assert payload["conflict_count"] == 1
+    conflict = payload["rows"][0]
+    assert conflict["target_type"] == "dft_results"
+    assert conflict["target_id"] == str(row_id)
+    assert conflict["field_name"] == "value"
+    assert "value_conflict" in conflict["conflict_types"]
+    assert "decision_conflict" in conflict["conflict_types"]
+    assert {item["source_type"] for item in conflict["opinions"]} >= {
+        "extraction_field_review",
+        "external_audit_opinion",
+        "paper_correction",
+    }
+    assert after.candidate_status == before_status
+    assert after.value == before_value
+    assert review.reviewer_status == "review_conflict"
+
+
+def test_review_conflicts_api_and_review_center_counts(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Conflict API Paper", pdf_path="conflict-api.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S8",
+            value=-0.5,
+            unit="eV",
+            evidence_text="Evidence text",
+        )
+        session.add(row)
+        session.flush()
+        session.add_all(
+            [
+                PaperCorrection(
+                    paper_id=paper.id,
+                    source="ai_a",
+                    field_name="dft_results",
+                    target_path=f"dft_results:{row.id}:value",
+                    operation="replace",
+                    proposed_value=-0.5,
+                    reason="Keep value.",
+                    status="pending",
+                ),
+                PaperCorrection(
+                    paper_id=paper.id,
+                    source="ai_b",
+                    field_name="dft_results",
+                    target_path=f"dft_results:{row.id}:value",
+                    operation="replace",
+                    proposed_value=-0.7,
+                    reason="Use table value.",
+                    status="pending",
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    response = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}")
+    assert response.status_code == 200
+    assert response.json()["conflict_count"] == 1
+
+    center = client.get("/api/workbench/review-center?limit=50")
+    assert center.status_code == 200
+    row_payload = next(item for item in center.json()["rows"] if item["paper_id"] == paper_id)
+    assert row_payload["review_conflict_count"] == 1

@@ -493,7 +493,8 @@
         ["A/B 可读", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0)],
         ["有 DFT 候选", rows.filter(function (row) { return row.has_dft_candidates; }).length],
         ["疑似漏提", rows.reduce(function (sum, row) { return sum + Number(row.suspected_missing_dft_count || 0); }, 0)],
-        ["图片可疑", rows.reduce(function (sum, row) { return sum + Number(row.unreliable_figure_count || 0); }, 0)]
+        ["图片可疑", rows.reduce(function (sum, row) { return sum + Number(row.unreliable_figure_count || 0); }, 0)],
+        ["AI 冲突", rows.reduce(function (sum, row) { return sum + Number(row.review_conflict_count || 0); }, 0)]
       ];
       document.getElementById("stats").innerHTML = items.map(function (item) {
         return '<div class="stat"><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
@@ -557,6 +558,10 @@
         const auditSummary = latestAudit
           ? [(latestAudit.source_label || latestAudit.source || "external audit"), (latestAudit.verdict || latestAudit.recommended_action || "review"), (latestAudit.verification_status || "unverified")].filter(Boolean).join(" / ")
           : "no external audit";
+        const conflictCount = toCount(row.review_conflict_count);
+        const conflictChip = conflictCount > 0
+          ? '<span class="chip bad" title="只读聚合：不同 AI/审核来源对同一字段存在分歧，不会自动共识或合并。">AI 冲突 ' + esc(conflictCount) + '</span>'
+          : '<span class="chip ok" title="未检测到多审核来源字段冲突。">AI 冲突 0</span>';
         const figureStatusCounts = row.figure_crop_status_counts || {};
         const figureSummary = Object.keys(figureStatusCounts).length
           ? Object.keys(figureStatusCounts).map(function (key) { return key + ":" + figureStatusCounts[key]; }).join("；")
@@ -579,7 +584,7 @@
           '<td style="text-align: center;"><span class="muted" style="font-size: 13px;">' + (idx + 1) + '</span></td>' +
           '<td class="col-divider" style="text-align: center;"><span style="font-size: 13px;">' + yearDisp + '</span></td>' +
           '<td class="col-divider"><div class="paper-title" title="' + esc(row.title || '未命名文献') + '">' + esc(row.title || '未命名文献') + '</div><div class="muted paper-meta-line"><span>' + esc(row.journal || '未知期刊') + '</span><span>|</span><span class="mono" title="工作目录 ID：' + esc(workspace) + '">' + esc(wsDisp) + '</span>' + (doiInline ? '<span>|</span>' + doiInline : '') + '</div></td>' +
-          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + qlChip + dftChip + '</div></td>' +
+          '<td class="col-divider"><div style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 6px;">' + wfChip + qlChip + dftChip + conflictChip + '</div></td>' +
           '<td class="col-divider"><div style="display:grid;gap:6px;">' +
             '<span class="chip ' + dftAuditChipClass + '" title="DFT 完整性状态">' + esc(dftStatus) + '</span>' +
             '<div class="muted">线索: <strong>' + esc(dftAudit.detected_signal_count || 0) + '</strong>；已解析: <strong>' + esc(dftAudit.parsed_dft_count || 0) + '</strong>；疑似漏提: <strong>' + esc(suspectedMissing) + '</strong></div>' +

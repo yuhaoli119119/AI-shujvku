@@ -12,6 +12,7 @@ from app.db.session import get_db_session
 from app.schemas.workbench import GeminiAuditRequest, HumanConfirmRequest, WorkbenchPrepareRequest
 from app.services.gemini_audit_service import GeminiAuditService
 from app.services.paper_workbench_service import PaperWorkbenchService
+from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.workbench_status import WORKBENCH_SCHEMA_VERSION
 
 router = APIRouter()
@@ -24,6 +25,26 @@ def review_center(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     return PaperWorkbenchService(session, settings).review_center(limit=limit)
+
+
+@router.get("/review-conflicts")
+def get_review_conflicts(
+    paper_id: UUID | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    field_name: str | None = None,
+    include_non_conflicts: bool = False,
+    limit: int = Query(default=200, ge=1, le=1000),
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    return ReviewConflictAggregationService(session).list_conflicts(
+        paper_id=paper_id,
+        target_type=target_type,
+        target_id=target_id,
+        field_name=field_name,
+        include_non_conflicts=include_non_conflicts,
+        limit=limit,
+    )
 
 
 @router.get("/papers/{paper_id}/workspace")

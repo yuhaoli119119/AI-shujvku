@@ -32,6 +32,7 @@ from app.services.local_pdf_service import LocalPdfService
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
+from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.services.review_service import ReviewService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
@@ -498,6 +499,34 @@ def get_dft_review_queue(
             reason=reason,
             status=status,
             limit=max(1, min(limit, 200)),
+        )
+
+
+@mcp_server.tool(
+    name="get_review_conflicts",
+    description=(
+        "Read-only multi-AI/reviewer conflict aggregation grouped by paper_id, target_type, target_id, "
+        "and field_name. Does not approve, merge, or verify anything."
+    ),
+)
+def get_review_conflicts(
+    paper_id: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    field_name: str | None = None,
+    include_non_conflicts: bool = False,
+    limit: int = 200,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return ReviewConflictAggregationService(session).list_conflicts(
+            paper_id=UUID(paper_id) if paper_id else None,
+            target_type=target_type,
+            target_id=target_id,
+            field_name=field_name,
+            include_non_conflicts=include_non_conflicts,
+            limit=max(1, min(limit, 1000)),
         )
 
 

@@ -24,6 +24,7 @@ from app.db.models import (
     PaperTable,
 )
 from app.services.dft_audit_service import DFTCompletenessAuditor
+from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.workbench_status import (
     EXTRACTION_PROTOCOL_VERSION,
@@ -282,6 +283,7 @@ class PaperWorkbenchService:
         status_counts: Counter[str] = Counter()
         quality_counts: Counter[str] = Counter()
         auditor = DFTCompletenessAuditor(self.session)
+        conflict_counts = ReviewConflictAggregationService(self.session).count_conflicts_by_paper({paper.id for paper in papers})
         for paper in papers:
             status_counts[paper.workflow_status or "Imported"] += 1
             quality_counts[paper.pdf_quality_status or "unknown"] += 1
@@ -370,6 +372,7 @@ class PaperWorkbenchService:
                     "external_audit_count": len(external_audit_candidates),
                     "external_audit_source_counts": dict(sorted(external_audit_source_counts.items())),
                     "external_audit_opinions": external_audit_opinions,
+                    "review_conflict_count": conflict_counts.get(str(paper.id), 0),
                     "workspace_path": paper.workspace_path,
                     "detail_url": f"../literature_library/index.html?paper_id={paper.id}&tab=review",
                     "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
