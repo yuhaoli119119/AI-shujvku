@@ -9,6 +9,8 @@ role_boundary:
     - Rule-based DFT hints are only stored as system_candidate records.
     - System candidates must never enter the final DFT/ML database without review.
   ai_extraction:
+    - Before extracting or reviewing values, compare the system-parsed sections, tables, figures, and locators against the original PDF pages.
+    - If parser structure, table split, figure crop, page mapping, or locator anchoring looks wrong, record parse defects first and do not pretend the parsed package is already trustworthy.
     - Read the full evidence package, not only rows pre-extracted by rules.
     - Extract scientific DFT/material data from evidence.
     - Compare new AI extraction with system_candidate hints and report missing/conflicting evidence.
@@ -30,6 +32,8 @@ intake_boundary:
     - Only papers that already exist in the active library can be used for DFT extraction, review, writing, export, or MCP evidence retrieval.
 
 evidence_first_rules:
+  - The AI must actively inspect the original PDF, not only the parsed markdown or context bundle.
+  - Parsed sections, tables, figure crops, and locators are candidate aids; high-risk DFT or chart conclusions must be checked against the original PDF first.
   - Every non-empty scientific field must be supported by a text/table/figure locator.
   - Do not infer a numeric value from trends, curves, colors, or pathway images unless the value is explicitly readable in the paper text/table/caption.
   - If a figure gives only a visual trend, mark the value as pending or needs_fix.
@@ -38,6 +42,14 @@ evidence_first_rules:
   - Data without evidence location must not be promoted.
 
 workflow_stages:
+  parse_vs_pdf_check:
+    goal: Compare the system-generated reading package with the original PDF before trusting any parsed section, table, figure, or locator.
+    required_output:
+      - parser_readability_status
+      - pdf_checked_pages
+      - parse_defects
+      - trustworthy_sections_tables_figures
+      - blocked_targets_due_to_parse_error
   scope_gate:
     goal: Decide whether the paper is in scope before extracting rows.
     required_output:
@@ -91,12 +103,22 @@ workflow_stages:
       - human_confirmation_required
       - internal_data_read_status
       - prior_external_audit_summary
+  third_ai_adjudication:
+    goal: When the first two AI opinions disagree on a high-risk target, a third AI may adjudicate after reading the original PDF and both prior opinions.
+    required_output:
+      - adjudication_role
+      - adjudication_scope
+      - selected_source_ids
+      - adopt_reject_partial_decision
+      - object_level_evidence_anchors
+      - adjudication_notes
 
 MCP_tooling_context:
   purpose: MCP tools expose evidence packets, page reads, figure crops, chart audits, share tokens, and repair actions to AI workers.
   rule: MCP tool output is supporting evidence, not final truth.
   traceability: Every MCP-assisted AI action must be recorded in AuditLog, task center, field review, external analysis run, or PaperNote.
   internal_verification_read_path:
+    - The worker must inspect the original PDF page or page-derived artifact before trusting parsed structure for high-risk review.
     - Before auditing, external AI workers should read paper readiness through get_paper or get_codex_context and inspect artifact_status when present.
     - artifact_ready_for_external_audit must be true, or the worker must report blocking_errors and warnings instead of pretending the paper was fully readable.
     - get_review_coverage(paper_id) now exposes latest_external_audits, external_audit_count, and external_audit_source_distribution so other AI workers can see prior internal verification opinions.
@@ -185,6 +207,7 @@ ai_worker_protocol:
     - Every AI operation must leave a trace in task center, audit logs, field reviews, shared notes, correction proposals, or external analysis runs.
     - Review suggestions are inspected from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, PaperNote records, and AuditLog entries.
     - External AI workers must first confirm they can read the active library paper, artifact status, parsed content, review coverage, and prior external_audit_opinion records through MCP or API.
+    - For DFT rows, chart values, and other high-risk targets, the worker must compare parsed content with the original PDF before returning PASS, REVISE, or adjudication.
     - "A second AI review that did not read the internal verification data must declare internal_data_read_status: unreadable or incomplete and cannot return can_promote_to_exportable_database: true."
   image_audit:
     - The assigned VLM-capable model may audit figure crops, captions, full-page screenshots, and chart interpretations.
@@ -195,11 +218,17 @@ ai_worker_protocol:
     - The reviewer must check exact numeric value, unit, catalyst/material, adsorbate, property type, method/condition, locator, duplicates, and suspected missing rows.
     - PASS/accept from an AI does not unlock export unless the configured human/final gate also passes.
   ai_a_initial_extract:
+    - First compare parsed materials with the original PDF and record parse defects or locator defects when found.
     - Read abstract, methods, results/discussion, all tables, all captions, DFT-related text, and supporting evidence package.
     - Output structured candidate records only when evidence is located.
   ai_b_independent_review:
+    - Re-check the original PDF instead of trusting the first AI's parse assumptions.
     - Independently rescan the same evidence package.
     - Report missing records, conflicts, weak evidence, and duplicate candidates.
+  ai_c_third_adjudicator:
+    - Read the original PDF, the parsed evidence package, and both prior AI opinions.
+    - Decide whether to adopt all, reject all, or partially adopt the disputed object-level results.
+    - Output object_review_audit entries with adjudication_role=third_ai, adjudication_scope=conflict_resolution, and selected_source_ids.
   judge:
     - Compare AI-A, AI-B, and system_candidate hints.
     - Produce one merged candidate set plus conflict report.
@@ -259,6 +288,12 @@ output_schema:
     notes: string
     internal_data_read_status: readable | incomplete | unreadable
     prior_external_audits_checked: boolean
+    parser_readability_status: readable | partially_reliable | unreliable
+    parse_defects: list
+    pdf_checked_pages: list
+    adjudication_role: string
+    adjudication_scope: string
+    selected_source_ids: list
   report:
     detected_dft_signal_count: integer
     parsed_candidate_count: integer

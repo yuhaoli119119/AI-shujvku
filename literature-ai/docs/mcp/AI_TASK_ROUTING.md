@@ -10,6 +10,7 @@ All AI output remains candidate or audit evidence until a later trusted review g
 
 - Start with `query_papers` unless the user already provided a `paper_id`.
 - Use `get_codex_context` for the paper-level context bundle.
+- For high-risk review, use `read_paper_page` to compare the parsed bundle with the original PDF before trusting parsed sections, tables, figures, or locators.
 - Use `get_codex_item` for focused checks of a section, figure, table, DFT row, mechanism claim, writing card, or figure data point.
 - Use `import_analysis` for paper-level AI audit opinions and other external AI review payloads.
 - Use `append_note` for non-final reviewer notes.
@@ -66,10 +67,11 @@ Recommended tool order:
 
 1. `query_papers` with `has_dft_results=true` or the supplied `paper_id`.
 2. `get_codex_context` to inspect artifact status and DFT export readiness.
-3. `get_dft_review_queue` for rows needing review.
-4. `get_codex_item` with `item_type="dft_result"` for each target row.
-5. `retrieve_evidence` or `read_paper_page` for targeted evidence checks when needed.
-6. `propose_dft_result_correction` for concrete field changes, or `import_analysis` for a paper-level or object-level DFT audit opinion.
+3. `read_paper_page` for the original PDF page(s) that contain the candidate table, section, or figure. This is mandatory before trusting parser structure for high-risk review.
+4. `get_dft_review_queue` for rows needing review.
+5. `get_codex_item` with `item_type="dft_result"` for each target row.
+6. `retrieve_evidence` for targeted evidence checks when needed.
+7. `propose_dft_result_correction` for concrete field changes, or `import_analysis` for a paper-level or object-level DFT audit opinion.
 
 Required capability:
 
@@ -85,9 +87,16 @@ Standard output or writeback:
 
 Write paper-level audit results through `import_analysis` as an `external_audit_opinion`, write row/field checks through `import_analysis.raw_payload.object_review_audits`, or create pending row corrections through `propose_dft_result_correction`. The audit candidate must remain `verification_status=unverified`.
 
+Expected review order for high-risk DFT data:
+
+1. One AI first compares system parsing against the original PDF and records parse defects, locator defects, or table/figure split defects.
+2. Two AI then perform ordinary DFT review.
+3. If those two AI disagree, a third AI may adjudicate after reading the original PDF and both prior AI outputs.
+
 Forbidden:
 
 Do not call final verification tools with an ordinary IDE AI key. Do not unlock ML export from external AI review alone. Do not infer precise numeric values from plots unless the value is explicitly readable in source evidence.
+Do not trust parsed markdown or split tables without checking the original PDF page first.
 
 ## Command: "核验图片"
 
@@ -99,8 +108,8 @@ Recommended tool order:
 
 1. `query_papers` or use the provided `paper_id`.
 2. `get_codex_context` with enough `max_figures`.
-3. `get_codex_item` with `item_type="figure"` for each figure needing inspection.
-4. `read_paper_page` when page-level source context is needed.
+3. `read_paper_page` for the original PDF page that contains the figure or chart. This is mandatory before trusting figure crops or parser figure metadata.
+4. `get_codex_item` with `item_type="figure"` for each figure needing inspection.
 5. `append_note` for non-final visual caveats, `propose_correction` for concrete figure metadata fixes, or `import_analysis` for a paper-level or object-level image audit opinion.
 
 Required capability:
@@ -120,6 +129,7 @@ Return inspected figure ids, crop/page/caption status, evidence notes, and propo
 Forbidden:
 
 Do not treat figure crops as exact evidence without checking page/caption context. Do not estimate hidden or unreadable values from image trends.
+Do not let parsed figure crops replace the original PDF page review.
 
 ## Command: "核验写作卡"
 
@@ -197,9 +207,10 @@ Recommended tool order:
 
 1. `query_papers` or use the provided `paper_id`.
 2. `get_codex_context` with enough `max_tables`.
-3. `get_codex_item` with `item_type="table"` for each target table.
-4. `retrieve_evidence` for table-derived structured rows.
-5. `propose_correction` or `propose_dft_result_correction` for concrete fixes; `import_analysis` for paper-level or object-level table audit.
+3. `read_paper_page` for the original PDF page that contains the table. This is mandatory before trusting parser table split or cell alignment.
+4. `get_codex_item` with `item_type="table"` for each target table.
+5. `retrieve_evidence` for table-derived structured rows.
+6. `propose_correction` or `propose_dft_result_correction` for concrete fixes; `import_analysis` for paper-level or object-level table audit.
 
 Required capability:
 
@@ -218,6 +229,7 @@ Return table ids, row/column concerns, suspected missing candidates, and propose
 Forbidden:
 
 Do not apply table-derived corrections directly. Do not create verified values from ambiguous table text.
+Do not trust parsed table structure without checking the original PDF page first.
 
 ## Command: "导入外部 AI 审核意见"
 
@@ -245,6 +257,14 @@ Recommended provenance:
 Standard output or writeback:
 
 `import_analysis` should create candidate records. Paper-level audit payloads should create `external_audit_opinion` candidates with `verification_status=unverified`. Object-level payloads should create `object_review_audit` candidates with the same unverified safety boundary.
+
+When the task is third-AI adjudication instead of ordinary review, the object-level payload must include:
+
+- `adjudication_role: "third_ai"`
+- `adjudication_scope: "conflict_resolution"`
+- `selected_source_ids: ["FIRST_AI_SOURCE_ID", "SECOND_AI_SOURCE_ID"]`
+
+In that mode the AI is not doing a generic third extraction pass. It is explicitly deciding between prior opinions after checking the original PDF.
 
 Object-level payload example:
 
@@ -278,3 +298,4 @@ Object-level payload example:
 Forbidden:
 
 Do not import external AI output as final verified data. Do not bypass the artifact gate for paper-level audit. Do not overwrite prior audit opinions; preserve conflicts for later review.
+Do not submit third-AI adjudication without checking the original PDF and preserving `selected_source_ids`.

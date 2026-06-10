@@ -56,6 +56,15 @@ For parsed-paper review, the AI assigned to the current task should use:
 - `get_field_disputes`
 - `import_analysis`
 
+For high-risk DFT, figure, chart, or table review, the intended order is:
+
+1. Read `get_codex_context`.
+2. Read the original PDF page through `read_paper_page`.
+3. Compare parsed sections/tables/figures/locators against the original PDF.
+4. Only then trust `get_codex_item`, `retrieve_evidence`, and parsed candidate structure for detailed review.
+
+The parsed package is a candidate aid, not a substitute for checking the original PDF.
+
 `get_codex_context` returns a compact paper bundle with:
 
 - metadata and artifact status
@@ -68,6 +77,16 @@ For parsed-paper review, the AI assigned to the current task should use:
 - warnings and recommended next actions
 
 `import_analysis` can accept a paper-level audit payload from any assigned AI. When the payload has audit fields such as `verdict`, `recommended_action`, `suspected_missing`, or `evidence_examples`, the service creates an `external_audit_opinion` candidate.
+
+`import_analysis` can also accept object-level review payloads through `raw_payload.object_review_audits`. For high-risk targets:
+
+- Two ordinary AI reviews with evidence anchors may auto-materialize when they agree.
+- If the first two AI disagree, a third AI may adjudicate by submitting an object-level payload with:
+  - `adjudication_role="third_ai"`
+  - `adjudication_scope="conflict_resolution"`
+  - `selected_source_ids=[...]`
+
+That third-AI payload is still traceable candidate/audit data. It does not bypass evidence or audit logging.
 
 The `source` and `source_label` fields record the role for that run, for example `glm_figure_audit`, `gemini_data_audit`, `codex_parse_review`, or `manual_second_pass`. The system does not hard-code a fixed job for Gemini, GLM, Codex, or any other AI.
 
@@ -85,6 +104,7 @@ When the gate fails, the import records `artifact_precondition_failed` instead o
 ## Safety Boundary
 
 - External AI outputs are candidates.
+- External AI should not trust parsed markdown, split tables, figure crops, or locators without checking the original PDF page first.
 - External AI audit opinions are stored as `external_audit_opinion` candidates with `verification_status=unverified`.
 - External AI does not automatically mark papers, fields, DFT rows, or citations as final verified truth.
 - DFT export remains protected by review, evidence, and locator gates.

@@ -338,6 +338,7 @@ class VerificationSessionService:
             "journal": paper.journal,
             "workspace_prepare_url": f"/api/papers/{paper.id}/prepare-ai-context",
             "codex_context_url": f"/api/papers/{paper.id}/codex-context",
+            "read_paper_page_url_template": f"/api/papers/{paper.id}/pages/{{page_no}}",
             "dft_result_count": int(dft_count),
             "writing_card_count": int(writing_count),
         }
@@ -363,8 +364,10 @@ class VerificationSessionService:
                     "import_mode": "object_review_audits",
                     "required_fields": ["target_type", "target_id", "field_name", "decision", "corrected_value", "evidence_location"],
                     "instruction": (
-                        "Use MCP /api/papers/{paper_id}/codex-context and /codex-item to inspect evidence, "
-                        "then import object_review_audits through import_analysis with the assigned source_label."
+                        "First compare the parsed materials with the original PDF page via read_paper_page, then use "
+                        "MCP /api/papers/{paper_id}/codex-context and /codex-item to inspect evidence. "
+                        "Record parse defects if the system split tables/figures/locators incorrectly, then import "
+                        "object_review_audits through import_analysis with the assigned source_label."
                     ),
                 }
             )
