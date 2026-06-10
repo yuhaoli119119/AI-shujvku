@@ -112,7 +112,7 @@ test.describe('Review Center Conflict Modal', () => {
         });
       }
 
-      if (method === 'POST' && pathname === '/api/workbench/review-center/batch-stage2') {
+      if (method === 'POST' && pathname === '/api/workbench/review-center/prepare-ai-materials') {
         writeCalls.push({ method, pathname, body: request.postDataJSON() });
         return jsonResponse(route, { completed: 1, failed: 0, requested: 1, rows: [] });
       }

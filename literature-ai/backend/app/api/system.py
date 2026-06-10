@@ -146,6 +146,12 @@ async def get_agent_guide() -> dict:
         },
         "http_endpoints": [
             {
+                "name": "prepare_external_ai_context",
+                "method": "POST",
+                "path": "/api/papers/{paper_id}/prepare-ai-context",
+                "purpose": "Refresh AI-readable materials, evidence bundles, workspace files, and codex context so IDE/MCP AI can continue parsing or auditing without requiring a backend LLM.",
+            },
+            {
                 "name": "list_papers",
                 "method": "GET",
                 "path": "/api/papers",
@@ -295,10 +301,11 @@ async def get_agent_guide() -> dict:
                 "LITAI_WRITER_API_BASE=<openai_compatible_base_url>",
                 "LITAI_WRITER_API_KEY=<api_key>",
             ],
+            "note": "Writer/internal parser settings are optional compatibility paths. They are not required for the primary IDE-AI-over-MCP workflow.",
         },
         "ingestion_config": {
             "auto_run_stage2_extraction": settings.auto_run_stage2_extraction,
-            "description": "When True, ingestion automatically runs Stage-2 deep extraction (DFT/electrochemical/mechanism/writing-card). When False, only basic extraction (metadata/sections/tables/figures/chunks) is performed during ingestion, and deep extraction must be triggered later by AI via MCP or manual rerun_stage2.",
+            "description": "When True, ingestion may still create backend candidate outputs. Regardless of that setting, the supported manual recovery path is to prepare AI-readable materials (workspace, evidence, codex context, AI reading package) and let IDE AI continue via MCP/import_analysis instead of requiring any backend-owned LLM deep parse.",
         },
         "suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
@@ -311,7 +318,7 @@ async def get_agent_guide() -> dict:
             "Use get_field_disputes to find conflicting values proposed by different AIs. Includes historically resolved disputes (status='resolved') so later AIs know what was already settled. "
             "Use scan_duplicate_dois to find papers that share the same DOI, which may indicate duplicates in the system. "
             "Use create_share_token to generate a read-only share link for others to view papers, figures, DFT data, and audit logs without MCP access. "
-            "IMPORTANT: If the server is configured with auto_run_stage2_extraction=False, the system only performs basic extraction (metadata, sections, tables, figures) during ingestion. Deep extraction (DFT results, electrochemical performance, mechanism claims, writing cards) is NOT run automatically. In that mode, YOU (the AI) must perform deep extraction on demand using the available tools: read paper sections and figures, analyze charts, and propose corrections or DFT results as needed. The paper's workflow_status will be 'Unparsed' until deep data is added. "
+            "IMPORTANT: The primary workflow does not depend on a backend-owned LLM. Even if auto_run_stage2_extraction is disabled, or backend writer/internal parser settings are missing, the system can still prepare AI-readable materials. In that mode, YOU (the AI) should first read the prepared workspace, codex context, item context, and evidence package, then continue analysis through MCP/import_analysis, notes, corrections, and review-safe candidate flows. The paper can remain in a material-ready state while waiting for IDE-AI follow-up. "
             "Use /api/intake/search for external candidate discovery, then approve and ingest candidates through the controlled intake endpoints. Do not use the legacy /api/papers/ai_workflow direct-ingest endpoint."
         ),
     }

@@ -1471,11 +1471,12 @@ def test_batch_stage2_deep_parse_respects_requested_paper_ids_beyond_recent_wind
 
     client = TestClient(app)
     response = client.post(
-        "/api/workbench/review-center/batch-stage2",
-        json={"paper_ids": [old_target_id], "mode": "deep_parse_suspected_missing", "reviewer": "review_center_batch"},
+        "/api/workbench/review-center/prepare-ai-materials",
+        json={"paper_ids": [old_target_id], "mode": "prepare_suspected_missing", "reviewer": "review_center_batch"},
     )
     assert response.status_code == 200
     payload = response.json()
+    assert payload["mode"] == "prepare_suspected_missing"
     assert payload["selection_scope"] == "requested_paper_ids"
     assert payload["requested"] == 1
     assert payload["completed"] == 1
@@ -1541,15 +1542,17 @@ def test_review_center_sorting_and_batch_stage2_endpoints(workbench_env, monkeyp
     monkeypatch.setattr("app.services.paper_reprocessing.PaperReprocessingService.rerun_stage2", fake_rerun_stage2)
 
     batch = client.post(
-        "/api/workbench/review-center/batch-stage2",
-        json={"paper_ids": [newest_id], "mode": "reparse_filtered", "reviewer": "review_center_batch"},
+        "/api/workbench/review-center/prepare-ai-materials",
+        json={"paper_ids": [newest_id], "mode": "prepare_filtered", "reviewer": "review_center_batch"},
     )
     assert batch.status_code == 200
+    assert batch.json()["mode"] == "prepare_filtered"
     assert batch.json()["completed"] == 1
 
     suspected = client.post(
-        "/api/workbench/review-center/batch-stage2",
-        json={"paper_ids": [missing_id], "mode": "deep_parse_suspected_missing", "reviewer": "review_center_batch"},
+        "/api/workbench/review-center/prepare-ai-materials",
+        json={"paper_ids": [missing_id], "mode": "prepare_suspected_missing", "reviewer": "review_center_batch"},
     )
     assert suspected.status_code == 200
+    assert suspected.json()["mode"] == "prepare_suspected_missing"
     assert suspected.json()["requested"] == 1

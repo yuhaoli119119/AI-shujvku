@@ -708,8 +708,8 @@
       <section class="stats" id="stats"></section>
       <div class="page-actions">
         <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()">刷新</button>
-        <button class="btn btn-ghost" type="button" onclick="batchReparseFiltered()">批量重解析当前筛选</button>
-        <button class="btn btn-ghost" type="button" onclick="batchDeepParseMissing()">批量深解析疑似漏提</button>
+        <button class="btn btn-ghost" type="button" onclick="batchReparseFiltered()">批量重建 AI 解析材料</button>
+        <button class="btn btn-ghost" type="button" onclick="batchDeepParseMissing()">批量准备疑似漏提论文的 AI 材料</button>
         <button class="btn btn-ghost" type="button" onclick="batchAutoAdvanceFiltered()">批量 AI 自动推进当前筛选</button>
         <button class="btn btn-tinted" type="button" onclick="prepareLibrary()">批量重建材料</button>
       </div>
@@ -2055,7 +2055,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ render_pages: false })
         });
-        showToast("已重建这篇文献的审核材料。");
+        showToast("已刷新这篇文献的 AI 审核材料，后续可由 IDE-AI 继续解析。");
         await loadReviewCenter();
       } catch (error) {
         showToast("重建材料失败：" + error.message);
@@ -2065,7 +2065,7 @@
     async function prepareLibrary() {
       try {
         const data = await fetchJSON("/api/workbench/prepare-active-library?render_pages=false&limit=50", { method: "POST" });
-        showToast("当前库材料重建完成：" + Number(data.prepared || 0) + " 篇。");
+        showToast("当前库 AI 材料重建完成：" + Number(data.prepared || 0) + " 篇。");
         await loadReviewCenter();
       } catch (error) {
         showToast("批量重建材料失败：" + error.message);
@@ -2116,6 +2116,11 @@
       }
     }
 
+    function batchActionLabel(mode) {
+      if (mode === "prepare_suspected_missing") return "批量准备疑似漏提论文的 AI 材料";
+      return "批量重建 AI 解析材料";
+    }
+
     async function runBatchStage2(mode, ids) {
       const paperIds = Array.from(new Set(ids || []));
       if (!paperIds.length) {
@@ -2123,25 +2128,25 @@
         return;
       }
       try {
-        const result = await fetchJSON("/api/workbench/review-center/batch-stage2", {
+        const result = await fetchJSON("/api/workbench/review-center/prepare-ai-materials", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ paper_ids: paperIds, mode: mode, reviewer: "review_center" })
         });
         const failed = Number(result.failed || 0);
-        showToast("批量解析完成：成功 " + Number(result.completed || 0) + "，失败 " + failed + (failed ? "。请查看失败摘要。" : "。"));
+        showToast(batchActionLabel(result.mode || mode) + "完成：成功 " + Number(result.completed || 0) + "，失败 " + failed + (failed ? "。请查看失败摘要。" : "。"));
         await loadReviewCenter();
       } catch (error) {
-        showToast("批量解析失败：" + error.message);
+        showToast(batchActionLabel(mode) + "失败：" + error.message);
       }
     }
 
     function batchReparseFiltered() {
-      runBatchStage2("reparse_filtered", filteredPaperIds());
+      runBatchStage2("prepare_filtered", filteredPaperIds());
     }
 
     function batchDeepParseMissing() {
-      runBatchStage2("deep_parse_suspected_missing", filteredPaperIds(function (row) {
+      runBatchStage2("prepare_suspected_missing", filteredPaperIds(function (row) {
         return toCount(row.suspected_missing_dft_count) > 0 || row.workflow_status === "Unparsed";
       }));
     }

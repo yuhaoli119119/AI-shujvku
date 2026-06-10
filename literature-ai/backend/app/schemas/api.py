@@ -85,6 +85,16 @@ class DiscoveryDownloadRequest(BaseModel):
 class ExtractionRunResponse(BaseModel):
     paper_id: UUID
     status: str
+    action: str | None = None
+    llm_required: bool = False
+    material_rebuild_completed: bool = False
+    external_ai_ready: bool = False
+    workflow_status: str | None = None
+    workspace_path: str | None = None
+    refreshed_materials: list[str] = Field(default_factory=list)
+    deferred_capabilities: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
     dft_settings: int = 0
     catalyst_samples: int = 0
     dft_results: int = 0

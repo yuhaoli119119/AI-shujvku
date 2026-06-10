@@ -213,16 +213,20 @@ def prepare_active_library(
     }
 
 
-@router.post("/review-center/batch-stage2")
-def batch_rerun_stage2(
+def _run_review_center_prepare_ai_materials(
     payload: ReviewCenterBatchStage2Request,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     service = PaperReprocessingService(session=session, settings=settings)
+    requested_mode = payload.mode
+    normalized_mode = {
+        "reparse_filtered": "prepare_filtered",
+        "deep_parse_suspected_missing": "prepare_suspected_missing",
+    }.get(requested_mode, requested_mode)
     paper_ids = list(dict.fromkeys(payload.paper_ids))
     selection_scope = "requested_paper_ids" if paper_ids else "explicit_request"
-    if payload.mode == "deep_parse_suspected_missing":
+    if normalized_mode == "prepare_suspected_missing":
         requested_ids = set(paper_ids)
         stmt = select(Paper.id, Paper.workflow_status, Paper.library_name)
         if requested_ids:
@@ -264,10 +268,37 @@ def batch_rerun_stage2(
         except Exception as exc:
             results.append({"paper_id": str(paper_id), "status": "failed", "error": str(exc)})
     return {
-        "mode": payload.mode,
+        "mode": normalized_mode,
+        "requested_mode": requested_mode,
+        "action_label": (
+            "prepare_external_ai_materials_for_suspected_missing"
+            if normalized_mode == "prepare_suspected_missing"
+            else "prepare_external_ai_materials"
+        ),
+        "llm_required": False,
         "selection_scope": selection_scope,
         "requested": len(paper_ids),
         "completed": len([item for item in results if item["status"] == "completed"]),
         "failed": len([item for item in results if item["status"] == "failed"]),
         "rows": results,
     }
+
+
+@router.post("/review-center/prepare-ai-materials")
+def prepare_review_center_ai_materials(
+    payload: ReviewCenterBatchStage2Request,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    return _run_review_center_prepare_ai_materials(payload, session, settings)
+
+
+@router.post("/review-center/batch-stage2", deprecated=True)
+def batch_rerun_stage2(
+    payload: ReviewCenterBatchStage2Request,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    # Compatibility alias for older UI calls. The supported meaning is
+    # "prepare AI-readable materials for external IDE/MCP follow-up".
+    return _run_review_center_prepare_ai_materials(payload, session, settings)

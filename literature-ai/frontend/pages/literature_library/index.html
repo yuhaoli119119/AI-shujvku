@@ -120,7 +120,7 @@
                             <div class="paper-actionbar">
                                 <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
                                 <button class="btn ghost small" onclick="openPaperDetailPage()">打开详情</button>
-                                <button class="btn ghost small" onclick="rerunExtraction()">重新解析</button>
+                                <button class="btn ghost small" onclick="rerunExtraction()">刷新 AI 解析材料</button>
                                 <div class="dropdown" id="paperMoreDropdown">
                                     <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
                                     <div id="paperMoreMenu" class="dropdown-menu right">
@@ -184,17 +184,17 @@
 
                     <section id="tab-review" class="tab-panel">
                         <div class="writer-block ai-review-section">
-                            <h3>网页内 AI 详细审阅</h3>
-                            <p class="subtle">AI 会先生成可读的审阅笔记、可疑字段修正和文献关联建议；这些内容只是候选，不会直接改库。点“生成待确认记录”后，还要人工核对证据并确认。</p>
+                            <h3>旧兼容：网页内 AI 审阅</h3>
+                            <p class="subtle">这一入口仅为兼容旧流程保留，不是当前主工作流。推荐优先使用下方 IDE / MCP AI 审阅入口；系统主线是先准备材料，再由 IDE 中的 AI 接手解析、审核和回写候选。</p>
                             <div id="internalAIConfigGuide"></div>
                             <div class="modal-actions" style="justify-content:flex-start;">
-                                <button class="btn primary" onclick="runInternalAIParse()">生成详细审阅</button>
+                                <button class="btn ghost" onclick="runInternalAIParse()">使用旧兼容入口</button>
                                 <button class="btn ghost" onclick="window.location.href='../settings/index.html'">打开设置页</button>
                             </div>
                         </div>
                         <div class="writer-block ai-review-section">
                             <h3>IDE / MCP AI 审阅</h3>
-                            <p class="subtle">显示 MCP 连接指南，供 IDE 或 MCP 客户端读取文献、生成建议；本入口不会自动生成待确认记录。</p>
+                            <p class="subtle">这是当前主工作流。先读取 MCP 指南，再让 IDE 中的 AI 读取文献、证据、codex context 和 item context，并通过 import_analysis / correction 流程回写候选。</p>
                             <div class="modal-actions" style="justify-content:flex-start;">
                                 <button class="btn ghost" onclick="loadAgentGuide()">显示 MCP 指南</button>
                             </div>

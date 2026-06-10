@@ -25,6 +25,16 @@ from app.services.paper_reprocessing import PaperReprocessingService
 def test_rerun_stage2_replaces_existing_outputs():
     with TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
+        fitz = __import__("fitz")
+        doc = fitz.open()
+        page = doc.new_page()
+        pdf_text = "\n".join(
+            f"Readable PDF evidence line {index}: adsorption energy, catalyst coordination, and DFT workflow details."
+            for index in range(80)
+        )
+        page.insert_textbox(fitz.Rect(72, 72, 520, 760), pdf_text, fontsize=8)
+        doc.save(tmp_path / "paper.pdf")
+        doc.close()
         (tmp_path / "paper.md").write_text("Results markdown", encoding="utf-8")
         (tmp_path / "paper.tei.xml").write_text("<TEI/>", encoding="utf-8")
         (tmp_path / "paper.docling.json").write_text("{}", encoding="utf-8")
@@ -119,12 +129,16 @@ def test_rerun_stage2_replaces_existing_outputs():
                 service = PaperReprocessingService(session=session, settings=Settings(storage_root=tmp_path))
                 summary = service.rerun_stage2(paper.id)
 
-                assert summary["dft_settings"] == 1
-                assert summary["catalyst_samples"] == 1
-                assert summary["dft_results"] >= 1
-                assert summary["electrochemical_performance"] == 1
-                assert summary["mechanism_claims"] >= 1
-                assert summary["writing_cards"] == 1
+                assert summary["action"] == "prepare_external_ai_reparse_context"
+                assert summary["llm_required"] is False
+                assert summary["material_rebuild_completed"] is True
+                assert isinstance(summary["external_ai_ready"], bool)
+                assert summary["artifact_status"]["ai_reading_package_exists"] is True
+                assert summary["workflow_status"] in {"Parsed_Material_Ready", "Needs_Human_Confirmation"}
+                assert "ai_reading_package" in summary["refreshed_materials"]
+                assert "dft_deep_parse" in summary["deferred_capabilities"]
+                assert summary["dft_settings"] == 0
+                assert summary["dft_results"] == 0
                 assert session.query(DFTSetting).filter(DFTSetting.paper_id == paper.id).count() == 1
                 assert session.query(CatalystSample).filter(CatalystSample.paper_id == paper.id).count() == 1
                 assert session.query(DFTResult).filter(DFTResult.paper_id == paper.id).count() >= 1
@@ -132,6 +146,8 @@ def test_rerun_stage2_replaces_existing_outputs():
                 assert session.query(MechanismClaim).filter(MechanismClaim.paper_id == paper.id).count() >= 1
                 assert session.query(WritingCard).filter(WritingCard.paper_id == paper.id).count() == 1
                 assert session.query(EvidenceSpan).filter(EvidenceSpan.paper_id == paper.id).count() >= 1
+                workspace_root = tmp_path / "by_id" / str(paper.id)
+                assert (workspace_root / "extraction" / "ai_reading_package.json").exists()
         finally:
             engine.dispose()
 

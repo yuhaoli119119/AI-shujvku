@@ -13,11 +13,13 @@ from app.db.models import Paper, PaperFigure, PaperSection, PaperTable
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_workbench_service import PaperWorkbenchService
+from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.workbench_status import HUMAN_FINAL_WORKFLOW_STATUSES
 
 
 class PaperReprocessingService:
-    """Rebuilds a unified document from persisted paper artifacts and reruns Stage 2 extraction."""
+    """Rebuilds AI-readable paper materials without requiring backend-owned LLM parsing."""
 
     def __init__(self, session: Session, settings: Settings) -> None:
         self.session = session
@@ -25,7 +27,7 @@ class PaperReprocessingService:
         self.pipeline = ExtractionPipelineService(session, settings)
         self.workbench = PaperWorkbenchService(session, settings)
 
-    def rerun_stage2(self, paper_id: UUID) -> dict[str, int]:
+    def rerun_stage2(self, paper_id: UUID) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)
         if not paper:
             raise ValueError("Paper not found")
@@ -38,30 +40,84 @@ class PaperReprocessingService:
         if pdf_path is not None and pdf_path.exists():
             quality = PaperWorkbenchService.assess_pdf_path(pdf_path, self.settings)
             self.workbench.apply_quality_report(paper, quality)
-            if quality.get("needs_human_confirmation"):
-                self.pipeline._delete_existing_stage2(paper.id)
-                paper.comprehensive_analysis = None
-                self.session.add(paper)
-                self.session.commit()
-                self.workbench.prepare_paper_workspace(paper.id)
-                return {
-                    "dft_settings": 0,
-                    "catalyst_samples": 0,
-                    "dft_results": 0,
-                    "electrochemical_performance": 0,
-                    "mechanism_claims": 0,
-                    "writing_cards": 0,
-                    "skipped_quality_blocked": 1,
-                }
         document = self._rebuild_document(paper)
-        summary = self.pipeline.replace_stage2(paper, document)
-        self.workbench.mark_parsed_ready(
-            paper,
-            candidate_count=sum(summary.get(key, 0) for key in ("dft_results", "dft_settings", "mechanism_claims")),
-        )
+        if (
+            paper.workflow_status not in HUMAN_FINAL_WORKFLOW_STATUSES
+            and paper.workflow_status != "Rejected"
+            and not bool((paper.pdf_quality_report or {}).get("needs_human_confirmation"))
+        ):
+            paper.workflow_status = "Parsed_Material_Ready"
+        self.session.add(paper)
         self.session.commit()
-        self.workbench.prepare_paper_workspace(paper.id)
-        return summary
+
+        workspace_summary = self.workbench.prepare_paper_workspace(paper.id)
+        self.session.refresh(paper)
+        artifact_status = build_paper_artifact_status(paper, settings=self.settings)
+
+        refreshed_materials = [
+            "workspace",
+            "metadata",
+            "quality_report",
+            "markdown_copy",
+            "docling_copy",
+            "evidence_sections",
+            "evidence_tables",
+            "evidence_figures",
+            "evidence_locators",
+            "ai_reading_package",
+            "audit_exports",
+        ]
+        notes = [
+            "Backend LLM deep extraction is not required for this action.",
+            "Structured DFT/mechanism/writing outputs were not regenerated automatically.",
+            "Use MCP paper detail, codex context, codex item, workspace artifacts, and import_analysis for the next AI step.",
+        ]
+        if not artifact_status.get("artifact_ready_for_external_audit"):
+            notes.append(
+                "External AI handoff is partially blocked until artifact prerequisites are fixed: "
+                + ", ".join(artifact_status.get("blocking_errors") or ["unknown"])
+            )
+
+        return {
+            "action": "prepare_external_ai_reparse_context",
+            "status": "completed",
+            "llm_required": False,
+            "material_rebuild_completed": True,
+            "external_ai_ready": bool(artifact_status.get("artifact_ready_for_external_audit")),
+            "workflow_status": paper.workflow_status,
+            "workspace_path": workspace_summary.get("workspace_path"),
+            "workspace_abs_path": workspace_summary.get("workspace_abs_path"),
+            "artifact_status": artifact_status,
+            "document_snapshot": {
+                "sections": len(document.sections or []),
+                "tables": len(document.tables or []),
+                "figures": len(document.figures or []),
+                "has_markdown": bool((document.markdown or "").strip()),
+                "has_docling_json": bool(document.docling_json),
+                "has_pdf_reference": bool(paper.pdf_path),
+            },
+            "refreshed_materials": refreshed_materials,
+            "deferred_capabilities": [
+                "dft_deep_parse",
+                "mechanism_claim_intelligence",
+                "writing_card_generation",
+                "complex_object_understanding",
+            ],
+            "next_actions": [
+                "Open /api/papers/{paper_id}/codex-context or MCP get_codex_context.",
+                "Read item-level evidence with /api/papers/{paper_id}/codex-item/... or MCP get_codex_item.",
+                "Import external AI review results through MCP import_analysis or the external analysis workbench.",
+            ],
+            "notes": notes,
+            "dft_settings": 0,
+            "catalyst_samples": 0,
+            "dft_results": 0,
+            "electrochemical_performance": 0,
+            "mechanism_claims": 0,
+            "writing_cards": 0,
+            "comprehensive_analysis": 0,
+            "skipped_quality_blocked": 1 if workspace_summary.get("workflow_status") == "Needs_Human_Confirmation" else 0,
+        }
 
     def classify_single_paper(self, paper_id: UUID, overwrite: bool = False) -> dict[str, Any]:
         """Classify a single paper using LLM or rule fallback, and commit to DB."""

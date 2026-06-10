@@ -14,7 +14,12 @@ class ReviewCenterBatchStage2Request(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     paper_ids: list[UUID] = Field(default_factory=list)
-    mode: Literal["reparse_filtered", "deep_parse_suspected_missing"] = "reparse_filtered"
+    mode: Literal[
+        "prepare_filtered",
+        "prepare_suspected_missing",
+        "reparse_filtered",
+        "deep_parse_suspected_missing",
+    ] = "prepare_filtered"
     reviewer: str = "review_center_batch"
 
 

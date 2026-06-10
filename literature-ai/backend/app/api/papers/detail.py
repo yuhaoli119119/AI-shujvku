@@ -426,8 +426,31 @@ async def delete_paper(
     }
 
 
-@router.post("/{paper_id}/extract", response_model=ExtractionRunResponse)
-def rerun_stage2_extraction(
+def _build_extraction_run_response(paper_id: UUID, summary: dict) -> ExtractionRunResponse:
+    return ExtractionRunResponse(
+        paper_id=paper_id,
+        status=str(summary.get("status") or "completed"),
+        action=summary.get("action"),
+        llm_required=bool(summary.get("llm_required", False)),
+        material_rebuild_completed=bool(summary.get("material_rebuild_completed", False)),
+        external_ai_ready=bool(summary.get("external_ai_ready", False)),
+        workflow_status=summary.get("workflow_status"),
+        workspace_path=summary.get("workspace_path"),
+        refreshed_materials=list(summary.get("refreshed_materials") or []),
+        deferred_capabilities=list(summary.get("deferred_capabilities") or []),
+        next_actions=list(summary.get("next_actions") or []),
+        notes=list(summary.get("notes") or []),
+        dft_settings=summary.get("dft_settings", 0),
+        catalyst_samples=summary.get("catalyst_samples", 0),
+        dft_results=summary.get("dft_results", 0),
+        electrochemical_performance=summary.get("electrochemical_performance", 0),
+        mechanism_claims=summary.get("mechanism_claims", 0),
+        writing_cards=summary.get("writing_cards", 0),
+    )
+
+
+@router.post("/{paper_id}/prepare-ai-context", response_model=ExtractionRunResponse)
+def prepare_external_ai_context(
     paper_id: UUID,
     session: Session = Depends(get_db_session),
 ):
@@ -437,16 +460,17 @@ def rerun_stage2_extraction(
 
     settings = get_settings()
     summary = PaperReprocessingService(session=session, settings=settings).rerun_stage2(paper_id)
-    return ExtractionRunResponse(
-        paper_id=paper_id,
-        status="completed",
-        dft_settings=summary.get("dft_settings", 0),
-        catalyst_samples=summary.get("catalyst_samples", 0),
-        dft_results=summary.get("dft_results", 0),
-        electrochemical_performance=summary.get("electrochemical_performance", 0),
-        mechanism_claims=summary.get("mechanism_claims", 0),
-        writing_cards=summary.get("writing_cards", 0),
-    )
+    return _build_extraction_run_response(paper_id, summary)
+
+
+@router.post("/{paper_id}/extract", response_model=ExtractionRunResponse, deprecated=True)
+def rerun_stage2_extraction(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+):
+    # Compatibility alias: keep old clients working, but the supported meaning is
+    # "prepare AI-readable materials for IDE/MCP follow-up", not backend LLM deep extraction.
+    return prepare_external_ai_context(paper_id, session)
 
 
 @router.post("/{paper_id}/figures/recrop")

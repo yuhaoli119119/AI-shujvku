@@ -19,8 +19,7 @@ def ingest_pdf_path_task(pdf_path: str) -> str:
         return str(paper.id)
 
 
-@celery_app.task(name="papers.rerun_stage2")
-def rerun_stage2_task(paper_id: str) -> dict[str, int | str]:
+def _prepare_external_ai_context_task(paper_id: str) -> dict[str, int | str | bool | list[str] | dict]:
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         paper = session.get(Paper, UUID(paper_id))
@@ -32,6 +31,17 @@ def rerun_stage2_task(paper_id: str) -> dict[str, int | str]:
             "status": "completed",
             **summary,
         }
+
+
+@celery_app.task(name="papers.prepare_external_ai_context")
+def prepare_external_ai_context_task(paper_id: str) -> dict[str, int | str | bool | list[str] | dict]:
+    return _prepare_external_ai_context_task(paper_id)
+
+
+@celery_app.task(name="papers.rerun_stage2")
+def rerun_stage2_task(paper_id: str) -> dict[str, int | str | bool | list[str] | dict]:
+    # Compatibility alias for older jobs. This no longer implies backend LLM deep extraction.
+    return _prepare_external_ai_context_task(paper_id)
 
 
 @celery_app.task(name="papers.run_workflow_job")

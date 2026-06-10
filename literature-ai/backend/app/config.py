@@ -61,9 +61,10 @@ class Settings(BaseSettings):
     settings_admin_token: str | None = None
     browse_roots: str = "/host/users,/data,/legacy"
 
-    # When False, ingestion only runs basic extraction (metadata/sections/tables/figures/chunks).
-    # Stage-2 deep extraction (DFT/electrochemical/mechanism/writing-card) is skipped
-    # and must be triggered later by AI via MCP or manual rerun_stage2.
+    # Compatibility flag for legacy backend stage-2 extraction. The primary workflow
+    # does NOT require backend-owned LLM parsing. When False, ingestion only runs
+    # basic extraction (metadata/sections/tables/figures/chunks), and later AI work
+    # should happen through MCP after the workspace and AI reading package are prepared.
     auto_run_stage2_extraction: bool = True
     auto_enrich_ingested_metadata: bool = True
     metadata_enrichment_timeout_seconds: float = 5.0

@@ -16,11 +16,13 @@ Some public APIs, services, prompts, and workflow statuses still contain histori
 
 - `get_codex_context`
 - `codex-context`
+- `extract`
+- `batch-stage2`
 - `GeminiAuditService`
 - `gemini_audit_protocol`
 - `Gemini_Verified`, `Gemini_Revised`, `Gemini_Flagged`
 
-These are compatibility names and should not be interpreted as fixed ownership by Codex or Gemini. New docs and UI copy should describe the general role, such as "AI paper context", "external AI audit", "second AI review", or "assigned AI reviewer".
+These are compatibility names and should not be interpreted as fixed ownership by Codex or Gemini, or as proof that the backend must run its own LLM deep parse. New docs and UI copy should describe the general role, such as "AI paper context", "prepare AI-readable materials", "external AI audit", "second AI review", or "assigned AI reviewer".
 
 ## Database
 

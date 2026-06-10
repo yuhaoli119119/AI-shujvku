@@ -646,19 +646,19 @@ async function uploadPDF(input) {
 
 async function rerunExtraction() {
     if (!state.selectedPaperId) return;
-    showProgress("正在重新解析当前文献...");
+    showProgress("正在刷新当前文献的 AI 解析材料...");
     try {
-        const data = await fetchJSON(API_BASE + "/" + state.selectedPaperId + "/extract", { method: "POST" });
-        showToast("重新解析完成。", "success");
+        const data = await fetchJSON(API_BASE + "/" + state.selectedPaperId + "/prepare-ai-context", { method: "POST" });
+        showToast("AI 解析材料已刷新，可继续由 IDE-AI 接手。", "success");
         const summary = $("summaryContent");
         if (summary) {
             summary.insertAdjacentHTML("afterbegin",
-                '<div class="section-card"><h3>最近一次重解析结果</h3><div class="subtle">任务已创建或完成。状态：' + esc(data.status || data.job_status || "已提交") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
+                '<div class="section-card"><h3>最近一次 AI 材料刷新结果</h3><div class="subtle">状态：' + esc(data.status || data.job_status || "已提交") + (data.external_ai_ready ? " | 外部 AI 可继续接手" : " | 仍需补齐材料或人工检查") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
             );
         }
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
-        showToast("重解析失败：" + error.message, "error");
+        showToast("刷新 AI 解析材料失败：" + error.message, "error");
     }
     hideProgress();
 }

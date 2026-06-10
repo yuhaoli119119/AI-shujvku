@@ -1,9 +1,9 @@
 function renderInternalAIConfigGuide(message, status) {
     const guide = $("internalAIConfigGuide");
     const missingMap = {
-        internal_parser_api_base: "内部解析 API Base URL（复用 Writer LLM）",
-        internal_parser_api_key: "内部解析 API Key（复用 Writer LLM）",
-        internal_parser_model: "内部解析 Model（复用 Writer LLM）",
+        internal_parser_api_base: "旧兼容内置审阅 API Base URL（复用 Writer LLM）",
+        internal_parser_api_key: "旧兼容内置审阅 API Key（复用 Writer LLM）",
+        internal_parser_model: "旧兼容内置审阅 Model（复用 Writer LLM）",
         writer_api_base: "Writer API Base URL",
         writer_api_key: "Writer API Key",
         writer_model: "Writer Model"
@@ -59,8 +59,8 @@ function renderInternalParseSummary(data) {
     const pending = candidates.filter(function(item) {
         return item.status === "pending" || item.status === "requires_resolution";
     }).length;
-    return '<div class="section-card"><h3>最近一次 AI 详细审阅</h3>' +
-        '<div class="subtle">AI 会生成阅读笔记、修正建议和文献关联建议，但不会直接改库。需要在下方审阅记录里点“生成待确认记录”，再由人工核对证据并确认。</div>' +
+    return '<div class="section-card"><h3>最近一次旧兼容网页内 AI 审阅</h3>' +
+        '<div class="subtle">这是旧兼容入口生成的候选审阅摘要，不会直接改库。当前主流程仍应优先使用 IDE / MCP AI 读取材料并回写候选。</div>' +
         '<div class="readable-grid" style="margin-top:10px;">' +
             '<div class="readable-field"><div class="k">审阅项总数</div><div class="v">' + esc(candidates.length) + '</div></div>' +
             '<div class="readable-field"><div class="k">待处理</div><div class="v">' + esc(pending) + '</div></div>' +
@@ -76,7 +76,7 @@ async function ensureInternalAIConfigured() {
         if (internalParser && internalParser.configured) {
             return true;
         }
-        const message = "内部解析配置未完成：它复用 Writer LLM 连接，不使用 Embedding 配置。请在设置 -> API 配置中补 Writer LLM 的 Base URL / API Key / Model。";
+        const message = "旧兼容网页内 AI 审阅尚未配置：它复用 Writer LLM 连接，但这不是当前主工作流。若你确实要走旧兼容入口，请在设置 -> API 配置中补 Writer LLM 的 Base URL / API Key / Model。";
         renderInternalAIConfigGuide(message, internalParser || null);
         showToast(message, "error");
         return false;
@@ -96,20 +96,20 @@ async function runInternalAIParse() {
         hideProgress(true);
         return;
     }
-    showProgress("网页内 AI 正在生成详细审阅，完成后可选择内容生成待确认记录。");
+    showProgress("旧兼容网页内 AI 入口正在生成候选审阅；当前推荐主流程仍是 IDE / MCP AI。");
     let hideImmediately = false;
     try {
         const data = await fetchJSON(EXTERNAL_API + "/papers/" + state.selectedPaperId + "/internal-parse", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                source_label: "网页内 AI 详细审阅",
+                source_label: "旧兼容网页内 AI 审阅",
                 auto_apply: false
             })
         });
         const extRawText = $("externalRawText");
         if (extRawText) extRawText.value = "";
-        showToast("网页内 AI 详细审阅已生成，请人工确认后再处理。", "success");
+        showToast("旧兼容网页内 AI 审阅已生成；建议继续以 IDE / MCP AI 为主线处理。", "success");
         const extRuns = $("externalRuns");
         if (extRuns) {
             extRuns.insertAdjacentHTML(
@@ -121,8 +121,8 @@ async function runInternalAIParse() {
     } catch (error) {
         hideImmediately = true;
         const guide = $("internalAIConfigGuide");
-        const internalParserMessage = "内部解析配置未完成：它复用 Writer LLM 连接，不使用 Embedding 配置。请在设置 -> API 配置中补 Writer LLM 的 Base URL / API Key / Model。";
-        const message = "网页内 AI 尚未配置，请到 设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
+        const internalParserMessage = "旧兼容网页内 AI 审阅尚未配置：它复用 Writer LLM 连接，但这不是当前主工作流。推荐改用 IDE / MCP AI；若要继续旧兼容入口，请在设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
+        const message = "旧兼容网页内 AI 审阅尚未配置。推荐改用 IDE / MCP AI；如需继续旧兼容入口，请填写 Writer API Key / Base URL / Model。";
         if (error.status === 400 && String(error.message || "").includes("Internal AI is not configured")) {
             hideProgress(true);
             if (guide) {
@@ -137,9 +137,9 @@ async function runInternalAIParse() {
         } else {
             const extRuns = $("externalRuns");
             if (extRuns) {
-                extRuns.innerHTML = '<div class="workspace-empty">网页内 AI 详细审阅生成失败：' + esc(error.message) + "</div>";
+                extRuns.innerHTML = '<div class="workspace-empty">旧兼容网页内 AI 审阅生成失败：' + esc(error.message) + "</div>";
             }
-            showToast("网页内 AI 详细审阅生成失败：" + error.message, "error");
+            showToast("旧兼容网页内 AI 审阅生成失败：" + error.message, "error");
         }
     }
     hideProgress(hideImmediately);
