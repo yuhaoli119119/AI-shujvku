@@ -791,6 +791,7 @@ def test_object_level_audit_payloads_participate_in_conflict_aggregation():
                                     "confidence": 0.7,
                                     "source": source,
                                     "agent_role": "dft_auditor",
+                                    "normalized_energy_type": "adsorption_energy",
                                 }
                             ]
                         },
@@ -808,9 +809,110 @@ def test_object_level_audit_payloads_participate_in_conflict_aggregation():
             assert conflict["field_name"] == "value"
             assert "value_conflict" in conflict["conflict_types"]
             assert "decision_conflict" in conflict["conflict_types"]
+            assert conflict["target_summary"]["property_type"] == "adsorption_energy"
+            assert conflict["target_summary"]["adsorbate"] == "Li2S8"
+            assert conflict["anchor_summary"]["page"] == 5
+            assert conflict["opinions"][0]["identity"]["normalized_energy_type"] == "adsorption_energy"
             assert {item["source_type"] for item in conflict["opinions"]} == {"object_review_audit"}
             assert stored_row.candidate_status == "system_candidate"
             assert stored_row.value == -0.50
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'third_ai_adjudication.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Third AI DFT Paper", pdf_path="third-ai.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                row = DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S6",
+                    value=-1.10,
+                    unit="eV",
+                    source_section="Results",
+                    evidence_text="Table 3 reports the adsorption energies.",
+                    candidate_status="system_candidate",
+                )
+                session.add(row)
+                session.commit()
+                paper_id = paper.id
+                row_id = row.id
+
+            client = TestClient(app)
+
+            def payload_for(source_label: str, decision: str, corrected_value: float, confidence: float, adjudication_role: str | None = None):
+                body = {
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": source_label,
+                    "auto_apply_review_rules": True,
+                    "reviewer": "ide_ai",
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "paper_id": str(paper_id),
+                                "target_type": "dft_result",
+                                "target_id": str(row_id),
+                                "field_name": "value",
+                                "decision": decision,
+                                "corrected_value": corrected_value,
+                                "confidence": confidence,
+                                "reason": "Compare against Table 3 and the surrounding paragraph.",
+                                "normalized_energy_type": "adsorption_energy",
+                                "normalized_material": "Co-N-C host",
+                                "structure_name": "CoN4 single-atom site",
+                                "adsorbate": "Li2S6",
+                                "reaction_step": "adsorption",
+                                "selected_source_ids": ["ide-ai-1", "ide-ai-2"],
+                                "evidence_location": {"page": 8, "section": "Results", "table": "Table 3", "quoted_text": "-1.26 eV"},
+                                **({"adjudication_role": adjudication_role, "adjudication_scope": "conflict_resolution"} if adjudication_role else {}),
+                            }
+                        ]
+                    },
+                }
+                return body
+
+            first = client.post("/api/external-analysis/import", json=payload_for("ide-ai-1", "PASS", -1.10, 0.81))
+            second = client.post("/api/external-analysis/import", json=payload_for("ide-ai-2", "REVISE", -1.26, 0.84))
+            third = client.post("/api/external-analysis/import", json=payload_for("ide-ai-3", "REVISE", -1.26, 0.92, adjudication_role="third_ai"))
+
+            assert first.status_code == 200
+            assert second.status_code == 200
+            assert third.status_code == 200
+
+            with Session(engine) as session:
+                stored_row = session.get(DFTResult, row_id)
+                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                corrections = session.query(PaperCorrection).all()
+
+            assert stored_row is not None
+            assert stored_row.value == -1.26
+            assert len(corrections) == 1
+            assert corrections[0].status == "approved"
+            assert corrections[0].evidence_payload["adjudication_role"] == "third_ai"
+            assert corrections[0].evidence_payload["selected_source_ids"] == ["ide-ai-1", "ide-ai-2"]
+            assert {candidate.status for candidate in candidates} == {"materialized"}
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

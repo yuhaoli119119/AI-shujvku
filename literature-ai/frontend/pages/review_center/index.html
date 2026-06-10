@@ -1428,7 +1428,7 @@
 
     function conflictSeverity(type) {
       if (type === "value_conflict" || type === "decision_conflict") return "high";
-      if (type === "unit_conflict" || type === "mapping_conflict") return "medium";
+      if (type === "unit_conflict" || type === "mapping_conflict" || type === "identity_conflict") return "medium";
       if (type === "locator_conflict") return "low";
       return "medium";
     }
@@ -1454,15 +1454,68 @@
       return parts.length ? parts.join(" ") : "unknown";
     }
 
+    function opinionIdentity(opinion) {
+      return opinion && opinion.identity && typeof opinion.identity === "object" ? opinion.identity : {};
+    }
+
+    function itemTargetSummary(item) {
+      return item && item.target_summary && typeof item.target_summary === "object" ? item.target_summary : {};
+    }
+
+    function itemAnchorSummary(item) {
+      return item && item.anchor_summary && typeof item.anchor_summary === "object" ? item.anchor_summary : {};
+    }
+
+    function joinDisplayParts(parts) {
+      return parts.filter(function (part) {
+        return part !== null && part !== undefined && String(part).trim() !== "";
+      }).join(" | ");
+    }
+
+    function opinionIdentitySummary(opinion) {
+      const identity = opinionIdentity(opinion);
+      return joinDisplayParts([
+        identity.normalized_energy_type,
+        identity.normalized_material,
+        identity.structure_name,
+        identity.adsorbate,
+        identity.reaction_step
+      ]) || identity.object_label || "";
+    }
+
+    function targetSummaryLabel(item) {
+      const summary = itemTargetSummary(item);
+      return summary.object_label || joinDisplayParts([
+        summary.property_type,
+        summary.normalized_material,
+        summary.structure_name,
+        summary.adsorbate,
+        summary.reaction_step,
+        summary.source_section,
+        summary.figure_label,
+        summary.caption
+      ]) || (item && item.target_id) || "-";
+    }
+
+    function anchorSummaryText(anchor) {
+      const summary = anchor && typeof anchor === "object" ? anchor : {};
+      return joinDisplayParts([
+        hasOwnValue(summary.page) ? ("page " + summary.page) : "",
+        summary.section,
+        summary.table,
+        summary.figure,
+        summary.locator_status
+      ]) || "missing locator";
+    }
+
+    function adjudicationRoleBadge(opinion) {
+      const role = String(opinion && opinion.adjudication_role || "").trim().toLowerCase();
+      if (!role) return "";
+      return '<span class="chip warn">' + esc(role === "third_ai" ? "third AI" : role) + '</span>';
+    }
+
     function formatLocatorSummary(opinion) {
-      const evidence = opinion && opinion.evidence && typeof opinion.evidence === "object" ? opinion.evidence : {};
-      const locator = evidence.locator && typeof evidence.locator === "object" ? evidence.locator : evidence;
-      const status = locator.locator_status || "missing_locator";
-      if (hasOwnValue(locator.page)) return "page " + locator.page + " | " + status;
-      if (status === "missing_bbox") return "missing bbox";
-      if (status === "missing_page") return "missing page";
-      if (status === "text_only") return "text_only";
-      return status || "missing locator";
+      return anchorSummaryText(opinion && opinion.anchor_summary);
     }
 
     function isWeakLocator(opinion) {
@@ -1578,7 +1631,7 @@
       if (!row || !item) return false;
       if (!UUID_RE.test(String(row.paper_id || ""))) return false;
       if (!UUID_RE.test(String(item.target_id || ""))) return false;
-      return ["dft_results", "writing_card", "mechanism_claim", "figure", "table"].includes(item.target_type);
+      return ["dft_results", "writing_card", "writing_cards", "mechanism_claim", "mechanism_claims", "figure", "figures", "table", "tables"].includes(item.target_type);
     }
 
     function canPreviewEvidence(row, item, opinion) {
@@ -1605,6 +1658,32 @@
       if (!payload) return buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段");
       if (payload.loading) return buildEvidencePreviewPlaceholder("正在读取原文片段...");
       const nearbyLines = Array.isArray(payload.nearbyContext) ? payload.nearbyContext.filter(Boolean) : [];
+      return '<div class="evidence-preview-card">' +
+        '<div class="evidence-preview-title">璇佹嵁棰勮</div>' +
+        '<div class="evidence-preview-meta">' +
+          '<div class="detail-block"><div class="detail-label">Object type</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Object</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Field</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Review source</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Page</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Locator</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Energy type</div><div class="detail-value">' + esc(payload.energyType || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Material</div><div class="detail-value">' + esc(payload.material || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Structure</div><div class="detail-value">' + esc(payload.structureName || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Adsorbate</div><div class="detail-value">' + esc(payload.adsorbate || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Reaction</div><div class="detail-value">' + esc(payload.reactionStep || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Anchor</div><div class="detail-value">' + esc(payload.anchorText || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Source type</div><div class="detail-value">' + esc(payload.sourceType || "unknown") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">Source label</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
+        '</div>' +
+        '<div class="detail-block"><div class="detail-label">Quoted text</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "褰撳墠娌℃湁鍙睍绀虹殑鍘熸枃鐗囨") + '</div></div>' +
+        '<div class="detail-block"><div class="detail-label">Nearby context</div>' +
+          (nearbyLines.length
+            ? '<ul class="detail-list">' + nearbyLines.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join("") + '</ul>'
+            : '<div class="detail-value muted">褰撳墠娌℃湁棰濆涓婁笅鏂囥€?/div>') +
+        '</div>' +
+        (payload.note ? '<div class="detail-value muted">' + esc(payload.note) + '</div>' : '') +
+      '</div>';
       return '<div class="evidence-preview-card">' +
         '<div class="evidence-preview-title">证据预览</div>' +
         '<div class="evidence-preview-meta">' +
@@ -1640,12 +1719,19 @@
       const locator = locatorPayloadFromEvidence(evidence);
       return {
         targetType: formatTargetType(item && item.target_type),
+        objectLabel: targetSummaryLabel(item) || opinionIdentitySummary(opinion),
         fieldName: item && item.field_name || "-",
         reviewSource: reviewSourceLabel(opinion),
         page: hasOwnValue(locator.page) ? locator.page : null,
         locatorStatus: locatorStatusLabel(locator.locator_status),
         sourceType: formatEvidenceSourceType(evidence.source_type || item && item.target_type || opinion.source_type),
         sourceLabel: deriveEvidenceSourceLabel(evidence, item, opinion),
+        energyType: opinionIdentity(opinion).normalized_energy_type || itemTargetSummary(item).property_type || "",
+        material: opinionIdentity(opinion).normalized_material || itemTargetSummary(item).normalized_material || "",
+        structureName: opinionIdentity(opinion).structure_name || itemTargetSummary(item).structure_name || "",
+        adsorbate: opinionIdentity(opinion).adsorbate || itemTargetSummary(item).adsorbate || "",
+        reactionStep: opinionIdentity(opinion).reaction_step || itemTargetSummary(item).reaction_step || "",
+        anchorText: anchorSummaryText(opinion.anchor_summary || itemAnchorSummary(item)),
         excerpt: clipText(evidence.evidence_text || evidence.excerpt || evidence.text, 1200),
         nearbyContext: extractNearbyContextLines(evidence),
         note: canUseCodexItem(row, item) ? "" : "当前预览基于冲突聚合中的只读证据字段。"
@@ -1683,12 +1769,19 @@
       const nearbyContext = extractNearbyContextLines(context.nearby_context || {});
       return {
         targetType: base.targetType,
+        objectLabel: base.objectLabel,
         fieldName: base.fieldName,
         reviewSource: base.reviewSource,
         page: bestLocator && hasOwnValue(bestLocator.page) ? bestLocator.page : base.page,
         locatorStatus: locatorStatusLabel(bestLocator && bestLocator.locator_status || base.locatorStatus),
         sourceType: formatEvidenceSourceType(bestLocator && bestLocator.target_type || context.item_type || base.sourceType),
         sourceLabel: (bestLocator && (bestLocator.section || bestLocator.field_name)) || base.sourceLabel,
+        energyType: base.energyType,
+        material: base.material,
+        structureName: base.structureName,
+        adsorbate: base.adsorbate,
+        reactionStep: base.reactionStep,
+        anchorText: anchorSummaryText(bestLocator || {}) || base.anchorText,
         excerpt: excerpt,
         nearbyContext: nearbyContext.length ? nearbyContext : base.nearbyContext,
         note: "当前预览优先复用了 codex-item 只读上下文。"
@@ -1822,11 +1915,12 @@
       const reasonId = "reason-" + cardIndex + "-" + opinionIndex;
       const showExpand = reason.length > 96;
       const opinionKey = extractOpinionEvidenceKey(item, opinion, cardIndex, opinionIndex);
+      const identityText = opinionIdentitySummary(opinion);
       return '<tr data-opinion-key="' + esc(opinionKey) + '" class="' + (opinionIndex > 2 ? 'compare-extra' : '') + '"' + (opinionIndex > 2 ? ' hidden' : '') + '>' +
         '<td><div class="opinion-source">' + esc(reviewSourceLabel(opinion)) + '</div><div class="opinion-submeta">' + esc(opinion.source || opinion.source_type || "read_only") + '</div></td>' +
         '<td>' + esc(roleModelLabel(opinion)) + '</td>' +
-        '<td><span class="chip">' + esc(opinion.decision || opinion.status || "review") + '</span></td>' +
-        '<td>' + esc(formatOpinionValue(opinion)) + '</td>' +
+        '<td><span class="chip">' + esc(opinion.decision || opinion.status || "review") + '</span>' + adjudicationRoleBadge(opinion) + '</td>' +
+        '<td><div>' + esc(formatOpinionValue(opinion)) + '</div>' + (identityText ? '<div class="opinion-submeta">' + esc(identityText) + '</div>' : '') + '</td>' +
         '<td>' + esc(confidenceLabel(opinion.confidence)) + '</td>' +
         '<td>' + esc(formatLocatorSummary(opinion)) + '</td>' +
         '<td><div class="reason-block"><div id="' + esc(reasonId) + '" class="reason-text' + (showExpand ? ' truncated' : '') + '">' + esc(reason) + '</div>' +
@@ -1844,10 +1938,13 @@
       const bestPage = bestOpenPage(row, opinions);
       const adjudication = item.adjudication || {};
       const blockedReasons = Array.isArray(adjudication.blocked_reasons) ? adjudication.blocked_reasons : [];
+      const summary = itemTargetSummary(item);
+      const anchor = itemAnchorSummary(item);
       return '<details class="conflict-card is-' + esc(severity) + '"' + (index === 0 ? ' open' : '') + '>' +
         '<summary class="conflict-card-head">' +
         '<div class="conflict-card-left">' +
-        '<div class="conflict-title">' + esc(formatTargetType(item.target_type)) + ' / ' + esc(item.field_name || "field") + '</div>' +
+        '<div class="conflict-title">' + esc(targetSummaryLabel(item)) + '</div>' +
+        '<div class="conflict-meta">' + esc(formatTargetType(item.target_type)) + ' / ' + esc(item.field_name || "field") + '</div>' +
         '<div class="conflict-meta">target_id: ' + esc(item.target_id || "-") + '</div>' +
         '</div>' +
         '<div class="conflict-card-right">' +
@@ -1863,6 +1960,13 @@
         '<div class="conflict-object-item"><div class="conflict-object-label">对象类型</div><div class="conflict-object-value">' + esc(formatTargetType(item.target_type)) + '</div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">字段</div><div class="conflict-object-value">' + esc(item.field_name || "-") + '</div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">target_id</div><div class="conflict-object-value mono">' + esc(item.target_id || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">Object</div><div class="conflict-object-value">' + esc(targetSummaryLabel(item)) + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">Energy type</div><div class="conflict-object-value">' + esc(summary.property_type || summary.normalized_energy_type || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">Material</div><div class="conflict-object-value">' + esc(summary.normalized_material || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">Structure</div><div class="conflict-object-value">' + esc(summary.structure_name || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">Adsorbate</div><div class="conflict-object-value">' + esc(summary.adsorbate || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">Reaction</div><div class="conflict-object-value">' + esc(summary.reaction_step || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">Anchor</div><div class="conflict-object-value">' + esc(anchorSummaryText(anchor)) + '</div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">冲突类型</div><div class="conflict-chip-row">' + (item.conflict_types || []).map(function (type) {
           return '<span class="chip ' + esc(conflictSeverityClass(type)) + '" title="' + esc(type) + '">' + esc(formatConflictType(type)) + '</span>';
         }).join("") + '</div></div>' +

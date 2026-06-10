@@ -29,6 +29,7 @@ from app.services.review_conflict_service import (
     ReviewConflictAggregationService,
 )
 from app.services.review_service import ReviewService
+from app.services.review_target_resolver import canonical_target_type
 
 
 class VerificationSessionService:
@@ -511,7 +512,7 @@ class VerificationSessionService:
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            target_type = str(payload.get("target_type") or "").strip().lower()
+            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
             target_id = str(payload.get("target_id") or "").strip()
             field_name = str(payload.get("field_name") or "").strip()
             if not target_type or not target_id or not field_name:
@@ -539,6 +540,9 @@ class VerificationSessionService:
                     "source": payload.get("source") or run.source,
                     "source_identity": identity,
                     "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
+                    "adjudication_role": payload.get("adjudication_role"),
+                    "adjudication_scope": payload.get("adjudication_scope"),
+                    "selected_source_ids": payload.get("selected_source_ids"),
                 }
             )
 
@@ -555,8 +559,11 @@ class VerificationSessionService:
                 if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
                     deduped[key] = opinion
             eligible = [item for item in deduped.values() if self._opinion_has_anchor(item)]
+            third_ai = [item for item in eligible if str(item.get("adjudication_role") or "").strip().lower() == "third_ai"]
             if target_type in self.HIGH_RISK_IDE_TARGET_TYPES:
-                if len(eligible) < 2:
+                if third_ai:
+                    adopted = max(third_ai, key=lambda item: item.get("confidence") or 0)
+                elif len(eligible) < 2:
                     pending.append(
                         {
                             "target_type": target_type,
@@ -567,22 +574,23 @@ class VerificationSessionService:
                         }
                     )
                     continue
-                signature_groups = {
-                    (str(item.get("decision") or ""), self._value_key(item.get("corrected_value"))): item
-                    for item in eligible
-                }
-                if len(signature_groups) != 1:
-                    pending.append(
-                        {
-                            "target_type": target_type,
-                            "target_id": target_id,
-                            "field_name": field_name,
-                            "reason": "ai_disagreement",
-                            "eligible_opinion_count": len(eligible),
-                        }
-                    )
-                    continue
-                adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
+                else:
+                    signature_groups = {
+                        (str(item.get("decision") or ""), self._value_key(item.get("corrected_value"))): item
+                        for item in eligible
+                    }
+                    if len(signature_groups) != 1:
+                        pending.append(
+                            {
+                                "target_type": target_type,
+                                "target_id": target_id,
+                                "field_name": field_name,
+                                "reason": "ai_disagreement",
+                                "eligible_opinion_count": len(eligible),
+                            }
+                        )
+                        continue
+                    adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
             else:
                 if not eligible:
                     skipped.append(
@@ -598,7 +606,7 @@ class VerificationSessionService:
                     (str(item.get("decision") or ""), self._value_key(item.get("corrected_value"))): item
                     for item in eligible
                 }
-                if len(signature_groups) != 1:
+                if not third_ai and len(signature_groups) != 1:
                     pending.append(
                         {
                             "target_type": target_type,
@@ -609,7 +617,7 @@ class VerificationSessionService:
                         }
                     )
                     continue
-                adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
+                adopted = max(third_ai, key=lambda item: item.get("confidence") or 0) if third_ai else max(eligible, key=lambda item: item.get("confidence") or 0)
             try:
                 result = self._apply_selected_opinion(
                     paper_id=paper_id,
@@ -619,6 +627,7 @@ class VerificationSessionService:
                     reviewer=reviewer,
                     opinion=adopted,
                     dual_ai_consensus=target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
+                    adjudicated_by_third_ai=bool(third_ai and adopted in third_ai),
                 )
             except Exception as exc:
                 skipped.append(
@@ -645,6 +654,7 @@ class VerificationSessionService:
                     "materialized_target_type": materialized_target_type,
                     "materialized_target_id": materialized_target_id,
                     "dual_ai_required": target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
+                    "adjudication_role": adopted.get("adjudication_role"),
                 }
             )
         self.session.flush()
@@ -770,8 +780,10 @@ class VerificationSessionService:
         reviewer: str,
         opinion: dict[str, Any],
         dual_ai_consensus: bool = False,
+        adjudicated_by_third_ai: bool = False,
     ) -> dict[str, Any]:
         decision = str(opinion.get("decision") or "").upper()
+        evidence_payload = self._materialize_evidence_payload(opinion)
         if target_type == "dft_results":
             if decision in {"REJECT", "REJECTED", "BLOCK"} and opinion.get("corrected_value") in (None, ""):
                 return self._apply_reject_all(paper_id=paper_id, target_type=target_type, target_id=target_id, reviewer=reviewer)
@@ -782,6 +794,8 @@ class VerificationSessionService:
                 reviewer=reviewer,
                 opinion=opinion,
                 dual_ai_consensus=dual_ai_consensus,
+                adjudicated_by_third_ai=adjudicated_by_third_ai,
+                evidence_payload=evidence_payload,
             )
         if decision in DECISION_NEGATIVE and opinion.get("corrected_value") in (None, ""):
             raise ValueError("A structured non-DFT review cannot be auto-applied without a corrected value.")
@@ -792,8 +806,9 @@ class VerificationSessionService:
             field_name=field_name,
             reviewer=reviewer,
             proposed_value=opinion.get("corrected_value", opinion.get("value")),
-            evidence_payload=opinion.get("evidence_payload"),
+            evidence_payload=evidence_payload,
             dual_ai_consensus=dual_ai_consensus,
+            adjudicated_by_third_ai=adjudicated_by_third_ai,
         )
 
     def _apply_reject_all(self, *, paper_id: UUID, target_type: str, target_id: str, reviewer: str) -> dict[str, Any]:
@@ -817,6 +832,8 @@ class VerificationSessionService:
         reviewer: str,
         opinion: dict[str, Any],
         dual_ai_consensus: bool,
+        adjudicated_by_third_ai: bool,
+        evidence_payload: Any,
     ) -> dict[str, Any]:
         row = self.session.get(DFTResult, UUID(str(target_id)))
         if row is None or row.paper_id != paper_id:
@@ -824,7 +841,10 @@ class VerificationSessionService:
         mapped_field = self.DFT_FIELD_ALIASES.get(field_name, field_name)
         proposed_value = opinion.get("corrected_value", opinion.get("value"))
         current_value = getattr(row, mapped_field, None) if hasattr(row, mapped_field) else None
-        note = "Dual-AI consensus auto-adopted through the DFT safety gate." if dual_ai_consensus else "Manual adjudication selected this AI opinion."
+        note = self._materialization_note(
+            dual_ai_consensus=dual_ai_consensus,
+            adjudicated_by_third_ai=adjudicated_by_third_ai,
+        )
         if mapped_field == "value" and self._value_key(proposed_value) == self._value_key(current_value):
             result = DFTResultReviewService(self.session).verify_result(
                 paper_id=paper_id,
@@ -833,7 +853,7 @@ class VerificationSessionService:
                 reviewer=reviewer,
                 reviewer_note=note,
                 field_names=["value"],
-                evidence_payload=opinion.get("evidence_payload"),
+                evidence_payload=evidence_payload,
             )
             return {"action": "verify", "target_type": "dft_results", "target_id": target_id, "result": result}
         return self._apply_structured_correction(
@@ -843,8 +863,9 @@ class VerificationSessionService:
             field_name=mapped_field,
             reviewer=reviewer,
             proposed_value=proposed_value,
-            evidence_payload=opinion.get("evidence_payload"),
+            evidence_payload=evidence_payload,
             dual_ai_consensus=dual_ai_consensus,
+            adjudicated_by_third_ai=adjudicated_by_third_ai,
         )
 
     def _apply_structured_correction(
@@ -858,6 +879,7 @@ class VerificationSessionService:
         proposed_value: Any,
         evidence_payload: Any,
         dual_ai_consensus: bool,
+        adjudicated_by_third_ai: bool,
     ) -> dict[str, Any]:
         target_collection = self._correction_collection_name(target_type)
         correction = PaperCorrection(
@@ -867,10 +889,9 @@ class VerificationSessionService:
             target_path=f"{target_collection}:{target_id}:{field_name}",
             operation="replace",
             proposed_value=proposed_value,
-            reason=(
-                "Dual-AI consensus auto-adopted through the correction approval gate."
-                if dual_ai_consensus
-                else "Manual adjudication adopted the selected AI opinion through the correction approval gate."
+            reason=self._materialization_note(
+                dual_ai_consensus=dual_ai_consensus,
+                adjudicated_by_third_ai=adjudicated_by_third_ai,
             ),
             evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
             status="pending",
@@ -948,6 +969,31 @@ class VerificationSessionService:
         if isinstance(value, float):
             return round(value, 8)
         return value
+
+    @staticmethod
+    def _materialization_note(*, dual_ai_consensus: bool, adjudicated_by_third_ai: bool) -> str:
+        if adjudicated_by_third_ai:
+            return "Third-AI adjudication adopted this opinion through the existing verify/correction safety gate."
+        if dual_ai_consensus:
+            return "Dual-AI consensus auto-adopted through the existing verify/correction safety gate."
+        return "Manual adjudication adopted this AI opinion through the existing verify/correction safety gate."
+
+    @staticmethod
+    def _materialize_evidence_payload(opinion: dict[str, Any]) -> Any:
+        payload = opinion.get("evidence_payload")
+        if not isinstance(payload, dict):
+            return payload
+        merged = dict(payload)
+        extra = {
+            "adjudication_role": opinion.get("adjudication_role"),
+            "adjudication_scope": opinion.get("adjudication_scope"),
+            "selected_source_ids": opinion.get("selected_source_ids"),
+            "review_decision": opinion.get("decision"),
+            "review_source": opinion.get("source"),
+            "review_source_label": opinion.get("source_label"),
+        }
+        merged.update({key: value for key, value in extra.items() if value not in (None, "", [])})
+        return merged
 
     def _get_session_job(self, session_id: str) -> WorkflowJob:
         job = self.session.get(WorkflowJob, session_id)

@@ -11,9 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    DFTResult,
     ExternalAnalysisCandidate,
     ExtractionFieldReview,
+    MechanismClaim,
+    PaperFigure,
     PaperCorrection,
+    PaperTable,
+    WritingCard,
 )
 from app.services.review_target_resolver import canonical_target_type
 
@@ -28,6 +33,7 @@ class ReviewConflictAggregationService:
 
     def __init__(self, session: Session) -> None:
         self.session = session
+        self._target_cache: dict[tuple[str, str], Any] = {}
 
     def list_conflicts(
         self,
@@ -48,10 +54,13 @@ class ReviewConflictAggregationService:
         groups = self._group_opinions(opinions)
         rows = []
         for key, items in sorted(groups.items(), key=lambda item: item[0]):
-            conflict_types = self._conflict_types(items)
+            enriched_items = [self._enrich_opinion(item) for item in items]
+            conflict_types = self._conflict_types(enriched_items)
             if not conflict_types and not include_non_conflicts:
                 continue
             paper, target, target_value, field = key.split("|", 3)
+            target_summary = self._build_target_summary(target, target_value, enriched_items)
+            anchor_summary = self._build_anchor_summary(enriched_items)
             rows.append(
                 {
                     "paper_id": paper,
@@ -59,10 +68,12 @@ class ReviewConflictAggregationService:
                     "target_id": target_value,
                     "field_name": field,
                     "reviewer_count": len(items),
-                    "source_count": len({self._norm(item.get("source")) for item in items if item.get("source")}),
+                    "source_count": len({self._norm(item.get("source")) for item in enriched_items if item.get("source")}),
                     "conflict": bool(conflict_types),
                     "conflict_types": conflict_types,
-                    "opinions": items,
+                    "target_summary": target_summary,
+                    "anchor_summary": anchor_summary,
+                    "opinions": enriched_items,
                 }
             )
         rows = rows[: max(1, min(limit, 1000))]
@@ -71,7 +82,7 @@ class ReviewConflictAggregationService:
             for conflict_type in row["conflict_types"]:
                 conflict_type_counts[conflict_type] += 1
         return {
-            "schema_version": "review_conflicts_v1",
+            "schema_version": "review_conflicts_v2",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "filters": {
                 "paper_id": str(paper_id) if paper_id else None,
@@ -394,6 +405,19 @@ class ReviewConflictAggregationService:
             "|".join([str(item.get("target_type") or ""), str(item.get("target_id") or ""), str(item.get("field_name") or "")])
             for item in opinions
         }
+        identity_keys = {
+            "|".join(
+                [
+                    self._norm((item.get("identity") or {}).get("normalized_energy_type")),
+                    self._norm((item.get("identity") or {}).get("normalized_material")),
+                    self._norm((item.get("identity") or {}).get("structure_name")),
+                    self._norm((item.get("identity") or {}).get("adsorbate")),
+                    self._norm((item.get("identity") or {}).get("reaction_step")),
+                ]
+            )
+            for item in opinions
+            if any((item.get("identity") or {}).get(key) for key in ("normalized_energy_type", "normalized_material", "structure_name", "adsorbate", "reaction_step"))
+        }
         if len(value_keys) > 1:
             conflict_types.append("value_conflict")
         if len(unit_keys) > 1:
@@ -404,7 +428,194 @@ class ReviewConflictAggregationService:
             conflict_types.append("locator_conflict")
         if len(mapping_keys) > 1:
             conflict_types.append("mapping_conflict")
+        if len(identity_keys) > 1:
+            conflict_types.append("identity_conflict")
         return conflict_types
+
+    def _enrich_opinion(self, opinion: dict[str, Any]) -> dict[str, Any]:
+        item = dict(opinion)
+        raw_payload = item.get("raw_payload") if isinstance(item.get("raw_payload"), dict) else {}
+        evidence = item.get("evidence")
+        locator = self._extract_locator_payload(evidence)
+        identity = {
+            "normalized_energy_type": raw_payload.get("normalized_energy_type") or raw_payload.get("property_type"),
+            "normalized_material": raw_payload.get("normalized_material"),
+            "structure_name": raw_payload.get("structure_name"),
+            "adsorbate": raw_payload.get("adsorbate"),
+            "reaction_step": raw_payload.get("reaction_step"),
+            "source_section": raw_payload.get("source_section") or locator.get("section") or raw_payload.get("section_title"),
+            "source_figure": raw_payload.get("source_figure") or locator.get("figure") or locator.get("figure_id"),
+            "source_table": raw_payload.get("source_table") or locator.get("table") or locator.get("table_id"),
+        }
+        identity["object_label"] = self._object_label(identity, item.get("field_name"))
+        item["identity"] = identity
+        item["anchor_summary"] = self._single_anchor_summary(evidence)
+        if raw_payload.get("adjudication_role"):
+            item["adjudication_role"] = raw_payload.get("adjudication_role")
+        if raw_payload.get("adjudication_scope"):
+            item["adjudication_scope"] = raw_payload.get("adjudication_scope")
+        selected_source_ids = raw_payload.get("selected_source_ids")
+        if isinstance(selected_source_ids, list):
+            item["selected_source_ids"] = [str(value) for value in selected_source_ids if str(value).strip()]
+        return item
+
+    def _build_target_summary(self, target_type: str, target_id: str, opinions: list[dict[str, Any]]) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "target_type": target_type,
+            "target_id": target_id,
+        }
+        target_row = self._load_target_row(target_type, target_id)
+        if isinstance(target_row, DFTResult):
+            summary.update(
+                {
+                    "object_label": self._join_bits(
+                        [target_row.property_type, target_row.adsorbate, target_row.reaction_step, target_row.source_section]
+                    ),
+                    "property_type": target_row.property_type,
+                    "adsorbate": target_row.adsorbate,
+                    "reaction_step": target_row.reaction_step,
+                    "source_section": target_row.source_section,
+                    "current_value": target_row.value,
+                    "current_unit": target_row.unit,
+                }
+            )
+        elif isinstance(target_row, PaperFigure):
+            summary.update(
+                {
+                    "object_label": self._join_bits([target_row.figure_label, target_row.caption]),
+                    "figure_label": target_row.figure_label,
+                    "caption": target_row.caption,
+                    "page": target_row.page,
+                    "content_summary": target_row.content_summary,
+                }
+            )
+        elif isinstance(target_row, PaperTable):
+            summary.update(
+                {
+                    "object_label": self._join_bits([target_row.caption, f"page {target_row.page}" if target_row.page else None]),
+                    "caption": target_row.caption,
+                    "page": target_row.page,
+                }
+            )
+        elif isinstance(target_row, MechanismClaim):
+            summary.update(
+                {
+                    "object_label": self._join_bits([target_row.claim_type, target_row.claim_text]),
+                    "claim_type": target_row.claim_type,
+                    "claim_text": target_row.claim_text,
+                }
+            )
+        elif isinstance(target_row, WritingCard):
+            summary.update(
+                {
+                    "object_label": self._join_bits([target_row.paper_type, "writing card"]),
+                    "paper_type": target_row.paper_type,
+                }
+            )
+        first_identity = self._first_non_blank_identity(opinions)
+        summary.update({key: value for key, value in first_identity.items() if value and key not in summary})
+        if not summary.get("object_label"):
+            summary["object_label"] = self._join_bits(
+                [
+                    summary.get("normalized_energy_type"),
+                    summary.get("normalized_material"),
+                    summary.get("structure_name"),
+                    summary.get("adsorbate"),
+                    summary.get("reaction_step"),
+                ]
+            ) or target_id
+        return summary
+
+    def _build_anchor_summary(self, opinions: list[dict[str, Any]]) -> dict[str, Any]:
+        anchors = [self._single_anchor_summary(item.get("evidence")) for item in opinions]
+        best = next(
+            (
+                anchor
+                for anchor in anchors
+                if any(anchor.get(key) for key in ("page", "section", "quoted_text", "table", "figure", "locator_status"))
+            ),
+            {},
+        )
+        return {
+            "page": best.get("page"),
+            "section": best.get("section"),
+            "table": best.get("table"),
+            "figure": best.get("figure"),
+            "quoted_text": best.get("quoted_text"),
+            "locator_status": best.get("locator_status"),
+            "source_count": len([anchor for anchor in anchors if any(anchor.values())]),
+        }
+
+    def _single_anchor_summary(self, evidence: Any) -> dict[str, Any]:
+        payload = evidence[0] if isinstance(evidence, list) and evidence else evidence
+        if not isinstance(payload, dict):
+            return {}
+        locator = self._extract_locator_payload(payload)
+        return {
+            "page": locator.get("page"),
+            "section": locator.get("section") or payload.get("section_title"),
+            "table": locator.get("table") or locator.get("table_id"),
+            "figure": locator.get("figure") or locator.get("figure_id"),
+            "quoted_text": payload.get("quoted_text") or payload.get("evidence_text") or payload.get("excerpt") or payload.get("text"),
+            "locator_status": locator.get("locator_status"),
+        }
+
+    def _load_target_row(self, target_type: str, target_id: str) -> Any:
+        key = (target_type, target_id)
+        if key in self._target_cache:
+            return self._target_cache[key]
+        model = {
+            "dft_results": DFTResult,
+            "figures": PaperFigure,
+            "tables": PaperTable,
+            "mechanism_claims": MechanismClaim,
+            "writing_cards": WritingCard,
+        }.get(target_type)
+        row = None
+        if model is not None:
+            try:
+                row = self.session.get(model, UUID(str(target_id)))
+            except (ValueError, TypeError):
+                row = None
+        self._target_cache[key] = row
+        return row
+
+    @staticmethod
+    def _extract_locator_payload(evidence: Any) -> dict[str, Any]:
+        payload = evidence[0] if isinstance(evidence, list) and evidence else evidence
+        if not isinstance(payload, dict):
+            return {}
+        locator = payload.get("locator") if isinstance(payload.get("locator"), dict) else payload.get("evidence_location")
+        if isinstance(locator, dict):
+            return locator
+        return payload
+
+    @staticmethod
+    def _first_non_blank_identity(opinions: list[dict[str, Any]]) -> dict[str, Any]:
+        for opinion in opinions:
+            identity = opinion.get("identity") or {}
+            if any(identity.get(key) for key in identity):
+                return identity
+        return {}
+
+    @classmethod
+    def _object_label(cls, identity: dict[str, Any], field_name: Any) -> str:
+        return cls._join_bits(
+            [
+                identity.get("normalized_energy_type"),
+                identity.get("normalized_material"),
+                identity.get("structure_name"),
+                identity.get("adsorbate"),
+                identity.get("reaction_step"),
+                identity.get("source_section"),
+                field_name,
+            ]
+        )
+
+    @staticmethod
+    def _join_bits(values: list[Any]) -> str:
+        bits = [str(value).strip() for value in values if value is not None and str(value).strip()]
+        return " | ".join(bits)
 
     @staticmethod
     def _opinion(

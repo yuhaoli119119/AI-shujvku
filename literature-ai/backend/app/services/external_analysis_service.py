@@ -82,6 +82,14 @@ class ExternalObjectReviewAuditModel(BaseModel):
     target_id: str
     field_name: str | None = None
     decision: str | None = None
+    adjudication_role: str | None = None
+    adjudication_scope: str | None = None
+    selected_source_ids: list[str] = Field(default_factory=list)
+    normalized_energy_type: str | None = None
+    normalized_material: str | None = None
+    structure_name: str | None = None
+    adsorbate: str | None = None
+    reaction_step: str | None = None
     evidence_checked: bool | None = None
     evidence_location: dict[str, Any] | list[Any] | str | None = None
     blocking_errors: list[Any] = Field(default_factory=list)
