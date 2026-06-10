@@ -522,9 +522,9 @@
     .compare-table tr:last-child td {
       border-bottom: 0;
     }
-    .compare-col-source { width: 20%; }
-    .compare-col-role { width: 14%; }
-    .compare-col-decision { width: 9%; }
+    .compare-col-source { width: 16%; }
+    .compare-col-role { width: 17%; }
+    .compare-col-decision { width: 10%; }
     .compare-col-value { width: 13%; }
     .compare-col-confidence { width: 8%; }
     .compare-col-locator { width: 12%; }
@@ -535,12 +535,14 @@
       font-weight: 800;
       color: var(--color-text);
       line-height: 1.45;
+      word-break: break-word;
     }
     .opinion-submeta {
       margin-top: 4px;
       color: var(--color-text-secondary);
       font-size: 11px;
       line-height: 1.4;
+      word-break: break-word;
     }
     .reason-block {
       display: grid;
@@ -1843,11 +1845,63 @@
     }
 
     function reviewSourceLabel(opinion) {
-      return opinion.source_label || opinion.source || opinion.agent_role || opinion.model_name || opinion.source_type || "review";
+      const raw = String(opinion.source_label || opinion.source || opinion.agent_role || opinion.model_name || opinion.source_type || "review");
+      if (raw === "codex_live_test") return "现场核验";
+      if (/^verify:.*:primary$/i.test(raw)) return "主审核 AI";
+      if (/^verify:.*:secondary$/i.test(raw)) return "第二审核 AI";
+      if (/^verify:.*:third_ai$/i.test(raw)) return "第三裁定 AI";
+      if (raw === "manual_adjudication") return "人工裁定";
+      return raw;
     }
 
     function roleModelLabel(opinion) {
-      return [opinion.agent_role || "-", opinion.model_name || "-"].join(" / ");
+      const parts = [opinion.agent_role, opinion.model_name].filter(function (part) {
+        return part !== null && part !== undefined && String(part).trim() !== "";
+      });
+      return parts.length ? parts.join(" / ") : "-";
+    }
+
+    function opinionSourceMeta(opinion) {
+      const raw = String(opinion.source || opinion.source_type || "").trim();
+      if (!raw) return "";
+      if (/^verify:/.test(raw)) {
+        const parts = raw.split(":");
+        return parts.length >= 3 ? ("审核批次 / " + parts[parts.length - 1]) : "审核批次";
+      }
+      return raw;
+    }
+
+    function opinionDecisionLabel(opinion) {
+      const raw = String(opinion.decision || opinion.status || "review").trim();
+      const mapping = {
+        PASS: "通过",
+        pass: "通过",
+        verified: "已核验",
+        review: "待复核",
+        reject: "拒绝",
+        rejected: "已拒绝",
+        correction: "需修正",
+        corrected: "已修正",
+        needs_fix: "需修正",
+        needs_review: "待复核"
+      };
+      return mapping[raw] || raw;
+    }
+
+    function opinionReasonLabel(reason) {
+      const raw = String(reason || "").trim();
+      if (!raw) return "未填写理由";
+      const exact = {
+        "Manual adjudication selected this AI opinion.": "人工裁定采用了这条 AI 意见。",
+        "Imported object-level external review audit candidate": "导入的对象级外部审核候选。",
+        "No reason provided.": "未填写理由。"
+      };
+      if (exact[raw]) return exact[raw];
+      return raw
+        .replaceAll("missing_locator", "缺少定位")
+        .replaceAll("missing locator", "缺少定位")
+        .replaceAll("Imported object-level external review audit candidate", "导入的对象级外部审核候选")
+        .replaceAll("Manual adjudication selected this AI opinion.", "人工裁定采用了这条 AI 意见。");
     }
 
     function bestOpenPage(row, opinions) {
@@ -1912,15 +1966,15 @@
     }
 
     function buildOpinionCompareRow(item, opinion, row, cardIndex, opinionIndex) {
-      const reason = opinion.reason || "No reason provided.";
+      const reason = opinionReasonLabel(opinion.reason || "No reason provided.");
       const reasonId = "reason-" + cardIndex + "-" + opinionIndex;
       const showExpand = reason.length > 96;
       const opinionKey = extractOpinionEvidenceKey(item, opinion, cardIndex, opinionIndex);
       const identityText = opinionIdentitySummary(opinion);
       return '<tr data-opinion-key="' + esc(opinionKey) + '" class="' + (opinionIndex > 2 ? 'compare-extra' : '') + '"' + (opinionIndex > 2 ? ' hidden' : '') + '>' +
-        '<td><div class="opinion-source">' + esc(reviewSourceLabel(opinion)) + '</div><div class="opinion-submeta">' + esc(opinion.source || opinion.source_type || "read_only") + '</div></td>' +
+        '<td><div class="opinion-source">' + esc(reviewSourceLabel(opinion)) + '</div><div class="opinion-submeta">' + esc(opinionSourceMeta(opinion) || "审核记录") + '</div></td>' +
         '<td>' + esc(roleModelLabel(opinion)) + '</td>' +
-        '<td><span class="chip">' + esc(opinion.decision || opinion.status || "review") + '</span>' + adjudicationRoleBadge(opinion) + '</td>' +
+        '<td><div class="opinion-action">' + '<span class="chip">' + esc(opinionDecisionLabel(opinion)) + '</span>' + adjudicationRoleBadge(opinion) + '</div></td>' +
         '<td><div>' + esc(formatOpinionValue(opinion)) + '</div>' + (identityText ? '<div class="opinion-submeta">' + esc(identityText) + '</div>' : '') + '</td>' +
         '<td>' + esc(confidenceLabel(opinion.confidence)) + '</td>' +
         '<td>' + esc(formatLocatorSummary(opinion)) + '</td>' +
