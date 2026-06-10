@@ -24,6 +24,7 @@ from app.services.external_analysis_service import (
     sanitize_internal_corrections as _sanitize_internal_corrections,
 )
 from app.services.paper_query import PaperQueryService
+from app.services.verification_session_service import VerificationSessionService
 
 router = APIRouter()
 
@@ -63,6 +64,11 @@ async def import_external_analysis(
             raw_text=payload.raw_text,
             raw_payload=payload.raw_payload,
         )
+        if payload.auto_apply_review_rules:
+            VerificationSessionService(session, settings).apply_import_rules_for_paper(
+                paper_id=payload.paper_id,
+                reviewer=payload.reviewer,
+            )
         session.commit()
         return _serialize_run(service, run)
     except ValueError as exc:

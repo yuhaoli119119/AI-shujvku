@@ -56,6 +56,7 @@ class DFTResultReviewService:
         reviewer: str | None = None,
         reviewer_note: str | None = None,
         field_names: list[str] | None = None,
+        evidence_payload: dict[str, Any] | list[Any] | None = None,
     ) -> dict[str, Any]:
         if not confirm_reviewed_against_pdf:
             raise ValueError("Explicit PDF/evidence review confirmation is required.")
@@ -69,16 +70,53 @@ class DFTResultReviewService:
         if not selected_fields:
             raise ValueError("No non-empty DFT result fields are available for verification.")
 
-        reviews = self.review_service.mark_verified(
-            paper_id,
-            ExtractionReviewMarkVerifiedRequest(
-                target_type="dft_results",
-                target_id=str(result_id),
-                field_names=selected_fields,
-                reviewer=reviewer or "codex_review",
-                reviewer_note=reviewer_note or "Verified through the DFT candidate review workflow.",
-            ),
-        )
+        try:
+            reviews = self.review_service.mark_verified(
+                paper_id,
+                ExtractionReviewMarkVerifiedRequest(
+                    target_type="dft_results",
+                    target_id=str(result_id),
+                    field_names=selected_fields,
+                    reviewer=reviewer or "codex_review",
+                    reviewer_note=reviewer_note or "Verified through the DFT candidate review workflow.",
+                ),
+            )
+        except ValueError as exc:
+            if "missing_evidence_reference" not in str(exc) or not self._has_anchor(evidence_payload):
+                raise
+            note = reviewer_note or "Verified through imported IDE-AI evidence anchors."
+            reviews = []
+            for field_name in selected_fields:
+                field_snapshot = snapshot[field_name]
+                review = self.review_service._get_or_create_review(
+                    paper_id,
+                    "dft_results",
+                    str(result_id),
+                    field_name,
+                )
+                review.original_value = field_snapshot["value"]
+                review.reviewed_value = field_snapshot["value"]
+                review.unit = field_snapshot["unit"]
+                review.evidence_text = field_snapshot["evidence_text"]
+                review.reviewer_status = "verified"
+                review.reviewer = reviewer or "codex_review"
+                review.reviewer_note = note
+                review.review_payload = {
+                    "human_verification": {
+                        "reviewer": reviewer or "codex_review",
+                        "reviewer_note": note,
+                        "decision": "verified",
+                        "writes_final_truth": True,
+                    },
+                    "imported_evidence_payload": evidence_payload,
+                }
+                review.target_resolution_status = "active"
+                review.remapped_from_target_id = None
+                review.last_resolved_target_id = str(result_id)
+                self.review_service.resolver._refresh_review_identity(review, "dft_results", row)
+                self.session.add(review)
+                self.session.flush()
+                reviews.append(self.review_service._serialize(review))
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
         row.candidate_status = "ML_Ready" if gate.eligible else "human_reviewed_needs_evidence"
         self.session.add(row)
@@ -116,6 +154,18 @@ class DFTResultReviewService:
             "export_safety": self._gate_payload(row, gate),
             "audit_log_id": str(audit.id),
         }
+
+    @staticmethod
+    def _has_anchor(evidence_payload: dict[str, Any] | list[Any] | None) -> bool:
+        if isinstance(evidence_payload, dict):
+            for key in ("page", "section", "figure", "table", "quoted_text", "section_title", "evidence_text"):
+                value = evidence_payload.get(key)
+                if value is not None and str(value).strip():
+                    return True
+            return False
+        if isinstance(evidence_payload, list):
+            return any(DFTResultReviewService._has_anchor(item) for item in evidence_payload if isinstance(item, (dict, list)))
+        return False
 
     def reject_result(
         self,

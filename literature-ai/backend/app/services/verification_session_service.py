@@ -32,6 +32,7 @@ from app.services.review_service import ReviewService
 
 
 class VerificationSessionService:
+    HIGH_RISK_IDE_TARGET_TYPES = {"dft_results", "figure", "figures", "table", "tables"}
     HIGH_RISK_SCOPES = {
         "all": {"dft_results", "mechanism_claims", "electrochemical_performance", "catalyst_samples", "dft_settings"},
         "dft_only": {"dft_results"},
@@ -152,6 +153,27 @@ class VerificationSessionService:
             "settlement": result.get("settlement"),
             "created_at": payload.get("created_at"),
         }
+
+    def apply_import_rules_for_paper(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
+        low_risk_summary = self._auto_materialize_single_ai_candidates(paper_id=paper_id, reviewer=reviewer)
+        object_review_summary = self._auto_apply_object_review_candidates(paper_id=paper_id, reviewer=reviewer)
+        summary = {
+            "paper_id": str(paper_id),
+            "single_ai": low_risk_summary,
+            "object_reviews": object_review_summary,
+        }
+        self.session.add(
+            AuditLog(
+                paper_id=paper_id,
+                action="apply_ide_review_rules",
+                source=reviewer,
+                target_type="paper",
+                target_id=str(paper_id),
+                payload=summary,
+            )
+        )
+        self.session.flush()
+        return summary
 
     def settle_session(self, session_id: str, *, reviewer: str) -> dict[str, Any]:
         job = self._get_session_job(session_id)
@@ -425,6 +447,216 @@ class VerificationSessionService:
             "materialized_note_ids": materialized_note_ids,
         }
 
+    def _auto_materialize_single_ai_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type.in_(("note", "correction")),
+            )
+            .order_by(ExternalAnalysisCandidate.created_at.asc())
+        ).all()
+        external_service = ExternalAnalysisService(self.session, self.settings)
+        materialized: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for candidate in candidates:
+            if candidate.status not in {"pending", "requires_resolution"}:
+                skipped.append({"candidate_id": str(candidate.id), "reason": f"status={candidate.status}"})
+                continue
+            if candidate.candidate_type == "note" and not self._note_has_anchor(candidate):
+                skipped.append({"candidate_id": str(candidate.id), "reason": "missing_evidence_anchor"})
+                continue
+            if candidate.candidate_type == "correction" and not self._correction_candidate_has_anchor(candidate):
+                skipped.append({"candidate_id": str(candidate.id), "reason": "missing_evidence_anchor"})
+                continue
+            result = external_service.materialize_candidates(
+                run_id=candidate.run_id,
+                candidate_ids=[candidate.id],
+                explicit_all=False,
+                created_by=reviewer,
+            )
+            approved_status = None
+            if candidate.candidate_type == "correction" and candidate.materialized_target_id:
+                approved = ReviewService(self.session).approve_correction(UUID(str(candidate.materialized_target_id)), reviewer=reviewer)
+                approved_status = approved.status
+            materialized.append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate_type": candidate.candidate_type,
+                    "materialized_target_type": candidate.materialized_target_type,
+                    "materialized_target_id": candidate.materialized_target_id,
+                    "approved_status": approved_status,
+                    "created_notes": result.created_notes,
+                    "created_corrections": result.created_corrections,
+                }
+            )
+        self.session.flush()
+        return {
+            "materialized_count": len(materialized),
+            "materialized_items": materialized,
+            "skipped_count": len(skipped),
+            "skipped_items": skipped,
+        }
+
+    def _auto_apply_object_review_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
+        rows = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+            )
+            .order_by(ExternalAnalysisCandidate.created_at.asc())
+        ).all()
+        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for candidate, run in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = str(payload.get("target_type") or "").strip().lower()
+            target_id = str(payload.get("target_id") or "").strip()
+            field_name = str(payload.get("field_name") or "").strip()
+            if not target_type or not target_id or not field_name:
+                continue
+            identity = str(
+                payload.get("source_label")
+                or run.source_label
+                or payload.get("source")
+                or run.source
+                or candidate.id
+            ).strip()
+            grouped[(target_type, target_id, field_name)].append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate": candidate,
+                    "paper_id": str(candidate.paper_id),
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "field_name": field_name,
+                    "decision": str(payload.get("decision") or "").upper(),
+                    "corrected_value": payload.get("corrected_value", payload.get("value")),
+                    "confidence": payload.get("confidence"),
+                    "reason": payload.get("reason"),
+                    "source_label": run.source_label,
+                    "source": payload.get("source") or run.source,
+                    "source_identity": identity,
+                    "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
+                }
+            )
+
+        applied: list[dict[str, Any]] = []
+        pending: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for (target_type, target_id, field_name), opinions in grouped.items():
+            deduped: dict[str, dict[str, Any]] = {}
+            for opinion in opinions:
+                if opinion["candidate"].status not in {"candidate", "pending", "requires_resolution"}:
+                    continue
+                key = opinion["source_identity"]
+                current = deduped.get(key)
+                if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
+                    deduped[key] = opinion
+            eligible = [item for item in deduped.values() if self._opinion_has_anchor(item)]
+            if target_type in self.HIGH_RISK_IDE_TARGET_TYPES:
+                if len(eligible) < 2:
+                    pending.append(
+                        {
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": "awaiting_two_ai_reviews",
+                            "eligible_opinion_count": len(eligible),
+                        }
+                    )
+                    continue
+                signature_groups = {
+                    (str(item.get("decision") or ""), self._value_key(item.get("corrected_value"))): item
+                    for item in eligible
+                }
+                if len(signature_groups) != 1:
+                    pending.append(
+                        {
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": "ai_disagreement",
+                            "eligible_opinion_count": len(eligible),
+                        }
+                    )
+                    continue
+                adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
+            else:
+                if not eligible:
+                    skipped.append(
+                        {
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": "missing_evidence_anchor",
+                        }
+                    )
+                    continue
+                signature_groups = {
+                    (str(item.get("decision") or ""), self._value_key(item.get("corrected_value"))): item
+                    for item in eligible
+                }
+                if len(signature_groups) != 1:
+                    pending.append(
+                        {
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": "ai_disagreement",
+                            "eligible_opinion_count": len(eligible),
+                        }
+                    )
+                    continue
+                adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
+            try:
+                result = self._apply_selected_opinion(
+                    paper_id=paper_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    field_name=field_name,
+                    reviewer=reviewer,
+                    opinion=adopted,
+                    dual_ai_consensus=target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
+                )
+            except Exception as exc:
+                skipped.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": str(exc),
+                    }
+                )
+                continue
+            materialized_target_type, materialized_target_id = self._materialized_target_ref(result)
+            for opinion in opinions:
+                opinion["candidate"].status = "materialized"
+                opinion["candidate"].materialized_target_type = materialized_target_type
+                opinion["candidate"].materialized_target_id = materialized_target_id
+                self.session.add(opinion["candidate"])
+            applied.append(
+                {
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "field_name": field_name,
+                    "action": result.get("action"),
+                    "materialized_target_type": materialized_target_type,
+                    "materialized_target_id": materialized_target_id,
+                    "dual_ai_required": target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
+                }
+            )
+        self.session.flush()
+        return {
+            "applied_count": len(applied),
+            "applied_items": applied,
+            "pending_count": len(pending),
+            "pending_items": pending,
+            "skipped_count": len(skipped),
+            "skipped_items": skipped,
+        }
+
     def _settle_high_risk_targets(
         self,
         *,
@@ -540,9 +772,9 @@ class VerificationSessionService:
         dual_ai_consensus: bool = False,
     ) -> dict[str, Any]:
         decision = str(opinion.get("decision") or "").upper()
-        if decision in DECISION_NEGATIVE:
-            return self._apply_reject_all(paper_id=paper_id, target_type=target_type, target_id=target_id, reviewer=reviewer)
         if target_type == "dft_results":
+            if decision in {"REJECT", "REJECTED", "BLOCK"} and opinion.get("corrected_value") in (None, ""):
+                return self._apply_reject_all(paper_id=paper_id, target_type=target_type, target_id=target_id, reviewer=reviewer)
             return self._apply_dft_opinion(
                 paper_id=paper_id,
                 target_id=target_id,
@@ -551,6 +783,8 @@ class VerificationSessionService:
                 opinion=opinion,
                 dual_ai_consensus=dual_ai_consensus,
             )
+        if decision in DECISION_NEGATIVE and opinion.get("corrected_value") in (None, ""):
+            raise ValueError("A structured non-DFT review cannot be auto-applied without a corrected value.")
         return self._apply_structured_correction(
             paper_id=paper_id,
             target_type=target_type,
@@ -599,6 +833,7 @@ class VerificationSessionService:
                 reviewer=reviewer,
                 reviewer_note=note,
                 field_names=["value"],
+                evidence_payload=opinion.get("evidence_payload"),
             )
             return {"action": "verify", "target_type": "dft_results", "target_id": target_id, "result": result}
         return self._apply_structured_correction(
@@ -624,11 +859,12 @@ class VerificationSessionService:
         evidence_payload: Any,
         dual_ai_consensus: bool,
     ) -> dict[str, Any]:
+        target_collection = self._correction_collection_name(target_type)
         correction = PaperCorrection(
             paper_id=paper_id,
             source=reviewer,
-            field_name=target_type,
-            target_path=f"{target_type}:{target_id}:{field_name}",
+            field_name=target_collection,
+            target_path=f"{target_collection}:{target_id}:{field_name}",
             operation="replace",
             proposed_value=proposed_value,
             reason=(
@@ -645,13 +881,39 @@ class VerificationSessionService:
         self.session.flush()
         return {
             "action": "approve_correction",
-            "target_type": target_type,
+            "target_type": target_collection,
             "target_id": target_id,
             "correction_id": str(approved.id),
             "field_name": field_name,
             "proposed_value": proposed_value,
             "result": {"status": approved.status, "reviewed_by": approved.reviewed_by},
         }
+
+    @staticmethod
+    def _correction_collection_name(target_type: str) -> str:
+        lowered = str(target_type or "").strip().lower()
+        if lowered in {"figure", "figures"}:
+            return "figures"
+        if lowered in {"table", "tables"}:
+            return "tables"
+        return lowered
+
+    @staticmethod
+    def _materialized_target_ref(result: dict[str, Any]) -> tuple[str | None, str | None]:
+        action = str(result.get("action") or "").strip()
+        if action == "approve_correction":
+            return ("paper_correction", str(result.get("correction_id") or "") or None)
+        target_type = str(result.get("target_type") or "").strip() or None
+        target_id = str(result.get("target_id") or "") or None
+        return (target_type, target_id)
+
+    @staticmethod
+    def _correction_candidate_has_anchor(candidate: ExternalAnalysisCandidate) -> bool:
+        payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+        evidence_payload = payload.get("evidence_payload")
+        if VerificationSessionService._opinion_has_anchor({"evidence_payload": evidence_payload}):
+            return True
+        return VerificationSessionService._opinion_has_anchor({"evidence_payload": candidate.evidence_payload})
 
     @staticmethod
     def _note_has_anchor(candidate: ExternalAnalysisCandidate) -> bool:

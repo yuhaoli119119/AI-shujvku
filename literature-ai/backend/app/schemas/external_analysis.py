@@ -12,6 +12,14 @@ class ExternalAnalysisImportRequest(BaseModel):
     source: str = Field(..., description="Source system, e.g. chatgpt, claude_web, manual")
     source_label: str | None = Field(default=None, description="Optional human-readable source label")
     raw_text: str | None = None
+    auto_apply_review_rules: bool = Field(
+        default=False,
+        description="When True, immediately try to apply the minimal IDE-AI review rules after import.",
+    )
+    reviewer: str = Field(
+        default="ide_ai",
+        description="Reviewer label recorded when auto_apply_review_rules materializes eligible results.",
+    )
     raw_payload: dict[str, Any] | list[Any] | str | None = Field(
         default=None,
         description=(

@@ -710,7 +710,6 @@
         <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()">刷新</button>
         <button class="btn btn-ghost" type="button" onclick="batchReparseFiltered()">批量重建 AI 解析材料</button>
         <button class="btn btn-ghost" type="button" onclick="batchDeepParseMissing()">批量准备疑似漏提论文的 AI 材料</button>
-        <button class="btn btn-ghost" type="button" onclick="batchAutoAdvanceFiltered()">批量 AI 自动推进当前筛选</button>
         <button class="btn btn-tinted" type="button" onclick="prepareLibrary()">批量重建材料</button>
       </div>
     </div>
@@ -718,27 +717,11 @@
     <section class="panel" style="margin-bottom: 16px;">
       <div class="panel-head">
         <div>
-          <div class="muted mono" style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">IDE-AI 双模型核验发起台</div>
-          <div class="muted" style="margin-top: 6px;">先指定论文和范围，再准备 MCP-first 材料。高风险对象走双 AI，一致时自动过现有 gate；低风险写作内容只自动采纳带证据锚点的 note。</div>
+          <div class="muted mono" style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">IDE-AI 结果面板</div>
+          <div class="muted" style="margin-top: 6px;">这里不再作为网页发起台。IDE 中的 AI 负责读取材料、执行核验、回写结果；本页只展示结果、查看证据和承接人工分歧。</div>
         </div>
       </div>
-      <div class="filterbar" style="grid-template-columns: 1.5fr 180px 160px 160px;">
-        <textarea id="verificationPaperRefs" rows="3" placeholder="每行一个 paper_id / DOI / 标题片段；也可先筛选列表再点“使用当前筛选”"></textarea>
-        <select id="verificationScope">
-          <option value="all">全部核验</option>
-          <option value="dft_only">只核验 DFT</option>
-          <option value="writing_only">只核验写作内容</option>
-        </select>
-        <label class="muted" style="display:flex;align-items:center;gap:8px;">
-          <input id="verificationRefreshMaterials" type="checkbox" checked>
-          启动前重建材料
-        </label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn btn-ghost btn-sm" type="button" onclick="useFilteredPapersForVerification()">使用当前筛选</button>
-          <button class="btn btn-tinted btn-sm" type="button" onclick="createVerificationSession()">发起核验会话</button>
-        </div>
-      </div>
-      <div id="verificationSessionBox" class="muted" style="margin-top: 12px;">尚未发起核验会话。</div>
+      <div id="verificationSessionBox" class="muted" style="padding: 14px 16px 16px;">主入口已切回 IDE。若需要更新材料，只保留“重建材料”；真正的 AI 核验请在 IDE 中发起。</div>
     </section>
 
     <section class="panel">
@@ -1212,14 +1195,7 @@
     }
 
     function buildConflictActionButtons(item, row, index) {
-      const adjudication = item.adjudication || {};
       const buttons = [];
-      if (adjudication.adjudication_mode !== "manual" && ["verify", "reject", "propose_correction"].includes(adjudication.recommended_action)) {
-        buttons.push('<button class="btn btn-ghost btn-sm" type="button" data-action="accept-ai" data-group-index="' + esc(index) + '">接受 AI 裁定</button>');
-      }
-      if (canGenerateCorrectionDraft(item) && adjudication.recommended_action === "propose_correction") {
-        buttons.push('<button class="btn btn-ghost btn-sm" type="button" data-action="draft-correction" data-group-index="' + esc(index) + '">生成修正草案</button>');
-      }
       if (canManualAdoptOpinion(item)) {
         buttons.push('<button class="btn btn-ghost btn-sm" type="button" data-action="reject-all-opinions" data-group-index="' + esc(index) + '">都不采用</button>');
       }
@@ -1979,7 +1955,6 @@
               '<span class="chip">意见来源 ' + esc(summary.opinionSources) + '</span>' +
               '<span class="chip bad">高优先级 ' + esc(summary.highPriority) + '</span>' +
               '<span class="chip low">定位薄弱 ' + esc(summary.weakLocator) + '</span>' +
-              '<span class="chip ok">自动推进 ' + esc(toCount(adjudicationSummary.auto)) + '</span>' +
               '<span class="chip warn">建议裁定 ' + esc(toCount(adjudicationSummary.suggest)) + '</span>' +
               '<span class="chip bad">必须人工 ' + esc(toCount(adjudicationSummary.manual)) + '</span>' +
             '</div>' +

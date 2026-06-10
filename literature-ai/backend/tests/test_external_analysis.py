@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
-from app.db.models import Base, DFTResult, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperNote, PaperRelationship, WritingCard
+from app.db.models import Base, DFTResult, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, WritingCard
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel
@@ -455,6 +455,274 @@ def test_external_analysis_object_level_writing_card_audit_payload_is_candidate_
                 assert stored_card.core_hypothesis == "Polar sites anchor polysulfides."
                 assert session.query(PaperCorrection).count() == 0
                 assert session.query(ExternalAnalysisCandidate).one().status == "candidate"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_auto_apply_review_rules_materializes_single_ai_anchored_content():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_single_ai.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(
+                    title="Single AI Auto Apply Paper",
+                    abstract="Original abstract.",
+                    pdf_path="single-auto.pdf",
+                    authors=[],
+                )
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+                paper_id = paper.id
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "ide-ai-main",
+                    "auto_apply_review_rules": True,
+                    "reviewer": "ide_ai",
+                    "raw_payload": {
+                        "review_notes": [
+                            {
+                                "content": "The abstract should be softened.",
+                                "field_name": "abstract",
+                                "page": 1,
+                                "quoted_text": "Original abstract.",
+                            }
+                        ],
+                        "correction_proposals": [
+                            {
+                                "field_name": "abstract",
+                                "target_path": "abstract",
+                                "operation": "replace",
+                                "proposed_value": "Updated abstract from IDE AI.",
+                                "reason": "The original wording is too strong.",
+                                "evidence_payload": {"page": 1, "quoted_text": "Original abstract."},
+                            }
+                        ],
+                    },
+                },
+            )
+
+            assert imported.status_code == 200
+            with Session(engine) as session:
+                stored_paper = session.get(Paper, paper_id)
+                notes = session.query(PaperNote).all()
+                corrections = session.query(PaperCorrection).all()
+                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+
+            assert stored_paper is not None
+            assert stored_paper.abstract == "Updated abstract from IDE AI."
+            assert len(notes) == 1
+            assert notes[0].quoted_text == "Original abstract."
+            assert len(corrections) == 1
+            assert corrections[0].status == "approved"
+            assert {candidate.status for candidate in candidates} == {"materialized"}
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_dft():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_dual_dft.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Dual AI DFT Paper", pdf_path="dual-dft.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                row = DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S4",
+                    value=-1.20,
+                    unit="eV",
+                    source_section="Results",
+                    evidence_text="Table 1 reports -1.20 eV.",
+                    candidate_status="system_candidate",
+                )
+                session.add(row)
+                session.commit()
+                paper_id = paper.id
+                row_id = row.id
+
+            client = TestClient(app)
+            base_payload = {
+                "paper_id": str(paper_id),
+                "source": "ide_ai",
+                "auto_apply_review_rules": True,
+                "reviewer": "ide_ai",
+                "raw_payload": {
+                    "object_review_audits": [
+                        {
+                            "paper_id": str(paper_id),
+                            "target_type": "dft_results",
+                            "target_id": str(row_id),
+                            "field_name": "value",
+                            "decision": "PASS",
+                            "corrected_value": -1.20,
+                            "confidence": 0.91,
+                            "reason": "Table 1 confirms the value.",
+                            "evidence_location": {"page": 7, "section": "Results", "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        }
+                    ]
+                },
+            }
+            first = client.post(
+                "/api/external-analysis/import",
+                json={**base_payload, "source_label": "ide-ai-1"},
+            )
+            second = client.post(
+                "/api/external-analysis/import",
+                json={**base_payload, "source_label": "ide-ai-2"},
+            )
+
+            assert first.status_code == 200
+            assert second.status_code == 200
+            with Session(engine) as session:
+                stored_row = session.get(DFTResult, row_id)
+                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+
+            assert stored_row is not None
+            assert stored_row.candidate_status != "system_candidate"
+            assert {candidate.status for candidate in candidates} == {"materialized"}
+
+            conflict = client.post(
+                "/api/external-analysis/import",
+                json={
+                    **base_payload,
+                    "source_label": "ide-ai-3",
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "paper_id": str(paper_id),
+                                "target_type": "dft_results",
+                                "target_id": str(row_id),
+                                "field_name": "value",
+                                "decision": "REVISE",
+                                "corrected_value": -1.35,
+                                "confidence": 0.88,
+                                "reason": "Conflicting audit after settlement.",
+                                "evidence_location": {"page": 7, "table": "Table 1", "quoted_text": "-1.35 eV"},
+                            }
+                        ]
+                    },
+                },
+            )
+            assert conflict.status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_figures():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_dual_figure.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Dual AI Figure Paper", pdf_path="dual-figure.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                figure = PaperFigure(
+                    paper_id=paper.id,
+                    caption="Figure 1",
+                    content_summary="Old summary",
+                    figure_label="Figure 1",
+                    page=5,
+                )
+                session.add(figure)
+                session.commit()
+                paper_id = paper.id
+                figure_id = figure.id
+
+            client = TestClient(app)
+            for source_label in ("ide-ai-1", "ide-ai-2"):
+                imported = client.post(
+                    "/api/external-analysis/import",
+                    json={
+                        "paper_id": str(paper_id),
+                        "source": "ide_ai",
+                        "source_label": source_label,
+                        "auto_apply_review_rules": True,
+                        "reviewer": "ide_ai",
+                        "raw_payload": {
+                            "object_review_audits": [
+                                {
+                                    "paper_id": str(paper_id),
+                                    "target_type": "figure",
+                                    "target_id": str(figure_id),
+                                    "field_name": "content_summary",
+                                    "decision": "REVISE",
+                                    "corrected_value": "Updated figure summary from two AI reviews.",
+                                    "confidence": 0.83,
+                                    "reason": "The original summary missed the main comparison.",
+                                    "evidence_location": {"page": 5, "figure": "Figure 1", "quoted_text": "Figure 1 compares..."},
+                                }
+                            ]
+                        },
+                    },
+                )
+                assert imported.status_code == 200
+
+            with Session(engine) as session:
+                stored_figure = session.get(PaperFigure, figure_id)
+                corrections = session.query(PaperCorrection).all()
+                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+
+            assert stored_figure is not None
+            assert stored_figure.content_summary == "Updated figure summary from two AI reviews."
+            assert len(corrections) == 1
+            assert corrections[0].status == "approved"
+            assert {candidate.status for candidate in candidates} == {"materialized"}
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

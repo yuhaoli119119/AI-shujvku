@@ -17,6 +17,8 @@ from app.db.models import (
     MechanismClaim,
     Paper,
     PaperCorrection,
+    PaperFigure,
+    PaperTable,
     WritingCard,
 )
 
@@ -119,6 +121,27 @@ class ReviewService:
                     "discussion_logic",
                 }
             ),
+        ),
+        "figures": StructuredTargetSpec(
+            model=PaperFigure,
+            allowed_fields=frozenset(
+                {
+                    "caption",
+                    "page",
+                    "figure_role",
+                    "role_confidence",
+                    "content_summary",
+                    "key_elements",
+                    "figure_label",
+                    "crop_status",
+                    "crop_confidence",
+                    "crop_source",
+                }
+            ),
+        ),
+        "tables": StructuredTargetSpec(
+            model=PaperTable,
+            allowed_fields=frozenset({"caption", "markdown_content", "page", "extraction_source", "prov"}),
         ),
     }
 

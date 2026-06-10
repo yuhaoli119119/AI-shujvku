@@ -125,7 +125,6 @@
                                     <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
                                     <div id="paperMoreMenu" class="dropdown-menu right">
                                         <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
-                                        <button type="button" onclick="runInternalAIParse()">生成 AI 详细审阅</button>
                                         <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
                                         <button type="button" onclick="openAggregateView()">查看聚合视图</button>
                                         <button type="button" onclick="promptAddRelationship(state.selectedPaperId)">添加关联文献</button>
@@ -184,31 +183,17 @@
 
                     <section id="tab-review" class="tab-panel">
                         <div class="writer-block ai-review-section">
-                            <h3>旧兼容：网页内 AI 审阅</h3>
-                            <p class="subtle">这一入口仅为兼容旧流程保留，不是当前主工作流。推荐优先使用下方 IDE / MCP AI 审阅入口；系统主线是先准备材料，再由 IDE 中的 AI 接手解析、审核和回写候选。</p>
-                            <div id="internalAIConfigGuide"></div>
-                            <div class="modal-actions" style="justify-content:flex-start;">
-                                <button class="btn ghost" onclick="runInternalAIParse()">使用旧兼容入口</button>
-                                <button class="btn ghost" onclick="window.location.href='../settings/index.html'">打开设置页</button>
-                            </div>
-                        </div>
-                        <div class="writer-block ai-review-section">
                             <h3>IDE / MCP AI 审阅</h3>
-                            <p class="subtle">这是当前主工作流。先读取 MCP 指南，再让 IDE 中的 AI 读取文献、证据、codex context 和 item context，并通过 import_analysis / correction 流程回写候选。</p>
+                            <p class="subtle">网页只负责展示已回写结果、查看证据和承接分歧。主发起入口已经回到 IDE 中的 AI 指令：先 prepare-ai-context，再读取 codex-context / codex-item，最后用 import_analysis 回写，并开启 auto_apply_review_rules。</p>
                             <div class="modal-actions" style="justify-content:flex-start;">
                                 <button class="btn ghost" onclick="loadAgentGuide()">显示 MCP 指南</button>
                             </div>
                             <div id="mcpGuideBox"></div>
                         </div>
                         <div class="writer-block ai-review-section">
-                            <h3>导入外部 AI 审阅结果</h3>
-                            <div class="external-toolbar">
-                                <input id="externalSource" class="medium-input" type="text" value="手动导入" placeholder="来源">
-                                <input id="externalSourceLabel" class="medium-input" type="text" value="外部 AI 审阅结果" placeholder="来源名称">
-                            </div>
-                            <textarea id="externalRawText" placeholder="把外部 AI 返回的审阅文本或 JSON 粘贴到这里，然后导入。"></textarea>
+                            <h3>AI 回写记录</h3>
+                            <p class="subtle">这里不再承担网页内发起或导入。AI 在 IDE 中完成核验后，结果会通过 import_analysis 自动回写到这里。</p>
                             <div class="modal-actions" style="margin-top:12px;">
-                                <button class="btn primary" onclick="importExternalAnalysis()">导入审阅结果</button>
                                 <button class="btn ghost" onclick="loadExternalRuns()">刷新审阅记录</button>
                             </div>
                         </div>
