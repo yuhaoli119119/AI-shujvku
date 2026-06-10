@@ -11,7 +11,7 @@ function jsonResponse(route, payload) {
 }
 
 test.describe('Review Center Conflict Modal', () => {
-  test('renders grouped comparison cards and stays read-only', async ({ page }) => {
+  test('links grouped conflicts to read-only evidence preview', async ({ page }) => {
     const writeCalls = [];
 
     await page.route('**/api/**', async route => {
@@ -126,7 +126,14 @@ test.describe('Review Center Conflict Modal', () => {
                   value: '-1.80',
                   unit: 'eV',
                   reason: 'Matches Table 2.',
-                  evidence: { locator: { page: 5, locator_status: 'exact_page' } },
+                  evidence: {
+                    source_type: 'table',
+                    source_label: 'Table 2',
+                    evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.',
+                    context_before: 'Table 2 reports adsorption energies for representative active sites.',
+                    context_after: 'The same table compares Fe-N4 against neighboring defect motifs.',
+                    locator: { page: 5, locator_status: 'exact_page' },
+                  },
                 },
                 {
                   source: 'external_analysis',
@@ -138,7 +145,14 @@ test.describe('Review Center Conflict Modal', () => {
                   value: '-1.75',
                   unit: 'eV',
                   reason: 'Caption and table disagree.',
-                  evidence: { locator: { page: 5, locator_status: 'text_only' } },
+                  evidence: {
+                    source_type: 'section',
+                    source_label: 'Section 3.2',
+                    evidence_text: 'The discussion text mentions -1.75 eV before the authors summarize the preferred value.',
+                    context_before: 'Section 3.2 explains why the caption and the table can diverge.',
+                    context_after: 'A follow-up paragraph notes the tabulated value should be reviewed manually.',
+                    locator: { page: 5, locator_status: 'text_only' },
+                  },
                 },
                 {
                   source: 'manual_review',
@@ -150,7 +164,12 @@ test.describe('Review Center Conflict Modal', () => {
                   value: '-1.80',
                   unit: 'eV',
                   reason: 'Manual check still supports the tabulated value.',
-                  evidence: { locator: { page: 5, locator_status: 'exact_page' } },
+                  evidence: {
+                    source_type: 'table',
+                    source_label: 'Table 2',
+                    evidence_text: 'A manual read still supports -1.80 eV for the selected row.',
+                    locator: { page: 5, locator_status: 'exact_page' },
+                  },
                 },
                 {
                   source: 'cross_lab',
@@ -162,7 +181,12 @@ test.describe('Review Center Conflict Modal', () => {
                   value: '-1.78',
                   unit: 'eV',
                   reason: 'This rationale is intentionally long so the modal must clamp it by default and then allow the reviewer to expand the full explanation without losing table alignment across rows.',
-                  evidence: { locator: { locator_status: 'missing_page' } },
+                  evidence: {
+                    source_type: 'section',
+                    source_label: 'Discussion',
+                    evidence_text: 'The lab summary mentions a likely discrepancy but does not keep the page anchor.',
+                    locator: { locator_status: 'missing_page' },
+                  },
                 },
               ],
             },
@@ -181,7 +205,13 @@ test.describe('Review Center Conflict Modal', () => {
                   decision: 'review',
                   confidence: 0.58,
                   reason: 'Hypothesis may map to mechanism claim instead.',
-                  evidence: { locator: { page: 2, locator_status: 'exact_page' } },
+                  evidence: {
+                    source_type: 'writing_card',
+                    source_label: 'Writing card',
+                    evidence_text: 'Defect sites alter adsorption and charge redistribution, which may fit the mechanism claim better.',
+                    context_before: 'The writing card summarizes the study framing for the introduction.',
+                    locator: { page: 2, locator_status: 'exact_page' },
+                  },
                 },
                 {
                   source: 'external_analysis',
@@ -191,7 +221,13 @@ test.describe('Review Center Conflict Modal', () => {
                   decision: 'review',
                   confidence: 0.61,
                   reason: 'Current mapping still looks valid.',
-                  evidence: { locator: { page: 2, locator_status: 'exact_page' } },
+                  evidence: {
+                    source_type: 'section',
+                    source_label: 'Section 2.1',
+                    evidence_text: 'The authors explicitly connect the hypothesis to the writing card summary in Section 2.1.',
+                    context_after: 'A nearby sentence reinforces the intended narrative thread.',
+                    locator: { page: 2, locator_status: 'exact_page' },
+                  },
                 },
               ],
             },
@@ -213,27 +249,8 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('冲突详情');
     await expect(overlay).toContainText('只读聚合，不自动合并');
-    await expect(overlay).toContainText('冲突对象');
-    await expect(overlay).toContainText('意见来源');
-    await expect(overlay).toContainText('高优先级');
-    await expect(overlay).toContainText('定位薄弱');
-    await expect(overlay).toContainText('DFT 字段 / value');
-    await expect(overlay).toContainText('写作卡 / core_hypothesis');
-    await expect(overlay).toContainText('target_id: dft-paper-2-1');
-    await expect(overlay).toContainText('数值冲突');
-    await expect(overlay).toContainText('结论冲突');
-    await expect(overlay).toContainText('映射冲突');
-    await expect(overlay).toContainText('来源');
-    await expect(overlay).toContainText('角色/模型');
-    await expect(overlay).toContainText('置信度');
-    await expect(overlay).toContainText('理由');
-    await expect(overlay).toContainText('Gemini data audit');
-    await expect(overlay).toContainText('GLM review');
-    await expect(overlay).toContainText('-1.80 eV');
-    await expect(overlay).toContainText('page 5 | exact_page');
-    await expect(overlay).toContainText('page 5 | text_only');
-    await expect(overlay).toContainText('Matches Table 2.');
-    await expect(overlay).toContainText('此视图仅用于人工比较审核意见，不会自动写回最终真值。');
+    await expect(overlay).toContainText('证据预览');
+    await expect(overlay).toContainText('请选择一条意见查看原文片段');
 
     const openDetails = overlay.locator('details.conflict-card');
     await expect(openDetails.nth(0)).toHaveAttribute('open', '');
@@ -246,13 +263,30 @@ test.describe('Review Center Conflict Modal', () => {
     await overlay.getByRole('button', { name: '展开全部意见（+1）' }).click();
     await expect(firstTableRows.filter({ hasText: 'Claude lab review' })).toBeVisible();
 
+    const viewEvidenceButtons = overlay.getByRole('button', { name: '查看原文' });
+    await expect(viewEvidenceButtons.first()).toBeVisible();
+
+    await viewEvidenceButtons.nth(0).click();
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('来源对象');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('页码');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('定位');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('原文片段');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('Table 2');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
+    await expect(firstTableRows.nth(0)).toHaveClass(/is-active/);
+
+    await viewEvidenceButtons.nth(1).click();
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('Section 3.2');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The discussion text mentions -1.75 eV before the authors summarize the preferred value.');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('text_only');
+    await expect(firstTableRows.nth(1)).toHaveClass(/is-active/);
+
+    await expect(overlay.getByRole('link', { name: 'Open page 5' }).first()).toBeVisible();
+    await expect(overlay.locator('button[disabled][title="当前定位不足，不能可靠跳页"]')).toHaveCount(2);
+
     const expandReason = overlay.getByRole('button', { name: '展开理由' }).first();
     await expandReason.click();
     await expect(overlay.getByRole('button', { name: '收起理由' }).first()).toBeVisible();
-
-    await expect(overlay.getByRole('link', { name: 'Open page 5' }).first()).toBeVisible();
-    const disabledPdfButtons = overlay.locator('button[disabled][title="当前定位不足，不能可靠跳页"]');
-    await expect(disabledPdfButtons).toHaveCount(2);
 
     const overlayText = await overlay.innerText();
     expect(overlayText).not.toMatch(/verify|reject|correction/i);

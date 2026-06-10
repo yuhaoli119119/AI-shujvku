@@ -571,11 +571,62 @@
       flex-wrap: wrap;
       gap: 6px;
     }
+    .opinion-action-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .opinion-action-stack .btn {
+      white-space: nowrap;
+    }
     .conflict-footer-note {
       margin-top: 14px;
       color: var(--color-text-secondary);
       font-size: 12px;
       line-height: 1.5;
+    }
+    .conflict-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.95fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .conflict-main,
+    .evidence-preview-shell {
+      min-width: 0;
+    }
+    .evidence-preview-card {
+      border: 1px solid #d7e2ef;
+      border-radius: 16px;
+      background: #fbfdff;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+    }
+    .evidence-preview-card.is-placeholder {
+      min-height: 220px;
+      justify-content: center;
+    }
+    .evidence-preview-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--color-text);
+    }
+    .evidence-preview-meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .evidence-excerpt {
+      white-space: pre-wrap;
+      line-height: 1.65;
+    }
+    .compare-table tr.is-active td {
+      background: rgba(12, 87, 164, 0.08);
     }
     .btn.btn-weak {
       min-height: 26px;
@@ -628,6 +679,15 @@
       }
       .conflict-object-grid {
         grid-template-columns: 1fr 1fr;
+      }
+      .conflict-layout {
+        grid-template-columns: 1fr;
+      }
+      .evidence-preview-card {
+        position: static;
+      }
+      .evidence-preview-meta {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -706,6 +766,14 @@
 
   <script>
     const state = { rows: [], metadata: {} };
+    const conflictState = {
+      activeRow: null,
+      groups: [],
+      activeOpinionKey: null,
+      evidenceCache: {},
+      requestToken: 0
+    };
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
@@ -1029,6 +1097,11 @@
       overlay.classList.remove("open");
       overlay.setAttribute("aria-hidden", "true");
       document.getElementById("infoModalBody").innerHTML = "";
+      conflictState.activeRow = null;
+      conflictState.groups = [];
+      conflictState.activeOpinionKey = null;
+      conflictState.evidenceCache = {};
+      conflictState.requestToken = 0;
     }
 
     function buildRowDetailModal(row) {
@@ -1143,6 +1216,251 @@
       return ["text_only", "missing_bbox", "missing_page"].includes(locator.locator_status);
     }
 
+    function locatorPayloadFromEvidence(evidence) {
+      const payload = Array.isArray(evidence) ? (evidence[0] || {}) : (evidence || {});
+      if (!payload || typeof payload !== "object") return {};
+      if (payload.locator && typeof payload.locator === "object") return payload.locator;
+      if (payload.evidence_location && typeof payload.evidence_location === "object") return payload.evidence_location;
+      return payload;
+    }
+
+    function opinionEvidencePayload(opinion) {
+      if (!opinion || !opinion.evidence) return {};
+      const evidence = Array.isArray(opinion.evidence) ? (opinion.evidence[0] || {}) : opinion.evidence;
+      return evidence && typeof evidence === "object" ? evidence : {};
+    }
+
+    function locatorStatusLabel(status) {
+      const mapping = {
+        exact_page: "exact_page",
+        exact_bbox: "exact_bbox",
+        text_only: "text_only",
+        missing_bbox: "missing_bbox",
+        missing_page: "missing_page",
+        missing_locator: "missing_locator",
+        approximate_locator: "approximate_locator",
+        unresolved_locator: "unresolved_locator"
+      };
+      return mapping[status] || status || "missing_locator";
+    }
+
+    function reliableLocatorStatus(status) {
+      return ["exact_page", "exact_bbox"].includes(status);
+    }
+
+    function normalizeWhitespace(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+
+    function clipText(value, maxChars) {
+      const text = normalizeWhitespace(value);
+      if (!text) return "";
+      const max = Number(maxChars || 0);
+      if (!max || text.length <= max) return text;
+      return text.slice(0, max - 1).trimEnd() + "…";
+    }
+
+    function formatEvidenceSourceType(sourceType) {
+      const mapping = {
+        section: "section",
+        table: "table",
+        figure: "figure",
+        writing_card: "writing card",
+        mechanism_claim: "mechanism claim",
+        dft_result: "dft_result",
+        dft_results: "dft_result",
+        extraction_field_review: "review payload",
+        object_review_audit: "object review",
+        external_audit_opinion: "external audit",
+        paper_correction: "correction proposal"
+      };
+      return mapping[sourceType] || sourceType || "unknown";
+    }
+
+    function deriveEvidenceSourceLabel(evidence, item, opinion) {
+      const payload = evidence || {};
+      return payload.source_label
+        || payload.section_title
+        || payload.section
+        || payload.label
+        || payload.table_label
+        || payload.figure_label
+        || payload.figure_caption
+        || payload.caption
+        || opinion.source_label
+        || formatTargetType(item && item.target_type);
+    }
+
+    function extractNearbyContextLines(payload) {
+      const lines = [];
+      if (payload && typeof payload === "object") {
+        if (Array.isArray(payload.related_sections)) {
+          payload.related_sections.slice(0, 2).forEach(function (section) {
+            const title = section && (section.title || section.section_type || "section");
+            const text = clipText(section && section.text, 280);
+            if (text) lines.push((title ? title + ": " : "") + text);
+          });
+        }
+        [payload.context_before, payload.context_after, payload.nearby_context, payload.section_text].forEach(function (value) {
+          const text = clipText(value, 280);
+          if (text && lines.indexOf(text) === -1) lines.push(text);
+        });
+      }
+      return lines.slice(0, 2);
+    }
+
+    function extractOpinionEvidenceKey(item, opinion, groupIndex, opinionIndex) {
+      return [
+        "conflict-evidence",
+        groupIndex,
+        opinionIndex,
+        item && item.target_type || "target",
+        item && item.field_name || "field"
+      ].join(":");
+    }
+
+    function canUseCodexItem(row, item) {
+      if (!row || !item) return false;
+      if (!UUID_RE.test(String(row.paper_id || ""))) return false;
+      if (!UUID_RE.test(String(item.target_id || ""))) return false;
+      return ["dft_results", "writing_card", "mechanism_claim", "figure", "table"].includes(item.target_type);
+    }
+
+    function canPreviewEvidence(row, item, opinion) {
+      if (canUseCodexItem(row, item)) return true;
+      const evidence = opinionEvidencePayload(opinion);
+      const locator = locatorPayloadFromEvidence(evidence);
+      return Boolean(
+        normalizeWhitespace(evidence.evidence_text || evidence.excerpt || evidence.text || "").length
+        || normalizeWhitespace(opinion && opinion.reason).length
+        || normalizeWhitespace(deriveEvidenceSourceLabel(evidence, item, opinion)).length
+        || hasOwnValue(locator.page)
+        || normalizeWhitespace(locator.locator_status).length
+      );
+    }
+
+    function buildEvidencePreviewPlaceholder(message) {
+      return '<div class="evidence-preview-card is-placeholder">' +
+        '<div class="evidence-preview-title">证据预览</div>' +
+        '<div class="detail-value muted">' + esc(message || "请选择一条意见查看原文片段") + '</div>' +
+      '</div>';
+    }
+
+    function buildEvidencePreviewPanel(payload) {
+      if (!payload) return buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段");
+      if (payload.loading) return buildEvidencePreviewPlaceholder("正在读取原文片段...");
+      const nearbyLines = Array.isArray(payload.nearbyContext) ? payload.nearbyContext.filter(Boolean) : [];
+      return '<div class="evidence-preview-card">' +
+        '<div class="evidence-preview-title">证据预览</div>' +
+        '<div class="evidence-preview-meta">' +
+          '<div class="detail-block"><div class="detail-label">来源对象</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">字段</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">来源</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">页码</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">定位</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">source type</div><div class="detail-value">' + esc(payload.sourceType || "unknown") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">source label</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
+        '</div>' +
+        '<div class="detail-block"><div class="detail-label">原文片段</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "当前没有可展示的原文片段") + '</div></div>' +
+        '<div class="detail-block"><div class="detail-label">上下文</div>' +
+          (nearbyLines.length
+            ? '<ul class="detail-list">' + nearbyLines.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join("") + '</ul>'
+            : '<div class="detail-value muted">当前没有额外上下文。</div>') +
+        '</div>' +
+        (payload.note ? '<div class="detail-value muted">' + esc(payload.note) + '</div>' : '') +
+      '</div>';
+    }
+
+    function renderEvidencePreview(payload) {
+      const panel = document.getElementById("conflictEvidencePanel");
+      if (!panel) return;
+      panel.innerHTML = buildEvidencePreviewPanel(payload);
+      Array.from(document.querySelectorAll("#infoModalBody tr[data-opinion-key]")).forEach(function (rowNode) {
+        rowNode.classList.toggle("is-active", rowNode.getAttribute("data-opinion-key") === conflictState.activeOpinionKey);
+      });
+    }
+
+    function fallbackEvidencePreview(row, item, opinion) {
+      const evidence = opinionEvidencePayload(opinion);
+      const locator = locatorPayloadFromEvidence(evidence);
+      return {
+        targetType: formatTargetType(item && item.target_type),
+        fieldName: item && item.field_name || "-",
+        reviewSource: reviewSourceLabel(opinion),
+        page: hasOwnValue(locator.page) ? locator.page : null,
+        locatorStatus: locatorStatusLabel(locator.locator_status),
+        sourceType: formatEvidenceSourceType(evidence.source_type || item && item.target_type || opinion.source_type),
+        sourceLabel: deriveEvidenceSourceLabel(evidence, item, opinion),
+        excerpt: clipText(evidence.evidence_text || evidence.excerpt || evidence.text, 1200),
+        nearbyContext: extractNearbyContextLines(evidence),
+        note: canUseCodexItem(row, item) ? "" : "当前预览基于冲突聚合中的只读证据字段。"
+      };
+    }
+
+    function bestLocatorForPreview(locators, fieldName) {
+      const items = Array.isArray(locators) ? locators.slice() : [];
+      const scoped = items.filter(function (item) {
+        return !fieldName || !item.field_name || item.field_name === fieldName;
+      });
+      const pool = scoped.length ? scoped : items;
+      pool.sort(function (left, right) {
+        const leftScore = reliableLocatorStatus(left.locator_status) ? 2 : (hasOwnValue(left.page) ? 1 : 0);
+        const rightScore = reliableLocatorStatus(right.locator_status) ? 2 : (hasOwnValue(right.page) ? 1 : 0);
+        return rightScore - leftScore;
+      });
+      return pool[0] || null;
+    }
+
+    function mergeCodexItemPreview(base, contextPayload, item) {
+      const context = contextPayload && contextPayload.context && typeof contextPayload.context === "object"
+        ? contextPayload.context
+        : {};
+      const locatorItems = (context.evidence_locators && context.evidence_locators.items) || [];
+      const bestLocator = bestLocatorForPreview(locatorItems, item && item.field_name);
+      const contextItem = context.item && typeof context.item === "object" ? context.item : {};
+      const excerpt = clipText(
+        (bestLocator && bestLocator.evidence_text)
+          || base.excerpt
+          || contextItem.evidence_text
+          || (item && item.field_name && typeof contextItem[item.field_name] === "string" ? contextItem[item.field_name] : ""),
+        1200
+      );
+      const nearbyContext = extractNearbyContextLines(context.nearby_context || {});
+      return {
+        targetType: base.targetType,
+        fieldName: base.fieldName,
+        reviewSource: base.reviewSource,
+        page: bestLocator && hasOwnValue(bestLocator.page) ? bestLocator.page : base.page,
+        locatorStatus: locatorStatusLabel(bestLocator && bestLocator.locator_status || base.locatorStatus),
+        sourceType: formatEvidenceSourceType(bestLocator && bestLocator.target_type || context.item_type || base.sourceType),
+        sourceLabel: (bestLocator && (bestLocator.section || bestLocator.field_name)) || base.sourceLabel,
+        excerpt: excerpt,
+        nearbyContext: nearbyContext.length ? nearbyContext : base.nearbyContext,
+        note: "当前预览优先复用了 codex-item 只读上下文。"
+      };
+    }
+
+    async function loadOpinionEvidence(row, item, opinion, opinionKey) {
+      if (conflictState.evidenceCache[opinionKey]) return conflictState.evidenceCache[opinionKey];
+      const fallback = fallbackEvidencePreview(row, item, opinion);
+      if (!canUseCodexItem(row, item)) {
+        conflictState.evidenceCache[opinionKey] = fallback;
+        return fallback;
+      }
+      try {
+        const payload = await fetchJSON("/api/papers/" + encodeURIComponent(row.paper_id) + "/codex-item/" + encodeURIComponent(item.target_type) + "/" + encodeURIComponent(item.target_id));
+        const merged = mergeCodexItemPreview(fallback, payload, item);
+        conflictState.evidenceCache[opinionKey] = merged;
+        return merged;
+      } catch (error) {
+        const degraded = Object.assign({}, fallback, {
+          note: "codex-item 只读上下文暂不可用，已退回冲突聚合中的证据字段。"
+        });
+        conflictState.evidenceCache[opinionKey] = degraded;
+        return degraded;
+      }
+    }
+
     function buildConflictSummary(conflictRows) {
       const rows = Array.isArray(conflictRows) ? conflictRows : [];
       const sourceSet = new Set();
@@ -1203,16 +1521,48 @@
       return '<button class="btn btn-ghost btn-sm btn-weak" type="button" disabled title="' + esc(fallbackTitle || "当前定位不足，不能可靠跳页") + '">' + esc(label) + '</button>';
     }
 
-    function buildOpinionCompareRow(opinion, row, cardIndex, opinionIndex) {
+    function canOpenPdf(opinion, row) {
+      const locator = locatorPayloadFromEvidence(opinionEvidencePayload(opinion));
+      const status = locator.locator_status || "missing_locator";
+      const page = hasOwnValue(locator.page) ? Number(locator.page) : null;
+      if (!row || !row.pdf_url) {
+        return { enabled: false, label: "Open PDF", href: "", title: "当前 paper 没有可用 PDF" };
+      }
+      if (!hasOwnValue(page) || !Number.isFinite(page)) {
+        return { enabled: false, label: "Open PDF", href: "", title: "当前定位不足，不能可靠跳页" };
+      }
+      if (!reliableLocatorStatus(status)) {
+        return { enabled: false, label: "Open page " + page, href: "", title: "当前定位不足，不能可靠跳页" };
+      }
+      return {
+        enabled: true,
+        label: "Open page " + page,
+        href: row.pdf_url + "#page=" + page,
+        title: "Open page " + page
+      };
+    }
+
+    function buildPdfAction(opinion, row) {
+      const action = canOpenPdf(opinion, row);
+      if (action.enabled) {
+        return '<a class="btn btn-ghost btn-sm btn-weak" href="' + esc(action.href) + '" target="_blank" rel="noopener noreferrer">' + esc(action.label) + '</a>';
+      }
+      return '<button class="btn btn-ghost btn-sm btn-weak" type="button" disabled title="' + esc(action.title) + '">' + esc(action.label) + '</button>';
+    }
+
+    function buildEvidenceAction(opinion, item, row, cardIndex, opinionIndex) {
+      const key = extractOpinionEvidenceKey(item, opinion, cardIndex, opinionIndex);
+      const enabled = canPreviewEvidence(row, item, opinion);
+      return '<button class="btn btn-ghost btn-sm btn-weak" type="button" data-action="view-evidence" data-group-index="' + esc(cardIndex) + '" data-opinion-index="' + esc(opinionIndex) + '" data-opinion-key="' + esc(key) + '"' +
+        (enabled ? '' : ' disabled title="当前没有可展示的原文片段"') + '>查看原文</button>';
+    }
+
+    function buildOpinionCompareRow(item, opinion, row, cardIndex, opinionIndex) {
       const reason = opinion.reason || "No reason provided.";
       const reasonId = "reason-" + cardIndex + "-" + opinionIndex;
       const showExpand = reason.length > 96;
-      const evidence = opinion && opinion.evidence && typeof opinion.evidence === "object" ? opinion.evidence : {};
-      const locator = evidence.locator && typeof evidence.locator === "object" ? evidence.locator : evidence;
-      const page = hasOwnValue(locator.page) && !["text_only", "missing_page", "missing_locator"].includes(locator.locator_status)
-        ? Number(locator.page)
-        : null;
-      return '<tr class="' + (opinionIndex > 2 ? 'compare-extra' : '') + '"' + (opinionIndex > 2 ? ' hidden' : '') + '>' +
+      const opinionKey = extractOpinionEvidenceKey(item, opinion, cardIndex, opinionIndex);
+      return '<tr data-opinion-key="' + esc(opinionKey) + '" class="' + (opinionIndex > 2 ? 'compare-extra' : '') + '"' + (opinionIndex > 2 ? ' hidden' : '') + '>' +
         '<td><div class="opinion-source">' + esc(reviewSourceLabel(opinion)) + '</div><div class="opinion-submeta">' + esc(opinion.source || opinion.source_type || "read_only") + '</div></td>' +
         '<td>' + esc(roleModelLabel(opinion)) + '</td>' +
         '<td><span class="chip">' + esc(opinion.decision || opinion.status || "review") + '</span></td>' +
@@ -1222,7 +1572,7 @@
         '<td><div class="reason-block"><div id="' + esc(reasonId) + '" class="reason-text' + (showExpand ? ' truncated' : '') + '">' + esc(reason) + '</div>' +
         (showExpand ? '<button class="expand-link" type="button" data-action="toggle-reason" data-target="' + esc(reasonId) + '">展开理由</button>' : '') +
         '</div></td>' +
-        '<td><div class="opinion-action">' + buildPdfButton(row, page, "当前定位不足，不能可靠跳页") + '</div></td>' +
+        '<td><div class="opinion-action-stack">' + buildEvidenceAction(opinion, item, row, cardIndex, opinionIndex) + buildPdfAction(opinion, row) + '</div></td>' +
       '</tr>';
     }
 
@@ -1264,9 +1614,9 @@
         '<th class="compare-col-confidence">置信度</th>' +
         '<th class="compare-col-locator">定位</th>' +
         '<th class="compare-col-reason">理由</th>' +
-        '<th class="compare-col-action">PDF</th>' +
+        '<th class="compare-col-action">操作</th>' +
         '</tr></thead><tbody id="' + esc(extraId) + '">' + opinions.map(function (opinion, opinionIndex) {
-          return buildOpinionCompareRow(opinion, row, index, opinionIndex);
+          return buildOpinionCompareRow(item, opinion, row, index, opinionIndex);
         }).join("") + '</tbody></table></div>' +
         (extraCount > 0 ? '<div class="conflict-card-actions"><button class="expand-link" type="button" data-action="toggle-opinions" data-target="' + esc(extraId) + '">展开全部意见（+' + esc(extraCount) + '）</button></div>' : '') +
         '</div>' +
@@ -1327,6 +1677,10 @@
         const payload = await fetchJSON("/api/workbench/review-conflicts?" + params.toString());
         const conflictRows = Array.isArray(payload.rows) ? payload.rows : [];
         const summary = buildConflictSummary(conflictRows);
+        conflictState.activeRow = row;
+        conflictState.groups = conflictRows;
+        conflictState.activeOpinionKey = null;
+        conflictState.evidenceCache = {};
         const html = conflictRows.length
           ? '<div class="conflict-summary-bar">' +
               '<span class="chip">冲突对象 ' + esc(summary.conflictObjects) + '</span>' +
@@ -1334,9 +1688,9 @@
               '<span class="chip bad">高优先级 ' + esc(summary.highPriority) + '</span>' +
               '<span class="chip low">定位薄弱 ' + esc(summary.weakLocator) + '</span>' +
             '</div>' +
-            '<div class="conflict-stack">' + conflictRows.map(function (item, index) {
+            '<div class="conflict-layout"><div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
               return buildConflictGroupCard(item, row, index);
-            }).join("") + '</div>' +
+            }).join("") + '</div></div><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div></div>' +
             '<div class="conflict-footer-note">此视图仅用于人工比较审核意见，不会自动写回最终真值。</div>'
           : '<div class="detail-value muted">当前没有可展示的字段冲突明细。</div>';
         modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), html);
@@ -1350,9 +1704,10 @@
       if (!actionNode) return;
       const action = actionNode.getAttribute("data-action");
       const targetId = actionNode.getAttribute("data-target");
-      if (!action || !targetId) return;
+      if (!action) return;
       event.preventDefault();
       if (action === "toggle-opinions") {
+        if (!targetId) return;
         const tbody = document.getElementById(targetId);
         if (!tbody) return;
         const extras = Array.from(tbody.querySelectorAll(".compare-extra"));
@@ -1362,6 +1717,7 @@
         });
         actionNode.textContent = expanded ? ("展开全部意见（+" + extras.length + "）") : "收起额外意见";
       } else if (action === "toggle-reason") {
+        if (!targetId) return;
         const reasonNode = document.getElementById(targetId);
         if (!reasonNode) return;
         const expanded = !reasonNode.classList.contains("truncated");
@@ -1372,6 +1728,36 @@
           reasonNode.classList.remove("truncated");
           actionNode.textContent = "收起理由";
         }
+      } else if (action === "view-evidence") {
+        const groupIndex = Number(actionNode.getAttribute("data-group-index"));
+        const opinionIndex = Number(actionNode.getAttribute("data-opinion-index"));
+        if (!Number.isFinite(groupIndex) || !Number.isFinite(opinionIndex)) return;
+        const item = conflictState.groups[groupIndex];
+        const opinion = item && Array.isArray(item.opinions) ? item.opinions[opinionIndex] : null;
+        if (!item || !opinion || !conflictState.activeRow) return;
+        const opinionKey = actionNode.getAttribute("data-opinion-key") || extractOpinionEvidenceKey(item, opinion, groupIndex, opinionIndex);
+        conflictState.activeOpinionKey = opinionKey;
+        const requestToken = conflictState.requestToken + 1;
+        conflictState.requestToken = requestToken;
+        renderEvidencePreview({ loading: true });
+        loadOpinionEvidence(conflictState.activeRow, item, opinion, opinionKey).then(function (payload) {
+          if (conflictState.requestToken !== requestToken) return;
+          conflictState.activeOpinionKey = opinionKey;
+          renderEvidencePreview(payload);
+        }).catch(function (error) {
+          if (conflictState.requestToken !== requestToken) return;
+          renderEvidencePreview({
+            targetType: formatTargetType(item.target_type),
+            fieldName: item.field_name || "-",
+            reviewSource: reviewSourceLabel(opinion),
+            locatorStatus: "missing_locator",
+            sourceType: formatEvidenceSourceType(item.target_type),
+            sourceLabel: deriveEvidenceSourceLabel(opinionEvidencePayload(opinion), item, opinion),
+            excerpt: "",
+            nearbyContext: [],
+            note: "加载原文片段失败：" + error.message
+          });
+        });
       }
     }
 
