@@ -20,6 +20,7 @@ function renderPaperList() {
         }
         return;
     }
+
     function workflowClass(status) {
         if (["Human_Confirmed", "ML_Ready", "Citation_Ready", "Human_Complete", "DB_Ready"].includes(status)) return "full";
         if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected", "Suspected_Missing", "Unparsed"].includes(status)) return "meta";
@@ -28,14 +29,54 @@ function renderPaperList() {
 
     function workflowMeta(status) {
         const mapping = {
-            Imported: "已导入", Quality_Checked: "已检质量", Parsed_Material_Ready: "材料已就绪",
-            Unparsed: "未解析", Initial_Parsed: "初步解析", Suspected_Missing: "疑似漏提",
-            AI_Rescanned: "AI已重扫", Human_Complete: "人工已确认", DB_Ready: "可入库",
-            Codex_Candidate: "系统候选", Gemini_Verified: "AI核验", Gemini_Revised: "AI修订",
-            Gemini_Flagged: "AI标红", Evidence_Insufficient: "证据不足", Rejected: "已废弃",
+            Imported: "已导入",
+            Quality_Checked: "已检质量",
+            Parsed_Material_Ready: "材料已就绪",
+            Unparsed: "未解析",
+            Initial_Parsed: "初步解析",
+            Suspected_Missing: "疑似漏提",
+            AI_Rescanned: "AI已重扫",
+            Human_Complete: "人工已确认",
+            DB_Ready: "可入库",
+            Codex_Candidate: "系统候选",
+            Gemini_Verified: "AI核验",
+            Gemini_Revised: "AI修订",
+            Gemini_Flagged: "AI标红",
+            Evidence_Insufficient: "证据不足",
+            Rejected: "已废弃",
             Needs_Human_Confirmation: "待人工审核"
         };
         return mapping[status] || status || "Imported";
+    }
+
+    function qualityLabel(status) {
+        const mapping = {
+            A_text_readable: "A 可读",
+            B_text_partial: "B 部分可读",
+            C_scan_clear: "C 扫描清晰",
+            D_scan_unclear: "D 扫描不清",
+            Broken: "文件异常",
+            Good: "质量良好"
+        };
+        return mapping[status] || status || "";
+    }
+
+    function qualityChipClass(status) {
+        if (status === "A_text_readable" || status === "Good") return "parsed";
+        if (status === "B_text_partial" || status === "C_scan_clear") return "meta";
+        if (status === "D_scan_unclear" || status === "Broken") return "failed";
+        return "meta";
+    }
+
+    function dftCompletenessLabel(status) {
+        const mapping = {
+            Unparsed: "未解析",
+            Initial_Parsed: "初步解析",
+            Suspected_Missing: "疑似漏提",
+            Human_Complete: "人工确认",
+            DB_Ready: "可入库"
+        };
+        return mapping[status] || status || "";
     }
 
     const tbodyHtml = state.papers.map(function(paper, idx) {
@@ -44,16 +85,30 @@ function renderPaperList() {
         const originalTitle = paper.title_zh && paper.title ? '<div class="paper-original-title" style="margin-top:2px;" title="' + esc(paper.title) + '">' + esc(paper.title) + '</div>' : '';
         const pdfSizeStr = paper.pdf_size ? ' | ' + formatFileSize(paper.pdf_size) : '';
         const metaLine = esc(paper.journal || "未知期刊") + (paper.doi ? ' | DOI: ' + esc(paper.doi) : '') + pdfSizeStr;
-        
+
         let wfChip = "";
         if (paper.workflow_status && paper.workflow_status !== "Imported") {
-            wfChip = '<span class="status-chip ' + workflowClass(paper.workflow_status) + '" title="审核进度: ' + esc(paper.workflow_status) + '">' + esc(workflowMeta(paper.workflow_status)) + '</span>';
+            wfChip = '<span class="status-chip ' + workflowClass(paper.workflow_status) + '" title="流程状态: ' + esc(paper.workflow_status) + '">' + esc(workflowMeta(paper.workflow_status)) + '</span>';
         }
-        
+
         let dftCandChip = "";
         if (paper.has_dft_candidates) {
             dftCandChip = '<span class="status-chip meta" title="系统检测到有需要进行人工审核或确认的 DFT 候选记录" style="border-color: rgba(239, 68, 68, 0.3); color: #ef4444; background: #fef2f2;">待审DFT候选</span>';
         }
+
+        const parsedStateIsRedundant = Boolean(
+            paper.pdf_path &&
+            (paper.tei_path || paper.markdown_path || (paper.counts && paper.counts.sections > 0)) &&
+            paper.workflow_status &&
+            paper.workflow_status !== "Imported"
+        );
+        const primaryStatusChip = parsedStateIsRedundant ? "" : paperStatusChip(paper);
+        const qualityChip = paper.pdf_quality_status
+            ? '<span class="status-chip ' + qualityChipClass(paper.pdf_quality_status) + '" title="PDF 质量: ' + esc(paper.pdf_quality_status) + '">' + esc(qualityLabel(paper.pdf_quality_status)) + '</span>'
+            : "";
+        const dftCompletenessChip = paper.dft_completeness_status
+            ? '<span class="status-chip ' + (paper.dft_completeness_status === "DB_Ready" ? "full" : "meta") + '" title="DFT 完整性: ' + esc(paper.dft_completeness_status) + '">' + esc(dftCompletenessLabel(paper.dft_completeness_status)) + '</span>'
+            : "";
 
         return (
             '<tr class="paper-row' + active + '" data-id="' + paper.id + '" onclick="selectPaperById(\'' + paper.id + '\')" ondblclick="openWorkspaceForPaper(\'' + paper.id + '\')">' +
@@ -68,11 +123,11 @@ function renderPaperList() {
                 '</td>' +
                 '<td class="col-divider" style="text-align:center;">' +
                     '<div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:center;">' +
-                        paperStatusChip(paper) + 
+                        primaryStatusChip +
                         wfChip +
                         dftCandChip +
-                        (paper.pdf_quality_status ? '<span class="status-chip ' + (paper.pdf_quality_status === 'Good' ? 'full' : 'meta') + '">' + esc(paper.pdf_quality_status) + '</span>' : '') +
-                        (paper.dft_completeness_status ? '<span class="status-chip ' + (paper.dft_completeness_status === 'DB_Ready' ? 'full' : 'meta') + '">' + esc(paper.dft_completeness_status) + '</span>' : '') +
+                        qualityChip +
+                        dftCompletenessChip +
                     '</div>' +
                 '</td>' +
                 '<td style="text-align:center;">' +
