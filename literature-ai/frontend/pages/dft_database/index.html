@@ -718,7 +718,7 @@
     function renderLocatorReliabilityChips(row) {
       const status = row && row.locator_reliability_status ? row.locator_reliability_status : "missing";
       const warnings = Array.isArray(row && row.locator_reliability_warnings) ? row.locator_reliability_warnings : [];
-      const chips = ['<span class="audit-chip ' + (warnings.length ? "warn" : "ok") + '" title="' + esc(locatorSummary(row)) + '">Locator reliability: ' + esc(locatorReliabilityLabel(status)) + '</span>'];
+      const chips = ['<span class="audit-chip ' + (warnings.length ? "warn" : "ok") + '" title="' + esc(locatorSummary(row)) + '">定位可靠性：' + esc(locatorReliabilityLabel(status)) + '</span>'];
       warnings.forEach(code => {
         chips.push('<span class="audit-chip ' + locatorWarningClass(code) + '" title="' + esc(code) + '">' + esc(locatorWarningLabel(code)) + '</span>');
       });
@@ -729,9 +729,9 @@
       const page = row && row.evidence_page ? row.evidence_page : (locator && locator.page);
       const klass = cssClass || "btn btn-ghost btn-sm";
       if (!canJumpToDftPdf(row)) {
-        return '<button class="' + klass + '" type="button" disabled title="No exact PDF page locator is available for this DFT row.">Open PDF page ' + esc(page || "-") + '</button>';
+        return '<button class="' + klass + '" type="button" disabled title="这条 DFT 记录还没有可直接跳转的精确 PDF 页定位。">打开 PDF 第 ' + esc(page || "-") + ' 页</button>';
       }
-      return '<button class="' + klass + '" type="button" onclick="openDftPdfPage(\'' + esc(row.paper_id) + '\',' + esc(page || 0) + ')">Open PDF page ' + esc(page || "-") + '</button>';
+      return '<button class="' + klass + '" type="button" onclick="openDftPdfPage(\'' + esc(row.paper_id) + '\',' + esc(page || 0) + ')">打开 PDF 第 ' + esc(page || "-") + ' 页</button>';
     }
     function auditClass(audit) {
       const verdict = String((audit && audit.verdict) || "").toLowerCase();
@@ -742,7 +742,7 @@
     }
     function renderAuditChips(audits) {
       const items = Array.isArray(audits) ? audits : [];
-      if (!items.length) return '<span class="audit-chip">no external audit</span>';
+      if (!items.length) return '<span class="audit-chip">暂无外部审核</span>';
       return items.slice(0, 3).map(audit => {
         const label = audit.source_label || audit.source || "external audit";
         const verdict = audit.verdict || audit.recommended_action || "review";
@@ -764,7 +764,7 @@
     function renderObjectAuditChips(audits, count) {
       const items = Array.isArray(audits) ? audits : [];
       const total = Number(count == null ? items.length : count) || 0;
-      if (!total) return '<span class="audit-chip">Object audits 0</span>';
+      if (!total) return '<span class="audit-chip">对象审核 0</span>';
       const chips = items.slice(0, 3).map(audit => {
         const status = audit.verification_status || "unverified";
         const title = [
@@ -776,11 +776,11 @@
         ].filter(Boolean).join(" / ");
         return '<span class="audit-chip ' + objectAuditClass(audit) + '" title="' + esc(title) + '">' + esc(objectAuditLabel(audit)) + '</span>';
       }).join("");
-      return '<span class="audit-chip warn" title="Object-level AI review candidates; read-only, unverified.">Object audits ' + esc(total) + '</span>' + (chips ? " " + chips : "");
+      return '<span class="audit-chip warn" title="对象级 AI 审核记录，仅供查看，尚未作为最终结论。">对象审核 ' + esc(total) + '</span>' + (chips ? " " + chips : "");
     }
     function renderObjectAuditRows(audits) {
       const items = Array.isArray(audits) ? audits : [];
-      if (!items.length) return '<div class="quality-meta">No object-level AI audit is attached to this DFT row.</div>';
+      if (!items.length) return '<div class="quality-meta">这条 DFT 记录暂时没有对象级 AI 审核。</div>';
       return items.map(audit => {
         const who = audit.source_label || audit.source || audit.agent_role || audit.model_name || "object_review_audit";
         const decision = audit.decision || audit.recommended_action || "-";
@@ -789,7 +789,7 @@
         const corrected = audit.corrected_value == null ? "" : " / corrected=" + JSON.stringify(audit.corrected_value);
         const reason = audit.reason ? '<div class="quality-meta">' + esc(audit.reason) + '</div>' : "";
         return '<div style="margin-bottom:8px;">' +
-          '<div class="quality-meta"><strong>' + esc(who) + '</strong>: ' + esc(decision) + ' / confidence ' + esc(confidence) + ' / ' + esc(audit.verification_status || "unverified") + esc(corrected) + '</div>' +
+          '<div class="quality-meta"><strong>' + esc(who) + '</strong>: ' + esc(decision) + ' / 置信度 ' + esc(confidence) + ' / ' + esc(audit.verification_status || "unverified") + esc(corrected) + '</div>' +
           '<div class="quality-meta">' + esc(audit.candidate_type || "object_review_audit") + '</div>' +
           '<div class="quality-meta">' + esc([audit.field_name || "field", audit.agent_role, audit.model_name].filter(Boolean).join(" / ")) + '</div>' +
           '<div class="quality-meta">evidence: ' + esc(evidence) + '</div>' +
@@ -799,7 +799,7 @@
     }
     function renderConflictChips(conflicts) {
       const items = Array.isArray(conflicts) ? conflicts : [];
-      if (!items.length) return '<span class="audit-chip ok">no AI conflicts</span>';
+      if (!items.length) return '<span class="audit-chip ok">暂无 AI 冲突</span>';
       return items.slice(0, 4).map(conflict => {
         const types = (conflict.conflict_types || []).join(", ") || "conflict";
         const label = (conflict.field_name || "field") + ": " + types;
@@ -856,23 +856,21 @@
       document.getElementById("evidenceDetail").innerHTML =
         '<div class="quality-status-grid">' +
           '<div class="readable-field"><div class="k">DFT row</div><div class="v">' + esc(item.property_type || "-") + ' / ' + esc(item.adsorbate || "-") + ' = ' + esc(item.value == null ? "-" : item.value) + ' ' + esc(item.unit || "") + '</div></div>' +
-          '<div class="readable-field"><div class="k">PDF locator</div><div class="v">' + esc(locatorSummary(item)) + '</div></div>' +
-          '<div class="readable-field"><div class="k">Locator warnings</div><div class="v">' + esc(locatorWarnings) + '</div></div>' +
-          '<div class="readable-field"><div class="k">Export safety</div><div class="v">' + esc(item.is_exportable ? "exportable" : "blocked") + ' / ' + esc((item.blocked_reasons || []).map(reasonLabel).join(", ") || "none") + '</div></div>' +
+          '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(locatorSummary(item)) + '</div></div>' +
+          '<div class="readable-field"><div class="k">定位告警</div><div class="v">' + esc(locatorWarnings) + '</div></div>' +
+          '<div class="readable-field"><div class="k">入库状态</div><div class="v">' + esc(item.is_exportable ? "可导出" : "待处理") + ' / ' + esc((item.blocked_reasons || []).map(reasonLabel).join(", ") || "无") + '</div></div>' +
           '<div class="readable-field"><div class="k">Review status</div><div class="v">' + esc(reviewStatusLabel(item.review_status)) + ' / ' + esc(item.recommended_action || "-") + '</div></div>' +
         '</div>' +
         '<div class="quality-actions">' +
           renderDftPdfButton(item, "btn btn-primary btn-sm") +
-          '<button class="btn btn-ghost btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Approve</button>' +
-          '<button class="btn btn-ghost btn-sm" type="button" onclick="rejectDftQueueRow(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Reject</button>' +
-          '<button class="btn btn-tinted btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(item.paper_id) + '\',\'' + esc(item.dft_result_id || item.record_id) + '\')">Needs fix</button>' +
+          '<a class="btn btn-ghost btn-sm" href="../review_center/index.html">去审核中心处理</a>' +
         '</div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">Evidence text</div><div class="v">' + esc(item.evidence_text || "No evidence text.") + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">Locators</div><div class="v">' + locatorRows + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">Latest external audit opinions</div><div class="v">' + auditRows + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">Object-level AI audits</div><div class="v">' + renderObjectAuditRows(objectAudits) + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">AI conflicts</div><div class="v">' + renderConflictRows(conflicts) + '</div></div>';
-      document.getElementById("validationSummary").textContent = item.evidence_text ? "DFT queue evidence loaded." : "This DFT row is missing evidence text.";
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">证据原文</div><div class="v">' + esc(item.evidence_text || "暂无证据原文。") + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">证据定位</div><div class="v">' + locatorRows + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">最新外部审核</div><div class="v">' + auditRows + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">对象级审核</div><div class="v">' + renderObjectAuditRows(objectAudits) + '</div></div>' +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">AI 冲突</div><div class="v">' + renderConflictRows(conflicts) + '</div></div>';
+      document.getElementById("validationSummary").textContent = item.evidence_text ? "已加载这条 DFT 记录的证据详情。" : "这条 DFT 记录缺少证据原文。";
     }
     function renderQualityRows(rows) {
       const el = document.getElementById("qualityRows");
@@ -881,7 +879,7 @@
       if (!el) return;
       state.qualityRows = rows || [];
       if (!rows.length) {
-        el.innerHTML = '<div class="empty-state">No DFT candidates need review for the current filters.</div>';
+        el.innerHTML = '<div class="empty-state">当前筛选下没有待处理的 DFT 候选。</div>';
         return;
       }
       el.innerHTML = rows.slice(0, 30).map((row, idx) => {
@@ -894,16 +892,16 @@
         return '<div class="' + rowClass + '">' +
           '<div class="quality-row-header">' +
             '<div class="quality-row-title">' +
-              '<div class="quality-pill">' + esc(row.is_exportable ? "exportable" : "blocked") + '</div>' +
+              '<div class="quality-pill">' + esc(row.is_exportable ? "可导出" : "待处理") + '</div>' +
               '<h4>' + esc(valueText) + '</h4>' +
-              '<div class="quality-meta">' + esc(row.title || "Paper") + '</div>' +
+              '<div class="quality-meta">' + esc(row.title || "文献") + '</div>' +
             '</div>' +
-            '<div class="quality-meta" style="text-align:right;min-width:120px;">' + esc(row.year || "-") + '<br>' + esc(row.candidate_source_label || row.candidate_status || "candidate") + '</div>' +
+            '<div class="quality-meta" style="text-align:right;min-width:120px;">' + esc(row.year || "-") + '<br>' + esc(row.candidate_source_label || row.candidate_status || "候选") + '</div>' +
           '</div>' +
           '<div class="queue-field-grid">' +
-            '<div class="readable-field"><div class="k">Evidence locator</div><div class="v">' + esc(locatorSummary(row)) + '</div></div>' +
-            '<div class="readable-field"><div class="k">Blocked reasons</div><div class="v">' + esc(reasons) + '</div></div>' +
-            '<div class="readable-field"><div class="k">Review action</div><div class="v">' + esc(row.recommended_action || "-") + '</div></div>' +
+            '<div class="readable-field"><div class="k">证据定位</div><div class="v">' + esc(locatorSummary(row)) + '</div></div>' +
+            '<div class="readable-field"><div class="k">阻断原因</div><div class="v">' + esc(reasons) + '</div></div>' +
+            '<div class="readable-field"><div class="k">建议处理</div><div class="v">' + esc(row.recommended_action || "-") + '</div></div>' +
           '</div>' +
           '<div class="queue-evidence-preview">' + esc(evidencePreview) + '</div>' +
           '<div class="audit-strip">' + renderAuditChips(row.latest_external_audit_opinions) + '</div>' +
@@ -911,11 +909,9 @@
           '<div class="audit-strip">' + renderObjectAuditChips(row.object_review_audits, row.object_review_audits_count) + '</div>' +
           '<div class="audit-strip">' + renderConflictChips(row.field_conflicts) + '</div>' +
           '<div class="quality-actions">' +
-            '<button class="btn btn-primary btn-sm" type="button" onclick="showQueueEvidence(' + idx + ')">Review evidence</button>' +
+            '<button class="btn btn-primary btn-sm" type="button" onclick="showQueueEvidence(' + idx + ')">查看证据</button>' +
             renderDftPdfButton(row, "btn btn-ghost btn-sm") +
-            '<button class="btn btn-ghost btn-sm" type="button" onclick="verifyDftQueueRow(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Approve</button>' +
-            '<button class="btn btn-ghost btn-sm" type="button" onclick="rejectDftQueueRow(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Reject</button>' +
-            '<button class="btn btn-tinted btn-sm" type="button" onclick="proposeDftQueueCorrection(\'' + esc(row.paper_id) + '\',\'' + esc(row.dft_result_id || row.record_id) + '\')">Needs fix</button>' +
+            '<a class="btn btn-ghost btn-sm" href="../review_center/index.html">去审核中心处理</a>' +
           '</div>' +
         '</div>';
       }).join("");

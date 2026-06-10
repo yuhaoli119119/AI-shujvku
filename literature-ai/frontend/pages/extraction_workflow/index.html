@@ -662,6 +662,39 @@
       </div>
     </section>
 
+    <section class="section-card">
+      <div class="section-header">
+        <div class="section-title-wrap">
+          <div class="section-eyebrow">规则提示</div>
+          <div class="section-title">高风险对象与 PDF 对照要求</div>
+          <p class="section-desc">高风险对象只保留三类：DFT 数据、图表、表格。它们都不能只看系统拆解结果，必须先回看原版 PDF，再进入后续 AI 审核。</p>
+        </div>
+      </div>
+      <div class="tool-grid">
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon rose">1</div>
+            <h3 class="tool-name">先对照原版 PDF</h3>
+          </div>
+          <p class="tool-desc">系统解析包只负责给 AI 提供入口。遇到 <strong>DFT / 图表 / 表格</strong>，必须先用 <code>read_paper_page</code> 回看原版 PDF，确认页码、段落、表格、图注和结构对象一致。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon orange">2</div>
+            <h3 class="tool-name">高风险定义</h3>
+          </div>
+          <p class="tool-desc">只要记录涉及 <strong>DFT 数值</strong>、<strong>图中读数</strong>、<strong>表格字段</strong>、<strong>材料结构归一</strong>、<strong>能量类型判定</strong>，就按高风险处理。相同材料在不同文章里的别名，也要由 AI 结合原文证据做归一核实。</p>
+        </div>
+        <div class="tool-item">
+          <div class="tool-top">
+            <div class="tool-icon emerald">3</div>
+            <h3 class="tool-name">入库门槛</h3>
+          </div>
+          <p class="tool-desc">高风险对象必须带 section、quoted text、table、figure、PDF page 等原文锚点，并经过双 AI 一致或第三 AI 裁定后才能入库。普通内容也必须有原文锚点，没有证据一律不入库。</p>
+        </div>
+      </div>
+    </section>
+
     <!-- ===== Protocol Detail Card ===== -->
     <section class="section-card">
       <div class="section-header">

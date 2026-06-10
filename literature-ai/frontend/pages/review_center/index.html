@@ -1376,7 +1376,7 @@
             latestAudit.verdict || latestAudit.recommended_action || "review",
             latestAudit.verification_status || "unverified"
           ].filter(Boolean).join(" / ")
-        : "no external audit";
+        : "暂无外部审核";
       const objectAuditLines = (row.object_review_audits || []).slice(0, 5).map(function (audit) {
         return [
           audit.source_label || audit.source || audit.agent_role || audit.model_name || "object_review_audit",
@@ -1392,8 +1392,8 @@
         compactDetailSection("PDF 状态", '<div class="detail-value">' + esc(quality.label) + ' | ' + esc(qualityReasonText) + '</div><div class="detail-value muted">' + esc(workflow.label) + ' | ' + esc(workflow.tip) + '</div>') +
         compactDetailSection("Figure 风险", compactIssueList(row.top_figure_issues, (row.figure_reliability || {}).issue_counts || row.figure_issue_counts || {}, figureIssueLabel, "No figure reliability warnings.")) +
         compactDetailSection("Locator 风险", compactIssueList(row.top_locator_issues, (row.locator_reliability || {}).issue_counts || row.locator_issue_counts || {}, locatorIssueLabel, "No locator reliability warnings.")) +
-        compactDetailSection("External audit", '<div class="detail-value">External audit: ' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>') +
-        compactDetailSection("Object audit", '<div class="detail-value">Object audits: ' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "No object-level AI audits.")) +
+        compactDetailSection("外部审核", '<div class="detail-value">外部审核：' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>') +
+        compactDetailSection("对象审核", '<div class="detail-value">对象审核：' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "暂无对象级 AI 审核。")) +
         compactDetailSection("候选状态", '<div class="detail-value">' + esc(candidateSummaryLines.length ? candidateSummaryLines.join(", ") : "无候选") + '</div>') +
         compactDetailSection("提取概览", '<div class="detail-value">线索 ' + esc(detectedSignals) + ' | 已解析 ' + esc(parsedCount) + ' | 疑似漏提 ' + esc(suspectedMissing) + '</div><div class="detail-value muted">图表 ' + esc(toCount(row.figure_count) + toCount(row.table_count)) + ' | 证据定位 ' + esc(toCount(row.evidence_count)) + ' | figure crop ' + esc(cropSummaryLines.length ? cropSummaryLines.join(", ") : "none") + '</div>') +
       '</div>';
@@ -1451,7 +1451,7 @@
       const parts = [opinion && opinion.value, opinion && opinion.unit].filter(function (part) {
         return part !== null && part !== undefined && String(part).trim() !== "";
       });
-      return parts.length ? parts.join(" ") : "unknown";
+      return parts.length ? parts.join(" ") : "未知";
     }
 
     function opinionIdentity(opinion) {
@@ -1661,19 +1661,19 @@
       return '<div class="evidence-preview-card">' +
         '<div class="evidence-preview-title">璇佹嵁棰勮</div>' +
         '<div class="evidence-preview-meta">' +
-          '<div class="detail-block"><div class="detail-label">Object type</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Object</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">对象类型</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Field</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Review source</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Page</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Locator</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Energy type</div><div class="detail-value">' + esc(payload.energyType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Material</div><div class="detail-value">' + esc(payload.material || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Structure</div><div class="detail-value">' + esc(payload.structureName || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Adsorbate</div><div class="detail-value">' + esc(payload.adsorbate || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Reaction</div><div class="detail-value">' + esc(payload.reactionStep || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Anchor</div><div class="detail-value">' + esc(payload.anchorText || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Source type</div><div class="detail-value">' + esc(payload.sourceType || "unknown") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">能量类型</div><div class="detail-value">' + esc(payload.energyType || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">材料</div><div class="detail-value">' + esc(payload.material || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">结构</div><div class="detail-value">' + esc(payload.structureName || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">吸附物</div><div class="detail-value">' + esc(payload.adsorbate || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">反应步骤</div><div class="detail-value">' + esc(payload.reactionStep || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">证据锚点</div><div class="detail-value">' + esc(payload.anchorText || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">来源类型</div><div class="detail-value">' + esc(payload.sourceType || "未知") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Source label</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
         '</div>' +
         '<div class="detail-block"><div class="detail-label">Quoted text</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "褰撳墠娌℃湁鍙睍绀虹殑鍘熸枃鐗囨") + '</div></div>' +
@@ -1692,7 +1692,7 @@
           '<div class="detail-block"><div class="detail-label">来源</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">页码</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">定位</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">source type</div><div class="detail-value">' + esc(payload.sourceType || "unknown") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">来源类型</div><div class="detail-value">' + esc(payload.sourceType || "未知") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">source label</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
         '</div>' +
         '<div class="detail-block"><div class="detail-label">原文片段</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "当前没有可展示的原文片段") + '</div></div>' +
@@ -1835,7 +1835,7 @@
     }
 
     function confidenceLabel(value) {
-      if (!hasOwnValue(value) || value === "") return "unknown";
+      if (!hasOwnValue(value) || value === "") return "未知";
       const num = Number(value);
       if (!Number.isFinite(num)) return String(value);
       return num.toFixed(2);
@@ -1951,7 +1951,7 @@
         (item.conflict_types || []).map(function (type) {
           return '<span class="chip ' + esc(conflictSeverityClass(type)) + '" title="' + esc(type) + '">' + esc(formatConflictType(type)) + '</span>';
         }).join("") +
-        '<span class="chip">' + esc(toCount(item.reviewer_count)) + ' reviewers</span>' +
+        '<span class="chip">审核来源 ' + esc(toCount(item.reviewer_count)) + '</span>' +
         buildPdfButton(row, bestPage, "当前定位不足，不能可靠跳页") +
         '</div>' +
         '</summary>' +
@@ -1960,27 +1960,27 @@
         '<div class="conflict-object-item"><div class="conflict-object-label">对象类型</div><div class="conflict-object-value">' + esc(formatTargetType(item.target_type)) + '</div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">字段</div><div class="conflict-object-value">' + esc(item.field_name || "-") + '</div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">target_id</div><div class="conflict-object-value mono">' + esc(item.target_id || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">Object</div><div class="conflict-object-value">' + esc(targetSummaryLabel(item)) + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">Energy type</div><div class="conflict-object-value">' + esc(summary.property_type || summary.normalized_energy_type || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">Material</div><div class="conflict-object-value">' + esc(summary.normalized_material || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">Structure</div><div class="conflict-object-value">' + esc(summary.structure_name || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">Adsorbate</div><div class="conflict-object-value">' + esc(summary.adsorbate || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">Reaction</div><div class="conflict-object-value">' + esc(summary.reaction_step || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">Anchor</div><div class="conflict-object-value">' + esc(anchorSummaryText(anchor)) + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">对象</div><div class="conflict-object-value">' + esc(targetSummaryLabel(item)) + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">能量类型</div><div class="conflict-object-value">' + esc(summary.property_type || summary.normalized_energy_type || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">材料</div><div class="conflict-object-value">' + esc(summary.normalized_material || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">结构</div><div class="conflict-object-value">' + esc(summary.structure_name || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">吸附物</div><div class="conflict-object-value">' + esc(summary.adsorbate || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">反应步骤</div><div class="conflict-object-value">' + esc(summary.reaction_step || "-") + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">证据锚点</div><div class="conflict-object-value">' + esc(anchorSummaryText(anchor)) + '</div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">冲突类型</div><div class="conflict-chip-row">' + (item.conflict_types || []).map(function (type) {
           return '<span class="chip ' + esc(conflictSeverityClass(type)) + '" title="' + esc(type) + '">' + esc(formatConflictType(type)) + '</span>';
         }).join("") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">reviewer count</div><div class="conflict-object-value">' + esc(toCount(item.reviewer_count)) + '</div></div>' +
+        '<div class="conflict-object-item"><div class="conflict-object-label">审核来源数</div><div class="conflict-object-value">' + esc(toCount(item.reviewer_count)) + '</div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">AI 裁定模式</div><div class="conflict-object-value"><span class="chip ' + esc(adjudicationClass(adjudication.adjudication_mode)) + '">' + esc(adjudicationLabel(adjudication.adjudication_mode)) + '</span></div></div>' +
         '<div class="conflict-object-item"><div class="conflict-object-label">建议动作</div><div class="conflict-object-value">' + esc(adjudicationActionLabel(adjudication.recommended_action)) + '</div></div>' +
         '</div>' +
         '<div class="muted" style="margin-bottom:10px;">' + esc(adjudication.reason_summary || "暂无 AI 裁定摘要。") + '</div>' +
-        (blockedReasons.length ? '<div class="muted" style="margin-bottom:10px;">blocked: ' + esc(blockedReasons.join(", ")) + '</div>' : '') +
+        (blockedReasons.length ? '<div class="muted" style="margin-bottom:10px;">阻断原因：' + esc(blockedReasons.join(", ")) + '</div>' : '') +
         '<div class="conflict-card-actions">' + buildConflictActionButtons(item, row, index) + '</div>' +
         '<div class="compare-table-wrap"><table class="compare-table"><thead><tr>' +
         '<th class="compare-col-source">来源</th>' +
         '<th class="compare-col-role">角色/模型</th>' +
-        '<th class="compare-col-decision">decision</th>' +
+        '<th class="compare-col-decision">结论</th>' +
         '<th class="compare-col-value">数值</th>' +
         '<th class="compare-col-confidence">置信度</th>' +
         '<th class="compare-col-locator">定位</th>' +
@@ -2214,10 +2214,10 @@
           auditMetrics.push('<span class="active">疑似漏提 ' + esc(suspectedMissing) + '</span>');
         }
         if (toCount(row.external_audit_count) > 0) {
-          auditMetrics.push('External audit ' + esc(toCount(row.external_audit_count)));
+          auditMetrics.push('外部审核 ' + esc(toCount(row.external_audit_count)));
         }
         if (toCount(row.object_review_audit_count) > 0) {
-          auditMetrics.push('Object audits ' + esc(toCount(row.object_review_audit_count)));
+          auditMetrics.push('对象审核 ' + esc(toCount(row.object_review_audit_count)));
         }
         const workspace = row.workspace_path || "-";
         const shortWorkspace = workspace.length > 12 ? ("... " + workspace.slice(-12)) : workspace;
