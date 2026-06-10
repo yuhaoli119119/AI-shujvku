@@ -1543,16 +1543,16 @@
 
     function locatorStatusLabel(status) {
       const mapping = {
-        exact_page: "exact_page",
-        exact_bbox: "exact_bbox",
-        text_only: "text_only",
-        missing_bbox: "missing_bbox",
-        missing_page: "missing_page",
-        missing_locator: "missing_locator",
-        approximate_locator: "approximate_locator",
-        unresolved_locator: "unresolved_locator"
+        exact_page: "精确页码",
+        exact_bbox: "精确框选",
+        text_only: "仅文本定位",
+        missing_bbox: "缺少框选",
+        missing_page: "缺少页码",
+        missing_locator: "缺少定位",
+        approximate_locator: "近似定位",
+        unresolved_locator: "未解析定位"
       };
-      return mapping[status] || status || "missing_locator";
+      return mapping[status] || status || "缺少定位";
     }
 
     function reliableLocatorStatus(status) {
@@ -1703,6 +1703,45 @@
           (nearbyLines.length
             ? '<ul class="detail-list">' + nearbyLines.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join("") + '</ul>'
             : '<div class="detail-value muted">当前没有额外上下文。</div>') +
+        '</div>' +
+        (payload.note ? '<div class="detail-value muted">' + esc(payload.note) + '</div>' : '') +
+      '</div>';
+    }
+
+    function buildEvidencePreviewPlaceholder(message) {
+      return '<div class="evidence-preview-card is-placeholder">' +
+        '<div class="evidence-preview-title">证据预览</div>' +
+        '<div class="detail-value muted">' + esc(message || "请选择一条意见查看原文片段") + '</div>' +
+      '</div>';
+    }
+
+    function buildEvidencePreviewPanel(payload) {
+      if (!payload) return buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段");
+      if (payload.loading) return buildEvidencePreviewPlaceholder("正在读取原文片段...");
+      const nearbyLines = Array.isArray(payload.nearbyContext) ? payload.nearbyContext.filter(Boolean) : [];
+      return '<div class="evidence-preview-card">' +
+        '<div class="evidence-preview-title">证据预览</div>' +
+        '<div class="evidence-preview-meta">' +
+          '<div class="detail-block"><div class="detail-label">对象类型</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">字段</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">审核来源</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">页码</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">定位</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">能量类型</div><div class="detail-value">' + esc(payload.energyType || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">材料</div><div class="detail-value">' + esc(payload.material || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">结构</div><div class="detail-value">' + esc(payload.structureName || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">吸附物</div><div class="detail-value">' + esc(payload.adsorbate || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">反应步骤</div><div class="detail-value">' + esc(payload.reactionStep || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">证据锚点</div><div class="detail-value">' + esc(payload.anchorText || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">来源类型</div><div class="detail-value">' + esc(payload.sourceType || "未知") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">来源标签</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
+        '</div>' +
+        '<div class="detail-block"><div class="detail-label">原文片段</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "当前没有可展示的原文片段") + '</div></div>' +
+        '<div class="detail-block"><div class="detail-label">附近上下文</div>' +
+          (nearbyLines.length
+            ? '<ul class="detail-list">' + nearbyLines.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join("") + '</ul>'
+            : '<div class="detail-value muted">当前没有更多上下文。</div>') +
         '</div>' +
         (payload.note ? '<div class="detail-value muted">' + esc(payload.note) + '</div>' : '') +
       '</div>';
