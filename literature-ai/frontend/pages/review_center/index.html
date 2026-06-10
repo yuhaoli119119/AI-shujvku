@@ -715,6 +715,32 @@
       </div>
     </div>
 
+    <section class="panel" style="margin-bottom: 16px;">
+      <div class="panel-head">
+        <div>
+          <div class="muted mono" style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">IDE-AI 双模型核验发起台</div>
+          <div class="muted" style="margin-top: 6px;">先指定论文和范围，再准备 MCP-first 材料。高风险对象走双 AI，一致时自动过现有 gate；低风险写作内容只自动采纳带证据锚点的 note。</div>
+        </div>
+      </div>
+      <div class="filterbar" style="grid-template-columns: 1.5fr 180px 160px 160px;">
+        <textarea id="verificationPaperRefs" rows="3" placeholder="每行一个 paper_id / DOI / 标题片段；也可先筛选列表再点“使用当前筛选”"></textarea>
+        <select id="verificationScope">
+          <option value="all">全部核验</option>
+          <option value="dft_only">只核验 DFT</option>
+          <option value="writing_only">只核验写作内容</option>
+        </select>
+        <label class="muted" style="display:flex;align-items:center;gap:8px;">
+          <input id="verificationRefreshMaterials" type="checkbox" checked>
+          启动前重建材料
+        </label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" type="button" onclick="useFilteredPapersForVerification()">使用当前筛选</button>
+          <button class="btn btn-tinted btn-sm" type="button" onclick="createVerificationSession()">发起核验会话</button>
+        </div>
+      </div>
+      <div id="verificationSessionBox" class="muted" style="margin-top: 12px;">尚未发起核验会话。</div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <div class="muted mono" id="queueMeta" style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">正在读取当前库...</div>
@@ -783,7 +809,7 @@
   </div>
 
   <script>
-    const state = { rows: [], metadata: {} };
+    const state = { rows: [], metadata: {}, verificationSession: null };
     const conflictState = {
       activeRow: null,
       groups: [],
@@ -1025,6 +1051,115 @@
       });
     }
 
+    function verificationBox() {
+      return document.getElementById("verificationSessionBox");
+    }
+
+    function renderVerificationSession() {
+      const box = verificationBox();
+      if (!box) return;
+      const session = state.verificationSession;
+      if (!session) {
+        box.textContent = "尚未发起核验会话。";
+        return;
+      }
+      const settlement = session.settlement || {};
+      const highRisk = settlement.high_risk || {};
+      const lowRisk = settlement.low_risk_notes || {};
+      const selection = Array.isArray(session.selection) ? session.selection : [];
+      const laneLabels = session.lane_labels || {};
+      box.innerHTML =
+        '<div class="readable-grid">' +
+          '<div class="readable-field"><div class="k">会话 ID</div><div class="v mono">' + esc(session.session_id || "-") + '</div></div>' +
+          '<div class="readable-field"><div class="k">论文数</div><div class="v">' + esc(selection.length) + '</div></div>' +
+          '<div class="readable-field"><div class="k">范围</div><div class="v">' + esc(session.scope || "-") + '</div></div>' +
+          '<div class="readable-field"><div class="k">双 AI 标签</div><div class="v mono">' + esc((laneLabels.primary || "-") + " | " + (laneLabels.secondary || "-")) + '</div></div>' +
+          '<div class="readable-field"><div class="k">单 AI 标签</div><div class="v mono">' + esc(laneLabels.single || "-") + '</div></div>' +
+          '<div class="readable-field"><div class="k">自动入库结果</div><div class="v">双 AI 一致 ' + esc(highRisk.auto_applied_count || 0) + '，单 AI note ' + esc(lowRisk.auto_materialized_count || 0) + '，待裁决 ' + esc(highRisk.manual_conflict_count || 0) + '</div></div>' +
+        '</div>' +
+        '<div class="modal-actions" style="justify-content:flex-start;margin-top:10px;">' +
+          '<button class="btn btn-ghost btn-sm" type="button" onclick="reloadVerificationSession()">刷新会话</button>' +
+          '<button class="btn btn-tinted btn-sm" type="button" onclick="settleVerificationSession()">结算当前会话</button>' +
+        '</div>' +
+        '<details style="margin-top:10px;"><summary>导入标签与论文清单</summary>' +
+          '<div class="muted" style="margin-top:8px;">高风险对象请让两个 IDE-AI 分别用 source_label <span class="mono">' + esc(laneLabels.primary || "-") + '</span> 与 <span class="mono">' + esc(laneLabels.secondary || "-") + '</span> 导入 object_review_audits；写作 note 用 <span class="mono">' + esc(laneLabels.single || "-") + '</span> 导入 review_notes。</div>' +
+          '<div class="muted" style="margin-top:8px;">' + selection.map(function (item) { return esc((item.title || "未命名文献") + " | " + (item.paper_id || "")); }).join("<br>") + '</div>' +
+        '</details>';
+    }
+
+    function useFilteredPapersForVerification() {
+      const ids = filteredPaperIds();
+      const box = document.getElementById("verificationPaperRefs");
+      if (!box) return;
+      box.value = ids.join("\n");
+      showToast("已填入当前筛选的 " + ids.length + " 篇论文。");
+    }
+
+    function parseVerificationRefs() {
+      const box = document.getElementById("verificationPaperRefs");
+      const raw = box ? box.value : "";
+      return String(raw || "").split(/\r?\n/).map(function (item) {
+        return item.trim();
+      }).filter(Boolean);
+    }
+
+    async function createVerificationSession() {
+      const refs = parseVerificationRefs();
+      if (!refs.length) {
+        showToast("请先填写 paper_id / DOI / 标题片段，或使用当前筛选。");
+        return;
+      }
+      try {
+        const payload = await fetchJSON("/api/workbench/verification-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paper_refs: refs,
+            scope: getValue("verificationScope") || "all",
+            refresh_materials: !!document.getElementById("verificationRefreshMaterials")?.checked,
+            reviewer: "review_center"
+          })
+        });
+        state.verificationSession = payload;
+        renderVerificationSession();
+        showToast("核验会话已创建，可让两个 IDE-AI 按会话标签分别导入结果。");
+      } catch (error) {
+        showToast("发起核验会话失败：" + error.message);
+      }
+    }
+
+    async function reloadVerificationSession() {
+      if (!state.verificationSession || !state.verificationSession.session_id) {
+        showToast("当前没有可刷新的核验会话。");
+        return;
+      }
+      try {
+        state.verificationSession = await fetchJSON("/api/workbench/verification-sessions/" + encodeURIComponent(state.verificationSession.session_id));
+        renderVerificationSession();
+      } catch (error) {
+        showToast("刷新核验会话失败：" + error.message);
+      }
+    }
+
+    async function settleVerificationSession() {
+      if (!state.verificationSession || !state.verificationSession.session_id) {
+        showToast("请先创建核验会话。");
+        return;
+      }
+      try {
+        state.verificationSession = await fetchJSON("/api/workbench/verification-sessions/" + encodeURIComponent(state.verificationSession.session_id) + "/settle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reviewer: "review_center" })
+        });
+        renderVerificationSession();
+        await loadReviewCenter();
+        showToast("会话结算完成：一致结果已过 gate，冲突项留在裁决列表。");
+      } catch (error) {
+        showToast("结算核验会话失败：" + error.message);
+      }
+    }
+
     function adjudicationClass(mode) {
       if (mode === "auto") return "ok";
       if (mode === "suggest") return "warn";
@@ -1072,6 +1207,10 @@
       return item && item.target_type === "dft_results" && ["value", "unit"].includes(item.field_name);
     }
 
+    function canManualAdoptOpinion(item) {
+      return item && item.target_type === "dft_results";
+    }
+
     function buildConflictActionButtons(item, row, index) {
       const adjudication = item.adjudication || {};
       const buttons = [];
@@ -1080,6 +1219,9 @@
       }
       if (canGenerateCorrectionDraft(item) && adjudication.recommended_action === "propose_correction") {
         buttons.push('<button class="btn btn-ghost btn-sm" type="button" data-action="draft-correction" data-group-index="' + esc(index) + '">生成修正草案</button>');
+      }
+      if (canManualAdoptOpinion(item)) {
+        buttons.push('<button class="btn btn-ghost btn-sm" type="button" data-action="reject-all-opinions" data-group-index="' + esc(index) + '">都不采用</button>');
       }
       buttons.push('<a class="btn btn-ghost btn-sm" href="' + esc(buildReviewTargetHref(row, item)) + '">跳到对象审核</a>');
       return buttons.join("");
@@ -1694,6 +1836,11 @@
         (enabled ? '' : ' disabled title="当前没有可展示的原文片段"') + '>查看原文</button>';
     }
 
+    function buildAdoptOpinionAction(item, opinion, cardIndex) {
+      if (!canManualAdoptOpinion(item)) return "";
+      return '<button class="btn btn-ghost btn-sm btn-weak" type="button" data-action="adopt-opinion" data-group-index="' + esc(cardIndex) + '" data-source-id="' + esc(opinion.source_id || "") + '">采用此条</button>';
+    }
+
     function buildOpinionCompareRow(item, opinion, row, cardIndex, opinionIndex) {
       const reason = opinion.reason || "No reason provided.";
       const reasonId = "reason-" + cardIndex + "-" + opinionIndex;
@@ -1709,7 +1856,7 @@
         '<td><div class="reason-block"><div id="' + esc(reasonId) + '" class="reason-text' + (showExpand ? ' truncated' : '') + '">' + esc(reason) + '</div>' +
         (showExpand ? '<button class="expand-link" type="button" data-action="toggle-reason" data-target="' + esc(reasonId) + '">展开理由</button>' : '') +
         '</div></td>' +
-        '<td><div class="opinion-action-stack">' + buildEvidenceAction(opinion, item, row, cardIndex, opinionIndex) + buildPdfAction(opinion, row) + '</div></td>' +
+        '<td><div class="opinion-action-stack">' + buildEvidenceAction(opinion, item, row, cardIndex, opinionIndex) + buildPdfAction(opinion, row) + buildAdoptOpinionAction(item, opinion, cardIndex) + '</div></td>' +
       '</tr>';
     }
 
@@ -1906,13 +2053,24 @@
             note: "加载原文片段失败：" + error.message
           });
         });
-      } else if (action === "accept-ai" || action === "draft-correction") {
+      } else if (action === "accept-ai" || action === "draft-correction" || action === "adopt-opinion" || action === "reject-all-opinions") {
         const groupIndex = Number(actionNode.getAttribute("data-group-index"));
         if (!Number.isFinite(groupIndex)) return;
         const item = conflictState.groups[groupIndex];
         if (!item || !conflictState.activeRow) return;
-        const execute = action === "accept-ai" ? executeAcceptAiAdjudication : executeDraftCorrection;
-        execute(conflictState.activeRow, item);
+        if (action === "accept-ai") {
+          executeAcceptAiAdjudication(conflictState.activeRow, item);
+          return;
+        }
+        if (action === "draft-correction") {
+          executeDraftCorrection(conflictState.activeRow, item);
+          return;
+        }
+        if (action === "reject-all-opinions") {
+          executeManualConflictDecision(conflictState.activeRow, item, "reject_all", null);
+          return;
+        }
+        executeManualConflictDecision(conflictState.activeRow, item, "adopt_opinion", actionNode.getAttribute("data-source-id"));
       }
     }
 
@@ -2114,6 +2272,33 @@
       }
     }
 
+    async function executeManualConflictDecision(row, item, resolution, opinionSourceId) {
+      const prompt = resolution === "reject_all"
+        ? "这会将当前冲突项按“不采用”处理，并走现有 reject gate。是否继续？"
+        : "这会采用所选 AI 意见，并走现有 correction / verify gate。是否继续？";
+      if (!window.confirm(prompt)) return;
+      try {
+        const result = await fetchJSON("/api/workbench/review-conflicts/manual-decision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paper_id: row.paper_id,
+            target_type: item.target_type,
+            target_id: item.target_id,
+            field_name: item.field_name,
+            resolution: resolution,
+            reviewer: "review_center",
+            opinion_source_id: opinionSourceId || null,
+          })
+        });
+        showToast("人工裁决已执行：" + (result.action || resolution));
+        await loadReviewCenter();
+        await openRowConflictModalV2(row);
+      } catch (error) {
+        showToast("人工裁决失败：" + error.message);
+      }
+    }
+
     function batchActionLabel(mode) {
       if (mode === "prepare_suspected_missing") return "批量准备疑似漏提论文的 AI 材料";
       return "批量重建 AI 解析材料";
@@ -2196,6 +2381,7 @@
       document.addEventListener("keydown", function (event) {
         if (event.key === "Escape") closeInfoOverlay();
       });
+      renderVerificationSession();
       loadReviewCenter();
     });
   </script>

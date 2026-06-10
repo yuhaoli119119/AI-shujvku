@@ -41,6 +41,34 @@ class ConflictAutoAdvanceBatchRequest(BaseModel):
     limit: int = Field(default=200, ge=1, le=1000)
 
 
+class VerificationSessionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_ids: list[UUID] = Field(default_factory=list)
+    paper_refs: list[str] = Field(default_factory=list)
+    scope: Literal["all", "dft_only", "writing_only"] = "all"
+    refresh_materials: bool = True
+    reviewer: str = "review_center"
+
+
+class VerificationSessionSettleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer: str = "review_center"
+
+
+class VerificationConflictDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: UUID
+    target_type: str
+    target_id: str
+    field_name: str
+    resolution: Literal["adopt_opinion", "reject_all"]
+    reviewer: str = "review_center"
+    opinion_source_id: str | None = None
+
+
 class GeminiAuditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

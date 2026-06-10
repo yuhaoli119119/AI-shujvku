@@ -16,6 +16,9 @@ from app.schemas.workbench import (
     GeminiAuditRequest,
     HumanConfirmRequest,
     ReviewCenterBatchStage2Request,
+    VerificationConflictDecisionRequest,
+    VerificationSessionCreateRequest,
+    VerificationSessionSettleRequest,
     WorkbenchPrepareRequest,
 )
 from app.services.dft_audit_service import DFTCompletenessAuditor
@@ -25,6 +28,7 @@ from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.services.review_adjudication_service import ReviewAdjudicationService
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.services.verification_session_service import VerificationSessionService
 from app.utils.active_database import get_registered_active_library_info
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.workbench_status import WORKBENCH_SCHEMA_VERSION
@@ -91,6 +95,71 @@ def auto_advance_review_conflicts(
         reviewer=payload.reviewer,
         limit=payload.limit,
     )
+
+
+@router.post("/verification-sessions")
+def create_verification_session(
+    payload: VerificationSessionCreateRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return VerificationSessionService(session, settings).create_session(
+            paper_ids=payload.paper_ids,
+            paper_refs=payload.paper_refs,
+            scope=payload.scope,
+            refresh_materials=payload.refresh_materials,
+            reviewer=payload.reviewer,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/verification-sessions/{session_id}")
+def get_verification_session(
+    session_id: str,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return VerificationSessionService(session, settings).get_session(session_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/verification-sessions/{session_id}/settle")
+def settle_verification_session(
+    session_id: str,
+    payload: VerificationSessionSettleRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return VerificationSessionService(session, settings).settle_session(session_id, reviewer=payload.reviewer)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/review-conflicts/manual-decision")
+def manually_resolve_review_conflict(
+    payload: VerificationConflictDecisionRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try:
+        return VerificationSessionService(session, settings).resolve_conflict(
+            paper_id=payload.paper_id,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            field_name=payload.field_name,
+            resolution=payload.resolution,
+            reviewer=payload.reviewer,
+            opinion_source_id=payload.opinion_source_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/artifact-reliability")
