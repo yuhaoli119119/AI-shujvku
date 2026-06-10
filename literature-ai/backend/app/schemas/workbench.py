@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -8,6 +8,32 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class WorkbenchPrepareRequest(BaseModel):
     render_pages: bool = False
+
+
+class ReviewCenterBatchStage2Request(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_ids: list[UUID] = Field(default_factory=list)
+    mode: Literal["reparse_filtered", "deep_parse_suspected_missing"] = "reparse_filtered"
+    reviewer: str = "review_center_batch"
+
+
+class ConflictAdjudicationActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: UUID
+    target_type: str
+    target_id: str
+    field_name: str
+    reviewer: str = "review_center"
+
+
+class ConflictAutoAdvanceBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_ids: list[UUID] = Field(default_factory=list)
+    reviewer: str = "ai_auto_advance"
+    limit: int = Field(default=200, ge=1, le=1000)
 
 
 class GeminiAuditRequest(BaseModel):

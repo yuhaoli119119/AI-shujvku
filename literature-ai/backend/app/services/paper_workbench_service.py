@@ -279,8 +279,8 @@ class PaperWorkbenchService:
             "dft_candidate_status_counts": dict(Counter(row.candidate_status or "unknown" for row in dft_rows)),
         }
 
-    def review_center(self, *, limit: int = 100) -> dict[str, Any]:
-        papers = self.session.scalars(select(Paper).order_by(Paper.created_at.desc()).limit(limit)).all()
+    def review_center(self, *, limit: int = 100, sort_by: str = "recent") -> dict[str, Any]:
+        papers = self.session.scalars(select(Paper)).all()
         paper_ids = {paper.id for paper in papers}
         rows = []
         status_counts: Counter[str] = Counter()
@@ -458,6 +458,8 @@ class PaperWorkbenchService:
             rows.append(
                 {
                     "paper_id": str(paper.id),
+                    "paper_short_id": str(paper.id).split("-")[-1],
+                    "created_at": paper.created_at.isoformat() if paper.created_at else None,
                     "title": paper.title,
                     "doi": paper.doi,
                     "year": paper.year,
@@ -504,15 +506,58 @@ class PaperWorkbenchService:
                     "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
                 }
             )
+        rows = self._sort_review_center_rows(rows, sort_by=sort_by)[:limit]
         return {
             "schema_version": WORKBENCH_SCHEMA_VERSION,
             "metadata": {
                 "returned": len(rows),
+                "sort_by": sort_by,
                 "status_counts": dict(sorted(status_counts.items())),
                 "quality_counts": dict(sorted(quality_counts.items())),
             },
             "rows": rows,
         }
+
+    @staticmethod
+    def _sort_review_center_rows(rows: list[dict[str, Any]], *, sort_by: str) -> list[dict[str, Any]]:
+        normalized_sort = str(sort_by or "recent").strip().lower()
+        if normalized_sort == "year_desc":
+            return sorted(
+                rows,
+                key=lambda row: (
+                    -(int(row["year"]) if row.get("year") is not None else -1),
+                    str(row.get("paper_id") or ""),
+                ),
+            )
+        if normalized_sort == "conflicts_desc":
+            return sorted(
+                rows,
+                key=lambda row: (
+                    -int(row.get("review_conflict_count") or 0),
+                    -int(row.get("locator_issue_count") or 0),
+                    -int(row.get("figure_issue_count") or 0),
+                    str(row.get("paper_id") or ""),
+                ),
+            )
+        if normalized_sort == "suspected_missing_desc":
+            return sorted(
+                rows,
+                key=lambda row: (
+                    -int(row.get("suspected_missing_dft_count") or 0),
+                    0
+                    if str(row.get("workflow_status") or "") == "Suspected_Missing"
+                    else (1 if str(row.get("workflow_status") or "") == "Unparsed" else 2),
+                    str(row.get("paper_id") or ""),
+                ),
+            )
+        return sorted(
+            rows,
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                str(row.get("paper_id") or ""),
+            ),
+            reverse=True,
+        )
 
     def _paper_pdf_path(self, paper: Paper) -> Path | None:
         raw_path = Path(paper.pdf_path) if paper.pdf_path else None

@@ -20,11 +20,6 @@ test.describe('Review Center Conflict Modal', () => {
       const pathname = url.pathname;
       const method = request.method();
 
-      if (method !== 'GET') {
-        writeCalls.push({ method, pathname });
-        return route.fulfill({ status: 204, body: '' });
-      }
-
       if (pathname === '/api/workbench/review-center') {
         return jsonResponse(route, {
           metadata: {
@@ -66,6 +61,7 @@ test.describe('Review Center Conflict Modal', () => {
               object_review_audits: [],
               review_conflict_count: 0,
               workspace_path: '/workspace/paper-1',
+              paper_short_id: 'stable01',
             },
             {
               paper_id: 'paper-2',
@@ -101,13 +97,49 @@ test.describe('Review Center Conflict Modal', () => {
               object_review_audits: [],
               review_conflict_count: 2,
               workspace_path: '/workspace/paper-2',
+              paper_short_id: 'cf73c0c5',
             },
           ],
         });
       }
 
+      if (method === 'POST' && pathname === '/api/workbench/review-conflicts/accept-ai') {
+        writeCalls.push({ method, pathname, body: request.postDataJSON() });
+        return jsonResponse(route, {
+          action: 'propose_correction',
+          target_id: 'dft-paper-2-1',
+          result: { status: 'pending', id: 'corr-1' },
+        });
+      }
+
+      if (method === 'POST' && pathname === '/api/workbench/review-center/batch-stage2') {
+        writeCalls.push({ method, pathname, body: request.postDataJSON() });
+        return jsonResponse(route, { completed: 1, failed: 0, requested: 1, rows: [] });
+      }
+
+      if (method === 'POST' && pathname === '/api/workbench/review-conflicts/auto-advance') {
+        writeCalls.push({ method, pathname, body: request.postDataJSON() });
+        return jsonResponse(route, {
+          eligible: 1,
+          executed: 1,
+          skipped: 0,
+          executed_items: [{ target_id: 'dft-paper-2-1', action: 'verify' }],
+          skipped_items: [],
+        });
+      }
+
+      if (method !== 'GET') {
+        writeCalls.push({ method, pathname });
+        return route.fulfill({ status: 204, body: '' });
+      }
+
       if (pathname === '/api/workbench/review-conflicts' && url.searchParams.get('paper_id') === 'paper-2') {
         return jsonResponse(route, {
+          adjudication_summary: {
+            auto: 0,
+            suggest: 1,
+            manual: 1,
+          },
           rows: [
             {
               target_type: 'dft_results',
@@ -115,6 +147,13 @@ test.describe('Review Center Conflict Modal', () => {
               field_name: 'value',
               reviewer_count: 4,
               conflict_types: ['value_conflict', 'decision_conflict'],
+              adjudication: {
+                adjudication_mode: 'suggest',
+                recommended_action: 'propose_correction',
+                reason_summary: 'A stronger table-backed consensus favors a correction draft.',
+                blocked_reasons: [],
+                recommended_payload: { proposed_value: '-1.80' },
+              },
               opinions: [
                 {
                   source: 'assigned_dft_audit',
@@ -196,6 +235,12 @@ test.describe('Review Center Conflict Modal', () => {
               field_name: 'core_hypothesis',
               reviewer_count: 2,
               conflict_types: ['mapping_conflict'],
+              adjudication: {
+                adjudication_mode: 'manual',
+                recommended_action: 'jump_to_review',
+                reason_summary: 'Writing-card conflicts should stay in object review.',
+                blocked_reasons: ['requires_object_review'],
+              },
               opinions: [
                 {
                   source: 'assigned_writing_audit',
@@ -243,7 +288,7 @@ test.describe('Review Center Conflict Modal', () => {
     const rows = page.locator('#rows tr');
     await expect(rows).toHaveCount(2);
 
-    await rows.nth(1).locator('[data-action="open-conflicts"]').click();
+    await page.locator('[data-action="open-conflicts"]').first().click();
 
     const overlay = page.locator('#infoOverlay.open');
     await expect(overlay).toBeVisible();
@@ -251,10 +296,17 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(overlay).toContainText('只读聚合，不自动合并');
     await expect(overlay).toContainText('证据预览');
     await expect(overlay).toContainText('请选择一条意见查看原文片段');
+    await expect(overlay).toContainText('自动推进 0');
+    await expect(overlay).toContainText('建议裁定 1');
+    await expect(overlay).toContainText('必须人工 1');
+    await expect(overlay).toContainText('接受 AI 裁定');
+    await expect(overlay).toContainText('生成修正草案');
+    await expect(overlay).toContainText('跳到对象审核');
 
     const openDetails = overlay.locator('details.conflict-card');
     await expect(openDetails.nth(0)).toHaveAttribute('open', '');
     await expect(openDetails.nth(1)).not.toHaveAttribute('open', '');
+    await expect(openDetails.nth(1)).not.toContainText('接受 AI 裁定');
 
     const firstTableRows = openDetails.nth(0).locator('tbody tr');
     await expect(firstTableRows).toHaveCount(4);
@@ -288,8 +340,35 @@ test.describe('Review Center Conflict Modal', () => {
     await expandReason.click();
     await expect(overlay.getByRole('button', { name: '收起理由' }).first()).toBeVisible();
 
-    const overlayText = await overlay.innerText();
-    expect(overlayText).not.toMatch(/verify|reject|correction/i);
-    expect(writeCalls).toEqual([]);
+    await overlay.getByRole('button', { name: '接受 AI 裁定' }).click();
+    await expect(page.locator('#toast')).toContainText('AI 裁定已执行');
+    expect(writeCalls).toContainEqual({
+      method: 'POST',
+      pathname: '/api/workbench/review-conflicts/accept-ai',
+      body: {
+        paper_id: 'paper-2',
+        target_type: 'dft_results',
+        target_id: 'dft-paper-2-1',
+        field_name: 'value',
+        reviewer: 'review_center',
+      },
+    });
+
+    await overlay.getByRole('button', { name: '关闭' }).first().click();
+    await expect(overlay).toBeHidden();
+    page.once('dialog', dialog => dialog.accept());
+    await page.getByRole('button', { name: '批量 AI 自动推进当前筛选' }).click();
+    await expect(page.locator('#toast')).toContainText('eligible 1');
+    await expect(page.locator('#toast')).toContainText('executed 1');
+    await expect(page.locator('#toast')).toContainText('skipped 0');
+    expect(writeCalls).toContainEqual({
+      method: 'POST',
+      pathname: '/api/workbench/review-conflicts/auto-advance',
+      body: {
+        paper_ids: ['paper-1', 'paper-2'],
+        reviewer: 'review_center',
+        limit: 200,
+      },
+    });
   });
 });

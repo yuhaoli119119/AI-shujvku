@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,7 @@ from app.db.models import (
     PaperCorrection,
     PaperFigure,
     PaperSection,
+    WorkflowJob,
     WritingCard,
 )
 from app.db.session import get_db_session
@@ -30,6 +33,7 @@ from app.main import app
 from app.services.gemini_audit_service import GeminiAuditService
 from app.services.paper_query import PaperQueryService
 from app.services.paper_workbench_service import PaperWorkbenchService
+from app.services.review_adjudication_service import ReviewAdjudicationService
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.workbench_status import workflow_needs_human_confirmation
 
@@ -943,3 +947,609 @@ def test_review_conflicts_api_and_review_center_counts(workbench_env):
     assert center.status_code == 200
     row_payload = next(item for item in center.json()["rows"] if item["paper_id"] == paper_id)
     assert row_payload["review_conflict_count"] == 1
+
+
+def _seed_object_review_audit(
+    session,
+    *,
+    paper_id,
+    target_type: str,
+    target_id,
+    field_name: str,
+    decision: str,
+    corrected_value,
+    confidence: float,
+    locator_status: str,
+    evidence_text: str,
+    source: str,
+):
+    run = session.query(ExternalAnalysisRun).filter(ExternalAnalysisRun.paper_id == paper_id).first()
+    if run is None:
+        run = ExternalAnalysisRun(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            normalized_payload={},
+            mapping_status="normalized",
+        )
+        session.add(run)
+        session.flush()
+    session.add(
+        ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper_id,
+            candidate_type="object_review_audit",
+            status="candidate",
+            confidence=confidence,
+            normalized_payload={
+                "paper_id": str(paper_id),
+                "target_type": target_type,
+                "target_id": str(target_id),
+                "field_name": field_name,
+                "source": source,
+                "source_label": source,
+                "agent_role": "dft_auditor",
+                "model_name": source + "-model",
+                "decision": decision,
+                "corrected_value": corrected_value,
+                "confidence": confidence,
+                "reason": f"{source} review",
+                "evidence_payload": {
+                    "evidence_text": evidence_text,
+                    "locator": {"page": 5, "locator_status": locator_status},
+                },
+                "evidence_location": {"page": 5, "locator_status": locator_status},
+                "verification_status": "unverified",
+            },
+        )
+    )
+
+
+def test_review_adjudication_supports_auto_suggest_and_manual_modes(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Adjudication modes", pdf_path="adjudication.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        auto_row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.20,
+            unit="eV",
+            evidence_text="Exact table evidence supports -1.20 eV.",
+            candidate_status="system_candidate",
+        )
+        suggest_row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S6",
+            value=-1.10,
+            unit="eV",
+            evidence_text="Competing evidence must be reconciled.",
+            candidate_status="system_candidate",
+        )
+        manual_row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S8",
+            value=-0.80,
+            unit="eV",
+            evidence_text="Weak locator evidence only.",
+            candidate_status="system_candidate",
+        )
+        session.add_all([auto_row, suggest_row, manual_row])
+        session.flush()
+        session.add_all(
+            [
+                EvidenceLocator(
+                    paper_id=paper.id,
+                    source_type="table",
+                    target_type="dft_results",
+                    target_id=str(auto_row.id),
+                    field_name="value",
+                    page=5,
+                    bbox={"l": 1, "t": 1, "r": 10, "b": 10},
+                    evidence_text=auto_row.evidence_text,
+                    locator_status="exact_page",
+                    locator_confidence=0.95,
+                ),
+                EvidenceLocator(
+                    paper_id=paper.id,
+                    source_type="table",
+                    target_type="dft_results",
+                    target_id=str(suggest_row.id),
+                    field_name="value",
+                    page=5,
+                    bbox={"l": 1, "t": 1, "r": 10, "b": 10},
+                    evidence_text=suggest_row.evidence_text,
+                    locator_status="exact_page",
+                    locator_confidence=0.9,
+                ),
+                EvidenceLocator(
+                    paper_id=paper.id,
+                    source_type="text",
+                    target_type="dft_results",
+                    target_id=str(manual_row.id),
+                    field_name="value",
+                    page=5,
+                    evidence_text=manual_row.evidence_text,
+                    locator_status="text_only",
+                    locator_confidence=0.5,
+                ),
+            ]
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=auto_row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-1.20,
+            confidence=0.91,
+            locator_status="exact_page",
+            evidence_text=auto_row.evidence_text,
+            source="gemini-auto",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=suggest_row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-1.35,
+            confidence=0.78,
+            locator_status="exact_page",
+            evidence_text="Table 3 supports -1.35 eV.",
+            source="gemini-suggest",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=suggest_row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-1.35,
+            confidence=0.82,
+            locator_status="exact_page",
+            evidence_text="Cross-check also supports -1.35 eV.",
+            source="claude-suggest",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=suggest_row.id,
+            field_name="value",
+            decision="REVISE",
+            corrected_value=-1.10,
+            confidence=0.41,
+            locator_status="text_only",
+            evidence_text="Narrative text is weaker.",
+            source="glm-suggest",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=manual_row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-0.82,
+            confidence=0.59,
+            locator_status="text_only",
+            evidence_text="Weak discussion evidence.",
+            source="gemini-manual",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=manual_row.id,
+            field_name="value",
+            decision="REVISE",
+            corrected_value=-0.77,
+            confidence=0.58,
+            locator_status="missing_locator",
+            evidence_text="No exact locator.",
+            source="glm-manual",
+        )
+        session.commit()
+
+        auto_payload = ReviewAdjudicationService(session).list_with_adjudication(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(auto_row.id),
+            include_non_conflicts=True,
+        )
+        suggest_payload = ReviewAdjudicationService(session).list_with_adjudication(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(suggest_row.id),
+            include_non_conflicts=True,
+        )
+        manual_payload = ReviewAdjudicationService(session).list_with_adjudication(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(manual_row.id),
+            include_non_conflicts=True,
+        )
+
+    auto_adjudication = auto_payload["rows"][0]["adjudication"]
+    assert auto_adjudication["adjudication_mode"] == "auto"
+    assert auto_adjudication["recommended_action"] == "verify"
+    assert auto_adjudication["eligible_for_auto_apply"] is True
+
+    suggest_adjudication = suggest_payload["rows"][0]["adjudication"]
+    assert suggest_adjudication["adjudication_mode"] == "suggest"
+    assert suggest_adjudication["recommended_action"] == "propose_correction"
+    assert suggest_adjudication["eligible_for_auto_apply"] is False
+
+    manual_adjudication = manual_payload["rows"][0]["adjudication"]
+    assert manual_adjudication["adjudication_mode"] == "manual"
+    assert manual_adjudication["eligible_for_auto_apply"] is False
+    assert "no_exact_locator" in manual_adjudication["blocked_reasons"]
+
+
+def test_review_conflicts_api_accepts_ai_adjudication_without_bypassing_audit(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Accept AI adjudication", pdf_path="accept-ai.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.10,
+            unit="eV",
+            evidence_text="Stored value is weaker than the table-backed consensus.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="table",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=5,
+                bbox={"l": 1, "t": 1, "r": 10, "b": 10},
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.93,
+            )
+        )
+        for source, decision, corrected_value, confidence, locator_status in [
+            ("gemini-accept", "PASS", -1.35, 0.84, "exact_page"),
+            ("claude-accept", "PASS", -1.35, 0.81, "exact_page"),
+            ("glm-accept", "REVISE", -1.10, 0.42, "text_only"),
+        ]:
+            _seed_object_review_audit(
+                session,
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=row.id,
+                field_name="value",
+                decision=decision,
+                corrected_value=corrected_value,
+                confidence=confidence,
+                locator_status=locator_status,
+                evidence_text="Consensus evidence." if locator_status == "exact_page" else "Weak narrative evidence.",
+                source=source,
+            )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    conflicts = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}&include_non_conflicts=true")
+    assert conflicts.status_code == 200
+    adjudication = conflicts.json()["rows"][0]["adjudication"]
+    assert adjudication["adjudication_mode"] == "suggest"
+    assert adjudication["recommended_action"] == "propose_correction"
+
+    accept = client.post(
+        "/api/workbench/review-conflicts/accept-ai",
+        json={
+            "paper_id": paper_id,
+            "target_type": "dft_results",
+            "target_id": row_id,
+            "field_name": "value",
+            "reviewer": "review_center_test",
+        },
+    )
+    assert accept.status_code == 200
+    result = accept.json()
+    assert result["action"] == "propose_correction"
+    assert result["result"]["status"] == "pending"
+
+    with Session() as session:
+        correction = session.scalar(select(PaperCorrection).where(PaperCorrection.paper_id == UUID(paper_id)))
+        assert correction is not None
+        assert correction.status == "pending"
+        assert correction.proposed_value == -1.35
+        assert session.scalar(select(AuditLog).where(AuditLog.action == "propose_dft_result_correction")) is not None
+        assert session.scalar(select(AuditLog).where(AuditLog.action == "accept_ai_adjudication")) is not None
+
+
+def test_review_conflicts_auto_advance_batch_records_audit(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(
+            title="Auto advance batch",
+            pdf_path="auto-batch.pdf",
+            workflow_status="Initial_Parsed",
+            library_name="活跃测试库",
+        )
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.20,
+            unit="eV",
+            evidence_text="Reliable table evidence.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="table",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=4,
+                bbox={"l": 1, "t": 1, "r": 10, "b": 10},
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.94,
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-1.20,
+            confidence=0.9,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="gemini-batch",
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/workbench/review-conflicts/auto-advance",
+        json={"paper_ids": [paper_id], "reviewer": "ai_auto_batch", "limit": 50},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["eligible"] == 1
+    assert payload["executed"] == 1
+    assert payload["executed_items"][0]["action"] == "verify"
+
+    with Session() as session:
+        stored = session.get(DFTResult, UUID(payload["executed_items"][0]["target_id"]))
+        assert stored.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"}
+        assert session.scalar(select(AuditLog).where(AuditLog.action == "auto_apply_ai_adjudication")) is not None
+        assert session.scalar(select(AuditLog).where(AuditLog.action == "auto_advance_review_adjudication_batch")) is not None
+        jobs = session.scalars(select(WorkflowJob).where(WorkflowJob.type == "review_adjudication")).all()
+        assert jobs
+        assert {job.library_name for job in jobs} == {"活跃测试库"}
+
+
+def test_review_conflicts_auto_advance_batch_skips_object_review_targets(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(
+            title="Auto advance guards object review",
+            pdf_path="auto-guard.pdf",
+            workflow_status="Initial_Parsed",
+            library_name="自动推进测试库",
+        )
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.20,
+            unit="eV",
+            evidence_text="Reliable table evidence.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="table",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=4,
+                bbox={"l": 1, "t": 1, "r": 10, "b": 10},
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.94,
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-1.20,
+            confidence=0.9,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="gemini-batch",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="writing_card",
+            target_id="writing-card-guard",
+            field_name="core_hypothesis",
+            decision="REVIEW",
+            corrected_value=None,
+            confidence=0.72,
+            locator_status="exact_page",
+            evidence_text="Object review targets must stay manual.",
+            source="claude-writing",
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/workbench/review-conflicts/auto-advance",
+        json={"paper_ids": [paper_id], "reviewer": "ai_auto_batch", "limit": 50},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["eligible"] == 1
+    assert payload["executed"] == 1
+    assert payload["skipped"] == 0
+
+    with Session() as session:
+        stored = session.get(DFTResult, UUID(row_id))
+        assert stored.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"}
+        jobs = session.scalars(select(WorkflowJob).where(WorkflowJob.type == "review_adjudication")).all()
+        assert len(jobs) == 1
+        assert jobs[0].payload["target_type"] == "dft_results"
+        assert jobs[0].payload["target_id"] == row_id
+        assert jobs[0].library_name == "自动推进测试库"
+        assert session.scalar(select(AuditLog).where(AuditLog.target_type == "writing_card").where(AuditLog.action == "auto_apply_ai_adjudication")) is None
+
+
+def test_batch_stage2_deep_parse_respects_requested_paper_ids_beyond_recent_window(workbench_env, monkeypatch):
+    _, _, Session = workbench_env
+    with Session() as session:
+        old_target = Paper(
+            title="Old unparsed target",
+            pdf_path="old-target.pdf",
+            workflow_status="Unparsed",
+            created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        )
+        session.add(old_target)
+        for index in range(505):
+            session.add(
+                Paper(
+                    title=f"Recent paper {index}",
+                    pdf_path=f"recent-{index}.pdf",
+                    workflow_status="Imported",
+                    created_at=datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=index),
+                )
+            )
+        session.commit()
+        old_target_id = str(old_target.id)
+
+    rerun_calls: list[str] = []
+
+    def fake_rerun_stage2(self, paper_id):
+        rerun_calls.append(str(paper_id))
+        return {"dft_results": 1, "mechanism_claims": 0, "writing_cards": 0}
+
+    monkeypatch.setattr("app.services.paper_reprocessing.PaperReprocessingService.rerun_stage2", fake_rerun_stage2)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/workbench/review-center/batch-stage2",
+        json={"paper_ids": [old_target_id], "mode": "deep_parse_suspected_missing", "reviewer": "review_center_batch"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selection_scope"] == "requested_paper_ids"
+    assert payload["requested"] == 1
+    assert payload["completed"] == 1
+    assert rerun_calls == [old_target_id]
+
+
+def test_review_center_sorting_and_batch_stage2_endpoints(workbench_env, monkeypatch):
+    _, _, Session = workbench_env
+    with Session() as session:
+        newest = Paper(title="Newest", year=2023, pdf_path="newest.pdf", workflow_status="Imported")
+        high_conflict = Paper(title="Conflict first", year=2024, pdf_path="conflict.pdf", workflow_status="Needs_Human_Confirmation")
+        missing = Paper(title="Missing first", year=2022, pdf_path="missing.pdf", workflow_status="Suspected_Missing")
+        session.add_all([newest, high_conflict, missing])
+        session.flush()
+        row = DFTResult(paper_id=high_conflict.id, property_type="adsorption_energy", value=-0.5, unit="eV")
+        session.add(row)
+        session.flush()
+        session.add_all(
+            [
+                PaperCorrection(
+                    paper_id=high_conflict.id,
+                    source="ai-a",
+                    field_name="dft_results",
+                    target_path=f"dft_results:{row.id}:value",
+                    operation="replace",
+                    proposed_value=-0.5,
+                    reason="Keep value",
+                    status="pending",
+                ),
+                PaperCorrection(
+                    paper_id=high_conflict.id,
+                    source="ai-b",
+                    field_name="dft_results",
+                    target_path=f"dft_results:{row.id}:value",
+                    operation="replace",
+                    proposed_value=-0.7,
+                    reason="Use table value",
+                    status="pending",
+                ),
+            ]
+        )
+        session.commit()
+        newest_id = str(newest.id)
+        missing_id = str(missing.id)
+
+    client = TestClient(app)
+    conflicts_sorted = client.get("/api/workbench/review-center?limit=10&sort_by=conflicts_desc")
+    assert conflicts_sorted.status_code == 200
+    assert conflicts_sorted.json()["metadata"]["sort_by"] == "conflicts_desc"
+    assert conflicts_sorted.json()["rows"][0]["title"] == "Conflict first"
+
+    missing_sorted = client.get("/api/workbench/review-center?limit=10&sort_by=suspected_missing_desc")
+    assert missing_sorted.status_code == 200
+    assert missing_sorted.json()["rows"][0]["paper_id"] == missing_id
+
+    recent_sorted = client.get("/api/workbench/review-center?limit=10&sort_by=recent")
+    assert recent_sorted.status_code == 200
+    assert any(row["paper_id"] == newest_id and row["paper_short_id"] for row in recent_sorted.json()["rows"])
+
+    def fake_rerun_stage2(self, paper_id):
+        return {"dft_results": 1, "mechanism_claims": 0, "writing_cards": 0}
+
+    monkeypatch.setattr("app.services.paper_reprocessing.PaperReprocessingService.rerun_stage2", fake_rerun_stage2)
+
+    batch = client.post(
+        "/api/workbench/review-center/batch-stage2",
+        json={"paper_ids": [newest_id], "mode": "reparse_filtered", "reviewer": "review_center_batch"},
+    )
+    assert batch.status_code == 200
+    assert batch.json()["completed"] == 1
+
+    suspected = client.post(
+        "/api/workbench/review-center/batch-stage2",
+        json={"paper_ids": [missing_id], "mode": "deep_parse_suspected_missing", "reviewer": "review_center_batch"},
+    )
+    assert suspected.status_code == 200
+    assert suspected.json()["requested"] == 1
