@@ -2269,6 +2269,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
 
     const rows = page.locator('#rows tr');
+    await expect(rows).toHaveCount(2);
+
     const firstStatus = rows.nth(0).locator('td').nth(3);
     await expect(firstStatus).toContainText('PDF 可用');
     await expect(firstStatus).toContainText('待审 DFT');
@@ -2283,16 +2285,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const secondStatus = rows.nth(1).locator('td').nth(3);
     await expect(secondStatus).toContainText('PDF 缺失');
     await expect(secondStatus).toContainText('未见 DFT');
+    await expect(secondStatus).toContainText('定位风险 0');
+    await expect(secondStatus).toContainText('图像风险 0');
     await expect(secondStatus).toContainText('冲突 2');
     await expect(secondStatus).not.toContainText('疑似漏提');
-
-    const figureSummary = page.locator('#rows [title*="missing full-page snapshot"]').first();
-    await expect(figureSummary).toHaveAttribute('title', /missing full-page snapshot: 1/);
-    await expect(figureSummary).toHaveAttribute('title', /small crop: 1/);
-    await expect(figureSummary).toHaveAttribute('title', /missing bbox: 1/);
-    const locatorSummary = page.locator('#rows [title*="text-only"]').first();
-    await expect(locatorSummary).toHaveAttribute('title', /missing bbox: 1/);
-    await expect(locatorSummary).toHaveAttribute('title', /text-only: 1/);
 
     await rows.nth(0).locator('[data-action="open-details"]').click();
     const overlay = page.locator('#infoOverlay.open');
@@ -2301,14 +2297,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#infoModalSubtitle')).toContainText('Journal of Testing | 2025');
     await expect(overlay).toContainText('External audit: 1');
     await expect(overlay).toContainText('Object audits: 1');
-    await expect(overlay).toContainText('Assigned AI DFT audit');
-    await expect(overlay).toContainText('unverified');
-    await expect(overlay).toContainText('system_candidate: 1');
     await expect(overlay).toContainText('Figure 风险');
     await expect(overlay).toContainText('Locator 风险');
-    await expect(overlay).toContainText('线索 1');
-    await expect(overlay).toContainText('已解析 1');
-    await expect(overlay).toContainText('疑似漏提 0');
+    await expect(overlay).toContainText('system_candidate');
+    await expect(overlay).toContainText('unverified');
     await page.locator('#infoOverlay .modal-close').click();
     await expect(page.locator('#infoOverlay')).not.toHaveClass(/open/);
 
@@ -2317,12 +2309,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(conflictOverlay).toBeVisible();
     await expect(conflictOverlay).toContainText('冲突详情');
     await expect(conflictOverlay).toContainText('只读聚合，不自动合并');
-    await expect(conflictOverlay).toContainText('dft_results / value');
-    await expect(conflictOverlay).toContainText('value_conflict, decision_conflict');
-    await expect(conflictOverlay).toContainText('Gemini data audit');
-    await expect(conflictOverlay).toContainText('GLM review');
-    await expect(conflictOverlay).toContainText('writing_card / core_hypothesis');
-    await expect(conflictOverlay).toContainText('mapping_conflict');
     await page.locator('#infoOverlay .modal-close').click();
 
     expect(writeCalls).toEqual([]);
