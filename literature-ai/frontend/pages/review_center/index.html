@@ -2050,10 +2050,8 @@
 
     async function preparePaper(paperId) {
       try {
-        await fetchJSON("/api/workbench/papers/" + encodeURIComponent(paperId) + "/prepare", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ render_pages: false })
+        await fetchJSON("/api/papers/" + encodeURIComponent(paperId) + "/prepare-ai-context", {
+          method: "POST"
         });
         showToast("已刷新这篇文献的 AI 审核材料，后续可由 IDE-AI 继续解析。");
         await loadReviewCenter();
