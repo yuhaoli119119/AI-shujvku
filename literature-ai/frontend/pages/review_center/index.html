@@ -320,8 +320,8 @@
       display: flex;
     }
     .modal-card {
-      width: min(980px, calc(100vw - 40px));
-      max-height: min(82vh, 920px);
+      width: min(1360px, calc(100vw - 28px));
+      max-height: min(88vh, 980px);
       overflow: hidden;
       border: 1px solid var(--color-border);
       border-radius: 10px;
@@ -405,7 +405,7 @@
     }
     .conflict-card {
       border: 1px solid var(--color-border);
-      border-radius: 8px;
+      border-radius: 14px;
       background: var(--color-surface-alt);
       overflow: hidden;
     }
@@ -458,16 +458,16 @@
     }
     .conflict-body {
       display: grid;
-      gap: 12px;
+      gap: 14px;
       padding: 0 14px 14px;
     }
     .conflict-object-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
       gap: 10px;
       padding: 12px;
       border: 1px solid var(--color-border);
-      border-radius: 8px;
+      border-radius: 12px;
       background: var(--color-surface);
     }
     .conflict-object-item {
@@ -495,12 +495,12 @@
     .compare-table-wrap {
       overflow-x: auto;
       border: 1px solid var(--color-border);
-      border-radius: 8px;
+      border-radius: 12px;
       background: var(--color-surface);
     }
     .compare-table {
       width: 100%;
-      min-width: 940px;
+      min-width: 1020px;
       border-collapse: separate;
       border-spacing: 0;
       table-layout: fixed;
@@ -522,14 +522,14 @@
     .compare-table tr:last-child td {
       border-bottom: 0;
     }
-    .compare-col-source { width: 16%; }
-    .compare-col-role { width: 15%; }
-    .compare-col-decision { width: 10%; }
-    .compare-col-value { width: 12%; }
-    .compare-col-confidence { width: 10%; }
-    .compare-col-locator { width: 14%; }
-    .compare-col-reason { width: 18%; }
-    .compare-col-action { width: 11%; }
+    .compare-col-source { width: 20%; }
+    .compare-col-role { width: 14%; }
+    .compare-col-decision { width: 9%; }
+    .compare-col-value { width: 13%; }
+    .compare-col-confidence { width: 8%; }
+    .compare-col-locator { width: 12%; }
+    .compare-col-reason { width: 16%; }
+    .compare-col-action { width: 8%; }
     .opinion-source {
       font-size: 12px;
       font-weight: 800;
@@ -574,6 +574,8 @@
     .conflict-card-actions {
       display: flex;
       justify-content: flex-start;
+      flex-wrap: wrap;
+      gap: 8px;
     }
     .opinion-action {
       display: flex;
@@ -597,13 +599,16 @@
     }
     .conflict-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.95fr);
+      grid-template-columns: 1fr;
       gap: 16px;
       align-items: start;
     }
     .conflict-main,
     .evidence-preview-shell {
       min-width: 0;
+    }
+    .evidence-preview-shell {
+      order: -1;
     }
     .evidence-preview-card {
       border: 1px solid #d7e2ef;
@@ -613,8 +618,7 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
-      position: sticky;
-      top: 0;
+      position: static;
     }
     .evidence-preview-card.is-placeholder {
       min-height: 220px;
@@ -677,7 +681,7 @@
         padding: 12px;
       }
       .modal-card {
-        width: min(100vw - 16px, 980px);
+        width: min(100vw - 16px, 1360px);
         max-height: calc(100vh - 24px);
       }
       .conflict-card-head {
@@ -688,9 +692,6 @@
       }
       .conflict-object-grid {
         grid-template-columns: 1fr 1fr;
-      }
-      .conflict-layout {
-        grid-template-columns: 1fr;
       }
       .evidence-preview-card {
         position: static;
@@ -1977,6 +1978,7 @@
         '<div class="muted" style="margin-bottom:10px;">' + esc(adjudication.reason_summary || "暂无 AI 裁定摘要。") + '</div>' +
         (blockedReasons.length ? '<div class="muted" style="margin-bottom:10px;">阻断原因：' + esc(blockedReasons.join(", ")) + '</div>' : '') +
         '<div class="conflict-card-actions">' + buildConflictActionButtons(item, row, index) + '</div>' +
+        '<div class="detail-value muted" style="margin-top:2px;">在下方点“查看原文”，证据会显示在本页上方，便于逐条对照。</div>' +
         '<div class="compare-table-wrap"><table class="compare-table"><thead><tr>' +
         '<th class="compare-col-source">来源</th>' +
         '<th class="compare-col-role">角色/模型</th>' +
@@ -2062,9 +2064,48 @@
               '<span class="chip warn">建议裁定 ' + esc(toCount(adjudicationSummary.suggest)) + '</span>' +
               '<span class="chip bad">必须人工 ' + esc(toCount(adjudicationSummary.manual)) + '</span>' +
             '</div>' +
-            '<div class="conflict-layout"><div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
+            '<div class="conflict-layout"><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("先在下方点“查看原文”，这里会显示对应证据。") + '</div></div><div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
               return buildConflictGroupCard(item, row, index);
             }).join("") + '</div></div><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div></div>' +
+            '<div class="conflict-footer-note">所有执行动作都会走既有 verify / reject / correction 安全链路，并保留审计记录。</div>'
+          : '<div class="detail-value muted">当前没有可展示的字段冲突明细。</div>';
+        modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), html);
+      } catch (error) {
+        modalContent("冲突详情", row.title || "", '<div class="error" style="margin:0;">加载冲突失败：' + esc(error.message) + '</div>');
+      }
+    }
+
+    async function openRowConflictModalV2(row) {
+      modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), '<div class="detail-value muted">加载中...</div>');
+      try {
+        const params = new URLSearchParams({
+          paper_id: row.paper_id,
+          include_non_conflicts: "false",
+          limit: "200"
+        });
+        const payload = await fetchJSON("/api/workbench/review-conflicts?" + params.toString());
+        const conflictRows = Array.isArray(payload.rows) ? payload.rows : [];
+        const summary = buildConflictSummary(conflictRows);
+        const adjudicationSummary = payload.adjudication_summary || {};
+        conflictState.activeRow = row;
+        conflictState.groups = conflictRows;
+        conflictState.activeOpinionKey = null;
+        conflictState.evidenceCache = {};
+        const html = conflictRows.length
+          ? '<div class="conflict-summary-bar">' +
+              '<span class="chip">冲突对象 ' + esc(summary.conflictObjects) + '</span>' +
+              '<span class="chip">意见来源 ' + esc(summary.opinionSources) + '</span>' +
+              '<span class="chip bad">高优先级 ' + esc(summary.highPriority) + '</span>' +
+              '<span class="chip low">定位偏弱 ' + esc(summary.weakLocator) + '</span>' +
+              '<span class="chip warn">建议裁定 ' + esc(toCount(adjudicationSummary.suggest)) + '</span>' +
+              '<span class="chip bad">必须人工 ' + esc(toCount(adjudicationSummary.manual)) + '</span>' +
+            '</div>' +
+            '<div class="conflict-layout">' +
+              '<div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("先在下方点“查看原文”，这里会显示对应证据。") + '</div></div>' +
+              '<div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
+                return buildConflictGroupCard(item, row, index);
+              }).join("") + '</div></div>' +
+            '</div>' +
             '<div class="conflict-footer-note">所有执行动作都会走既有 verify / reject / correction 安全链路，并保留审计记录。</div>'
           : '<div class="detail-value muted">当前没有可展示的字段冲突明细。</div>';
         modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), html);
