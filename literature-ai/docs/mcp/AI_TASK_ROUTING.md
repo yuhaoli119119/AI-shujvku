@@ -93,6 +93,8 @@ Expected review order for high-risk DFT data:
 2. Two AI then perform ordinary DFT review.
 3. If those two AI disagree, a third AI may adjudicate after reading the original PDF and both prior AI outputs.
 
+If a DFT row refers to a material or structure that has no `catalyst_sample`, first use `import_analysis` to propose or dual-review `catalyst_samples:new:create` with an original-PDF anchor. Do not bind the DFT row to the paper's first sample. After the sample is created or unambiguously reused, submit the normal dual-AI `catalyst_sample_id` review for the DFT row.
+
 Forbidden:
 
 Do not call final verification tools with an ordinary IDE AI key. Do not unlock ML export from external AI review alone. Do not infer precise numeric values from plots unless the value is explicitly readable in source evidence.

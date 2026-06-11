@@ -336,6 +336,18 @@ class ExternalAnalysisService:
                     self.session.add(candidate)
                     result.skipped_candidates += 1
                     continue
+                if (
+                    payload.get("field_name") == "catalyst_samples"
+                    and payload.get("operation") == "create"
+                    and (
+                        payload.get("target_path") != "catalyst_samples:new:create"
+                        or not isinstance(payload.get("proposed_value"), dict)
+                    )
+                ):
+                    candidate.status = "requires_resolution"
+                    self.session.add(candidate)
+                    result.skipped_candidates += 1
+                    continue
                 correction = PaperCorrection(
                     paper_id=candidate.paper_id,
                     source=run.source,
@@ -432,6 +444,9 @@ class ExternalAnalysisService:
             correction.evidence_payload
         ):
             return "requires_resolution"
+        if correction.field_name == "catalyst_samples" and correction.operation == "create":
+            if correction.target_path != "catalyst_samples:new:create" or not isinstance(correction.proposed_value, dict):
+                return "requires_resolution"
         return "pending"
 
     def _normalize_input(

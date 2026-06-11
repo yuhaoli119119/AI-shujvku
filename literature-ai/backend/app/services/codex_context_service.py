@@ -283,6 +283,13 @@ class CodexContextService:
             safety = safety_by_id.get(str(item.get("id")))
             if safety is not None:
                 item["export_safety"] = safety
+        suggested_sample_creations = self._suggested_sample_creations(detail.id)
+        blocked_unbound_dft = [
+            item
+            for item in dft_results
+            if not item.get("catalyst_sample_id")
+            and "missing_material_identity" in ((item.get("export_safety") or {}).get("blocked_reasons") or [])
+        ]
 
         context: dict[str, Any] = {
             "schema_version": self.schema_version,
@@ -389,6 +396,12 @@ class CodexContextService:
                 "figure_data_points": self._dump_items(detail.figure_data_points_items, max_candidates),
                 "knowledge_candidates": knowledge_candidates,
                 "candidate_status": "automatic_unverified_candidates",
+            },
+            "material_identity_gaps": {
+                "existing_samples": self._dump_catalyst_samples(detail, max_candidates),
+                "suggested_sample_creations": suggested_sample_creations,
+                "blocked_unbound_dft_results": blocked_unbound_dft,
+                "pdf_url": f"/api/papers/{detail.id}/pdf",
             },
             "knowledge_candidates": {
                 "schema_version": PaperKnowledgeService.schema_version,
@@ -1167,9 +1180,40 @@ class CodexContextService:
             "binding_status": "bound" if row.catalyst_sample_id else "unbound",
             "current_catalyst_sample": current_sample,
             "candidate_catalyst_samples": candidate_samples,
+            "suggested_sample_creations": self._suggested_sample_creations(detail.id),
+            "pdf_url": f"/api/papers/{detail.id}/pdf",
             "binding_evidence_anchor": first_evidence_anchor(binding_payload),
             "requires_explicit_material_choice": not bool(row.catalyst_sample_id) and len(candidate_samples) > 1,
         }
+
+    def _suggested_sample_creations(self, paper_id: UUID) -> list[dict[str, Any]]:
+        rows = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type == "correction",
+            )
+            .order_by(ExternalAnalysisCandidate.created_at.desc())
+        ).all()
+        suggestions: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row.normalized_payload if isinstance(row.normalized_payload, dict) else {}
+            if payload.get("field_name") != "catalyst_samples" or payload.get("operation") != "create":
+                continue
+            suggestions.append(
+                {
+                    "candidate_id": str(row.id),
+                    "status": row.status,
+                    "proposed_value": payload.get("proposed_value"),
+                    "reason": payload.get("reason"),
+                    "evidence_anchor": first_material_correction_anchor(
+                        payload.get("evidence_payload") or row.evidence_payload
+                    ),
+                    "materialized_target_type": row.materialized_target_type,
+                    "materialized_target_id": row.materialized_target_id,
+                }
+            )
+        return suggestions[:20]
 
     def _locator_payload(self, row: EvidenceLocator) -> dict[str, Any]:
         return {

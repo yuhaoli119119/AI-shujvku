@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.db.models import (
     AuditLog,
     Base,
+    CatalystSample,
     DFTResult,
     EvidenceLocator,
     ExternalAnalysisCandidate,
@@ -194,6 +195,82 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
         assert note.section_title == "Discussion"
         assert session.scalar(select(AuditLog).where(AuditLog.action == "single_ai_auto_materialize_note")) is not None
         assert session.scalar(select(AuditLog).where(AuditLog.action == "settle_verification_session")) is not None
+
+
+def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Multi-material paper", pdf_path="multi.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    created = client.post(
+        "/api/workbench/verification-sessions",
+        json={"paper_ids": [paper_id], "scope": "all", "refresh_materials": False, "reviewer": "test_runner"},
+    )
+    assert created.status_code == 200
+    session_payload = created.json()
+    labels = session_payload["lane_labels"]
+    proposed = {
+        "name": "Pt",
+        "catalyst_type": "comparator",
+        "metal_centers": ["Pt"],
+        "coordination": "Pt surface",
+        "support": None,
+        "synthesis_method": None,
+        "evidence_strength": "Original PDF text",
+        "structure_name": "Pt catalyst",
+    }
+
+    with Session() as session:
+        for source, label in (("ai_a", labels["primary"]), ("ai_b", labels["secondary"])):
+            run = ExternalAnalysisRun(
+                paper_id=UUID(paper_id), source=source, source_label=label,
+                raw_payload={}, normalized_payload={}, mapping_status="mapped",
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=UUID(paper_id),
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "catalyst_samples",
+                        "target_id": "new",
+                        "field_name": "create",
+                        "decision": "REVISE",
+                        "corrected_value": proposed,
+                        "confidence": 0.95,
+                        "evidence_location": {
+                            "page": 2,
+                            "section": "Introduction",
+                            "quoted_text": "0.44 eV on Pt",
+                        },
+                    },
+                    status="pending",
+                )
+            )
+        session.commit()
+
+    settled = client.post(
+        f"/api/workbench/verification-sessions/{session_payload['session_id']}/settle",
+        json={"reviewer": "dual_ai_test"},
+    )
+    assert settled.status_code == 200
+    assert settled.json()["settlement"]["high_risk"]["auto_applied_count"] == 1
+    with Session() as session:
+        samples = session.scalars(select(CatalystSample).where(CatalystSample.paper_id == UUID(paper_id))).all()
+        assert len(samples) == 1
+        assert samples[0].name == "Pt"
+        assert samples[0].metal_centers == ["Pt"]
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == UUID(paper_id))
+        ).all()
+        assert {item.materialized_target_type for item in candidates} == {"catalyst_sample"}
+        assert {item.materialized_target_id for item in candidates} == {str(samples[0].id)}
 
 
 def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):

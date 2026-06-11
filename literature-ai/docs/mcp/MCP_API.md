@@ -153,6 +153,40 @@ Object-level audit payload example:
 
 Object-level imports create `object_review_audit` candidates with `verification_status=unverified`. They are comparison evidence for queues and conflict aggregation. They do not approve corrections, merge values, mark extraction reviews verified, or unlock export.
 
+### Creating a missing catalyst sample
+
+Use `import_analysis` through the same external candidate and verification flow. A low-risk proposal may be represented as a correction candidate:
+
+```json
+{
+  "correction_proposals": [
+    {
+      "field_name": "catalyst_samples",
+      "target_path": "catalyst_samples:new:create",
+      "operation": "create",
+      "proposed_value": {
+        "name": "Pt",
+        "catalyst_type": "benchmark_comparator",
+        "metal_centers": ["Pt"],
+        "coordination": "Pt metal surface",
+        "support": null,
+        "synthesis_method": "commercial Pt catalyst comparator",
+        "evidence_strength": "Original PDF exact-page text",
+        "structure_name": "Pt catalyst"
+      },
+      "reason": "The PDF identifies a distinct Pt comparator.",
+      "evidence_payload": {
+        "page": 2,
+        "section": "Introduction",
+        "quoted_text": "0.44 eV on Pt"
+      }
+    }
+  ]
+}
+```
+
+For automated settlement, two AI lanes must instead submit matching `object_review_audits` with `target_type="catalyst_samples"`, `target_id="new"`, `field_name="create"`, and the same identity object in `corrected_value`. Missing PDF anchors remain `requires_resolution`. Before insertion, the backend compares normalized name, metal centers, coordination, support, and structure name within the same paper. One clear match is reused; multiple plausible matches remain unresolved and are never auto-merged.
+
 Third-AI adjudication payload example:
 
 ```json

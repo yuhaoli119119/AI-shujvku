@@ -14,6 +14,7 @@ from app.db.models import (
     DFTResult,
     DFTSetting,
     ElectrochemicalPerformance,
+    EvidenceLocator,
     MechanismClaim,
     Paper,
     PaperCorrection,
@@ -21,7 +22,8 @@ from app.db.models import (
     PaperTable,
     WritingCard,
 )
-from app.utils.evidence_anchors import has_evidence_anchor, has_material_correction_anchor
+from app.utils.evidence_anchors import first_evidence_anchor, has_evidence_anchor, has_material_correction_anchor
+from app.services.catalyst_sample_identity import clean_sample_payload, resolve_sample_identity
 
 
 @dataclass(frozen=True)
@@ -257,8 +259,11 @@ class ReviewService:
         }
 
     def _apply_correction(self, correction: PaperCorrection) -> None:
+        if correction.operation == "create" and correction.field_name == "catalyst_samples":
+            self._apply_catalyst_sample_create(correction)
+            return
         if correction.operation != "replace":
-            raise ValueError("Only replace corrections are supported in the current review flow")
+            raise ValueError("Only replace corrections and catalyst sample creation are supported in the current review flow")
 
         if correction.target_path == correction.field_name and correction.field_name in self.ALLOWED_PAPER_FIELDS:
             paper = self.session.get(Paper, correction.paper_id)
@@ -274,6 +279,61 @@ class ReviewService:
             return
 
         raise ValueError(f"Correction field is not review-applicable yet: {correction.field_name}")
+
+    def _apply_catalyst_sample_create(self, correction: PaperCorrection) -> None:
+        if not has_material_correction_anchor(correction.evidence_payload):
+            raise ValueError(
+                "Catalyst sample creation requires at least one PDF evidence anchor: "
+                "page, section, quoted_text, table, or figure."
+            )
+        collection, row_id_text, attribute = self._parse_structured_target_path(correction.target_path)
+        if collection != "catalyst_samples" or row_id_text != "new" or attribute != "create":
+            raise ValueError("Catalyst sample creation target must be catalyst_samples:new:create")
+        proposed = dict(correction.proposed_value or {})
+        cleaned = clean_sample_payload(proposed)
+        resolution = resolve_sample_identity(
+            self.session,
+            paper_id=correction.paper_id,
+            proposed_value=proposed,
+        )
+        if resolution.status == "ambiguous":
+            correction.status = "requires_resolution"
+            correction.evidence_payload = {
+                **dict(correction.evidence_payload or {}),
+                "sample_resolution": {
+                    "status": "ambiguous",
+                    "candidate_ids": list(resolution.candidate_ids),
+                },
+            }
+            raise ValueError("Catalyst sample identity is ambiguous; manual resolution is required.")
+        sample = resolution.sample
+        if sample is None:
+            sample = CatalystSample(paper_id=correction.paper_id, **cleaned)
+            self.session.add(sample)
+            self.session.flush()
+        correction.evidence_payload = {
+            **dict(correction.evidence_payload or {}),
+            "sample_resolution": {
+                "status": resolution.status,
+                "catalyst_sample_id": str(sample.id),
+            },
+        }
+        self.session.add(correction)
+        self.session.add(
+            AuditLog(
+                paper_id=correction.paper_id,
+                action="create_or_reuse_catalyst_sample",
+                source=correction.reviewed_by or correction.source,
+                target_type="catalyst_sample",
+                target_id=str(sample.id),
+                payload={
+                    "resolution": resolution.status,
+                    "source_correction_id": str(correction.id),
+                    "proposed_identity": proposed,
+                    "evidence_anchor": correction.evidence_payload,
+                },
+            )
+        )
 
     def _apply_structured_correction(self, correction: PaperCorrection) -> None:
         record, spec, attribute = self._resolve_structured_target(correction)
@@ -310,12 +370,52 @@ class ReviewService:
                     "evidence_anchor": correction.evidence_payload,
                 }
                 record.evidence_payload = merged_payload
+                self._upsert_binding_locator(record, correction.evidence_payload)
             self.session.add(record)
             return
         setattr(record, attribute, proposed_value)
         self.session.add(record)
 
+    def _upsert_binding_locator(self, row: DFTResult, evidence_payload: dict[str, Any]) -> None:
+        anchor = first_evidence_anchor(evidence_payload)
+        if not anchor or anchor.get("page") in (None, ""):
+            return
+        try:
+            page = int(anchor["page"])
+        except (TypeError, ValueError):
+            return
+        locator = self.session.scalar(
+            select(EvidenceLocator).where(
+                EvidenceLocator.paper_id == row.paper_id,
+                EvidenceLocator.target_type == "dft_results",
+                EvidenceLocator.target_id == str(row.id),
+                EvidenceLocator.field_name.in_([None, "catalyst_sample_id"]),
+            )
+        )
+        if locator is None:
+            locator = EvidenceLocator(
+                paper_id=row.paper_id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="catalyst_sample_id",
+                evidence_text=str(anchor.get("quoted_text") or row.evidence_text or "PDF evidence"),
+                locator_status="exact_page",
+                locator_confidence=1.0,
+                parser_source="external_ai_review",
+            )
+        locator.page = page
+        locator.section = anchor.get("section") or anchor.get("section_title") or row.source_section
+        locator.evidence_text = str(anchor.get("quoted_text") or locator.evidence_text or row.evidence_text or "PDF evidence")
+        locator.locator_status = "exact_bbox" if anchor.get("bbox") else "exact_page"
+        locator.locator_confidence = 1.0
+        locator.parser_source = "external_ai_review"
+        locator.warning_reason = None
+        self.session.add(locator)
+
     def _resolve_current_value(self, correction: PaperCorrection) -> Any:
+        if correction.operation == "create" and correction.field_name == "catalyst_samples":
+            return None
         if correction.target_path == correction.field_name and correction.field_name in self.ALLOWED_PAPER_FIELDS:
             paper = self.session.get(Paper, correction.paper_id)
             if not paper:

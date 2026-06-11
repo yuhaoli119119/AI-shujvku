@@ -35,7 +35,7 @@ from app.utils.evidence_anchors import has_evidence_anchor
 
 
 class VerificationSessionService:
-    HIGH_RISK_IDE_TARGET_TYPES = {"dft_results", "figure", "figures", "table", "tables"}
+    HIGH_RISK_IDE_TARGET_TYPES = {"dft_results", "catalyst_samples", "figure", "figures", "table", "tables"}
     HIGH_RISK_SCOPES = {
         "all": {"dft_results", "mechanism_claims", "electrochemical_performance", "catalyst_samples", "dft_settings"},
         "dft_only": {"dft_results"},
@@ -493,6 +493,7 @@ class VerificationSessionService:
                 approved_status = approved.status
             materialized.append(
                 {
+                    "candidate": candidate,
                     "candidate_id": str(candidate.id),
                     "candidate_type": candidate.candidate_type,
                     "materialized_target_type": candidate.materialized_target_type,
@@ -711,6 +712,7 @@ class VerificationSessionService:
             )
             grouped[key].append(
                 {
+                    "candidate": candidate,
                     "candidate_id": str(candidate.id),
                     "paper_id": str(candidate.paper_id),
                     "target_type": target_type,
@@ -752,7 +754,17 @@ class VerificationSessionService:
                 opinion=decision["opinion"],
                 dual_ai_consensus=True,
             )
+            materialized_target_type, materialized_target_id = self._materialized_target_ref(adopted)
+            for opinion in opinions:
+                candidate = opinion.get("candidate")
+                if candidate is None:
+                    continue
+                candidate.status = "materialized"
+                candidate.materialized_target_type = materialized_target_type
+                candidate.materialized_target_id = materialized_target_id
+                self.session.add(candidate)
             auto_applied.append(adopted)
+        self.session.flush()
         missing_dual = max(0, len(grouped) - len(auto_applied) - len(pending_conflicts))
         if missing_dual:
             skipped.append({"reason": "insufficient_dual_ai_pairs", "count": missing_dual})
@@ -893,12 +905,17 @@ class VerificationSessionService:
         adjudicated_by_third_ai: bool,
     ) -> dict[str, Any]:
         target_collection = self._correction_collection_name(target_type)
+        is_sample_create = (
+            target_collection == "catalyst_samples"
+            and str(target_id).strip().lower() in {"new", "create"}
+            and str(field_name).strip().lower() == "create"
+        )
         correction = PaperCorrection(
             paper_id=paper_id,
             source=reviewer,
             field_name=target_collection,
-            target_path=f"{target_collection}:{target_id}:{field_name}",
-            operation="replace",
+            target_path="catalyst_samples:new:create" if is_sample_create else f"{target_collection}:{target_id}:{field_name}",
+            operation="create" if is_sample_create else "replace",
             proposed_value=proposed_value,
             reason=self._materialization_note(
                 dual_ai_consensus=dual_ai_consensus,
@@ -911,10 +928,20 @@ class VerificationSessionService:
         self.session.flush()
         approved = ReviewService(self.session).approve_correction(correction.id, reviewer=reviewer)
         self.session.flush()
+        sample_resolution = (
+            (approved.evidence_payload or {}).get("sample_resolution")
+            if isinstance(approved.evidence_payload, dict)
+            else None
+        )
+        resolved_target_id = (
+            sample_resolution.get("catalyst_sample_id")
+            if isinstance(sample_resolution, dict)
+            else target_id
+        )
         return {
             "action": "approve_correction",
             "target_type": target_collection,
-            "target_id": target_id,
+            "target_id": resolved_target_id,
             "correction_id": str(approved.id),
             "field_name": field_name,
             "proposed_value": proposed_value,
@@ -933,6 +960,8 @@ class VerificationSessionService:
     @staticmethod
     def _materialized_target_ref(result: dict[str, Any]) -> tuple[str | None, str | None]:
         action = str(result.get("action") or "").strip()
+        if action == "approve_correction" and result.get("target_type") == "catalyst_samples":
+            return ("catalyst_sample", str(result.get("target_id") or "") or None)
         if action == "approve_correction":
             return ("paper_correction", str(result.get("correction_id") or "") or None)
         target_type = str(result.get("target_type") or "").strip() or None
