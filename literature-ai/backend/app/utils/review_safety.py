@@ -268,7 +268,12 @@ def _locator_summary(
     paper_id: Any,
     target_type: str,
     target_id: Any,
+    reviews: list[ExtractionFieldReview] | None = None,
 ) -> tuple[str, str]:
+    for review in reviews or []:
+        if _review_has_safe_imported_page_anchor(review):
+            return "exact_pdf_page", "exact_page"
+
     target_id_str = str(target_id)
     target_types = _target_type_values(target_type)
     if not _table_exists(session, "evidence_locators"):
@@ -404,6 +409,7 @@ def is_export_eligible_extraction(
         paper_id=row.paper_id,
         target_type=target_type,
         target_id=row.id,
+        reviews=reviews,
     )
     reasons = build_export_gate_reason(
         has_review=has_review,
@@ -518,6 +524,7 @@ def bulk_export_gate_results(
             locators_by_target.get(target_id, []),
             span_pages_by_target.get(target_id, []),
             claim_pages_by_target.get(target_id, []),
+            reviews,
         )
         reasons = build_export_gate_reason(
             has_review=bool(reviews),
@@ -551,7 +558,12 @@ def _bulk_locator_summary(
     locators: list[EvidenceLocator],
     span_pages: list[Any],
     claim_pages: list[tuple[Any, Any]],
+    reviews: list[ExtractionFieldReview] | None = None,
 ) -> tuple[str, str]:
+    for review in reviews or []:
+        if _review_has_safe_imported_page_anchor(review):
+            return "exact_pdf_page", "exact_page"
+
     if locators:
         if any(
             _safe_locator_from_parts(
@@ -594,6 +606,30 @@ def _bulk_locator_summary(
     if claim_pages:
         return "text_evidence_only", "missing_page"
     return "text_evidence_only", "missing_locator"
+
+
+def _review_has_safe_imported_page_anchor(review: ExtractionFieldReview) -> bool:
+    if not is_safe_verified_review(review):
+        return False
+    review_payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+    imported = review_payload.get("imported_evidence_payload")
+    imported_items = imported if isinstance(imported, list) else [imported]
+    return any(
+        isinstance(item, dict)
+        and _safe_locator_from_parts(
+            page=item.get("page"),
+            locator_status="exact_page",
+            evidence_text=(
+                item.get("quoted_text")
+                or item.get("evidence_text")
+                or item.get("section")
+                or item.get("table")
+                or item.get("figure")
+                or "reviewed PDF page"
+            ),
+        )
+        for item in imported_items
+    )
 
 
 def summarize_gate_results(results: list[ExportGateResult]) -> dict[str, Any]:

@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTResult, Paper, PaperCorrection, WorkflowJob
+from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldReview, Paper, PaperCorrection, WorkflowJob
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.review_service import ReviewService
@@ -88,6 +89,13 @@ class DFTResultReviewService:
                     reviewer_note=reviewer_note or "Verified through the DFT candidate review workflow.",
                 ),
             )
+            if self._has_anchor(evidence_payload):
+                self._attach_imported_evidence_payload(
+                    paper_id=paper_id,
+                    result_id=result_id,
+                    field_names=selected_fields,
+                    evidence_payload=evidence_payload,
+                )
         except ValueError as exc:
             if "missing_evidence_reference" not in str(exc) or not self._has_anchor(evidence_payload):
                 raise
@@ -161,6 +169,31 @@ class DFTResultReviewService:
             "export_safety": self._gate_payload(row, gate),
             "audit_log_id": str(audit.id),
         }
+
+    def _attach_imported_evidence_payload(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        field_names: list[str],
+        evidence_payload: dict[str, Any] | list[Any],
+    ) -> None:
+        rows = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(result_id),
+                ExtractionFieldReview.field_name.in_(field_names),
+            )
+        ).all()
+        for review in rows:
+            payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+            review.review_payload = {
+                **payload,
+                "imported_evidence_payload": evidence_payload,
+            }
+            self.session.add(review)
+        self.session.flush()
 
     @staticmethod
     def _has_anchor(evidence_payload: dict[str, Any] | list[Any] | None) -> bool:

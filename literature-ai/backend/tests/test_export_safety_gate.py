@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.papers.aggregation import dft_dataset_quality, export_dft_dataset, export_dft_results_csv
 from app.db.models import Base, CatalystSample, DFTResult, DFTSetting, EvidenceSpan, ExtractionFieldReview, Paper
+from app.services.dft_review_service import DFTResultReviewService
 
 
 def _session(tmp_path):
@@ -258,6 +259,110 @@ def test_dft_export_blocks_missing_page_and_does_not_fabricate_page_or_bbox(tmp_
             assert rows == []
             assert response.headers["x-d3-export-count"] == "0"
             assert response.headers["x-d3-block-count"] == "1"
+            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
+def test_dft_export_accepts_safe_verified_imported_pdf_page_anchor(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            session.add(
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="value",
+                    reviewer_status="verified",
+                    target_resolution_status="active",
+                    evidence_text=row.evidence_text,
+                    review_payload={
+                        "imported_evidence_payload": {
+                            "page": 6,
+                            "section": "Results",
+                            "quoted_text": "The adsorption energy is -1.23 eV.",
+                        }
+                    },
+                )
+            )
+            _evidence_ref(session, paper, row, page=None)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert response.headers["x-d1-exported-count"] == "1"
+            assert response.headers["x-d1-blocked-count"] == "0"
+            assert rows[0]["locator_status"] == "exact_page"
+    finally:
+        engine.dispose()
+
+
+def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            _evidence_ref(session, paper, row, page=None)
+            session.commit()
+
+            DFTResultReviewService(session).verify_result(
+                paper_id=paper.id,
+                result_id=row.id,
+                confirm_reviewed_against_pdf=True,
+                reviewer="dual_ai_settlement",
+                reviewer_note="Dual AI checked the PDF page.",
+                field_names=["value"],
+                evidence_payload={
+                    "page": 6,
+                    "section": "Results",
+                    "quoted_text": "The adsorption energy is -1.23 eV.",
+                },
+            )
+
+            response, rows = _export_rows(session)
+            stored_row = session.get(DFTResult, row.id)
+
+            assert response.headers["x-d1-exported-count"] == "1"
+            assert stored_row.candidate_status == "ML_Ready"
+            assert rows[0]["locator_status"] == "exact_page"
+    finally:
+        engine.dispose()
+
+
+def test_dft_export_rejects_imported_page_anchor_from_unsafe_review(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            session.add(
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="value",
+                    reviewer_status="verified",
+                    target_resolution_status="stale",
+                    evidence_text=row.evidence_text,
+                    review_payload={
+                        "imported_evidence_payload": {
+                            "page": 6,
+                            "quoted_text": "The adsorption energy is -1.23 eV.",
+                        }
+                    },
+                )
+            )
+            _evidence_ref(session, paper, row, page=None)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert "unsafe_review" in response.headers["x-d1-blocked-reasons"]
             assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()

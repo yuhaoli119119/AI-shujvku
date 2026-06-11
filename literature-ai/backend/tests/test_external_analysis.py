@@ -12,6 +12,7 @@ from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.services.verification_session_service import VerificationSessionService
 from app.utils.review_safety import is_export_eligible_extraction
 
 
@@ -30,6 +31,14 @@ def _make_external_audit_ready(paper: Paper, root: Path) -> None:
     paper.markdown_path = str(markdown_path)
     paper.docling_json_path = str(docling_path)
     paper.workspace_path = str(workspace_path)
+
+
+def test_dual_ai_consensus_signature_accepts_structured_corrected_values():
+    first = VerificationSessionService._value_key(["Mo", "Ni"])
+    second = VerificationSessionService._value_key(["Mo", "Ni"])
+    grouped = {("REVISE", first): "accepted"}
+
+    assert grouped[("REVISE", second)] == "accepted"
 
 
 def test_external_analysis_import_and_materialize_flow():

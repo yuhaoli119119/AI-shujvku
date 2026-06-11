@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
@@ -969,6 +970,8 @@ class VerificationSessionService:
     def _value_key(value: Any) -> Any:
         if isinstance(value, float):
             return round(value, 8)
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
         return value
 
     @staticmethod
