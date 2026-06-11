@@ -34,6 +34,7 @@ from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.services.review_service import ReviewService
+from app.services.verification_session_service import VerificationSessionService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 
@@ -1016,6 +1017,8 @@ def import_analysis(
     source_label: str = "",
     raw_text: str | None = None,
     raw_payload: dict | None = None,
+    auto_apply_review_rules: bool = True,
+    reviewer: str = "ide_ai",
 ) -> dict[str, Any]:
     require_mcp_capability("propose_corrections")
     settings = get_settings()
@@ -1028,12 +1031,20 @@ def import_analysis(
             raw_text=raw_text,
             raw_payload=raw_payload,
         )
+        auto_apply_summary = None
+        if auto_apply_review_rules:
+            auto_apply_summary = VerificationSessionService(session, settings).apply_import_rules_for_paper(
+                paper_id=UUID(paper_id),
+                reviewer=reviewer,
+            )
         candidates = service.list_candidates(run.id)
         session.commit()
         return {
             "run_id": str(run.id),
             "mapping_status": run.mapping_status,
             "mapping_error": run.mapping_error,
+            "auto_apply_review_rules": auto_apply_review_rules,
+            "auto_apply_summary": auto_apply_summary,
             "candidate_count": len(candidates),
             "candidates": [
                 {

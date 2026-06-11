@@ -221,7 +221,8 @@ class TestImportAnalysis:
     @patch("app.mcp.server.get_settings")
     @patch("app.mcp.server.require_mcp_capability")
     @patch("app.mcp.server.ExternalAnalysisService")
-    def test_import_analysis_with_text(self, MockService, mock_auth, mock_settings, mock_session_scope):
+    @patch("app.mcp.server.VerificationSessionService")
+    def test_import_analysis_with_text(self, MockVerificationSessionService, MockService, mock_auth, mock_settings, mock_session_scope):
         from app.mcp.server import import_analysis
 
         mock_auth.return_value = MagicMock()
@@ -240,6 +241,7 @@ class TestImportAnalysis:
         mock_service_instance.import_run.return_value = mock_run
         mock_service_instance.list_candidates.return_value = []
         MockService.return_value = mock_service_instance
+        MockVerificationSessionService.return_value.apply_import_rules_for_paper.return_value = {"paper_id": paper_id}
 
         result = import_analysis(
             paper_id=paper_id,
@@ -250,14 +252,17 @@ class TestImportAnalysis:
 
         assert result["mapping_status"] == "normalized_with_llm"
         assert result["candidate_count"] == 0
+        assert result["auto_apply_review_rules"] is True
         mock_service_instance.import_run.assert_called_once()
+        MockVerificationSessionService.return_value.apply_import_rules_for_paper.assert_called_once()
         mock_session.commit.assert_called_once()
 
     @patch("app.mcp.server.session_scope")
     @patch("app.mcp.server.get_settings")
     @patch("app.mcp.server.require_mcp_capability")
     @patch("app.mcp.server.ExternalAnalysisService")
-    def test_import_analysis_with_payload(self, MockService, mock_auth, mock_settings, mock_session_scope):
+    @patch("app.mcp.server.VerificationSessionService")
+    def test_import_analysis_with_payload(self, MockVerificationSessionService, MockService, mock_auth, mock_settings, mock_session_scope):
         from app.mcp.server import import_analysis
 
         mock_auth.return_value = MagicMock()
@@ -283,6 +288,7 @@ class TestImportAnalysis:
         mock_service_instance.import_run.return_value = mock_run
         mock_service_instance.list_candidates.return_value = [candidate]
         MockService.return_value = mock_service_instance
+        MockVerificationSessionService.return_value.apply_import_rules_for_paper.return_value = {"paper_id": paper_id}
 
         result = import_analysis(
             paper_id=paper_id,
@@ -292,6 +298,7 @@ class TestImportAnalysis:
 
         assert result["candidate_count"] == 1
         assert result["candidates"][0]["type"] == "note"
+        MockVerificationSessionService.return_value.apply_import_rules_for_paper.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

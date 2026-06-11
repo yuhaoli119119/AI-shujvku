@@ -14,9 +14,11 @@ from app.config import get_settings
 from app.db.models import (
     AuditLog,
     Base,
+    CatalystSample,
     DFTResult,
     ElectrochemicalPerformance,
     EvidenceLocator,
+    ExtractionFieldReview,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     MechanismClaim,
@@ -477,6 +479,97 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
         assert stored_candidate.candidate_type == "object_review_audit"
         assert stored_candidate.status == "candidate"
         assert stored_candidate.normalized_payload["writes_final_truth"] is False
+
+
+def test_mcp_import_analysis_auto_applies_dual_ai_dft_reviews(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Auto Apply DFT Paper", pdf_path="mcp-auto-apply.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            coordination="single vacancy",
+            support="graphene",
+        )
+        session.add(catalyst)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            reaction_step="adsorption",
+            evidence_text="Table 1 reports -1.20 eV for Li2S4 adsorption.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=7,
+                evidence_text="Table 1 reports -1.20 eV for Li2S4 adsorption.",
+                locator_status="exact_page",
+                locator_confidence=0.95,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": row_id,
+                "field_name": "value",
+                "decision": "PASS",
+                "corrected_value": -1.2,
+                "evidence_checked": True,
+                "confidence": 0.91,
+                "reason": "Table 1 confirms the DFT value.",
+                "evidence_location": {"page": 7, "table": "Table 1", "quoted_text": "-1.20 eV"},
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        first = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit A",
+            raw_payload=payload,
+        )
+        second = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit B",
+            raw_payload=payload,
+        )
+
+    assert first["candidate_count"] == 1
+    assert second["candidate_count"] == 1
+    assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
+    assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
+
+    with Session(mcp_test_env["engine"]) as session:
+        stored_row = session.get(DFTResult, UUID(row_id))
+        candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+        reviews = session.query(ExtractionFieldReview).all()
+
+    assert stored_row is not None
+    assert stored_row.candidate_status == "ML_Ready"
+    assert {candidate.status for candidate in candidates} == {"materialized"}
+    assert reviews
+    assert {review.reviewer_status for review in reviews} == {"verified"}
 
 
 def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
