@@ -8,10 +8,28 @@ function disconnectSSE() {
 function initSSE() {
     if (location.protocol === "file:") return;
     disconnectSSE();
+    const streamLibraryName = getCurrentLibraryName();
+    if (!streamLibraryName) {
+        state.paperStreamLibraryName = "";
+        return;
+    }
+    state.paperStreamLibraryName = streamLibraryName;
     state.eventSource = new EventSource(API_BASE + "/stream?" + getFilters().toString());
     state.eventSource.addEventListener("papers_update", function(event) {
         try {
-            state.papers = JSON.parse(event.data) || [];
+            if (state.paperStreamLibraryName !== getCurrentLibraryName()) {
+                return;
+            }
+            const papers = JSON.parse(event.data) || [];
+            const mismatched = papers.filter(function(paper) {
+                return paper && paper.library_name && paper.library_name !== state.paperStreamLibraryName;
+            });
+            if (mismatched.length) {
+                console.error("Rejected cross-library SSE papers_update", mismatched);
+                showToast("实时刷新返回了非当前库记录，已拒绝渲染", "error");
+                return;
+            }
+            state.papers = papers;
             renderPaperList();
             if (typeof updatePager === "function") {
                 updatePager();

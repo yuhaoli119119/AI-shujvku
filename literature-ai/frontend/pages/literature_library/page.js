@@ -213,11 +213,25 @@ function updatePager() {
 }
 
 async function fetchPapers() {
+    const requestSeq = (state.paperListRequestSeq || 0) + 1;
+    state.paperListRequestSeq = requestSeq;
+    const requestLibrary = getCurrentLibraryName();
     try {
         renderPaperListSkeleton();
         const params = getFilters();
         const data = await fetchJSON(API_BASE + "?" + params.toString());
+        if (requestSeq !== state.paperListRequestSeq || requestLibrary !== getCurrentLibraryName()) {
+            return;
+        }
         const normalized = normalizePaperListResponse(data);
+        if (requestLibrary) {
+            const mismatched = normalized.papers.filter(function(paper) {
+                return paper && paper.library_name && paper.library_name !== requestLibrary;
+            });
+            if (mismatched.length) {
+                throw new Error("文献列表返回了非当前库记录，已拒绝渲染：" + mismatched.length + " 条");
+            }
+        }
         state.papers = normalized.papers;
         if (normalized.total !== null) {
             state.currentLibraryTotal = normalized.total;
@@ -820,8 +834,10 @@ initSplitDrag();
 initActionMenus();
 ensureClassificationToolbarButton();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
-loadLibraries().finally(fetchPapers);
-initSSE();
+loadLibraries().finally(function() {
+    fetchPapers();
+    initSSE();
+});
 switchTab(state.currentTab);
 if (state.openAddOnLoad) {
     openAddLiteraturePanel(state.openAddOnLoad);

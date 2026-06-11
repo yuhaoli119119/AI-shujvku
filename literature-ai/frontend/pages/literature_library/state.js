@@ -7,6 +7,8 @@ const state = {
     hasExplicitTab: false,
     currentLibrary: null,
     currentLibraryTotal: 0,
+    paperListRequestSeq: 0,
+    paperStreamLibraryName: "",
     openAddOnLoad: null,
     eventSource: null,
     writerStatus: null,
