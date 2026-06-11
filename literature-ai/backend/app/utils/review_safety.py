@@ -8,6 +8,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    CatalystSample,
     DFTResult,
     EvidenceClaim,
     EvidenceLocator,
@@ -217,6 +218,29 @@ def has_required_evidence_reference(
     return False
 
 
+def _catalyst_has_material_identity(catalyst: CatalystSample | None) -> bool:
+    if catalyst is None:
+        return False
+    return any(
+        not _is_blank(value)
+        for value in (
+            catalyst.name,
+            catalyst.catalyst_type,
+            catalyst.metal_centers,
+            catalyst.coordination,
+            catalyst.support,
+        )
+    )
+
+
+def has_required_material_identity(session: Session, row: Any) -> bool:
+    if not isinstance(row, DFTResult):
+        return True
+    if _is_blank(row.catalyst_sample_id):
+        return False
+    return _catalyst_has_material_identity(session.get(CatalystSample, row.catalyst_sample_id))
+
+
 def _safe_locator_from_parts(
     *,
     page: Any,
@@ -336,8 +360,11 @@ def build_export_gate_reason(
     has_evidence_reference: bool,
     has_evidence_text: bool,
     has_safe_locator: bool,
+    has_material_identity: bool = True,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
+    if not has_material_identity:
+        reasons.append("missing_material_identity")
     if not has_review:
         reasons.append("missing_review")
     elif not has_safe_review:
@@ -384,6 +411,7 @@ def is_export_eligible_extraction(
         has_evidence_reference=has_evidence_reference,
         has_evidence_text=has_evidence_text,
         has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
+        has_material_identity=has_required_material_identity(session, row),
     )
     review_status = safe_review.reviewer_status if safe_review is not None else (
         ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews})) if reviews else "missing"
@@ -411,6 +439,8 @@ def bulk_export_gate_results(
     row_by_id = {str(row.id): row for row in rows}
     target_ids = set(row_by_id)
     paper_ids = {row.paper_id for row in rows}
+    dft_aliases = {_normalized(value) for value in _target_type_values("dft_results")}
+    is_dft_target = _normalized(target_type) in dft_aliases
 
     reviews_by_target: dict[str, list[ExtractionFieldReview]] = {target_id: [] for target_id in target_ids}
     if _table_exists(session, "extraction_field_reviews"):
@@ -468,6 +498,18 @@ def bulk_export_gate_results(
             evidence_reference_ids.add(target_id_str)
             claim_pages_by_target[target_id_str].append((page_start, page_end))
 
+    material_identity_ids: set[str] = set()
+    if is_dft_target:
+        catalyst_ids = {
+            row.catalyst_sample_id
+            for row in rows
+            if isinstance(row, DFTResult) and not _is_blank(row.catalyst_sample_id)
+        }
+        if catalyst_ids:
+            for catalyst in session.scalars(select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))).all():
+                if _catalyst_has_material_identity(catalyst):
+                    material_identity_ids.add(str(catalyst.id))
+
     gates: dict[str, ExportGateResult] = {}
     for target_id, row in row_by_id.items():
         reviews = reviews_by_target.get(target_id, [])
@@ -483,6 +525,11 @@ def bulk_export_gate_results(
             has_evidence_reference=target_id in evidence_reference_ids,
             has_evidence_text=has_required_evidence_text(row),
             has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
+            has_material_identity=(
+                str(row.catalyst_sample_id) in material_identity_ids
+                if is_dft_target and isinstance(row, DFTResult)
+                else True
+            ),
         )
         review_status = safe_review.reviewer_status if safe_review is not None else (
             ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews}))

@@ -525,6 +525,8 @@ class DFTReviewQueueService:
         if gate.eligible:
             return "ready_for_ml_export"
         reason_set = set(reasons)
+        if "missing_material_identity" in reason_set:
+            return "bind_material_identity"
         if "missing_evidence_text" in reason_set:
             return "add_evidence_text"
         if "missing_evidence" in reason_set:
@@ -656,6 +658,7 @@ class DFTReviewQueueService:
         gate: Any,
     ) -> list[dict[str, Any]]:
         issue_map = {
+            "missing_material_identity": ("缺少材料/结构绑定", "danger"),
             "missing_review": ("缺人工确认", "warning"),
             "unsafe_review": ("复核状态不安全", "danger"),
             "missing_evidence_text": ("缺证据原文", "danger"),

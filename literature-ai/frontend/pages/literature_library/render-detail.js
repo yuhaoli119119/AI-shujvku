@@ -553,6 +553,7 @@ const DFT_BLOCK_REASON_LABELS = {
     missing_evidence_text: "缺少证据原文",
     unsafe_locator: "缺少准确 PDF 定位"
 };
+DFT_BLOCK_REASON_LABELS.missing_material_identity = "缺少材料/结构绑定";
 
 function codexItemActionHtml(itemType, item) {
     if (!itemType || !item || !item.id) return "";

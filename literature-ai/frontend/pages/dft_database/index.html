@@ -415,8 +415,10 @@
       merged_duplicate: "疑似重复已合并",
       figure_locator_missing: "图片定位可疑"
     };
+    REASON_LABELS.missing_material_identity = "缺少材料/结构绑定";
     function reasonLabel(reason) { return REASON_LABELS[reason] || String(reason || "未知原因").replace(/_/g, " "); }
     function reasonAction(reason) {
+      if (reason === "missing_material_identity") return "先把这条 DFT 数据绑定到明确材料/结构，再允许入库或导出。";
       if (reason === "missing_review") return "到 review 页确认该条 DFT 数据是否可信。";
       if (reason === "unsafe_review") return "检查被拒绝或需要修正的人工审核记录。";
       if (reason === "missing_locator") return "补充或修复 PDF 页码定位。";

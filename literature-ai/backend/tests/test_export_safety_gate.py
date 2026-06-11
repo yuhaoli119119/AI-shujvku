@@ -26,9 +26,31 @@ def _paper(session: Session) -> Paper:
     return paper
 
 
-def _dft(session: Session, paper: Paper, *, evidence_text: str | None = "Evidence text") -> DFTResult:
+def _catalyst(session: Session, paper: Paper) -> CatalystSample:
+    catalyst = CatalystSample(
+        paper_id=paper.id,
+        name="Fe-N-C",
+        catalyst_type="single_atom",
+        metal_centers=["Fe"],
+        coordination="Fe-N4",
+        support="carbon",
+    )
+    session.add(catalyst)
+    session.flush()
+    return catalyst
+
+
+def _dft(
+    session: Session,
+    paper: Paper,
+    *,
+    evidence_text: str | None = "Evidence text",
+    with_catalyst: bool = True,
+) -> DFTResult:
+    catalyst = _catalyst(session, paper) if with_catalyst else None
     row = DFTResult(
         paper_id=paper.id,
+        catalyst_sample_id=catalyst.id if catalyst else None,
         adsorbate="Li2S4",
         property_type="adsorption_energy",
         value=-1.23,
@@ -182,6 +204,26 @@ def test_dft_export_allows_safe_verified_with_evidence_text(tmp_path):
         engine.dispose()
 
 
+def test_dft_export_excludes_missing_material_identity(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper, with_catalyst=False)
+            _safe_review(session, paper, row)
+            _evidence_ref(session, paper, row, page=1)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert response.headers["x-d1-exported-count"] == "0"
+            assert response.headers["x-d1-blocked-count"] == "1"
+            assert "missing_material_identity" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
 def test_dft_export_default_excludes_missing_evidence_text(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
@@ -226,16 +268,7 @@ def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
     try:
         with SessionLocal() as session:
             paper = _paper(session)
-            catalyst = CatalystSample(
-                paper_id=paper.id,
-                name="Fe-N-C",
-                catalyst_type="single_atom",
-                metal_centers=["Fe"],
-                coordination="Fe-N4",
-                support="carbon",
-            )
-            session.add(catalyst)
-            session.flush()
+            catalyst = _catalyst(session, paper)
             setting = DFTSetting(
                 paper_id=paper.id,
                 software="VASP",

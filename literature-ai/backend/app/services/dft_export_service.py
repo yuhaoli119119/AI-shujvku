@@ -257,8 +257,6 @@ def build_dft_ml_dataset(
     for dr, paper, gate in eligible_rows:
         paper_id_str = str(paper.id)
         direct_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
-        fallback_catalyst = catalysts_by_paper.get(paper_id_str, [None])[0]
-        primary_catalyst = direct_catalyst or fallback_catalyst
         paper_settings = settings_by_paper.get(paper_id_str, [])
 
         norm_val, norm_unit = _normalize_energy_value(dr.value, dr.unit, dr.property_type)
@@ -276,7 +274,7 @@ def build_dft_ml_dataset(
                     "normalized_value": norm_val,
                     "normalized_unit": norm_unit,
                 },
-                "catalyst": _catalyst_payload(primary_catalyst),
+                "catalyst": _catalyst_payload(direct_catalyst),
                 "catalyst_candidates": [
                     payload
                     for payload in (_catalyst_payload(catalyst) for catalyst in catalysts_by_paper.get(paper_id_str, []))
