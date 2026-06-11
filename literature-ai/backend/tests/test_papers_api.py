@@ -417,11 +417,31 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
             evidence_text="The Li adsorption energy on the vacancy defect is -1.23 eV.",
             confidence=0.82,
         )
+        catalyst_a = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            metal_centers=[],
+            coordination="single vacancy",
+            support="graphene",
+            evidence_strength="section_and_figure",
+        )
+        catalyst_b = CatalystSample(
+            paper_id=paper.id,
+            name="Pristine graphene",
+            catalyst_type="graphene",
+            metal_centers=[],
+            coordination=None,
+            support="graphene",
+            evidence_strength="section_only",
+        )
         session.add_all(
             [
                 section,
                 figure,
                 dft_result,
+                catalyst_a,
+                catalyst_b,
                 MechanismClaim(
                     paper_id=paper.id,
                     claim_type="defect_adsorption",
@@ -475,13 +495,13 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     assert data["context"]["structured_candidates"]["dft_results"][0]["candidate_status"] == "candidate_unverified"
     dft_safety = data["context"]["structured_candidates"]["dft_results"][0]["export_safety"]
     assert dft_safety["is_exportable"] is False
-    assert dft_safety["blocked_reasons"] == ["missing_review"]
+    assert dft_safety["blocked_reasons"] == ["missing_material_identity", "missing_review"]
     readiness = data["context"]["dft_export_readiness"]
     assert readiness["safety_gate"] == "safe_verified_with_required_evidence"
     assert readiness["total_candidates"] == 1
     assert readiness["eligible_count"] == 0
     assert readiness["blocked_count"] == 1
-    assert readiness["blocked_reasons"] == {"missing_review": 1}
+    assert readiness["blocked_reasons"] == {"missing_material_identity": 1, "missing_review": 1}
     assert data["context"]["evidence_locators"]["status_counts"]["exact_page"] == 1
     assert any(item["code"] == "dft_unverified" for item in data["context"]["warnings"])
     assert any(item["code"] == "dft_export_blocked" for item in data["context"]["warnings"])
@@ -496,10 +516,18 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     item_data = item_response.json()
     assert item_data["schema_version"] == "codex_item_context_v1"
     assert item_data["item_type"] == "dft_result"
-    assert item_data["context"]["item"]["export_safety"]["blocked_reasons"] == ["missing_review"]
+    assert item_data["context"]["item"]["export_safety"]["blocked_reasons"] == ["missing_material_identity", "missing_review"]
+    assert item_data["context"]["source_assets"]["pdf_url"].endswith(f"/api/papers/{paper_id}/pdf")
+    assert item_data["context"]["item"]["binding_status"] == "unbound"
+    assert item_data["context"]["item"]["requires_explicit_material_choice"] is True
+    assert len(item_data["context"]["item"]["candidate_catalyst_samples"]) == 2
+    assert item_data["context"]["item"]["candidate_catalyst_samples"][0]["name"] == "Vacancy graphene"
     assert item_data["context"]["evidence_locators"]["items"][0]["page"] == 4
     assert item_data["context"]["nearby_context"]["related_sections"][0]["title"] == "Computational Methods"
+    assert any("open the original pdf" in action.lower() for action in item_data["context"]["recommended_next_actions"])
+    assert any("fall back to the first sample" in action.lower() for action in item_data["context"]["recommended_next_actions"])
     assert "Codex Item: dft_result" in item_data["markdown"]
+    assert "Open the original PDF evidence first" in item_data["markdown"]
 
     figure_response = client.get(f"/api/papers/{paper_id}/codex-item/figure/{figure_id}")
     assert figure_response.status_code == 200
@@ -635,8 +663,18 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
         )
         session.add(paper)
         session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            coordination="single vacancy",
+            support="graphene",
+        )
+        session.add(catalyst)
+        session.flush()
         dft_result = DFTResult(
             paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
             adsorbate="Li",
             property_type="adsorption_energy",
             value=-1.23,
@@ -648,6 +686,7 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
         )
         missing_locator_result = DFTResult(
             paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
             adsorbate="Na",
             property_type="adsorption_energy",
             value=-0.5,
@@ -807,7 +846,7 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     response = client.get("/api/papers/export/dft-review-queue")
     assert response.status_code == 200
     queue_row = response.json()["rows"][0]
-    assert queue_row["blocked_reasons"] == ["missing_review"]
+    assert queue_row["blocked_reasons"] == ["missing_material_identity", "missing_review"]
     assert queue_row["can_mark_verified"] is False
     assert queue_row["recommended_action"] == "inspect_suspicious_candidate"
     assert "adsorbate_looks_like_reference" in queue_row["sanity_flags"]
@@ -862,7 +901,7 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     assert rejected_payload["dft_result_id"] == str(row_id)
     assert rejected_payload["export_safety"]["is_exportable"] is False
     assert rejected_payload["export_safety"]["review_status"] == "rejected"
-    assert rejected_payload["export_safety"]["blocked_reasons"] == ["unsafe_review"]
+    assert rejected_payload["export_safety"]["blocked_reasons"] == ["missing_material_identity", "unsafe_review"]
     assert all(item["reviewer_status"] == "rejected" for item in rejected_payload["reviews"])
 
     active_queue = client.get("/api/papers/export/dft-review-queue")
@@ -879,7 +918,7 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     dataset = client.get("/api/papers/export/dft-dataset").json()
     assert dataset["metadata"]["eligible_count"] == 0
     assert dataset["metadata"]["blocked_count"] == 1
-    assert dataset["metadata"]["blocked_reasons"] == {"unsafe_review": 1}
+    assert dataset["metadata"]["blocked_reasons"] == {"missing_material_identity": 1, "unsafe_review": 1}
 
     with Session() as session:
         saved_correction = session.scalar(select(PaperCorrection).where(PaperCorrection.target_path == f"dft_results:{row_id}:unit"))
@@ -891,6 +930,86 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         audit = session.scalar(select(AuditLog).where(AuditLog.action == "reject_dft_result"))
         assert audit is not None
         assert audit.target_id == str(row_id)
+
+
+def test_propose_dft_catalyst_binding_requires_anchor_and_valid_sample(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Binding proposal paper", year=2026, pdf_path="binding-proposal.pdf")
+        other_paper = Paper(title="Other paper", year=2026, pdf_path="other-binding.pdf")
+        session.add_all([paper, other_paper])
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.11,
+            unit="eV",
+            reaction_step="adsorption",
+            evidence_text="Table 2 shows Li2S4 adsorption on vacancy graphene.",
+            confidence=0.82,
+        )
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            coordination="single vacancy",
+            support="graphene",
+        )
+        other_catalyst = CatalystSample(
+            paper_id=other_paper.id,
+            name="Other sample",
+            catalyst_type="other",
+        )
+        session.add_all([row, catalyst, other_catalyst])
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+        catalyst_id = catalyst.id
+        other_catalyst_id = other_catalyst.id
+
+    client = TestClient(app)
+    missing_anchor = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": True,
+            "field_name": "catalyst_sample_id",
+            "proposed_value": str(catalyst_id),
+            "reason": "This DFT row belongs to the vacancy graphene structure.",
+        },
+    )
+    assert missing_anchor.status_code == 400
+    assert "evidence anchor" in missing_anchor.json()["detail"]
+
+    wrong_paper_sample = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": True,
+            "field_name": "catalyst_sample_id",
+            "proposed_value": str(other_catalyst_id),
+            "reason": "Try cross-paper binding.",
+            "evidence_payload": {"evidence_location": {"page": 6, "table": "Table 2", "quoted_text": "vacancy graphene"}},
+        },
+    )
+    assert wrong_paper_sample.status_code == 400
+    assert "does not belong to this paper" in wrong_paper_sample.json()["detail"]
+
+    correction_response = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": True,
+            "field_name": "catalyst_sample_id",
+            "proposed_value": str(catalyst_id),
+            "reason": "Table 2 and the caption both identify vacancy graphene as the host.",
+            "reviewer": "codex_test",
+            "evidence_payload": {"evidence_location": {"page": 6, "section": "Results", "table": "Table 2", "quoted_text": "vacancy graphene"}},
+        },
+    )
+    assert correction_response.status_code == 200
+    correction = correction_response.json()["correction"]
+    assert correction["target_path"] == f"dft_results:{row_id}:catalyst_sample_id"
+    assert correction["proposed_value"] == str(catalyst_id)
 
 
 def test_dft_aggregation_endpoints_filter_by_library_name(setup_test_db):

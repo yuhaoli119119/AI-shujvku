@@ -12,6 +12,7 @@ from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate,
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
+from app.utils.evidence_anchors import first_evidence_anchor, has_evidence_anchor
 from app.utils.figure_reliability import build_figure_image_review
 from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
@@ -150,6 +151,7 @@ class CodexContextService:
             if row is not None and row.paper_id == paper_id:
                 export_safety = self._dft_export_gate_payload(row)
                 item_payload["export_safety"] = export_safety
+                item_payload.update(self._dft_binding_item_payload(detail, row))
 
         locators = self._load_item_locators(
             paper_id,
@@ -179,6 +181,12 @@ class CodexContextService:
                 "year": detail.year,
                 "journal": detail.journal,
                 "pdf_path": detail.pdf_path,
+            },
+            "source_assets": {
+                "pdf_url": f"/api/papers/{paper_id}/pdf",
+                "pdf_path": detail.pdf_path,
+                "workspace_path": detail.workspace_path,
+                "has_pdf": bool(detail.pdf_path),
             },
             "item_type": normalized_type,
             "item": item_payload,
@@ -646,8 +654,11 @@ class CodexContextService:
                 [
                     "## AI Review Protocol",
                     "You are a materials-computation data reviewer. Do not invent or repair values from memory.",
+                    "Open the original PDF evidence first. Do not bind or correct this row from parsed markdown alone.",
                     "Check whether this DFT candidate is directly supported by the PDF evidence package.",
-                    "Required checks: material/catalyst, adsorbate, property type, numeric value, unit, method/condition, evidence excerpt, page/section/table/figure locator, duplicates, and suspected missing data.",
+                    "Required checks: material/catalyst binding, adsorbate, property type, numeric value, unit, method/condition, evidence excerpt, page/section/table/figure locator, duplicates, and suspected missing data.",
+                    "If catalyst_sample_id is blank, choose one explicit candidate catalyst sample and cite the exact source anchor used for the binding.",
+                    "Never auto-bind because the paper has only one sample or because one sample looks similar; the choice must come from the PDF evidence.",
                     "If a figure only shows a trend/path and no readable value, mark pending/needs_fix instead of estimating from the image.",
                     "Output exactly one decision: accept / reject / needs_fix / suspected_duplicate / suspected_missing, followed by a concise reason and evidence location.",
                     "",
@@ -853,6 +864,18 @@ class CodexContextService:
         locators: list[dict[str, Any]],
     ) -> list[str]:
         actions = []
+        if item_type == "dft_result":
+            actions.append("Open the original PDF page/table/figure before trusting parsed fields or proposing a catalyst binding.")
+            if not has_evidence_anchor(item_payload.get("binding_evidence_anchor")) and not any(
+                item.get("locator_status") in {"exact_page", "exact_bbox"} for item in locators
+            ):
+                actions.append("Do not bind this DFT row until you can cite a page, section, table, figure, or quoted-text anchor from the PDF.")
+            if not item_payload.get("catalyst_sample_id"):
+                candidate_count = len(item_payload.get("candidate_catalyst_samples") or [])
+                if candidate_count > 1:
+                    actions.append("Explicitly choose one catalyst_sample_id from the candidate list; do not silently fall back to the first sample.")
+                elif candidate_count == 1:
+                    actions.append("Even with one candidate catalyst sample, confirm the binding against the PDF before proposing catalyst_sample_id.")
         if item_type == "figure":
             review = item_payload.get("image_review") or {}
             if review.get("review_required"):
@@ -870,6 +893,52 @@ class CodexContextService:
         if not actions:
             actions.append("Review the item against its evidence, then append a note or propose a correction if needed.")
         return actions
+
+    @staticmethod
+    def _dft_candidate_catalyst_payload(detail: PaperDetailResponse) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for catalyst in detail.catalyst_samples_items or []:
+            items.append(
+                {
+                    "id": str(catalyst.id),
+                    "name": catalyst.name,
+                    "catalyst_type": catalyst.catalyst_type,
+                    "metal_centers": catalyst.metal_centers or [],
+                    "coordination": catalyst.coordination,
+                    "support": catalyst.support,
+                    "synthesis_method": catalyst.synthesis_method,
+                    "evidence_strength": catalyst.evidence_strength,
+                    "has_material_identity": any(
+                        (
+                            bool((catalyst.name or "").strip()),
+                            bool((catalyst.catalyst_type or "").strip()),
+                            bool(catalyst.metal_centers),
+                            bool((catalyst.coordination or "").strip()),
+                            bool((catalyst.support or "").strip()),
+                        )
+                    ),
+                }
+            )
+        return items
+
+    def _dft_binding_item_payload(self, detail: PaperDetailResponse, row: DFTResult) -> dict[str, Any]:
+        candidate_samples = self._dft_candidate_catalyst_payload(detail)
+        current_sample = next(
+            (item for item in candidate_samples if item["id"] == str(row.catalyst_sample_id)),
+            None,
+        )
+        binding_payload = (
+            (row.evidence_payload or {}).get("material_binding")
+            if isinstance(row.evidence_payload, dict)
+            else None
+        )
+        return {
+            "binding_status": "bound" if row.catalyst_sample_id else "unbound",
+            "current_catalyst_sample": current_sample,
+            "candidate_catalyst_samples": candidate_samples,
+            "binding_evidence_anchor": first_evidence_anchor(binding_payload),
+            "requires_explicit_material_choice": not bool(row.catalyst_sample_id) and len(candidate_samples) > 1,
+        }
 
     def _locator_payload(self, row: EvidenceLocator) -> dict[str, Any]:
         return {

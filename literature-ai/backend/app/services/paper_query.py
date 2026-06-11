@@ -48,6 +48,7 @@ from app.schemas.api import (
 from app.config import get_settings
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.utils.artifact_status import build_paper_artifact_status
+from app.utils.evidence_anchors import first_evidence_anchor
 from app.utils.figure_reliability import build_figure_image_review
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
@@ -341,6 +342,18 @@ class PaperQueryService:
             target_type="mechanism_claims",
             target_ids=mechanism_claim_ids,
         )
+        dft_result_ids = {str(item.id) for item in dft_results}
+        dft_result_audits = self._object_review_audits_by_target(
+            paper_id,
+            dft_result_ids,
+            target_types={"dft_result", "dft_results"},
+        )
+        dft_result_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+            paper_ids={paper_id},
+            target_type="dft_results",
+            target_ids=dft_result_ids,
+        )
+        catalyst_by_id = {str(item.id): item for item in catalyst_samples}
 
         base_counts = {
             "sections": len(sections),
@@ -382,7 +395,15 @@ class PaperQueryService:
             ],
             dft_settings_items=[DFTSettingResponse.model_validate(item) for item in dft_settings],
             catalyst_samples_items=[CatalystSampleResponse.model_validate(item) for item in catalyst_samples],
-            dft_results_items=[self._serialize_dft_result(item) for item in dft_results],
+            dft_results_items=[
+                self._serialize_dft_result(
+                    item,
+                    catalyst_by_id=catalyst_by_id,
+                    object_review_audits=dft_result_audits.get(str(item.id), []),
+                    field_conflicts=dft_result_conflicts.get(str(item.id), []),
+                )
+                for item in dft_results
+            ],
             electrochemical_performance_items=[
                 ElectrochemicalPerformanceResponse.model_validate(item) for item in electrochemical_items
             ],
@@ -623,15 +644,71 @@ class PaperQueryService:
     def _figure_image_review_payload(payload: PaperFigureResponse) -> dict[str, Any]:
         return build_figure_image_review(payload, settings=get_settings(), check_asset_exists=True)
 
+    @staticmethod
+    def _catalyst_summary(item: CatalystSample) -> dict[str, Any]:
+        return {
+            "id": str(item.id),
+            "name": item.name,
+            "catalyst_type": item.catalyst_type,
+            "metal_centers": item.metal_centers or [],
+            "coordination": item.coordination,
+            "support": item.support,
+            "evidence_strength": item.evidence_strength,
+        }
+
     @classmethod
-    def _serialize_dft_result(cls, item: DFTResult) -> DFTResultResponse:
+    def _serialize_dft_result(
+        cls,
+        item: DFTResult,
+        *,
+        catalyst_by_id: dict[str, CatalystSample] | None = None,
+        object_review_audits: list[dict[str, Any]] | None = None,
+        field_conflicts: list[dict[str, Any]] | None = None,
+    ) -> DFTResultResponse:
         payload = DFTResultResponse.model_validate(item)
+        audits = object_review_audits or []
+        conflicts = field_conflicts or []
+        linked_catalyst = (
+            catalyst_by_id.get(str(item.catalyst_sample_id))
+            if catalyst_by_id and item.catalyst_sample_id is not None
+            else None
+        )
+        has_catalyst_identity = bool(
+            linked_catalyst
+            and any(
+                (
+                    bool((linked_catalyst.name or "").strip()),
+                    bool((linked_catalyst.catalyst_type or "").strip()),
+                    bool(linked_catalyst.metal_centers),
+                    bool((linked_catalyst.coordination or "").strip()),
+                    bool((linked_catalyst.support or "").strip()),
+                )
+            )
+        )
+        binding_status = (
+            "bound_with_identity"
+            if has_catalyst_identity
+            else ("bound_missing_identity" if linked_catalyst else "unbound")
+        )
+        binding_payload = (
+            (item.evidence_payload or {}).get("material_binding")
+            if isinstance(item.evidence_payload, dict)
+            else None
+        )
         return payload.model_copy(
             update={
+                "material_binding_status": binding_status,
+                "bound_catalyst_sample": cls._catalyst_summary(linked_catalyst) if linked_catalyst else None,
+                "binding_evidence_anchor": first_evidence_anchor(binding_payload),
                 "reaction_step": cls._clean_pdf_text(payload.reaction_step),
                 "source_section": cls._clean_pdf_text(payload.source_section),
                 "source_figure": cls._clean_pdf_text(payload.source_figure),
                 "evidence_text": cls._clean_pdf_text(payload.evidence_text),
+                "object_review_audit_count": len(audits),
+                "object_review_audits": audits[:5],
+                "latest_object_review_audit": audits[0] if audits else None,
+                "conflict_count": len(conflicts),
+                "field_conflicts": conflicts[:5],
             }
         )
 

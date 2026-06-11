@@ -30,6 +30,7 @@ from app.services.review_conflict_service import (
 )
 from app.services.review_service import ReviewService
 from app.services.review_target_resolver import canonical_target_type
+from app.utils.evidence_anchors import has_evidence_anchor
 
 
 class VerificationSessionService:
@@ -45,6 +46,12 @@ class VerificationSessionService:
         "writing_only": {"review_notes"},
     }
     DFT_FIELD_ALIASES = {
+        "catalyst": "catalyst_sample_id",
+        "catalyst_id": "catalyst_sample_id",
+        "catalyst_sample": "catalyst_sample_id",
+        "catalyst_sample_id": "catalyst_sample_id",
+        "material_binding": "catalyst_sample_id",
+        "structure_binding": "catalyst_sample_id",
         "energy_type": "property_type",
         "property_type": "property_type",
         "energy": "property_type",
@@ -956,16 +963,7 @@ class VerificationSessionService:
 
     @staticmethod
     def _opinion_has_anchor(opinion: dict[str, Any]) -> bool:
-        payload = opinion.get("evidence_payload")
-        if isinstance(payload, dict):
-            locator = payload.get("locator") if isinstance(payload.get("locator"), dict) else payload
-            for key in ("page", "section", "figure", "table", "evidence_text", "quoted_text", "section_title"):
-                value = locator.get(key) if isinstance(locator, dict) else None
-                if value is not None and str(value).strip():
-                    return True
-        if isinstance(payload, list):
-            return any(VerificationSessionService._opinion_has_anchor({"evidence_payload": item}) for item in payload if isinstance(item, dict))
-        return False
+        return has_evidence_anchor(opinion.get("evidence_payload"))
 
     @staticmethod
     def _value_key(value: Any) -> Any:

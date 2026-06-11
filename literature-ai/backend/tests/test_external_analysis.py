@@ -7,11 +7,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
-from app.db.models import Base, DFTResult, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, WritingCard
+from app.db.models import Base, CatalystSample, DFTResult, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, WritingCard
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.utils.review_safety import is_export_eligible_extraction
 
 
 def _make_external_audit_ready(paper: Paper, root: Path) -> None:
@@ -723,6 +724,104 @@ def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_figures(
             assert len(corrections) == 1
             assert corrections[0].status == "approved"
             assert {candidate.status for candidate in candidates} == {"materialized"}
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_sample():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_dft_binding.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Dual AI DFT Binding Paper", pdf_path="dual-binding.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                catalyst = CatalystSample(
+                    paper_id=paper.id,
+                    name="Vacancy graphene",
+                    catalyst_type="defective_graphene",
+                    coordination="single vacancy",
+                    support="graphene",
+                )
+                row = DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S4",
+                    value=-1.20,
+                    unit="eV",
+                    source_section="Results",
+                    evidence_text="Table 2 reports adsorption on vacancy graphene.",
+                    candidate_status="system_candidate",
+                )
+                session.add_all([catalyst, row])
+                session.commit()
+                paper_id = paper.id
+                row_id = row.id
+                catalyst_id = catalyst.id
+
+            client = TestClient(app)
+            base_payload = {
+                "paper_id": str(paper_id),
+                "source": "ide_ai",
+                "auto_apply_review_rules": True,
+                "reviewer": "ide_ai",
+                "raw_payload": {
+                    "object_review_audits": [
+                        {
+                            "paper_id": str(paper_id),
+                            "target_type": "dft_results",
+                            "target_id": str(row_id),
+                            "field_name": "catalyst_sample_id",
+                            "decision": "REVISE",
+                            "corrected_value": str(catalyst_id),
+                            "confidence": 0.92,
+                            "reason": "Table 2 and the surrounding paragraph both attribute this adsorption energy to vacancy graphene.",
+                            "normalized_material": "vacancy graphene",
+                            "structure_name": "single vacancy graphene",
+                            "adsorbate": "Li2S4",
+                            "reaction_step": "adsorption",
+                            "evidence_location": {"page": 6, "section": "Results", "table": "Table 2", "quoted_text": "vacancy graphene"},
+                        }
+                    ]
+                },
+            }
+            first = client.post("/api/external-analysis/import", json={**base_payload, "source_label": "ide-ai-1"})
+            second = client.post("/api/external-analysis/import", json={**base_payload, "source_label": "ide-ai-2"})
+
+            assert first.status_code == 200
+            assert second.status_code == 200
+
+            with Session(engine) as session:
+                stored_row = session.get(DFTResult, row_id)
+                corrections = session.query(PaperCorrection).all()
+                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                gate = is_export_eligible_extraction(session, stored_row, target_type="dft_results")
+
+            assert stored_row is not None
+            assert stored_row.catalyst_sample_id == catalyst_id
+            assert len(corrections) == 1
+            assert corrections[0].status == "approved"
+            assert corrections[0].target_path == f"dft_results:{row_id}:catalyst_sample_id"
+            assert corrections[0].evidence_payload["review_source_label"] in {"ide-ai-1", "ide-ai-2"}
+            assert {candidate.status for candidate in candidates} == {"materialized"}
+            assert "missing_material_identity" not in gate.reasons
+            assert "missing_review" in gate.reasons
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

@@ -211,6 +211,9 @@ class CatalystSampleResponse(BaseModel):
 class DFTResultResponse(BaseModel):
     id: UUID
     catalyst_sample_id: UUID | None = None
+    material_binding_status: str = "unbound"
+    bound_catalyst_sample: dict[str, Any] | None = None
+    binding_evidence_anchor: dict[str, Any] | None = None
     adsorbate: str | None = None
     property_type: str | None = None
     value: float | None = None
@@ -223,6 +226,11 @@ class DFTResultResponse(BaseModel):
     candidate_status: str = "system_candidate"
     evidence_payload: dict[str, Any] | None = None
     extraction_protocol_version: str | None = None
+    object_review_audit_count: int = 0
+    object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
+    latest_object_review_audit: dict[str, Any] | None = None
+    conflict_count: int = 0
+    field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

@@ -5,10 +5,11 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, DFTResult, Paper, PaperCorrection, WorkflowJob
+from app.db.models import AuditLog, CatalystSample, DFTResult, Paper, PaperCorrection, WorkflowJob
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.review_service import ReviewService
+from app.utils.evidence_anchors import has_evidence_anchor
 from app.utils.review_safety import is_export_eligible_extraction
 
 
@@ -25,6 +26,12 @@ DFT_REVIEW_FIELD_ALIASES = {
 }
 
 DFT_CORRECTION_FIELD_ALIASES = {
+    "catalyst": "catalyst_sample_id",
+    "catalyst_id": "catalyst_sample_id",
+    "catalyst_sample": "catalyst_sample_id",
+    "catalyst_sample_id": "catalyst_sample_id",
+    "material_binding": "catalyst_sample_id",
+    "structure_binding": "catalyst_sample_id",
     "energy_type": "property_type",
     "property_type": "property_type",
     "energy": "property_type",
@@ -157,15 +164,7 @@ class DFTResultReviewService:
 
     @staticmethod
     def _has_anchor(evidence_payload: dict[str, Any] | list[Any] | None) -> bool:
-        if isinstance(evidence_payload, dict):
-            for key in ("page", "section", "figure", "table", "quoted_text", "section_title", "evidence_text"):
-                value = evidence_payload.get(key)
-                if value is not None and str(value).strip():
-                    return True
-            return False
-        if isinstance(evidence_payload, list):
-            return any(DFTResultReviewService._has_anchor(item) for item in evidence_payload if isinstance(item, (dict, list)))
-        return False
+        return has_evidence_anchor(evidence_payload)
 
     def reject_result(
         self,
@@ -346,6 +345,19 @@ class DFTResultReviewService:
         )
         if canonical_field not in ReviewService.ALLOWED_DFT_RESULT_FIELDS:
             raise ValueError(f"Unsupported DFT result correction field: {field_name}")
+        if canonical_field == "catalyst_sample_id":
+            if not has_evidence_anchor(evidence_payload):
+                raise ValueError("DFT catalyst/material binding requires at least one evidence anchor from the source PDF, section, table, figure, or quoted text.")
+            try:
+                proposed_uuid = UUID(str(proposed_value))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("DFT catalyst/material binding requires a valid catalyst_sample_id UUID.") from exc
+            catalyst = self.session.get(CatalystSample, proposed_uuid)
+            if catalyst is None:
+                raise ValueError("Target catalyst sample does not exist.")
+            if catalyst.paper_id != paper_id:
+                raise ValueError("Target catalyst sample does not belong to this paper.")
+            proposed_value = str(catalyst.id)
 
         correction = PaperCorrection(
             paper_id=paper_id,

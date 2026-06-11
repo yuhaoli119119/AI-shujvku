@@ -21,6 +21,7 @@ from app.db.models import (
     PaperTable,
     WritingCard,
 )
+from app.utils.evidence_anchors import has_evidence_anchor
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class ReviewService:
         "license",
     }
     ALLOWED_DFT_RESULT_FIELDS = {
+        "catalyst_sample_id",
         "adsorbate",
         "property_type",
         "value",
@@ -159,10 +161,10 @@ class ReviewService:
         if correction.status != "pending":
             raise ValueError("Correction is not pending")
 
-        self._apply_correction(correction)
         correction.status = "approved"
         correction.reviewed_by = reviewer
         correction.reviewed_at = datetime.utcnow()
+        self._apply_correction(correction)
         self.session.add(correction)
         self.session.add(
             AuditLog(
@@ -275,7 +277,37 @@ class ReviewService:
 
     def _apply_structured_correction(self, correction: PaperCorrection) -> None:
         record, _, attribute = self._resolve_structured_target(correction)
-        setattr(record, attribute, correction.proposed_value)
+        proposed_value = correction.proposed_value
+        if isinstance(record, DFTResult) and attribute == "catalyst_sample_id":
+            if not has_evidence_anchor(correction.evidence_payload):
+                raise ValueError("DFT catalyst/material binding corrections require a page, section, table, figure, or quoted-text anchor.")
+            if proposed_value in ("", None):
+                proposed_value = None
+            else:
+                try:
+                    proposed_uuid = UUID(str(proposed_value))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("DFT catalyst/material binding corrections require a valid catalyst_sample_id UUID.") from exc
+                catalyst = self.session.get(CatalystSample, proposed_uuid)
+                if catalyst is None:
+                    raise ValueError("Target catalyst sample was not found.")
+                if catalyst.paper_id != correction.paper_id:
+                    raise ValueError("Target catalyst sample does not belong to the same paper.")
+                proposed_value = proposed_uuid
+            setattr(record, attribute, proposed_value)
+            if isinstance(correction.evidence_payload, dict):
+                merged_payload = dict(record.evidence_payload or {})
+                merged_payload["material_binding"] = {
+                    "catalyst_sample_id": str(proposed_value) if proposed_value else None,
+                    "approved_correction_id": str(correction.id),
+                    "approved_by": correction.reviewed_by,
+                    "approved_at": correction.reviewed_at.isoformat() if correction.reviewed_at else None,
+                    "evidence_anchor": correction.evidence_payload,
+                }
+                record.evidence_payload = merged_payload
+            self.session.add(record)
+            return
+        setattr(record, attribute, proposed_value)
         self.session.add(record)
 
     def _resolve_current_value(self, correction: PaperCorrection) -> Any:
