@@ -8,11 +8,16 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, PaperNote
+from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, PaperCorrection, PaperNote
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
-from app.utils.evidence_anchors import first_evidence_anchor, has_evidence_anchor
+from app.utils.evidence_anchors import (
+    first_evidence_anchor,
+    first_material_correction_anchor,
+    has_evidence_anchor,
+    has_material_correction_anchor,
+)
 from app.utils.figure_reliability import build_figure_image_review
 from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
@@ -138,6 +143,18 @@ class CodexContextService:
             item_payload["candidate_status"] = self._legacy_candidate_status(raw_candidate_status)
         else:
             item_payload["candidate_status"] = self._candidate_status_for_item(normalized_type)
+        locators = self._load_item_locators(
+            paper_id,
+            normalized_type,
+            item_id,
+            limit=max_locators,
+        )
+        corrections = self._load_item_corrections(
+            paper_id,
+            normalized_type,
+            item_id,
+            limit=max_locators,
+        )
         export_safety = None
         if normalized_type == "figure":
             item_payload["asset_url"] = (
@@ -152,13 +169,16 @@ class CodexContextService:
                 export_safety = self._dft_export_gate_payload(row)
                 item_payload["export_safety"] = export_safety
                 item_payload.update(self._dft_binding_item_payload(detail, row))
-
-        locators = self._load_item_locators(
-            paper_id,
-            normalized_type,
-            item_id,
-            limit=max_locators,
-        )
+        elif normalized_type == "catalyst_sample":
+            item_payload.update(
+                self._catalyst_sample_item_payload(
+                    detail,
+                    item_id=item_id,
+                    item_payload=item_payload,
+                    locators=locators,
+                    corrections=corrections,
+                )
+            )
         related_sections = self._related_sections(
             detail,
             normalized_type,
@@ -194,6 +214,10 @@ class CodexContextService:
             "evidence_locators": {
                 "status_counts": dict(Counter(item.get("locator_status") or "unknown" for item in locators)),
                 "items": locators,
+            },
+            "correction_history": {
+                "count": len(corrections),
+                "items": corrections,
             },
             "nearby_context": {
                 "abstract": self._clip(detail.abstract, 900),
@@ -291,6 +315,7 @@ class CodexContextService:
             },
             "source_assets": {
                 "has_pdf": bool(artifact_status.get("pdf_exists")),
+                "pdf_url": f"/api/papers/{detail.id}/pdf",
                 "pdf_path": detail.pdf_path,
                 "tei_path": detail.tei_path,
                 "docling_json_path": detail.docling_json_path,
@@ -356,7 +381,7 @@ class CodexContextService:
             },
             "structured_candidates": {
                 "dft_settings": self._dump_items(detail.dft_settings_items, max_candidates),
-                "catalyst_samples": self._dump_items(detail.catalyst_samples_items, max_candidates),
+                "catalyst_samples": self._dump_catalyst_samples(detail, max_candidates),
                 "dft_results": dft_results,
                 "electrochemical_performance": self._dump_items(detail.electrochemical_performance_items, max_candidates),
                 "mechanism_claims": self._dump_items(detail.mechanism_claims_items, max_candidates),
@@ -664,6 +689,19 @@ class CodexContextService:
                     "",
                 ]
             )
+        if context["item_type"] == "catalyst_sample":
+            lines.extend(
+                [
+                    "## AI Review Protocol",
+                    "You are reviewing one catalyst/material sample that downstream DFT bindings depend on.",
+                    "Open the original PDF evidence first. Do not refine this sample from parsed markdown alone.",
+                    "Allowed correction fields: name, catalyst_type, metal_centers, coordination, support, synthesis_method, evidence_strength.",
+                    "Every catalyst sample correction must cite at least one PDF anchor: page, section, quoted_text, table, or figure.",
+                    "If the paper currently has only one coarse sample row, do not auto-pass it; refine it when the PDF shows a more specific material or structure.",
+                    "Output only evidence-backed edits and keep unresolved ambiguity as pending/conflict instead of guessing.",
+                    "",
+                ]
+            )
         lines.append("## Evidence Locators")
         for locator in context["evidence_locators"]["items"]:
             lines.append(
@@ -673,6 +711,15 @@ class CodexContextService:
         if not context["evidence_locators"]["items"]:
             lines.append("- none")
         lines.append("")
+        if context.get("correction_history", {}).get("items"):
+            lines.append("## Correction History")
+            for correction in context["correction_history"]["items"]:
+                anchor = correction.get("evidence_anchor") or {}
+                anchor_text = ", ".join(f"{key}={value}" for key, value in anchor.items()) if anchor else "none"
+                lines.append(
+                    f"- {correction.get('status')} | {correction.get('target_path')} | anchor: {anchor_text} | reason: {correction.get('reason') or ''}"
+                )
+            lines.append("")
         lines.append("## Related Sections")
         for section in context["nearby_context"]["related_sections"]:
             lines.extend(
@@ -721,6 +768,149 @@ class CodexContextService:
             payload["candidate_status"] = self._legacy_candidate_status(raw_candidate_status)
             dumped.append(payload)
         return dumped
+
+    def _dump_catalyst_samples(self, detail: PaperDetailResponse, limit: int) -> list[dict[str, Any]]:
+        dumped: list[dict[str, Any]] = []
+        for sample in (detail.catalyst_samples_items or [])[:limit]:
+            payload = sample.model_dump(mode="json")
+            raw_candidate_status = payload.get("candidate_status")
+            if raw_candidate_status:
+                payload["workbench_candidate_status"] = raw_candidate_status
+            payload["candidate_status"] = self._legacy_candidate_status(raw_candidate_status)
+            payload.update(self._sample_identity_payload(detail, payload))
+            dumped.append(payload)
+        return dumped
+
+    def _catalyst_sample_item_payload(
+        self,
+        detail: PaperDetailResponse,
+        *,
+        item_id: UUID,
+        item_payload: dict[str, Any],
+        locators: list[dict[str, Any]],
+        corrections: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload = self._sample_identity_payload(detail, item_payload)
+        correction_anchors = [
+            item.get("evidence_anchor")
+            for item in corrections
+            if has_material_correction_anchor(item.get("evidence_anchor"))
+        ]
+        locator_anchors = [
+            first_material_correction_anchor(locator)
+            for locator in locators
+            if first_material_correction_anchor(locator) is not None
+        ]
+        evidence_anchors = correction_anchors + locator_anchors
+        payload.update(
+            {
+                "evidence_anchor_status": "sufficient" if evidence_anchors else "insufficient",
+                "evidence_anchor_count": len(evidence_anchors),
+                "evidence_anchors": evidence_anchors[:12],
+                "correction_history_count": len(corrections),
+                "requires_pdf_backed_refinement": bool(
+                    payload.get("is_identity_missing")
+                    or payload.get("is_identity_coarse")
+                    or not evidence_anchors
+                ),
+                "pdf_review_required": True,
+            }
+        )
+        return payload
+
+    def _sample_identity_payload(self, detail: PaperDetailResponse, sample_payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(sample_payload.get("name") or "").strip()
+        catalyst_type = str(sample_payload.get("catalyst_type") or "").strip()
+        coordination = str(sample_payload.get("coordination") or "").strip()
+        support = str(sample_payload.get("support") or "").strip()
+        synthesis_method = str(sample_payload.get("synthesis_method") or "").strip()
+        evidence_strength = str(sample_payload.get("evidence_strength") or "").strip()
+        metal_centers = sample_payload.get("metal_centers") or []
+        generic_labels = {
+            "graphene",
+            "graphdiyne",
+            "gdy",
+            "graphdiyne nanosheet",
+            "nanosheet",
+            "catalyst",
+            "material",
+            "sample",
+            "coordination number",
+        }
+        field_presence = {
+            "name": bool(name),
+            "catalyst_type": bool(catalyst_type),
+            "metal_centers": bool(metal_centers),
+            "coordination": bool(coordination),
+            "support": bool(support),
+            "synthesis_method": bool(synthesis_method),
+            "evidence_strength": bool(evidence_strength),
+        }
+        identity_fields_present = sum(
+            1 for key in ("name", "catalyst_type", "metal_centers", "coordination", "support") if field_presence[key]
+        )
+        lowered_name = name.lower()
+        coarse_name = lowered_name in generic_labels
+        coarse_identity = identity_fields_present <= 1 or (coarse_name and not metal_centers and not coordination)
+        missing_identity = identity_fields_present == 0
+        if missing_identity:
+            identity_status = "missing_identity"
+        elif coarse_identity:
+            identity_status = "coarse_identity"
+        else:
+            identity_status = "usable_identity"
+        dependent_rows = self._sample_dependent_dft_rows(detail, sample_payload.get("id"))
+        return {
+            "identity_field_presence": field_presence,
+            "identity_fields_present": identity_fields_present,
+            "sample_identity_status": identity_status,
+            "is_identity_missing": missing_identity,
+            "is_identity_coarse": coarse_identity and not missing_identity,
+            "single_sample_paper": len(detail.catalyst_samples_items or []) == 1,
+            "dependent_dft_summary": {
+                "total": len(dependent_rows),
+                "bound": sum(1 for row in dependent_rows if row.get("binding_status") == "bound"),
+                "future_unbound": sum(
+                    1 for row in dependent_rows if row.get("binding_status") in {"future_unbound", "future_candidate"}
+                ),
+            },
+            "dependent_dft_results": dependent_rows[:20],
+        }
+
+    def _sample_dependent_dft_rows(
+        self,
+        detail: PaperDetailResponse,
+        sample_id: str | UUID | None,
+    ) -> list[dict[str, Any]]:
+        sample_id_text = str(sample_id) if sample_id else None
+        single_sample_paper = len(detail.catalyst_samples_items or []) == 1
+        rows: list[dict[str, Any]] = []
+        for row in detail.dft_results_items or []:
+            binding_status = None
+            if str(row.catalyst_sample_id) == sample_id_text:
+                binding_status = "bound"
+            elif not row.catalyst_sample_id:
+                if single_sample_paper:
+                    binding_status = "future_unbound"
+                else:
+                    binding_status = "future_candidate"
+            if not binding_status:
+                continue
+            rows.append(
+                {
+                    "id": str(row.id),
+                    "binding_status": binding_status,
+                    "adsorbate": row.adsorbate,
+                    "property_type": row.property_type,
+                    "value": row.value,
+                    "unit": row.unit,
+                    "source_section": row.source_section,
+                    "source_figure": row.source_figure,
+                    "evidence_text": self._clip(row.evidence_text, 240),
+                    "candidate_status": self._legacy_candidate_status(row.candidate_status),
+                }
+            )
+        return rows
 
     def _build_dft_export_readiness(self, detail: PaperDetailResponse, *, limit: int) -> dict[str, Any]:
         rows = self.session.scalars(
@@ -814,6 +1004,39 @@ class CodexContextService:
         ).all()
         return [self._locator_payload(row) for row in rows]
 
+    def _load_item_corrections(
+        self,
+        paper_id: UUID,
+        item_type: str,
+        item_id: UUID,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        collection_map = {
+            "dft_result": "dft_results",
+            "catalyst_sample": "catalyst_samples",
+            "dft_setting": "dft_settings",
+            "mechanism_claim": "mechanism_claims",
+            "electrochemical_performance": "electrochemical_performance",
+            "writing_card": "writing_cards",
+            "figure": "figures",
+            "table": "tables",
+        }
+        collection = collection_map.get(item_type)
+        if collection is None:
+            return []
+        target_prefix = f"{collection}:{item_id}:"
+        rows = self.session.scalars(
+            select(PaperCorrection)
+            .where(
+                PaperCorrection.paper_id == paper_id,
+                PaperCorrection.target_path.like(f"{target_prefix}%"),
+            )
+            .order_by(PaperCorrection.created_at.desc())
+            .limit(limit)
+        ).all()
+        return [self._correction_payload(row) for row in rows]
+
     def _related_sections(
         self,
         detail: PaperDetailResponse,
@@ -827,6 +1050,15 @@ class CodexContextService:
         source_section = str(item_payload.get("source_section") or "").strip().lower()
         evidence_text = str(item_payload.get("evidence_text") or "").strip()
         evidence_probe = " ".join(evidence_text.split())[:120].lower()
+        if item_type == "catalyst_sample" and not evidence_probe:
+            sample_probe_parts = [
+                str(item_payload.get("name") or "").strip(),
+                str(item_payload.get("catalyst_type") or "").strip(),
+                str(item_payload.get("coordination") or "").strip(),
+                str(item_payload.get("support") or "").strip(),
+                " ".join(str(item).strip() for item in (item_payload.get("metal_centers") or []) if str(item).strip()),
+            ]
+            evidence_probe = " ".join(part for part in sample_probe_parts if part)[:120].lower()
         ranked: list[tuple[int, int, Any]] = []
         for index, section in enumerate(detail.sections or []):
             score = 0
@@ -876,6 +1108,14 @@ class CodexContextService:
                     actions.append("Explicitly choose one catalyst_sample_id from the candidate list; do not silently fall back to the first sample.")
                 elif candidate_count == 1:
                     actions.append("Even with one candidate catalyst sample, confirm the binding against the PDF before proposing catalyst_sample_id.")
+        if item_type == "catalyst_sample":
+            actions.append("Open the original PDF page/table/figure before trusting or editing this catalyst sample.")
+            if item_payload.get("evidence_anchor_status") != "sufficient":
+                actions.append("Do not approve or auto-materialize catalyst sample corrections unless you can cite page, section, quoted_text, table, or figure.")
+            if item_payload.get("is_identity_missing") or item_payload.get("is_identity_coarse"):
+                actions.append("Refine the sample to the material/structure level instead of keeping a paper-level coarse label.")
+            if item_payload.get("single_sample_paper") and item_payload.get("dependent_dft_summary", {}).get("total", 0) > 0:
+                actions.append("Even though this paper currently has one sample row, do not auto-pass it; tighten the identity against the PDF because downstream DFT rows depend on it.")
         if item_type == "figure":
             review = item_payload.get("image_review") or {}
             if review.get("review_required"):
@@ -894,31 +1134,22 @@ class CodexContextService:
             actions.append("Review the item against its evidence, then append a note or propose a correction if needed.")
         return actions
 
-    @staticmethod
-    def _dft_candidate_catalyst_payload(detail: PaperDetailResponse) -> list[dict[str, Any]]:
+    def _dft_candidate_catalyst_payload(self, detail: PaperDetailResponse) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for catalyst in detail.catalyst_samples_items or []:
-            items.append(
-                {
-                    "id": str(catalyst.id),
-                    "name": catalyst.name,
-                    "catalyst_type": catalyst.catalyst_type,
-                    "metal_centers": catalyst.metal_centers or [],
-                    "coordination": catalyst.coordination,
-                    "support": catalyst.support,
-                    "synthesis_method": catalyst.synthesis_method,
-                    "evidence_strength": catalyst.evidence_strength,
-                    "has_material_identity": any(
-                        (
-                            bool((catalyst.name or "").strip()),
-                            bool((catalyst.catalyst_type or "").strip()),
-                            bool(catalyst.metal_centers),
-                            bool((catalyst.coordination or "").strip()),
-                            bool((catalyst.support or "").strip()),
-                        )
-                    ),
-                }
-            )
+            payload = {
+                "id": str(catalyst.id),
+                "name": catalyst.name,
+                "catalyst_type": catalyst.catalyst_type,
+                "metal_centers": catalyst.metal_centers or [],
+                "coordination": catalyst.coordination,
+                "support": catalyst.support,
+                "synthesis_method": catalyst.synthesis_method,
+                "evidence_strength": catalyst.evidence_strength,
+            }
+            payload.update(self._sample_identity_payload(detail, payload))
+            payload["has_material_identity"] = not payload.get("is_identity_missing", False)
+            items.append(payload)
         return items
 
     def _dft_binding_item_payload(self, detail: PaperDetailResponse, row: DFTResult) -> dict[str, Any]:
@@ -956,6 +1187,26 @@ class CodexContextService:
             "parser_source": row.parser_source,
             "warning_reason": row.warning_reason,
             "evidence_text": self._clip(row.evidence_text, 900),
+        }
+
+    def _correction_payload(self, row: PaperCorrection) -> dict[str, Any]:
+        return {
+            "id": str(row.id),
+            "field_name": row.field_name,
+            "target_path": row.target_path,
+            "operation": row.operation,
+            "proposed_value": row.proposed_value,
+            "reason": row.reason,
+            "status": row.status,
+            "reviewed_by": row.reviewed_by,
+            "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "evidence_anchor": (
+                first_material_correction_anchor(row.evidence_payload)
+                if row.field_name == "catalyst_samples"
+                else first_evidence_anchor(row.evidence_payload)
+            ),
+            "evidence_payload": row.evidence_payload,
         }
 
     @staticmethod

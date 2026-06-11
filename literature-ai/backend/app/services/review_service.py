@@ -21,7 +21,7 @@ from app.db.models import (
     PaperTable,
     WritingCard,
 )
-from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.evidence_anchors import has_evidence_anchor, has_material_correction_anchor
 
 
 @dataclass(frozen=True)
@@ -276,8 +276,13 @@ class ReviewService:
         raise ValueError(f"Correction field is not review-applicable yet: {correction.field_name}")
 
     def _apply_structured_correction(self, correction: PaperCorrection) -> None:
-        record, _, attribute = self._resolve_structured_target(correction)
+        record, spec, attribute = self._resolve_structured_target(correction)
         proposed_value = correction.proposed_value
+        if spec.model is CatalystSample and not has_material_correction_anchor(correction.evidence_payload):
+            raise ValueError(
+                "Catalyst sample corrections require at least one PDF evidence anchor: "
+                "page, section, quoted_text, table, or figure."
+            )
         if isinstance(record, DFTResult) and attribute == "catalyst_sample_id":
             if not has_evidence_anchor(correction.evidence_payload):
                 raise ValueError("DFT catalyst/material binding corrections require a page, section, table, figure, or quoted-text anchor.")

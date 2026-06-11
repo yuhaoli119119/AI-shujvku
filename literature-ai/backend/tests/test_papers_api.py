@@ -460,6 +460,24 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
         )
         session.flush()
         session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="codex_test",
+                field_name="catalyst_samples",
+                target_path=f"catalyst_samples:{catalyst_a.id}:name",
+                operation="replace",
+                proposed_value="Single-vacancy graphene",
+                reason="Figure 1 and methods section identify a vacancy-defect graphene model.",
+                evidence_payload={
+                    "page": 3,
+                    "section": "Computational Methods",
+                    "figure": "Figure 1",
+                    "quoted_text": "VASP and PBE were used to model a graphene single-vacancy defect supercell.",
+                },
+                status="pending",
+            )
+        )
+        session.add(
             EvidenceLocator(
                 paper_id=paper.id,
                 target_type="dft_result",
@@ -476,6 +494,7 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
         paper_id = paper.id
         figure_id = figure.id
         dft_result_id = dft_result.id
+        catalyst_a_id = catalyst_a.id
 
     client = TestClient(app)
     response = client.get(f"/api/papers/{paper_id}/codex-context")
@@ -534,6 +553,18 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     figure_data = figure_response.json()
     assert figure_data["context"]["item"]["image_review"]["review_required"] is True
     assert figure_data["context"]["nearby_context"]["related_sections"][0]["title"] == "Computational Methods"
+
+    sample_response = client.get(f"/api/papers/{paper_id}/codex-item/catalyst_sample/{catalyst_a_id}")
+    assert sample_response.status_code == 200
+    sample_data = sample_response.json()
+    assert sample_data["context"]["source_assets"]["pdf_url"].endswith(f"/api/papers/{paper_id}/pdf")
+    assert sample_data["context"]["item"]["sample_identity_status"] == "usable_identity"
+    assert sample_data["context"]["item"]["evidence_anchor_status"] == "sufficient"
+    assert sample_data["context"]["item"]["dependent_dft_summary"]["total"] == 1
+    assert sample_data["context"]["correction_history"]["count"] == 1
+    assert sample_data["context"]["correction_history"]["items"][0]["evidence_anchor"]["figure"] == "Figure 1"
+    assert any("open the original pdf" in action.lower() for action in sample_data["context"]["recommended_next_actions"])
+    assert "Allowed correction fields: name, catalyst_type, metal_centers, coordination, support, synthesis_method, evidence_strength." in sample_data["markdown"]
 
     invalid_response = client.get(f"/api/papers/{paper_id}/codex-item/not_supported/{figure_id}")
     assert invalid_response.status_code == 400

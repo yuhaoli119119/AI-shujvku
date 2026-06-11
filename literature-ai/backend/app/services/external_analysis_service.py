@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.services.llm_service import LLMService
 from app.utils.artifact_status import build_paper_artifact_status
+from app.utils.evidence_anchors import has_material_correction_anchor
 from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 
@@ -328,6 +329,13 @@ class ExternalAnalysisService:
                 candidate.materialized_target_id = str(note.id)
                 result.created_notes += 1
             elif candidate.candidate_type == "correction":
+                if payload.get("field_name") == "catalyst_samples" and not has_material_correction_anchor(
+                    payload.get("evidence_payload")
+                ):
+                    candidate.status = "requires_resolution"
+                    self.session.add(candidate)
+                    result.skipped_candidates += 1
+                    continue
                 correction = PaperCorrection(
                     paper_id=candidate.paper_id,
                     source=run.source,
@@ -417,6 +425,14 @@ class ExternalAnalysisService:
             }
         )
         return payload
+
+    @staticmethod
+    def _correction_candidate_status(correction: ExternalCorrectionProposalModel) -> str:
+        if correction.field_name == "catalyst_samples" and not has_material_correction_anchor(
+            correction.evidence_payload
+        ):
+            return "requires_resolution"
+        return "pending"
 
     def _normalize_input(
         self,
@@ -511,6 +527,17 @@ class ExternalAnalysisService:
                 )
             )
         for correction in normalized.correction_proposals:
+            status = self._correction_candidate_status(correction)
+            mapping_reason = correction.mapping_reason
+            if (
+                correction.field_name == "catalyst_samples"
+                and status == "requires_resolution"
+                and "evidence anchor" not in str(mapping_reason or "").lower()
+            ):
+                mapping_reason = (
+                    "Catalyst sample corrections require at least one PDF evidence anchor: "
+                    "page, section, quoted_text, table, or figure."
+                )
             self.session.add(
                 ExternalAnalysisCandidate(
                     run_id=run.id,
@@ -518,9 +545,9 @@ class ExternalAnalysisService:
                     candidate_type="correction",
                     normalized_payload=correction.model_dump(mode="json"),
                     confidence=correction.confidence,
-                    mapping_reason=correction.mapping_reason,
+                    mapping_reason=mapping_reason,
                     evidence_payload=correction.evidence_payload,
-                    status="pending",
+                    status=status,
                 )
             )
         for relationship in normalized.supporting_papers:
@@ -943,6 +970,11 @@ def build_internal_ai_review_blob(detail) -> str:
             if hasattr(detail.artifact_status, "model_dump")
             else detail.artifact_status,
         },
+        "source_assets": {
+            "pdf_url": f"/api/papers/{detail.id}/pdf",
+            "pdf_path": detail.pdf_path,
+            "workspace_path": detail.workspace_path,
+        },
         "external_audit_precondition": {
             "status": "ready"
             if getattr(detail.artifact_status, "artifact_ready_for_external_audit", False)
@@ -951,7 +983,19 @@ def build_internal_ai_review_blob(detail) -> str:
         },
         "comprehensive_analysis": detail.comprehensive_analysis,
         "dft_settings_items": [item.model_dump(mode="json") for item in detail.dft_settings_items[:20]],
-        "catalyst_samples_items": [item.model_dump(mode="json") for item in detail.catalyst_samples_items[:20]],
+        "catalyst_samples_items": [
+            {
+                **item.model_dump(mode="json"),
+                "dependent_dft_count": sum(
+                    1
+                    for row in detail.dft_results_items
+                    if str(row.catalyst_sample_id) == str(item.id)
+                    or (len(detail.catalyst_samples_items) == 1 and not row.catalyst_sample_id)
+                ),
+                "single_sample_paper": len(detail.catalyst_samples_items) == 1,
+            }
+            for item in detail.catalyst_samples_items[:20]
+        ],
         "dft_results_items": [item.model_dump(mode="json") for item in detail.dft_results_items[:40]],
         "electrochemical_performance_items": [
             item.model_dump(mode="json") for item in detail.electrochemical_performance_items[:30]

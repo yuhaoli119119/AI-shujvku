@@ -25,6 +25,17 @@ NESTED_ANCHOR_KEYS = (
     "primary_locator",
 )
 
+MATERIAL_CORRECTION_ANCHOR_KEYS = (
+    "page",
+    "section",
+    "section_title",
+    "quoted_text",
+    "figure",
+    "figure_id",
+    "table",
+    "table_id",
+)
+
 
 def iter_anchor_payloads(payload: Any) -> Iterator[dict[str, Any]]:
     if isinstance(payload, dict):
@@ -53,3 +64,19 @@ def first_evidence_anchor(payload: Any) -> dict[str, Any] | None:
         if summary:
             return summary
     return None
+
+
+def first_material_correction_anchor(payload: Any) -> dict[str, Any] | None:
+    for candidate in iter_anchor_payloads(payload):
+        summary = {
+            key: candidate.get(key)
+            for key in MATERIAL_CORRECTION_ANCHOR_KEYS
+            if candidate.get(key) is not None and str(candidate.get(key)).strip()
+        }
+        if summary:
+            return summary
+    return None
+
+
+def has_material_correction_anchor(payload: Any) -> bool:
+    return first_material_correction_anchor(payload) is not None

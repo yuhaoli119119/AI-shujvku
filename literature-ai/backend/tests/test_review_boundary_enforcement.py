@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import Settings
 from app.db.models import (
     Base,
+    CatalystSample,
     DFTResult,
     EvidenceSpan,
     ExternalAnalysisCandidate,
@@ -30,12 +31,14 @@ from app.db.models import (
     ExtractionFieldReview,
     MechanismClaim,
     Paper,
+    PaperCorrection,
     WritingCard,
 )
 from app.rag.retriever import Retriever
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.paper_query import PaperQueryService
+from app.services.review_service import ReviewService
 from app.utils.review_safety import (
     build_review_boundary_reason,
     can_ai_candidate_update_target,
@@ -318,6 +321,85 @@ def test_import_ai_candidate_does_not_create_verified_review(tmp_path):
                 ExtractionFieldReview.reviewer_status == "verified",
             ).all()
             assert len(reviews) == 0
+    finally:
+        engine.dispose()
+
+
+def test_catalyst_sample_correction_without_pdf_anchor_stays_unmaterialized(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            sample = CatalystSample(paper_id=paper.id, name="graphene")
+            session.add(sample)
+            session.flush()
+
+            service = ExternalAnalysisService(session, Settings())
+            run = service.import_run(
+                paper_id=paper.id,
+                source="external",
+                source_label="external",
+                raw_text=None,
+                raw_payload={
+                    "correction_proposals": [
+                        {
+                            "field_name": "catalyst_samples",
+                            "target_path": f"catalyst_samples:{sample.id}:name",
+                            "operation": "replace",
+                            "proposed_value": "single-vacancy graphene",
+                            "reason": "Try to refine the material identity.",
+                            "evidence_payload": {"evidence_text": "single-vacancy graphene"},
+                        }
+                    ]
+                },
+            )
+            session.flush()
+
+            candidate = session.query(ExternalAnalysisCandidate).filter_by(run_id=run.id).one()
+            assert candidate.status == "requires_resolution"
+
+            result = service.materialize_candidates(run.id, explicit_all=True)
+            session.flush()
+
+            assert result.created_corrections == 0
+            assert result.skipped_candidates == 1
+            assert session.query(PaperCorrection).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_approve_catalyst_sample_correction_requires_pdf_anchor(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            sample = CatalystSample(paper_id=paper.id, name="graphene")
+            session.add(sample)
+            session.flush()
+            correction = PaperCorrection(
+                paper_id=paper.id,
+                source="external",
+                field_name="catalyst_samples",
+                target_path=f"catalyst_samples:{sample.id}:name",
+                operation="replace",
+                proposed_value="single-vacancy graphene",
+                reason="Need a finer material identity.",
+                evidence_payload={"evidence_text": "single-vacancy graphene"},
+                status="pending",
+            )
+            session.add(correction)
+            session.commit()
+
+            with SessionLocal() as verification_session:
+                stored = verification_session.query(PaperCorrection).one()
+                service = ReviewService(verification_session)
+                error_raised = False
+                try:
+                    service.approve_correction(stored.id, reviewer="reviewer")
+                except ValueError as exc:
+                    error_raised = True
+                    assert "Catalyst sample corrections require" in str(exc)
+                assert error_raised, "approve_correction should reject catalyst sample edits without a PDF anchor"
     finally:
         engine.dispose()
 

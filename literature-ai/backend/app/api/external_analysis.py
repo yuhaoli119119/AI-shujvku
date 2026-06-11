@@ -179,13 +179,15 @@ def internal_ai_parse_paper(
         "If figure crops look like publisher logos, CrossMark badges, headers, or other decorative/non-scientific snippets, flag them as extraction noise. "
         "Do not treat noisy figure crops as scientific figures; instead explain that the PDF page or caption must be checked. "
         "For catalyst support, synthesis method, coordination, DFT settings, energy values, and writing cards, prefer concrete quoted evidence. "
+        "For catalyst_samples corrections, only propose updates when you can cite the PDF evidence package with at least one of: page, section, quoted_text, table, or figure. "
         "Use correction_proposals only for concrete field fixes, "
         "and supporting_papers only when an existing linked paper can be inferred from DOI/title clues already present. "
         "Do not invent evidence, identifiers, values, or target paths. If evidence is incomplete, explain the gap in review_notes instead of guessing. "
         "For top-level paper fields, only use these correction field_name values: doi, title, year, journal, authors, abstract, oa_status, license. "
         "For those top-level fields, set target_path exactly equal to field_name. "
         "For structured corrections, only use field_name values from dft_results, mechanism_claims, electrochemical_performance, catalyst_samples, dft_settings, writing_cards, "
-        "and set target_path strictly as <collection>:<row_id>:<field> using row ids that already exist in the provided bundle."
+        "and set target_path strictly as <collection>:<row_id>:<field> using row ids that already exist in the provided bundle. "
+        "For catalyst_samples, only use these fields: name, catalyst_type, metal_centers, coordination, support, synthesis_method, evidence_strength."
     )
     user_prompt = (
         "Analyze this parsed literature record and extraction output. "
