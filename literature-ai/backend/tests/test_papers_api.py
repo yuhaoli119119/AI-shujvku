@@ -1822,6 +1822,22 @@ def test_ai_workflow_job_list_retry_and_cancel_endpoints(setup_test_db, monkeypa
         assert session.get(WorkflowJob, failed_job_id).status == "failed"
 
 
+def test_discovery_download_returns_not_found_when_metadata_is_unavailable(setup_test_db, monkeypatch):
+    def fake_fetch_metadata(self, identifier, providers=None):
+        raise ValueError("No paper metadata found for the given identifier")
+
+    monkeypatch.setattr(papers_api.DiscoveryService, "fetch_metadata", fake_fetch_metadata)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/discovery/download",
+        json={"identifier": "10.1000/missing", "library_name": "MissingLibrary", "providers": ["arxiv"]},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "No paper metadata found for the given identifier"}
+
+
 def test_discovery_download_falls_back_to_direct_pdf_url(setup_test_db, monkeypatch):
     class DummyPaper:
         pass

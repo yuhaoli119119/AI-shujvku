@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -96,7 +96,10 @@ async def discovery_download_and_ingest(
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
     service = DiscoveryService()
-    raw_paper, metadata = await run_in_threadpool(service.fetch_metadata, payload.identifier, payload.providers)
+    try:
+        raw_paper, metadata = await run_in_threadpool(service.fetch_metadata, payload.identifier, payload.providers)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     target_library = normalize_library_name(payload.library_name)
     doi = metadata.get("doi")
