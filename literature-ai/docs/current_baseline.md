@@ -39,6 +39,15 @@ These are compatibility names and should not be interpreted as fixed ownership b
 - If running locally from `literature-ai/backend`, use `LITAI_STORAGE_ROOT=../data/storage`.
 - A wrong storage root can make PostgreSQL paper rows visible while artifact checks report `missing_pdf`, `missing_markdown_and_docling_json`, or `missing_ai_reading_package`.
 
+## DFT Evidence Locator Boundary
+
+- DFT rows may have paper-level provenance, source sections, and evidence text while still lacking a precise PDF page.
+- Missing DFT locator pages must remain visible as `text_only` / missing-page evidence. The UI may explain the limitation, but it must not display fake page links or imply that a PDF jump is available.
+- Do not add a web UI button that claims to run AI page lookup unless the backend actually provides a reviewed, auditable AI workflow for that action. In the current workflow, the assigned IDE AI, not the web page itself, performs any ad hoc PDF page investigation requested by the user.
+- Do not rebuild PDF page text, OCR the PDF, or reconstruct chunk-page mappings merely to repair DFT locator pages unless the user explicitly approves that broader parser work.
+- Conservative locator repair may only write pages when existing parsed artifacts already provide a unique, exact evidence-text-to-page match. It must not write approximate guesses, mark reviews verified, approve DFT rows, or unlock CSV/ML export.
+- When no safe page recovery exists, keep the DFT row reviewable through paper title, DOI, source section, evidence text, and review-center links; exact-page export gates should continue to block it.
+
 ## Schema
 
 - `backend/app/db/models.py` is the ORM source.

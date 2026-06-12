@@ -1,5 +1,5 @@
 name: dft_material_ai_extraction_protocol
-version: system_candidate_dft_v1_1
+version: system_candidate_dft_v1_2
 stage: ai_extraction_and_review_gate
 
 role_boundary:
@@ -40,6 +40,8 @@ evidence_first_rules:
   - PDF original page, section title, table number, figure number, caption, and excerpt are preferred over parser-only text.
   - Cropped figures are candidate locators only; verify them against the full PDF page and caption.
   - Data without evidence location must not be promoted.
+  - If the evidence packet has text and section metadata but no PDF page, keep the row as text_only evidence. Do not infer a page from a similar section title, nearby figure, or approximate text match.
+  - Missing PDF pages may be investigated by an assigned IDE AI when the user asks, but any proposed page remains a candidate until reviewed. The web UI must not pretend to run an AI page lookup unless a real audited backend workflow exists.
 
 workflow_stages:
   parse_vs_pdf_check:
@@ -150,6 +152,19 @@ required_fields_per_dft_record:
   - protocol_sha256
   - human_confirmation_required
   - notes
+
+DFT_locator_boundary:
+  page_capture:
+    - Capture pdf_page only when it is present in the original PDF page context, page-derived artifact, table/figure metadata, or explicit locator supplied to the worker.
+    - If page context is absent, output pdf_page: null and explain the missing locator in notes or known_missing.
+  text_only_rows:
+    - Text-only DFT evidence can remain reviewable through paper title, DOI, source section, and evidence_text.
+    - Text-only DFT evidence must not be exported as ML/CSV training data until an exact page locator and the required review gates exist.
+  forbidden:
+    - Do not fabricate page numbers.
+    - Do not infer exact pages from similarity alone.
+    - Do not use page recovery to mark DFT rows verified, approve corrections, bind materials, or unlock export.
+    - Do not add or rely on a web UI "AI find PDF page" action unless it is backed by an audited backend workflow.
 
 property_types:
   examples:

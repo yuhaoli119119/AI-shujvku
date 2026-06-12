@@ -1,5 +1,5 @@
 name: dft_results_extraction
-version: 0.2
+version: 0.3
 stage: mvp
 
 description: >
@@ -36,6 +36,20 @@ output:
       figure: str | null
       table: str | null
     confidence: float
+
+locator_policy:
+  rule: >
+    The extractor should preserve a page only when it is present in the input
+    section, table, figure, or page-derived artifact. It must not infer or guess
+    a PDF page from section title similarity alone.
+  missing_page_behavior: >
+    If evidence text is available but no page is present in the source artifact,
+    keep source_location.page as null. Downstream review should treat the row as
+    text_only evidence, not as an exact PDF locator.
+  forbidden:
+    - Do not fabricate page numbers.
+    - Do not mark text_only rows as exact_page.
+    - Do not unlock ML/CSV export from page-less evidence.
 
 categories:
   - adsorption_energy

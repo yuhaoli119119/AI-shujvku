@@ -95,6 +95,13 @@ Expected review order for high-risk DFT data:
 
 If a DFT row refers to a material or structure that has no `catalyst_sample`, first use `import_analysis` to propose or dual-review `catalyst_samples:new:create` with an original-PDF anchor. Do not bind the DFT row to the paper's first sample. After the sample is created or unambiguously reused, submit the normal dual-AI `catalyst_sample_id` review for the DFT row.
 
+DFT page-locator boundary:
+
+- A DFT row can be reviewable with paper provenance, source section, and evidence text even when the exact PDF page is missing.
+- If the current parsed artifacts do not contain a unique exact evidence-text-to-page match, keep the row as `text_only` / missing-page evidence. Do not infer a page from similarity alone.
+- The web UI should not expose an "AI find PDF page" action unless a real backend workflow exists. In the current workflow, ad hoc page investigation is performed by the assigned IDE AI when the user requests it, and any result must remain a candidate until reviewed.
+- Do not use page-recovery work to mark DFT rows verified, approve corrections, bind materials, or unlock ML/CSV export.
+
 Forbidden:
 
 Do not call final verification tools with an ordinary IDE AI key. Do not unlock ML export from external AI review alone. Do not infer precise numeric values from plots unless the value is explicitly readable in source evidence.

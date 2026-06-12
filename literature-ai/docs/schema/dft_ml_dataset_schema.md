@@ -86,3 +86,5 @@ Ensures data traceability back to the exact location in the original paper.
 - `review_gate_status` (string): Safety gate evaluation (e.g., `safe_verified`).
 - `provenance_level` (string): Evidence linking strictness (e.g., `exact_page`, `in_document`).
 - `locator_status` (string): Validation of the evidence text location.
+
+Rows with `locator_status` such as `text_only`, `missing_page`, `approximate`, or `unresolved` remain blocked candidates. They can be reviewed through paper/section/evidence text, but they must not appear in ML-ready `records` until an exact PDF page locator and the required review gates exist.

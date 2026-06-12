@@ -85,6 +85,22 @@ Every non-empty trusted field should have:
 
 Text-only evidence can support a candidate, but exact page/table/figure locators are required before export or final trust where the relevant gate demands it.
 
+### Missing Page Locator Boundary
+
+Some DFT rows can be traceable to a paper, source section, and evidence text while still lacking an exact PDF page. This state is valid as a review candidate but not as export-ready evidence.
+
+Current boundary:
+
+- Keep these rows as `text_only` or missing-page evidence.
+- Do not display fake PDF page links or imply that a PDF jump is available.
+- Do not infer an exact page from section-title similarity, nearby figures, or approximate text matches.
+- Do not rebuild PDF page text, OCR the PDF, or reconstruct chunk-page mappings unless the user explicitly approves broader parser work.
+- Conservative page repair may only write a page when existing parsed artifacts already provide a unique exact evidence-text-to-page match.
+- Page repair must not mark reviews verified, approve corrections, bind materials, or unlock CSV/ML export.
+- If the user asks an IDE AI to investigate a specific row, any proposed page remains a candidate until reviewed.
+
+The web workbench should explain missing pages and provide review/detail navigation. It should not add an "AI find PDF page" button unless the backend actually implements an auditable workflow for that action.
+
 ## Figure And Image Policy
 
 Figure records should be classified as:

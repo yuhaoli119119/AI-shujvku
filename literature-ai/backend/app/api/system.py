@@ -307,6 +307,15 @@ async def get_agent_guide() -> dict:
             "auto_run_stage2_extraction": settings.auto_run_stage2_extraction,
             "description": "When True, ingestion may still create backend candidate outputs. Regardless of that setting, the supported manual recovery path is to prepare AI-readable materials (workspace, evidence, codex context, AI reading package) and let IDE AI continue via MCP/import_analysis instead of requiring any backend-owned LLM deep parse.",
         },
+        "safety_boundaries": {
+            "dft_page_locators": [
+                "DFT rows with paper provenance, source section, and evidence text but no exact PDF page must remain text_only candidates.",
+                "Do not infer exact PDF pages from approximate similarity, nearby figures, or section-title matches.",
+                "Do not expose a web UI AI page-lookup action unless a real audited backend workflow exists.",
+                "Ad hoc page investigation belongs to the assigned IDE AI when requested by the user; any proposed page remains a candidate until reviewed.",
+                "Missing-page repair must not mark DFT rows verified, approve corrections, bind materials, or unlock CSV/ML export.",
+            ],
+        },
         "suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
             "Then connect to /mcp and prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections, export_ml_dataset to export verified data as JSON or CSV for machine learning. "
