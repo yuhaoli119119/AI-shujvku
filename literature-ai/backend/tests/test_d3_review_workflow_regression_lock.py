@@ -12,6 +12,7 @@ from app.api.papers.aggregation import export_dft_results_csv
 from app.config import Settings
 from app.db.models import (
     Base,
+    CatalystSample,
     DFTResult,
     EvidenceSpan,
     ExternalAnalysisCandidate,
@@ -55,6 +56,19 @@ def _dft(session: Session, paper: Paper, *, evidence_text: str | None = "Reviewe
     session.add(row)
     session.flush()
     return row
+
+
+def _catalyst_sample(session: Session, paper: Paper) -> CatalystSample:
+    sample = CatalystSample(
+        paper_id=paper.id,
+        name="Fe-N4 catalyst",
+        catalyst_type="single_atom",
+        metal_centers=["Fe"],
+        support="N-doped carbon",
+    )
+    session.add(sample)
+    session.flush()
+    return sample
 
 
 def _evidence_ref(session: Session, paper: Paper, row: DFTResult) -> EvidenceSpan:
@@ -264,7 +278,9 @@ def test_export_headers_and_block_counts_are_stable_for_mixed_safe_unsafe_rows(t
     try:
         with SessionLocal() as session:
             paper = _paper(session)
+            sample = _catalyst_sample(session, paper)
             safe = _dft(session, paper)
+            safe.catalyst_sample_id = sample.id
             _verified_review(session, paper, safe)
             _evidence_ref(session, paper, safe)
 

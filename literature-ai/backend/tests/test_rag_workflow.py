@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import (
     Base,
+    CatalystSample,
     DFTResult,
     ElectrochemicalPerformance,
     EvidenceSpan,
@@ -35,6 +36,15 @@ def test_retriever_writer_and_citation_guard_work_together():
                 paper = Paper(title="RAG Paper", pdf_path="rag.pdf", authors=[])
                 session.add(paper)
                 session.flush()
+                catalyst_sample = CatalystSample(
+                    paper_id=paper.id,
+                    name="Fe-N4 catalyst",
+                    catalyst_type="single_atom",
+                    metal_centers=["Fe"],
+                    support="N-doped carbon",
+                )
+                session.add(catalyst_sample)
+                session.flush()
 
                 session.add(
                     PaperSection(
@@ -58,6 +68,7 @@ def test_retriever_writer_and_citation_guard_work_together():
                 )
                 dft_result = DFTResult(
                     paper_id=paper.id,
+                    catalyst_sample_id=catalyst_sample.id,
                     adsorbate="Li2S4",
                     property_type="adsorption_energy",
                     value=-1.23,

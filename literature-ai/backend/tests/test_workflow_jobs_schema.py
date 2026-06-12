@@ -213,7 +213,7 @@ def test_paper_type_stats_are_database_backed_and_empty_when_no_papers():
         factory = db_session._session_factories[db_url]
         session = factory()
         try:
-            empty = asyncio.run(get_paper_type_stats("DefaultLibrary", session=session))
+            empty = get_paper_type_stats("DefaultLibrary", session=session)
             assert empty["total"] == 0
             assert [item["count"] for item in empty["items"]] == [0, 0, 0, 0]
 
@@ -227,7 +227,7 @@ def test_paper_type_stats_are_database_backed_and_empty_when_no_papers():
             )
             session.commit()
 
-            stats = asyncio.run(get_paper_type_stats("DefaultLibrary", session=session))
+            stats = get_paper_type_stats("DefaultLibrary", session=session)
             counts = {item["key"]: item["count"] for item in stats["items"]}
             assert stats["total"] == 3
             assert counts == {"A": 1, "B": 1, "C": 0, "uncategorized": 1}

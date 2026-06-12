@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.extraction import prepare_extraction_field_reviews
-from app.db.models import Base, DFTResult, EvidenceLocator, EvidenceSpan, ExtractionFieldReview, Paper, WritingCard
+from app.db.models import Base, CatalystSample, DFTResult, EvidenceLocator, EvidenceSpan, ExtractionFieldReview, Paper, WritingCard
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.paper_query import PaperQueryService
@@ -61,6 +61,19 @@ def _dft_result(session: Session, paper: Paper, *, evidence_text: str = "DFT evi
     session.add(row)
     session.flush()
     return row
+
+
+def _catalyst_sample(session: Session, paper: Paper) -> CatalystSample:
+    sample = CatalystSample(
+        paper_id=paper.id,
+        name="Fe-N4 catalyst",
+        catalyst_type="single_atom",
+        metal_centers=["Fe"],
+        support="N-doped carbon",
+    )
+    session.add(sample)
+    session.flush()
+    return sample
 
 
 def _locator(
@@ -297,6 +310,7 @@ def test_d4_exact_locator_and_human_verified_are_required_for_export_and_writing
         with SessionLocal() as session:
             paper = _paper(session)
             row = _dft_result(session, paper)
+            row.catalyst_sample_id = _catalyst_sample(session, paper).id
             _locator(session, paper, row, page=1, locator_status="exact_page")
             _review_like_writing_card(session, paper, locator_status="exact_page", page=1)
             service = ExtractionReviewService(session)
