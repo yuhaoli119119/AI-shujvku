@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db.models import EvidenceLocator, Paper, PaperFigure, PaperTable
 from app.utils.figure_reliability import build_figure_image_review, first_bbox
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.locator_degradation import locator_degradation
 
 
@@ -128,8 +129,12 @@ class ArtifactReliabilityAuditService:
             "examples": dict(sorted(examples.items())),
         }
 
-    def audit_library(self, *, limit: int = 100) -> dict[str, Any]:
-        papers = self.session.scalars(select(Paper).order_by(Paper.created_at.desc()).limit(limit)).all()
+    def audit_library(self, *, limit: int = 100, library_name: str | None = None) -> dict[str, Any]:
+        paper_stmt = select(Paper)
+        normalized_library = normalize_library_name(library_name) if library_name is not None else None
+        if library_name is not None:
+            paper_stmt = paper_stmt.where(build_library_name_clause(Paper.library_name, normalized_library))
+        papers = self.session.scalars(paper_stmt.order_by(Paper.created_at.desc()).limit(limit)).all()
         rows = [self.audit_paper(paper.id) for paper in papers]
         figure_issue_counts: Counter[str] = Counter()
         table_issue_counts: Counter[str] = Counter()
@@ -144,6 +149,8 @@ class ArtifactReliabilityAuditService:
             "metadata": {
                 "returned": len(rows),
                 "read_only": True,
+                "library_name": normalized_library,
+                "search_scope": "library" if library_name is not None else "all_libraries",
             },
             "summary": {
                 "paper_count": len(rows),

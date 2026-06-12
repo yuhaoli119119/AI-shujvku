@@ -652,6 +652,31 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert by_title["Human confirmed paper"]["needs_human_confirmation"] is False
 
 
+def test_review_center_api_filters_by_library_name(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper_a = Paper(title="Library A review paper", pdf_path="library-a.pdf", library_name="库A")
+        paper_b = Paper(title="Library B review paper", pdf_path="library-b.pdf", library_name="库B")
+        session.add_all([paper_a, paper_b])
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(paper_id=paper_a.id, property_type="band_gap", value=1.1, unit="eV"),
+                DFTResult(paper_id=paper_b.id, property_type="band_gap", value=2.2, unit="eV"),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/workbench/review-center", params={"library_name": "库A"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    titles = {row["title"] for row in payload["rows"]}
+    assert titles == {"Library A review paper"}
+    assert payload["metadata"]["library_name"] == "库A"
+
+
 def test_dft_review_queue_api_exposes_object_review_audit_summary(workbench_env):
     _, _, Session = workbench_env
     with Session() as session:

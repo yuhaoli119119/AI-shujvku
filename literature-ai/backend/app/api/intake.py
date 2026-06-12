@@ -143,14 +143,12 @@ def _trigger_ingest_job(
 ) -> dict[str, Any]:
     """为一个已 approved 的候选创建 ingest job 并派发。"""
     # 构建与现有 discovery_download_ingest 兼容的 payload
-    target_library = normalize_library_name(library_name or candidate.session.library_name if hasattr(candidate, "session") else None)
     # 直接从候选字段获取 library_name（通过 session_id 反查开销较大，改用 JOIN）
     stmt = select(LiteratureIntakeSession.library_name).where(
         LiteratureIntakeSession.id == candidate.session_id
     )
     sess_lib = session.scalar(stmt)
-    if library_name is None:
-        library_name = normalize_library_name(sess_lib)
+    effective_library = normalize_library_name(library_name or sess_lib)
 
     identifier = candidate.doi or candidate.identifier or candidate.url or candidate.title or ""
     if not identifier:
@@ -159,7 +157,7 @@ def _trigger_ingest_job(
     payload = {
         "identifier": identifier,
         "providers": candidate.providers or [],
-        "library_name": library_name,
+        "library_name": effective_library,
         # 传递候选原始元数据，供 ingest_metadata_only 降级时使用
         "title": candidate.title,
         "doi": candidate.doi,
@@ -176,7 +174,7 @@ def _trigger_ingest_job(
     job = create_job(
         session,
         job_type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
-        library_name=library_name,
+        library_name=effective_library,
         payload=payload,
         runtime_context={},
         progress={

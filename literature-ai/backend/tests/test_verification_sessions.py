@@ -197,6 +197,43 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
         assert session.scalar(select(AuditLog).where(AuditLog.action == "settle_verification_session")) is not None
 
 
+def test_verification_session_rejects_ambiguous_paper_ref_across_libraries(verification_env):
+    Session = verification_env
+    with Session() as session:
+        session.add_all(
+            [
+                Paper(
+                    title="Shared verification ref A",
+                    pdf_path="shared-a.pdf",
+                    library_name="库A",
+                    doi="10.1000/shared-verification-ref",
+                ),
+                Paper(
+                    title="Shared verification ref B",
+                    pdf_path="shared-b.pdf",
+                    library_name="库B",
+                    doi="10.1000/shared-verification-ref",
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/workbench/verification-sessions",
+        json={
+            "paper_refs": ["10.1000/shared-verification-ref"],
+            "scope": "all",
+            "refresh_materials": False,
+            "reviewer": "test_runner",
+        },
+    )
+
+    assert response.status_code == 400
+    detail = str(response.json()["detail"]).lower()
+    assert "ambiguous" in detail or "multiple libraries" in detail or "library" in detail
+
+
 def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
     Session = verification_env
     with Session() as session:

@@ -65,7 +65,39 @@ def test_claim_returns_candidate_papers(citation_client):
     assert response.status_code == 200
     ids = _ids(response)
     assert str(seed["safe"]) in ids
+    assert response.json()["metadata"]["search_scope"] == "all_libraries"
     assert response.json()["candidate_count"] > 0
+
+
+def test_citation_candidates_filter_by_library_name(citation_client):
+    client, Session, _ = citation_client
+    with Session() as session:
+        paper_a = Paper(
+            title="Library A sulfur redox kinetics",
+            abstract=CLAIM,
+            pdf_path="library-a.pdf",
+            library_name="库A",
+        )
+        paper_b = Paper(
+            title="Library B sulfur redox kinetics",
+            abstract=CLAIM,
+            pdf_path="library-b.pdf",
+            library_name="库B",
+        )
+        session.add_all([paper_a, paper_b])
+        session.commit()
+        paper_b_id = str(paper_b.id)
+
+    response = _post(client, library_name="库A")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata"]["library_name"] == "库A"
+    assert payload["metadata"]["search_scope"] == "library"
+    assert payload["metadata"]["total_papers_considered"] == 1
+    assert payload["candidates"]
+    assert all(item["library_name"] == "库A" for item in payload["candidates"])
+    assert paper_b_id not in _ids(response)
 
 
 def test_exclude_from_citation_true_is_not_returned(citation_client):
@@ -230,12 +262,13 @@ def test_max_candidates_limit_is_enforced(citation_client):
     assert len(response.json()["candidates"]) == 2
 
 
-def _post(client, *, filters=None, max_candidates=10):
+def _post(client, *, filters=None, max_candidates=10, library_name=None):
     return client.post(
         "/api/writing/citation-candidates",
         json={
             "text": CLAIM,
             "max_candidates": max_candidates,
+            "library_name": library_name,
             "filters": filters or {},
             "include_unverified_suggestions": True,
             "include_pending_review": True,

@@ -23,6 +23,7 @@ from app.db.models import (
     PaperSection,
     WritingCard,
 )
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import is_safe_verified_review
 
 
@@ -75,6 +76,7 @@ class CitationCandidateFilters:
 class CitationCandidateRequest:
     text: str
     max_candidates: int = 10
+    library_name: str | None = None
     filters: CitationCandidateFilters = field(default_factory=CitationCandidateFilters)
     include_unverified_suggestions: bool = True
     include_pending_review: bool = True
@@ -112,7 +114,11 @@ class WritingCitationCandidateService:
         if len(query_tokens) < 2:
             raise ValueError("text must contain at least two searchable terms")
 
-        papers = list(self.session.scalars(select(Paper)).all())
+        paper_stmt = select(Paper)
+        normalized_library = normalize_library_name(request.library_name) if request.library_name is not None else None
+        if request.library_name is not None:
+            paper_stmt = paper_stmt.where(build_library_name_clause(Paper.library_name, normalized_library))
+        papers = list(self.session.scalars(paper_stmt).all())
         eligibility = {row.paper_id: row for row in self.session.scalars(select(PaperCitationEligibility)).all()}
         impacts = {row.paper_id: row for row in self.session.scalars(select(PaperImpactMetadata)).all()}
         reviews = _group_by_paper(self.session.scalars(select(ExtractionFieldReview)).all())
@@ -192,6 +198,11 @@ class WritingCitationCandidateService:
         candidates = candidates[: request.max_candidates]
         return {
             "query_text": request.text,
+            "metadata": {
+                "library_name": normalized_library,
+                "search_scope": "library" if request.library_name is not None else "all_libraries",
+                "total_papers_considered": len(papers),
+            },
             "candidate_count": len(candidates),
             "candidates": candidates,
             "excluded_count": len(excluded_reasons),
@@ -444,6 +455,7 @@ class WritingCitationCandidateService:
             warnings.append("impact_factor_needs_metadata")
         return {
             "paper_id": str(paper.id),
+            "library_name": paper.library_name,
             "title": paper.title,
             "year": paper.year,
             "journal": paper.journal,

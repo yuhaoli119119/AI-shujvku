@@ -32,6 +32,7 @@ from app.services.review_conflict_service import (
 from app.services.review_service import ReviewService
 from app.services.review_target_resolver import canonical_target_type
 from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.library_names import DEFAULT_LIBRARY_NAME, normalize_library_name
 
 
 class VerificationSessionService:
@@ -117,7 +118,7 @@ class VerificationSessionService:
             job_id=session_id,
             type="verification_session",
             status="completed",
-            library_name=selected[0].library_name or "默认文献库",
+            library_name=selected[0].library_name or DEFAULT_LIBRARY_NAME,
             payload=payload,
             progress={"prepared": len(selected), "completed": True},
             result={
@@ -320,20 +321,35 @@ class VerificationSessionService:
                     func.lower(Paper.doi) == ref.lower(),
                     func.lower(Paper.title) == ref.lower(),
                 )
-            )
-            exact = self.session.scalars(stmt).first()
+            ).order_by(Paper.created_at.desc(), Paper.id.desc())
+            exact = self._select_unambiguous_paper(ref, self.session.scalars(stmt).all())
             if exact is not None:
                 resolved[str(exact.id)] = exact
                 continue
-            fuzzy = self.session.scalars(
-                select(Paper)
-                .where(or_(Paper.title.ilike(f"%{ref}%"), Paper.doi.ilike(f"%{ref}%")))
-                .order_by(Paper.created_at.desc())
-                .limit(1)
-            ).first()
+            fuzzy = self._select_unambiguous_paper(
+                ref,
+                self.session.scalars(
+                    select(Paper)
+                    .where(or_(Paper.title.ilike(f"%{ref}%"), Paper.doi.ilike(f"%{ref}%")))
+                    .order_by(Paper.created_at.desc(), Paper.id.desc())
+                ).all(),
+            )
             if fuzzy is not None:
                 resolved[str(fuzzy.id)] = fuzzy
         return list(resolved.values())
+
+    @staticmethod
+    def _select_unambiguous_paper(ref: str, papers: list[Paper]) -> Paper | None:
+        if not papers:
+            return None
+        libraries = {normalize_library_name(paper.library_name) for paper in papers}
+        if len(libraries) > 1:
+            ordered_libraries = ", ".join(sorted(libraries))
+            raise ValueError(
+                f"Ambiguous paper reference {ref!r}: matched papers in multiple libraries ({ordered_libraries}). "
+                "Use a paper UUID to select the intended paper."
+            )
+        return papers[0]
 
     def _paper_summary(self, paper: Paper) -> dict[str, Any]:
         dft_count = self.session.scalar(select(func.count()).select_from(DFTResult).where(DFTResult.paper_id == paper.id)) or 0

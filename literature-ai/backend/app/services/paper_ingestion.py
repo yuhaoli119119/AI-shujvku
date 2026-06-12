@@ -30,11 +30,11 @@ from app.services.paper_serials import renumber_library_papers_by_year
 from app.services.parse_quality_auditor import ParseQualityAuditor
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
+from app.utils.library_names import DEFAULT_LIBRARY_NAME
 from app.utils.text_cleaning import normalize_text_tree
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LIBRARY_NAME = "\u9ed8\u8ba4\u6587\u732e\u5e93"
 DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 
 

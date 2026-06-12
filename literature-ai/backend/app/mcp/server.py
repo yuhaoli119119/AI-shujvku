@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.config import get_settings
 from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
@@ -37,6 +37,7 @@ from app.services.review_service import ReviewService
 from app.services.verification_session_service import VerificationSessionService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause
 
 mcp_server = FastMCP(
     get_settings().mcp_server_name,
@@ -742,7 +743,12 @@ async def parse_paper(identifier: str, providers: list[str] | None = None) -> di
 
             doi = metadata.get("doi")
             if doi:
-                existing = session.scalar(select(Paper).where(Paper.doi == doi))
+                existing = session.scalar(
+                    select(Paper).where(
+                        Paper.doi == doi,
+                        build_library_name_clause(Paper.library_name, DEFAULT_LIBRARY_NAME),
+                    )
+                )
                 if existing:
                     job.status = "completed"
                     job.paper_id = existing.id
@@ -754,7 +760,7 @@ async def parse_paper(identifier: str, providers: list[str] | None = None) -> di
                             source=auth.source_prefix,
                             target_type="parse_job",
                             target_id=str(job.id),
-                            payload={"identifier": identifier, "doi": doi},
+                            payload={"identifier": identifier, "doi": doi, "library_name": DEFAULT_LIBRARY_NAME},
                         )
                     )
                     session.flush()
@@ -2048,24 +2054,30 @@ def scan_duplicate_dois() -> dict[str, Any]:
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        from sqlalchemy import text
-        query = text("""
-            SELECT doi, COUNT(*) as cnt, array_agg(id) as paper_ids
-            FROM papers
-            WHERE doi IS NOT NULL
-            GROUP BY doi
-            HAVING COUNT(*) > 1
-        """)
-        results = session.execute(query).fetchall()
-        
+        duplicate_keys = session.execute(
+            select(Paper.library_name, Paper.doi, func.count(Paper.id).label("cnt"))
+            .where(Paper.doi.is_not(None))
+            .group_by(Paper.library_name, Paper.doi)
+            .having(func.count(Paper.id) > 1)
+        ).all()
+
         duplicates = []
-        for row in results:
-            duplicates.append({
-                "doi": row.doi,
-                "count": row.cnt,
-                "paper_ids": [str(pid) for pid in row.paper_ids]
-            })
-            
+        for library_name, doi, count in duplicate_keys:
+            paper_ids = session.scalars(
+                select(Paper.id).where(
+                    Paper.library_name == library_name,
+                    Paper.doi == doi,
+                )
+            ).all()
+            duplicates.append(
+                {
+                    "library_name": library_name,
+                    "doi": doi,
+                    "count": count,
+                    "paper_ids": [str(pid) for pid in paper_ids],
+                }
+            )
+
         return {
             "duplicate_groups_count": len(duplicates),
             "duplicates": duplicates

@@ -21,3 +21,24 @@ def test_postgresql_baseline_uses_current_embedding_dimension():
     vector_dimensions = set(int(item) for item in re.findall(r"vector\((\d+)\)", sql, flags=re.IGNORECASE))
 
     assert vector_dimensions == {EMBEDDING_DIMENSION}
+
+
+def test_postgresql_baseline_keeps_required_extensions_and_library_scoped_doi():
+    sql = Path("app/migrations/001_init.sql").read_text(encoding="utf-8")
+
+    for extension in ("vector", "pgcrypto", "pg_trgm"):
+        assert re.search(rf"CREATE EXTENSION IF NOT EXISTS\s+{extension}\s*;", sql, flags=re.IGNORECASE)
+
+    assert "CONSTRAINT uq_papers_library_doi UNIQUE (library_name, doi)" in sql
+    assert "papers_doi_key" not in sql
+    assert not re.search(r"UNIQUE\s*\(\s*doi\s*\)", sql, flags=re.IGNORECASE)
+    assert "library_name VARCHAR(255) DEFAULT '默认文献库' NOT NULL" in sql
+
+
+def test_migration_files_are_utf8_without_common_mojibake_markers():
+    markers = ("榛樿", "鏂囩", "\ufffd")
+
+    for path in Path("app/migrations").glob("*.sql"):
+        sql = path.read_text(encoding="utf-8")
+        for marker in markers:
+            assert marker not in sql, f"{path} contains mojibake marker {marker!r}"

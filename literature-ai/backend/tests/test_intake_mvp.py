@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import Base, LiteratureIntakeCandidate, LiteratureIntakeSession, Paper
+from app.db.models import Base, LiteratureIntakeCandidate, LiteratureIntakeSession, Paper, WorkflowJob
 from app.db.session import get_db_session
 from app.main import app
 
@@ -350,6 +350,24 @@ def test_batch_ingest_approved_only(client, db_session):
 # ===========================================================================
 # TEST 7: 批量 ingest-approved — 无 approved 候选 → 422
 # ===========================================================================
+
+def test_batch_ingest_uses_intake_session_library_when_not_explicit(client, db_session):
+    """ingest-approved should carry the intake session library into job and payload."""
+    sess, candidates = make_session_with_candidates(db_session, n_pending=1, library_name="SessionLibrary")
+    candidate = candidates[0]
+    client.post(f"/api/intake/candidates/{candidate.id}/approve")
+
+    with patch("app.api.intake.dispatch_job", return_value="threadpool"):
+        response = client.post(f"/api/intake/sessions/{sess.id}/ingest-approved")
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    updated = db_session.get(LiteratureIntakeCandidate, candidate.id)
+    job = db_session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == updated.ingest_job_id))
+    assert job is not None
+    assert job.library_name == "SessionLibrary"
+    assert job.payload["library_name"] == "SessionLibrary"
+
 
 def test_batch_ingest_no_approved_returns_422(client, db_session):
     """无 approved 候选时批量 ingest 应返回 422。"""
