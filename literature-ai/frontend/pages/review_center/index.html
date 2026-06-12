@@ -731,6 +731,9 @@
       <div class="panel-head">
         <div class="muted mono" id="queueMeta" style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">正在读取当前库...</div>
         <div class="filterbar">
+          <select id="libraryFilter" onchange="loadReviewCenter()">
+            <option value="">全部文献库</option>
+          </select>
           <select id="statusFilter" onchange="renderRows()">
             <option value="">全部流程状态</option>
             <option value="group:needs_action">需要我处理</option>
@@ -795,7 +798,7 @@
   </div>
 
   <script>
-    const state = { rows: [], metadata: {}, verificationSession: null };
+    const state = { rows: [], metadata: {}, verificationSession: null, libraries: [] };
     const conflictState = {
       activeRow: null,
       groups: [],
@@ -985,6 +988,25 @@
         ].join(" ").toLowerCase();
         return haystack.includes(q);
       });
+    }
+
+    async function loadLibraries() {
+      try {
+        const libraries = await fetchJSON("/api/libraries");
+        state.libraries = Array.isArray(libraries) ? libraries : [];
+        const select = document.getElementById("libraryFilter");
+        if (!select) return;
+        const current = select.value || "";
+        select.innerHTML = '<option value="">全部文献库</option>' + state.libraries.map(function (item) {
+          const count = Number(item.paper_count || 0);
+          return '<option value="' + esc(item.name || "") + '">' + esc((item.name || "未命名文献库") + " (" + count + ")") + '</option>';
+        }).join("");
+        if (current && state.libraries.some(function (item) { return item && item.name === current; })) {
+          select.value = current;
+        }
+      } catch (_) {
+        state.libraries = [];
+      }
     }
 
     function sortedRows(rows) {
@@ -2309,7 +2331,8 @@
     function renderRows() {
       renderStats();
       const rows = sortedRows(filteredRows());
-      document.getElementById("queueMeta").textContent = "显示 " + rows.length + " / " + state.rows.length + " 篇";
+      const library = getValue("libraryFilter") || "全部文献库";
+      document.getElementById("queueMeta").textContent = library + " | 显示 " + rows.length + " / " + state.rows.length + " 篇";
       const tbody = document.getElementById("rows");
       if (!rows.length) {
         tbody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无匹配文献</div></td></tr>';
@@ -2408,6 +2431,8 @@
           limit: "50",
           sort_by: getValue("sortFilter") || "recent",
         });
+        const library = getValue("libraryFilter");
+        if (library) params.set("library_name", library);
         const data = await fetchJSON("/api/workbench/review-center?" + params.toString());
         state.rows = data.rows || [];
         state.metadata = data.metadata || {};
@@ -2595,7 +2620,7 @@
         if (event.key === "Escape") closeInfoOverlay();
       });
       renderVerificationSession();
-      loadReviewCenter();
+      loadLibraries().finally(loadReviewCenter);
     });
   </script>
 </body>

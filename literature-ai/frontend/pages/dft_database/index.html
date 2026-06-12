@@ -201,8 +201,8 @@
       border-color: var(--color-primary);
       color: var(--color-primary);
     }
-    .quality-list { display: grid; gap: 8px; max-height: 240px; overflow: auto; padding-right: 4px; }
-    .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 10px 12px; background: var(--color-surface-alt); }
+    .quality-list { display: grid; gap: 10px; max-height: 380px; overflow: auto; padding-right: 4px; }
+    .quality-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 12px 14px; background: var(--color-surface-alt); }
     .quality-row.exportable { border-color: var(--color-success); background: var(--color-success-bg); }
     .quality-row h4 { margin: 0 0 6px; font-size: 14px; }
     .quality-row-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -210,8 +210,8 @@
     .quality-row-title h4 { overflow-wrap: anywhere; }
     .quality-meta { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-    .queue-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 8px; }
-    .queue-evidence-preview { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
+    .queue-field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 10px; }
+    .queue-evidence-preview { margin-top: 10px; padding: 9px 11px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; max-height: 74px; overflow: hidden; }
     .audit-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .audit-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 4px 8px; background: var(--color-surface); color: var(--color-text-secondary); font-size: 11px; font-weight: 800; }
     .audit-chip.warn { border-color: var(--color-warning); color: var(--color-warning); background: var(--color-warning-bg); }
@@ -241,6 +241,22 @@
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
     .empty-state { text-align: left; color: var(--color-text-secondary); padding: 8px 12px; min-height: auto; border: 1px dashed var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); line-height: 1.45; }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
+    .modal-backdrop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.38); z-index: 50; }
+    .modal-backdrop.open { display: flex; }
+    .evidence-modal { width: min(920px, 96vw); max-height: min(760px, 88vh); display: flex; flex-direction: column; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--shadow-elevated); overflow: hidden; }
+    .evidence-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 18px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-alt); }
+    .evidence-modal-title { margin: 0; font-size: 17px; line-height: 1.35; }
+    .evidence-modal-subtitle { margin-top: 4px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.45; }
+    .modal-close { width: 32px; height: 32px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-secondary); cursor: pointer; font-size: 18px; line-height: 1; }
+    .modal-close:hover { color: var(--color-primary); border-color: var(--color-primary); }
+    .evidence-modal-body { padding: 16px 18px 18px; overflow: auto; }
+    .evidence-modal-status { color: var(--color-text-secondary); font-size: 12px; font-weight: 700; margin-bottom: 10px; }
+    .evidence-modal .mono { max-height: none; }
+    .fragment-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 12px; margin-top: 10px; }
+    .fragment-card .fragment-label { color: var(--color-text-muted); font-size: 12px; font-weight: 800; margin-bottom: 6px; }
+    .fragment-card .fragment-text { color: var(--color-text); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .fragment-context-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .fragment-context-grid .fragment-card { margin-top: 0; }
     /* Collapsible sections */
     .collapse-header {
       display: flex;
@@ -285,6 +301,7 @@
       .filter-panel { align-items: flex-start; }
       .export-panel { margin-left: 0; }
       .completeness-list { grid-template-columns: 1fr; }
+      .fragment-context-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -293,6 +310,7 @@
   <main class="shell">
     <section class="filter-panel">
       <div class="filter-grid">
+        <div class="filter-field"><label for="libraryFilter">文献库</label><select id="libraryFilter" onchange="setCurrentLibraryFromSelect(); queryDFT();"><option value="">全部文献库</option></select></div>
         <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option></select></div>
         <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
         <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
@@ -377,24 +395,27 @@
       </div>
     </section>
 
-    <section class="panel-card">
-      <div class="panel-actions">
-        <div class="collapse-header" onclick="toggleCollapse(this)">
-          <span class="collapse-arrow">▼</span>
-          <strong>证据详情</strong>
-        </div>
-        <span id="validationSummary" class="muted"></span>
-      </div>
-      <div class="collapse-body" id="evidenceCollapse">
-        <div id="evidenceDetail" class="mono">点击证据链接以查看原始证据文本及来源元数据。</div>
-      </div>
-    </section>
     </div>
   </main>
   <div id="toast" class="toast"></div>
+  <div id="evidenceModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="evidenceModalTitle" onclick="handleEvidenceBackdropClick(event)">
+    <div class="evidence-modal">
+      <div class="evidence-modal-head">
+        <div>
+          <h3 id="evidenceModalTitle" class="evidence-modal-title">证据详情</h3>
+          <div id="evidenceModalSubtitle" class="evidence-modal-subtitle">查看原始证据文本及来源元数据。</div>
+        </div>
+        <button class="modal-close" type="button" onclick="closeEvidenceModal()" aria-label="关闭证据详情">×</button>
+      </div>
+      <div class="evidence-modal-body">
+        <div id="validationSummary" class="evidence-modal-status"></div>
+        <div id="evidenceDetail" class="mono">点击证据链接以查看原始证据文本及来源元数据。</div>
+      </div>
+    </div>
+  </div>
   <script>
     const API_BASE = "/api/papers";
-    const state = { items: [], qualityRows: [], qualityReason: "", currentLibrary: "" };
+    const state = { items: [], qualityRows: [], qualityReason: "", currentLibrary: "", libraries: [] };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function toggleCollapse(header) {
       const body = header.closest(".panel-actions")?.nextElementSibling || header.parentElement.nextElementSibling;
@@ -507,15 +528,45 @@
       return data;
     }
     async function ensureCurrentLibraryName() {
+      const select = document.getElementById("libraryFilter");
+      if (select && select.value !== state.currentLibrary) state.currentLibrary = select.value;
       if (state.currentLibrary) return state.currentLibrary;
       try {
         const libraries = await fetchJSON("/api/libraries");
-        const active = (libraries || []).find(item => item && item.is_active) || (libraries || [])[0];
-        state.currentLibrary = active && active.name ? active.name : "";
+        state.libraries = Array.isArray(libraries) ? libraries : [];
+        populateLibraryFilter();
+        state.currentLibrary = select ? select.value : "";
       } catch (_) {
         state.currentLibrary = "";
       }
       return state.currentLibrary;
+    }
+    async function loadLibraries() {
+      try {
+        const libraries = await fetchJSON("/api/libraries");
+        state.libraries = Array.isArray(libraries) ? libraries : [];
+        populateLibraryFilter();
+      } catch (_) {
+        state.libraries = [];
+      }
+    }
+    function populateLibraryFilter() {
+      const select = document.getElementById("libraryFilter");
+      if (!select) return;
+      const current = state.currentLibrary || select.value || "";
+      select.innerHTML = '<option value="">全部文献库</option>' + state.libraries.map(item => {
+        const count = Number(item.paper_count || 0);
+        return '<option value="' + esc(item.name || "") + '">' + esc((item.name || "未命名文献库") + " (" + count + ")") + '</option>';
+      }).join("");
+      if (current && state.libraries.some(item => item && item.name === current)) {
+        select.value = current;
+        state.currentLibrary = current;
+      }
+    }
+    function setCurrentLibraryFromSelect() {
+      const select = document.getElementById("libraryFilter");
+      state.currentLibrary = select ? select.value : "";
+      state.qualityReason = "";
     }
     function applyLibraryParam(params) {
       if (state.currentLibrary) params.set("library_name", state.currentLibrary);
@@ -671,6 +722,18 @@
       const locators = row && Array.isArray(row.evidence_locators) ? row.evidence_locators : [];
       return locators.find(item => item && item.locator_status === "exact_page" && item.page) || locators.find(item => item && item.page) || locators[0] || null;
     }
+    function sourceTypeLabel(value) {
+      const raw = String(value || "").trim();
+      if (!raw || raw === "unknown") return "";
+      const mapping = {
+        pdf_text: "PDF 文本",
+        docling_text: "Docling 文本",
+        table: "表格",
+        figure: "图像",
+        supplementary: "补充材料"
+      };
+      return mapping[raw] || raw;
+    }
     function locatorSummary(row) {
       const locator = firstLocator(row);
       const primary = row && row.primary_locator_reliability ? row.primary_locator_reliability : {};
@@ -680,11 +743,99 @@
       const parts = ["locator: " + locatorStatusLabel(status)];
       if (reliability) parts.push(locatorReliabilityLabel(reliability));
       if (page) parts.push("page " + page);
-      if (locator && locator.source_type) parts.push(locator.source_type);
+      if (!page) parts.push("缺少 PDF 页码");
+      if (locator && locator.source_type) {
+        const sourceLabel = sourceTypeLabel(locator.source_type);
+        if (sourceLabel) parts.push(sourceLabel);
+      }
       if (locator && locator.section) parts.push(locator.section);
       if (locator && locator.table_id) parts.push("table");
       if (locator && locator.figure_id) parts.push("figure");
       return parts.join(" / ");
+    }
+    function fragmentStatusLabel(row) {
+      const locator = firstLocator(row);
+      const primary = row && row.primary_locator_reliability ? row.primary_locator_reliability : {};
+      const status = primary.status || (row && row.locator_status) || (locator && locator.locator_status);
+      if (status === "exact_page") return "文章片段 + 精确 PDF 页码";
+      if (status === "text_only") return "文章片段定位（无 PDF 页码）";
+      if (status === "missing_locator" || status === "missing") return "文章片段待补定位";
+      if (status === "approximate") return "文章片段定位（近似）";
+      return "文章片段定位";
+    }
+    function firstTextValue(...values) {
+      for (const value of values) {
+        if (value == null) continue;
+        if (typeof value === "string" && value.trim()) return value.trim();
+        if (typeof value === "number" && Number.isFinite(value)) return String(value);
+      }
+      return "";
+    }
+    function collectEvidencePayloadText(payload, keys) {
+      const seen = new Set();
+      const stack = [payload];
+      while (stack.length) {
+        const value = stack.shift();
+        if (!value || typeof value !== "object") continue;
+        if (seen.has(value)) continue;
+        seen.add(value);
+        if (Array.isArray(value)) {
+          value.slice(0, 12).forEach(item => stack.push(item));
+          continue;
+        }
+        for (const key of keys) {
+          const found = firstTextValue(value[key]);
+          if (found) return found;
+        }
+        Object.values(value).slice(0, 24).forEach(item => {
+          if (item && typeof item === "object") stack.push(item);
+        });
+      }
+      return "";
+    }
+    function evidenceFragmentPayload(row) {
+      const locator = firstLocator(row) || {};
+      const payload = row && row.evidence_payload;
+      const sourceLocation = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload.source_location || {}) : {};
+      const before = collectEvidencePayloadText(payload, ["before_text", "text_before", "preceding_text", "context_before", "previous_text", "prefix"]);
+      const after = collectEvidencePayloadText(payload, ["after_text", "text_after", "following_text", "context_after", "next_text", "suffix"]);
+      const context = collectEvidencePayloadText(payload, ["context", "evidence_context", "surrounding_text", "chunk_text", "section_text"]);
+      return {
+        paper: firstTextValue(row && row.title, row && row.paper_title),
+        doi: firstTextValue(row && row.doi),
+        section: firstTextValue(row && row.source_section, locator.section, sourceLocation.section, sourceLocation.section_title),
+        figure: firstTextValue(row && row.source_figure, locator.figure_id, sourceLocation.figure),
+        table: firstTextValue(locator.table_id, sourceLocation.table),
+        sourceType: firstTextValue(sourceTypeLabel(locator.source_type), sourceTypeLabel(sourceLocation.source_type)),
+        evidenceText: firstTextValue(row && row.evidence_text, locator.evidence_text, collectEvidencePayloadText(payload, ["evidence_text", "excerpt", "quote"])),
+        before,
+        after,
+        context,
+      };
+    }
+    function renderFragmentContext(row) {
+      const fragment = evidenceFragmentPayload(row);
+      const contextText = fragment.context && fragment.context !== fragment.evidenceText ? fragment.context : "";
+      const before = fragment.before || (contextText ? "见完整上下文。" : "暂无前文片段。");
+      const after = fragment.after || (contextText ? "见完整上下文。" : "暂无后文片段。");
+      const fullContext = contextText
+        ? '<div class="fragment-card"><div class="fragment-label">上下文</div><div class="fragment-text">' + esc(contextText) + '</div></div>'
+        : "";
+      return '<div class="fragment-card"><div class="fragment-label">证据原文</div><div class="fragment-text">' + esc(fragment.evidenceText || "暂无证据原文。") + '</div></div>' +
+        '<div class="fragment-context-grid">' +
+          '<div class="fragment-card"><div class="fragment-label">前文</div><div class="fragment-text">' + esc(before) + '</div></div>' +
+          '<div class="fragment-card"><div class="fragment-label">后文</div><div class="fragment-text">' + esc(after) + '</div></div>' +
+        '</div>' +
+        fullContext;
+    }
+    function renderFragmentLocationRows(row) {
+      const fragment = evidenceFragmentPayload(row);
+      return '<div class="quality-status-grid">' +
+          '<div class="readable-field"><div class="k">来源文献</div><div class="v">' + esc(fragment.paper || "文献") + (fragment.doi ? '<br><span class="muted">' + esc(fragment.doi) + '</span>' : "") + '</div></div>' +
+          '<div class="readable-field"><div class="k">来源章节</div><div class="v">' + esc(fragment.section || "-") + '</div></div>' +
+          '<div class="readable-field"><div class="k">图表 / 步骤</div><div class="v">' + esc([fragment.table, fragment.figure, row && row.reaction_step].filter(Boolean).join(" / ") || "-") + '</div></div>' +
+          '<div class="readable-field"><div class="k">片段定位状态</div><div class="v">' + esc(fragmentStatusLabel(row)) + '</div></div>' +
+        '</div>';
     }
     function locatorReliabilityLabel(status) {
       const mapping = {
@@ -731,7 +882,8 @@
       const page = row && row.evidence_page ? row.evidence_page : (locator && locator.page);
       const klass = cssClass || "btn btn-ghost btn-sm";
       if (!canJumpToDftPdf(row)) {
-        return '<button class="' + klass + '" type="button" disabled title="这条 DFT 记录还没有可直接跳转的精确 PDF 页定位。">打开 PDF 第 ' + esc(page || "-") + ' 页</button>';
+        const reason = page ? "定位不是精确页码，暂不直接跳转 PDF。" : "解析结果没有给出 PDF 页码，暂不直接跳转 PDF。";
+        return '<button class="' + klass + '" type="button" disabled title="' + esc(reason) + '">' + esc(page ? "页码定位不可靠" : "缺少页码定位") + '</button>';
       }
       return '<button class="' + klass + '" type="button" onclick="openDftPdfPage(\'' + esc(row.paper_id) + '\',' + esc(page || 0) + ')">打开 PDF 第 ' + esc(page || "-") + ' 页</button>';
     }
@@ -831,6 +983,26 @@
       }
       window.open("/api/papers/" + encodeURIComponent(paperId) + "/pdf#page=" + pageNumber, "_blank", "noopener");
     }
+    function setEvidenceModalHeader(title, subtitle) {
+      const titleEl = document.getElementById("evidenceModalTitle");
+      const subtitleEl = document.getElementById("evidenceModalSubtitle");
+      if (titleEl) titleEl.textContent = title || "证据详情";
+      if (subtitleEl) subtitleEl.textContent = subtitle || "查看原始证据文本及来源元数据。";
+    }
+    function revealEvidencePanel() {
+      const modal = document.getElementById("evidenceModal");
+      if (!modal) return;
+      modal.classList.add("open");
+      const closeButton = modal.querySelector(".modal-close");
+      if (closeButton) closeButton.focus({ preventScroll: true });
+    }
+    function closeEvidenceModal() {
+      const modal = document.getElementById("evidenceModal");
+      if (modal) modal.classList.remove("open");
+    }
+    function handleEvidenceBackdropClick(event) {
+      if (event && event.target && event.target.id === "evidenceModal") closeEvidenceModal();
+    }
     function showQueueEvidence(index) {
       const item = state.qualityRows[index];
       if (!item) return;
@@ -840,14 +1012,17 @@
       const audits = Array.isArray(item.latest_external_audit_opinions) ? item.latest_external_audit_opinions : [];
       const objectAudits = Array.isArray(item.object_review_audits) ? item.object_review_audits : [];
       const conflicts = Array.isArray(item.field_conflicts) ? item.field_conflicts : [];
-      const collapseEl = document.getElementById("evidenceCollapse");
-      const header = collapseEl?.previousElementSibling?.querySelector(".collapse-header");
-      if (collapseEl && collapseEl.classList.contains("hidden")) {
-        collapseEl.classList.remove("hidden");
-        if (header) header.classList.remove("collapsed");
-      }
       const locatorRows = locators.length
-        ? locators.map(loc => '<div class="quality-meta">page ' + esc(loc.page || "-") + ' / ' + esc(locatorStatusLabel(loc.locator_status)) + ' / ' + esc(loc.source_type || "-") + (loc.section ? ' / ' + esc(loc.section) : '') + (loc.table_id ? ' / table' : '') + (loc.figure_id ? ' / figure' : '') + (loc.warning_reason ? ' / warning: ' + esc(loc.warning_reason) : '') + '</div>').join("")
+        ? locators.map(loc => {
+          const locationParts = ['page ' + (loc.page || "-"), locatorStatusLabel(loc.locator_status)];
+          const sourceLabel = sourceTypeLabel(loc.source_type);
+          if (sourceLabel) locationParts.push(sourceLabel);
+          if (loc.section) locationParts.push(loc.section);
+          if (loc.table_id) locationParts.push("table");
+          if (loc.figure_id) locationParts.push("figure");
+          if (loc.warning_reason) locationParts.push("warning: " + loc.warning_reason);
+          return '<div class="quality-meta">' + esc(locationParts.join(" / ")) + '</div>';
+        }).join("")
         : '<div class="quality-meta">No evidence locator is attached to this row.</div>';
       const locatorWarnings = Array.isArray(item.locator_reliability_warnings) && item.locator_reliability_warnings.length
         ? item.locator_reliability_warnings.map(locatorWarningLabel).join(", ")
@@ -856,10 +1031,9 @@
         ? audits.map(audit => '<div class="quality-meta"><strong>' + esc(audit.source_label || audit.source || "external audit") + '</strong>: ' + esc(audit.verdict || "-") + ' / ' + esc(audit.recommended_action || "-") + ' / ' + esc(audit.verification_status || "unverified") + '</div>').join("")
         : '<div class="quality-meta">No external audit opinion has been imported for this paper.</div>';
       document.getElementById("evidenceDetail").innerHTML =
-        '<div class="quality-status-grid">' +
+        renderFragmentLocationRows(item) +
+        '<div class="quality-status-grid" style="margin-top:10px;">' +
           '<div class="readable-field"><div class="k">DFT row</div><div class="v">' + esc(item.property_type || "-") + ' / ' + esc(item.adsorbate || "-") + ' = ' + esc(item.value == null ? "-" : item.value) + ' ' + esc(item.unit || "") + '</div></div>' +
-          '<div class="readable-field"><div class="k">PDF 定位</div><div class="v">' + esc(locatorSummary(item)) + '</div></div>' +
-          '<div class="readable-field"><div class="k">定位告警</div><div class="v">' + esc(locatorWarnings) + '</div></div>' +
           '<div class="readable-field"><div class="k">入库状态</div><div class="v">' + esc(item.is_exportable ? "可导出" : "待处理") + ' / ' + esc((item.blocked_reasons || []).map(reasonLabel).join(", ") || "无") + '</div></div>' +
           '<div class="readable-field"><div class="k">Review status</div><div class="v">' + esc(reviewStatusLabel(item.review_status)) + ' / ' + esc(item.recommended_action || "-") + '</div></div>' +
         '</div>' +
@@ -867,12 +1041,14 @@
           renderDftPdfButton(item, "btn btn-primary btn-sm") +
           '<a class="btn btn-ghost btn-sm" href="../review_center/index.html">去审核中心处理</a>' +
         '</div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">证据原文</div><div class="v">' + esc(item.evidence_text || "暂无证据原文。") + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">证据定位</div><div class="v">' + locatorRows + '</div></div>' +
+        renderFragmentContext(item) +
+        '<div class="readable-field" style="margin-top:10px;"><div class="k">原定位记录</div><div class="v">' + locatorRows + '<div class="quality-meta">定位摘要：' + esc(locatorSummary(item)) + '</div><div class="quality-meta">定位告警：' + esc(locatorWarnings) + '</div></div></div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">最新外部审核</div><div class="v">' + auditRows + '</div></div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">对象级审核</div><div class="v">' + renderObjectAuditRows(objectAudits) + '</div></div>' +
         '<div class="readable-field" style="margin-top:10px;"><div class="k">AI 冲突</div><div class="v">' + renderConflictRows(conflicts) + '</div></div>';
-      document.getElementById("validationSummary").textContent = item.evidence_text ? "已加载这条 DFT 记录的证据详情。" : "这条 DFT 记录缺少证据原文。";
+      document.getElementById("validationSummary").textContent = item.evidence_text ? "已加载这条 DFT 记录的文章片段证据。" : "这条 DFT 记录缺少证据原文。";
+      setEvidenceModalHeader(item.property_type || "DFT 候选证据", (item.title || "文献") + (item.year ? " | " + item.year : ""));
+      revealEvidencePanel();
     }
     function renderQualityRows(rows) {
       const el = document.getElementById("qualityRows");
@@ -1009,22 +1185,17 @@
     }
     function showEvidence(index) {
       const item = state.items[index];
-      // Auto-expand evidence section
-      const collapseEl = document.getElementById("evidenceCollapse");
-      const header = collapseEl?.previousElementSibling?.querySelector(".collapse-header");
-      if (collapseEl && collapseEl.classList.contains("hidden")) {
-        collapseEl.classList.remove("hidden");
-        if (header) header.classList.remove("collapsed");
-      }
+      if (!item) return;
       document.getElementById("evidenceDetail").innerHTML =
-        '<div class="quality-status-grid">' +
-          '<div class="readable-field"><div class="k">来源章节</div><div class="v">' + esc(item.source_section || "-") + '</div></div>' +
-          '<div class="readable-field"><div class="k">页码</div><div class="v">' + esc(item.page_start || "-") + '</div></div>' +
+        renderFragmentLocationRows(item) +
+        '<div class="quality-status-grid" style="margin-top:10px;">' +
           '<div class="readable-field"><div class="k">置信度</div><div class="v">' + esc(item.confidence == null ? "-" : item.confidence) + '</div></div>' +
           '<div class="readable-field"><div class="k">校验状态</div><div class="v">' + esc(validationStatusLabel(item.validation_status || "needs_review")) + '</div></div>' +
         '</div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">证据原文</div><div class="v">' + esc(item.evidence_text || "暂无证据原文") + '</div></div>';
-      document.getElementById("validationSummary").textContent = item.evidence_text ? "已显示证据" : "这条记录缺少证据原文";
+        renderFragmentContext(item);
+      document.getElementById("validationSummary").textContent = item.evidence_text ? "已显示文章片段证据。" : "这条记录缺少证据原文。";
+      setEvidenceModalHeader(item.property_type || "DFT 证据", (item.title || "文献") + (item.doi ? " | " + item.doi : ""));
+      revealEvidencePanel();
     }
     function setExportSafetyStatus(message) {
       const el = document.getElementById("exportSafetyStatus");
@@ -1223,7 +1394,10 @@
       ensureMLExportButton();
       applyReadableDftLabels();
       TopNav.init({ currentPage: "dft-database", mountId: "topnav-mount" });
-      queryDFT();
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape") closeEvidenceModal();
+      });
+      loadLibraries().finally(queryDFT);
     });
   </script>
 </body>

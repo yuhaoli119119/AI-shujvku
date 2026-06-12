@@ -322,6 +322,7 @@ async def compare_dft_results(
                 "confidence": dr.confidence,
                 "candidate_status": dr.candidate_status or "system_candidate",
                 "evidence_text": dr.evidence_text,
+                "evidence_payload": dr.evidence_payload,
                 "source_section": dr.source_section,
                 "source_figure": dr.source_figure,
                 "catalysts": catalysts,

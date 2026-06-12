@@ -34,6 +34,7 @@ from app.utils.workbench_status import (
     workflow_needs_human_confirmation,
     workflow_status_after_parsing,
 )
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
 from app.utils.protocol_tracking import protocol_snapshot
 
@@ -279,8 +280,18 @@ class PaperWorkbenchService:
             "dft_candidate_status_counts": dict(Counter(row.candidate_status or "unknown" for row in dft_rows)),
         }
 
-    def review_center(self, *, limit: int = 100, sort_by: str = "recent") -> dict[str, Any]:
-        papers = self.session.scalars(select(Paper)).all()
+    def review_center(
+        self,
+        *,
+        limit: int = 100,
+        sort_by: str = "recent",
+        library_name: str | None = None,
+    ) -> dict[str, Any]:
+        paper_stmt = select(Paper)
+        normalized_library = normalize_library_name(library_name) if library_name is not None else None
+        if normalized_library:
+            paper_stmt = paper_stmt.where(build_library_name_clause(Paper.library_name, normalized_library))
+        papers = self.session.scalars(paper_stmt).all()
         paper_ids = {paper.id for paper in papers}
         rows = []
         status_counts: Counter[str] = Counter()
@@ -512,6 +523,7 @@ class PaperWorkbenchService:
             "metadata": {
                 "returned": len(rows),
                 "sort_by": sort_by,
+                "library_name": normalized_library,
                 "status_counts": dict(sorted(status_counts.items())),
                 "quality_counts": dict(sorted(quality_counts.items())),
             },

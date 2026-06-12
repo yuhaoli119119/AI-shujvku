@@ -684,6 +684,12 @@ async function mockApi(route) {
           unit: 'eV',
           confidence: 0.9,
           evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+          source_section: 'Results',
+          evidence_payload: {
+            source_location: { section: 'Results' },
+            before_text: 'The Fe-N4 catalyst was evaluated for Li-S intermediates.',
+            after_text: 'This result indicates stronger polysulfide anchoring.',
+          },
         },
       ],
       stats: {
@@ -760,8 +766,14 @@ async function mockApi(route) {
           is_exportable: false,
           can_mark_verified: true,
           recommended_action: 'verify_against_pdf',
+          source_section: 'Results',
           evidence_text: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
           evidence_preview: 'The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.',
+          evidence_payload: {
+            source_location: { section: 'Results' },
+            before_text: 'The Fe-N4 catalyst was evaluated for Li-S intermediates.',
+            after_text: 'This result indicates stronger polysulfide anchoring.',
+          },
           primary_evidence_locator: {
             page: 4,
             source_type: 'table',
@@ -849,8 +861,14 @@ async function mockApi(route) {
           is_exportable: false,
           can_mark_verified: false,
           recommended_action: 'repair_pdf_locator',
+          source_section: 'Results',
           evidence_text: 'The band gap is reported in the text, but the parser did not retain a page locator.',
           evidence_preview: 'The band gap is reported in the text, but the parser did not retain a page locator.',
+          evidence_payload: {
+            source_location: { section: 'Results' },
+            before_text: 'Graphdiyne structures were compared in the electronic analysis.',
+            after_text: 'The missing parser page keeps this as text-only evidence.',
+          },
           primary_evidence_locator: {
             page: null,
             source_type: 'text',
@@ -1354,6 +1372,23 @@ async function mockApi(route) {
     return jsonResponse(route, {
       base_url: 'http://localhost:8000',
       mcp_url: 'http://localhost:8000/mcp',
+      recommended_entrypoint: {
+        method: 'POST',
+        path: '/api/papers/{paper_id}/prepare-ai-context',
+        description: 'Prepare materials for IDE / MCP AI review.',
+      },
+      http_endpoints: [
+        {
+          name: 'prepare-ai-context',
+          method: 'POST',
+          path: '/api/papers/{paper_id}/prepare-ai-context',
+          purpose: 'Prepare review materials without running a browser-owned AI parse.',
+        },
+      ],
+      mcp: {
+        url: '/mcp',
+        common_tools: ['prepare-ai-context', 'codex-item', 'import_analysis'],
+      },
       notes: ['Mock guide'],
     });
   }
@@ -2137,8 +2172,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
     await expect(page.locator('#dftTable')).toContainText('Li2S4');
     await page.click('button:has-text("证据链接")');
+    await expect(page.locator('#evidenceDetail')).toContainText('片段定位状态');
+    await expect(page.locator('#evidenceDetail')).toContainText('来源章节');
+    await expect(page.locator('#evidenceDetail')).toContainText('Results');
     await expect(page.locator('#evidenceDetail')).toContainText('证据原文');
     await expect(page.locator('#evidenceDetail')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.');
+    await expect(page.locator('#evidenceDetail')).toContainText('前文');
+    await expect(page.locator('#evidenceDetail')).toContainText('后文');
   });
 
   test('business flow: DFT export displays safety headers', async ({ page }) => {
@@ -2215,39 +2255,40 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityExportable')).toContainText('1');
     await expect(page.locator('#qualityBlocked')).toContainText('2');
     await expect(page.locator('#qualityReasonChips')).toContainText('缺少人工确认');
-    await expect(page.locator('#qualityRows')).toContainText('blocked');
+    await expect(page.locator('#qualityRows')).toContainText('待处理');
     await expect(page.locator('#qualityRows')).toContainText('adsorption_energy Li2S4 -1.23 eV');
-    await expect(page.locator('#qualityRows')).toContainText('Evidence locator');
+    await expect(page.locator('#qualityRows')).toContainText('证据定位');
     await expect(page.locator('#qualityRows')).toContainText('PDF 页码准确');
     await expect(page.locator('#qualityRows')).toContainText('page 4');
-    await expect(page.locator('#qualityRows')).toContainText('Blocked reasons');
+    await expect(page.locator('#qualityRows')).toContainText('阻断原因');
     await expect(page.locator('#qualityRows')).toContainText('缺少人工确认');
     await expect(page.locator('#qualityRows')).toContainText('Assigned AI DFT audit');
     await expect(page.locator('#qualityRows')).toContainText('WARN');
-    await expect(page.locator('#qualityRows')).toContainText('Object audits 1');
+    await expect(page.locator('#qualityRows')).toContainText('对象审核 1');
     await expect(page.locator('#qualityRows')).toContainText('REVISE');
-    await expect(page.locator('#qualityRows')).toContainText('Locator reliability: weak locator');
+    await expect(page.locator('#qualityRows')).toContainText('定位可靠性：weak locator');
     await expect(page.locator('#qualityRows')).toContainText('missing bbox');
-    await expect(page.locator('#qualityRows')).toContainText('Locator reliability: text-only');
+    await expect(page.locator('#qualityRows')).toContainText('定位可靠性：text-only');
     await expect(page.locator('#qualityRows')).toContainText('text-only');
-    await expect(page.locator('#qualityRows button:has-text("Review evidence")')).toHaveCount(2);
-    await expect(page.locator('#qualityRows button:has-text("Open PDF page 4")')).toHaveCount(1);
-    await expect(page.locator('#qualityRows button:has-text("Open PDF page -")')).toBeDisabled();
-    await expect(page.locator('#qualityRows button:has-text("Approve")')).toHaveCount(2);
-    await expect(page.locator('#qualityRows button:has-text("Reject")')).toHaveCount(2);
-    await expect(page.locator('#qualityRows button:has-text("Needs fix")')).toHaveCount(2);
+    await expect(page.locator('#qualityRows button:has-text("查看证据")')).toHaveCount(2);
+    await expect(page.locator('#qualityRows button:has-text("打开 PDF 第 4 页")')).toHaveCount(1);
+    await expect(page.locator('#qualityRows button:has-text("缺少页码定位")')).toBeDisabled();
+    await expect(page.locator('#qualityRows a:has-text("去审核中心处理")')).toHaveCount(2);
 
-    await page.click('#qualityRows button:has-text("Review evidence")');
-    await expect(page.locator('#evidenceDetail')).toContainText('Evidence text');
+    await page.click('#qualityRows button:has-text("查看证据")');
+    await expect(page.locator('#evidenceDetail')).toContainText('片段定位状态');
+    await expect(page.locator('#evidenceDetail')).toContainText('来源章节');
+    await expect(page.locator('#evidenceDetail')).toContainText('Results');
+    await expect(page.locator('#evidenceDetail')).toContainText('证据原文');
     await expect(page.locator('#evidenceDetail')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.');
-    await expect(page.locator('#evidenceDetail')).toContainText('Locator warnings');
+    await expect(page.locator('#evidenceDetail')).toContainText('前文');
+    await expect(page.locator('#evidenceDetail')).toContainText('后文');
+    await expect(page.locator('#evidenceDetail')).toContainText('原定位记录');
     await expect(page.locator('#evidenceDetail')).toContainText('missing bbox');
-    await expect(page.locator('#evidenceDetail')).toContainText('Locators');
     await expect(page.locator('#evidenceDetail')).toContainText('table');
     await expect(page.locator('#evidenceDetail')).toContainText('figure');
-    await expect(page.locator('#evidenceDetail')).toContainText('Export safety');
-    await expect(page.locator('#evidenceDetail')).toContainText('Latest external audit opinions');
-    await expect(page.locator('#evidenceDetail')).toContainText('Object-level AI audits');
+    await expect(page.locator('#evidenceDetail')).toContainText('最新外部审核');
+    await expect(page.locator('#evidenceDetail')).toContainText('对象级审核');
     await expect(page.locator('#evidenceDetail')).toContainText('object_review_audit');
     await expect(page.locator('#evidenceDetail')).toContainText('Object-level audit says the value should be checked against Table 1.');
     await expect(page.locator('#evidenceDetail')).toContainText('unverified');
@@ -2271,7 +2312,12 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const rows = page.locator('#rows tr');
     await expect(rows).toHaveCount(2);
 
-    const firstStatus = rows.nth(0).locator('td').nth(3);
+    const parsedRow = page.locator('#rows tr', { hasText: 'Test Paper for Smoke Validation' });
+    const missingRow = page.locator('#rows tr', { hasText: 'Missing PDF But Has Clues' });
+    await expect(parsedRow).toHaveCount(1);
+    await expect(missingRow).toHaveCount(1);
+
+    const firstStatus = parsedRow.locator('td').nth(3);
     await expect(firstStatus).toContainText('PDF 可用');
     await expect(firstStatus).toContainText('待审 DFT');
     await expect(firstStatus).toContainText('定位风险 2');
@@ -2282,7 +2328,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(firstStatus).not.toContainText('External audit:');
     await expect(firstStatus).not.toContainText('Object audits:');
 
-    const secondStatus = rows.nth(1).locator('td').nth(3);
+    const secondStatus = missingRow.locator('td').nth(3);
     await expect(secondStatus).toContainText('PDF 缺失');
     await expect(secondStatus).toContainText('未见 DFT');
     await expect(secondStatus).toContainText('定位风险 0');
@@ -2290,13 +2336,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(secondStatus).toContainText('冲突 2');
     await expect(secondStatus).not.toContainText('疑似漏提');
 
-    await rows.nth(0).locator('[data-action="open-details"]').click();
+    await parsedRow.locator('[data-action="open-details"]').click();
     const overlay = page.locator('#infoOverlay.open');
     await expect(overlay).toBeVisible();
     await expect(page.locator('#infoModalTitle')).toHaveText('Test Paper for Smoke Validation');
     await expect(page.locator('#infoModalSubtitle')).toContainText('Journal of Testing | 2025');
-    await expect(overlay).toContainText('External audit: 1');
-    await expect(overlay).toContainText('Object audits: 1');
+    await expect(overlay).toContainText('外部审核：1');
+    await expect(overlay).toContainText('对象审核：1');
     await expect(overlay).toContainText('Figure 风险');
     await expect(overlay).toContainText('Locator 风险');
     await expect(overlay).toContainText('system_candidate');
@@ -2304,7 +2350,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('#infoOverlay .modal-close').click();
     await expect(page.locator('#infoOverlay')).not.toHaveClass(/open/);
 
-    await rows.nth(1).locator('[data-action="open-conflicts"]').click();
+    await missingRow.locator('[data-action="open-conflicts"]').click();
     const conflictOverlay = page.locator('#infoOverlay.open');
     await expect(conflictOverlay).toBeVisible();
     await expect(conflictOverlay).toContainText('冲突详情');
@@ -2613,47 +2659,21 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect.poll(() => unsafeWrites.length).toBe(0);
   });
 
-  test('business flow: unconfigured internal AI shows parser settings guide with writer fallback', async ({ page }) => {
-    await page.route(/\/api\/settings\/status$/, route => {
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          embedding: { configured: true, provider: 'deterministic', model: 'text-embedding-3-small' },
-          writer: {
-            configured: false,
-            backend: 'rule',
-            model: 'gpt-4.1-mini',
-            missing: ['writer_api_base', 'writer_api_key'],
-            message: 'Writer LLM 尚未配置完整',
-          },
-          mcp: { has_keys: false, enabled: false },
-        }),
-      });
-    });
-    await page.route(/\/api\/external-analysis\/papers\/paper-1\/internal-parse$/, route => {
-      return route.fulfill({
-        status: 400,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'Internal AI is not configured' }),
-      });
-    });
-
+  test('business flow: review tab exposes MCP guide instead of legacy internal AI trigger', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
-    await page.waitForTimeout(500);
-    await page.locator('.paper-card, .paper-row').first().click();
+    await page.locator('.paper-row').first().click();
     await page.click('button[data-tab="review"]');
-    await page.click('#tab-review button[onclick="runInternalAIParse()"]');
 
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('内部解析配置未完成');
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('复用 Writer LLM');
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('不使用 Embedding');
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('Writer API Base URL / Writer API Key');
-    await expect(page.locator('#internalAIConfigGuide button:has-text("打开设置页")')).toBeVisible();
+    await expect(page.locator('#tab-review')).toContainText('IDE / MCP AI');
+    await expect(page.locator('#tab-review button[onclick="runInternalAIParse()"]')).toHaveCount(0);
+    await page.locator('#tab-review button[onclick="loadAgentGuide()"]').click();
+    await expect(page.locator('#mcpGuideBox')).toContainText('IDE / MCP AI');
+    await expect(page.locator('#mcpGuideBox')).toContainText('/mcp');
+    await expect(page.locator('#mcpGuideBox')).toContainText('prepare-ai-context');
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 
-  test('business flow: unconfigured internal AI separates parser, writer, and embedding guidance', async ({ page }) => {
+  test('business flow: review tab separates IDE/MCP workflow from embedding settings', async ({ page }) => {
     await page.route(/\/api\/settings\/status$/, route => {
       return route.fulfill({
         status: 200,
@@ -2681,15 +2701,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
-    await page.waitForTimeout(500);
-    await page.locator('.paper-card, .paper-row').first().click();
+    await page.locator('.paper-row').first().click();
     await page.click('button[data-tab="review"]');
-    await page.click('#tab-review button[onclick="runInternalAIParse()"]');
 
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('内部解析配置未完成');
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('复用 Writer LLM');
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('不使用 Embedding');
-    await expect(page.locator('#internalAIConfigGuide')).toContainText('内部解析 API Base URL');
+    await expect(page.locator('#tab-review')).toContainText('prepare-ai-context');
+    await expect(page.locator('#tab-review')).toContainText('codex-context');
+    await expect(page.locator('#tab-review')).toContainText('codex-item');
+    await expect(page.locator('#tab-review button[onclick="runInternalAIParse()"]')).toHaveCount(0);
+    await expect(page.locator('#internalAIConfigGuide')).toHaveCount(0);
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 
@@ -2844,7 +2863,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
 
-    const metaCard = page.locator('.paper-card').first();
+    const metaCard = page.locator('.paper-row[data-id="paper-meta-only"]');
     await expect(metaCard).toContainText('Metadata Only Paper');
     await expect(metaCard.locator('.status-chip.meta')).toBeVisible();
 
@@ -2867,8 +2886,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.waitForTimeout(500);
 
-    await expect(page.locator('.paper-card.active')).toContainText('Metadata Only Paper (Attached)');
-    await expect(page.locator('.paper-card.active .status-chip.parsed')).toBeVisible();
+    await expect(page.locator('.paper-row.active')).toContainText('Metadata Only Paper (Attached)');
+    await expect(page.locator('.paper-row.active .status-chip.parsed')).toBeVisible();
   });
 
   test('business flow: attach-pdf identity verification - needs_confirmation and confirm', async ({ page }) => {
@@ -2934,7 +2953,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
 
-    const metaCard = page.locator('.paper-card').first();
+    const metaCard = page.locator('.paper-row[data-id="paper-meta-only"]');
     await metaCard.click();
     await page.waitForTimeout(500);
 
@@ -3032,7 +3051,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
 
-    const metaCard = page.locator('.paper-card').first();
+    const metaCard = page.locator('.paper-row[data-id="paper-meta-only"]');
     await metaCard.click();
     await page.waitForTimeout(500);
 
@@ -3107,7 +3126,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
 
-    const metaCard = page.locator('.paper-card').first();
+    const metaCard = page.locator('.paper-row[data-id="paper-meta-only"]');
     await metaCard.click();
     await page.waitForTimeout(500);
 

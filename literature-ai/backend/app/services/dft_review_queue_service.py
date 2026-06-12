@@ -282,6 +282,7 @@ class DFTReviewQueueService:
             "source_section": row.source_section,
             "source_figure": row.source_figure,
             "evidence_text": row.evidence_text,
+            "evidence_payload": row.evidence_payload,
             "evidence_preview": self._shorten(row.evidence_text),
             "primary_evidence_locator": primary_locator,
             "primary_locator_reliability": locator_reliability["primary_locator"],
