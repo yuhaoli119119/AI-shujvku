@@ -296,7 +296,9 @@ def test_mcp_get_codex_item_returns_low_token_dft_context(mcp_test_env):
     assert payload["schema_version"] == "codex_item_context_v1"
     assert payload["item_type"] == "dft_result"
     assert payload["context"]["item"]["value"] == 7.5
-    assert payload["context"]["export_safety"]["blocked_reasons"] == ["missing_review"]
+    blocked_reasons = payload["context"]["export_safety"]["blocked_reasons"]
+    assert "missing_material_identity" in blocked_reasons
+    assert "missing_review" in blocked_reasons
     assert payload["context"]["evidence_locators"]["items"][0]["page"] == 5
 
 
@@ -692,10 +694,11 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
     assert len(payload["rows"]) == 1
     row = payload["rows"][0]
     assert row["record_id"] == row_id
-    assert row["blocked_reasons"] == ["missing_review"]
-    assert row["recommended_action"] == "verify_against_pdf"
+    assert "missing_material_identity" in row["blocked_reasons"]
+    assert "missing_review" in row["blocked_reasons"]
+    assert row["recommended_action"] == "bind_material_identity"
     assert row["sanity_flags"] == []
-    assert row["can_mark_verified"] is True
+    assert row["can_mark_verified"] is False
     assert row["evidence_locators"][0]["page"] == 7
     assert row["primary_evidence_locator"]["page"] == 7
     assert row["evidence_page"] == 7
@@ -839,7 +842,8 @@ def test_admin_mcp_reject_dft_result_leaves_active_queue(mcp_test_env):
         rejected_queue = get_dft_review_queue(paper_id=paper_id, status="rejected")
 
     assert rejected["export_safety"]["review_status"] == "rejected"
-    assert rejected["export_safety"]["blocked_reasons"] == ["unsafe_review"]
+    assert "missing_material_identity" in rejected["export_safety"]["blocked_reasons"]
+    assert "unsafe_review" in rejected["export_safety"]["blocked_reasons"]
     assert active_queue["rows"] == []
     assert rejected_queue["rows"][0]["record_id"] == row_id
     assert rejected_queue["rows"][0]["decision_status"] == "rejected"
