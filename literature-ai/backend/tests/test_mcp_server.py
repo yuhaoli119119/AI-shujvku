@@ -54,7 +54,9 @@ from app.mcp.server import (
     query_papers,
     reject_correction,
     scan_local_pdfs,
+    scan_duplicate_dois,
 )
+from app.utils.library_names import DEFAULT_LIBRARY_NAME
 
 
 @pytest.fixture
@@ -190,6 +192,26 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
         assert [item.action for item in audit_logs] == ["append_note", "propose_correction"]
+
+
+def test_scan_duplicate_dois_groups_default_library_aliases(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        session.add_all(
+            [
+                Paper(title="Default Alias One", doi="10.1000/default-alias", library_name=DEFAULT_LIBRARY_NAME, pdf_path="one.pdf"),
+                Paper(title="Default Alias Two", doi="10.1000/default-alias", library_name="Codex ????????", pdf_path="two.pdf"),
+                Paper(title="Other Library", doi="10.1000/default-alias", library_name="OtherLibrary", pdf_path="three.pdf"),
+            ]
+        )
+        session.commit()
+
+    with mcp_auth_context(_auth()):
+        payload = scan_duplicate_dois()
+
+    duplicate = next(item for item in payload["duplicates"] if item["doi"] == "10.1000/default-alias")
+    assert duplicate["library_name"] == DEFAULT_LIBRARY_NAME
+    assert duplicate["count"] == 2
+    assert len(duplicate["paper_ids"]) == 2
 
 
 def test_mcp_query_papers_sort_by_created_at(mcp_test_env):

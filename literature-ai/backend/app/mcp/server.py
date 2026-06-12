@@ -37,7 +37,7 @@ from app.services.review_service import ReviewService
 from app.services.verification_session_service import VerificationSessionService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
-from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause
+from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
 
 mcp_server = FastMCP(
     get_settings().mcp_server_name,
@@ -1932,6 +1932,7 @@ def export_ml_dataset(
     targets = [t for t in (target_types or ["dft_results"]) if t in valid_targets]
     if not targets:
         targets = ["dft_results"]
+    normalized_library_name = normalize_library_name(library_name) if library_name is not None else None
 
     with session_scope(settings.database_url) as session:
         dft_data: dict | None = None
@@ -1942,7 +1943,7 @@ def export_ml_dataset(
             if format.lower() == "csv":
                 csv_text, gate_summary = build_dft_csv_rows(
                     session,
-                    library_name=library_name,
+                    library_name=normalized_library_name,
                     year_min=year_min,
                     year_max=year_max,
                     paper_id=UUID(paper_id) if paper_id else None,
@@ -1958,7 +1959,7 @@ def export_ml_dataset(
             else:
                 dft_data = build_dft_ml_dataset(
                     session,
-                    library_name=library_name,
+                    library_name=normalized_library_name,
                     year_min=year_min,
                     year_max=year_max,
                     paper_id=UUID(paper_id) if paper_id else None,
@@ -1970,8 +1971,8 @@ def export_ml_dataset(
             paper_query = select(Paper)
             if paper_id:
                 paper_query = paper_query.where(Paper.id == UUID(paper_id))
-            if library_name:
-                paper_query = paper_query.where(Paper.library_name == library_name)
+            if normalized_library_name:
+                paper_query = paper_query.where(build_library_name_clause(Paper.library_name, normalized_library_name))
             if year_min is not None:
                 paper_query = paper_query.where(Paper.year >= year_min)
             if year_max is not None:
@@ -2009,6 +2010,7 @@ def export_ml_dataset(
             target_id=paper_id,
             payload={
                 "library_name": library_name,
+                "normalized_library_name": normalized_library_name,
                 "year_min": year_min,
                 "year_max": year_max,
                 "target_types": targets,
@@ -2026,6 +2028,7 @@ def export_ml_dataset(
             "filters": {
                 "paper_id": paper_id,
                 "library_name": library_name,
+                "normalized_library_name": normalized_library_name,
                 "year_min": year_min,
                 "year_max": year_max,
             },
@@ -2054,20 +2057,25 @@ def scan_duplicate_dois() -> dict[str, Any]:
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        duplicate_keys = session.execute(
+        duplicate_rows = session.execute(
             select(Paper.library_name, Paper.doi, func.count(Paper.id).label("cnt"))
             .where(Paper.doi.is_not(None))
             .group_by(Paper.library_name, Paper.doi)
-            .having(func.count(Paper.id) > 1)
         ).all()
+        duplicate_counts: Counter[tuple[str, str], int] = Counter()
+        for library_name, doi, count in duplicate_rows:
+            duplicate_counts[(normalize_library_name(library_name), doi)] += count
 
         duplicates = []
-        for library_name, doi, count in duplicate_keys:
+        for (library_name, doi), count in sorted(duplicate_counts.items()):
+            if count <= 1:
+                continue
             paper_ids = session.scalars(
                 select(Paper.id).where(
-                    Paper.library_name == library_name,
+                    build_library_name_clause(Paper.library_name, library_name),
                     Paper.doi == doi,
                 )
+                .order_by(Paper.created_at.asc(), Paper.id.asc())
             ).all()
             duplicates.append(
                 {

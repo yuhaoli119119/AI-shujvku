@@ -509,7 +509,6 @@ class VerificationSessionService:
                 approved_status = approved.status
             materialized.append(
                 {
-                    "candidate": candidate,
                     "candidate_id": str(candidate.id),
                     "candidate_type": candidate.candidate_type,
                     "materialized_target_type": candidate.materialized_target_type,

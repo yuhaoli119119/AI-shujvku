@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
@@ -147,6 +147,138 @@ def test_external_analysis_import_and_materialize_flow():
                 assert session.query(PaperNote).count() == 1
                 assert session.query(PaperCorrection).count() == 1
                 assert session.query(PaperRelationship).count() == 1
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_relationship_resolution_stays_in_source_library():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_scope.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                source = Paper(title="Source A", doi="10.1000/source-a", library_name="LibraryA", pdf_path="source.pdf", authors=[])
+                wrong_library_target = Paper(title="Support B", doi="10.1000/shared-support", library_name="LibraryB", pdf_path="b.pdf", authors=[])
+                right_library_target = Paper(title="Support A", doi="10.1000/shared-support", library_name="LibraryA", pdf_path="a.pdf", authors=[])
+                session.add_all([source, wrong_library_target, right_library_target])
+                session.commit()
+                session.refresh(source)
+                session.refresh(wrong_library_target)
+                session.refresh(right_library_target)
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(source.id),
+                    "source": "chatgpt_web",
+                    "raw_payload": {
+                        "supporting_papers": [
+                            {
+                                "relationship_type": "supports",
+                                "target_doi": "https://doi.org/10.1000/SHARED-SUPPORT",
+                                "target_title": "Support A",
+                            }
+                        ]
+                    },
+                },
+            )
+            assert imported.status_code == 200
+            run_id = imported.json()["id"]
+
+            materialized = client.post(
+                f"/api/external-analysis/runs/{run_id}/materialize",
+                json={"explicit_all": True, "created_by": "reviewer_ai"},
+            )
+            assert materialized.status_code == 200
+            assert materialized.json()["created_relationships"] == 1
+
+            with Session(engine) as session:
+                relationship = session.scalars(select(PaperRelationship)).one()
+                assert relationship.target_paper_id == right_library_target.id
+                assert relationship.target_paper_id != wrong_library_target.id
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_relationship_resolution_blocks_ambiguous_same_library_title():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_ambiguous.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                source = Paper(title="Source A", doi="10.1000/source-ambiguous", library_name="LibraryA", pdf_path="source.pdf", authors=[])
+                first_target = Paper(title="Shared Support Title", library_name="LibraryA", pdf_path="first.pdf", authors=[])
+                second_target = Paper(title="Shared Support Title", library_name="LibraryA", pdf_path="second.pdf", authors=[])
+                session.add_all([source, first_target, second_target])
+                session.commit()
+                session.refresh(source)
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(source.id),
+                    "source": "chatgpt_web",
+                    "raw_payload": {
+                        "supporting_papers": [
+                            {
+                                "relationship_type": "supports",
+                                "target_title": "Shared Support Title",
+                            }
+                        ]
+                    },
+                },
+            )
+            assert imported.status_code == 200
+            run_id = imported.json()["id"]
+
+            with Session(engine) as session:
+                candidate = session.scalars(select(ExternalAnalysisCandidate)).one()
+                assert candidate.status == "requires_resolution"
+                assert candidate.normalized_payload["target_paper_id"] is None
+                assert "ambiguous" in candidate.mapping_reason
+
+            materialized = client.post(
+                f"/api/external-analysis/runs/{run_id}/materialize",
+                json={"explicit_all": True, "created_by": "reviewer_ai"},
+            )
+            assert materialized.status_code == 200
+            assert materialized.json()["created_relationships"] == 0
+            assert materialized.json()["skipped_candidates"] == 1
+
+            with Session(engine) as session:
+                assert session.query(PaperRelationship).count() == 0
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

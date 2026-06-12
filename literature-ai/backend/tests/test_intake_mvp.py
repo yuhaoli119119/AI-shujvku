@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.models import Base, LiteratureIntakeCandidate, LiteratureIntakeSession, Paper, WorkflowJob
 from app.db.session import get_db_session
 from app.main import app
+from app.services.intake_screening_service import IntakeScreeningService
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +325,35 @@ def test_duplicate_doi_detection_is_library_scoped(client, db_session):
     assert same_doi
     assert all(c["status"] != "duplicate" for c in same_doi)
     assert all(c["duplicate_paper_id"] is None for c in same_doi)
+
+
+def test_duplicate_doi_detection_normalizes_prefix_case_and_whitespace(db_session):
+    existing = Paper(
+        title="Normalized DOI Paper",
+        doi="10.xxxx/abc",
+        library_name="test_lib",
+        pdf_path="mock.pdf",
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    items = [
+        {"title": "Variant DOI 1", "doi": "10.xxxx/abc", "abstract": "battery anode", "year": 2024},
+        {"title": "Variant DOI 2", "doi": "https://doi.org/10.xxxx/abc", "abstract": "battery anode", "year": 2024},
+        {"title": "Variant DOI 3", "doi": "doi:10.xxxx/abc", "abstract": "battery anode", "year": 2024},
+        {"title": "Variant DOI 4", "doi": "  HTTPS://DOI.ORG/10.XXXX/ABC  ", "abstract": "battery anode", "year": 2024},
+    ]
+
+    results = IntakeScreeningService(db_session, library_name="test_lib").screen(
+        items,
+        user_need="battery anode",
+        query="battery anode",
+    )
+
+    assert len(results) == len(items)
+    assert all(result.is_duplicate for result in results)
+    assert {result.duplicate_paper_id for result in results} == {str(existing.id)}
 
 
 def test_batch_ingest_approved_only(client, db_session):

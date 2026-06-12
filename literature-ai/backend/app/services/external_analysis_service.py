@@ -21,8 +21,10 @@ from app.db.models import (
     PaperRelationship,
 )
 from app.services.llm_service import LLMService
+from app.services.paper_identity import PaperIdentityService
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.evidence_anchors import has_material_correction_anchor
+from app.utils.library_names import build_library_name_clause
 from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 
@@ -150,6 +152,7 @@ class ExternalAnalysisService:
         normalized, mapping_status, mapping_error = self._normalize_input(
             raw_text=sanitized_raw_text,
             raw_payload=sanitized_raw_payload,
+            source_paper=paper,
         )
         run = ExternalAnalysisRun(
             paper_id=paper_id,
@@ -453,25 +456,32 @@ class ExternalAnalysisService:
         self,
         raw_text: str | None,
         raw_payload: dict[str, Any] | list[Any] | str | None,
+        source_paper: Paper | None = None,
     ) -> tuple[ExternalAnalysisNormalizedModel | None, str, str | None]:
         parsed = self._extract_structured_payload(raw_text=raw_text, raw_payload=raw_payload)
         if isinstance(parsed, dict):
             try:
                 normalized = ExternalAnalysisNormalizedModel.model_validate(parsed)
-                return self._post_process_normalized(normalized, parsed), "normalized", None
+                return self._post_process_normalized(normalized, parsed, source_paper=source_paper), "normalized", None
             except Exception:
                 llm_normalized = self._llm_normalize(raw_text=raw_text, raw_payload=parsed)
                 if llm_normalized:
-                    return self._post_process_normalized(llm_normalized, parsed), "normalized_with_llm", None
-                return self._heuristic_normalize(parsed), "heuristic", None
+                    return self._post_process_normalized(llm_normalized, parsed, source_paper=source_paper), "normalized_with_llm", None
+                return self._post_process_normalized(
+                    self._heuristic_normalize(parsed),
+                    source_paper=source_paper,
+                ), "heuristic", None
 
         if isinstance(parsed, list):
-            return self._heuristic_normalize({"unmapped_items": parsed}), "heuristic", None
+            return self._post_process_normalized(
+                self._heuristic_normalize({"unmapped_items": parsed}),
+                source_paper=source_paper,
+            ), "heuristic", None
 
         if isinstance(parsed, str) and parsed.strip():
             llm_normalized = self._llm_normalize(raw_text=parsed, raw_payload=None)
             if llm_normalized:
-                return self._post_process_normalized(llm_normalized), "normalized_with_llm", None
+                return self._post_process_normalized(llm_normalized, source_paper=source_paper), "normalized_with_llm", None
             return ExternalAnalysisNormalizedModel(
                 review_notes=[ExternalReviewNoteModel(content=parsed, mapping_reason="Fallback free-text note import")]
             ), "free_text_fallback", None
@@ -482,14 +492,19 @@ class ExternalAnalysisService:
         self,
         normalized: ExternalAnalysisNormalizedModel,
         raw_payload: dict[str, Any] | None = None,
+        source_paper: Paper | None = None,
     ) -> ExternalAnalysisNormalizedModel:
         supporting = []
         for item in normalized.supporting_papers:
-            resolved_target = self._resolve_target_paper_id(item)
+            resolved_target, resolution_reason = self._resolve_target_paper_id(item, source_paper=source_paper)
+            mapping_reason = item.mapping_reason
+            if resolution_reason and not resolved_target:
+                mapping_reason = resolution_reason
             supporting.append(
                 item.model_copy(
                     update={
                         "target_paper_id": resolved_target or item.target_paper_id,
+                        "mapping_reason": mapping_reason,
                     }
                 )
             )
@@ -756,19 +771,36 @@ class ExternalAnalysisService:
             mapping_reason="Paper-level external audit payload imported as candidate opinion",
         )
 
-    def _resolve_target_paper_id(self, relationship: ExternalSupportingPaperModel) -> str | None:
+    def _resolve_target_paper_id(
+        self,
+        relationship: ExternalSupportingPaperModel,
+        *,
+        source_paper: Paper | None = None,
+    ) -> tuple[str | None, str | None]:
         if relationship.target_paper_id:
-            return relationship.target_paper_id
+            return relationship.target_paper_id, None
 
         conditions = []
         if relationship.target_doi:
-            conditions.append(Paper.doi == relationship.target_doi)
+            normalized_doi = PaperIdentityService.normalize_doi(relationship.target_doi)
+            if normalized_doi:
+                conditions.append(Paper.doi == normalized_doi)
         if relationship.target_title:
             conditions.append(Paper.title.ilike(relationship.target_title))
         if not conditions:
-            return None
-        target = self.session.scalar(select(Paper).where(or_(*conditions)).limit(1))
-        return str(target.id) if target else None
+            return None, None
+
+        stmt = select(Paper).where(or_(*conditions))
+        if source_paper is not None:
+            stmt = stmt.where(build_library_name_clause(Paper.library_name, source_paper.library_name))
+            stmt = stmt.where(Paper.id != source_paper.id)
+        stmt = stmt.order_by(Paper.created_at.asc(), Paper.id.asc()).limit(2)
+        targets = self.session.scalars(stmt).all()
+        if len(targets) == 1:
+            return str(targets[0].id), None
+        if len(targets) > 1:
+            return None, "Relationship target is ambiguous within the source paper library; keep target_paper_id unresolved."
+        return None, None
 
     def _extract_structured_payload(
         self,

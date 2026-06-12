@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Paper
+from app.services.paper_identity import PaperIdentityService
 from app.utils.library_names import build_library_name_clause
 
 
@@ -191,14 +192,15 @@ def _detect_duplicate(
 ) -> str | None:
     """在 papers 表中检测是否有重复条目，返回已有 paper_id（字符串）或 None。"""
     if doi:
-        doi_clean = doi.strip().lower().lstrip("https://doi.org/").lstrip("doi:")
-        stmt = select(Paper.id).where(Paper.doi.ilike(f"%{doi_clean}%"))
-        if library_name:
-            stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
-        stmt = stmt.limit(1)
-        result = session.scalar(stmt)
-        if result:
-            return str(result)
+        doi_clean = PaperIdentityService.normalize_doi(doi)
+        if doi_clean:
+            stmt = select(Paper.id).where(Paper.doi == doi_clean)
+            if library_name:
+                stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
+            stmt = stmt.order_by(Paper.created_at.asc(), Paper.id.asc()).limit(1)
+            result = session.scalar(stmt)
+            if result:
+                return str(result)
     if title:
         # 模糊标题去重：取前 60 字符做 ilike
         title_prefix = title.strip()[:60]
