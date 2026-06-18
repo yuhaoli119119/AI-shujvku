@@ -1,0 +1,92 @@
+{
+  "2026": [
+    {
+      "id": "5ae9bc01-ad28-47fe-a88e-04ee1e8d6a0d",
+      "title": "Engineering of Asymmetric Dual-Atom Sites for Effective Oxygen Electrocatalysis",
+      "doi": "https://doi.org/10.1007/s40820-026-02155-2",
+      "year": 2026,
+      "journal": "Nano-Micro Letters",
+      "score": 0.475,
+      "tier": "maybe",
+      "status": "pending_review",
+      "is_open_access": null
+    },
+    {
+      "id": "c461fef5-5fe1-4bbf-a59f-6400dd438ebf",
+      "title": "Bidirectional catalysts with dual-atom dynamic d-band centre modulation and support self-reconstruction for de/hydrogenation in MgH2/Mg",
+      "doi": "https://doi.org/10.1038/s41467-026-70604-y",
+      "year": 2026,
+      "journal": "Nature Communications",
+      "score": 0.4375,
+      "tier": "maybe",
+      "status": "pending_review",
+      "is_open_access": null
+    },
+    {
+      "id": "a568660c-4f94-49be-ac7a-f0420f0e6f27",
+      "title": "Electronegativity‐Driven Frontier Orbital Engineering in B‐Ti Diatomic Synergy Enables Selective Li <sub>2</sub> C <sub>2</sub> O <sub>4</sub> Conversion in Li‐CO <sub>2</sub> Batteries",
+      "doi": "https://doi.org/10.1002/rar2.70124",
+      "year": 2026,
+      "journal": "Rare Metals",
+      "score": 0.3864,
+      "tier": "maybe",
+      "status": "pending_review",
+      "is_open_access": null
+    },
+    {
+      "id": "58d8f226-77e0-4420-9cfc-dfb395996ddf",
+      "title": "Non-Precious Electrocatalysts for Alkaline Oxygen Evolution: Transition Metal Compounds, Carbon Supports, and Metal-Free Systems",
+      "doi": "https://doi.org/10.3390/pr14071085",
+      "year": 2026,
+      "journal": "Processes",
+      "score": 0.3591,
+      "tier": "maybe",
+      "status": "pending_review",
+      "is_open_access": null
+    },
+    {
+      "id": "c7bd5c50-6af5-46d2-931f-6352437906d7",
+      "title": "Multireference Wavefunction Methods for Accurate Adsorption Energies on Single-Atom Catalysts",
+      "doi": "https://doi.org/10.26434/chemrxiv.15000689/v1",
+      "year": 2026,
+      "journal": "ChemRxiv",
+      "score": 0.3455,
+      "tier": "weak",
+      "status": "pending_review",
+      "is_open_access": null
+    },
+    {
+      "id": "916914e8-c299-4aeb-a5ca-8b4a0eb8c52a",
+      "title": "Smart Catalyst Design: Integrating Structure–Activity Relationships with Computational and Data-Driven Approaches",
+      "doi": "https://doi.org/10.55041/ijcope.v2i4.571",
+      "year": 2026,
+      "journal": "International Journal of Creative and Open Research in Engineering and Management",
+      "score": 0.3182,
+      "tier": "weak",
+      "status": "pending_review",
+      "is_open_access": null
+    },
+    {
+      "id": "01d24142-1c01-4c96-86b6-c8b35a6d65a5",
+      "title": "Electrochemical upcycling of polyethylene terephthalate: catalyst design, reaction mechanisms, and integrated paired electrolysis",
+      "doi": "https://doi.org/10.1039/d6im00018e",
+      "year": 2026,
+      "journal": "Industrial Chemistry and Materials",
+      "score": 0.3045,
+      "tier": "weak",
+      "status": "pending_review",
+      "is_open_access": null
+    },
+    {
+      "id": "b4c6182e-717a-4b3f-8e84-8252493f1969",
+      "title": "Insights into DFT-guided synthesis of atomic clusters for electrocatalysis",
+      "doi": "https://doi.org/10.26599/nr.2026.94908519",
+      "year": 2026,
+      "journal": "Nano Research",
+      "score": 0.3045,
+      "tier": "weak",
+      "status": "pending_review",
+      "is_open_access": null
+    }
+  ]
+}
