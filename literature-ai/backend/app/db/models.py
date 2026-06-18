@@ -209,6 +209,7 @@ class PaperFigure(Base):
     )
     crop_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     crop_source: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    write_version: Mapped[int] = mapped_column(sa.Integer, default=1, server_default="1", nullable=False)
 
 
 class CatalystSample(Base):
@@ -265,6 +266,11 @@ class DFTResult(Base):
     )
     evidence_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     extraction_protocol_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    candidate_identity: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+
+    __table_args__ = (
+        sa.UniqueConstraint("paper_id", "candidate_identity", name="uq_dft_result_candidate_identity"),
+    )
 
 
 class MechanismClaim(Base):
@@ -463,6 +469,32 @@ class WorkflowJob(Base):
     )
 
 
+class VerificationSessionPaperClaim(Base):
+    __tablename__ = "verification_session_paper_claims"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[str] = mapped_column(
+        sa.ForeignKey("workflow_jobs.job_id", ondelete="CASCADE"), index=True
+    )
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(sa.String(32), default="active", server_default="active", index=True)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), index=True)
+    released_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+    __table_args__ = (
+        sa.Index(
+            "uq_verification_session_active_paper",
+            "paper_id",
+            unique=True,
+            postgresql_where=sa.text("status = 'active'"),
+            sqlite_where=sa.text("status = 'active'"),
+        ),
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
@@ -615,9 +647,11 @@ class ExtractionFieldReview(Base):
     review_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+    write_version: Mapped[int] = mapped_column(sa.Integer, default=1, server_default="1", nullable=False)
     __table_args__ = (
         sa.UniqueConstraint("paper_id", "target_type", "target_id", "field_name", name="uq_extraction_field_review"),
     )
+    __mapper_args__ = {"version_id_col": write_version}
 
 
 class ShareToken(Base):

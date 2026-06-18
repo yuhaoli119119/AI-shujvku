@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 
 from app.config import get_settings
 from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
@@ -1294,6 +1294,7 @@ def recrop_figure(
             "figure_page": fig.page,
             "old_image_path": fig.image_path,
             "prov": list(fig.prov) if fig.prov else [],
+            "write_version": fig.write_version,
         }
 
     # Phase 2: PDF rendering — session is already closed, safe to do I/O.
@@ -1372,18 +1373,14 @@ def recrop_figure(
         doc.close()
 
     # Phase 3: Write back to DB — new session for the update.
-    with session_scope(settings.database_url) as session:
-        fig = session.get(PaperFigure, UUID(figure_id))
-        if not fig:
-            raise ValueError(f"Figure {figure_id} not found during write-back (race condition)")
+    try:
+        with session_scope(settings.database_url) as session:
+            fig = session.get(PaperFigure, UUID(figure_id))
+            if not fig:
+                raise ValueError(f"Figure {figure_id} not found during write-back (race condition)")
 
-        old_path = fig.image_path
-        fig.image_path = rendered_meta["new_rel_path"]
-        fig.crop_status = "recropped"
-        fig.crop_source = f"recrop:{strategy}:{auth.source_prefix}"
-        fig.crop_confidence = 0.5 if strategy == "ai_bbox" else 0.8  # ai_bbox is lower confidence
-
-        prov_entry = {
+            old_path = fig.image_path
+            prov_entry = {
             "action": "recrop_figure",
             "strategy": strategy,
             "bbox": {"l": rendered_meta["bbox_used"][0], "t": rendered_meta["bbox_used"][1],
@@ -1392,15 +1389,29 @@ def recrop_figure(
             "pixel_size": rendered_meta["pixel_size"],
             "previous_path": old_path,
             "recropped_by": auth.source_prefix,
-        }
-        if fig.prov is None:
-            fig.prov = []
-        if isinstance(fig.prov, dict):
-            fig.prov = [fig.prov]
-        fig.prov.append(prov_entry)
+            }
+            next_prov = list(fig.prov or []) if not isinstance(fig.prov, dict) else [fig.prov]
+            next_prov.append(prov_entry)
+            updated = session.execute(
+                update(PaperFigure)
+                .where(
+                    PaperFigure.id == UUID(figure_id),
+                    PaperFigure.write_version == fig_meta["write_version"],
+                )
+                .values(
+                    image_path=rendered_meta["new_rel_path"],
+                    crop_status="recropped",
+                    crop_source=f"recrop:{strategy}:{auth.source_prefix}",
+                    crop_confidence=0.5 if strategy == "ai_bbox" else 0.8,
+                    prov=next_prov,
+                    write_version=fig_meta["write_version"] + 1,
+                )
+            )
+            if updated.rowcount != 1:
+                raise ValueError("write_conflict:figure_version_stale")
 
-        session.add(
-            AuditLog(
+            session.add(
+                AuditLog(
                 paper_id=UUID(fig_meta["paper_id"]),
                 action="recrop_figure",
                 source=auth.source_prefix,
@@ -1412,11 +1423,11 @@ def recrop_figure(
                     "new_image_path": rendered_meta["new_rel_path"],
                     "old_image_path": old_path,
                 },
+                )
             )
-        )
-        session.flush()
+            session.flush()
 
-        return {
+            result = {
             "figure_id": figure_id,
             "paper_id": fig_meta["paper_id"],
             "strategy": strategy,
@@ -1425,7 +1436,11 @@ def recrop_figure(
             "pixel_size": rendered_meta["pixel_size"],
             "crop_confidence": fig.crop_confidence,
             "status": "success",
-        }
+            }
+        return result
+    except Exception:
+        new_abs_path.unlink(missing_ok=True)
+        raise
 
 
 @mcp_server.tool(
@@ -1584,8 +1599,10 @@ def review_figure(
     crop_status: str | None = None,
 ) -> dict[str, Any]:
     auth = require_mcp_capability_any("review_corrections", "review_dft")
-    if verdict not in ("verified", "needs_attention", "incorrect"):
-        raise ValueError("verdict must be one of: verified, needs_attention, incorrect")
+    verdict_aliases = {"needs_attention": "needs_repair", "incorrect": "rejected"}
+    normalized_verdict = verdict_aliases.get(verdict, verdict)
+    if normalized_verdict not in ("verified", "needs_repair", "rejected"):
+        raise ValueError("verdict must be one of: verified, needs_repair, rejected, needs_attention, incorrect")
     allowed_crop_status = {"candidate_crop", "recropped", "ai_created_crop", "needs_recrop", "needs_review", "caption_only", "noisy", "noise", "missing", "failed"}
     if crop_status is not None and crop_status not in allowed_crop_status:
         raise ValueError("crop_status must be one of: " + ", ".join(sorted(allowed_crop_status)))
@@ -1609,15 +1626,34 @@ def review_figure(
             fig.crop_status = crop_status
             applied_updates["crop_status"] = fig.crop_status
 
+        latest_review = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "review_figure")
+            .where(AuditLog.target_id == figure_id)
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(1)
+        ).first()
+        latest_payload = latest_review.payload if latest_review is not None and isinstance(latest_review.payload, dict) else {}
+        if latest_payload.get("verdict") == normalized_verdict and latest_payload.get("applied_updates", {}) == applied_updates:
+            return {
+                "figure_id": figure_id,
+                "paper_id": str(fig.paper_id),
+                "verdict": normalized_verdict,
+                "reviewer": auth.source_prefix,
+                "note_created": False,
+                "applied_updates": applied_updates,
+                "idempotent": True,
+            }
+
         # Write structured review note (Blackboard pattern).
         note = PaperNote(
             paper_id=fig.paper_id,
             source=f"review_figure:{auth.source_prefix}",
-            content=f"[Figure Review] Verdict: {verdict}\nReasoning: {reasoning}\nApplied updates: {applied_updates}",
+            content=f"[Figure Review] Verdict: {normalized_verdict}\nReasoning: {reasoning}\nApplied updates: {applied_updates}",
             field_name="figure_review",
             page=fig.page,
             section_title=fig.caption,
-            quoted_text=verdict,
+            quoted_text=normalized_verdict,
         )
         session.add(note)
         session.flush()
@@ -1630,7 +1666,8 @@ def review_figure(
                 target_type="paper_figure",
                 target_id=figure_id,
                 payload={
-                    "verdict": verdict,
+                    "verdict": normalized_verdict,
+                    "requested_verdict": verdict,
                     "reasoning": reasoning,
                     "note_id": str(note.id),
                     "applied_updates": applied_updates,
@@ -1641,10 +1678,11 @@ def review_figure(
     return {
         "figure_id": figure_id,
         "paper_id": str(fig.paper_id),
-        "verdict": verdict,
+        "verdict": normalized_verdict,
         "reviewer": auth.source_prefix,
         "note_created": True,
         "applied_updates": applied_updates,
+        "idempotent": False,
     }
 
 

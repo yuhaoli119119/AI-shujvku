@@ -33,6 +33,7 @@ class PaperWriterPromptBuilder:
         retrieved: dict[str, list[dict[str, Any]]],
         target_paper_type: str | None = None,
     ) -> dict[str, Any]:
+        formal_retrieved = self.formal_evidence_only(retrieved)
         return {
             "instruction": self.config.get("instruction", ""),
             "style": self.config.get("style", {}),
@@ -42,10 +43,22 @@ class PaperWriterPromptBuilder:
             "topic": topic,
             "user_notes": user_notes,
             "requested_sections": requested_sections,
-            "retrieved": retrieved,
-            "evidence_pack": self._build_evidence_pack(requested_sections, retrieved),
-            "numeric_guardrails": self._build_numeric_guardrails(retrieved),
+            "retrieved": formal_retrieved,
+            "evidence_pack": self._build_evidence_pack(requested_sections, formal_retrieved),
+            "numeric_guardrails": self._build_numeric_guardrails(formal_retrieved),
             "target_paper_type": target_paper_type,
+        }
+
+    @staticmethod
+    def formal_evidence_only(retrieved: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+        """Remove discovery-only section candidates from writing inputs."""
+
+        return {
+            evidence_type: [
+                item for item in items
+                if evidence_type != "sections" or item.get("can_use_for_writing") is True
+            ]
+            for evidence_type, items in retrieved.items()
         }
 
     # 论文分类与对应写作指导

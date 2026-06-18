@@ -52,6 +52,7 @@ from app.mcp.server import (
     propose_correction,
     propose_dft_result_correction,
     reject_dft_result,
+    review_figure,
     query_papers,
     reject_correction,
     scan_local_pdfs,
@@ -204,6 +205,41 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
         assert [item.action for item in audit_logs] == ["append_note", "propose_correction"]
+
+
+def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Review figure", pdf_path="paper.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Figure 1. Reaction pathway.",
+            image_path="figures/one.png",
+            page=2,
+            figure_role="mechanism",
+            content_summary="Two reaction branches contain distinct intermediates and barrier labels.",
+            key_elements=["reaction arrows", "intermediates", "barrier labels"],
+        )
+        session.add(figure)
+        session.commit()
+        figure_id = str(figure.id)
+
+    with mcp_auth_context(_admin_auth()):
+        first = review_figure(figure_id, "rejected", "The crop does not match the caption.")
+        second = review_figure(figure_id, "rejected", "Repeated check reaches the same result.")
+
+    assert first["verdict"] == "rejected"
+    assert first["idempotent"] is False
+    assert second["verdict"] == "rejected"
+    assert second["idempotent"] is True
+    assert second["note_created"] is False
+    with Session(mcp_test_env["engine"]) as session:
+        logs = session.scalars(select(AuditLog).where(AuditLog.action == "review_figure")).all()
+        notes = session.scalars(select(PaperNote).where(PaperNote.field_name == "figure_review")).all()
+        assert len(logs) == 1
+        assert len(notes) == 1
+        assert logs[0].payload["verdict"] == "rejected"
 
 
 def test_scan_duplicate_dois_groups_default_library_aliases(mcp_test_env):

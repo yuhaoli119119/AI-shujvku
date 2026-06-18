@@ -213,6 +213,9 @@ def run_e2e_rollback(session: Session, *, seed_if_needed: bool = False) -> dict[
             target_type="dft_results",
             target_id=str(target.id),
             field_names=["value"],
+            expected_write_versions={
+                "value": save_result[0].write_version,
+            } if save_result else None,
             reviewer="d2_rollback_probe",
             reviewer_note="D2-1 rollback-only verified review probe",
         ),
@@ -367,6 +370,9 @@ def run_real_extraction_sample_rollback(session: Session, *, paper_id: UUID | No
             target_type="dft_results",
             target_id=str(target.id),
             field_names=["value"],
+            expected_write_versions={
+                "value": saved[0].write_version,
+            } if saved else None,
             reviewer="d2_real_sample_probe",
             reviewer_note="D2-3 rollback-only mark verified for real extraction sample",
         ),

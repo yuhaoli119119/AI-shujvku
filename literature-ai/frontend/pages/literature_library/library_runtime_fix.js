@@ -36,7 +36,8 @@ activateLibraryByName = async function(name) {
     if (!name) return;
     try {
         await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
-        state.currentOffset = 0;
+        if (typeof resetLibraryPagination === "function") resetLibraryPagination();
+        else state.currentOffset = 0;
         await loadLibraries();
         if (typeof fetchPapers === "function") {
             fetchPapers();

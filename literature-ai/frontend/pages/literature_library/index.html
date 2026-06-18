@@ -77,11 +77,6 @@
                     <option value="false">无写作卡</option>
                 </select>
                 <button class="btn ghost" onclick="clearFilters()">清空筛选</button>
-                <div class="pager">
-                    <button class="btn ghost small" id="prevBtn" onclick="prevPage()" disabled>上一页</button>
-                    <span id="pageInfo" class="toolbar-label">第 1 页</span>
-                    <button class="btn ghost small" id="nextBtn" onclick="nextPage()">下一页</button>
-                </div>
                 <button class="btn ghost small" onclick="toggleSidebar()" id="toggleSidebarBtn" style="margin-left: 12px;">隐藏列表</button>
                 <button class="btn ghost small" onclick="toggleWorkspace()" id="toggleWorkspaceBtn">隐藏详情</button>
             </div>
@@ -89,12 +84,12 @@
 
         <div class="layout">
             <aside class="sidebar">
-                <div class="sidebar-header">
-                    <h2>当前文献</h2>
-                    <span id="paperListMeta" class="subtle">0 篇</span>
-                </div>
                 <div id="paperList" class="paper-list">
                     <div class="list-empty">正在加载文献列表...</div>
+                </div>
+                <div class="sidebar-pagination">
+                    <div id="paginationMeta" class="pagination-meta subtle">正在准备分页...</div>
+                    <div id="paginationBar" class="pagination-bar"></div>
                 </div>
             </aside>
 

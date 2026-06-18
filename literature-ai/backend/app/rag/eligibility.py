@@ -6,8 +6,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, PaperChunk, PaperCorrection, PaperFigure, PaperSection, WritingCard
-from app.utils.review_safety import bulk_export_gate_results, has_safe_verified_review, writing_card_gate
+from app.db.models import AuditLog, DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperChunk, PaperCorrection, PaperFigure, PaperSection, WritingCard
+from app.utils.review_safety import bulk_export_gate_results, has_safe_verified_review, writing_card_content_gate, writing_card_gate
 
 
 def is_rag_eligible(session: Session, item: Any, item_type: str) -> bool:
@@ -26,13 +26,15 @@ def is_rag_eligible(session: Session, item: Any, item_type: str) -> bool:
 
 
 def writing_card_is_rag_eligible(session: Session, item: Any) -> bool:
-    """Writing cards enter formal RAG only after the AI-verified safety gate."""
+    """Writing cards enter formal RAG only when content quality cannot be bypassed."""
 
     if not isinstance(item, WritingCard):
         return False
-    if writing_card_gate(item).can_use_for_writing:
-        return True
-    return _writing_card_has_ai_verified_review(session, item)
+    content_quality_passed = writing_card_content_gate(item).can_use_for_writing
+    return bool(content_quality_passed and (
+        writing_card_gate(item).can_use_for_writing
+        or _writing_card_has_ai_verified_review(session, item)
+    ))
 
 
 def writing_card_rag_review_status(session: Session, item: Any) -> str:
@@ -40,8 +42,8 @@ def writing_card_rag_review_status(session: Session, item: Any) -> str:
         return "blocked"
     gate = writing_card_gate(item)
     if gate.can_use_for_writing:
-        return "safe_verified"
-    if _writing_card_has_ai_verified_review(session, item):
+        return "content_verified"
+    if writing_card_content_gate(item).can_use_for_writing and _writing_card_has_ai_verified_review(session, item):
         return "ai_verified"
     return gate.review_gate_status
 
@@ -120,6 +122,8 @@ def _review_field_matches(value: str, expected: set[str]) -> bool:
 
 
 def _section_item_is_eligible(session: Session, item: Any) -> bool:
+    if not section_is_retrieval_candidate(session, item):
+        return False
     paper_id = getattr(item, "paper_id", None)
     if paper_id is None:
         return False
@@ -165,28 +169,33 @@ def _figure_item_is_eligible(session: Session, item: Any) -> bool:
         return False
     if not str(figure.caption or "").strip():
         return False
+    review_verdict = _latest_figure_review_verdict(session, figure)
+    if review_verdict in {"rejected", "needs_repair"}:
+        return False
     crop_status = str(figure.crop_status or "").strip().lower()
     if crop_status in {
         "missing",
         "missing_image",
         "failed",
+        "full_page",
+        "needs_repair",
         "needs_review",
-        "needs_recrop",
         "caption_only",
         "noisy",
         "noise",
     }:
-        if not _figure_has_latest_precise_recrop(figure):
-            return False
+        return False
+    if crop_status == "needs_recrop" and not _figure_has_latest_precise_recrop(figure):
+        return False
     if _figure_is_unlocated_full_page_recrop(figure):
         return False
     role = str(figure.figure_role or "").strip().lower()
     if role in {"noise", "noisy", "decorative", "publisher_logo"}:
         return False
-    has_safe_review = _figure_has_safe_review(session, figure)
+    has_safe_review = review_verdict == "verified" or _figure_has_safe_review(session, figure)
     return _figure_has_required_ai_summary(
         figure,
-        allow_caption_echo=has_safe_review,
+        allow_caption_echo=False,
     ) and (
         _figure_has_ai_classification(figure) or has_safe_review
     )
@@ -337,6 +346,11 @@ def _flatten_figure_key_element_value(value: Any) -> list[str]:
 
 
 def _figure_has_safe_review(session: Session, figure: PaperFigure) -> bool:
+    verdict = _latest_figure_review_verdict(session, figure)
+    if verdict in {"rejected", "needs_repair"}:
+        return False
+    if verdict == "verified":
+        return True
     if has_safe_verified_review(
         session,
         paper_id=figure.paper_id,
@@ -357,6 +371,55 @@ def _figure_has_safe_review(session: Session, figure: PaperFigure) -> bool:
         target_id=figure.id,
         field_names={"figures", "figure"},
     )
+
+
+def _latest_figure_review_verdict(session: Session, figure: PaperFigure) -> str | None:
+    """Return the single authoritative latest review_figure verdict."""
+
+    review = session.scalars(
+        select(AuditLog)
+        .where(AuditLog.paper_id == figure.paper_id)
+        .where(AuditLog.action == "review_figure")
+        .where(AuditLog.target_id == str(figure.id))
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .limit(1)
+    ).first()
+    payload = review.payload if review is not None and isinstance(review.payload, dict) else {}
+    verdict = str(payload.get("verdict") or "").strip().lower()
+    aliases = {
+        "incorrect": "rejected",
+        "needs_attention": "needs_repair",
+    }
+    normalized = aliases.get(verdict, verdict)
+    return normalized if normalized in {"verified", "rejected", "needs_repair"} else None
+
+
+def section_is_retrieval_candidate(session: Session, item: Any) -> bool:
+    """Loose discovery gate; this never grants formal RAG or citation eligibility."""
+
+    if not isinstance(item, (PaperSection, PaperChunk)):
+        return False
+    if item.paper_id is None or session.get(Paper, item.paper_id) is None:
+        return False
+    text = str(item.text or "").strip()
+    if not text or _section_text_is_noise(text):
+        return False
+    section = item if isinstance(item, PaperSection) else session.get(PaperSection, item.section_id) if item.section_id else None
+    title = str(getattr(section, "section_title", None) or "").strip()
+    section_type = str(getattr(section, "section_type", None) or "").strip()
+    if not title and not section_type:
+        return False
+    page_start = getattr(item, "page_start", None) or getattr(section, "page_start", None)
+    page_end = getattr(item, "page_end", None) or getattr(section, "page_end", None)
+    return page_start is not None or page_end is not None
+
+
+def _section_text_is_noise(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text).strip().lower()
+    if normalized in {"n/a", "na", "none", "null", "todo", "placeholder", "content unavailable"}:
+        return True
+    reference_markers = len(re.findall(r"(?:doi:|https?://|\[\d+\])", normalized))
+    return reference_markers >= 5 and reference_markers * 35 >= len(normalized)
 
 
 def _writing_card_has_ai_verified_review(session: Session, card: WritingCard) -> bool:

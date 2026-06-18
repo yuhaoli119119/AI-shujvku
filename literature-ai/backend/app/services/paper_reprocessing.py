@@ -3,19 +3,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import Paper, PaperFigure, PaperSection, PaperTable
+from app.db.models import EvidenceSpan, Paper, PaperFigure, PaperSection, PaperTable, WritingCard
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.extraction_pipeline import ExtractionPipelineService
+from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.workbench_status import HUMAN_FINAL_WORKFLOW_STATUSES
+from app.utils.review_safety import writing_card_content_gate
 
 
 class PaperReprocessingService:
@@ -28,6 +30,9 @@ class PaperReprocessingService:
         self.workbench = PaperWorkbenchService(session, settings)
 
     def rerun_stage2(self, paper_id: UUID) -> dict[str, Any]:
+        return self._run_exclusive_rebuild(paper_id, "rerun_stage2", self._rerun_stage2)
+
+    def _rerun_stage2(self, paper_id: UUID) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)
         if not paper:
             raise ValueError("Paper not found")
@@ -50,7 +55,7 @@ class PaperReprocessingService:
         self.session.add(paper)
         self.session.commit()
 
-        workspace_summary = self.workbench.prepare_paper_workspace(paper.id, render_pages=True)
+        workspace_summary = self.workbench._prepare_paper_workspace_unlocked(paper.id, render_pages=True)
         self.session.refresh(paper)
         artifact_status = build_paper_artifact_status(paper, settings=self.settings)
 
@@ -118,6 +123,76 @@ class PaperReprocessingService:
             "comprehensive_analysis": 0,
             "skipped_quality_blocked": 1 if workspace_summary.get("workflow_status") == "Needs_Human_Confirmation" else 0,
         }
+
+    def rebuild_writing_card(self, paper_id: UUID) -> dict[str, Any]:
+        """Atomically replace only WritingCard/EvidenceSpan data for one paper."""
+        return self._run_exclusive_rebuild(paper_id, "rebuild_writing_card", self._rebuild_writing_card)
+
+    def _rebuild_writing_card(self, paper_id: UUID) -> dict[str, Any]:
+        paper = self.session.get(Paper, paper_id)
+        if not paper:
+            raise ValueError("Paper not found")
+        document = self._rebuild_document(paper)
+        payload = self.pipeline._refine_writing_card(self.pipeline.writing_card_extractor.extract(document))
+        if not payload:
+            raise ValueError("WritingCard extraction returned no payload")
+
+        with self.session.begin_nested():
+            old_ids = [
+                str(value) for value in self.session.scalars(
+                    select(WritingCard.id).where(WritingCard.paper_id == paper_id)
+                ).all()
+            ]
+            if old_ids:
+                self.session.execute(
+                    delete(EvidenceSpan).where(
+                        EvidenceSpan.paper_id == paper_id,
+                        EvidenceSpan.object_type.in_(["writing_card", "writing_cards"]),
+                        EvidenceSpan.object_id.in_(old_ids),
+                    )
+                )
+            self.session.execute(delete(WritingCard).where(WritingCard.paper_id == paper_id))
+            created = self.pipeline._persist_writing_card(paper_id, payload)
+            if created != 1:
+                raise RuntimeError("WritingCard replacement did not create exactly one card")
+
+        self.session.commit()
+        card = self.session.scalar(select(WritingCard).where(WritingCard.paper_id == paper_id))
+        gate = writing_card_content_gate(card) if card is not None else None
+        return {
+            "paper_id": str(paper_id),
+            "status": "completed",
+            "writing_cards": created,
+            "rag_eligible": bool(gate and gate.can_use_for_writing),
+            "blocked_reasons": list(gate.blocked_reasons) if gate else ["missing_rebuilt_card"],
+        }
+
+    def _run_exclusive_rebuild(self, paper_id: UUID, operation: str, callback) -> dict[str, Any]:
+        owner = f"paper_operation:{operation}:{uuid4().hex}"
+        locks = ModuleWriteLockService(self.session)
+        try:
+            lock = locks.acquire(
+                paper_id=paper_id,
+                module_name="all_non_dft",
+                locked_by=owner,
+                ttl_minutes=60,
+                meta={"operation": operation, "internal_operation_lock": True},
+            )
+            self.session.commit()
+        except ValueError as exc:
+            self.session.rollback()
+            raise ValueError(f"paper_operation_conflict:{operation}:{paper_id}:{exc}") from exc
+        try:
+            return callback(paper_id)
+        except Exception:
+            self.session.rollback()
+            raise
+        finally:
+            try:
+                locks.release(lock_token=lock.lock_token, released_by=owner)
+                self.session.commit()
+            except Exception:
+                self.session.rollback()
 
     def classify_single_paper(self, paper_id: UUID, overwrite: bool = False) -> dict[str, Any]:
         """Classify a single paper using LLM or rule fallback, and commit to DB."""

@@ -61,7 +61,7 @@ async def approve_correction(
         return MCPCorrectionResponse.model_validate(item)
     except ValueError as exc:
         session.rollback()
-        status_code = 409 if str(exc).startswith("module_write_lock_required") else 400
+        status_code = 409 if str(exc).startswith(("module_write_lock_required", "write_conflict")) else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 

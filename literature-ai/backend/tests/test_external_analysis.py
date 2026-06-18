@@ -554,6 +554,7 @@ def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
                 paper_id = paper.id
 
             client = TestClient(app)
+            lock = _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="IDE AI SI rescan")
             response = client.post(
                 "/api/external-analysis/import",
                 json={
@@ -561,6 +562,7 @@ def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
                     "source": "ide_ai",
                     "source_label": "IDE AI SI rescan",
                     "auto_apply_review_rules": True,
+                    "write_lock_token": lock,
                     "raw_payload": {
                         "object_review_audits": [
                             {
@@ -1414,11 +1416,13 @@ def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_dft():
                 row_id = row.id
 
             client = TestClient(app)
+            lock = _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai")
             base_payload = {
                 "paper_id": str(paper_id),
                 "source": "ide_ai",
                 "auto_apply_review_rules": True,
                 "reviewer": "ide_ai",
+                "write_lock_token": lock,
                 "raw_payload": {
                     "object_review_audits": [
                         {
@@ -2165,11 +2169,13 @@ def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_samp
                 catalyst_id = catalyst.id
 
             client = TestClient(app)
+            lock = _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai")
             base_payload = {
                 "paper_id": str(paper_id),
                 "source": "ide_ai",
                 "auto_apply_review_rules": True,
                 "reviewer": "ide_ai",
+                "write_lock_token": lock,
                 "raw_payload": {
                     "object_review_audits": [
                         {
@@ -2349,7 +2355,14 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
 
             client = TestClient(app)
 
-            def payload_for(source_label: str, decision: str, corrected_value: float, confidence: float, adjudication_role: str | None = None):
+            def payload_for(
+                source_label: str,
+                decision: str,
+                corrected_value: float,
+                confidence: float,
+                adjudication_role: str | None = None,
+                write_lock_tokens: list[str] | None = None,
+            ):
                 body = {
                     "paper_id": str(paper_id),
                     "source": "ide_ai",
@@ -2379,11 +2392,27 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
                         ]
                     },
                 }
+                if write_lock_tokens:
+                    body["write_lock_tokens"] = write_lock_tokens
                 return body
 
             first = client.post("/api/external-analysis/import", json=payload_for("ide-ai-1", "PASS", -1.10, 0.81))
             second = client.post("/api/external-analysis/import", json=payload_for("ide-ai-2", "REVISE", -1.26, 0.84))
-            third = client.post("/api/external-analysis/import", json=payload_for("ide-ai-3", "REVISE", -1.26, 0.92, adjudication_role="third_ai"))
+            third_lock_tokens = [
+                _acquire_write_lock(client, paper_id, module_name="catalyst_samples", locked_by="ide_ai"),
+                _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai"),
+            ]
+            third = client.post(
+                "/api/external-analysis/import",
+                json=payload_for(
+                    "ide-ai-3",
+                    "REVISE",
+                    -1.26,
+                    0.92,
+                    adjudication_role="third_ai",
+                    write_lock_tokens=third_lock_tokens,
+                ),
+            )
 
             assert first.status_code == 200
             assert second.status_code == 200
@@ -2396,11 +2425,24 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
 
             assert stored_row is not None
             assert stored_row.value == -1.26
-            assert len(corrections) == 1
-            assert corrections[0].status == "approved"
-            assert corrections[0].evidence_payload["adjudication_role"] == "third_ai"
-            assert corrections[0].evidence_payload["selected_source_ids"] == ["ide-ai-1", "ide-ai-2"]
-            assert {candidate.status for candidate in candidates} == {"materialized"}
+            value_corrections = [
+                item
+                for item in corrections
+                if item.field_name == "dft_results" and item.target_path == f"dft_results:{row_id}:value"
+            ]
+            catalyst_corrections = [item for item in corrections if item.field_name == "catalyst_samples"]
+            binding_corrections = [
+                item
+                for item in corrections
+                if item.field_name == "dft_results" and item.target_path == f"dft_results:{row_id}:catalyst_sample_id"
+            ]
+            assert len(value_corrections) == 1
+            assert catalyst_corrections
+            assert binding_corrections
+            assert all(item.status == "approved" for item in corrections)
+            assert value_corrections[0].evidence_payload["adjudication_role"] == "third_ai"
+            assert value_corrections[0].evidence_payload["selected_source_ids"] == ["ide-ai-1", "ide-ai-2"]
+            assert {candidate.status for candidate in candidates} == {"ai_applied"}
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

@@ -16,6 +16,10 @@ literature-ai/.env
 # Node modules
 node_modules/
 
+# Local agent and test-run artifacts
+.reasonix/
+literature-ai/test-results/
+
 # Local databases and run metadata
 *.sqlite
 *.sqlite3

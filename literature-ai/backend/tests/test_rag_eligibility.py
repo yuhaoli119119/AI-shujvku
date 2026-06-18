@@ -46,6 +46,8 @@ def test_rag_eligibility_recognizes_legacy_materialized_ai_records():
                 section_title="Results",
                 section_type="results",
                 text="AI-reviewed text",
+                page_start=2,
+                page_end=2,
             )
             session.add_all([raw_section, reviewed_section])
             session.flush()
@@ -146,6 +148,8 @@ def test_rag_eligibility_recognizes_approved_ide_ai_corrections():
                 section_title="Results",
                 section_type="results",
                 text="AI-corrected section text",
+                page_start=3,
+                page_end=3,
             )
             session.add(section)
             session.flush()
@@ -188,6 +192,8 @@ def test_rag_eligibility_does_not_promote_chunks_from_paper_level_ai_records():
                 section_title="Results",
                 section_type="results",
                 text="Raw section text",
+                page_start=4,
+                page_end=4,
             )
             session.add(section)
             session.flush()
@@ -196,6 +202,8 @@ def test_rag_eligibility_does_not_promote_chunks_from_paper_level_ai_records():
                 section_id=section.id,
                 chunk_index=0,
                 text="Raw chunk text with band gap values.",
+                page_start=4,
+                page_end=4,
                 content_hash="raw-chunk-hash",
             )
             session.add(chunk)
@@ -419,7 +427,7 @@ def test_rag_eligibility_allows_only_classified_or_verified_figures():
             assert is_rag_eligible(session, no_key_elements_figure, "figure") is False
             assert is_rag_eligible(session, placeholder_key_elements_figure, "figure") is False
             assert is_rag_eligible(session, caption_echo_figure, "figure") is False
-            assert is_rag_eligible(session, reviewed_caption_echo_figure, "figure") is True
+            assert is_rag_eligible(session, reviewed_caption_echo_figure, "figure") is False
             assert is_rag_eligible(session, missing_summary_figure, "figure") is False
             assert is_rag_eligible(session, missing_image, "figure") is False
             assert is_rag_eligible(session, noisy_figure, "figure") is False
@@ -432,7 +440,7 @@ def test_rag_eligibility_allows_only_classified_or_verified_figures():
         engine.dispose()
 
 
-def test_rag_quality_summary_does_not_block_reviewed_caption_echo_figures():
+def test_rag_quality_summary_blocks_reviewed_caption_echo_figures():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_quality_caption_echo.db'}", future=True)
         with engine.begin() as connection:
@@ -483,9 +491,9 @@ def test_rag_quality_summary_does_not_block_reviewed_caption_echo_figures():
                 writing_cards=[],
             )
 
-            assert summary["figures"]["eligible"] == 1
-            assert summary["figures"]["blocked"] == 1
-            assert summary["figures"]["blocked_reasons"]["caption_echo_summary"] == 1
+            assert summary["figures"]["eligible"] == 0
+            assert summary["figures"]["blocked"] == 2
+            assert summary["figures"]["blocked_reasons"]["caption_echo_summary"] == 2
 
         engine.dispose()
 
@@ -606,8 +614,8 @@ def test_writing_card_rag_eligibility_recognizes_approved_ide_ai_review():
             session.flush()
 
             assert is_rag_eligible(session, raw_card, "writing_card") is False
-            assert is_rag_eligible(session, reviewed_card, "writing_card") is True
-            assert writing_card_rag_review_status(session, reviewed_card) == "ai_verified"
+            assert is_rag_eligible(session, reviewed_card, "writing_card") is False
+            assert writing_card_rag_review_status(session, reviewed_card) == "blocked"
 
         engine.dispose()
 
@@ -658,8 +666,8 @@ def test_writing_card_rag_eligibility_recognizes_approved_ide_ai_create():
             )
             session.flush()
 
-            assert is_rag_eligible(session, created_card, "writing_card") is True
-            assert writing_card_rag_review_status(session, created_card) == "ai_verified"
+            assert is_rag_eligible(session, created_card, "writing_card") is False
+            assert writing_card_rag_review_status(session, created_card) == "blocked"
             assert is_rag_eligible(session, unrelated_card, "writing_card") is False
 
         engine.dispose()
@@ -700,8 +708,12 @@ def test_rag_quality_summary_counts_eligible_and_blocked_reasons():
             eligible_card = WritingCard(
                 paper_id=paper.id,
                 paper_type="A",
-                research_gap="AI-created writing card.",
-                evidence_chain={"pages": [1]},
+                research_gap="A conversion limitation remains unresolved in current catalysts.",
+                proposed_solution="This work develops atomically dispersed sites for conversion.",
+                evidence_chain=[
+                    {"text": "A conversion limitation remains unresolved in current catalysts.", "source": "Introduction", "page": 1, "locator_status": "exact_page", "supports_fields": ["research_gap"]},
+                    {"text": "This work develops atomically dispersed sites for conversion.", "source": "Introduction", "page": 1, "locator_status": "exact_page", "supports_fields": ["proposed_solution"]},
+                ],
             )
             session.add_all([eligible_figure, blocked_figure, blocked_dft, eligible_card])
             session.flush()
@@ -712,7 +724,7 @@ def test_rag_quality_summary_counts_eligible_and_blocked_reasons():
                     field_name="writing_cards",
                     target_path="writing_cards:new:create",
                     operation="create",
-                    proposed_value={"paper_type": "A", "research_gap": "AI-created writing card."},
+                    proposed_value={"paper_type": "A", "research_gap": "A conversion limitation remains unresolved in current catalysts."},
                     reason="IDE AI created writing card.",
                     status="approved",
                     reviewed_by="ide_ai",

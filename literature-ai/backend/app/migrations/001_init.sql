@@ -82,6 +82,20 @@ CREATE TABLE workflow_jobs (
 );
 
 
+CREATE TABLE verification_session_paper_claims (
+	id UUID NOT NULL,
+	session_id VARCHAR(64) NOT NULL,
+	paper_id UUID NOT NULL,
+	status VARCHAR(32) DEFAULT 'active' NOT NULL,
+	expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	released_at TIMESTAMP WITHOUT TIME ZONE,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(session_id) REFERENCES workflow_jobs (job_id) ON DELETE CASCADE,
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE
+);
+
+
 CREATE TABLE audit_logs (
 	id UUID NOT NULL, 
 	paper_id UUID, 
@@ -197,6 +211,7 @@ CREATE TABLE extraction_field_reviews (
 	reviewer VARCHAR(128), 
 	reviewer_note TEXT, 
 	review_payload JSONB, 
+	write_version INTEGER DEFAULT 1 NOT NULL,
 	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
@@ -283,6 +298,7 @@ CREATE TABLE paper_figures (
 	crop_status VARCHAR(32) DEFAULT 'candidate_crop' NOT NULL, 
 	crop_confidence FLOAT, 
 	crop_source VARCHAR(64), 
+	write_version INTEGER DEFAULT 1 NOT NULL,
 	PRIMARY KEY (id), 
 	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE
 );
@@ -425,7 +441,9 @@ CREATE TABLE dft_results (
 	candidate_status VARCHAR(64) DEFAULT 'system_candidate' NOT NULL, 
 	evidence_payload JSONB, 
 	extraction_protocol_version VARCHAR(64), 
+	candidate_identity VARCHAR(64),
 	PRIMARY KEY (id), 
+	CONSTRAINT uq_dft_result_candidate_identity UNIQUE (paper_id, candidate_identity),
 	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE, 
 	FOREIGN KEY(catalyst_sample_id) REFERENCES catalyst_samples (id) ON DELETE SET NULL
 );
@@ -593,6 +611,11 @@ CREATE UNIQUE INDEX ix_share_tokens_token ON share_tokens (token);
 CREATE INDEX ix_workflow_jobs_type ON workflow_jobs (type);
 CREATE INDEX ix_workflow_jobs_status ON workflow_jobs (status);
 CREATE INDEX ix_workflow_jobs_library_name ON workflow_jobs (library_name);
+CREATE INDEX ix_verification_session_paper_claims_session_id ON verification_session_paper_claims (session_id);
+CREATE INDEX ix_verification_session_paper_claims_paper_id ON verification_session_paper_claims (paper_id);
+CREATE INDEX ix_verification_session_paper_claims_status ON verification_session_paper_claims (status);
+CREATE INDEX ix_verification_session_paper_claims_expires_at ON verification_session_paper_claims (expires_at);
+CREATE UNIQUE INDEX uq_verification_session_active_paper ON verification_session_paper_claims (paper_id) WHERE status = 'active';
 
 CREATE INDEX ix_audit_logs_paper_id ON audit_logs (paper_id);
 

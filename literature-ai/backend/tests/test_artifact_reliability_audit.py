@@ -65,6 +65,9 @@ def _seed_reliability_cases(storage_root: Path, Session) -> tuple[str, dict[str,
     _write_png(figure_dir / "normal.png", (420, 260))
     _write_png(figure_dir / "nobbox.png", (420, 260))
     _write_png(figure_dir / "nofull.png", (420, 260))
+    _write_png(figure_dir / "page_003.png", (900, 1200))
+    _write_png(figure_dir / "page_004.png", (900, 1200))
+    _write_png(figure_dir / "page_005.png", (900, 1200))
 
     with Session() as session:
         paper = Paper(title="Artifact reliability paper", pdf_path="paper.pdf", workflow_status="Parsed_Material_Ready")

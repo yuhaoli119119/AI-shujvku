@@ -202,6 +202,13 @@ def test_d4_prepared_candidate_and_save_reviews_cannot_set_verified(tmp_path):
             row = _dft_result(session, paper)
             service = ExtractionReviewService(session)
             service.prepare_pending_reviews(paper.id)
+            stored = session.scalar(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper.id,
+                    ExtractionFieldReview.target_id == str(row.id),
+                    ExtractionFieldReview.field_name == "value",
+                )
+            )
 
             with pytest.raises(ValueError, match="Cannot set reviewer_status=verified"):
                 service.save_reviews(
@@ -215,17 +222,12 @@ def test_d4_prepared_candidate_and_save_reviews_cannot_set_verified(tmp_path):
                             unit="eV",
                             evidence_text=row.evidence_text,
                             reviewer_status="verified",
+                            expected_write_version=stored.write_version,
                         )
                     ],
                 )
 
-            stored = session.scalar(
-                select(ExtractionFieldReview).where(
-                    ExtractionFieldReview.paper_id == paper.id,
-                    ExtractionFieldReview.target_id == str(row.id),
-                    ExtractionFieldReview.field_name == "value",
-                )
-            )
+            session.refresh(stored)
             assert stored.reviewer_status == "pending"
     finally:
         engine.dispose()
@@ -240,6 +242,13 @@ def test_d4_mark_verified_is_the_only_verified_path(tmp_path):
             _locator(session, paper, row, page=1, locator_status="exact_page")
             service = ExtractionReviewService(session)
             service.prepare_pending_reviews(paper.id)
+            pending = session.scalar(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper.id,
+                    ExtractionFieldReview.target_id == str(row.id),
+                    ExtractionFieldReview.field_name == "value",
+                )
+            )
 
             corrected = service.save_reviews(
                 paper.id,
@@ -252,6 +261,7 @@ def test_d4_mark_verified_is_the_only_verified_path(tmp_path):
                         unit="eV",
                         evidence_text=row.evidence_text,
                         reviewer_status="corrected",
+                        expected_write_version=pending.write_version,
                     )
                 ],
             )
@@ -263,6 +273,7 @@ def test_d4_mark_verified_is_the_only_verified_path(tmp_path):
                     target_type="dft_results",
                     target_id=str(row.id),
                     field_names=["value"],
+                    expected_write_versions={"value": corrected[0].write_version},
                     reviewer="human_reviewer",
                 ),
             )
@@ -315,6 +326,13 @@ def test_d4_exact_locator_and_human_verified_are_required_for_export_and_writing
             _review_like_writing_card(session, paper, locator_status="exact_page", page=1)
             service = ExtractionReviewService(session)
             service.prepare_pending_reviews(paper.id)
+            pending = session.scalar(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper.id,
+                    ExtractionFieldReview.target_id == str(row.id),
+                    ExtractionFieldReview.field_name == "value",
+                )
+            )
 
             pending_gate = is_export_eligible_extraction(session, row, target_type="dft_results")
             assert pending_gate.eligible is False
@@ -326,6 +344,7 @@ def test_d4_exact_locator_and_human_verified_are_required_for_export_and_writing
                     target_type="dft_results",
                     target_id=str(row.id),
                     field_names=["value"],
+                    expected_write_versions={"value": pending.write_version},
                     reviewer="human_reviewer",
                 ),
             )
@@ -336,7 +355,9 @@ def test_d4_exact_locator_and_human_verified_are_required_for_export_and_writing
             assert export_gate.eligible is True
             assert export_gate.review_gate_status == "safe_verified"
             assert export_gate.provenance_level == "exact_pdf_page"
-            assert card.can_use_for_writing is True
+            # A human/AI review marker cannot replace field-scoped source evidence.
+            assert card.can_use_for_writing is False
+            assert "insufficient_reliable_core_fields" in card.blocked_reasons
     finally:
         engine.dispose()
 

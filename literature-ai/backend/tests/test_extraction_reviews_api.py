@@ -114,6 +114,165 @@ def test_save_extraction_field_review(setup_test_db):
     assert reviews[0]["reviewer"] == "alice"
 
 
+def test_save_extraction_field_review_rejects_stale_expected_write_version(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        paper = Paper(title="Stale Save Paper", pdf_path="stale-save.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S4",
+            property_type="adsorption_energy",
+            value=-1.23,
+            unit="eV",
+            evidence_text="The adsorption energy of Li2S4 is -1.23 eV.",
+            confidence=0.88,
+        )
+        session.add(result)
+        session.commit()
+        paper_id = str(paper.id)
+        paper_uuid = paper.id
+        target_id = str(result.id)
+
+    client = TestClient(app)
+    first = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={
+            "reviews": [
+                {
+                    "target_type": "dft_results",
+                    "target_id": target_id,
+                    "field_name": "value",
+                    "reviewed_value": -1.2,
+                    "reviewer_status": "corrected",
+                    "reviewer": "ai-1",
+                    "expected_write_version": 1,
+                }
+            ]
+        },
+    )
+    assert first.status_code == 200
+    before = first.json()[0]
+    stale_version = first.json()[0]["write_version"] - 1
+
+    second = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={
+            "reviews": [
+                {
+                    "target_type": "dft_results",
+                    "target_id": target_id,
+                    "field_name": "value",
+                    "reviewed_value": -9.99,
+                    "reviewer_status": "corrected",
+                    "reviewer": "ai-2",
+                    "expected_write_version": stale_version,
+                }
+            ]
+        },
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"] == "write_conflict:extraction_review_version_stale"
+
+    with Session() as session:
+        review = session.query(ExtractionFieldReview).filter_by(paper_id=paper_uuid).one()
+        assert review.reviewed_value == -1.2
+        assert review.reviewer == "ai-1"
+
+
+def test_existing_review_rejects_missing_expected_write_version_without_mutation(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Missing Version Save", pdf_path="missing-version-save.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S4",
+            property_type="adsorption_energy",
+            value=-1.23,
+            unit="eV",
+            evidence_text="The adsorption energy is -1.23 eV.",
+        )
+        session.add(result)
+        session.commit()
+        paper_id, paper_uuid, target_id = str(paper.id), paper.id, str(result.id)
+
+    client = TestClient(app)
+    first = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={"reviews": [{
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_name": "value",
+            "reviewed_value": -1.2,
+            "reviewer_status": "corrected",
+            "reviewer": "ai-1",
+        }]},
+    )
+    assert first.status_code == 200
+    before = first.json()[0]
+
+    missing = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={"reviews": [{
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_name": "value",
+            "reviewed_value": -9.99,
+            "reviewer_status": "corrected",
+            "reviewer": "ai-2",
+        }]},
+    )
+    assert missing.status_code == 409
+    assert missing.json()["detail"] == "write_conflict:extraction_review_version_required"
+
+    with Session() as session:
+        review = session.query(ExtractionFieldReview).filter_by(paper_id=paper_uuid).one()
+        assert review.reviewed_value == before["reviewed_value"]
+        assert review.reviewer == before["reviewer"]
+        assert review.reviewer_status == before["reviewer_status"]
+        assert review.write_version == before["write_version"]
+
+
+def test_first_review_creation_allows_missing_version_and_returns_version(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="First Review", pdf_path="first-review.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S6",
+            property_type="adsorption_energy",
+            value=-0.91,
+            unit="eV",
+            evidence_text="The adsorption energy is -0.91 eV.",
+        )
+        session.add(result)
+        session.commit()
+        paper_id, target_id = str(paper.id), str(result.id)
+
+    response = TestClient(app).post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={"reviews": [{
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_name": "value",
+            "reviewed_value": -0.9,
+            "reviewer_status": "corrected",
+            "reviewer": "ai-1",
+        }]},
+    )
+    assert response.status_code == 200
+    assert response.json()[0]["write_version"] >= 1
+
+
 def test_mark_verified_persists_verified_review(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -160,6 +319,262 @@ def test_mark_verified_persists_verified_review(setup_test_db):
     assert data[0]["verified"] is True
     assert data[0]["reviewed_value"] == -0.91
     assert data[0]["target_resolution_status"] == "active"
+
+
+def test_mark_verified_rejects_stale_expected_write_version(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        paper = Paper(title="Stale Verify Paper", pdf_path="stale-verify.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S6",
+            property_type="adsorption_energy",
+            value=-0.91,
+            unit="eV",
+            evidence_text="The adsorption energy of Li2S6 is -0.91 eV.",
+            confidence=0.8,
+        )
+        session.add(result)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(result.id),
+            text=result.evidence_text or "The adsorption energy of Li2S6 is -0.91 eV.",
+        ))
+        session.commit()
+        paper_id = str(paper.id)
+        paper_uuid = paper.id
+        target_id = str(result.id)
+
+    client = TestClient(app)
+    first = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={
+            "reviews": [
+                {
+                    "target_type": "dft_results",
+                    "target_id": target_id,
+                    "field_name": "value",
+                    "reviewed_value": -0.9,
+                    "reviewer_status": "corrected",
+                    "reviewer": "ai-1",
+                    "expected_write_version": 1,
+                }
+            ]
+        },
+    )
+    assert first.status_code == 200
+    before = first.json()[0]
+    stale_version = first.json()[0]["write_version"] - 1
+
+    response = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/mark-verified",
+        json={
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_names": ["value"],
+            "reviewer": "ai-2",
+            "expected_write_version": stale_version,
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "write_conflict:extraction_review_version_stale"
+
+    with Session() as session:
+        review = session.query(ExtractionFieldReview).filter_by(paper_id=paper_uuid).one()
+        assert review.reviewed_value == before["reviewed_value"]
+        assert review.reviewer_status == "corrected"
+        assert review.reviewer == "ai-1"
+        assert review.write_version == before["write_version"]
+
+
+def test_mark_verified_rejects_missing_version_without_mutation(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Missing Verify Version", pdf_path="missing-verify.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S6",
+            property_type="adsorption_energy",
+            value=-0.91,
+            unit="eV",
+            evidence_text="The adsorption energy is -0.91 eV.",
+        )
+        session.add(result)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(result.id),
+            text=result.evidence_text,
+        ))
+        session.commit()
+        paper_id, paper_uuid, target_id = str(paper.id), paper.id, str(result.id)
+
+    client = TestClient(app)
+    first = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={"reviews": [{
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_name": "value",
+            "reviewed_value": -0.9,
+            "reviewer_status": "corrected",
+            "reviewer": "ai-1",
+        }]},
+    )
+    assert first.status_code == 200
+    before = first.json()[0]
+
+    response = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/mark-verified",
+        json={
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_names": ["value"],
+            "reviewer": "ai-2",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "write_conflict:extraction_review_version_required"
+
+    with Session() as session:
+        review = session.query(ExtractionFieldReview).filter_by(paper_id=paper_uuid).one()
+        assert review.reviewed_value == before["reviewed_value"]
+        assert review.reviewer == before["reviewer"]
+        assert review.reviewer_status == before["reviewer_status"]
+        assert review.write_version == before["write_version"]
+
+
+def test_mark_verified_accepts_distinct_per_field_versions(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Per Field Versions", pdf_path="per-field.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S8",
+            property_type="adsorption_energy",
+            value=-0.75,
+            unit="eV",
+            evidence_text="The adsorption energy is -0.75 eV.",
+        )
+        session.add(result)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(result.id),
+            text=result.evidence_text,
+        ))
+        session.commit()
+        paper_id, target_id = str(paper.id), str(result.id)
+
+    client = TestClient(app)
+    created = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={"reviews": [
+            {"target_type": "dft_results", "target_id": target_id, "field_name": "value", "reviewed_value": -0.74, "reviewer_status": "corrected", "reviewer": "ai-1"},
+            {"target_type": "dft_results", "target_id": target_id, "field_name": "adsorbate", "reviewed_value": "Li2S8", "reviewer_status": "corrected", "reviewer": "ai-1"},
+        ]},
+    )
+    assert created.status_code == 200
+    versions = {row["field_name"]: row["write_version"] for row in created.json()}
+    updated = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={"reviews": [{
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_name": "value",
+            "reviewed_value": -0.73,
+            "reviewer_status": "corrected",
+            "reviewer": "ai-2",
+            "expected_write_version": versions["value"],
+        }]},
+    )
+    assert updated.status_code == 200
+    versions["value"] = updated.json()[0]["write_version"]
+    assert versions["value"] != versions["adsorbate"]
+
+    verified = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/mark-verified",
+        json={
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_names": ["value", "adsorbate"],
+            "expected_write_versions": versions,
+            "reviewer": "human",
+        },
+    )
+    assert verified.status_code == 200
+    assert {row["reviewer_status"] for row in verified.json()} == {"verified"}
+
+
+def test_mark_verified_stale_field_rolls_back_entire_batch(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Atomic Verify Batch", pdf_path="atomic-verify.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        result = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S8",
+            property_type="adsorption_energy",
+            value=-0.75,
+            unit="eV",
+            evidence_text="The adsorption energy is -0.75 eV.",
+        )
+        session.add(result)
+        session.flush()
+        session.add(EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(result.id),
+            text=result.evidence_text,
+        ))
+        session.commit()
+        paper_id, paper_uuid, target_id = str(paper.id), paper.id, str(result.id)
+
+    client = TestClient(app)
+    created = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/save",
+        json={"reviews": [
+            {"target_type": "dft_results", "target_id": target_id, "field_name": "value", "reviewed_value": -0.74, "reviewer_status": "corrected", "reviewer": "ai-1"},
+            {"target_type": "dft_results", "target_id": target_id, "field_name": "adsorbate", "reviewed_value": "Li2S8", "reviewer_status": "corrected", "reviewer": "ai-1"},
+        ]},
+    )
+    assert created.status_code == 200
+    versions = {row["field_name"]: row["write_version"] for row in created.json()}
+
+    response = client.post(
+        f"/api/extraction/results/{paper_id}/reviews/mark-verified",
+        json={
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_names": ["value", "adsorbate"],
+            "expected_write_versions": {"value": versions["value"], "adsorbate": versions["adsorbate"] - 1},
+            "reviewer": "human",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "write_conflict:extraction_review_version_stale"
+
+    with Session() as session:
+        reviews = session.query(ExtractionFieldReview).filter_by(paper_id=paper_uuid).all()
+        assert {row.reviewer_status for row in reviews} == {"corrected"}
+        assert {row.reviewer for row in reviews} == {"ai-1"}
+        assert {row.field_name: row.write_version for row in reviews} == versions
 
 
 def test_validate_returns_review_state(setup_test_db):
@@ -299,12 +714,14 @@ def test_replace_stage2_remaps_review_when_semantics_are_unchanged(setup_test_db
         },
     )
     assert save_response.status_code == 200
+    saved_version = save_response.json()[0]["write_version"]
     verify_response = client.post(
         f"/api/extraction/results/{paper_id}/reviews/mark-verified",
         json={
             "target_type": "dft_results",
             "target_id": old_target_id,
             "field_names": ["value"],
+            "expected_write_versions": {"value": saved_version},
             "reviewer": "alice",
             "reviewer_note": "Confirmed against the PDF.",
         },

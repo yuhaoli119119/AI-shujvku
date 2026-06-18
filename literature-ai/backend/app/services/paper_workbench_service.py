@@ -7,7 +7,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -38,6 +38,7 @@ from app.services.dft_rescan_policy import (
     normalize_source_document_type,
     normalize_unit,
 )
+from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_codes import ensure_paper_codes
 from app.services.review_adjudication_service import ReviewAdjudicationService
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -210,6 +211,12 @@ class PaperWorkbenchService:
         }
 
     def prepare_paper_workspace(self, paper_id: UUID, *, render_pages: bool = False) -> dict[str, Any]:
+        return self._run_exclusive_prepare(
+            paper_id,
+            lambda: self._prepare_paper_workspace_unlocked(paper_id, render_pages=render_pages),
+        )
+
+    def _prepare_paper_workspace_unlocked(self, paper_id: UUID, *, render_pages: bool = False) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)
         if paper is None:
             raise LookupError("Paper not found")
@@ -231,18 +238,32 @@ class PaperWorkbenchService:
             )
         self.apply_quality_report(paper, quality_report)
         workspace_root = self._workspace_root(paper.id)
-        dirs = self._ensure_workspace_dirs(workspace_root)
-        self._copy_source_pdf(pdf_path, workspace_root)
-        self._write_json(workspace_root / "metadata.json", self._paper_metadata(paper))
-        self._write_json(workspace_root / "quality_report.json", quality_report)
-        self._write_markdown_copy(paper, dirs["markdown"])
-        self._write_docling_copy(paper, dirs["extraction"])
-        self._write_evidence_files(paper, dirs)
-        self._write_ai_reading_package(paper, dirs)
-        self._write_extraction_files(paper, dirs)
-        self._write_audit_files(paper, dirs)
-        if render_pages and pdf_path is not None and quality_report.get("parse_allowed"):
-            self._render_page_previews(pdf_path, dirs["pages"])
+        staging_root = workspace_root.with_name(f".{workspace_root.name}.staging-{uuid4().hex}")
+        backup_root = workspace_root.with_name(f".{workspace_root.name}.backup-{uuid4().hex}")
+        swapped = False
+        try:
+            dirs = self._ensure_workspace_dirs(staging_root)
+            self._copy_source_pdf(pdf_path, staging_root)
+            self._write_json(staging_root / "metadata.json", self._paper_metadata(paper))
+            self._write_json(staging_root / "quality_report.json", quality_report)
+            self._write_markdown_copy(paper, dirs["markdown"])
+            self._write_docling_copy(paper, dirs["extraction"])
+            self._write_evidence_files(paper, dirs)
+            self._write_ai_reading_package(paper, dirs)
+            self._write_extraction_files(paper, dirs)
+            self._write_audit_files(paper, dirs)
+            if render_pages and pdf_path is not None and quality_report.get("parse_allowed"):
+                self._render_page_previews(pdf_path, dirs["pages"])
+            if workspace_root.exists():
+                workspace_root.replace(backup_root)
+            staging_root.replace(workspace_root)
+            swapped = True
+        except Exception:
+            if staging_root.exists():
+                shutil.rmtree(staging_root, ignore_errors=True)
+            if backup_root.exists() and not workspace_root.exists():
+                backup_root.replace(workspace_root)
+            raise
         paper.workspace_path = self._workspace_ref(workspace_root)
         if paper.workflow_status in (None, "", "Imported"):
             paper.workflow_status = "Quality_Checked"
@@ -262,9 +283,46 @@ class PaperWorkbenchService:
             )
         )
         self.session.add(paper)
-        self.session.commit()
+        try:
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            if swapped and workspace_root.exists():
+                shutil.rmtree(workspace_root, ignore_errors=True)
+            if backup_root.exists():
+                backup_root.replace(workspace_root)
+            raise
+        if backup_root.exists():
+            shutil.rmtree(backup_root, ignore_errors=True)
         self.session.refresh(paper)
         return self.workspace_summary(paper.id)
+
+    def _run_exclusive_prepare(self, paper_id: UUID, callback) -> dict[str, Any]:
+        owner = f"paper_operation:prepare_workspace:{uuid4().hex}"
+        locks = ModuleWriteLockService(self.session)
+        try:
+            lock = locks.acquire(
+                paper_id=paper_id,
+                module_name="all_non_dft",
+                locked_by=owner,
+                ttl_minutes=60,
+                meta={"operation": "prepare_workspace", "internal_operation_lock": True},
+            )
+            self.session.commit()
+        except ValueError as exc:
+            self.session.rollback()
+            raise ValueError(f"paper_operation_conflict:prepare_workspace:{paper_id}:{exc}") from exc
+        try:
+            return callback()
+        except Exception:
+            self.session.rollback()
+            raise
+        finally:
+            try:
+                locks.release(lock_token=lock.lock_token, released_by=owner)
+                self.session.commit()
+            except Exception:
+                self.session.rollback()
 
     def apply_quality_report(self, paper: Paper, quality_report: dict[str, Any]) -> None:
         paper.pdf_quality_status = quality_report.get("quality_status")
@@ -604,11 +662,16 @@ class PaperWorkbenchService:
                     "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
                 }
             )
-        rows = self._sort_review_center_rows(rows, sort_by=sort_by)[:limit]
+        sorted_rows = self._sort_review_center_rows(rows, sort_by=sort_by)
+        total_rows = len(sorted_rows)
+        rows = sorted_rows[:limit]
         return {
             "schema_version": WORKBENCH_SCHEMA_VERSION,
             "metadata": {
                 "returned": len(rows),
+                "total": total_rows,
+                "limit": limit,
+                "has_more": total_rows > len(rows),
                 "sort_by": sort_by,
                 "library_name": normalized_library,
                 "status_counts": dict(sorted(status_counts.items())),
@@ -703,6 +766,7 @@ class PaperWorkbenchService:
             return sorted(
                 rows,
                 key=lambda row: (
+                    -int(row.get("review_conflict_total_count") or 0),
                     -int(row.get("review_conflict_count") or 0),
                     -int(row.get("locator_issue_count") or 0),
                     -int(row.get("figure_issue_count") or 0),

@@ -360,7 +360,8 @@ async function activateLibraryByName(name) {
         rememberCurrentLibraryName(name);
         await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
         showToast("已切换到：" + name, "success");
-        state.currentOffset = 0;
+        if (typeof resetLibraryPagination === "function") resetLibraryPagination();
+        else state.currentOffset = 0;
         await loadLibraries();
         refreshCurrentPage();
     } catch (error) {
@@ -398,7 +399,8 @@ async function confirmRemoveLibrary() {
         closeRemoveLibraryDialog();
         showToast("库已移除。", "success");
         await loadLibraries();
-        state.currentOffset = 0;
+        if (typeof resetLibraryPagination === "function") resetLibraryPagination();
+        else state.currentOffset = 0;
         refreshCurrentPage();
     } catch (error) {
         showToast("移除失败：" + error.message, "error");

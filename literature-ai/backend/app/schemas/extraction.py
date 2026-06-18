@@ -55,6 +55,7 @@ class ExtractionFieldReviewResponse(BaseModel):
     verified: bool = False
     created_at: str
     updated_at: str
+    write_version: int = 1
 
 
 class EvidenceField(BaseModel):
@@ -151,6 +152,7 @@ class ExtractionFieldReviewSaveItem(BaseModel):
     target_type: str
     target_id: str
     field_name: str
+    expected_write_version: int | None = None
     original_value: Any = None
     reviewed_value: Any = None
     unit: str | None = None
@@ -169,6 +171,8 @@ class ExtractionReviewMarkVerifiedRequest(BaseModel):
     target_type: str
     target_id: str
     field_names: list[str] = Field(default_factory=list)
+    expected_write_versions: dict[str, int] = Field(default_factory=dict)
+    expected_write_version: int | None = None
     reviewer: str | None = None
     reviewer_note: str | None = None
 

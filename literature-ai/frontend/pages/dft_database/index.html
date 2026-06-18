@@ -12,11 +12,61 @@
   <script>ThemeManager.init();</script>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1440px; margin: 0 auto; padding: 18px 18px 28px; height: calc(100vh - 56px); display: flex; flex-direction: column; overflow: hidden; }
+    html, body { height: 100%; margin: 0; }
+    body { min-height: 100vh; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); display: flex; flex-direction: column; }
+    .shell { max-width: var(--page-shell-max-width); width: 100%; margin: 0 auto; padding: 0 18px 8px; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
     .scroll-area { flex: 1; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
-    .panel-card, .filter-panel, .data-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-card); margin-bottom: 16px; }
-    .filter-panel { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .panel-card, .data-panel, .dashboard-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-card); margin-bottom: 16px; }
+    .dashboard-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .dashboard-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .dashboard-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .dashboard-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .dashboard-title-tip {
+      cursor: help;
+      color: var(--color-text-muted);
+      font-size: 13px;
+      flex: 0 0 auto;
+    }
+    .dashboard-header-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .dashboard-body {
+      display: grid;
+      gap: 12px;
+    }
+    .dashboard-panel.collapsed .dashboard-body {
+      display: none;
+    }
+    .dashboard-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
     .filter-grid { flex: 1 1 860px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
     .filter-field { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
     label { flex: 0 0 auto; display: inline-flex; align-items: center; margin: 0; font-size: 12px; color: var(--color-text-secondary); font-weight: 800; }
@@ -29,11 +79,10 @@
     .stat-box .lbl { color: var(--color-text-secondary); font-size: 12px; }
     .stat-box .val { font-size: 22px; font-weight: 800; margin-top: 4px; }
     .panel-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-    .export-panel { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+    .export-panel { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .export-panel .btn { height: 32px; padding: 0 12px; font-size: 13px; }
     .export-panel .export-status { color: var(--color-primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
-    .export-note { flex-basis: 100%; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
-    .quality-panel { display: flex; flex-direction: column; gap: 14px; }
+    .export-note { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-topbar {
       display: flex;
       align-items: center;
@@ -293,11 +342,13 @@
       pointer-events: none;
     }
     @media (max-width: 768px) {
+      .shell { padding: 0 14px 8px; }
       .quality-topbar { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; }
       .quality-topbar .donut-wrap { align-self: flex-start; }
       .quality-topbar .stat-divider { display: none; }
       .quality-topbar .actions-bar { margin-left: 0; width: 100%; justify-content: flex-end; }
-      .filter-panel { align-items: flex-start; }
+      .dashboard-toolbar { align-items: flex-start; }
+      .dashboard-header-actions { margin-left: 0; width: 100%; justify-content: flex-start; }
       .export-panel { margin-left: 0; }
       .completeness-list { grid-template-columns: 1fr; }
       .fragment-context-grid { grid-template-columns: 1fr; }
@@ -307,34 +358,38 @@
 <body>
   <div id="topnav-mount"></div>
   <main class="shell">
-    <section class="filter-panel">
-      <div class="filter-grid">
-        <div class="filter-field"><label for="libraryFilter">文献库</label><select id="libraryFilter" onchange="setCurrentLibraryFromSelect(); queryDFT();"><option value="">全部文献库</option></select></div>
-        <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option></select></div>
-        <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
-        <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
-        <div class="filter-field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
-        <div class="filter-field"><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="validated" selected>已审核可导出</option></select></div>
-      </div>
-      <div class="export-panel">
-        <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
-        <span id="exportSafetyStatus" class="export-status">等待导出。</span>
-      </div>
-      <div class="export-note">只导出人工已确认、证据完整、定位准确的记录；候选和需要处理的记录不会导出。</div>
-    </section>
-
-    <section class="panel-card quality-panel" id="exportSafetyPanel">
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <strong>DFT 导出安全概览</strong>
-          <span title="这里只显示全局数量：已确认可导出的 DFT 数据会进入正式数据库表格；需处理的数据只作为数量提示，不在数据库表格中展开。" style="cursor:help;color:var(--color-text-muted);font-size:13px;">ⓘ</span>
+    <section class="dashboard-panel" id="exportSafetyPanel">
+      <div class="dashboard-header">
+        <div class="dashboard-title-wrap">
+          <h2 class="dashboard-title">DFT 导出仪表盘</h2>
+          <span class="dashboard-title-tip" title="这里汇总当前文献库的筛选、导出安全状态和待处理原因；如果没有选择文献库，则汇总全部文献库。">ⓘ</span>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="loadExportSafetyOverview()">↻ 刷新概览</button>
+        <div class="dashboard-header-actions">
+          <button class="btn btn-ghost btn-sm" type="button" onclick="loadExportSafetyOverview()">↻ 刷新概览</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtn">收起面板</button>
+        </div>
       </div>
-      <div class="quality-topbar">
-        <div id="qualityDonuts"><div class="empty-state">正在加载导出安全概览...</div></div>
-        <div class="stat-divider"></div>
-        <div class="reason-chips-bar" id="qualityReasonChips"></div>
+      <div class="dashboard-body" id="dashboardBody">
+        <div class="dashboard-toolbar">
+          <div class="filter-grid">
+            <div class="filter-field"><label for="libraryFilter">文献库</label><select id="libraryFilter" onchange="handleLibraryChange()"><option value="">全部文献库</option></select></div>
+            <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option></select></div>
+            <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
+            <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
+            <div class="filter-field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
+            <div class="filter-field"><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="validated" selected>已审核可导出</option></select></div>
+          </div>
+          <div class="export-panel">
+            <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
+            <span id="exportSafetyStatus" class="export-status">等待导出。</span>
+          </div>
+        </div>
+        <div class="export-note">只导出人工已确认、证据完整、定位准确的记录；候选和需要处理的记录不会导出。</div>
+        <div class="quality-topbar">
+          <div id="qualityDonuts"><div class="empty-state">正在加载导出安全概览...</div></div>
+          <div class="stat-divider"></div>
+          <div class="reason-chips-bar" id="qualityReasonChips"></div>
+        </div>
       </div>
     </section>
 
@@ -382,8 +437,27 @@
   </div>
   <script>
     const API_BASE = "/api/papers";
+    const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
+    const DFT_DASHBOARD_STORAGE_KEY = "litai_dft_hide_dashboard";
     const state = { items: [], currentLibrary: "", libraries: [] };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+    function toggleDashboard() {
+      const panel = document.getElementById("exportSafetyPanel");
+      if (!panel) return;
+      panel.classList.toggle("collapsed");
+      const isCollapsed = panel.classList.contains("collapsed");
+      const btn = document.getElementById("dashboardToggleBtn");
+      if (btn) btn.textContent = isCollapsed ? "展开面板" : "收起面板";
+      localStorage.setItem(DFT_DASHBOARD_STORAGE_KEY, isCollapsed ? "1" : "0");
+    }
+    function initDashboardState() {
+      const panel = document.getElementById("exportSafetyPanel");
+      if (!panel) return;
+      const btn = document.getElementById("dashboardToggleBtn");
+      const isCollapsed = localStorage.getItem(DFT_DASHBOARD_STORAGE_KEY) === "1";
+      panel.classList.toggle("collapsed", isCollapsed);
+      if (btn) btn.textContent = isCollapsed ? "展开面板" : "收起面板";
+    }
     function toggleCollapse(header) {
       const body = header.closest(".panel-actions")?.nextElementSibling || header.parentElement.nextElementSibling;
       if (!body || !body.classList.contains("collapse-body")) return;
@@ -494,6 +568,31 @@
       if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
       return data;
     }
+    function getStoredLibraryName() {
+      try {
+        return window.localStorage.getItem(CURRENT_LIBRARY_STORAGE_KEY) || "";
+      } catch (_) {
+        return "";
+      }
+    }
+    function rememberLibraryName(name) {
+      try {
+        if (name) {
+          window.localStorage.setItem(CURRENT_LIBRARY_STORAGE_KEY, name);
+        } else {
+          window.localStorage.removeItem(CURRENT_LIBRARY_STORAGE_KEY);
+        }
+      } catch (_) {
+        // localStorage can be unavailable in strict browser modes.
+      }
+    }
+    function getQueryLibraryName() {
+      try {
+        return new URLSearchParams(window.location.search).get("library_name") || "";
+      } catch (_) {
+        return "";
+      }
+    }
     async function ensureCurrentLibraryName() {
       const select = document.getElementById("libraryFilter");
       if (select && select.value !== state.currentLibrary) state.currentLibrary = select.value;
@@ -533,6 +632,12 @@
     function setCurrentLibraryFromSelect() {
       const select = document.getElementById("libraryFilter");
       state.currentLibrary = select ? select.value : "";
+      rememberLibraryName(state.currentLibrary);
+    }
+    function handleLibraryChange() {
+      setCurrentLibraryFromSelect();
+      loadExportSafetyOverview();
+      queryDFT();
     }
     function applyLibraryParam(params) {
       if (state.currentLibrary) params.set("library_name", state.currentLibrary);
@@ -581,16 +686,16 @@
           </div>
           <div class="donut-legend">
             <div class="lg-row">
-              <div style="display:flex; align-items:center; gap:6px;">
+            <div style="display:flex; align-items:center; gap:6px;">
                 <div class="lg-dot" style="background:linear-gradient(135deg, #52c41a, #389e0d); box-shadow: 0 0 4px rgba(82,196,26,0.4);"></div>
-                <span class="lg-label">已导出/可导出</span>
+                <span class="lg-label">合格记录</span>
               </div>
               <span class="lg-val" style="color:var(--color-success);">${exportable}</span>
             </div>
             <div class="lg-row">
               <div style="display:flex; align-items:center; gap:6px;">
                 <div class="lg-dot" style="background:linear-gradient(135deg, #ff4d4f, #f5222d); box-shadow: 0 0 4px rgba(255,77,79,0.4);"></div>
-                <span class="lg-label">未导出/需处理</span>
+                <span class="lg-label">待处理记录</span>
               </div>
               <span class="lg-val" style="color:var(--color-danger);">${blocked}</span>
             </div>
@@ -1100,9 +1205,12 @@
       }
     }
     document.addEventListener("DOMContentLoaded", () => {
+      state.currentLibrary = getQueryLibraryName() || getStoredLibraryName() || "";
+      if (state.currentLibrary) rememberLibraryName(state.currentLibrary);
       ensureMLExportButton();
       applyReadableDftLabels();
       TopNav.init({ currentPage: "dft-database", mountId: "topnav-mount" });
+      initDashboardState();
       document.addEventListener("keydown", event => {
         if (event.key === "Escape") closeEvidenceModal();
       });

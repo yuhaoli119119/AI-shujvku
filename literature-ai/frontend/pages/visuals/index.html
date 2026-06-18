@@ -20,7 +20,7 @@
       min-height: 100vh;
     }
     .shell {
-      max-width: 1480px;
+      max-width: var(--page-shell-max-width);
       margin: 0 auto;
       padding: 22px 20px 34px;
     }
@@ -617,6 +617,7 @@
 
   <script>
     const COLORS = ["#2A9D8F", "#E9C46A", "#E76F51", "#4C78A8", "#7A5195", "#59A14F", "#D37295"];
+    const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     let currentLibrary = "";
     let latestData = null;
     let matrixCategory = "all";
@@ -643,6 +644,31 @@
       try { data = text ? JSON.parse(text) : null; } catch (_) {}
       if (!resp.ok) throw new Error((data && data.detail) || ("HTTP " + resp.status));
       return data;
+    }
+    function getStoredLibraryName() {
+      try {
+        return window.localStorage.getItem(CURRENT_LIBRARY_STORAGE_KEY) || "";
+      } catch (_) {
+        return "";
+      }
+    }
+    function rememberLibraryName(name) {
+      try {
+        if (name) {
+          window.localStorage.setItem(CURRENT_LIBRARY_STORAGE_KEY, name);
+        } else {
+          window.localStorage.removeItem(CURRENT_LIBRARY_STORAGE_KEY);
+        }
+      } catch (_) {
+        // localStorage can be unavailable in strict browser modes.
+      }
+    }
+    function getQueryLibraryName() {
+      try {
+        return new URLSearchParams(window.location.search).get("library_name") || "";
+      } catch (_) {
+        return "";
+      }
     }
     function switchView(name) {
       document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.view === name));
@@ -951,9 +977,14 @@
       const libs = await fetchJSON("/api/libraries");
       const select = document.getElementById("librarySelect");
       const active = libs.find(item => item.is_active) || libs[0];
-      currentLibrary = active ? active.name : "";
+      const preferredLibrary = getQueryLibraryName() || getStoredLibraryName() || "";
+      currentLibrary = (preferredLibrary && libs.some(item => item && item.name === preferredLibrary))
+        ? preferredLibrary
+        : (active ? active.name : "");
       select.innerHTML = libs.map(item => '<option value="' + esc(item.name) + '"' + (item.name === currentLibrary ? " selected" : "") + '>' + esc(item.name) + (item.is_active ? " (当前)" : "") + '</option>').join("");
-      document.getElementById("libraryMeta").textContent = active ? ("当前文献库：" + active.name + " · " + (active.paper_count || 0) + " 篇") : "未找到文献库";
+      const selected = libs.find(item => item && item.name === currentLibrary) || active;
+      if (currentLibrary) rememberLibraryName(currentLibrary);
+      document.getElementById("libraryMeta").textContent = selected ? ("当前文献库：" + selected.name + " · " + (selected.paper_count || 0) + " 篇") : "未找到文献库";
     }
     async function loadVisuals() {
       if (!currentLibrary) return;
@@ -970,6 +1001,7 @@
     }
     async function handleLibraryChange(name) {
       currentLibrary = name;
+      rememberLibraryName(name);
       document.getElementById("libraryMeta").textContent = "当前文献库：" + name;
       await loadVisuals().catch(error => showToast("加载可视化失败：" + error.message));
     }

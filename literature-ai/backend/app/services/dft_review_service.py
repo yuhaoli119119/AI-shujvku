@@ -18,9 +18,7 @@ DFT_REVIEW_FIELD_ALIASES = {
     "property_type": "energy_type",
     "energy": "energy_type",
     "energy_type": "energy_type",
-    # DFT review snapshots store the numeric value and its unit together under
-    # "value"; there is no standalone review field named "unit".
-    "unit": "value",
+    "unit": "unit",
     "energy_value": "value",
     "adsorbate": "adsorbate",
     "reaction_step": "reaction_step",
@@ -645,6 +643,7 @@ class DFTResultReviewService:
         reviewer: str,
         reason: str,
         evidence_payload: dict[str, Any] | list[Any] | None,
+        write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any] | None:
         if not self._has_anchor(evidence_payload):
             raise ValueError("Applying imported material binding requires a PDF evidence anchor.")
@@ -656,6 +655,7 @@ class DFTResultReviewService:
                 reviewer=reviewer,
                 reason=reason,
                 evidence_payload=evidence_payload,
+                write_lock_tokens=write_lock_tokens,
             )
         if not target_sample_id:
             return None
@@ -667,6 +667,7 @@ class DFTResultReviewService:
             reviewer=reviewer,
             reason=reason,
             evidence_payload=evidence_payload,
+            write_lock_tokens=write_lock_tokens,
         )
 
     def _resolve_or_create_catalyst_sample_id(
@@ -677,6 +678,7 @@ class DFTResultReviewService:
         reviewer: str,
         reason: str,
         evidence_payload: dict[str, Any] | list[Any] | None,
+        write_lock_tokens: list[str] | None = None,
     ) -> str:
         first_anchor = self._first_anchor(evidence_payload)
         proposed_value = {
@@ -700,7 +702,11 @@ class DFTResultReviewService:
         )
         self.session.add(correction)
         self.session.flush()
-        approved = ReviewService(self.session).approve_correction(correction.id, reviewer=reviewer)
+        approved = ReviewService(self.session).approve_correction(
+            correction.id,
+            reviewer=reviewer,
+            write_lock_tokens=write_lock_tokens,
+        )
         self.session.flush()
         payload = approved.evidence_payload if isinstance(approved.evidence_payload, dict) else {}
         resolution = payload.get("sample_resolution") if isinstance(payload, dict) else {}
@@ -719,6 +725,7 @@ class DFTResultReviewService:
         reviewer: str,
         reason: str,
         evidence_payload: dict[str, Any] | list[Any] | None,
+        write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
         canonical_field = DFT_CORRECTION_FIELD_ALIASES.get(str(field_name or "").strip(), str(field_name or "").strip())
         correction = PaperCorrection(
@@ -734,7 +741,11 @@ class DFTResultReviewService:
         )
         self.session.add(correction)
         self.session.flush()
-        approved = ReviewService(self.session).approve_correction(correction.id, reviewer=reviewer)
+        approved = ReviewService(self.session).approve_correction(
+            correction.id,
+            reviewer=reviewer,
+            write_lock_tokens=write_lock_tokens,
+        )
         self.session.flush()
         return {
             "correction_id": str(approved.id),

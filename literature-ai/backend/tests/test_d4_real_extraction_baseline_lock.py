@@ -173,7 +173,8 @@ def test_text_only_writing_evidence_without_safe_review_payload_is_blocked(tmp_p
             assert gate.can_use_for_writing is False
             assert gate.evidence_chain_status == "present"
             assert gate.review_gate_status == "blocked"
-            assert gate.blocked_reasons == ("missing_review",)
+            assert "missing_field_evidence:research_gap" in gate.blocked_reasons
+            assert "insufficient_reliable_core_fields" in gate.blocked_reasons
     finally:
         engine.dispose()
 

@@ -167,7 +167,7 @@ def test_query_embedding_failure_falls_back_to_lexical():
     )
 
     assert query_embedding == []
-    assert score > 0
+    assert score == 1.0
     assert breakdown["semantic"] == 0.0
 
 
@@ -220,7 +220,7 @@ def test_structured_token_prefilter_empty_result_falls_back_with_paper_scope():
         engine.dispose()
 
 
-def test_retriever_returns_eligible_figure_and_dft_cards_but_not_raw_sections():
+def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retriever_rag_cards.db'}", future=True)
         with engine.begin() as connection:
@@ -282,14 +282,28 @@ def test_retriever_returns_eligible_figure_and_dft_cards_but_not_raw_sections():
                 research_gap="Existing Li-S DFT studies lack reliable Fe-N4 Li2S4 adsorption comparisons.",
                 proposed_solution="Use Fe-N4 active sites to regulate Li2S4 adsorption.",
                 core_hypothesis="Verified writing card: Fe-N4 improves Li2S4 adsorption energetics.",
-                evidence_chain=[
-                    {
-                        "text": "The adsorption energy of Li2S4 on Fe-N4 was -1.23 eV.",
-                        "page": 6,
-                        "reviewer_status": "verified",
-                        "target_resolution_status": "active",
-                        "locator_status": "exact_page",
-                    }
+                    evidence_chain=[
+                        {
+                            "text": "Existing Li-S DFT studies lack reliable Fe-N4 Li2S4 adsorption comparisons.",
+                            "source": "Introduction",
+                            "page": 6,
+                            "locator_status": "exact_page",
+                            "supports_fields": ["research_gap"],
+                        },
+                        {
+                            "text": "Use Fe-N4 active sites to regulate Li2S4 adsorption.",
+                            "source": "Introduction",
+                            "page": 6,
+                            "locator_status": "exact_page",
+                            "supports_fields": ["proposed_solution"],
+                        },
+                        {
+                            "text": "Verified writing card: Fe-N4 improves Li2S4 adsorption energetics.",
+                            "source": "Introduction",
+                            "page": 6,
+                            "locator_status": "exact_page",
+                            "supports_fields": ["core_hypothesis"],
+                        },
                 ],
             )
             session.add_all([raw_section, figure, dft, candidate_dft, writing_card])
@@ -320,7 +334,10 @@ def test_retriever_returns_eligible_figure_and_dft_cards_but_not_raw_sections():
 
             retrieved = Retriever(session).retrieve("Fe-N4 Li2S4 adsorption energy Figure 2", [paper.id], 5)
 
-            assert retrieved["sections"] == []
+            assert len(retrieved["sections"]) == 1
+            assert retrieved["sections"][0]["object_id"] == raw_section.id
+            assert retrieved["sections"][0]["retrieval_tier"] == "discovery_candidate"
+            assert retrieved["sections"][0]["can_use_for_writing"] is False
             assert retrieved["figure_cards"]
             assert retrieved["figure_cards"][0]["object_id"] == figure.id
             assert retrieved["figure_cards"][0]["asset_url"] == "/api/papers/assets/figures/figure-2.png"
@@ -345,7 +362,7 @@ def test_retriever_returns_eligible_figure_and_dft_cards_but_not_raw_sections():
             assert retrieved["writing_cards"][0]["source_id"] == str(writing_card.id)
             assert retrieved["writing_cards"][0]["paper_code"] == "A0002"
             assert retrieved["writing_cards"][0]["page"] == 6
-            assert retrieved["writing_cards"][0]["review_status"] == "safe_verified"
+            assert retrieved["writing_cards"][0]["review_status"] == "content_verified"
 
         engine.dispose()
 

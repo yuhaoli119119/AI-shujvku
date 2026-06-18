@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import logging
+from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -433,6 +434,30 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 ),
             )
             execute_migration_step(
+                "paper_figures",
+                "write_version",
+                (
+                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS write_version INTEGER NOT NULL DEFAULT 1"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_figures ADD COLUMN write_version INTEGER NOT NULL DEFAULT 1"
+                ),
+            )
+            execute_migration_step(
+                "dft_results",
+                "candidate_identity",
+                (
+                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_identity VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE dft_results ADD COLUMN candidate_identity VARCHAR(64)"
+                ),
+            )
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_dft_result_candidate_identity "
+                    "ON dft_results (paper_id, candidate_identity)"
+                )
+            )
+            execute_migration_step(
                 "evidence_locators",
                 "claim_id",
                 (
@@ -664,6 +689,15 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                     "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS review_payload JSONB"
                     if engine.dialect.name == "postgresql"
                     else "ALTER TABLE extraction_field_reviews ADD COLUMN review_payload JSON"
+                ),
+            )
+            execute_migration_step(
+                "extraction_field_reviews",
+                "write_version",
+                (
+                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS write_version INTEGER NOT NULL DEFAULT 1"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE extraction_field_reviews ADD COLUMN write_version INTEGER NOT NULL DEFAULT 1"
                 ),
             )
 

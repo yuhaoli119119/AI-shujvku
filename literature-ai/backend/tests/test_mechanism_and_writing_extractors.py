@@ -118,6 +118,9 @@ def test_writing_card_extractor_merges_llm_and_rule_outputs():
     result = extractor.extract(document)
 
     assert result["paper_type"] == "mixed"
-    assert result["research_gap"].startswith("现有工作")
+    # Unsupported LLM prose is rejected and the grounded rule value is retained.
+    assert result["research_gap"] == "However, sluggish conversion remains a challenge."
+    assert result["core_hypothesis"] == ""
+    assert any("research_gap" in item.get("supports_fields", []) for item in result["evidence_chain"])
     assert result["evidence_chain"]
     assert any("adsorption energy" in item["text"].lower() for item in result["evidence_chain"])

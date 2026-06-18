@@ -49,9 +49,48 @@ function formatDate(value) {
     }
 }
 
+function ensureLibraryPaginationState() {
+    if (!state.pagination || typeof state.pagination !== "object") {
+        state.pagination = { page: 1, pageSize: PAGE_SIZE };
+    }
+    if (!Number.isFinite(Number(state.pagination.page)) || Number(state.pagination.page) < 1) {
+        state.pagination.page = 1;
+    }
+    if (!Number.isFinite(Number(state.pagination.pageSize)) || Number(state.pagination.pageSize) < 1) {
+        state.pagination.pageSize = PAGE_SIZE;
+    }
+}
+
+function getLibraryPageSize() {
+    ensureLibraryPaginationState();
+    return Math.max(1, Number(state.pagination.pageSize || PAGE_SIZE));
+}
+
+function getLibraryCurrentPage() {
+    ensureLibraryPaginationState();
+    return Math.max(1, Math.floor(Number(state.pagination.page || 1)));
+}
+
+function syncLibraryOffset() {
+    state.currentOffset = Math.max(0, (getLibraryCurrentPage() - 1) * getLibraryPageSize());
+    return state.currentOffset;
+}
+
+function resetLibraryPagination() {
+    ensureLibraryPaginationState();
+    state.pagination.page = 1;
+    state.currentOffset = 0;
+}
+
+function getLibraryTotalPages() {
+    const total = Math.max(0, Number(state.currentLibraryTotal || 0));
+    return Math.max(1, Math.ceil(total / getLibraryPageSize()));
+}
+
 function getFilters() {
+    syncLibraryOffset();
     const params = new URLSearchParams();
-    params.set("limit", PAGE_SIZE);
+    params.set("limit", getLibraryPageSize());
     params.set("offset", state.currentOffset);
     const libraryName = getCurrentLibraryName();
     const searchInput = $("searchInput");
@@ -200,25 +239,68 @@ function normalizePaperListResponse(data) {
 }
 
 function updatePager() {
-    const pageInfo = $("pageInfo");
-    const prevBtn = $("prevBtn");
-    const nextBtn = $("nextBtn");
-    const page = Math.floor(state.currentOffset / PAGE_SIZE) + 1;
+    const metaEl = $("paginationMeta");
+    const barEl = $("paginationBar");
+    if (!metaEl || !barEl) return;
+    const currentPage = getLibraryCurrentPage();
+    const pageSize = getLibraryPageSize();
+    const totalPages = getLibraryTotalPages();
     const shown = state.papers.length;
     const total = Number(state.currentLibraryTotal || 0);
-    if (pageInfo) {
-        const rangeStart = shown ? state.currentOffset + 1 : 0;
-        const rangeEnd = state.currentOffset + shown;
-        pageInfo.textContent = total
-            ? "第 " + page + " 页（" + rangeStart + "-" + rangeEnd + " / " + total + "）"
-            : "第 " + page + " 页";
+    const rangeStart = shown ? state.currentOffset + 1 : 0;
+    const rangeEnd = shown ? (state.currentOffset + shown) : 0;
+    const metaParts = [];
+    metaParts.push(total ? ("当前页 " + rangeStart + "-" + rangeEnd + " / " + total + " 篇") : ("当前页 " + shown + " 篇"));
+    metaParts.push("第 " + currentPage + " / " + totalPages + " 页");
+    metaParts.push("总计 " + total + " 篇");
+    metaEl.textContent = metaParts.join(" | ");
+
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+    const pages = [];
+    for (let page = startPage; page <= endPage; page += 1) {
+        pages.push(
+            '<button class="page-indicator' + (page === currentPage ? ' is-active' : '') + '" type="button" onclick="goToLibraryPage(' + page + ')"' +
+            (page === currentPage ? ' aria-current="page"' : '') +
+            '>' + page + '</button>'
+        );
     }
-    if (prevBtn) prevBtn.disabled = state.currentOffset <= 0;
-    if (nextBtn) {
-        nextBtn.disabled = total
-            ? state.currentOffset + shown >= total
-            : shown < PAGE_SIZE;
-    }
+    barEl.innerHTML =
+        '<span class="page-size-box">每页' +
+            '<select id="paperPageSizeSelect" onchange="setLibraryPageSize()">' +
+                '<option value="25"' + (pageSize === 25 ? ' selected' : '') + '>25 篇</option>' +
+                '<option value="50"' + (pageSize === 50 ? ' selected' : '') + '>50 篇</option>' +
+                '<option value="100"' + (pageSize === 100 ? ' selected' : '') + '>100 篇</option>' +
+            '</select>' +
+        '</span>' +
+        '<button class="btn ghost small" type="button" onclick="goToLibraryPage(1)"' + (currentPage <= 1 ? ' disabled' : '') + '>首页</button>' +
+        '<button class="btn ghost small" type="button" onclick="changeLibraryPage(-1)"' + (currentPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+        '<span class="pagination-pages">' + pages.join("") + '</span>' +
+        '<button class="btn ghost small" type="button" onclick="changeLibraryPage(1)"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页</button>' +
+        '<button class="btn ghost small" type="button" onclick="goToLibraryPage(' + totalPages + ')"' + (currentPage >= totalPages ? ' disabled' : '') + '>末页</button>';
+}
+
+function goToLibraryPage(page) {
+    ensureLibraryPaginationState();
+    const totalPages = getLibraryTotalPages();
+    const safePage = Math.max(1, Math.min(totalPages, Number(page || 1)));
+    state.pagination.page = safePage;
+    syncLibraryOffset();
+    fetchPapers();
+}
+
+function changeLibraryPage(delta) {
+    goToLibraryPage(getLibraryCurrentPage() + Number(delta || 0));
+}
+
+function setLibraryPageSize() {
+    const select = $("paperPageSizeSelect");
+    const nextSize = Number(select && select.value ? select.value : getLibraryPageSize());
+    ensureLibraryPaginationState();
+    state.pagination.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : PAGE_SIZE;
+    state.pagination.page = 1;
+    syncLibraryOffset();
+    fetchPapers();
 }
 
 async function fetchPapers() {
@@ -226,8 +308,11 @@ async function fetchPapers() {
     state.paperListRequestSeq = requestSeq;
     const requestLibrary = getCurrentLibraryName();
     try {
+        ensureLibraryPaginationState();
+        syncLibraryOffset();
         renderPaperListSkeleton();
         const params = getFilters();
+        const requestedOffset = state.currentOffset;
         const data = await fetchJSON(API_BASE + "?" + params.toString());
         if (requestSeq !== state.paperListRequestSeq || requestLibrary !== getCurrentLibraryName()) {
             return;
@@ -246,6 +331,15 @@ async function fetchPapers() {
             state.currentLibraryTotal = normalized.total;
         } else if (state.currentOffset === 0 && state.papers.length > state.currentLibraryTotal) {
             state.currentLibraryTotal = state.papers.length;
+        }
+        if (state.currentLibraryTotal > 0 && requestedOffset >= state.currentLibraryTotal) {
+            state.pagination.page = getLibraryTotalPages();
+            syncLibraryOffset();
+            if (state.currentOffset !== requestedOffset) {
+                return fetchPapers();
+            }
+        } else if (state.currentLibraryTotal === 0) {
+            resetLibraryPagination();
         }
         renderPaperList();
         updatePager();
@@ -280,7 +374,7 @@ async function fetchPapers() {
 }
 
 function searchLocal() {
-    state.currentOffset = 0;
+    resetLibraryPagination();
     fetchPapers();
 }
 
@@ -290,14 +384,11 @@ function refreshCurrentPage() {
 }
 
 function prevPage() {
-    if (state.currentOffset <= 0) return;
-    state.currentOffset = Math.max(0, state.currentOffset - PAGE_SIZE);
-    fetchPapers();
+    changeLibraryPage(-1);
 }
 
 function nextPage() {
-    state.currentOffset += PAGE_SIZE;
-    fetchPapers();
+    changeLibraryPage(1);
 }
 
 function clearFilters() {
@@ -809,6 +900,10 @@ Object.assign(window, {
     fetchPapers: fetchPapers,
     searchLocal: searchLocal,
     refreshCurrentPage: refreshCurrentPage,
+    resetLibraryPagination: resetLibraryPagination,
+    goToLibraryPage: goToLibraryPage,
+    changeLibraryPage: changeLibraryPage,
+    setLibraryPageSize: setLibraryPageSize,
     prevPage: prevPage,
     nextPage: nextPage,
     clearFilters: clearFilters,

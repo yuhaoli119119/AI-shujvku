@@ -362,6 +362,7 @@
 
     <script>
         const API_BASE = "/api/papers";
+        const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
         const state = {
             activeTab: "catalysts",
             aggregateData: null,
@@ -406,7 +407,25 @@
             return data;
         }
 
+        function getStoredLibraryName() {
+            try {
+                return window.localStorage.getItem(CURRENT_LIBRARY_STORAGE_KEY) || "";
+            } catch (_) {
+                return "";
+            }
+        }
+
+        function getQueryLibraryName() {
+            try {
+                return new URLSearchParams(window.location.search).get("library_name") || "";
+            } catch (_) {
+                return "";
+            }
+        }
+
         async function ensureCurrentLibraryName() {
+            if (state.currentLibrary) return state.currentLibrary;
+            state.currentLibrary = getQueryLibraryName() || getStoredLibraryName() || "";
             if (state.currentLibrary) return state.currentLibrary;
             try {
                 const libraries = await fetchJSON("/api/libraries");

@@ -103,11 +103,20 @@ def test_retriever_writer_and_citation_guard_work_together():
                         figure_logic='[{"fig_id":"Figure 1","purpose":"structure"},{"fig_id":"Figure 2","purpose":"DFT evidence"}]',
                         evidence_chain=[
                             {
-                                "text": "The adsorption energy of Li2S4 on Fe-N4 was -1.23 eV.",
-                                "source": "Results",
-                                "reviewer_status": "verified",
-                                "target_resolution_status": "active",
-                            }
+                                "text": "Existing sulfur hosts still struggle to balance adsorption and conversion.",
+                                "source": "Introduction", "page": 1, "locator_status": "exact_page",
+                                "supports_fields": ["research_gap"],
+                            },
+                                {
+                                    "text": "Fe-N4 single-atom sites are introduced to regulate sulfur redox intermediates.",
+                                    "source": "Introduction", "page": 1, "locator_status": "exact_page",
+                                    "supports_fields": ["proposed_solution"],
+                                },
+                                {
+                                    "text": "Strong but not overly irreversible LiPS binding can improve bidirectional redox kinetics.",
+                                    "source": "Introduction", "page": 1, "locator_status": "exact_page",
+                                    "supports_fields": ["core_hypothesis"],
+                                },
                         ],
                     )
                 )

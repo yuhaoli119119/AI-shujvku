@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DFT 机器学习数据集 - Literature AI</title>
+    <link rel="stylesheet" href="../../shared/fonts.css">
+    <link rel="stylesheet" href="../../shared/tokens.css">
+    <link rel="stylesheet" href="../../shared/components.css">
+    <link rel="stylesheet" href="../../shared/topnav.css">
+    <link rel="stylesheet" href="./page.css">
+    <script src="../../shared/topnav.js"></script>
+    <script>ThemeManager.init();</script>
+</head>
+<body>
+    <div id="topnav-mount"></div>
+
+    <main class="shell">
+        <section class="hero-card">
+            <div>
+                <p class="eyebrow">DFT 机器学习就绪数据集</p>
+                <h1>DFT 机器学习数据集</h1>
+                <p class="hero-copy">
+                    直接复用 <code>dft_results_ml_v2</code> 实时导出，区分可直接训练的数值记录、被 blocker 阻止的记录，以及仅供 LM 使用的辅助 claim。
+                </p>
+                <div class="hero-meta">
+                    <span id="schemaVersionBadge" class="meta-chip">契约版本: -</span>
+                    <span id="generatedAtBadge" class="meta-chip">生成时间: -</span>
+                    <span id="libraryBadge" class="meta-chip">文献库: 全部</span>
+                </div>
+            </div>
+            <div class="hero-actions">
+                <button id="refreshButton" type="button" class="btn btn-primary">重新生成 / 刷新</button>
+                <button id="exportCsvButton" type="button" class="btn btn-secondary">导出 ML-ready CSV</button>
+                <button id="exportJsonButton" type="button" class="btn btn-ghost">导出 V2 JSON</button>
+            </div>
+        </section>
+
+        <section id="statusPanel" class="status-panel" hidden></section>
+
+        <section class="stats-grid" id="statsGrid">
+            <article class="stat-card">
+                <div class="stat-label">候选总数</div>
+                <div id="statTotalCandidates" class="stat-value">-</div>
+                <div class="stat-desc">安全门控评估过的候选总数，包含已拒绝候选</div>
+            </article>
+            <article class="stat-card">
+                <div class="stat-label">可导出记录数</div>
+                <div id="statEligibleCount" class="stat-value">-</div>
+                <div class="stat-desc">通过 bulk export gate 的记录数</div>
+            </article>
+            <article class="stat-card">
+                <div class="stat-label">数值记录数</div>
+                <div id="statNumericRecordCount" class="stat-value">-</div>
+                <div class="stat-desc">当前导出的数值 DFT 记录</div>
+            </article>
+            <article class="stat-card success">
+                <div class="stat-label">可训练记录数</div>
+                <div id="statNumericReadyCount" class="stat-value">-</div>
+                <div class="stat-desc">可直接进入训练样本筛选的记录</div>
+            </article>
+            <article class="stat-card danger">
+                <div class="stat-label">阻止记录数</div>
+                <div id="statNumericBlockedCount" class="stat-value">-</div>
+                <div class="stat-desc">仍被 blocker 阻止的数值记录</div>
+            </article>
+            <article class="stat-card warning">
+                <div class="stat-label">LM 辅助记录数</div>
+                <div id="statLmCount" class="stat-value">-</div>
+                <div class="stat-desc">仅供 LM / 文本辅助的非数值 claim</div>
+            </article>
+        </section>
+
+        <section class="filters-card">
+            <div class="filters-header">
+                <div>
+                    <h2>训练前质检筛选器</h2>
+                    <p>年份与文献库会重新请求后端 V2；其余筛选直接基于当前 V2 payload 客户端过滤。</p>
+                </div>
+                <button id="clearFiltersButton" type="button" class="btn btn-ghost">清空筛选</button>
+            </div>
+            <div class="filters-grid">
+                <label class="field">
+                    <span>只看状态</span>
+                    <select id="readinessFilter">
+                        <option value="all">全部</option>
+                        <option value="ready">只看 ML-ready</option>
+                        <option value="blocked">只看 blocked</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>规范属性类型</span>
+                    <select id="propertyTypeFilter">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>属性子类型</span>
+                    <select id="propertySubtypeFilter">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>规范吸附物</span>
+                    <select id="adsorbateFilter">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>阻止原因</span>
+                    <select id="blockerFilter">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>setting 绑定状态</span>
+                    <select id="settingStatusFilter">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>descriptor 特征</span>
+                    <select id="descriptorFilter">
+                        <option value="all">全部</option>
+                        <option value="with_d_band_center">包含 d_band_center</option>
+                        <option value="without_d_band_center">不含 d_band_center</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>文献库</span>
+                    <select id="libraryFilter">
+                        <option value="">全部文献库</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>年份下限</span>
+                    <input id="yearMinFilter" type="number" placeholder="例如 2020">
+                </label>
+                <label class="field">
+                    <span>年份上限</span>
+                    <input id="yearMaxFilter" type="number" placeholder="例如 2026">
+                </label>
+            </div>
+            <div class="filter-actions">
+                <button id="applyServerFiltersButton" type="button" class="btn btn-secondary">应用年份 / 文献库筛选</button>
+                <p id="resultsMeta" class="results-meta">等待加载 DFT ML 数据集。</p>
+            </div>
+        </section>
+
+        <section class="table-card">
+            <div class="table-card-header">
+                <div>
+                    <h2>数值训练记录</h2>
+                    <p>推荐训练 setting 只显示 <code>linked_dft_setting</code>；<code>paper_level_dft_settings</code> 仅在详情中作审计展示。</p>
+                </div>
+                <div class="table-legend">
+                    <span class="legend-chip ready">可训练</span>
+                    <span class="legend-chip blocked">已阻止</span>
+                    <span class="legend-chip lm">LM 辅助记录另计</span>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="records-table">
+                    <thead>
+                        <tr>
+                            <th>就绪状态</th>
+                            <th>评分</th>
+                            <th>阻止原因</th>
+                            <th>规范属性类型</th>
+                            <th>属性子类型</th>
+                            <th>规范吸附物</th>
+                            <th>原始数值 / 单位</th>
+                            <th>归一化目标</th>
+                            <th>推荐训练 setting</th>
+                            <th>d 带中心</th>
+                            <th>催化剂 / 材料</th>
+                            <th>文献标题 / 年份</th>
+                            <th>定位 / 审核门控</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsTableBody">
+                        <tr>
+                            <td colspan="14" class="empty-row">正在读取 dft_results_ml_v2...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="./page.js"></script>
+</body>
+</html>

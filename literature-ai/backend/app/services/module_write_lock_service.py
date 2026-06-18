@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,8 @@ CANONICAL_MODULES = {
     "tables",
     "notes",
     "relationships",
+    "dft_results",
+    "dft_settings",
 }
 
 MODULE_ALIASES = {
@@ -63,6 +65,11 @@ MODULE_ALIASES = {
     "paper_note": "notes",
     "relationship": "relationships",
     "paper_relationship": "relationships",
+    "dft": "dft_results",
+    "dft_result": "dft_results",
+    "dft_results": "dft_results",
+    "dft_setting": "dft_settings",
+    "dft_settings": "dft_settings",
     "title": "metadata",
     "abstract": "metadata",
     "authors": "metadata",
@@ -105,6 +112,15 @@ class ModuleWriteLockCheck:
     covered_modules: list[str]
     missing_modules: list[str]
     lock_ids: list[str]
+
+
+class ModuleWriteLockError(ValueError):
+    """Stable domain error used by HTTP/MCP boundaries for lock conflicts."""
+
+    def __init__(self, code: str, detail: str | None = None) -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(code if not detail else f"{code}:{detail}")
 
 
 class ModuleWriteLockService:
@@ -165,8 +181,10 @@ class ModuleWriteLockService:
             self.session.flush()
             return lock
         if conflicts:
-            pass # Ignore conflicts
-
+            raise ModuleWriteLockError(
+                "module_write_lock_conflict",
+                ",".join(f"{item.module_name}:{item.locked_by}:{item.expires_at.isoformat()}" for item in conflicts),
+            )
 
         lock = ModuleWriteLock(
             paper_id=paper_id,
@@ -180,7 +198,7 @@ class ModuleWriteLockService:
             self.session.flush()
         except IntegrityError as exc:
             self.session.rollback()
-            raise ValueError("module_write_lock_conflict:active lock already exists") from exc
+            raise ModuleWriteLockError("module_write_lock_conflict", "active lock already exists") from exc
         self._audit(lock, action="acquire_module_write_lock", source=owner)
         self.session.flush()
         return lock
@@ -213,7 +231,32 @@ class ModuleWriteLockService:
         locked_by: str | None = None,
     ) -> ModuleWriteLockCheck:
         required = sorted({self.normalize_module_name(item) for item in module_names if str(item or "").strip()})
-        return ModuleWriteLockCheck(True, required, required, [], [])
+        if not required:
+            return ModuleWriteLockCheck(True, [], [], [], [])
+        now = utcnow()
+        self.expire_stale_locks(now=now)
+        tokens = [str(item or "").strip() for item in (lock_tokens or []) if str(item or "").strip()]
+        if not tokens:
+            return ModuleWriteLockCheck(False, required, [], required, [])
+        locks = self.session.scalars(
+            select(ModuleWriteLock).where(
+                ModuleWriteLock.paper_id == paper_id,
+                ModuleWriteLock.lock_token.in_(tokens),
+                ModuleWriteLock.status == "active",
+                ModuleWriteLock.expires_at > now,
+            )
+        ).all()
+        if locked_by:
+            locks = [lock for lock in locks if lock.locked_by == locked_by]
+        covered = sorted({module for module in required if any(self._covers(lock.module_name, module) for lock in locks)})
+        missing = sorted(set(required) - set(covered))
+        return ModuleWriteLockCheck(
+            valid=not missing,
+            required_modules=required,
+            covered_modules=covered,
+            missing_modules=missing,
+            lock_ids=[str(lock.id) for lock in locks],
+        )
 
     def require_write(
         self,
@@ -271,7 +314,24 @@ class ModuleWriteLockService:
         return [lock for lock in active if self._scopes_overlap(lock.module_name, module_name)]
 
     def _lock_paper_scope(self, paper_id: UUID) -> None:
-        pass
+        bind = self.session.get_bind()
+        if bind is None:
+            return
+        if bind.dialect.name == "sqlite":
+            # SQLite has no row/advisory locks.  A no-op write makes conflict
+            # checking and insertion part of one serialized DB write
+            # transaction. SQLite serializes writers globally by design; the
+            # production PostgreSQL path below remains strictly per-paper.
+            self.session.execute(update(Paper).where(Paper.id == paper_id).values(id=paper_id))
+            return
+        if bind.dialect.name != "postgresql":
+            return
+        # Transaction-scoped and keyed by paper: failures/rollbacks release it
+        # automatically, while unrelated papers remain fully concurrent.
+        key = int.from_bytes(paper_id.bytes[:8], byteorder="big", signed=True)
+        acquired = self.session.execute(text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": key}).scalar()
+        if not acquired:
+            raise ModuleWriteLockError("module_write_lock_conflict", "paper_transaction_busy")
 
     @classmethod
     def _scope_set(cls, module_name: str) -> set[str]:

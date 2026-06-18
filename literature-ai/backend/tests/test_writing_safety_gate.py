@@ -38,14 +38,18 @@ def _paper(session: Session) -> Paper:
     return paper
 
 
-def _safe_evidence_chain() -> list[dict[str, str]]:
+def _safe_evidence_chain() -> list[dict]:
     return [
         {
-            "text": "Reviewed evidence.",
-            "source": "Results",
-            "reviewer_status": "verified",
-            "target_resolution_status": "active",
-        }
+            "text": "A documented conversion limitation remains unresolved in current hosts.",
+            "source": "Introduction", "page": 1, "locator_status": "exact_page",
+            "supports_fields": ["research_gap"],
+        },
+        {
+            "text": "This work develops a documented catalyst solution for conversion.",
+            "source": "Introduction", "page": 1, "locator_status": "exact_page",
+            "supports_fields": ["proposed_solution"],
+        },
     ]
 
 
@@ -95,7 +99,7 @@ def test_writing_card_with_unsafe_review_chain_is_blocked(tmp_path):
             assert card.can_use_for_writing is False
             assert card.evidence_chain_status == "present"
             assert card.review_gate_status == "blocked"
-            assert "unsafe_review" in card.blocked_reasons
+            assert "missing_field_evidence:research_gap" in card.blocked_reasons
     finally:
         engine.dispose()
 
@@ -116,8 +120,8 @@ def test_retriever_keeps_unsafe_writing_card_out_of_writing_path(tmp_path):
             session.add(
                 WritingCard(
                     paper_id=paper.id,
-                    research_gap="safe gap",
-                    proposed_solution="safe solution",
+                    research_gap="A documented conversion limitation remains unresolved in current hosts.",
+                    proposed_solution="This work develops a documented catalyst solution for conversion.",
                     evidence_chain=_safe_evidence_chain(),
                 )
             )
@@ -126,7 +130,7 @@ def test_retriever_keeps_unsafe_writing_card_out_of_writing_path(tmp_path):
             retrieved = Retriever(session).retrieve("safe unsafe gap solution", [paper.id], 5)
 
             assert len(retrieved["writing_cards"]) == 1
-            assert retrieved["writing_cards"][0]["research_gap"] == "safe gap"
+            assert retrieved["writing_cards"][0]["research_gap"].startswith("A documented")
             assert retrieved["writing_cards"][0]["can_use_for_writing"] is True
     finally:
         engine.dispose()

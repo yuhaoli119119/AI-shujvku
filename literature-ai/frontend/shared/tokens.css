@@ -29,6 +29,8 @@
 
   /* ---- Layout Tokens (global fixed) ---- */
   --nav-height: 36px;
+  --page-top-gap: 8px;
+  --page-shell-max-width: 1520px;
   --sidebar-width: 320px;
   --transition: 0.2s ease;
   --z-nav: 100;

@@ -205,7 +205,7 @@ def test_save_reviews_rejects_verified_status_and_does_not_mutate_existing_verif
             row = _dft(session, paper)
             _evidence_ref(session, paper, row)
             service = ExtractionReviewService(session)
-            service.mark_verified(
+            marked = service.mark_verified(
                 paper.id,
                 ExtractionReviewMarkVerifiedRequest(
                     target_type="dft_results",
@@ -226,6 +226,7 @@ def test_save_reviews_rejects_verified_status_and_does_not_mutate_existing_verif
                             field_name="value",
                             reviewed_value=-9.99,
                             reviewer_status="corrected",
+                            expected_write_version=marked[0].write_version,
                             reviewer="ai_candidate",
                             reviewer_note="Attempted overwrite.",
                         )

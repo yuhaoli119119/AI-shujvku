@@ -16,7 +16,7 @@ test.describe('Layout Constraints', () => {
     // gap = h2 top - nav bottom
     const gap = h2Box.y - (navBox.y + navBox.height);
     expect(gap).toBeLessThan(80);
-    expect(gap).toBeGreaterThanOrEqual(10); // Ensure there is some gap
+    expect(gap).toBeGreaterThanOrEqual(8); // Ensure there is some gap
     
     // Scroll down significantly
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));

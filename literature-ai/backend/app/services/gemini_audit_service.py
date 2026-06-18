@@ -241,6 +241,7 @@ class GeminiAuditService:
                     target_type=canonical,
                     target_id=str(target_id),
                     field_name=name,
+                    expected_write_version=existing.write_version if existing is not None else None,
                     original_value=snapshot[name]["value"],
                     reviewed_value=snapshot[name]["value"],
                     unit=snapshot[name]["unit"],

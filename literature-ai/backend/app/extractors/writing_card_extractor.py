@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,6 +29,10 @@ logger = logging.getLogger(__name__)
 class EvidenceItem:
     text: str
     source: str  # e.g. "Abstract", "Introduction", "Fig.3 caption"
+    page: int | None = None
+    supports_fields: list[str] = field(default_factory=list)
+    locator_status: str = "text_only"
+    evidence_type: str = "result"
 
 
 @dataclass
@@ -65,7 +70,15 @@ class WritingCard:
             "proposed_solution": self.proposed_solution,
             "core_hypothesis": self.core_hypothesis,
             "evidence_chain": [
-                {"text": ev.text, "source": ev.source} for ev in self.evidence_chain
+                {
+                    "text": ev.text,
+                    "source": ev.source,
+                    "page": ev.page,
+                    "supports_fields": ev.supports_fields,
+                    "locator_status": ev.locator_status,
+                    "evidence_type": ev.evidence_type,
+                }
+                for ev in self.evidence_chain
             ],
             "section_strategy": {
                 k: {
@@ -91,6 +104,10 @@ class WritingCard:
 class EvidenceItemModel(BaseModel):
     text: str
     source: str
+    page: int | None = None
+    supports_fields: list[str] = Field(default_factory=list)
+    locator_status: str | None = None
+    evidence_type: str | None = None
 
 class SectionStrategyModel(BaseModel):
     purpose: str
@@ -121,7 +138,7 @@ class WritingCardModel(BaseModel):
             "proposed_solution": self.proposed_solution,
             "core_hypothesis": self.core_hypothesis,
             "evidence_chain": [
-                {"text": ev.text, "source": ev.source} for ev in self.evidence_chain
+                ev.model_dump() for ev in self.evidence_chain
             ],
             "section_strategy": {
                 k: {
@@ -203,6 +220,56 @@ _HYPOTHESIS_MARKERS: list[tuple[str, str]] = [
      "{context}"),
 ]
 
+_CORE_FIELDS = ("research_gap", "proposed_solution", "core_hypothesis")
+_PLACEHOLDER_RE = re.compile(
+    r"^(?:not explicitly stated|not clearly extracted|unknown|none|n/?a|"
+    r"research gap not explicitly stated|solution not clearly extracted|hypothesis not explicitly stated)[.!]?$",
+    re.IGNORECASE,
+)
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9+./-]{2,}")
+_NUMBER_RE = re.compile(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?(?:\s*[%°]|\s*[A-Za-z]+)?")
+_ENTITY_RE = re.compile(r"\b(?:[A-Z][a-z]?\d*){2,}\b|\b[A-Z]{2,}[A-Za-z0-9-]*\b")
+_SPECIFIC_TOKEN_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*\d[A-Za-z0-9+.-]*\b")
+_STOPWORDS = {
+    "the", "and", "for", "that", "with", "this", "from", "were", "was", "are", "our",
+    "their", "into", "using", "used", "study", "work", "paper", "method", "approach", "based",
+    "propose", "proposed", "results", "result", "show", "shows", "could", "would", "may", "can",
+}
+
+
+def _get(value: Any, name: str, default: Any = None) -> Any:
+    return value.get(name, default) if isinstance(value, dict) else getattr(value, name, default)
+
+
+def _normalized_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _has_pdf_source(document: Any) -> bool:
+    path = _get(document, "source_pdf_path", None)
+    if path is None:
+        metadata = _get(document, "metadata", {}) or {}
+        path = _get(metadata, "pdf_path", None)
+    if path is None:
+        return False
+    try:
+        candidate = Path(path)
+    except TypeError:
+        return False
+    text = str(candidate).strip()
+    return bool(text and text not in {".", ""} and candidate.suffix.lower() == ".pdf")
+
+
+def _content_tokens(value: str) -> set[str]:
+    return {token.lower() for token in _WORD_RE.findall(value) if token.lower() not in _STOPWORDS}
+
+
+def _sentence_containing_match(text: str, match: re.Match[str]) -> str:
+    start = max(text.rfind(".", 0, match.start()), text.rfind("!", 0, match.start()), text.rfind("?", 0, match.start())) + 1
+    endings = [pos for mark in ".!?" if (pos := text.find(mark, match.start())) >= 0]
+    end = min(endings) + 1 if endings else min(len(text), match.end())
+    return _normalized_text(text[start:end])[:600]
+
 
 def _extract_sentences(text: str, max_n: int = 10) -> list[str]:
     """将文本拆分为句子列表."""
@@ -213,7 +280,7 @@ def _extract_sentences(text: str, max_n: int = 10) -> list[str]:
 def _find_section_by_type(sections: list[Any], type_patterns: list[str]) -> tuple[Any | None, str]:
     """按章节类型模糊匹配查找章节."""
     for sec in sections:
-        title = getattr(sec, "section_title", "") or ""
+        title = _get(sec, "section_title", "") or _get(sec, "section_type", "") or ""
         title_lower = title.lower()
         for pat in type_patterns:
             if re.search(pat, title_lower):
@@ -323,9 +390,7 @@ class WritingCardExtractor:
         figures = getattr(doc, "figures", []) or []
         abstract = getattr(doc, "abstract", "") or ""
 
-        full_text = "\n\n".join(
-            [abstract] + [getattr(s, "text", "") or "" for s in sections]
-        )
+        full_text = "\n\n".join([abstract] + [_get(s, "text", "") or "" for s in sections])
 
         # ---- 1. 论文类型 ----
         card.paper_type = _score_text_for_type(full_text)
@@ -334,7 +399,7 @@ class WritingCardExtractor:
         intro_sec, intro_title = _find_section_by_type(sections, [
             r"intro", r"background", r"motiv",
         ])
-        intro_text = getattr(intro_sec, "text", "") or "" if intro_sec else ""
+        intro_text = _get(intro_sec, "text", "") or "" if intro_sec else ""
         card.research_gap = self._extract_gap(intro_text, abstract)
 
         # ---- 3. Proposed Solution (通常在 Abstract末尾 / Intro末尾) ----
@@ -349,9 +414,9 @@ class WritingCardExtractor:
         results_sec, _ = _find_section_by_type(sections, [
             r"result", r"discuss",
         ])
-        results_text = getattr(results_sec, "text", "") or "" if results_sec else ""
+        results_text = _get(results_sec, "text", "") or "" if results_sec else ""
         card.evidence_chain = self._build_evidence_chain(
-            results_text, figures, tables
+            results_text, figures, tables, results_sec
         )
 
         # ---- 6. Section Strategy ----
@@ -366,25 +431,31 @@ class WritingCardExtractor:
         discuss_sec, _ = _find_section_by_type(sections, [
             r"discuss", r"conclusion",
         ])
-        discuss_text = getattr(discuss_sec, "text", "") or "" if discuss_sec else ""
+        discuss_text = _get(discuss_sec, "text", "") or "" if discuss_sec else ""
         card.discussion_logic = self._infer_discussion_logic(discuss_text)
 
-        rule_payload = card.to_dict()
+        rule_payload = self._validate_and_ground_card(card.to_dict(), doc)
 
         if self.llm and self.llm.is_configured() and (markdown or abstract or sections):
             logger.info("Running hybrid LLM Writing Card extraction")
             system_prompt = (
                 "You are an expert scientific writer and reviewer.\n"
                 "Extract the structural and logical writing skeleton of this paper.\n"
-                "Identify the core hypothesis, research gap, evidence chain, section-level logical flows, and figure roles.\n"
-                "Use only claims directly supported by the provided text.\n"
+                "Do not complete the paper's intent from general knowledge or inference.\n"
+                "For research_gap, proposed_solution, and core_hypothesis, include at least one verbatim source sentence "
+                "in evidence_chain and name the field in supports_fields.\n"
+                "Return an empty string when a core field is not explicitly supported. In particular, do not turn results "
+                "into a hypothesis and do not mechanically use the abstract's last sentence as the proposed solution.\n"
+                "Every number, material, chemical formula, mechanism, and intermediate in a core field must appear in its evidence.\n"
+                "Use result and caption evidence for writing context only; it does not support a core field unless the text explicitly does so.\n"
                 "Return the extracted logic matching the JSON schema exactly."
             )
             text_to_process = self._build_focus_text(doc)
             try:
                 llm_output = self.llm.structured_extract(system_prompt, text_to_process, WritingCardModel)
                 if llm_output:
-                    return self._merge_cards(rule_payload, llm_output.model_dump())
+                    merged = self._merge_cards(rule_payload, llm_output.model_dump())
+                    return self._validate_and_ground_card(merged, doc, fallback=rule_payload)
             except Exception as e:
                 logger.warning(f"LLM Writing Card extraction failed, keeping rule-based card: {e}")
 
@@ -401,18 +472,18 @@ class WritingCardExtractor:
         if abstract:
             parts.append("## Abstract\n" + abstract[:5000])
         for sec in sections:
-            title = getattr(sec, "section_title", "") or ""
-            text = getattr(sec, "text", "") or ""
+            title = _get(sec, "section_title", "") or _get(sec, "section_type", "") or ""
+            text = _get(sec, "text", "") or ""
             if not text:
                 continue
             if section_regex.search(title):
                 parts.append(f"## Section: {title or 'Untitled'}\n{text[:5000]}")
         for fig in figures[:10]:
-            caption = getattr(fig, "caption", "") or ""
+            caption = _get(fig, "caption", "") or ""
             if caption:
                 parts.append(f"## Figure Caption\n{caption[:1000]}")
         for tbl in tables[:10]:
-            caption = getattr(tbl, "caption", "") or ""
+            caption = _get(tbl, "caption", "") or ""
             if caption:
                 parts.append(f"## Table Caption\n{caption[:800]}")
         if not parts and markdown:
@@ -437,7 +508,9 @@ class WritingCardExtractor:
     def _merge_evidence_chain(rule_items: list[dict], llm_items: list[dict]) -> list[dict]:
         merged: list[dict] = []
         seen: set[str] = set()
-        for item in llm_items + rule_items:
+        items = llm_items + rule_items
+        items.sort(key=lambda item: bool(item.get("supports_fields")), reverse=True)
+        for item in items:
             text = str(item.get("text") or "").strip()
             source = str(item.get("source") or "").strip()
             if not text:
@@ -446,59 +519,166 @@ class WritingCardExtractor:
             if key in seen:
                 continue
             seen.add(key)
-            merged.append({"text": text[:400], "source": source or "Unknown"})
+            merged.append({
+                "text": text[:600],
+                "source": source or "Unknown",
+                "page": item.get("page"),
+                "supports_fields": [field for field in item.get("supports_fields", []) if field in _CORE_FIELDS],
+                "locator_status": item.get("locator_status") or "text_only",
+                "evidence_type": item.get("evidence_type") or ("core_field" if item.get("supports_fields") else "result"),
+            })
         return merged[:20]
+
+    def _validate_and_ground_card(self, payload: dict, document: Any, fallback: dict | None = None) -> dict:
+        """Bind each core field to source text and conservatively clear unsupported values."""
+        validated = dict(payload)
+        fallback = fallback or {}
+        result_evidence = [
+            dict(item) for item in (payload.get("evidence_chain") or [])
+            if isinstance(item, dict) and not item.get("supports_fields")
+        ]
+        core_evidence: list[dict[str, Any]] = []
+        for field_name in _CORE_FIELDS:
+            value = str(payload.get(field_name) or "").strip()
+            evidence = self._validate_core_field(field_name, value, document)
+            if evidence is None and fallback:
+                value = str(fallback.get(field_name) or "").strip()
+                evidence = self._validate_core_field(field_name, value, document)
+            if evidence is None:
+                validated[field_name] = ""
+                continue
+            validated[field_name] = value
+            core_evidence.append(evidence)
+        validated["evidence_chain"] = self._merge_evidence_chain(core_evidence, result_evidence)
+        return validated
+
+    def _validate_core_field(self, field_name: str, value: str, document: Any) -> dict[str, Any] | None:
+        value = _normalized_text(value)
+        if not value or _PLACEHOLDER_RE.match(value) or len(value) < 20 or len(value) > 600:
+            return None
+        metadata = _get(document, "metadata", {}) or {}
+        title = _normalized_text(_get(document, "title", "") or _get(metadata, "title", ""))
+        abstract = _normalized_text(_get(document, "abstract", ""))
+        if title and value.casefold() == title.casefold():
+            return None
+        if abstract and len(abstract) > 80 and value.casefold() == abstract.casefold():
+            return None
+        if re.fullmatch(r"(?:this|the present) (?:study|work) (?:proposes?|presents?|develops?) (?:a )?(?:new|novel) (?:method|approach|strategy)\.?", value, re.I):
+            return None
+
+        candidates = self._source_sentences(document)
+        value_tokens = _content_tokens(value)
+        best: tuple[float, dict[str, Any]] | None = None
+        for candidate in candidates:
+            evidence_text = candidate["text"]
+            evidence_tokens = _content_tokens(evidence_text)
+            coverage = len(value_tokens & evidence_tokens) / max(1, len(value_tokens))
+            exact = value.casefold() in evidence_text.casefold() or evidence_text.casefold() in value.casefold()
+            score = 1.0 if exact else coverage
+            if best is None or score > best[0] or (
+                score == best[0] and candidate.get("page") is not None and best[1].get("page") is None
+            ):
+                best = (score, candidate)
+        if best is None or best[0] < 0.45:
+            return None
+        evidence = best[1]
+        evidence_lower = evidence["text"].casefold()
+        for token in _NUMBER_RE.findall(value):
+            if _normalized_text(token).casefold() not in evidence_lower:
+                return None
+        for token in _ENTITY_RE.findall(value):
+            if token.casefold() not in evidence_lower:
+                return None
+        for token in _SPECIFIC_TOKEN_RE.findall(value):
+            if token.casefold() not in evidence_lower:
+                return None
+
+        field_text = evidence_lower
+        if field_name == "research_gap" and not re.search(
+            r"\b(?:however|challenge|limitation|limited|lack|missing|unresolved|remain|bottleneck|drawback|poor|insufficient|unknown)\b",
+            field_text,
+        ):
+            return None
+        if field_name == "proposed_solution" and not re.search(
+            r"\b(?:herein|this work|this study|we (?:report|present|propose|design|develop|construct|fabricate|synthesize|use)|was (?:designed|developed|used))\b",
+            field_text,
+        ):
+            return None
+        if field_name == "core_hypothesis" and not re.search(
+            r"\b(?:hypothesiz|hypothesis|we propose that|expected|anticipate|predict|would|could|may|might|design rationale)\b",
+            field_text,
+        ):
+            return None
+        if evidence.get("evidence_type") == "caption":
+            return None
+        return {
+            **evidence,
+            "supports_fields": [field_name],
+            "evidence_type": "core_field",
+        }
+
+    @staticmethod
+    def _source_sentences(document: Any) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+
+        def add(text: str, source: str, page: Any, evidence_type: str = "section") -> None:
+            for sentence in _extract_sentences(text, max_n=200):
+                sources.append({
+                    "text": sentence[:600],
+                    "source": source,
+                    "page": page if isinstance(page, int) and page > 0 else None,
+                    "locator_status": "exact_page" if isinstance(page, int) and page > 0 else "text_only",
+                    "evidence_type": evidence_type,
+                })
+
+        abstract_page = _get(document, "abstract_page", None)
+        if not isinstance(abstract_page, int) and _has_pdf_source(document):
+            abstract_page = 1
+        add(_get(document, "abstract", "") or "", "Abstract", abstract_page)
+        for section in _get(document, "sections", []) or []:
+            source = _get(section, "section_title", "") or _get(section, "section_type", "") or "Section"
+            add(_get(section, "text", "") or "", source, _get(section, "page_start", None))
+        for figure in _get(document, "figures", []) or []:
+            add(_get(figure, "caption", "") or "", "Figure", _get(figure, "page", None), "caption")
+        for table in _get(document, "tables", []) or []:
+            add(_get(table, "caption", "") or "", "Table", _get(table, "page", None), "caption")
+        return sources
 
     # -- 各子模块 -----------------------------------------------------------
 
     def _extract_gap(self, intro_text: str, abstract: str) -> str:
         """从 Introduction / Abstract 中提取 research gap."""
         combined = f"{abstract}\n\n{intro_text}"
-        for pattern, template in _GAP_MARKERS:
+        for pattern, _template in _GAP_MARKERS:
             m = re.search(pattern, combined, re.IGNORECASE | re.DOTALL)
             if m:
-                context = m.group(0)[:300].replace("\n", " ").strip()
-                return template.format(context=context)
-        # fallback: 取 Introduction 最后 1/3 的第一句
-        if intro_text:
-            sentences = _extract_sentences(intro_text)
-            if len(sentences) > 3:
-                return sentences[-min(3, len(sentences))][:300]
-        return "Research gap not explicitly stated."
+                return _sentence_containing_match(combined, m)
+        return ""
 
     def _extract_solution(self, abstract: str, intro_text: str) -> str:
         """提取 proposed solution."""
         combined = f"{abstract}\n\n{intro_text}"
-        for pattern, template in _SOLUTION_MARKERS:
+        for pattern, _template in _SOLUTION_MARKERS:
             m = re.search(pattern, combined, re.IGNORECASE | re.DOTALL)
             if m:
-                context = m.group(0)[:350].replace("\n", " ").strip()
-                return template.format(context=context)
-        # fallback: Abstract 最后一句常含 solution
-        abs_sentences = _extract_sentences(abstract)
-        if abs_sentences:
-            return abs_sentences[-1][:350]
-        return "Solution not clearly extracted."
+                return _sentence_containing_match(combined, m)
+        return ""
 
     def _extract_hypothesis(self, abstract: str, intro: str, full_head: str) -> str:
         """提取 core hypothesis."""
         combined = f"{abstract}\n\n{intro}\n\n{full_head}"
-        for pattern, template in _HYPOTHESIS_MARKERS:
+        for pattern, _template in _HYPOTHESIS_MARKERS:
             m = re.search(pattern, combined, re.IGNORECASE | re.DOTALL)
             if m:
-                context = m.group(0)[:400].replace("\n", " ").strip()
-                return template.format(context=context)
-        # fallback: 从 solution 推断
-        sol = self._extract_solution(abstract, intro)
-        if sol != "Solution not clearly extracted.":
-            return f"The core hypothesis underlying this approach: {sol[:250]}"
-        return "Hypothesis not explicitly stated."
+                return _sentence_containing_match(combined, m)
+        return ""
 
     @staticmethod
     def _build_evidence_chain(
         results_text: str,
         figures: list[Any],
         tables: list[Any],
+        results_section: Any | None = None,
     ) -> list[EvidenceItem]:
         """构建证据链: Results 段落核心句 + 图表引用."""
         chain: list[EvidenceItem] = []
@@ -514,17 +694,25 @@ class WritingCardExtractor:
         for sent in result_sentences:
             sent_lower = sent.lower()
             if any(kw in sent_lower for kw in evidence_keywords):
-                chain.append(EvidenceItem(text=sent[:400], source="Results"))
+                page = _get(results_section, "page_start", None)
+                chain.append(EvidenceItem(
+                    text=sent[:400],
+                    source=_get(results_section, "section_title", "") or "Results",
+                    page=page if isinstance(page, int) and page > 0 else None,
+                    locator_status="exact_page" if isinstance(page, int) and page > 0 else "text_only",
+                ))
 
         # 图表作为证据补充
         for fig in figures:
-            cap = getattr(fig, "caption", "") or ""
+            cap = _get(fig, "caption", "") or ""
             if cap:
-                chain.append(EvidenceItem(text=cap[:300], source=f"Figure"))
+                page = _get(fig, "page", None)
+                chain.append(EvidenceItem(text=cap[:300], source="Figure", page=page, locator_status="exact_page" if page else "text_only"))
         for tbl in tables:
-            cap = getattr(tbl, "caption", "") or ""
+            cap = _get(tbl, "caption", "") or ""
             if cap:
-                chain.append(EvidenceItem(text=cap[:300], source="Table"))
+                page = _get(tbl, "page", None)
+                chain.append(EvidenceItem(text=cap[:300], source="Table", page=page, locator_status="exact_page" if page else "text_only"))
 
         # 去重并限制长度
         seen: set[str] = set()

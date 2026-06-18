@@ -5,7 +5,9 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models import (
     CatalystSample,
@@ -137,7 +139,7 @@ class ExtractionReviewService:
                     if self._is_blank(field_snapshot["value"]):
                         continue
                     review = self._get_or_create_review(paper_id, canonical_type, str(target.id), field_name)
-                    if review.id is not None:
+                    if not getattr(review, "_created_by_get_or_create", False):
                         existing_count += 1
                         if review.reviewer_status == "verified":
                             skipped_count += 1
@@ -159,7 +161,7 @@ class ExtractionReviewService:
                     review.last_resolved_target_id = str(target.id)
                     self.resolver._refresh_review_identity(review, canonical_type, target)
                     self.session.add(review)
-                    self.session.flush()
+                    self._flush_review_write()
                     prepared.append(self._serialize(review))
         self.session.commit()
         return ExtractionReviewPrepareResponse(
@@ -174,15 +176,32 @@ class ExtractionReviewService:
         )
 
     def save_reviews(self, paper_id: UUID, items: list[ExtractionFieldReviewSaveItem]) -> list[ExtractionFieldReviewResponse]:
-        saved: list[ExtractionFieldReviewResponse] = []
+        prepared: list[tuple[ExtractionFieldReviewSaveItem, str, Any, dict[str, Any], ExtractionFieldReview | None]] = []
         for item in items:
             canonical_type = self.canonical_target_type(item.target_type)
             target = self.get_target_or_raise(paper_id, canonical_type, item.target_id)
             snapshot = self.get_target_field_snapshot(canonical_type, target)
             if item.field_name not in snapshot:
                 raise ValueError(f"Unsupported field for {canonical_type}: {item.field_name}")
-            field_snapshot = snapshot[item.field_name]
-            review = self._get_or_create_review(paper_id, canonical_type, item.target_id, item.field_name)
+            review = self._find_review(paper_id, canonical_type, item.target_id, item.field_name)
+            if review is not None:
+                self._guard_expected_write_version(review, item.expected_write_version, created=False)
+            prepared.append((item, canonical_type, target, snapshot[item.field_name], review))
+
+        writable: list[tuple[ExtractionFieldReviewSaveItem, str, Any, dict[str, Any], ExtractionFieldReview]] = []
+        for item, canonical_type, target, field_snapshot, existing_review in prepared:
+            review = existing_review or self._get_or_create_review(
+                paper_id, canonical_type, item.target_id, item.field_name
+            )
+            self._guard_expected_write_version(
+                review,
+                item.expected_write_version,
+                created=existing_review is None and getattr(review, "_created_by_get_or_create", False),
+            )
+            writable.append((item, canonical_type, target, field_snapshot, review))
+
+        saved: list[ExtractionFieldReviewResponse] = []
+        for item, canonical_type, target, field_snapshot, review in writable:
             self._guard_verified_review_mutation(review, item.reviewed_value, item.reviewer_status)
             # D1 Phase 3: save_reviews cannot directly set reviewer_status=verified
             # Verified must go through mark_verified API which has evidence checks
@@ -202,13 +221,13 @@ class ExtractionReviewService:
             review.review_payload = item.review_payload
             # D1 Phase 3: do not reset target_resolution_status on save
             # Only mark_verified is allowed to set it to "active"
-            if review.id is None:
+            if getattr(review, "_created_by_get_or_create", False):
                 review.target_resolution_status = "active"
                 review.remapped_from_target_id = None
                 review.last_resolved_target_id = item.target_id
             self.resolver._refresh_review_identity(review, canonical_type, target)
             self.session.add(review)
-            self.session.flush()
+            self._flush_review_write()
             saved.append(self._serialize(review))
         self.session.commit()
         return saved
@@ -218,6 +237,8 @@ class ExtractionReviewService:
         target = self.get_target_or_raise(paper_id, canonical_type, payload.target_id)
         snapshot = self.get_target_field_snapshot(canonical_type, target)
         field_names = payload.field_names or list(snapshot.keys())
+        if len(field_names) > 1 and payload.expected_write_version is not None:
+            raise ValueError("write_conflict:extraction_review_per_field_versions_required")
 
         # D1 Phase 3: check target exists (already done by get_target_or_raise above)
         # and check evidence reference and evidence text before marking verified
@@ -228,7 +249,7 @@ class ExtractionReviewService:
             target_id=target.id,
         )
 
-        saved: list[ExtractionFieldReviewResponse] = []
+        prepared: list[tuple[str, dict[str, Any], ExtractionFieldReview | None]] = []
         for field_name in field_names:
             if field_name not in snapshot:
                 raise ValueError(f"Unsupported field for {canonical_type}: {field_name}")
@@ -247,7 +268,27 @@ class ExtractionReviewService:
                     f"Cannot mark {canonical_type}.{field_name} as verified: {reason}. "
                     f"Ensure target exists, evidence reference and evidence text are present."
                 )
-            review = self._get_or_create_review(paper_id, canonical_type, payload.target_id, field_name)
+            review = self._find_review(paper_id, canonical_type, payload.target_id, field_name)
+            expected_version = self._expected_mark_verified_version(payload, field_name, len(field_names))
+            if review is not None:
+                self._guard_expected_write_version(review, expected_version, created=False)
+            prepared.append((field_name, field_snapshot, review))
+
+        writable: list[tuple[str, dict[str, Any], ExtractionFieldReview]] = []
+        for field_name, field_snapshot, existing_review in prepared:
+            review = existing_review or self._get_or_create_review(
+                paper_id, canonical_type, payload.target_id, field_name
+            )
+            expected_version = self._expected_mark_verified_version(payload, field_name, len(field_names))
+            self._guard_expected_write_version(
+                review,
+                expected_version,
+                created=existing_review is None and getattr(review, "_created_by_get_or_create", False),
+            )
+            writable.append((field_name, field_snapshot, review))
+
+        saved: list[ExtractionFieldReviewResponse] = []
+        for field_name, field_snapshot, review in writable:
             review.original_value = field_snapshot["value"]
             if review.reviewed_value is None:
                 review.reviewed_value = field_snapshot["value"]
@@ -269,7 +310,7 @@ class ExtractionReviewService:
             review.last_resolved_target_id = payload.target_id
             self.resolver._refresh_review_identity(review, canonical_type, target)
             self.session.add(review)
-            self.session.flush()
+            self._flush_review_write()
             saved.append(self._serialize(review))
         self.session.commit()
         return saved
@@ -294,23 +335,70 @@ class ExtractionReviewService:
         return FIELD_SNAPSHOT_BUILDERS[canonical_type](row)
 
     def _get_or_create_review(self, paper_id: UUID, canonical_type: str, target_id: str, field_name: str) -> ExtractionFieldReview:
-        review = self.session.scalar(
+        identity_filter = (
+            ExtractionFieldReview.paper_id == paper_id,
+            ExtractionFieldReview.target_type == canonical_type,
+            ExtractionFieldReview.target_id == target_id,
+            ExtractionFieldReview.field_name == field_name,
+        )
+        review = self.session.scalar(select(ExtractionFieldReview).where(*identity_filter))
+        if review is not None:
+            review._created_by_get_or_create = False
+            return review
+        values = {
+            "paper_id": paper_id,
+            "target_type": canonical_type,
+            "target_id": target_id,
+            "field_name": field_name,
+            "target_resolution_status": "active",
+            "last_resolved_target_id": target_id,
+        }
+        dialect = self.session.get_bind().dialect.name
+        if dialect in {"sqlite", "postgresql"}:
+            if dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as dialect_insert
+            else:
+                from sqlalchemy.dialects.postgresql import insert as dialect_insert
+            result = self.session.execute(
+                dialect_insert(ExtractionFieldReview)
+                .values(**values)
+                .on_conflict_do_nothing(
+                    index_elements=["paper_id", "target_type", "target_id", "field_name"]
+                )
+            )
+            winner = self.session.scalar(select(ExtractionFieldReview).where(*identity_filter))
+            if winner is None:
+                raise RuntimeError("extraction_review_upsert_failed")
+            winner._created_by_get_or_create = result.rowcount == 1
+            return winner
+        review = ExtractionFieldReview(**values)
+        try:
+            with self.session.begin_nested():
+                self.session.add(review)
+                self.session.flush()
+            review._created_by_get_or_create = True
+            return review
+        except IntegrityError:
+            winner = self.session.scalar(select(ExtractionFieldReview).where(*identity_filter))
+            if winner is None:
+                raise
+            winner._created_by_get_or_create = False
+            return winner
+
+    def _find_review(
+        self,
+        paper_id: UUID,
+        canonical_type: str,
+        target_id: str,
+        field_name: str,
+    ) -> ExtractionFieldReview | None:
+        return self.session.scalar(
             select(ExtractionFieldReview).where(
                 ExtractionFieldReview.paper_id == paper_id,
                 ExtractionFieldReview.target_type == canonical_type,
                 ExtractionFieldReview.target_id == target_id,
                 ExtractionFieldReview.field_name == field_name,
             )
-        )
-        if review is not None:
-            return review
-        return ExtractionFieldReview(
-            paper_id=paper_id,
-            target_type=canonical_type,
-            target_id=target_id,
-            field_name=field_name,
-            target_resolution_status="active",
-            last_resolved_target_id=target_id,
         )
 
     @staticmethod
@@ -331,6 +419,13 @@ class ExtractionReviewService:
             review.target_resolution_status = "active"
         if not review.last_resolved_target_id:
             review.last_resolved_target_id = target_id
+
+    def _flush_review_write(self) -> None:
+        try:
+            self.session.flush()
+        except StaleDataError as exc:
+            self.session.rollback()
+            raise ValueError("write_conflict:extraction_review_version_stale") from exc
 
     @staticmethod
     def _is_blank(value: Any) -> bool:
@@ -354,6 +449,32 @@ class ExtractionReviewService:
             raise ValueError("Verified reviews cannot be downgraded through save")
         if incoming_reviewed_value != review.reviewed_value:
             raise ValueError("Verified reviews cannot overwrite reviewed_value")
+
+    @staticmethod
+    def _guard_expected_write_version(
+        review: ExtractionFieldReview,
+        expected_write_version: int | None,
+        *,
+        created: bool,
+    ) -> None:
+        if expected_write_version is None:
+            if created:
+                return
+            raise ValueError("write_conflict:extraction_review_version_required")
+        if int(review.write_version or 1) != int(expected_write_version):
+            raise ValueError("write_conflict:extraction_review_version_stale")
+
+    @staticmethod
+    def _expected_mark_verified_version(
+        payload: ExtractionReviewMarkVerifiedRequest,
+        field_name: str,
+        field_count: int,
+    ) -> int | None:
+        if field_name in payload.expected_write_versions:
+            return payload.expected_write_versions[field_name]
+        if field_count == 1:
+            return payload.expected_write_version
+        return None
 
     @staticmethod
     def result_key(canonical_type: str) -> str:
@@ -388,4 +509,5 @@ class ExtractionReviewService:
             verified=is_safe_verified_review(row),
             created_at=created,
             updated_at=updated,
+            write_version=row.write_version,
         )

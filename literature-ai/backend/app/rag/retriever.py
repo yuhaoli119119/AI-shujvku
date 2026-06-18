@@ -16,7 +16,7 @@ from app.services.embedding import (
     EmbeddingUnavailableError,
     get_embedding_service,
 )
-from app.rag.eligibility import is_rag_eligible, writing_card_rag_review_status
+from app.rag.eligibility import is_rag_eligible, section_is_retrieval_candidate, writing_card_rag_review_status
 from app.rag.cards import build_dft_card, build_evidence_card, build_figure_card, build_writing_card, paper_code_for
 from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
 
@@ -38,6 +38,7 @@ class Retriever:
     def __init__(self, session: Session, embedding_dimension: int = 1024, embedding: EmbeddingService | None = None) -> None:
         self.session = session
         self.embedding = embedding or DeterministicEmbeddingService(embedding_dimension)
+        self._semantic_enabled = not isinstance(self.embedding, DeterministicEmbeddingService)
         self._text_embedding_cache: dict[str, list[float]] = {}
 
     def retrieve(
@@ -51,10 +52,8 @@ class Retriever:
         tokens = _tokenize(query)
         query_embedding = self._safe_query_embedding(query)
         result = {
-            # Formal focused RAG is restricted to reviewed/export-safe cards and
-            # structured evidence. Raw sections remain available only through
-            # RetrievalService full_context for IDE AI review context.
-            "sections": [],
+            # Discovery candidates carry a separate formal-writing gate result.
+            "sections": self._retrieve_sections(tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter),
             "catalyst_samples": self._retrieve_catalyst_samples(tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter),
             "dft_results": self._retrieve_dft_results(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
             "electrochemical_performance": self._retrieve_electrochemical(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
@@ -98,9 +97,7 @@ class Retriever:
         limit: int,
         paper_type_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        chunk_results = self._retrieve_chunks(tokens, query_embedding, paper_ids, limit, paper_type_filter)
-        if chunk_results:
-            return chunk_results
+        chunk_results = self._retrieve_chunks(tokens, query_embedding, paper_ids, max(limit * 2, 4), paper_type_filter)
 
         query = select(PaperSection)
         if paper_ids:
@@ -115,8 +112,9 @@ class Retriever:
         )
         results = []
         for row in rows:
-            if not is_rag_eligible(self.session, row, "section"):
+            if not section_is_retrieval_candidate(self.session, row):
                 continue
+            formal_eligible = is_rag_eligible(self.session, row, "section")
             text = row.text or ""
             haystack = " ".join(filter(None, [row.section_title, row.section_type, text]))
             score, score_info = self._hybrid_score(tokens, query_embedding, haystack, row.embedding, allow_paper_fallback=bool(paper_ids))
@@ -127,6 +125,7 @@ class Retriever:
                     "type": "section",
                     "paper_id": row.paper_id,
                     "object_id": row.id,
+                    "section_id": row.id,
                     "score": score,
                     "score_breakdown": score_info,
                     "text": text[:1200],
@@ -134,9 +133,11 @@ class Retriever:
                     "section_type": row.section_type,
                     "page_start": row.page_start,
                     "page_end": row.page_end,
+                    "retrieval_tier": "formal_evidence" if formal_eligible else "discovery_candidate",
+                    "can_use_for_writing": formal_eligible,
                 }
             )
-        return self._top_k(results, limit)
+        return self._merge_section_results(chunk_results, results, limit)
 
     def _retrieve_chunks(
         self,
@@ -149,8 +150,10 @@ class Retriever:
         rows = self._candidate_chunks(tokens, query_embedding, paper_ids, max(limit * 10, 50), paper_type_filter)
         results = []
         for row in rows:
-            if not is_rag_eligible(self.session, row, "chunk"):
+            if not section_is_retrieval_candidate(self.session, row):
                 continue
+            formal_eligible = is_rag_eligible(self.session, row, "chunk")
+            section = self.session.get(PaperSection, row.section_id) if row.section_id else None
             haystack = row.text or ""
             score, score_info = self._hybrid_score(tokens, query_embedding, haystack, row.embedding, allow_paper_fallback=bool(paper_ids))
             if score <= 0:
@@ -164,15 +167,44 @@ class Retriever:
                     "score": score,
                     "score_breakdown": score_info,
                     "text": haystack[:1200],
-                    "section_title": "Chunk",
-                    "section_type": "chunk",
+                    "section_title": getattr(section, "section_title", None) or "Chunk",
+                    "section_type": getattr(section, "section_type", None) or "chunk",
                     "page_start": row.page_start,
                     "page_end": row.page_end,
                     "embedding_model": row.embedding_model,
                     "embedding_dimension": row.embedding_dimension,
+                    "chunk_index": row.chunk_index,
+                    "retrieval_tier": "formal_evidence" if formal_eligible else "discovery_candidate",
+                    "can_use_for_writing": formal_eligible,
                 }
             )
         return self._top_k(results, limit)
+
+    @staticmethod
+    def _merge_section_results(
+        chunks: list[dict[str, Any]], sections: list[dict[str, Any]], limit: int,
+    ) -> list[dict[str, Any]]:
+        """Prefer precise chunks while retaining full-section boundary recall."""
+
+        merged: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, Any, Any, str]] = set()
+        chunks_per_section: dict[tuple[str, str], int] = {}
+        for item in sorted(chunks + sections, key=lambda row: row["score"], reverse=True):
+            paper_key = str(item.get("paper_id") or "")
+            section_key = str(item.get("section_id") or item.get("object_id") or "")
+            group = (paper_key, section_key)
+            is_chunk = item.get("chunk_index") is not None
+            if is_chunk and chunks_per_section.get(group, 0) >= 2:
+                continue
+            text_key = re.sub(r"\s+", " ", str(item.get("text") or "").strip().lower())[:160]
+            key = (paper_key, section_key, item.get("page_start"), item.get("page_end"), text_key)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            if is_chunk:
+                chunks_per_section[group] = chunks_per_section.get(group, 0) + 1
+        return sorted(merged, key=lambda row: row["score"], reverse=True)[:limit]
 
     def _candidate_chunks(
         self,
@@ -753,8 +785,8 @@ class Retriever:
     ) -> tuple[float, dict[str, float]]:
         lexical = self._score_text(query_tokens, text)
         semantic = 0.0
-        effective_embedding = stored_embedding
-        if not effective_embedding and query_embedding:
+        effective_embedding = stored_embedding if self._semantic_enabled else None
+        if not effective_embedding and query_embedding and self._semantic_enabled:
             effective_embedding = self._safe_text_embedding(text)
         if query_embedding and effective_embedding:
             semantic = max(0.0, self.embedding.cosine_similarity(query_embedding, effective_embedding))
@@ -762,7 +794,7 @@ class Retriever:
             lexical = 0.05
         if lexical <= 0 and semantic <= 0:
             return 0.0, {"lexical": 0.0, "semantic": 0.0, "hybrid": 0.0}
-        hybrid = round((0.65 * lexical) + (0.35 * semantic), 4)
+        hybrid = round((0.65 * lexical) + (0.35 * semantic), 4) if semantic > 0 else round(lexical, 4)
         return hybrid, {"lexical": round(lexical, 4), "semantic": round(semantic, 4), "hybrid": hybrid}
 
     def _safe_text_embedding(self, text: str) -> list[float]:
@@ -772,6 +804,8 @@ class Retriever:
         cached = self._text_embedding_cache.get(normalized)
         if cached is not None:
             return cached
+        if not self._semantic_enabled:
+            return []
         try:
             raw_embedding = self.embedding.embed_text(normalized)
             embedding = raw_embedding if isinstance(raw_embedding, list) else []

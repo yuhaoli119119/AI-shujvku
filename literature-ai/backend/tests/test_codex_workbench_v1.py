@@ -180,6 +180,7 @@ def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_e
     figure_asset = storage_root / "figures" / "figure-2.png"
     figure_asset.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (420, 260), color=(32, 64, 96)).save(figure_asset)
+    Image.new("RGB", (900, 1200), color=(245, 245, 245)).save(storage_root / "figures" / "page_004.png")
     with Session() as session:
         paper = Paper(title="Figure audit paper", pdf_path="paper.pdf", workflow_status="Parsed_Material_Ready")
         session.add(paper)
@@ -253,7 +254,7 @@ def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_e
         assert detail is not None
         figure_payload = detail.figures[0]
         assert figure_payload.page == 4
-        assert figure_payload.asset_url == "/api/papers/assets/figures/figure-2.png"
+        assert figure_payload.asset_url == "/api/papers/assets/storage/figures/figure-2.png"
         assert figure_payload.image_review["crop_status"] == "candidate_crop"
         assert figure_payload.review_required is False
         assert figure_payload.figure_reliability_status == "reliable"
@@ -1652,6 +1653,45 @@ def test_review_center_sorting_and_batch_stage2_endpoints(workbench_env, monkeyp
         row = DFTResult(paper_id=high_conflict.id, property_type="adsorption_energy", value=-0.5, unit="eV")
         session.add(row)
         session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=high_conflict.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value=-0.5,
+                reviewed_value=-0.5,
+                unit="eV",
+                reviewer_status="review_conflict",
+                reviewer="review_center_sort_fixture",
+                review_payload={
+                    "ai_audits": [
+                        {
+                            "source": "ai-a",
+                            "decision": "PASS",
+                            "corrected_value": -0.5,
+                            "unit": "eV",
+                            "confidence": 0.93,
+                            "evidence_payload": {
+                                "evidence_text": "DFT adsorption energy is -0.5 eV.",
+                                "locator": {"page": 3, "status": "exact_page"},
+                            },
+                        },
+                        {
+                            "source": "ai-b",
+                            "decision": "REVISE",
+                            "corrected_value": -0.7,
+                            "unit": "eV",
+                            "confidence": 0.91,
+                            "evidence_payload": {
+                                "evidence_text": "The table reports -0.7 eV.",
+                                "locator": {"page": 3, "status": "exact_page"},
+                            },
+                        },
+                    ]
+                },
+            )
+        )
         session.add_all(
             [
                 PaperCorrection(

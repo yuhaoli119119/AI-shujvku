@@ -1,5 +1,9 @@
 const state = {
     currentOffset: 0,
+    pagination: {
+        page: 1,
+        pageSize: 25,
+    },
     papers: [],
     selectedPaperId: null,
     selectedPaper: null,

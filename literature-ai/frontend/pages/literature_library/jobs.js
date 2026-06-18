@@ -163,7 +163,8 @@ async function pollAIWorkflowJob(jobId) {
             setTimeout(function() { pollAIWorkflowJob(jobId); }, 3000);
         } else if (job.status === "completed") {
             showToast("AI 工作流完成，文献列表已刷新。", "success");
-            state.currentOffset = 0;
+            if (typeof resetLibraryPagination === "function") resetLibraryPagination();
+            else state.currentOffset = 0;
             refreshCurrentPage();
         } else if (job.status === "failed") {
             showToast("AI 工作流失败：" + (job.error || ""), "error");
@@ -214,7 +215,8 @@ async function pollWorkflowIngestJob(jobId) {
             } else {
                 showToast("已完成后台收录：" + (result.title || ""), "success");
             }
-            state.currentOffset = 0;
+            if (typeof resetLibraryPagination === "function") resetLibraryPagination();
+            else state.currentOffset = 0;
             refreshCurrentPage();
         } else if (job.status === "failed") {
             showToast("后台收录失败：" + (job.error || ""), "error");
@@ -680,7 +682,8 @@ async function uploadPDF(input) {
             refreshCurrentPage();
         } else {
             showToast("已上传并收录：" + (data.title || file.name), "success");
-            state.currentOffset = 0;
+            if (typeof resetLibraryPagination === "function") resetLibraryPagination();
+            else state.currentOffset = 0;
             refreshCurrentPage();
         }
     } catch (error) {

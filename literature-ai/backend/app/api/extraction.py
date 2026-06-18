@@ -184,7 +184,8 @@ async def save_extraction_field_reviews(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/results/{paper_id}/reviews/mark-verified", response_model=list[ExtractionFieldReviewResponse])
@@ -200,7 +201,8 @@ async def mark_extraction_fields_verified(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/results/{paper_id}/validate", response_model=ExtractionValidationResponse)

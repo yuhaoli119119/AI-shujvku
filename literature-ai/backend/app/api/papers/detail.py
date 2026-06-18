@@ -644,7 +644,12 @@ def prepare_external_ai_context(
         raise HTTPException(status_code=404, detail="Paper not found")
 
     settings = get_settings()
-    summary = PaperReprocessingService(session=session, settings=settings).rerun_stage2(paper_id)
+    try:
+        summary = PaperReprocessingService(session=session, settings=settings).rerun_stage2(paper_id)
+    except ValueError as exc:
+        if str(exc).startswith("paper_operation_conflict"):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise
     return _build_extraction_run_response(paper_id, summary)
 
 

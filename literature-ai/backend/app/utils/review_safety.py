@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from sqlalchemy import inspect, select
@@ -714,49 +715,123 @@ def _safe_locator_payload(item: dict[str, Any]) -> bool:
     )
 
 
-def writing_card_gate(card: WritingCard) -> WritingGateResult:
+_WRITING_CORE_FIELDS = ("research_gap", "proposed_solution", "core_hypothesis")
+_WRITING_PLACEHOLDER_RE = re.compile(
+    r"^(?:not explicitly stated|not clearly extracted|unknown|none|n/?a|"
+    r"research gap not explicitly stated|solution not clearly extracted|hypothesis not explicitly stated)[.!]?$",
+    re.IGNORECASE,
+)
+_WRITING_NUMBER_RE = re.compile(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?(?:\s*[%°]|\s*[A-Za-z]+)?")
+_WRITING_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9+./-]{2,}")
+_WRITING_SPECIFIC_TOKEN_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*\d[A-Za-z0-9+.-]*\b")
+_WRITING_STOPWORDS = {
+    "the", "and", "for", "that", "with", "this", "from", "were", "was", "are", "our",
+    "their", "into", "using", "used", "study", "work", "paper", "method", "approach", "based",
+    "propose", "proposed", "results", "result", "show", "shows", "could", "would", "may", "can",
+}
+
+
+def _writing_content_tokens(value: str) -> set[str]:
+    return {
+        token.lower()
+        for token in _WRITING_WORD_RE.findall(value)
+        if token.lower() not in _WRITING_STOPWORDS
+    }
+
+
+def writing_card_content_gate(card: WritingCard) -> WritingGateResult:
+    """Pure, deterministic content gate for evidence-grounded WritingCards."""
     evidence_chain = card.evidence_chain
-    if _is_blank(evidence_chain):
+    if not isinstance(evidence_chain, list) or not evidence_chain:
         return WritingGateResult(
             can_use_for_writing=False,
-            evidence_chain_status="missing",
+            evidence_chain_status="missing" if _is_blank(evidence_chain) else "legacy_unscoped",
             review_gate_status="blocked",
-            blocked_reasons=("missing_evidence_chain",),
+            blocked_reasons=("missing_evidence_chain",) if _is_blank(evidence_chain) else ("unscoped_evidence_chain",),
         )
 
+    reasons: list[str] = []
+    # Preserve useful diagnostics for legacy chains without letting review flags
+    # bypass the new field-scoped content requirements.
     review_payloads = [
-        item
-        for item in _iter_dicts(evidence_chain)
-        if any(key in item for key in ("reviewer_status", "review_status", "target_resolution_status", "resolution_status"))
+        item for item in evidence_chain
+        if isinstance(item, dict)
+        and any(key in item for key in ("reviewer_status", "review_status", "target_resolution_status", "resolution_status"))
     ]
-    if not review_payloads:
-        return WritingGateResult(
-            can_use_for_writing=False,
-            evidence_chain_status="present",
-            review_gate_status="blocked",
-            blocked_reasons=("missing_review",),
-        )
-    if not all(is_safe_verified_review(item) for item in review_payloads):
-        return WritingGateResult(
-            can_use_for_writing=False,
-            evidence_chain_status="present",
-            review_gate_status="blocked",
-            blocked_reasons=("unsafe_review",),
-        )
+    if review_payloads and not all(is_safe_verified_review(item) for item in review_payloads):
+        reasons.append("unsafe_review")
+    scoped_evidence = [
+        item for item in evidence_chain
+        if isinstance(item, dict) and item.get("supports_fields")
+    ]
     locator_payloads = _locator_payloads(evidence_chain)
-    if locator_payloads and not all(_safe_locator_payload(item) for item in locator_payloads):
+    if not scoped_evidence and locator_payloads and not all(_safe_locator_payload(item) for item in locator_payloads):
+        reasons.append("unsafe_locator")
+    reliable_fields = 0
+    for field_name in _WRITING_CORE_FIELDS:
+        value = str(getattr(card, field_name, None) or "").strip()
+        if not value or _WRITING_PLACEHOLDER_RE.match(value):
+            continue
+        supporting = [
+            item for item in evidence_chain
+            if isinstance(item, dict)
+            and field_name in (item.get("supports_fields") or [])
+            and str(item.get("text") or "").strip()
+            and str(item.get("source") or "").strip()
+        ]
+        if not supporting:
+            reasons.append(f"missing_field_evidence:{field_name}")
+            continue
+        safe_supporting = []
+        for item in supporting:
+            if _safe_locator_payload(item):
+                safe_supporting.append(item)
+        if not safe_supporting:
+            reasons.append(f"unsafe_field_locator:{field_name}")
+            continue
+        evidence_text = " ".join(str(item.get("text") or "") for item in safe_supporting).lower()
+        value_tokens = _writing_content_tokens(value)
+        evidence_tokens = _writing_content_tokens(evidence_text)
+        token_coverage = len(value_tokens & evidence_tokens) / max(1, len(value_tokens))
+        if not value_tokens or token_coverage < 0.45:
+            reasons.append(f"field_evidence_mismatch:{field_name}")
+            continue
+        unsupported_numbers = [
+            number for number in _WRITING_NUMBER_RE.findall(value)
+            if str(number).strip().lower() not in evidence_text
+        ]
+        if unsupported_numbers:
+            reasons.append(f"unsupported_number:{field_name}")
+            continue
+        unsupported_specific_tokens = [
+            token for token in _WRITING_SPECIFIC_TOKEN_RE.findall(value)
+            if token.lower() not in evidence_text
+        ]
+        if unsupported_specific_tokens:
+            reasons.append(f"unsupported_specific_token:{field_name}")
+            continue
+        reliable_fields += 1
+
+    if reliable_fields < 2:
+        reasons.append("insufficient_reliable_core_fields")
+    if reasons:
         return WritingGateResult(
             can_use_for_writing=False,
             evidence_chain_status="present",
             review_gate_status="blocked",
-            blocked_reasons=("unsafe_locator",),
+            blocked_reasons=tuple(dict.fromkeys(reasons)),
         )
     return WritingGateResult(
         can_use_for_writing=True,
         evidence_chain_status="present",
-        review_gate_status="safe_verified",
+        review_gate_status="content_verified",
         blocked_reasons=(),
     )
+
+
+def writing_card_gate(card: WritingCard) -> WritingGateResult:
+    """Compatibility entry point; content quality is now the non-bypassable gate."""
+    return writing_card_content_gate(card)
 
 
 def external_candidate_has_evidence(candidate: ExternalAnalysisCandidate) -> bool:

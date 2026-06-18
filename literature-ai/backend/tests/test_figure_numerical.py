@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db.models import (
+    AuditLog,
     Base,
     Paper,
     PaperFigure,
@@ -110,6 +111,22 @@ def test_vlm_level3_extraction_and_rag_integration():
                 assert cap_ev.figure == "Figure 3. Capacity voltage profiles."
                 assert "current_density" in cap_ev.text
                 assert "0.1C" in cap_ev.text
+                stored_figure = session.scalar(
+                    select(PaperFigure).where(PaperFigure.paper_id == paper.id)
+                )
+                stored_figure.crop_status = "candidate_crop"
+                stored_figure.crop_source = "vlm_level3_test_fixture"
+                session.add(
+                    AuditLog(
+                        paper_id=paper.id,
+                        action="review_figure",
+                        source="figure_numerical_test",
+                        target_type="paper_figure",
+                        target_id=str(stored_figure.id),
+                        payload={"verdict": "verified"},
+                    )
+                )
+                session.commit()
                 
                 # 4. 验证 Retriever 混合检索 FigureDataPoint 的召回与打分
                 retriever = Retriever(session)

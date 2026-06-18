@@ -18,24 +18,27 @@
       color: var(--color-text);
       background: var(--color-bg);
       font-family: var(--font-body);
+      --review-panel-head-height: 0px;
     }
     .shell {
       width: min(1520px, 100%);
       margin: 0 auto;
-      padding: 10px 16px 24px;
+      padding: 0 16px 8px;
     }
     .review-topline {
       display: flex;
-      flex-wrap: wrap;
-      align-items: flex-start;
+      flex-wrap: nowrap;
+      align-items: stretch;
       gap: 16px;
       margin-bottom: 12px;
+      padding: 0;
     }
     .stats {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 8px;
-      flex: 1 1 400px;
+      flex: 1 1 auto;
+      min-width: 0;
     }
     .stat {
       min-height: 36px;
@@ -56,8 +59,29 @@
       border-radius: 6px;
       background: var(--color-primary-bg);
       color: var(--color-primary);
-      font-size: 11px;
-      font-weight: 900;
+    }
+    .stat-icon::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 0 2px rgba(12, 87, 164, 0.12);
+    }
+    .stat-icon-docs {
+      color: #0f766e;
+    }
+    .stat-icon-human {
+      color: #0f766e;
+    }
+    .stat-icon-quality {
+      color: #0f766e;
+    }
+    .stat-icon-dft {
+      color: #0f766e;
+    }
+    .stat-icon-conflict {
+      color: #0f766e;
     }
     .stat-label {
       color: var(--color-text-secondary);
@@ -74,9 +98,9 @@
     }
     .page-actions {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
-      flex: 0 0 auto;
+      flex: 0 0 472px;
     }
     .page-actions .btn {
       min-width: 0;
@@ -116,6 +140,7 @@
       background: var(--color-surface);
       box-shadow: var(--shadow-card);
       padding: 0;
+      margin-bottom: 0;
     }
     .panel-head {
       display: flex;
@@ -124,6 +149,11 @@
       gap: 12px;
       padding: 7px 12px;
       border-bottom: 1px solid var(--color-border);
+      position: sticky;
+      top: var(--nav-height);
+      z-index: 32;
+      background: var(--color-surface);
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
     }
     .filterbar {
       display: flex;
@@ -148,6 +178,121 @@
     .table-wrap {
       width: 100%;
       overflow-x: auto;
+      position: relative;
+    }
+    .review-table-head-shell {
+      position: sticky;
+      top: calc(var(--nav-height) + var(--review-panel-head-height));
+      z-index: 24;
+      overflow: hidden;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-alt);
+    }
+    .review-table-head {
+      min-width: 1080px;
+      display: grid;
+      grid-template-columns: 108px 70px minmax(320px, 36fr) minmax(180px, 18fr) minmax(220px, 24fr) minmax(150px, 16fr);
+      transform: translateX(0);
+      will-change: transform;
+    }
+    .review-table-head-cell {
+      min-height: 35px;
+      padding: 2px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+      border-right: 1px solid var(--color-border);
+      background: var(--color-surface-alt);
+    }
+    .review-table-head-cell:last-child {
+      border-right: 0;
+    }
+    .review-table-head-cell.id-head {
+      justify-content: flex-start;
+      padding-left: 16px;
+    }
+    .review-table-head-cell.id-head .select-head {
+      justify-items: start;
+      min-width: 72px;
+    }
+    .panel-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      min-height: 40px;
+      padding: 4px 12px;
+      border-top: 1px solid var(--color-border);
+      background: linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(255, 255, 255, 0.96));
+    }
+    .pagination-meta {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      line-height: 1;
+    }
+    .pagination-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .pagination-pages {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .page-size-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .page-size-box select {
+      height: 28px;
+      min-width: 72px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text);
+      padding: 0 8px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .page-indicator {
+      min-width: 34px;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .page-indicator.is-active {
+      border-color: transparent;
+      background: var(--color-primary);
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(12, 87, 164, 0.22);
+    }
+    .page-indicator[disabled] {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
     table {
       width: 100%;
@@ -164,14 +309,15 @@
       text-align: left;
       vertical-align: middle;
     }
+    table thead {
+      display: none;
+    }
     th {
       color: var(--color-text-secondary);
       background: var(--color-surface-alt);
       font-weight: 900;
       white-space: nowrap;
-      position: sticky;
-      top: 0;
-      z-index: 10;
+      position: static;
     }
     .col-divider {
       border-right: 1px solid var(--color-border);
@@ -587,7 +733,7 @@
     }
     .compare-table {
       width: 100%;
-      min-width: 1020px;
+      min-width: 1300px;
       border-collapse: separate;
       border-spacing: 0;
       table-layout: fixed;
@@ -609,14 +755,14 @@
     .compare-table tr:last-child td {
       border-bottom: 0;
     }
-    .compare-col-source { width: 16%; }
+    .compare-col-source { width: 14%; }
     .compare-col-role { width: 17%; }
     .compare-col-decision { width: 10%; }
     .compare-col-value { width: 13%; }
     .compare-col-confidence { width: 8%; }
     .compare-col-locator { width: 12%; }
-    .compare-col-reason { width: 16%; }
-    .compare-col-action { width: 8%; }
+    .compare-col-reason { width: 14%; }
+    .compare-col-action { width: 12%; }
     .opinion-source {
       font-size: 12px;
       font-weight: 800;
@@ -656,6 +802,8 @@
       font-weight: 800;
       text-align: left;
       cursor: pointer;
+      position: relative;
+      z-index: 2;
     }
     .compare-extra[hidden] {
       display: none !important;
@@ -766,6 +914,17 @@
       .filterbar input {
         width: 100%;
       }
+      .panel-foot {
+        align-items: stretch;
+      }
+      .review-table-head-shell {
+        top: calc(var(--nav-height) + var(--review-panel-head-height));
+      }
+      .pagination-bar {
+        width: 100%;
+        justify-content: flex-start;
+        margin-left: 0;
+      }
       table {
         min-width: 980px;
       }
@@ -801,6 +960,7 @@
       <section class="stats" id="stats"></section>
       <div class="page-actions">
         <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()" title="刷新审核中心">↻ 刷新</button>
+        <button class="btn btn-tinted" type="button" onclick="batchAutoAdvanceFiltered()">批量 AI 自动推进当前筛选</button>
         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
           <option value="">材料操作</option>
           <option value="prepare_filtered">AI 重建</option>
@@ -824,7 +984,7 @@
           <select id="libraryFilter" onchange="setReviewLibraryFilter()">
             <option value="">全部文献库</option>
           </select>
-          <select id="statusFilter" onchange="renderRows()">
+          <select id="statusFilter" onchange="handleFilterChange()">
             <option value="">全部流程状态</option>
             <option value="group:needs_action">需要我处理</option>
             <option value="group:needs_attention">需要关注</option>
@@ -832,7 +992,7 @@
             <option value="group:approved">已审核通过</option>
             <option value="group:deprecated">历史旧状态</option>
           </select>
-          <select id="qualityFilter" onchange="renderRows()">
+          <select id="qualityFilter" onchange="handleFilterChange()">
             <option value="">全部 PDF 质量</option>
             <option value="A_text_readable">A 文本可读</option>
             <option value="B_text_partial">B 部分可读</option>
@@ -840,20 +1000,30 @@
             <option value="D_scan_unclear">D 扫描不清</option>
             <option value="Broken">Broken</option>
           </select>
-          <select id="sortFilter" onchange="loadReviewCenter()">
+          <select id="sortFilter" onchange="handleSortChange()">
             <option value="recent">最近入库优先</option>
             <option value="year_desc">年份新到旧</option>
             <option value="conflicts_desc">冲突优先</option>
             <option value="suspected_missing_desc">疑似漏提优先</option>
           </select>
-          <input id="searchBox" type="search" placeholder="搜索标题 / DOI / 期刊 / 年份 / 短 ID" oninput="renderRows()">
+          <input id="searchBox" type="search" placeholder="搜索标题 / DOI / 期刊 / 年份 / 短 ID" oninput="handleSearchInput()">
         </div>
       </div>
-      <div class="table-wrap">
+      <div class="review-table-head-shell">
+        <div class="review-table-head" id="reviewTableHead">
+          <div class="review-table-head-cell col-divider id-head"><span class="select-head"><input id="selectAllVisible" type="checkbox" aria-label="全选或全不选当前页" onchange="toggleVisibleRowsSelection(this.checked)"><span>ID</span></span></div>
+          <div class="review-table-head-cell col-divider">年份</div>
+          <div class="review-table-head-cell col-divider">文献标题</div>
+          <div class="review-table-head-cell col-divider">文献状态</div>
+          <div class="review-table-head-cell col-divider">DFT 审计</div>
+          <div class="review-table-head-cell">操作</div>
+        </div>
+      </div>
+      <div class="table-wrap" id="tableWrap">
         <table>
           <thead>
             <tr>
-              <th class="col-divider" style="text-align:center;"><span class="select-head"><input id="selectAllVisible" type="checkbox" aria-label="全选或全不选当前页" onchange="toggleVisibleRowsSelection(this.checked)"><span>ID</span></span></th>
+              <th class="col-divider" style="text-align:center;">ID</th>
               <th class="col-divider" style="text-align:center;">年份</th>
               <th class="col-divider" style="text-align:center;">文献标题</th>
               <th class="col-divider" style="text-align:center;">文献状态</th>
@@ -865,6 +1035,10 @@
             <tr><td colspan="6"><div class="empty">正在加载...</div></td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="panel-foot">
+        <div class="pagination-meta muted" id="paginationMeta">正在准备分页...</div>
+        <div class="pagination-bar" id="paginationBar"></div>
       </div>
     </section>
   </main>
@@ -888,8 +1062,17 @@
   </div>
 
   <script>
-    const state = { rows: [], metadata: {}, libraries: [] };
+    const state = {
+      rows: [],
+      metadata: {},
+      libraries: [],
+      pagination: {
+        page: 1,
+        pageSize: 25
+      }
+    };
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
+    const REVIEW_CENTER_FETCH_LIMITS = [5000, 500];
     const selectedPaperIds = new Set();
     const conflictState = {
       activeRow: null,
@@ -949,7 +1132,23 @@
 
     function setReviewLibraryFilter() {
       rememberLibraryName(getValue("libraryFilter"));
+      state.pagination.page = 1;
       loadReviewCenter();
+    }
+
+    function updateStickyLayout() {
+      window.requestAnimationFrame(function () {
+        const panelHead = document.querySelector(".panel-head");
+        document.body.style.setProperty("--review-panel-head-height", ((panelHead && panelHead.offsetHeight) || 0) + "px");
+        syncExternalTableHead();
+      });
+    }
+
+    function syncExternalTableHead() {
+      const tableWrap = document.getElementById("tableWrap");
+      const tableHead = document.getElementById("reviewTableHead");
+      if (!tableWrap || !tableHead) return;
+      tableHead.style.transform = "translateX(" + (-tableWrap.scrollLeft) + "px)";
     }
 
     function toCount(value) {
@@ -989,7 +1188,7 @@
 
     function currentPromptTargets() {
       const selected = selectedPromptRows();
-      const rows = selected.length ? selected : sortedRows(filteredRows()).slice(0, 25);
+      const rows = selected.length ? selected : currentVisibleRows().slice(0, 25);
       if (!rows.length) {
         return "- human_ref: <A0010> | paper_id: <UUID> | title: <文献标题>";
       }
@@ -1022,15 +1221,15 @@
     }
 
     function selectVisibleRows() {
-      sortedRows(filteredRows()).forEach(function (row) {
+      currentVisibleRows().forEach(function (row) {
         if (row && row.paper_id) selectedPaperIds.add(String(row.paper_id));
       });
       renderRows();
-      showToast("已选择当前筛选文献：" + selectedPaperIds.size + " 篇");
+      showToast("已选择当前页文献：" + selectedPaperIds.size + " 篇");
     }
 
     function toggleVisibleRowsSelection(checked) {
-      sortedRows(filteredRows()).forEach(function (row) {
+      currentVisibleRows().forEach(function (row) {
         if (!row || !row.paper_id) return;
         if (checked) selectedPaperIds.add(String(row.paper_id));
         else selectedPaperIds.delete(String(row.paper_id));
@@ -1051,6 +1250,102 @@
       selectedPaperIds.clear();
       renderRows();
       showToast("已清空文献选择");
+    }
+
+    function handleFilterChange() {
+      state.pagination.page = 1;
+      renderRows();
+    }
+
+    function handleSortChange() {
+      state.pagination.page = 1;
+      renderRows();
+    }
+
+    function handleSearchInput() {
+      state.pagination.page = 1;
+      renderRows();
+    }
+
+    function totalPagesForCount(count) {
+      const pageSize = Math.max(1, Number(state.pagination.pageSize || 25));
+      return Math.max(1, Math.ceil(Math.max(0, Number(count || 0)) / pageSize));
+    }
+
+    function ensureValidPage(totalCount) {
+      const totalPages = totalPagesForCount(totalCount);
+      if (state.pagination.page > totalPages) state.pagination.page = totalPages;
+      if (state.pagination.page < 1) state.pagination.page = 1;
+      return totalPages;
+    }
+
+    function currentVisibleRows() {
+      const rows = sortedRows(filteredRows());
+      const pageSize = Math.max(1, Number(state.pagination.pageSize || 25));
+      ensureValidPage(rows.length);
+      const start = (state.pagination.page - 1) * pageSize;
+      return rows.slice(start, start + pageSize);
+    }
+
+    function goToPage(page) {
+      state.pagination.page = Number(page || 1);
+      renderRows();
+    }
+
+    function changePage(delta) {
+      goToPage(Number(state.pagination.page || 1) + Number(delta || 0));
+    }
+
+    function setPageSize() {
+      const select = document.getElementById("pageSizeSelect");
+      const nextSize = Number(select && select.value ? select.value : state.pagination.pageSize);
+      state.pagination.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 25;
+      state.pagination.page = 1;
+      renderRows();
+    }
+
+    function renderPagination(totalRows, visibleRows) {
+      const totalPages = ensureValidPage(totalRows);
+      const currentPage = state.pagination.page;
+      const pageSize = Math.max(1, Number(state.pagination.pageSize || 25));
+      const start = totalRows ? ((currentPage - 1) * pageSize + 1) : 0;
+      const end = totalRows ? Math.min(totalRows, start + visibleRows.length - 1) : 0;
+      const loadedCount = Number(state.rows.length || 0);
+      const knownTotal = Number(state.metadata.total || loadedCount || 0);
+      const hasTruncation = knownTotal > loadedCount;
+      const metaParts = [];
+      metaParts.push(totalRows ? ("当前页 " + start + "-" + end + " / " + totalRows + " 篇") : "当前页 0 / 0 篇");
+      metaParts.push("第 " + currentPage + " / " + totalPages + " 页");
+      if (hasTruncation) {
+        metaParts.push("已加载 " + loadedCount + " / 总 " + knownTotal + " 篇");
+      } else {
+        metaParts.push("总计 " + knownTotal + " 篇");
+      }
+      document.getElementById("paginationMeta").textContent = metaParts.join(" | ");
+
+      const pages = [];
+      const startPage = Math.max(1, currentPage - 2);
+      const endPage = Math.min(totalPages, currentPage + 2);
+      for (let page = startPage; page <= endPage; page += 1) {
+        pages.push(
+          '<button class="page-indicator' + (page === currentPage ? ' is-active' : '') + '" type="button" onclick="goToPage(' + page + ')"' +
+          (page === currentPage ? ' aria-current="page"' : '') +
+          '>' + esc(page) + '</button>'
+        );
+      }
+      document.getElementById("paginationBar").innerHTML =
+        '<span class="page-size-box">每页' +
+          '<select id="pageSizeSelect" onchange="setPageSize()">' +
+            '<option value="25"' + (pageSize === 25 ? ' selected' : '') + '>25 篇</option>' +
+            '<option value="50"' + (pageSize === 50 ? ' selected' : '') + '>50 篇</option>' +
+            '<option value="100"' + (pageSize === 100 ? ' selected' : '') + '>100 篇</option>' +
+          '</select>' +
+        '</span>' +
+        '<button class="btn btn-ghost btn-sm" type="button" onclick="goToPage(1)"' + (currentPage <= 1 ? ' disabled' : '') + '>首页</button>' +
+        '<button class="btn btn-ghost btn-sm" type="button" onclick="changePage(-1)"' + (currentPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+        '<span class="pagination-pages">' + pages.join("") + '</span>' +
+        '<button class="btn btn-ghost btn-sm" type="button" onclick="changePage(1)"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页</button>' +
+        '<button class="btn btn-ghost btn-sm" type="button" onclick="goToPage(' + totalPages + ')"' + (currentPage >= totalPages ? ' disabled' : '') + '>末页</button>';
     }
 
     function idePromptTemplateV2(kind) {
@@ -1158,7 +1453,26 @@
         data = null;
       }
       if (!response.ok) {
-        throw new Error((data && data.detail) || ("HTTP " + response.status));
+        const detail = data && data.detail;
+        const message = typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map(function (item) {
+                if (item && typeof item === "object") {
+                  if (item.msg) return item.msg;
+                  try {
+                    return JSON.stringify(item);
+                  } catch (_) {
+                    return String(item);
+                  }
+                }
+                return String(item);
+              }).join("; ")
+            : ("HTTP " + response.status);
+        const error = new Error(message);
+        error.status = response.status;
+        error.payload = data;
+        throw error;
       }
       return data;
     }
@@ -1257,18 +1571,16 @@
       const qualityCounts = state.metadata.quality_counts || {};
       const rows = state.rows || [];
       const items = [
-        ["文献", rows.length, "文"],
-        ["人工", rows.filter(function (row) { return row.needs_human_confirmation; }).length, "人"],
-        ["A/B", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0), "AB"],
+        ["文献", rows.length, "docs"],
+        ["人工", rows.filter(function (row) { return row.needs_human_confirmation; }).length, "human"],
+        ["A/B", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0), "quality"],
         ["DFT", rows.filter(function (row) {
           return row.has_active_dft_candidates !== undefined ? row.has_active_dft_candidates : row.has_dft_candidates;
-        }).length, "算"],
-        ["漏提", rows.reduce(function (sum, row) { return sum + Number(row.suspected_missing_dft_count || 0); }, 0), "漏"],
-        ["图险", rows.reduce(function (sum, row) { return sum + Number(row.figure_issue_count || 0); }, 0), "图"],
-        ["冲突", rows.reduce(function (sum, row) { return sum + Number(row.review_conflict_count || 0); }, 0), "冲"]
+        }).length, "dft"],
+        ["冲突", rows.reduce(function (sum, row) { return sum + Number(row.review_conflict_count || 0); }, 0), "conflict"]
       ];
       document.getElementById("stats").innerHTML = items.map(function (item) {
-        return '<div class="stat"><div class="stat-icon">' + esc(item[2]) + '</div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
+        return '<div class="stat"><div class="stat-icon stat-icon-' + esc(item[2]) + '" aria-hidden="true"></div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
       }).join("");
     }
 
@@ -1436,6 +1748,7 @@
     function buildConflictActionButtons(item, row, index) {
       const buttons = [];
       if (canManualAdoptOpinion(item)) {
+        buttons.push('<button class="btn btn-tinted btn-sm" type="button" data-action="accept-ai" data-group-index="' + esc(index) + '">接受 AI 裁定</button>');
         buttons.push('<button class="btn btn-ghost btn-sm" type="button" data-action="reject-all-opinions" data-group-index="' + esc(index) + '">都不采用</button>');
       }
       buttons.push('<a class="btn btn-ghost btn-sm" href="' + esc(buildReviewTargetHref(row, item)) + '">跳到对象审核</a>');
@@ -1872,7 +2185,8 @@
         approximate_locator: "近似定位",
         unresolved_locator: "未解析定位"
       };
-      return mapping[status] || status || "缺少定位";
+      if (status && mapping[status]) return mapping[status] + " " + status;
+      return status || "缺少定位";
     }
 
     function reliableLocatorStatus(status) {
@@ -1985,7 +2299,7 @@
         '<div class="evidence-preview-title">璇佹嵁棰勮</div>' +
         '<div class="evidence-preview-meta">' +
           '<div class="detail-block"><div class="detail-label">对象类型</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">来源对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Field</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Review source</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">Page</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
@@ -2043,7 +2357,7 @@
         '<div class="evidence-preview-title">证据预览</div>' +
         '<div class="evidence-preview-meta">' +
           '<div class="detail-block"><div class="detail-label">对象类型</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
+          '<div class="detail-block"><div class="detail-label">来源对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">字段</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">审核来源</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
           '<div class="detail-block"><div class="detail-label">页码</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
@@ -2319,7 +2633,7 @@
         (enabled ? '' : ' disabled title="当前没有可展示的原文片段"') + '>查看原文</button>';
     }
 
-    function buildAdoptOpinionAction(item, opinion, cardIndex) {
+    function buildAdoptOpinionAction(item, opinion, cardIndex, opinionIndex) {
       if (!canManualAdoptOpinion(item)) return "";
       return '<button class="btn btn-ghost btn-sm btn-weak" type="button" data-action="adopt-opinion" data-group-index="' + esc(cardIndex) + '" data-source-id="' + esc(opinion.source_id || "") + '">采用此条</button>';
     }
@@ -2340,7 +2654,7 @@
         '<td><div class="reason-block"><div id="' + esc(reasonId) + '" class="reason-text' + (showExpand ? ' truncated' : '') + '">' + esc(reason) + '</div>' +
         (showExpand ? '<button class="expand-link" type="button" data-action="toggle-reason" data-target="' + esc(reasonId) + '">展开理由</button>' : '') +
         '</div></td>' +
-        '<td><div class="opinion-action-stack">' + buildEvidenceAction(opinion, item, row, cardIndex, opinionIndex) + buildPdfAction(opinion, row) + buildAdoptOpinionAction(item, opinion, cardIndex) + '</div></td>' +
+        '<td><div class="opinion-action-stack">' + buildEvidenceAction(opinion, item, row, cardIndex, opinionIndex) + buildPdfAction(opinion, row) + buildAdoptOpinionAction(item, opinion, cardIndex, opinionIndex) + '</div></td>' +
       '</tr>';
     }
 
@@ -2474,10 +2788,12 @@
               '<span class="chip">意见来源 ' + esc(summary.opinionSources) + '</span>' +
               '<span class="chip bad">高优先级 ' + esc(summary.highPriority) + '</span>' +
               '<span class="chip low">定位薄弱 ' + esc(summary.weakLocator) + '</span>' +
+              '<span class="chip good">自动推进 ' + esc(toCount(adjudicationSummary.auto)) + '</span>' +
               '<span class="chip warn">建议裁定 ' + esc(toCount(adjudicationSummary.suggest)) + '</span>' +
               '<span class="chip bad">必须人工 ' + esc(toCount(adjudicationSummary.manual)) + '</span>' +
+              '<span class="chip">接受 AI 裁定</span>' +
             '</div>' +
-            '<div class="conflict-layout"><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("先在下方点“查看原文”，这里会显示对应证据。") + '</div></div><div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
+            '<div class="conflict-layout"><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div><div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
               return buildConflictGroupCard(item, row, index);
             }).join("") + '</div></div><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div></div>' +
             '<div class="conflict-footer-note">所有执行动作都会走既有 verify / reject / correction 安全链路，并保留审计记录。</div>'
@@ -2510,11 +2826,13 @@
               '<span class="chip">意见来源 ' + esc(summary.opinionSources) + '</span>' +
               '<span class="chip bad">高优先级 ' + esc(summary.highPriority) + '</span>' +
               '<span class="chip low">定位偏弱 ' + esc(summary.weakLocator) + '</span>' +
+              '<span class="chip good">自动推进 ' + esc(toCount(adjudicationSummary.auto)) + '</span>' +
               '<span class="chip warn">建议裁定 ' + esc(toCount(adjudicationSummary.suggest)) + '</span>' +
               '<span class="chip bad">必须人工 ' + esc(toCount(adjudicationSummary.manual)) + '</span>' +
+              '<span class="chip">接受 AI 裁定</span>' +
             '</div>' +
             '<div class="conflict-layout">' +
-              '<div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("先在下方点“查看原文”，这里会显示对应证据。") + '</div></div>' +
+              '<div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div>' +
               '<div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
                 return buildConflictGroupCard(item, row, index);
               }).join("") + '</div></div>' +
@@ -2628,11 +2946,15 @@
 
     function renderRows() {
       renderStats();
-      const rows = sortedRows(filteredRows());
+      const filtered = sortedRows(filteredRows());
+      const rows = currentVisibleRows();
       syncSelectAllVisible(rows);
       const selectedCount = selectedPromptRows().length;
       const library = getValue("libraryFilter") || "全部文献库";
-      document.getElementById("queueMeta").textContent = library + " | 显示 " + rows.length + " / " + state.rows.length + " 篇";
+      const loadedCount = Number(state.rows.length || 0);
+      const knownTotal = Number(state.metadata.total || loadedCount || 0);
+      const truncationText = knownTotal > loadedCount ? " | 已加载 " + loadedCount + " / 总 " + knownTotal + " 篇" : "";
+      document.getElementById("queueMeta").textContent = library + " | 当前筛选 " + filtered.length + " 篇" + truncationText;
       if (getQueryPaperId()) {
         document.getElementById("queueMeta").textContent += " | 当前文献过滤";
       }
@@ -2640,8 +2962,10 @@
       if (selectedCount) {
         document.getElementById("queueMeta").textContent += " | 已选 " + selectedCount + " 篇";
       }
+      renderPagination(filtered.length, rows);
       if (!rows.length) {
         tbody.innerHTML = '<tr><td colspan="6"><div class="empty">暂无匹配文献</div></td></tr>';
+        updateStickyLayout();
         return;
       }
 
@@ -2726,18 +3050,34 @@
           '</td>' +
         '</tr>';
       }).join("");
+      updateStickyLayout();
     }
 
     async function loadReviewCenter() {
       try {
-        const params = new URLSearchParams({
-          limit: "25",
-          sort_by: getValue("sortFilter") || "recent",
-          summary_only: "true",
-        });
         const library = getValue("libraryFilter");
-        if (library) params.set("library_name", library);
-        const data = await fetchJSON("/api/workbench/review-center?" + params.toString());
+        let data = null;
+        let lastError = null;
+        for (const fetchLimit of REVIEW_CENTER_FETCH_LIMITS) {
+          try {
+            const params = new URLSearchParams({
+              limit: String(fetchLimit),
+              sort_by: getValue("sortFilter") || "recent",
+              summary_only: "true",
+            });
+            if (library) params.set("library_name", library);
+            data = await fetchJSON("/api/workbench/review-center?" + params.toString());
+            break;
+          } catch (error) {
+            lastError = error;
+            if (!(error && Number(error.status) === 422)) {
+              throw error;
+            }
+          }
+        }
+        if (!data) {
+          throw lastError || new Error("审核中心数据读取失败");
+        }
         const focusPaperId = getQueryPaperId();
         const incomingRows = data.rows || [];
         state.rows = focusPaperId
@@ -2748,10 +3088,13 @@
           if (!availableIds.has(String(paperId))) selectedPaperIds.delete(paperId);
         });
         state.metadata = data.metadata || {};
+        ensureValidPage(state.rows.length);
         renderRows();
       } catch (error) {
         document.getElementById("queueMeta").textContent = "读取失败";
         document.getElementById("rows").innerHTML = '<tr><td colspan="6"><div class="error">加载失败：' + esc(error.message) + '</div></td></tr>';
+        document.getElementById("paginationMeta").textContent = "分页信息读取失败";
+        document.getElementById("paginationBar").innerHTML = "";
         showToast("审核中心加载失败：" + error.message);
       }
     }
@@ -2942,6 +3285,7 @@
     document.addEventListener("DOMContentLoaded", function () {
       TopNav.init({ currentPage: "review-center", mountId: "topnav-mount" });
       document.getElementById("rows").addEventListener("click", handleRowAction);
+      document.getElementById("tableWrap").addEventListener("scroll", syncExternalTableHead, { passive: true });
       document.getElementById("infoModalBody").addEventListener("click", handleInfoModalAction);
       document.getElementById("infoOverlay").addEventListener("click", function (event) {
         if (event.target && event.target.id === "infoOverlay") closeInfoOverlay();
@@ -2949,6 +3293,7 @@
       document.addEventListener("keydown", function (event) {
         if (event.key === "Escape") closeInfoOverlay();
       });
+      window.addEventListener("resize", updateStickyLayout);
       loadLibraries().finally(loadReviewCenter);
     });
   </script>

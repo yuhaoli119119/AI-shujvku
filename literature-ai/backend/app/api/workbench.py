@@ -38,7 +38,7 @@ router = APIRouter()
 
 @router.get("/review-center")
 def review_center(
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=5000),
     sort_by: str = Query(default="recent"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
     summary_only: bool = Query(default=False, description="Return a lightweight row summary for the review center table"),
@@ -89,7 +89,8 @@ def accept_ai_adjudication(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/review-conflicts/auto-advance")
@@ -119,7 +120,8 @@ def create_verification_session(
             reviewer=payload.reviewer,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("verification_session_paper_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("/verification-sessions/{session_id}")
@@ -217,6 +219,9 @@ def prepare_paper_workspace(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        status_code = 409 if str(exc).startswith("paper_operation_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/papers/{paper_id}/gemini-audit")

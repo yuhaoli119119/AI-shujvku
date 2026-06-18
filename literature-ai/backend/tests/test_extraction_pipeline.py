@@ -187,7 +187,7 @@ def test_extraction_pipeline_persists_stage2_outputs():
                 assert summary["catalyst_samples"] == 1
                 assert summary["dft_results"] >= 1
                 assert summary["electrochemical_performance"] == 1
-                assert summary["writing_cards"] == 0
+                assert summary["writing_cards"] == 1
                 assert session.query(DFTSetting).count() == 1
                 setting = session.query(DFTSetting).one()
                 assert round(setting.cutoff_energy_ev, 2) == 408.17
@@ -195,7 +195,7 @@ def test_extraction_pipeline_persists_stage2_outputs():
                 assert session.query(DFTResult).count() >= 1
                 assert session.query(ElectrochemicalPerformance).count() == 1
                 assert session.query(MechanismClaim).count() >= 1
-                assert session.query(WritingCard).count() == 0
+                assert session.query(WritingCard).count() == 1
                 assert session.query(EvidenceSpan).count() >= 1
         finally:
             engine.dispose()

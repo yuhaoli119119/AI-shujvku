@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -24,6 +26,8 @@ from app.db.models import (
     PaperNote,
     WorkflowJob,
     WritingCard,
+    VerificationSessionPaperClaim,
+    utcnow,
 )
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.external_analysis_service import ExternalAnalysisService
@@ -39,6 +43,17 @@ from app.services.review_target_resolver import canonical_target_type
 from app.utils.evidence_anchors import has_evidence_anchor
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, normalize_library_name
 from app.utils.review_safety import is_safe_verified_review
+
+
+class VerificationSessionConflict(ValueError):
+    def __init__(self, paper_id: UUID, session_id: str | None = None) -> None:
+        self.code = "verification_session_paper_conflict"
+        self.paper_id = paper_id
+        self.session_id = session_id
+        detail = f"paper_id={paper_id}"
+        if session_id:
+            detail += f",session_id={session_id}"
+        super().__init__(f"{self.code}:{detail}")
 
 
 class VerificationSessionService:
@@ -96,19 +111,6 @@ class VerificationSessionService:
             "secondary": f"verify:{session_id}:secondary",
             "single": f"verify:{session_id}:single",
         }
-        preparation_rows = []
-        if refresh_materials:
-            reprocessing = PaperReprocessingService(session=self.session, settings=self.settings)
-            for paper in selected:
-                summary = reprocessing.rerun_stage2(paper.id)
-                preparation_rows.append(
-                    {
-                        "paper_id": str(paper.id),
-                        "status": summary.get("status") or "completed",
-                        "external_ai_ready": bool(summary.get("external_ai_ready")),
-                        "workspace_path": summary.get("workspace_path"),
-                    }
-                )
         payload = {
             "session_id": session_id,
             "scope": scope,
@@ -119,10 +121,11 @@ class VerificationSessionService:
             "created_by": reviewer,
             "created_at": datetime.utcnow().isoformat(),
         }
+        preparation_rows: list[dict[str, Any]] = []
         job = WorkflowJob(
             job_id=session_id,
             type="verification_session",
-            status="completed",
+            status="active",
             library_name=selected[0].library_name or DEFAULT_LIBRARY_NAME,
             payload=payload,
             progress={"prepared": len(selected), "completed": True},
@@ -134,6 +137,7 @@ class VerificationSessionService:
             },
         )
         self.session.add(job)
+        self._claim_session_papers(session_id, [paper.id for paper in selected])
         self.session.add(
             AuditLog(
                 action="create_verification_session",
@@ -149,7 +153,98 @@ class VerificationSessionService:
             )
         )
         self.session.commit()
+        if refresh_materials:
+            try:
+                reprocessing = PaperReprocessingService(session=self.session, settings=self.settings)
+                for paper in selected:
+                    summary = reprocessing.rerun_stage2(paper.id)
+                    preparation_rows.append(
+                        {
+                            "paper_id": str(paper.id),
+                            "status": summary.get("status") or "completed",
+                            "external_ai_ready": bool(summary.get("external_ai_ready")),
+                            "workspace_path": summary.get("workspace_path"),
+                        }
+                    )
+                job = self._get_session_job(session_id)
+                result = dict(job.result or {})
+                result["preparation_rows"] = preparation_rows
+                job.result = result
+                self.session.add(job)
+                self.session.commit()
+            except Exception:
+                self._release_session_papers(session_id, status="released")
+                job = self._get_session_job(session_id)
+                job.status = "failed"
+                self.session.add(job)
+                self.session.commit()
+                raise
         return self.get_session(session_id)
+
+    def _claim_session_papers(self, session_id: str, paper_ids: list[UUID]) -> None:
+        now = utcnow()
+        ordered = sorted(set(paper_ids), key=str)
+        bind = self.session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            for paper_id in ordered:
+                key = int.from_bytes(paper_id.bytes[:8], byteorder="big", signed=True)
+                if not self.session.execute(
+                    text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": key}
+                ).scalar():
+                    self.session.rollback()
+                    raise VerificationSessionConflict(paper_id)
+        stale = self.session.scalars(
+            select(VerificationSessionPaperClaim).where(
+                VerificationSessionPaperClaim.paper_id.in_(ordered),
+                VerificationSessionPaperClaim.status == "active",
+                VerificationSessionPaperClaim.expires_at <= now,
+            )
+        ).all()
+        for claim in stale:
+            claim.status = "expired"
+            claim.released_at = now
+            self.session.add(claim)
+        if stale:
+            self.session.flush()
+        claims = [
+            VerificationSessionPaperClaim(
+                session_id=session_id,
+                paper_id=paper_id,
+                status="active",
+                expires_at=now + timedelta(hours=4),
+            )
+            for paper_id in ordered
+        ]
+        try:
+            with self.session.begin_nested():
+                self.session.add_all(claims)
+                self.session.flush()
+        except IntegrityError:
+            self.session.rollback()
+            conflict = self.session.scalar(
+                select(VerificationSessionPaperClaim).where(
+                    VerificationSessionPaperClaim.paper_id.in_(ordered),
+                    VerificationSessionPaperClaim.status == "active",
+                    VerificationSessionPaperClaim.expires_at > now,
+                )
+            )
+            raise VerificationSessionConflict(
+                conflict.paper_id if conflict else ordered[0],
+                conflict.session_id if conflict else None,
+            )
+
+    def _release_session_papers(self, session_id: str, *, status: str = "released") -> None:
+        now = utcnow()
+        claims = self.session.scalars(
+            select(VerificationSessionPaperClaim).where(
+                VerificationSessionPaperClaim.session_id == session_id,
+                VerificationSessionPaperClaim.status == "active",
+            )
+        ).all()
+        for claim in claims:
+            claim.status = status
+            claim.released_at = now
+            self.session.add(claim)
 
     def get_session(self, session_id: str) -> dict[str, Any]:
         job = self._get_session_job(session_id)
@@ -176,7 +271,6 @@ class VerificationSessionService:
         reviewer: str,
         write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
-        new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
         required_modules = self._required_direct_write_modules_for_paper(paper_id)
         try:
             lock_check = ModuleWriteLockService(self.session).require_write(
@@ -186,44 +280,8 @@ class VerificationSessionService:
                 locked_by=reviewer,
             )
         except ValueError as exc:
-            if not new_dft_summary.get("materialized_count"):
-                raise
-            summary = {
-                "paper_id": str(paper_id),
-                "new_dft_candidates": new_dft_summary,
-                "single_ai": {
-                    "materialized_count": 0,
-                    "materialized_items": [],
-                    "skipped_count": 0,
-                    "skipped_items": [],
-                },
-                "object_reviews": {
-                    "applied_count": 0,
-                    "applied_items": [],
-                    "pending_count": 0,
-                    "pending_items": [],
-                    "skipped_count": 1,
-                    "skipped_items": [{"reason": str(exc)}],
-                },
-                "write_lock": {
-                    "required_modules": required_modules,
-                    "covered_modules": [],
-                    "lock_ids": [],
-                    "error": str(exc),
-                },
-            }
-            self.session.add(
-                AuditLog(
-                    paper_id=paper_id,
-                    action="apply_ide_review_rules",
-                    source=reviewer,
-                    target_type="paper",
-                    target_id=str(paper_id),
-                    payload=summary,
-                )
-            )
-            self.session.flush()
-            return summary
+            raise
+        new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
         low_risk_summary = self._auto_materialize_single_ai_candidates(paper_id=paper_id, reviewer=reviewer)
         dft_settlement_summary = self.settle_ai_dft_reviews_for_paper(
             paper_id=paper_id,
@@ -543,6 +601,15 @@ class VerificationSessionService:
         candidate_item: dict[str, Any],
         source_label: str,
     ) -> DFTResult:
+        identity = self._new_dft_identity(candidate_item["signature"])
+        existing = self.session.scalar(
+            select(DFTResult).where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.candidate_identity == identity,
+            )
+        )
+        if existing is not None:
+            return existing
         row = DFTResult(
             paper_id=paper_id,
             adsorbate=candidate_item["adsorbate"],
@@ -557,11 +624,29 @@ class VerificationSessionService:
             candidate_status="new_candidate",
             evidence_payload=candidate_item["evidence_payload"],
             extraction_protocol_version="ide_ai_new_candidate_v1",
+            candidate_identity=identity,
         )
-        self.session.add(row)
-        self.session.flush()
+        try:
+            with self.session.begin_nested():
+                self.session.add(row)
+                self.session.flush()
+        except IntegrityError:
+            winner = self.session.scalar(
+                select(DFTResult).where(
+                    DFTResult.paper_id == paper_id,
+                    DFTResult.candidate_identity == identity,
+                )
+            )
+            if winner is None:
+                raise
+            return winner
         self._upsert_new_dft_locator(row, candidate_item["evidence_payload"], source_label=source_label)
         return row
+
+    @staticmethod
+    def _new_dft_identity(signature: tuple[str, ...]) -> str:
+        canonical = json.dumps(list(signature), ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _upsert_new_dft_locator(self, row: DFTResult, evidence_payload: dict[str, Any], *, source_label: str) -> None:
         page = self._int_or_none(evidence_payload.get("page"))
@@ -673,6 +758,10 @@ class VerificationSessionService:
                 continue
             target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
             if target_type == "dft_results":
+                decision = str(payload.get("decision") or "").strip().lower()
+                target_id = str(payload.get("target_id") or "").strip().lower()
+                if decision == "new_candidate" or target_id == "new":
+                    modules.add("dft_results")
                 continue
             try:
                 modules.add(ModuleWriteLockService.module_from_field(target_type))
@@ -708,6 +797,7 @@ class VerificationSessionService:
         result = dict(job.result or {})
         result["settlement"] = settlement
         job.result = result
+        job.status = "settled"
         job.progress = {
             "completed": True,
             "consistent_auto_adopted": high_risk_summary["auto_applied_count"],
@@ -715,6 +805,7 @@ class VerificationSessionService:
             "manual_conflicts": high_risk_summary["manual_conflict_count"],
         }
         self.session.add(job)
+        self._release_session_papers(session_id)
         self.session.add(
             AuditLog(
                 action="settle_verification_session",
@@ -1078,6 +1169,14 @@ class VerificationSessionService:
                     "corrected_value": payload.get("corrected_value", payload.get("value")),
                     "confidence": payload.get("confidence"),
                     "reason": payload.get("reason"),
+                    "normalized_material": payload.get("normalized_material"),
+                    "normalized_material_or_catalyst": payload.get("normalized_material_or_catalyst"),
+                    "material": payload.get("material"),
+                    "catalyst": payload.get("catalyst"),
+                    "structure_name": payload.get("structure_name"),
+                    "adsorbate": payload.get("adsorbate"),
+                    "reaction_step": payload.get("reaction_step"),
+                    "normalized_energy_type": payload.get("normalized_energy_type"),
                     "source_label": run.source_label,
                     "source": payload.get("source") or run.source,
                     "source_identity": identity,
@@ -1272,6 +1371,14 @@ class VerificationSessionService:
                     "corrected_value": payload.get("corrected_value", payload.get("value")),
                     "confidence": payload.get("confidence"),
                     "reason": payload.get("reason"),
+                    "normalized_material": payload.get("normalized_material"),
+                    "normalized_material_or_catalyst": payload.get("normalized_material_or_catalyst"),
+                    "material": payload.get("material"),
+                    "catalyst": payload.get("catalyst"),
+                    "structure_name": payload.get("structure_name"),
+                    "adsorbate": payload.get("adsorbate"),
+                    "reaction_step": payload.get("reaction_step"),
+                    "normalized_energy_type": payload.get("normalized_energy_type"),
                     "source_label": str(payload.get("source_label") or run.source_label or run.source or "").strip(),
                     "source": str(payload.get("source") or run.source or "").strip(),
                     "source_identity": str(
@@ -1338,7 +1445,7 @@ class VerificationSessionService:
                 write_lock_tokens=write_lock_tokens,
             )
             for audit in audits:
-                audit["candidate"].status = "materialized"
+                audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
             row_ref["status"] = "auto_applied"
@@ -1358,7 +1465,7 @@ class VerificationSessionService:
                 reviewer=reviewer,
             )
             for audit in audits:
-                audit["candidate"].status = "materialized"
+                audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(
                 {
@@ -1390,7 +1497,7 @@ class VerificationSessionService:
                 write_lock_tokens=write_lock_tokens,
             )
             for audit in audits:
-                audit["candidate"].status = "materialized"
+                audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
             row_ref["status"] = "auto_applied"
@@ -1410,7 +1517,7 @@ class VerificationSessionService:
                 write_lock_tokens=write_lock_tokens,
             )
             for audit in audits:
-                audit["candidate"].status = "materialized"
+                audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
             row_ref["status"] = "auto_applied"
@@ -1434,7 +1541,7 @@ class VerificationSessionService:
                 write_lock_tokens=write_lock_tokens,
             )
             for audit in audits:
-                audit["candidate"].status = "materialized"
+                audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
             row_ref["status"] = "auto_applied"
@@ -1456,6 +1563,32 @@ class VerificationSessionService:
         if len(identity_keys) > 1:
             row_ref["reason"] = "material_identity_conflict"
             row_ref["status"] = "need_repair"
+            return row_ref
+
+        same_field_consensus = {
+            self._review_consensus_key(
+                audit,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name=str(audit.get("field_name") or ""),
+            ): audit
+            for audit in anchored
+            if str(audit.get("field_name") or "").strip() not in {"", "dft_results"}
+            and not self._is_negative_dft_decision(audit.get("decision"))
+        }
+        if len(same_field_consensus) == 1 and len(anchored) >= 2:
+            adopted = max(same_field_consensus.values(), key=lambda item: item.get("confidence") or 0)
+            result = self._apply_dft_consensus_outcome(
+                row=row,
+                adopted=adopted,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            for audit in audits:
+                audit["candidate"].status = self._object_review_candidate_status_for_result(result)
+                self.session.add(audit["candidate"])
+            row_ref.update(result)
+            row_ref["status"] = "auto_applied"
             return row_ref
 
         row_ref["reason"] = "value_conflict"
@@ -1511,6 +1644,7 @@ class VerificationSessionService:
             opinion=proposal,
             reviewer=reviewer,
             evidence_payload=evidence_payload,
+            write_lock_tokens=write_lock_tokens,
         )
         self.session.flush()
         self.session.refresh(row)
@@ -2031,14 +2165,16 @@ class VerificationSessionService:
         mapped_field = self.DFT_FIELD_ALIASES.get(field_name, field_name)
         proposed_value = opinion.get("corrected_value", opinion.get("value"))
         current_value = getattr(row, mapped_field, None) if hasattr(row, mapped_field) else None
-        self._apply_dft_material_binding_if_needed(
-            row=row,
-            opinion=opinion,
-            reviewer=reviewer,
-            evidence_payload=evidence_payload,
-        )
-        self.session.flush()
-        self.session.refresh(row)
+        if not (mapped_field == "catalyst_sample_id" and proposed_value not in (None, "")):
+            self._apply_dft_material_binding_if_needed(
+                row=row,
+                opinion=opinion,
+                reviewer=reviewer,
+                evidence_payload=evidence_payload,
+                write_lock_tokens=write_lock_tokens,
+            )
+            self.session.flush()
+            self.session.refresh(row)
         note = self._materialization_note(
             dual_ai_consensus=dual_ai_consensus,
             adjudicated_by_third_ai=adjudicated_by_third_ai,
@@ -2136,14 +2272,20 @@ class VerificationSessionService:
         opinion: dict[str, Any],
         reviewer: str,
         evidence_payload: Any,
+        write_lock_tokens: list[str] | None = None,
     ) -> None:
         corrected_value = opinion.get("corrected_value")
+        raw_payload = opinion.get("raw_payload") if isinstance(opinion.get("raw_payload"), dict) else {}
         material_identity = self._first_text(
             corrected_value.get("material_identity") if isinstance(corrected_value, dict) else None,
             corrected_value.get("material") if isinstance(corrected_value, dict) else None,
             corrected_value.get("catalyst") if isinstance(corrected_value, dict) else None,
             opinion.get("normalized_material"),
             opinion.get("normalized_material_or_catalyst"),
+            raw_payload.get("normalized_material"),
+            raw_payload.get("normalized_material_or_catalyst"),
+            raw_payload.get("material"),
+            raw_payload.get("catalyst"),
         )
         if not material_identity and not row.catalyst_sample_id:
             return
@@ -2153,6 +2295,7 @@ class VerificationSessionService:
             reviewer=reviewer,
             reason=str(opinion.get("reason") or "").strip() or "Applied AI-reviewed DFT material binding through the verification safety gate.",
             evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
+            write_lock_tokens=write_lock_tokens,
         )
 
     @staticmethod

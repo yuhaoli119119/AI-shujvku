@@ -103,9 +103,10 @@ def _figure_block_reasons(session: Session, figure: PaperFigure) -> list[str]:
     if not str(figure.caption or "").strip():
         reasons.append("missing_caption")
     crop_status = str(figure.crop_status or "").strip().lower()
-    if crop_status in {"missing", "missing_image", "failed", "needs_review", "needs_recrop", "caption_only", "noisy", "noise"}:
-        if not _figure_has_latest_precise_recrop(figure):
-            reasons.append(f"crop_status:{crop_status}")
+    if crop_status in {"missing", "missing_image", "failed", "full_page", "needs_repair", "needs_review", "caption_only", "noisy", "noise"}:
+        reasons.append(f"crop_status:{crop_status}")
+    elif crop_status == "needs_recrop" and not _figure_has_latest_precise_recrop(figure):
+        reasons.append(f"crop_status:{crop_status}")
     if _figure_is_unlocated_full_page_recrop(figure):
         reasons.append("unlocated_full_page_recrop")
     role = str(figure.figure_role or "").strip().lower()
@@ -115,7 +116,7 @@ def _figure_block_reasons(session: Session, figure: PaperFigure) -> list[str]:
         reasons.append("missing_figure_role")
     if not str(figure.content_summary or "").strip():
         reasons.append("missing_content_summary")
-    elif _figure_summary_echoes_caption(figure.content_summary, figure.caption) and not _figure_has_safe_review(session, figure):
+    elif _figure_summary_echoes_caption(figure.content_summary, figure.caption):
         reasons.append("caption_echo_summary")
     key_elements = _normalize_figure_key_elements(figure.key_elements)
     if not key_elements:

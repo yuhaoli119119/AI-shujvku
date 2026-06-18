@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -194,12 +194,20 @@ class ReviewService:
     ) -> PaperCorrection:
         correction = self._get_correction(correction_id)
         if correction.status != "pending":
-            raise ValueError("Correction is not pending")
+            raise ValueError("write_conflict:correction_not_pending")
         self._require_module_lock_for_direct_ai_write(
             correction,
             reviewer=reviewer,
             write_lock_tokens=write_lock_tokens,
         )
+        claimed = self.session.execute(
+            update(PaperCorrection)
+            .where(PaperCorrection.id == correction_id, PaperCorrection.status == "pending")
+            .values(status="applying")
+            .execution_options(synchronize_session=False)
+        )
+        if claimed.rowcount != 1:
+            raise ValueError("write_conflict:correction_version_stale")
 
         correction.status = "approved"
         correction.reviewed_by = reviewer

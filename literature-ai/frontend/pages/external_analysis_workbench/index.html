@@ -13,7 +13,7 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1440px; margin: 0 auto; padding: calc(var(--nav-height) + 28px) 24px 36px; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 0 24px 36px; }
     .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
     .page-head h1 { margin: 0 0 6px; font-size: 26px; }
     .page-head p { margin: 0; color: var(--color-text-secondary); font-size: 14px; }
@@ -128,7 +128,7 @@
     </div>
   </div>
   <script>
-    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null, locatorCache: {}, prepareSummary: null, preparingReviews: false };
+    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null, locatorCache: {}, prepareSummary: null, preparingReviews: false, reviewVersions: {} };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function escAttr(value) { return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
     function ellipsis(text, limit) { var t = String(text || ""); return t.length > limit ? t.slice(0, limit) + "…" : t; }
@@ -158,8 +158,71 @@
       const token = sessionStorage.getItem("litai-settings-token"); if (token) options.headers["X-Settings-Token"] = token;
       const resp = await fetch(url, options); const text = await resp.text();
       let data = null; try { data = text ? JSON.parse(text) : null; } catch (_) {}
-      if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+      if (!resp.ok) {
+        const error = new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+        error.status = resp.status;
+        error.code = data && data.detail ? data.detail : null;
+        throw error;
+      }
       return data;
+    }
+
+    function reviewVersionKey(targetType, targetId, fieldName) {
+      return [targetType, targetId, fieldName].join(":");
+    }
+
+    function rebuildReviewVersions() {
+      const versions = {};
+      const addReview = review => {
+        if (!review || review.write_version == null) return;
+        versions[reviewVersionKey(review.target_type, review.target_id, review.field_name)] = review.write_version;
+      };
+      (state.extraction?.field_reviews || []).forEach(addReview);
+      (state.audit?.items || []).forEach(addReview);
+      Object.values(state.extraction?.results || {}).forEach(records => {
+        (records || []).forEach(record => Object.entries(record).forEach(([fieldName, field]) => {
+          if (fieldName === "target_id" || fieldName === "target_type" || !field?.review) return;
+          addReview({
+            ...field.review,
+            target_type: field.review.target_type || record.target_type,
+            target_id: field.review.target_id || record.target_id,
+            field_name: field.review.field_name || fieldName
+          });
+        }));
+      });
+      state.reviewVersions = versions;
+    }
+
+    function currentReviewVersion(targetType, targetId, fieldName) {
+      return state.reviewVersions[reviewVersionKey(targetType, targetId, fieldName)];
+    }
+
+    function rememberReviewVersions(reviews) {
+      const savedReviews = Array.isArray(reviews)
+        ? reviews
+        : (Array.isArray(reviews?.reviews) ? reviews.reviews : []);
+      savedReviews.forEach(review => {
+        if (review?.write_version == null) return;
+        state.reviewVersions[reviewVersionKey(review.target_type, review.target_id, review.field_name)] = review.write_version;
+      });
+    }
+
+    function expectedVersionsFor(targetType, targetId, fieldNames) {
+      const versions = {};
+      fieldNames.forEach(fieldName => {
+        const version = currentReviewVersion(targetType, targetId, fieldName);
+        if (version != null) versions[fieldName] = version;
+      });
+      return versions;
+    }
+
+    async function handleReviewWriteError(error, fallbackMessage) {
+      if (error && error.status === 409) {
+        await refreshAllData();
+        showToast("并发冲突：服务端数据已刷新，请检查后重新操作。" + (error.code ? ` (${error.code})` : ""));
+        return;
+      }
+      showToast(fallbackMessage + error.message);
     }
     async function loadPapers() {
       try {
@@ -187,6 +250,7 @@
           state.audit = { _error: true, message: e.message };
           console.warn("Audit API failed", e);
         }
+        rebuildReviewVersions();
 
         await loadExtractionLocators();
 
@@ -1256,6 +1320,7 @@
           state.audit = { _error: true, message: e.message };
           console.warn("Audit API failed", e);
         }
+        rebuildReviewVersions();
         
         // 4. GET /api/papers/{paper_id}
         try {
@@ -1313,19 +1378,21 @@
         unit: inputs.unit,
         evidence_text: inputs.evidence_text,
         reviewer_status: "corrected",
-        reviewer: "manual_reviewer"
+        reviewer: "manual_reviewer",
+        expected_write_version: currentReviewVersion(targetType, targetId, fieldName)
       };
       
       try {
-        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/save`, {
+        const saved = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reviews: [reviewItem] })
         });
+        rememberReviewVersions(saved);
         showToast(`字段 ${fieldName} 保存成功！`);
         await refreshAllData();
       } catch (error) {
-        showToast("保存失败: " + error.message);
+        await handleReviewWriteError(error, "保存失败: ");
       }
     }
 
@@ -1337,19 +1404,21 @@
         target_type: targetType,
         target_id: targetId,
         field_names: [fieldName],
+        expected_write_versions: expectedVersionsFor(targetType, targetId, [fieldName]),
         reviewer: "manual_reviewer"
       };
       
       try {
-        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
+        const saved = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
+        rememberReviewVersions(saved);
         showToast(`字段 ${fieldName} 人工确认通过！`);
         await refreshAllData();
       } catch (error) {
-        showToast("人工确认失败: " + error.message);
+        await handleReviewWriteError(error, "人工确认失败: ");
       }
     }
 
@@ -1368,19 +1437,21 @@
         target_type: targetType,
         target_id: targetId,
         field_names: fieldNames,
+        expected_write_versions: expectedVersionsFor(targetType, targetId, fieldNames),
         reviewer: "manual_reviewer"
       };
       
       try {
-        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
+        const saved = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
+        rememberReviewVersions(saved);
         showToast("整条记录人工确认通过！");
         await refreshAllData();
       } catch (error) {
-        showToast("人工确认失败: " + error.message);
+        await handleReviewWriteError(error, "人工确认失败: ");
       }
     }
 
@@ -1405,7 +1476,8 @@
             unit: inputs.unit,
             evidence_text: inputs.evidence_text,
             reviewer_status: "corrected",
-            reviewer: "manual_reviewer"
+            reviewer: "manual_reviewer",
+            expected_write_version: currentReviewVersion(record.target_type, record.target_id, name)
           });
         });
       });
@@ -1416,15 +1488,16 @@
       }
       
       try {
-        await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/save`, {
+        const saved = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reviews: reviews })
         });
+        rememberReviewVersions(saved);
         showToast("批量修改保存成功！");
         await refreshAllData();
       } catch (error) {
-        showToast("批量保存失败: " + error.message);
+        await handleReviewWriteError(error, "批量保存失败: ");
       }
     }
 
@@ -1445,18 +1518,20 @@
             target_type: record.target_type,
             target_id: record.target_id,
             field_names: entry.fieldNames,
+            expected_write_versions: expectedVersionsFor(record.target_type, record.target_id, entry.fieldNames),
             reviewer: "manual_reviewer"
           };
-          await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
+          const saved = await fetchJSON(`/api/extraction/results/${state.paper.id}/reviews/mark-verified`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
           });
+          rememberReviewVersions(saved);
         }
         showToast("批量人工确认通过成功！");
         await refreshAllData();
       } catch (error) {
-        showToast("批量人工确认失败: " + error.message);
+        await handleReviewWriteError(error, "批量人工确认失败: ");
       }
     }
     async function validateCurrent() {

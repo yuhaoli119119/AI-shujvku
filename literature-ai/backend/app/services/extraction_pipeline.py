@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 from uuid import UUID
@@ -36,6 +37,8 @@ from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.workbench_status import EXTRACTION_PROTOCOL_VERSION
+
+logger = logging.getLogger(__name__)
 
 
 STAGE2_LOCATOR_TARGET_TYPES = [
@@ -184,7 +187,11 @@ class ExtractionPipelineService:
         
         comprehensive_data_raw = self.comprehensive_extractor.extract(document)
         
-        writing_card_raw = self.writing_card_extractor.extract(document)
+        try:
+            writing_card_raw = self.writing_card_extractor.extract(document)
+        except Exception as exc:
+            logger.warning("WritingCard extraction failed without blocking paper ingestion: %s", exc)
+            writing_card_raw = {}
         if writing_card_raw and comprehensive_data_raw and comprehensive_data_raw.get("paper_type"):
             writing_card_raw["paper_type"] = comprehensive_data_raw.get("paper_type")
             
@@ -200,9 +207,13 @@ class ExtractionPipelineService:
         dft_count = self._persist_dft_results(paper.id, dft_results)
         electrochemical_count = self._persist_electrochemical_performance(paper.id, electrochemical_items)
         mechanism_count = self._persist_mechanism_claims(paper.id, mechanism_claims)
-        # Parser-derived writing cards are planning hypotheses, not trusted content.
-        # They become DB/RAG material only after an IDE AI review writes them back.
         writing_count = 0
+        if writing_card:
+            try:
+                with self.session.begin_nested():
+                    writing_count = self._persist_writing_card(paper.id, writing_card)
+            except Exception as exc:
+                logger.warning("WritingCard persistence failed without blocking paper ingestion: %s", exc)
         
         if comprehensive_data:
             paper.comprehensive_analysis = comprehensive_data
@@ -296,7 +307,17 @@ class ExtractionPipelineService:
             if key in seen:
                 continue
             seen.add(key)
-            evidence_chain.append({"text": text[:400], "source": source or "Unknown"})
+            evidence_chain.append({
+                "text": text[:600],
+                "source": source or "Unknown",
+                "page": item.get("page"),
+                "supports_fields": [
+                    field for field in (item.get("supports_fields") or [])
+                    if field in {"research_gap", "proposed_solution", "core_hypothesis"}
+                ],
+                "locator_status": item.get("locator_status") or "text_only",
+                "evidence_type": item.get("evidence_type") or "result",
+            })
         refined["evidence_chain"] = evidence_chain[:20]
         return refined
 
@@ -841,6 +862,11 @@ class ExtractionPipelineService:
                 ],
             )
         )
+        try:
+            embedding = self._embed_text(embedding_text) if embedding_text.strip() else None
+        except Exception as exc:
+            logger.warning("WritingCard embedding unavailable; storing grounded card without embedding: %s", exc)
+            embedding = None
         record = WritingCard(
             paper_id=paper_id,
             paper_type=payload.get("paper_type"),
@@ -853,7 +879,7 @@ class ExtractionPipelineService:
             abstract_logic=payload.get("abstract_logic"),
             introduction_logic=payload.get("introduction_logic"),
             discussion_logic=payload.get("discussion_logic"),
-            embedding=self._embed_text(embedding_text),
+            embedding=embedding,
         )
         self.session.add(record)
         self.session.flush()
@@ -865,6 +891,7 @@ class ExtractionPipelineService:
                     object_type="writing_card",
                     object_id=str(record.id),
                     text=evidence.get("text") or "",
+                    page=evidence.get("page"),
                     section=evidence.get("source"),
                     confidence=0.75,
                 )

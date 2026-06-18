@@ -53,21 +53,22 @@ class Writer:
             target_paper_type=target_paper_type,
             paper_type_filter=paper_type_filter
         )
+        formal_retrieved = self.prompt_builder.formal_evidence_only(retrieved)
 
-        rule_sections = self._build_rule_sections(topic, retrieved, requested, target_paper_type)
-        prompt_payload = self.prompt_builder.build(topic, user_notes, requested, retrieved, target_paper_type)
+        rule_sections = self._build_rule_sections(topic, formal_retrieved, requested, target_paper_type)
+        prompt_payload = self.prompt_builder.build(topic, user_notes, requested, formal_retrieved, target_paper_type)
         messages = self.prompt_builder.render_messages(prompt_payload, rule_sections)
         generated = self.backend.generate(prompt_payload, rule_sections, messages)
         content = generated.get("sections", {})
-        content, guard_actions = self._enforce_guardrails(content, rule_sections, retrieved)
+        content, guard_actions = self._enforce_guardrails(content, rule_sections, formal_retrieved)
 
         validations = {
-            "introduction": self.citation_guard.validate(content.get("introduction", ""), retrieved) if content.get("introduction") else {"ok": True, "missing_values": []},
-            "dft_results": self.citation_guard.validate(content.get("dft_results", ""), retrieved) if content.get("dft_results") else {"ok": True, "missing_values": []},
-            "discussion": self.citation_guard.validate(content.get("discussion", ""), retrieved) if content.get("discussion") else {"ok": True, "missing_values": []},
+            "introduction": self.citation_guard.validate(content.get("introduction", ""), formal_retrieved) if content.get("introduction") else {"ok": True, "missing_values": []},
+            "dft_results": self.citation_guard.validate(content.get("dft_results", ""), formal_retrieved) if content.get("dft_results") else {"ok": True, "missing_values": []},
+            "discussion": self.citation_guard.validate(content.get("discussion", ""), formal_retrieved) if content.get("discussion") else {"ok": True, "missing_values": []},
         }
         evidence_service = EvidenceService(self.session)
-        evidence_claims = evidence_service.claims_from_generated_sections(content, retrieved)
+        evidence_claims = evidence_service.claims_from_generated_sections(content, formal_retrieved)
         audit_text = "\n".join(
             str(content.get(name) or "")
             for name in ["introduction", "dft_results", "discussion"]
