@@ -9,11 +9,11 @@ ENERGY_TO_EV = {
     "ev": 1.0,
     "mev": 1e-3,
     "kj/mol": 1.0 / 96.485,
-    "kj mol-1": 1.0 / 96.485,
-    "kj mol^-1": 1.0 / 96.485,
+    "kjmol-1": 1.0 / 96.485,
+    "kjmol^-1": 1.0 / 96.485,
     "kcal/mol": 1.0 / 23.0605,
-    "kcal mol-1": 1.0 / 23.0605,
-    "kcal mol^-1": 1.0 / 23.0605,
+    "kcalmol-1": 1.0 / 23.0605,
+    "kcalmol^-1": 1.0 / 23.0605,
 }
 
 LENGTH_TO_A = {
@@ -56,6 +56,9 @@ class NormalizedUnit:
     normalized_unit: str
     conversion_factor: float = 1.0
     is_valid: bool = True
+    canonical_unit: str | None = None
+    basis: str | None = None
+    blockers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -105,7 +108,43 @@ class UnitNormalizer:
         return result
 
     def normalize_energy(self, value: float | None, unit: str | None) -> NormalizedUnit:
-        return self._convert(value, unit, ENERGY_TO_EV, "eV", precision=6)
+        if value is None or unit is None:
+            return NormalizedUnit(value, unit, value, unit or "", is_valid=False)
+        canonical = self._canonical_energy_unit(unit)
+        basis = self._energy_basis(unit)
+        if basis is not None:
+            return NormalizedUnit(
+                original_value=value,
+                original_unit=unit,
+                normalized_value=None,
+                normalized_unit=self._display_energy_unit(unit),
+                conversion_factor=1.0,
+                is_valid=True,
+                canonical_unit=canonical,
+                basis=basis,
+                blockers=["energy_basis_requires_explicit_modeling"],
+            )
+        factor = ENERGY_TO_EV.get(canonical)
+        if factor is None:
+            return NormalizedUnit(
+                original_value=value,
+                original_unit=unit,
+                normalized_value=value,
+                normalized_unit=self._display_unit(unit),
+                conversion_factor=1.0,
+                is_valid=False,
+                canonical_unit=canonical,
+                blockers=["unrecognized_energy_unit"],
+            )
+        return NormalizedUnit(
+            original_value=value,
+            original_unit=unit,
+            normalized_value=round(float(value) * factor, 6),
+            normalized_unit="eV",
+            conversion_factor=factor,
+            is_valid=True,
+            canonical_unit=canonical,
+        )
 
     def normalize_length(self, value: float | None, unit: str | None) -> NormalizedUnit:
         return self._convert(value, unit, LENGTH_TO_A, "A", precision=6)
@@ -141,7 +180,7 @@ class UnitNormalizer:
         factor = mapping.get(canonical, 1.0)
         normalized_value = round(float(value) * factor, precision)
         normalized_unit = target_unit if canonical in mapping else self._display_unit(unit)
-        return NormalizedUnit(value, unit, normalized_value, normalized_unit, factor, True)
+        return NormalizedUnit(value, unit, normalized_value, normalized_unit, factor, True, canonical)
 
     @staticmethod
     def _canonical_unit(unit: str | None) -> str:
@@ -158,8 +197,63 @@ class UnitNormalizer:
         )
 
     @staticmethod
-    def _display_unit(unit: str | None) -> str:
+    def _canonical_energy_unit(unit: str | None) -> str:
+        if not unit:
+            return ""
         canonical = UnitNormalizer._canonical_unit(unit)
+        canonical = (
+            canonical
+            .replace("−", "-")
+            .replace("⁻", "-")
+            .replace("¹", "1")
+            .replace("·", "/")
+            .replace("⋅", "/")
+            .replace("per", "/")
+        )
+        canonical = canonical.replace("kj/mole", "kj/mol").replace("kcal/mole", "kcal/mol")
+        canonical = canonical.replace("kjmol⁻1", "kjmol-1").replace("kcalmol⁻1", "kcalmol-1")
+        canonical = canonical.replace("kj/mol^-1", "kjmol^-1").replace("kcal/mol^-1", "kcalmol^-1")
+        canonical = canonical.replace("kj/mol-1", "kjmol-1").replace("kcal/mol-1", "kcalmol-1")
+        return canonical
+
+    @staticmethod
+    def _energy_basis(unit: str | None) -> str | None:
+        normalized = UnitNormalizer._canonical_energy_unit(unit)
+        basis_aliases = {
+            "ev/atom": "per_atom",
+            "ev/site": "per_site",
+            "ev/formulaunit": "per_formula_unit",
+            "ev/performulaunit": "per_formula_unit",
+            "ev/unitcell": "per_unit_cell",
+            "ev/perunitcell": "per_unit_cell",
+        }
+        if normalized in basis_aliases:
+            return basis_aliases[normalized]
+        display = UnitNormalizer._display_energy_unit(unit).lower()
+        if "formula unit" in display:
+            return "per_formula_unit"
+        if "unit cell" in display:
+            return "per_unit_cell"
+        return None
+
+    @staticmethod
+    def _display_energy_unit(unit: str | None) -> str:
+        if not unit:
+            return ""
+        lowered = str(unit).strip().lower()
+        if lowered in {"ev/atom", "e v/atom"}:
+            return "eV/atom"
+        if lowered in {"ev/site", "e v/site"}:
+            return "eV/site"
+        if "formula unit" in lowered:
+            return "eV per formula unit"
+        if "unit cell" in lowered:
+            return "eV per unit cell"
+        return UnitNormalizer._display_unit(unit)
+
+    @staticmethod
+    def _display_unit(unit: str | None) -> str:
+        canonical = UnitNormalizer._canonical_energy_unit(unit)
         aliases = {
             "mah/g": "mAh/g",
             "mahg-1": "mAh/g",
@@ -171,7 +265,11 @@ class UnitNormalizer:
             "ev": "eV",
             "mev": "meV",
             "kj/mol": "kJ/mol",
+            "kjmol-1": "kJ/mol",
+            "kjmol^-1": "kJ/mol",
             "kcal/mol": "kcal/mol",
+            "kcalmol-1": "kcal/mol",
+            "kcalmol^-1": "kcal/mol",
             "a": "A",
             "angstrom": "A",
             "å": "A",

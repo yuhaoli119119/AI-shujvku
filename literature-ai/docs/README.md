@@ -10,6 +10,7 @@
 - [mcp/AI_TASK_ROUTING.md](./mcp/AI_TASK_ROUTING.md)：自然语言 AI 任务到 MCP 工具与仓库内后备路径的动态路由说明
 - [mcp/LAN_MULTI_AI_WORKFLOW.md](./mcp/LAN_MULTI_AI_WORKFLOW.md)：局域网多电脑/多 AI 并发核验、模块写入锁与后备执行流程
 - [mcp/MCP_IMPLEMENTATION.md](./mcp/MCP_IMPLEMENTATION.md)：当前 MCP 实现与安全边界
+- [schema/dft_ml_dataset_schema.md](./schema/dft_ml_dataset_schema.md)：当前 `dft_results_ml_v2` 导出契约，含 `linked_dft_setting`、`instance_key`、`ml_blockers`、`lm_records` 使用边界，以及对应的机器可校验 model 路径
 - [plans/litai_extraction_review_protocol_v0_1.md](./plans/litai_extraction_review_protocol_v0_1.md)：LitAI 当前提取与审核协议草案
 - [plans/future_backlog_dynamic_ai_workbench.md](./plans/future_backlog_dynamic_ai_workbench.md)：动态 AI 文献工作台后续改进 backlog
 

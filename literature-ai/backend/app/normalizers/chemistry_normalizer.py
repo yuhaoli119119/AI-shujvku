@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import asdict, dataclass
 from typing import Any
 
 # Catalyst name patterns → canonical form
@@ -41,15 +42,33 @@ CATALYST_TYPE_MAP: dict[str, str] = {
 
 ADSORBATE_MAP: dict[str, str] = {
     "s8": "S8", "sulfur": "S8", "sulphur": "S8",
-    "li2s8": "Li2S8",
-    "li2s6": "Li2S6",
-    "li2s4": "Li2S4",
-    "li2s2": "Li2S2",
+    "li2s8": "Li2S8", "li2s 8": "Li2S8",
+    "li2s6": "Li2S6", "li2s 6": "Li2S6",
+    "li2s4": "Li2S4", "li2s 4": "Li2S4",
+    "li2s2": "Li2S2", "li2s 2": "Li2S2",
     "li2s": "Li2S",
     "lithium polysulfide": "LiPS", "lips": "LiPS",
-    "polysulfide": "LiPS",
+    "polysulfide": "LiPS", "lithium sulfide": "Li2S",
     "li": "Li", "lithium": "Li",
     "s": "S",
+    "ooh*": "*OOH", "*ooh": "*OOH", "ooh": "*OOH",
+    "oh*": "*OH", "*oh": "*OH", "oh": "*OH", "hydroxyl": "*OH",
+    "o*": "*O", "*o": "*O", "atomic oxygen": "*O",
+    "h*": "*H", "*h": "*H", "atomic hydrogen": "*H", "h": "*H",
+    "o2": "O2", "oxygen": "O2",
+    "h2": "H2", "hydrogen": "H2",
+    "h2o": "H2O", "water": "H2O",
+    "n2": "N2", "nitrogen": "N2",
+    "nnh": "*NNH", "*nnh": "*NNH",
+    "nhnh": "*NHNH", "*nhnh": "*NHNH",
+    "nh2nh2": "NH2NH2", "hydrazine": "NH2NH2",
+    "nh3": "NH3", "ammonia": "NH3",
+    "co2": "CO2", "carbon dioxide": "CO2",
+    "co": "CO", "carbon monoxide": "CO",
+    "cooh": "*COOH", "*cooh": "*COOH",
+    "cho": "*CHO", "*cho": "*CHO",
+    "hcoo": "*HCOO", "*hcoo": "*HCOO", "formate": "*HCOO",
+    "hcooh": "HCOOH", "formic acid": "HCOOH",
 }
 
 SUPPORT_MAP: dict[str, str] = {
@@ -91,6 +110,56 @@ METAL_ELEMENT_MAP: dict[str, str] = {
 }
 
 
+@dataclass(frozen=True)
+class DFTPropertyTaxonomy:
+    canonical_property_type: str
+    property_family: str
+    property_subtype: str | None
+    physical_dimension: str
+    ml_role: str
+
+
+_PROPERTY_TAXONOMY_MAP: dict[str, DFTPropertyTaxonomy] = {
+    "adsorption_energy": DFTPropertyTaxonomy("adsorption_energy", "energetics", "adsorption", "energy", "target"),
+    "binding_energy": DFTPropertyTaxonomy("adsorption_energy", "energetics", "binding", "energy", "target"),
+    "gibbs_free_energy_change": DFTPropertyTaxonomy("gibbs_free_energy_change", "thermodynamics", "gibbs_free_energy_change", "energy", "target"),
+    "free_energy": DFTPropertyTaxonomy("gibbs_free_energy_change", "thermodynamics", "gibbs_free_energy_change", "energy", "target"),
+    "free_energy_change": DFTPropertyTaxonomy("gibbs_free_energy_change", "thermodynamics", "gibbs_free_energy_change", "energy", "target"),
+    "reaction_energy": DFTPropertyTaxonomy("reaction_energy", "thermodynamics", "reaction_energy", "energy", "target"),
+    "formation_energy": DFTPropertyTaxonomy("formation_energy", "energetics", "formation", "energy", "target"),
+    "cohesive_energy": DFTPropertyTaxonomy("cohesive_energy", "energetics", "cohesive", "energy", "target"),
+    "fluorination_energy": DFTPropertyTaxonomy("fluorination_energy", "energetics", "fluorination", "energy", "target"),
+    "activation_energy": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "activation_energy", "energy", "target"),
+    "reaction_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "reaction_barrier", "energy", "target"),
+    "migration_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "migration_barrier", "energy", "target"),
+    "permeation_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "permeation_barrier", "energy", "target"),
+    "li2s_decomposition_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "li2s_decomposition_barrier", "energy", "target"),
+    "li2s_nucleation_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "li2s_nucleation_barrier", "energy", "target"),
+    "d_band_center": DFTPropertyTaxonomy("d_band_center", "electronic_descriptor", "d_band_center", "energy", "descriptor"),
+    "bader_charge": DFTPropertyTaxonomy("bader_charge", "electronic_descriptor", "bader_charge", "charge", "descriptor"),
+    "charge_transfer": DFTPropertyTaxonomy("charge_transfer", "electronic_descriptor", "charge_transfer", "charge", "descriptor"),
+    "band_gap": DFTPropertyTaxonomy("band_gap", "electronic_descriptor", "band_gap", "energy", "descriptor"),
+    "work_function": DFTPropertyTaxonomy("work_function", "electronic_descriptor", "work_function", "energy", "descriptor"),
+    "magnetic_moment": DFTPropertyTaxonomy("magnetic_moment", "electronic_descriptor", "magnetic_moment", "magnetic_moment", "descriptor"),
+    "lattice_constant": DFTPropertyTaxonomy("lattice_constant", "structural_descriptor", "lattice_constant", "length", "descriptor"),
+    "interlayer_distance": DFTPropertyTaxonomy("interlayer_distance", "structural_descriptor", "interlayer_distance", "length", "descriptor"),
+    "pore_diameter": DFTPropertyTaxonomy("pore_diameter", "structural_descriptor", "pore_diameter", "length", "descriptor"),
+    "permeance": DFTPropertyTaxonomy("permeance", "transport_descriptor", "permeance", "permeance", "descriptor"),
+    "young_modulus": DFTPropertyTaxonomy("young_modulus", "mechanical_descriptor", "young_modulus", "modulus", "descriptor"),
+    "carrier_mobility": DFTPropertyTaxonomy("carrier_mobility", "transport_descriptor", "carrier_mobility", "mobility", "descriptor"),
+    "seebeck_coefficient": DFTPropertyTaxonomy("seebeck_coefficient", "transport_descriptor", "seebeck_coefficient", "seebeck_coefficient", "descriptor"),
+    "zt": DFTPropertyTaxonomy("zt", "transport_descriptor", "zt", "dimensionless", "descriptor"),
+    "electrical_conductance": DFTPropertyTaxonomy("electrical_conductance", "transport_descriptor", "electrical_conductance", "conductance", "descriptor"),
+    "thermal_conductance": DFTPropertyTaxonomy("thermal_conductance", "transport_descriptor", "thermal_conductance", "conductance", "descriptor"),
+    "thermal_conductivity": DFTPropertyTaxonomy("thermal_conductivity", "transport_descriptor", "thermal_conductivity", "conductivity", "descriptor"),
+    "optical_absorption_peak": DFTPropertyTaxonomy("optical_absorption_peak", "optical_descriptor", "optical_absorption_peak", "energy", "descriptor"),
+    "limiting_potential": DFTPropertyTaxonomy("limiting_potential", "electrocatalytic_metric", "limiting_potential", "potential", "target"),
+    "overpotential": DFTPropertyTaxonomy("overpotential", "electrocatalytic_metric", "overpotential", "potential", "target"),
+    "dos_claim": DFTPropertyTaxonomy("dos_claim", "qualitative_claim", "dos_claim", "text", "lm_auxiliary"),
+    "charge_density_difference_claim": DFTPropertyTaxonomy("charge_density_difference_claim", "qualitative_claim", "charge_density_difference_claim", "text", "lm_auxiliary"),
+}
+
+
 def _canonicalize(text: str, mapping: dict[str, str]) -> str | None:
     """Try to map a text to its canonical form via the mapping table."""
     key = text.strip().lower()
@@ -102,6 +171,58 @@ def _canonicalize(text: str, mapping: dict[str, str]) -> str | None:
         if re.sub(r"[^a-z0-9]", "", k) == key2:
             return v
     return None
+
+
+def canonicalize_adsorbate(text: str | None) -> str | None:
+    if not text:
+        return None
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    canonical = _canonicalize(cleaned, ADSORBATE_MAP)
+    if canonical:
+        return canonical
+
+    star_normalized = cleaned.replace("∗", "*").replace("＊", "*").replace("·", "").strip()
+    collapsed = re.sub(r"\s+", "", star_normalized.lower())
+    star_aliases = {
+        "oh*": "*OH",
+        "*oh": "*OH",
+        "ooh*": "*OOH",
+        "*ooh": "*OOH",
+        "o*": "*O",
+        "*o": "*O",
+        "h*": "*H",
+        "*h": "*H",
+        "co*": "*CO",
+        "*co": "*CO",
+        "cooh*": "*COOH",
+        "*cooh": "*COOH",
+        "cho*": "*CHO",
+        "*cho": "*CHO",
+        "hcoo*": "*HCOO",
+        "*hcoo": "*HCOO",
+        "nnh*": "*NNH",
+        "*nnh": "*NNH",
+        "nhnh*": "*NHNH",
+        "*nhnh": "*NHNH",
+    }
+    return star_aliases.get(collapsed, cleaned)
+
+
+def get_property_taxonomy(raw: str | None) -> dict[str, Any]:
+    normalized = ChemistryNormalizer._normalize_property(raw or "")
+    taxonomy = _PROPERTY_TAXONOMY_MAP.get(
+        normalized,
+        DFTPropertyTaxonomy(
+            canonical_property_type=normalized or "unknown_property",
+            property_family="other",
+            property_subtype=normalized or None,
+            physical_dimension="unknown",
+            ml_role="unknown",
+        ),
+    )
+    return asdict(taxonomy)
 
 
 def _extract_metal_from_name(name: str) -> str | None:
@@ -155,7 +276,7 @@ class ChemistryNormalizer:
         # Normalize adsorbate
         adsorbate = payload.get("adsorbate") or ""
         if adsorbate:
-            canonical = _canonicalize(adsorbate, ADSORBATE_MAP)
+            canonical = canonicalize_adsorbate(adsorbate)
             if canonical:
                 result["adsorbate"] = canonical
                 result["_normalized"]["adsorbate"] = {"from": adsorbate, "to": canonical}
@@ -175,28 +296,53 @@ class ChemistryNormalizer:
             if normalized_prop != prop:
                 result["property_type"] = normalized_prop
                 result["_normalized"]["property_type"] = {"from": prop, "to": normalized_prop}
+            result["_normalized"]["property_taxonomy"] = get_property_taxonomy(prop)
 
         return result
 
     @staticmethod
     def _normalize_property(raw: str) -> str:
+        lowered = raw.strip().lower().replace("–", "-").replace("—", "-")
         mapping = {
             "adsorption energy": "adsorption_energy",
-            "binding energy": "adsorption_energy",
             "adsorption_energy": "adsorption_energy",
+            "binding energy": "binding_energy",
+            "binding_energy": "binding_energy",
             "gibbs free energy": "gibbs_free_energy_change",
             "gibbs free energy change": "gibbs_free_energy_change",
             "free energy change": "gibbs_free_energy_change",
             "free energy": "gibbs_free_energy_change",
             "reaction barrier": "reaction_barrier",
-            "activation energy": "reaction_barrier",
+            "activation energy": "activation_energy",
             "energy barrier": "reaction_barrier",
+            "migration barrier": "migration_barrier",
+            "permeation barrier": "permeation_barrier",
+            "li2s decomposition barrier": "li2s_decomposition_barrier",
+            "li2s nucleation barrier": "li2s_nucleation_barrier",
             "d band center": "d_band_center",
             "d-band center": "d_band_center",
+            "d_band_center": "d_band_center",
             "bader charge": "bader_charge",
             "charge transfer": "charge_transfer",
+            "band gap": "band_gap",
+            "work function": "work_function",
+            "magnetic moment": "magnetic_moment",
             "dos": "dos_claim",
             "density of states": "dos_claim",
             "charge density difference": "charge_density_difference_claim",
         }
-        return mapping.get(raw.strip().lower(), raw.strip().lower().replace(" ", "_"))
+        normalized = mapping.get(lowered)
+        if normalized:
+            return normalized
+        underscored = lowered.replace(" ", "_")
+        if underscored in _PROPERTY_TAXONOMY_MAP:
+            return underscored
+        if "li2s" in lowered and "decom" in lowered:
+            return "li2s_decomposition_barrier"
+        if "li2s" in lowered and "nucleat" in lowered:
+            return "li2s_nucleation_barrier"
+        if "migration" in lowered and "barrier" in lowered:
+            return "migration_barrier"
+        if "permeation" in lowered and "barrier" in lowered:
+            return "permeation_barrier"
+        return underscored
