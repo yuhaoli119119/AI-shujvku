@@ -200,7 +200,9 @@ class ExtractionPipelineService:
         dft_count = self._persist_dft_results(paper.id, dft_results)
         electrochemical_count = self._persist_electrochemical_performance(paper.id, electrochemical_items)
         mechanism_count = self._persist_mechanism_claims(paper.id, mechanism_claims)
-        writing_count = self._persist_writing_card(paper.id, writing_card)
+        # Parser-derived writing cards are planning hypotheses, not trusted content.
+        # They become DB/RAG material only after an IDE AI review writes them back.
+        writing_count = 0
         
         if comprehensive_data:
             paper.comprehensive_analysis = comprehensive_data

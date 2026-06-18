@@ -147,6 +147,11 @@ class PaperTableResponse(BaseModel):
     markdown_content: str | None = None
     page: int | None = None
     extraction_source: str | None = None
+    prov: list[Any] | None = None
+    table_review_status: str | None = None
+    object_review_audit_count: int = 0
+    object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
+    latest_object_review_audit: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -160,7 +165,8 @@ class PaperFigureResponse(BaseModel):
     figure_role: str | None = None
     role_confidence: float | None = None
     content_summary: str | None = None
-    key_elements: list[str] | None = None
+    key_elements: Any = None
+    key_elements_detail: dict[str, Any] | None = None
     prov: list[Any] | None = None
     figure_label: str | None = None
     crop_status: str = "candidate_crop"
@@ -171,6 +177,8 @@ class PaperFigureResponse(BaseModel):
     flags: list[str] = Field(default_factory=list)
     figure_reliability_status: str | None = None
     figure_reliability_warnings: list[str] = Field(default_factory=list)
+    approved_correction_count: int = 0
+    approved_correction_fields: list[str] = Field(default_factory=list)
     object_review_audit_count: int = 0
     object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
     latest_object_review_audit: dict[str, Any] | None = None
@@ -339,6 +347,7 @@ class PaperArtifactStatusResponse(BaseModel):
 
 class PaperListItemResponse(BaseModel):
     id: UUID
+    paper_id: UUID
     library_name: str | None = None
     doi: str | None = None
     title: str | None = None
@@ -368,6 +377,7 @@ class PaperListItemResponse(BaseModel):
     created_at: datetime
     counts: PaperCountsResponse = Field(default_factory=PaperCountsResponse)
     serial_number: int | None = None
+    paper_code: str | None = None
     relationship_summary: dict[str, int] = Field(default_factory=dict)
 
     model_config = {"from_attributes": True}
@@ -377,6 +387,7 @@ class PaperDetailResponse(PaperListItemResponse):
     sections: list[PaperSectionResponse] = Field(default_factory=list)
     tables: list[PaperTableResponse] = Field(default_factory=list)
     figures: list[PaperFigureResponse] = Field(default_factory=list)
+    paper_notes: list[dict[str, Any]] = Field(default_factory=list)
     dft_settings_items: list[DFTSettingResponse] = Field(default_factory=list)
     catalyst_samples_items: list[CatalystSampleResponse] = Field(default_factory=list)
     dft_results_items: list[DFTResultResponse] = Field(default_factory=list)
@@ -388,6 +399,13 @@ class PaperDetailResponse(PaperListItemResponse):
     incoming_relationships: list[PaperRelationshipItemResponse] = Field(default_factory=list)
     references: list[ReferenceEntryResponse] = Field(default_factory=list)
     artifact_status: PaperArtifactStatusResponse = Field(default_factory=PaperArtifactStatusResponse)
+    abstract_review_status: str = "missing"
+    sections_review_status: str = "missing"
+    writing_cards_review_status: str = "missing"
+    figures_review_status: str = "missing"
+    dft_review_status: str = "missing"
+    translation_review_status: str = "missing"
+    rag_quality: dict[str, Any] = Field(default_factory=dict)
 
 
 class CodexContextResponse(BaseModel):

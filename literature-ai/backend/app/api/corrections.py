@@ -44,16 +44,25 @@ async def get_correction_detail(
 @router.post("/{correction_id}/approve", response_model=MCPCorrectionResponse)
 async def approve_correction(
     correction_id: UUID,
+    payload: MCPCorrectionDecisionRequest | None = None,
     auth: MCPAuthInfo = Depends(require_request_mcp_capability("review_corrections")),
     session: Session = Depends(get_db_session),
 ) -> MCPCorrectionResponse:
     try:
-        item = ReviewService(session).approve_correction(correction_id, reviewer=auth.source_prefix)
+        write_lock_tokens = [*(payload.write_lock_tokens if payload else [])]
+        if payload and payload.write_lock_token:
+            write_lock_tokens.append(payload.write_lock_token)
+        item = ReviewService(session).approve_correction(
+            correction_id,
+            reviewer=auth.source_prefix,
+            write_lock_tokens=write_lock_tokens,
+        )
         session.commit()
         return MCPCorrectionResponse.model_validate(item)
     except ValueError as exc:
         session.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("module_write_lock_required") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/{correction_id}/reject", response_model=MCPCorrectionResponse)

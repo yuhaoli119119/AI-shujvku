@@ -162,7 +162,7 @@ class CodexContextService:
                 if item_payload.get("image_path")
                 else None
             )
-            item_payload["image_review"] = self._build_figure_image_review(item)
+            item_payload["image_review"] = self._build_figure_image_review(item, paper_id=paper_id)
         elif normalized_type == "dft_result":
             row = self.session.get(DFTResult, item_id)
             if row is not None and row.paper_id == paper_id:
@@ -302,8 +302,8 @@ class CodexContextService:
             },
             "paper": {
                 "id": str(detail.id),
+                "human_ref": detail.paper_code,
                 "library_name": detail.library_name,
-                "serial_number": detail.serial_number,
                 "title": detail.title,
                 "title_zh": detail.title_zh,
                 "doi": detail.doi,
@@ -366,11 +366,15 @@ class CodexContextService:
                         "image_path": figure.image_path,
                         "asset_url": f"/api/papers/assets/{figure.image_path}" if figure.image_path else None,
                         "prov": figure.prov,
-                        "image_review": self._build_figure_image_review(figure),
+                        "image_review": self._build_figure_image_review(figure, paper_id=detail.id),
+                        "figure_label": figure.figure_label,
                         "figure_role": figure.figure_role,
                         "role_confidence": figure.role_confidence,
                         "content_summary": figure.content_summary,
                         "key_elements": figure.key_elements,
+                        "crop_status": figure.crop_status,
+                        "crop_confidence": figure.crop_confidence,
+                        "crop_source": figure.crop_source,
                         "candidate_status": "candidate_unverified",
                     }
                     for figure in (detail.figures or [])[:max_figures]
@@ -381,6 +385,8 @@ class CodexContextService:
                         "caption": self._clip(table.caption, 800),
                         "page": table.page,
                         "markdown_content": self._clip(table.markdown_content, 2200),
+                        "extraction_source": table.extraction_source,
+                        "prov": table.prov,
                         "candidate_status": "candidate_unverified",
                     }
                     for table in (detail.tables or [])[:max_tables]
@@ -535,6 +541,7 @@ class CodexContextService:
             "- Use evidence text, PDF locators, and notes before writing conclusions or exporting data.",
             "",
             "## Metadata",
+            f"- Human Ref: `{paper.get('human_ref') or '-'}` (for user communication only; use Paper ID for MCP/API calls)",
             f"- Paper ID: `{paper.get('id')}`",
             f"- DOI: {paper.get('doi') or '-'}",
             f"- Year / Journal: {paper.get('year') or '-'} / {paper.get('journal') or '-'}",
@@ -667,6 +674,7 @@ class CodexContextService:
             f"# Codex Item: {context['item_type']}",
             "",
             f"- Paper: {paper.get('title') or 'Untitled paper'}",
+            f"- Human Ref: `{paper.get('human_ref') or '-'}` (for user communication only; use Paper ID for MCP/API calls)",
             f"- Paper ID: `{paper.get('id')}`",
             f"- Item ID: `{item.get('id')}`",
             "- Reliability: automatic/parser outputs are candidates until reviewed against evidence.",
@@ -675,6 +683,17 @@ class CodexContextService:
             "```json",
             self._compact_json(item),
             "```",
+            "",
+            "## Execution Guardrails",
+            "- Prefer MCP tools. If MCP is unavailable, use only the official HTTP evidence/import endpoints already exposed by this system.",
+            "- Do not download the PDF to local files or use pdftotext/pdf2txt/custom scripts as a substitute for read_paper_page or the prepared evidence APIs.",
+            "- Open the original page evidence before trusting parser text. If page evidence cannot be read, stop and report blocked_by_evidence_api_unavailable.",
+            "- Write conclusions back through import_analysis as structured review/correction candidates. After import, read back the target item or review coverage before claiming success.",
+            "- auto_apply_review_rules=false is candidate-only. It may record an unverified audit, but it does not mean PASS/completed/applied and must not be described as a finished review.",
+            "- For missing DFT rows that should enter the system candidate queue, use object_review_audits with decision=new_candidate, a structured corrected_value, and auto_apply_review_rules=true. This materializes an unverified DFTResult candidate; it does not mark the row final or exportable.",
+            "- Directly applying non-DFT fixes or [AI_REVIEWED] status requires acquire_module_write_lock plus auto_apply_review_rules=true and a valid write_lock_token.",
+            "- When submitting object_review_audits with decision=approve_correction, evidence_location MUST contain structured anchor keys (page, table, figure, quoted_text, etc.) or the auto-apply will skip with missing_evidence_anchor. A plain string (even a descriptive one like \"PDF page 13, Table 5\") is treated as quoted_text and works, but a structured dict like {\"page\": 13, \"table\": \"Table 5\", \"quoted_text\": \"...\"} is preferred for reliable page/section-level evidence tracing.",
+            "- Figure image creation/recropping is direct-tool-only: use recrop_figure or create_figure_from_bbox through MCP/API, never import_analysis bbox/crop payloads.",
             "",
         ]
         if context.get("export_safety"):
@@ -765,8 +784,14 @@ class CodexContextService:
             return f"(page {start})"
         return ""
 
-    def _build_figure_image_review(self, figure: PaperFigureResponse) -> dict[str, Any]:
-        return build_figure_image_review(figure, settings=self.settings, check_asset_exists=True)
+    def _build_figure_image_review(self, figure: PaperFigureResponse | dict[str, Any], paper_id: UUID | None = None) -> dict[str, Any]:
+        if hasattr(figure, "model_dump"):
+            payload = figure.model_dump(mode="json")
+        else:
+            payload = dict(figure)
+        if paper_id is not None:
+            payload["paper_id"] = str(paper_id)
+        return build_figure_image_review(payload, settings=self.settings, check_asset_exists=True)
 
     def _dump_items(self, items: list[Any], limit: int) -> list[dict[str, Any]]:
         dumped: list[dict[str, Any]] = []
@@ -930,19 +955,25 @@ class CodexContextService:
             select(DFTResult).where(DFTResult.paper_id == detail.id)
         ).all()
         gate_by_id = bulk_export_gate_results(self.session, rows, target_type="dft_results")
-        gates = []
+        active_gates = []
         items = []
+        rejected_count = 0
         for row in rows:
             gate = gate_by_id.get(str(row.id))
             if gate is None:
                 continue
-            gates.append(gate)
+            if str(row.candidate_status or "").strip().lower() == "rejected":
+                rejected_count += 1
+            else:
+                active_gates.append(gate)
             if len(items) < limit:
                 items.append(self._dft_export_gate_payload(row, gate=gate))
-        summary = summarize_gate_results(gates)
+        summary = summarize_gate_results(active_gates)
         return {
             "safety_gate": self.dft_export_safety_gate,
-            "total_candidates": summary["total_candidates"],
+            "total_candidates": len(rows),
+            "active_candidates": summary["total_candidates"],
+            "rejected_count": rejected_count,
             "eligible_count": summary["eligible"],
             "blocked_count": summary["blocked"],
             "blocked_reasons": summary["blocked_reasons"],

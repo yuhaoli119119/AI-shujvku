@@ -81,6 +81,7 @@ The parsed package is a candidate aid, not a substitute for checking the origina
 `import_analysis` can also accept object-level review payloads through `raw_payload.object_review_audits`. For high-risk targets:
 
 - Two ordinary AI reviews with evidence anchors may auto-materialize when they agree.
+- For DFT rows that do not yet exist, `decision="new_candidate"` plus a structured `corrected_value` and `auto_apply_review_rules=true` will materialize an unverified `DFTResult` candidate and locator first; later review gates still apply.
 - If the first two AI disagree, a third AI may adjudicate by submitting an object-level payload with:
   - `adjudication_role="third_ai"`
   - `adjudication_scope="conflict_resolution"`

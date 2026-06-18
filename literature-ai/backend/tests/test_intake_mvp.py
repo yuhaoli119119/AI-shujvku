@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.models import Base, LiteratureIntakeCandidate, LiteratureIntakeSession, Paper, WorkflowJob
 from app.db.session import get_db_session
 from app.main import app
-from app.services.intake_screening_service import IntakeScreeningService
+from app.services.intake_screening_service import IntakeScreeningService, ScreeningResult
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +296,66 @@ def test_duplicate_doi_detected(client, db_session):
         assert c["duplicate_paper_id"] is not None
 
 
+def test_intake_search_keeps_screening_result_aligned_after_relevance_sort(client):
+    raw_results = [
+        {
+            "identifier": "10.1234/low",
+            "title": "Low relevance raw paper",
+            "doi": "10.1234/low",
+            "year": 2021,
+            "journal": "Raw Journal",
+            "authors": ["Low Author"],
+            "abstract": "weak match",
+            "url": "https://example.com/low",
+            "databases": ["openalex"],
+        },
+        {
+            "identifier": "10.1234/high",
+            "title": "High relevance raw paper",
+            "doi": "10.1234/high",
+            "year": 2024,
+            "journal": "Raw Journal",
+            "authors": ["High Author"],
+            "abstract": "strong match",
+            "url": "https://example.com/high",
+            "databases": ["openalex"],
+        },
+    ]
+
+    def fake_screen(self, items, **kwargs):
+        return [
+            ScreeningResult(
+                identifier="10.1234/high",
+                relevance_score=0.95,
+                screening_tier="recommended",
+                screening_reason="high paper reason",
+            ),
+            ScreeningResult(
+                identifier="10.1234/low",
+                relevance_score=0.25,
+                screening_tier="weak",
+                screening_reason="low paper reason",
+            ),
+        ]
+
+    with patch("app.services.discovery_service.DiscoveryService.search", return_value=raw_results):
+        with patch.object(IntakeScreeningService, "screen", fake_screen):
+            resp = client.post("/api/intake/search", json={
+                "query": "single atom DFT",
+                "library_name": "test_lib",
+                "max_results": 2,
+            })
+
+    assert resp.status_code == 200, resp.text
+    candidates = resp.json()["candidates"]
+    assert candidates[0]["doi"] == "10.1234/high"
+    assert candidates[0]["title"] == "High relevance raw paper"
+    assert candidates[0]["relevance_score"] == 0.95
+    assert candidates[0]["screening_reason"] == "high paper reason"
+    assert candidates[1]["doi"] == "10.1234/low"
+    assert candidates[1]["title"] == "Low relevance raw paper"
+
+
 # ===========================================================================
 # TEST 6: 批量 ingest-approved — 只触发 approved 候选
 # ===========================================================================
@@ -354,6 +414,34 @@ def test_duplicate_doi_detection_normalizes_prefix_case_and_whitespace(db_sessio
     assert len(results) == len(items)
     assert all(result.is_duplicate for result in results)
     assert {result.duplicate_paper_id for result in results} == {str(existing.id)}
+
+
+def test_title_duplicate_detection_requires_high_confidence_identity(db_session):
+    db_session.add(
+        Paper(
+            title="Lithium-Ion Battery Technology",
+            year=2024,
+            library_name="test_lib",
+            pdf_path="mock.pdf",
+        )
+    )
+    db_session.commit()
+
+    results = IntakeScreeningService(db_session, library_name="test_lib").screen(
+        [
+            {
+                "title": "Advances in Lithium-Ion Battery Technology for EV",
+                "year": 2024,
+                "abstract": "battery anode electrolyte",
+            }
+        ],
+        user_need="battery anode",
+        query="battery anode",
+    )
+
+    assert len(results) == 1
+    assert results[0].is_duplicate is False
+    assert results[0].duplicate_paper_id is None
 
 
 def test_batch_ingest_approved_only(client, db_session):

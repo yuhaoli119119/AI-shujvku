@@ -7,7 +7,8 @@
 - [../README.md](../README.md)：子项目技术说明
 - [../使用说明.md](../%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)：中文使用说明
 - [mcp/MCP_API.md](./mcp/MCP_API.md)：当前 MCP 接口使用说明
-- [mcp/AI_TASK_ROUTING.md](./mcp/AI_TASK_ROUTING.md)：自然语言 AI 任务到 MCP 工具的动态路由说明
+- [mcp/AI_TASK_ROUTING.md](./mcp/AI_TASK_ROUTING.md)：自然语言 AI 任务到 MCP 工具与仓库内后备路径的动态路由说明
+- [mcp/LAN_MULTI_AI_WORKFLOW.md](./mcp/LAN_MULTI_AI_WORKFLOW.md)：局域网多电脑/多 AI 并发核验、模块写入锁与后备执行流程
 - [mcp/MCP_IMPLEMENTATION.md](./mcp/MCP_IMPLEMENTATION.md)：当前 MCP 实现与安全边界
 - [plans/litai_extraction_review_protocol_v0_1.md](./plans/litai_extraction_review_protocol_v0_1.md)：LitAI 当前提取与审核协议草案
 - [plans/future_backlog_dynamic_ai_workbench.md](./plans/future_backlog_dynamic_ai_workbench.md)：动态 AI 文献工作台后续改进 backlog

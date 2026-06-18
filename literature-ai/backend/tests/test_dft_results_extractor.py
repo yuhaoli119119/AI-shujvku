@@ -88,6 +88,99 @@ def test_dft_results_merges_rule_output_with_partial_llm_output():
     assert "charge_transfer" in categories
 
 
+def test_dft_results_llm_accepts_graphdiyne_material_properties():
+    class DummyLLM:
+        def is_configured(self):
+            return True
+
+        def structured_extract(self, system_prompt, user_prompt, response_format):
+            assert response_format is DFTResultListModel
+            assert "graphdiyne/graphyne" in system_prompt
+            assert "cohesive_energy" in system_prompt
+            assert "figure-only content" in system_prompt
+            return DFTResultListModel.model_validate(
+                {
+                    "results": [
+                        {
+                            "category": "cohesive_energy",
+                            "adsorbate": "alpha-GDY",
+                            "value": -8.19,
+                            "unit": "eV/atom",
+                            "evidence_text": "The cohesive energy of alpha-GDY is -8.19 eV/atom.",
+                            "source_location": {"section": "Results"},
+                            "confidence": 0.9,
+                        },
+                        {
+                            "category": "lattice_constant",
+                            "adsorbate": "HsGDY-AA",
+                            "value": 16.63,
+                            "unit": "Å",
+                            "evidence_text": "The optimized lattice parameter for HsGDY-AA is a = b = 16.63 Å.",
+                            "source_location": {"section": "Results"},
+                            "confidence": 0.9,
+                        },
+                    ]
+                }
+            )
+
+    extractor = DFTResultsExtractor()
+    extractor.llm = DummyLLM()
+    document = {
+        "markdown": "Graphdiyne results",
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text="The cohesive energy of alpha-GDY is -8.19 eV/atom.",
+                section_title="Computational results",
+                page_start=3,
+            )
+        ],
+        "tables": [],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert any(item["category"] == "cohesive_energy" and item["value"] == -8.19 for item in results)
+    assert any(item["category"] == "lattice_constant" and item["value"] == 16.63 for item in results)
+
+
+def test_dft_results_llm_focus_text_excludes_figures():
+    class CapturingLLM:
+        prompt = ""
+
+        def is_configured(self):
+            return True
+
+        def structured_extract(self, system_prompt, user_prompt, response_format):
+            self.prompt = user_prompt
+            return DFTResultListModel.model_validate({"results": []})
+
+    llm = CapturingLLM()
+    extractor = DFTResultsExtractor()
+    extractor.llm = llm
+    document = {
+        "markdown": "Graphdiyne results",
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text="The band gap of graphdiyne is discussed in the text.",
+                section_title="Electronic results",
+                page_start=3,
+            )
+        ],
+        "tables": [],
+        "figures": [
+            SimpleNamespace(caption="Figure-only icon caption with band gap 9.99 eV.", page=4)
+        ],
+    }
+
+    extractor.extract(document)
+
+    assert "The band gap of graphdiyne is discussed" in llm.prompt
+    assert "Figure-only icon caption" not in llm.prompt
+
+
 def test_dft_results_extracts_structured_markdown_table_values():
     extractor = DFTResultsExtractor()
     document = {
@@ -112,6 +205,55 @@ def test_dft_results_extracts_structured_markdown_table_values():
 
     assert any(item["category"] == "adsorption_energy" and item["adsorbate"] == "Li2S4" and item["value"] == -1.23 for item in results)
     assert any(item["category"] == "bader_charge" and item["adsorbate"] == "S8" and item["value"] == 0.15 for item in results)
+
+
+def test_dft_results_rejects_band_gap_candidates_that_are_dimension_rows():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                caption="Table 1 Electronic properties",
+                markdown_content=(
+                    "| Structure | Band gap (eV) |\n"
+                    "| --- | --- |\n"
+                    "| Pore diameter changed | 10.286 |\n"
+                    "| Lattice constant | 15.542 |\n"
+                ),
+                page=8,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert not any(item["category"] == "band_gap" for item in results)
+
+
+def test_dft_results_does_not_use_sentence_like_first_column_as_adsorbate():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                caption="Table 2 Adsorption energies",
+                markdown_content=(
+                    "| Sample | E_ads (eV) |\n"
+                    "| --- | --- |\n"
+                    "| Structure changed after adsorption | -1.23 |\n"
+                ),
+                page=9,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert not any(item["category"] == "adsorption_energy" for item in results)
 
 
 def test_dft_results_preserves_unicode_minus_and_avoids_markdown_duplicates():

@@ -23,6 +23,7 @@ function renderPaperList() {
 
     function workflowClass(status) {
         if (["Human_Confirmed", "ML_Ready", "Citation_Ready", "Human_Complete", "DB_Ready"].includes(status)) return "full";
+        if (["Parsed_Material_Ready", "Initial_Parsed", "AI_Rescanned"].includes(status)) return "parsed";
         if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected", "Suspected_Missing", "Unparsed"].includes(status)) return "meta";
         return "meta";
     }
@@ -80,10 +81,12 @@ function renderPaperList() {
     }
 
     const tbodyHtml = state.papers.map(function(paper, idx) {
-        const active = paper.id === state.selectedPaperId ? " active" : "";
+        const stablePaperId = paper.paper_id || paper.id;
+        const active = stablePaperId === state.selectedPaperId ? " active" : "";
         const titleLine = esc(paper.title_zh || paper.title || "未命名文献");
         const originalTitle = paper.title_zh && paper.title ? '<div class="paper-original-title" style="margin-top:2px;" title="' + esc(paper.title) + '">' + esc(paper.title) + '</div>' : '';
         const pdfSizeStr = paper.pdf_size ? ' | ' + formatFileSize(paper.pdf_size) : '';
+        const displayCode = paper.paper_code || "";
         const metaLine = esc(paper.journal || "未知期刊") + (paper.doi ? ' | DOI: ' + esc(paper.doi) : '') + pdfSizeStr;
 
         let wfChip = "";
@@ -111,8 +114,8 @@ function renderPaperList() {
             : "";
 
         return (
-            '<tr class="paper-row' + active + '" data-id="' + paper.id + '" onclick="selectPaperById(\'' + paper.id + '\')" ondblclick="openWorkspaceForPaper(\'' + paper.id + '\')">' +
-                '<td style="text-align:center; color:var(--color-text-secondary);">' + (paper.serial_number ? formatSerialNumber(paper.serial_number) : (idx + 1)) + '</td>' +
+            '<tr class="paper-row' + active + '" data-id="' + stablePaperId + '" onclick="selectPaperById(\'' + stablePaperId + '\')" ondblclick="openWorkspaceForPaper(\'' + stablePaperId + '\')">' +
+                '<td class="col-divider" style="text-align:center; color:var(--color-text-secondary);">' + esc(displayCode || (idx + 1)) + '</td>' +
                 '<td style="text-align:center; color:var(--color-text-secondary);">' + esc(paper.year || "-") + '</td>' +
                 '<td style="text-align:center; color:var(--color-text-secondary); font-weight:600;">' + esc(paperTypeLabel(paper.paper_type)) + '</td>' +
                 '<td class="col-divider" style="text-align:center; vertical-align:middle;">' + renderImpactFactor(paper) + '</td>' +
@@ -144,13 +147,13 @@ function renderPaperList() {
 
     container.innerHTML = '<table class="paper-table">' +
         '<thead><tr>' +
-            '<th style="width:40px; text-align:center;">#</th>' +
-            '<th style="width:50px; text-align:center;">年份</th>' +
-            '<th style="width:60px; text-align:center;">类型</th>' +
-            '<th class="col-divider" style="width:60px; text-align:center;">IF</th>' +
+            '<th class="col-divider" style="width:75px; text-align:center;">#</th>' +
+            '<th style="width:5%; text-align:center;">年份</th>' +
+            '<th style="width:6%; text-align:center;">类型</th>' +
+            '<th class="col-divider" style="width:6%; text-align:center;">IF</th>' +
             '<th class="col-divider" style="text-align:center;">文献标题</th>' +
-            '<th class="col-divider" style="width:180px; text-align:center;">流程与质量</th>' +
-            '<th style="width:160px; text-align:center;">数据统计</th>' +
+            '<th class="col-divider" style="width:18%; text-align:center;">流程与质量</th>' +
+            '<th style="width:17%; text-align:center;">数据统计</th>' +
         '</tr></thead>' +
         '<tbody>' + tbodyHtml + '</tbody>' +
     '</table>';

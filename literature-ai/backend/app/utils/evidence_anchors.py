@@ -38,15 +38,19 @@ MATERIAL_CORRECTION_ANCHOR_KEYS = (
 
 
 def iter_anchor_payloads(payload: Any) -> Iterator[dict[str, Any]]:
-    if isinstance(payload, dict):
+    # Plain strings are common evidence_location values (e.g. "PDF page 13, Table 5").
+    # Treat them as quoted_text so has_evidence_anchor() can recognise them.
+    if isinstance(payload, str):
+        yield {"quoted_text": payload}
+    elif isinstance(payload, dict):
         yield payload
         for key in NESTED_ANCHOR_KEYS:
             nested = payload.get(key)
-            if isinstance(nested, (dict, list)):
+            if isinstance(nested, (dict, list, str)):
                 yield from iter_anchor_payloads(nested)
     elif isinstance(payload, list):
         for item in payload:
-            if isinstance(item, (dict, list)):
+            if isinstance(item, (dict, list, str)):
                 yield from iter_anchor_payloads(item)
 
 

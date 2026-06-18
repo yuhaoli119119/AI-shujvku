@@ -26,6 +26,47 @@ def test_embedding_similarity_prefers_related_text():
     assert service.cosine_similarity(query, related) > service.cosine_similarity(query, unrelated)
 
 
+def test_cosine_similarity_handles_unnormalized_vectors():
+    service = DeterministicEmbeddingService(dimension=2)
+
+    assert service.cosine_similarity([10.0, 0.0], [2.0, 0.0]) == 1.0
+    assert service.cosine_similarity([10.0, 0.0], [0.0, 5.0]) == 0.0
+
+
+def test_openai_compatible_embedding_normalizes_api_vectors(monkeypatch):
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"embedding": [3.0, 4.0]}]}
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, *args, **kwargs):
+            return DummyResponse()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "Client", DummyClient)
+    service = OpenAICompatibleEmbeddingService(
+        api_base="https://example.test/v1",
+        api_key="sk-test",
+        model="dummy",
+        dimension=2,
+    )
+
+    assert service.embed_text("test") == [0.6, 0.8]
+
+
 def test_openai_compatible_embedding_does_not_fallback_without_credentials():
     service = get_embedding_service(provider="openai_compatible", api_base="", api_key="", dimension=1024)
 

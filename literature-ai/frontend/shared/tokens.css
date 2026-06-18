@@ -28,7 +28,7 @@
   --color-danger-bg: rgba(220,38,38,0.12);
 
   /* ---- Layout Tokens (global fixed) ---- */
-  --nav-height: 44px;
+  --nav-height: 36px;
   --sidebar-width: 320px;
   --transition: 0.2s ease;
   --z-nav: 100;
@@ -181,7 +181,7 @@
   --color-border: rgba(0,0,0,0.08);
   --color-border-strong: rgba(204,136,0,0.25);
 
-  --font-body: "Chakra Petch", "Segoe UI", sans-serif;
+  --font-body: "Chakra Petch", "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --font-display: "Chakra Petch", sans-serif;
   --font-mono: "JetBrains Mono", "Consolas", monospace;
   --font-weight-btn: 600;
@@ -213,8 +213,8 @@
   --color-text: #1E2938;
   --color-text-secondary: #5A6577;
   --color-text-muted: #8B95A5;
-  --color-border: rgba(0,0,0,0.0);
-  --color-border-strong: rgba(0,0,0,0.0);
+  --color-border: rgba(0,0,0,0.06);
+  --color-border-strong: rgba(0,0,0,0.12);
 
   --font-body: "Space Mono", "Consolas", "Microsoft YaHei", monospace;
   --font-display: "Space Mono", monospace;
@@ -335,8 +335,8 @@
   --color-text: #3D3A35;
   --color-text-secondary: #7A756D;
   --color-text-muted: #8B8175;
-  --color-border: rgba(0,0,0,0.0);
-  --color-border-strong: rgba(0,0,0,0.0);
+  --color-border: rgba(0,0,0,0.06);
+  --color-border-strong: rgba(0,0,0,0.12);
   --shadow-card: 6px 6px 12px rgba(61,53,41,0.15), -6px -6px 12px rgba(255,250,240,0.7);
   --shadow-elevated: 8px 8px 16px rgba(61,53,41,0.2), -8px -8px 16px rgba(255,250,240,0.8);
   --shadow-inset: inset 4px 4px 8px rgba(61,53,41,0.15), inset -4px -4px 8px rgba(255,250,240,0.7);

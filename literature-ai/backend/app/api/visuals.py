@@ -23,6 +23,7 @@ from app.db.models import (
 from app.db.session import get_db_session
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
+from app.utils.text_cleaning import repair_mojibake_text
 
 router = APIRouter()
 
@@ -83,6 +84,7 @@ def _clean_pdf_text(value: Any) -> str:
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
+    text = repair_mojibake_text(text) or ""
     return re.sub(r"\s+", " ", text).strip()
 
 

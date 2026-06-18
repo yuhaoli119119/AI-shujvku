@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 from uuid import UUID
 
@@ -8,10 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import PaperSection
+from app.rag.eligibility import is_rag_eligible
 from app.rag.retriever import Retriever
 from app.schemas.evidence import EvidenceRef, PageSpan
 from app.schemas.retrieval import RetrievalSearchRequest, RetrievalSearchResponse, RetrievalSearchResult
 from app.services.embedding import get_embedding_service
+from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 from app.utils.paper_type import normalize_paper_type_filter
 
 
@@ -95,9 +98,13 @@ class RetrievalService:
                 .limit(limit_per_paper)
             )
             for section in self.session.scalars(stmt).all():
+                if not is_rag_eligible(self.session, section, "section"):
+                    continue
                 text = (section.text or "").strip()
                 if not text:
                     continue
+                text = _clean_retrieval_text(text)
+                section_title = _clean_retrieval_text(section.section_title)
                 score = round(max(0.1, 1.0 - index * 0.001), 4)
                 index += 1
                 items.append(
@@ -107,7 +114,7 @@ class RetrievalService:
                         paper_id=section.paper_id,
                         chunk_id=str(section.id),
                         section_id=section.id,
-                        section_title=section.section_title,
+                        section_title=section_title,
                         text=text,
                         page_start=section.page_start,
                         page_end=section.page_end,
@@ -120,7 +127,7 @@ class RetrievalService:
                             evidence_text=text[:1200],
                             confidence=score,
                             source="full_context",
-                            section_title=section.section_title,
+                            section_title=section_title,
                             target_type="section",
                             target_id=str(section.id),
                         ),
@@ -134,13 +141,16 @@ class RetrievalService:
         flat: list[RetrievalSearchResult] = []
         for source, rows in (retrieved or {}).items():
             for row in rows:
-                text = row.get("evidence_text") or row.get("text") or ""
+                text = _clean_retrieval_text(row.get("evidence_text") or row.get("text") or "")
                 if not text:
                     continue
                 paper_id = row.get("paper_id")
                 object_id = row.get("object_id")
                 section_id = row.get("section_id") or (object_id if row.get("type") == "section" else None)
                 score_breakdown = row.get("score_breakdown") or {}
+                locator = row.get("evidence_locator") if isinstance(row.get("evidence_locator"), dict) else {}
+                page_start = row.get("page_start") or locator.get("page")
+                page_end = row.get("page_end") or locator.get("page")
                 normalized_breakdown = {
                     "bm25": float(score_breakdown.get("lexical", score_breakdown.get("bm25", 0.0)) or 0.0),
                     "vector": float(score_breakdown.get("semantic", score_breakdown.get("vector", 0.0)) or 0.0),
@@ -150,28 +160,45 @@ class RetrievalService:
                     RetrievalSearchResult(
                         score=float(row.get("score") or 0.0),
                         source=source,
+                        source_type=row.get("source_type") or row.get("type") or source,
+                        source_id=str(row.get("source_id") or object_id) if (row.get("source_id") or object_id) else None,
                         paper_id=paper_id,
+                        paper_code=row.get("paper_code"),
                         chunk_id=str(object_id) if object_id else None,
                         section_id=section_id,
-                        section_title=row.get("section_title") or row.get("source_section"),
+                        section_title=_clean_retrieval_text(row.get("section_title") or row.get("source_section")),
                         text=text,
-                        page_start=row.get("page_start"),
-                        page_end=row.get("page_end"),
+                        page=row.get("page") or page_start,
+                        evidence_text=_clean_retrieval_text(row.get("evidence_text") or text),
+                        review_status=row.get("review_status") or row.get("review_gate_status") or row.get("provenance_level"),
+                        page_start=page_start,
+                        page_end=page_end,
                         score_breakdown=normalized_breakdown,
                         evidence=EvidenceRef(
                             paper_id=paper_id,
                             chunk_id=str(object_id) if object_id else None,
                             section_id=section_id,
-                            page_span=PageSpan(page_start=row.get("page_start"), page_end=row.get("page_end")),
+                            page_span=PageSpan(page_start=page_start, page_end=page_end),
                             evidence_text=text,
                             confidence=float(row.get("confidence") or row.get("score") or 0.0),
                             source=source,
-                            section_title=row.get("section_title") or row.get("source_section"),
+                            section_title=_clean_retrieval_text(row.get("section_title") or row.get("source_section")),
                             target_type=row.get("type"),
                             target_id=str(object_id) if object_id else None,
+                            locator_status=locator.get("locator_status") or row.get("locator_status"),
+                            locator_confidence=locator.get("locator_confidence"),
                         ),
-                        metadata={k: v for k, v in row.items() if k not in {"text", "evidence_text", "score", "score_breakdown"}},
+                        metadata=normalize_text_tree({k: v for k, v in row.items() if k not in {"text", "evidence_text", "score", "score_breakdown"}}),
                     )
                 )
         return flat
+
+
+def _clean_retrieval_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = repair_mojibake_text(str(value)) or ""
+    text = re.sub(r"\s+([,.;:])", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 

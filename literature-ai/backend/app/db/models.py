@@ -92,6 +92,7 @@ class Paper(Base):
     docling_json_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     markdown_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     serial_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    paper_code: Mapped[str | None] = mapped_column(sa.String(16), nullable=True, unique=True, index=True)
     comprehensive_analysis: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     paper_type: Mapped[str | None] = mapped_column(sa.String(20), nullable=True, index=True)
     type_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True, index=True)
@@ -475,6 +476,33 @@ class AuditLog(Base):
     target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     payload: Mapped[dict | list | str | None] = mapped_column(json_type(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class ModuleWriteLock(Base):
+    __tablename__ = "module_write_locks"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    module_name: Mapped[str] = mapped_column(sa.String(64), index=True)
+    locked_by: Mapped[str] = mapped_column(sa.String(128), index=True)
+    lock_token: Mapped[str] = mapped_column(sa.String(64), unique=True, index=True, default=lambda: uuid.uuid4().hex)
+    status: Mapped[str] = mapped_column(sa.String(32), default="active", server_default="active", index=True)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), index=True)
+    released_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+    meta: Mapped[dict | None] = mapped_column("metadata", json_type(), nullable=True)
+
+    __table_args__ = (
+        sa.Index(
+            "uq_module_write_locks_active_scope",
+            "paper_id",
+            "module_name",
+            unique=True,
+            postgresql_where=sa.text("status = 'active'"),
+            sqlite_where=sa.text("status = 'active'"),
+        ),
+    )
 
 
 class PaperRelationship(Base):

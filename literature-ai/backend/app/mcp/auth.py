@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.mcp.context import MCPAuthInfo, get_mcp_auth, reset_mcp_auth, set_mcp_auth
+
+
+ALL_MCP_CAPABILITIES = frozenset(
+    {
+        "read_papers",
+        "append_notes",
+        "propose_corrections",
+        "request_parse",
+        "review_corrections",
+        "review_dft",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -36,14 +49,51 @@ def parse_mcp_api_keys(raw: str) -> dict[str, MCPKeyConfig]:
     return configs
 
 
+def _request_source_is_trusted(request: Request) -> bool:
+    client_host = (request.client.host if request.client else "").strip()
+    if not client_host:
+        return False
+    if client_host in {"localhost", "testclient"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(client_host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def _unauthenticated_mcp_allowed(request: Request) -> bool:
+    settings = get_settings()
+    if not settings.mcp_enabled:
+        return False
+    if not _request_source_is_trusted(request):
+        return False
+    return settings.mcp_allow_unauthenticated or not parse_mcp_api_keys(settings.mcp_api_keys)
+
+
+def _anonymous_mcp_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="open_mcp",
+        display_name="Open MCP",
+        capabilities=ALL_MCP_CAPABILITIES,
+        raw_key="",
+    )
+
+
 def authenticate_mcp_request(request: Request) -> MCPAuthInfo:
+    settings = get_settings()
+    configured_keys = parse_mcp_api_keys(settings.mcp_api_keys)
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
+        if _unauthenticated_mcp_allowed(request):
+            return _anonymous_mcp_auth()
         raise HTTPException(status_code=401, detail="Missing MCP API key")
 
     raw_key = auth_header.removeprefix("Bearer ").strip()
-    config = parse_mcp_api_keys(get_settings().mcp_api_keys).get(raw_key)
+    config = configured_keys.get(raw_key)
     if not config:
+        if _unauthenticated_mcp_allowed(request):
+            return _anonymous_mcp_auth()
         raise HTTPException(status_code=401, detail="Invalid MCP API key")
 
     return MCPAuthInfo(

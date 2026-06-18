@@ -12,12 +12,16 @@ from sqlalchemy.orm import sessionmaker
 from app.config import get_settings
 from app.db.models import (
     Base,
+    CatalystSample,
     DFTResult,
+    ElectrochemicalPerformance,
     EvidenceLocator,
     ExtractionFieldReview,
+    MechanismClaim,
     Paper,
     PaperCitationEligibility,
     PaperImpactMetadata,
+    WritingCard,
 )
 from app.db.session import get_db_session
 from app.main import app
@@ -200,6 +204,67 @@ def test_unverified_extraction_is_marked_as_suggestion(citation_client):
     assert candidate["can_be_used_as_confirmed_citation"] is False
 
 
+def test_structured_non_dft_rows_feed_citation_recommendations(citation_client):
+    client, Session, _ = citation_client
+    with Session() as session:
+        paper = _paper("Structured non-DFT citation", 2026, "Journal of Energy Chemistry", "structured evidence", "structured.pdf")
+        session.add(paper)
+        session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-N4 catalyst",
+            catalyst_type="single_atom",
+            metal_centers=["Fe"],
+            coordination="Fe-N4",
+            support="N-doped carbon",
+            evidence_strength="Fe-N4 catalyst on N-doped carbon accelerates LiPS conversion.",
+        )
+        mechanism = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="lips_conversion",
+            claim_text="Fe-N4 sites accelerate LiPS conversion by strengthening Li2S4 binding.",
+            evidence_types=["Li2S4 binding"],
+            evidence_text="Li2S4 binding supports faster LiPS conversion.",
+        )
+        electrochemical = ElectrochemicalPerformance(
+            paper_id=paper.id,
+            capacity_value=900,
+            rate="0.5C",
+            cycle_number=200,
+            evidence_text="The cell retained 900 mAh/g at 0.5C after 200 cycles.",
+        )
+        writing_card = WritingCard(
+            paper_id=paper.id,
+            research_gap="single-atom LiPS conversion needs better catalyst identity tracking",
+            proposed_solution="Use Fe-N4 coordination to connect mechanism and electrochemical performance.",
+            core_hypothesis="Fe-N4 coordination improves sulfur redox kinetics.",
+        )
+        session.add_all([catalyst, mechanism, electrochemical, writing_card])
+        session.commit()
+        paper_id = paper.id
+
+    response = client.post(
+        "/api/writing/citation-candidates",
+        json={
+            "text": "Fe-N4 coordination Li2S4 binding 900 mAh/g 0.5C sulfur redox kinetics",
+            "max_candidates": 5,
+            "include_unverified_suggestions": True,
+            "include_pending_review": True,
+        },
+    )
+
+    assert response.status_code == 200
+    candidate = _candidate(response, paper_id)
+    assert candidate["evidence_status"] == "unverified_extraction"
+    snippet_types = {item["source_type"] for item in candidate["supporting_snippets"]}
+    assert {
+        "catalyst_samples",
+        "mechanism_claims",
+        "electrochemical_performance",
+    } & snippet_types
+    assert any(item["source_id"] for item in candidate["supporting_snippets"])
+
+
 def test_metadata_only_cannot_pose_as_evidence(citation_client):
     client, _, seed = citation_client
     candidate = _candidate(_post(client), seed["metadata_only"])
@@ -237,8 +302,9 @@ def test_api_does_not_modify_guarded_tables(citation_client):
 
 
 def test_service_does_not_call_mark_verified_or_export_writer_paths():
-    source = Path("app/services/writing_citation_candidate_service.py").read_text(encoding="utf-8")
-    api_source = Path("app/api/writing.py").read_text(encoding="utf-8")
+    backend_root = Path(__file__).resolve().parents[1]
+    source = (backend_root / "app/services/writing_citation_candidate_service.py").read_text(encoding="utf-8")
+    api_source = (backend_root / "app/api/writing.py").read_text(encoding="utf-8")
     combined = source + api_source
     assert "mark_verified" not in combined
     assert "draft_paper_sections" not in combined

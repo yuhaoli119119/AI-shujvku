@@ -5,6 +5,7 @@ stage: mvp
 description: >
   Rule-based DFT results extraction for Li-S battery catalyst papers.
   No LLM dependency — uses regex patterns + keyword matching + heuristics.
+  Before trusting any candidate family, confirm the paper type inferred from the original PDF matches the system-parsed paper type; if they disagree, update the parsed type immediately and then continue extraction.
 
 candidate_policy:
   status: system_candidate
@@ -29,6 +30,10 @@ output:
     adsorbate: str | null
     value: float | null
     unit: str | null
+    raw_unit_policy: >
+      Rule-based candidates may preserve the raw paper unit. Final AI-adopted
+      DFT rows must normalize energy to eV (meV / 1000) and permeance to GPU
+      (10^3 GPU * 1000) while preserving the raw expression in evidence text.
     evidence_text: str
     source_location:
       section: str | null

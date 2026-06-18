@@ -1762,10 +1762,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const mockedJobs = [
         {
           job_id: 'job-safe-1',
-          type: 'ai_workflow',
+          type: 'discovery_download_ingest',
           status: 'completed',
           progress: { phase: 'completed', ingested: 5, failed: 0 },
-          summary: { source_label: 'AI 文献检索与入库', success_count: 5, failure_count: 0 },
+          summary: { source_label: '在线下载队列入库', success_count: 5, failure_count: 0 },
           result: null,
           error: null,
           created_at: today,

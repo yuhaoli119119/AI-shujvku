@@ -22,13 +22,9 @@ from app.services.codex_context_service import CodexContextService
 from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
-from app.services.external_analysis_service import (
-    ExternalAnalysisNormalizedModel,
-    ExternalAnalysisService,
-    build_internal_ai_review_blob,
-    sanitize_internal_corrections,
-)
+from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.local_pdf_service import LocalPdfService
+from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
@@ -666,11 +662,15 @@ def get_correction_detail(correction_id: str) -> dict[str, Any]:
 
 
 @mcp_server.tool(name="approve_correction", description="Approve a pending correction proposal and apply it.")
-def approve_correction(correction_id: str) -> dict[str, Any]:
+def approve_correction(correction_id: str, write_lock_token: str | None = None) -> dict[str, Any]:
     auth = require_mcp_capability("review_corrections")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        item = ReviewService(session).approve_correction(UUID(correction_id), reviewer=auth.source_prefix)
+        item = ReviewService(session).approve_correction(
+            UUID(correction_id),
+            reviewer=auth.source_prefix,
+            write_lock_tokens=[write_lock_token] if write_lock_token else None,
+        )
         return _serialize_correction(item)
 
 
@@ -691,13 +691,14 @@ def reject_correction(correction_id: str, reason: str | None = None) -> dict[str
     name="approve_corrections_batch",
     description="Approve multiple pending correction proposals in one call. Skips non-pending or failed items and reports them.",
 )
-def approve_corrections_batch(correction_ids: list[str]) -> dict[str, Any]:
+def approve_corrections_batch(correction_ids: list[str], write_lock_token: str | None = None) -> dict[str, Any]:
     auth = require_mcp_capability("review_corrections")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return ReviewService(session).approve_corrections_batch(
             correction_ids=[UUID(cid) for cid in correction_ids],
             reviewer=auth.source_prefix,
+            write_lock_tokens=[write_lock_token] if write_lock_token else None,
         )
 
 
@@ -714,6 +715,61 @@ def reject_corrections_batch(correction_ids: list[str], reason: str | None = Non
             reviewer=auth.source_prefix,
             reason=reason,
         )
+
+
+@mcp_server.tool(
+    name="acquire_module_write_lock",
+    description=(
+        "Acquire a lease before directly applying non-DFT AI edits to a paper module. "
+        "Use module_name values such as sections, writing_cards, figures, content, or all_non_dft."
+    ),
+)
+def acquire_module_write_lock(
+    paper_id: str,
+    module_name: str,
+    locked_by: str | None = None,
+    ttl_minutes: int = 30,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    owner = str(locked_by or auth.source_prefix or "ide_ai").strip() or "ide_ai"
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        lock = ModuleWriteLockService(session).acquire(
+            paper_id=UUID(paper_id),
+            module_name=module_name,
+            locked_by=owner,
+            ttl_minutes=ttl_minutes,
+            meta=metadata,
+        )
+        session.flush()
+        return {
+            "id": str(lock.id),
+            "paper_id": str(lock.paper_id),
+            "module_name": lock.module_name,
+            "locked_by": lock.locked_by,
+            "lock_token": lock.lock_token,
+            "status": lock.status,
+            "expires_at": lock.expires_at.isoformat(),
+        }
+
+
+@mcp_server.tool(name="release_module_write_lock", description="Release a previously acquired module write lock.")
+def release_module_write_lock(lock_token: str, released_by: str | None = None) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    releaser = str(released_by or auth.source_prefix or "").strip() or None
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        lock = ModuleWriteLockService(session).release(lock_token=lock_token, released_by=releaser)
+        session.flush()
+        return {
+            "id": str(lock.id),
+            "paper_id": str(lock.paper_id),
+            "module_name": lock.module_name,
+            "locked_by": lock.locked_by,
+            "status": lock.status,
+            "released_at": lock.released_at.isoformat() if lock.released_at else None,
+        }
 
 
 @mcp_server.tool(name="parse_paper", description="Parse a paper from DOI or arXiv identifier.")
@@ -855,7 +911,7 @@ async def ingest_pdf_batch(
 
 
 # ---------------------------------------------------------------------------
-# External AI integration tools (retrieve_evidence, review_paper,
+# IDE/MCP analysis integration tools (retrieve_evidence, review_paper,
 # import_analysis, compare_papers)
 # ---------------------------------------------------------------------------
 
@@ -910,22 +966,9 @@ def retrieve_evidence(
         return {"results": serialized}
 
 
-_REVIEW_SYSTEM_PROMPT = (
-    "You are an internal scientific curation agent for a literature database. "
-    "Review the provided parsed-paper bundle and return only high-confidence structured output. "
-    "Use review_notes for useful summaries or caveats, correction_proposals for concrete field fixes, "
-    "and supporting_papers only when an existing linked paper can be inferred from DOI/title clues already present. "
-    "Do not invent evidence, identifiers, values, or target paths. Prefer leaving arrays empty over guessing. "
-    "For top-level paper fields, only use these correction field_name values: doi, title, year, journal, authors, abstract, oa_status, license. "
-    "For those top-level fields, set target_path exactly equal to field_name. "
-    "For structured corrections, only use field_name values from dft_results, mechanism_claims, electrochemical_performance, catalyst_samples, dft_settings, writing_cards, "
-    "and set target_path strictly as <collection>:<row_id>:<field> using row ids that already exist in the provided bundle."
-)
-
-
 @mcp_server.tool(
     name="review_paper",
-    description="Trigger an AI-powered deep review of a paper using the configured LLM (e.g. DeepSeek). The AI will analyze the paper's extracted data and produce structured review notes, correction proposals, and relationship suggestions. Results are stored as candidates and can be materialized later.",
+    description="Deprecated compatibility tool. Backend-owned LLM review is disabled; IDE AI should read get_codex_context / get_codex_item / read_paper_page evidence and write candidates through import_analysis.",
 )
 async def review_paper(
     paper_id: str,
@@ -933,88 +976,18 @@ async def review_paper(
     source_label: str = "mcp_review",
 ) -> dict[str, Any]:
     require_mcp_capability("propose_corrections")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        detail = PaperQueryService(session).get_paper_detail(UUID(paper_id))
-        if not detail:
-            raise ValueError("Paper not found")
-
-        service = ExternalAnalysisService(session=session, settings=settings)
-        if not service.llm.is_configured():
-            raise ValueError("Internal AI is not configured. Set LITAI_WRITER_API_KEY and LITAI_WRITER_API_BASE.")
-
-        review_blob = build_internal_ai_review_blob(detail)
-        user_prompt = (
-            "Analyze this parsed literature record and extraction output. "
-            "Identify any clear normalization notes, corrections, and supporting-paper relationships.\n\n"
-            f"{review_blob}"
-        )
-
-        normalized = await run_in_threadpool(
-            service.llm.structured_extract, _REVIEW_SYSTEM_PROMPT, user_prompt, ExternalAnalysisNormalizedModel
-        )
-        if normalized is None:
-            raise ValueError("AI review failed to produce structured output")
-
-        normalized = sanitize_internal_corrections(normalized)
-
-        run = service.import_run(
-            paper_id=UUID(paper_id),
-            source="mcp_review",
-            source_label=source_label,
-            raw_text=None,
-            raw_payload=normalized.model_dump(mode="json"),
-        )
-
-        created_notes = 0
-        created_corrections = 0
-        created_relationships = 0
-        auto_applied_corrections = 0
-        skipped_candidates = 0
-
-        if auto_apply:
-            materialized = service.materialize_candidates(
-                run_id=run.id,
-                candidate_ids=None,
-                explicit_all=True,
-                created_by="mcp_review",
-            )
-            created_notes = materialized.created_notes
-            created_corrections = materialized.created_corrections
-            created_relationships = materialized.created_relationships
-            skipped_candidates = materialized.skipped_candidates
-            if materialized.created_corrections:
-                reviewer = ReviewService(session)
-                correction_candidate_ids = [
-                    item.materialized_target_id
-                    for item in service.list_candidates(run.id)
-                    if item.materialized_target_type == "paper_correction" and item.materialized_target_id
-                ]
-                for correction_id in correction_candidate_ids:
-                    try:
-                        reviewer.approve_correction(UUID(str(correction_id)), reviewer="mcp_review")
-                        auto_applied_corrections += 1
-                    except ValueError:
-                        continue
-
-        session.commit()
-        return {
-            "run_id": str(run.id),
-            "mapping_status": run.mapping_status,
-            "created_notes": created_notes,
-            "created_corrections": created_corrections,
-            "created_relationships": created_relationships,
-            "auto_applied_corrections": auto_applied_corrections,
-            "skipped_candidates": skipped_candidates,
-        }
+    raise ValueError(
+        "Backend-owned LLM review is disabled. Use get_codex_context / get_codex_item / read_paper_page in the IDE, then call import_analysis with the IDE AI output."
+    )
 
 
 @mcp_server.tool(
     name="import_analysis",
     description=(
-        "Import analysis results from an external AI agent (e.g. Cursor, DeepSeek chat, Claude) into the library. "
+        "Import IDE AI analysis results into the library. "
         "Supports free-text or structured JSON, including object-level review audits with target_type, target_id, "
-        "field_name, decision, evidence_location, and corrected_value. Imported outputs remain candidates."
+        "field_name, decision, evidence_location, and corrected_value. Direct non-DFT auto-apply requires "
+        "a write_lock_token from acquire_module_write_lock."
     ),
 )
 def import_analysis(
@@ -1024,9 +997,19 @@ def import_analysis(
     raw_text: str | None = None,
     raw_payload: dict | None = None,
     auto_apply_review_rules: bool = True,
-    reviewer: str = "ide_ai",
+    reviewer: str | None = None,
+    write_lock_token: str | None = None,
 ) -> dict[str, Any]:
-    require_mcp_capability("propose_corrections")
+    auth = require_mcp_capability("propose_corrections")
+    has_text = bool(str(raw_text or "").strip())
+    has_payload = raw_payload is not None
+    if isinstance(raw_payload, str):
+        has_payload = bool(raw_payload.strip())
+    elif isinstance(raw_payload, (dict, list)):
+        has_payload = bool(raw_payload)
+    if not has_text and not has_payload:
+        raise ValueError("import_analysis requires non-empty raw_text or raw_payload")
+    effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         service = ExternalAnalysisService(session=session, settings=settings)
@@ -1039,10 +1022,26 @@ def import_analysis(
         )
         auto_apply_summary = None
         if auto_apply_review_rules:
-            auto_apply_summary = VerificationSessionService(session, settings).apply_import_rules_for_paper(
-                paper_id=UUID(paper_id),
-                reviewer=reviewer,
+            non_dft_summary = service.auto_apply_non_dft_review_outputs(
+                run.id,
+                reviewer=effective_reviewer,
+                write_lock_tokens=[write_lock_token] if write_lock_token else None,
             )
+            dft_auto_apply_summary = VerificationSessionService(session, settings).apply_import_rules_for_paper(
+                paper_id=UUID(paper_id),
+                reviewer=effective_reviewer,
+                write_lock_tokens=[write_lock_token] if write_lock_token else None,
+            )
+            auto_apply_summary = {
+                **(dft_auto_apply_summary or {}),
+                "non_dft_auto_apply": {
+                    "created_notes": non_dft_summary.created_notes,
+                    "created_corrections": non_dft_summary.created_corrections,
+                    "created_relationships": non_dft_summary.created_relationships,
+                    "auto_applied_corrections": non_dft_summary.auto_applied_corrections,
+                    "skipped_candidates": non_dft_summary.skipped_candidates,
+                },
+            }
         candidates = service.list_candidates(run.id)
         session.commit()
         return {
@@ -1050,6 +1049,7 @@ def import_analysis(
             "mapping_status": run.mapping_status,
             "mapping_error": run.mapping_error,
             "auto_apply_review_rules": auto_apply_review_rules,
+            "reviewer": effective_reviewer,
             "auto_apply_summary": auto_apply_summary,
             "candidate_count": len(candidates),
             "candidates": [
@@ -1097,6 +1097,7 @@ def compare_papers(
                 raise ValueError(f"Paper {pid} not found")
             papers_data.append({
                 "id": str(detail.id),
+                "paper_code": detail.paper_code,
                 "title": detail.title,
                 "year": detail.year,
                 "journal": detail.journal,
@@ -1114,7 +1115,7 @@ def compare_papers(
 
         comparison: list[dict[str, Any]] = []
         for p in papers_data:
-            entry: dict[str, Any] = {"id": p["id"], "title": p["title"], "year": p["year"], "paper_type": p["paper_type"]}
+            entry: dict[str, Any] = {"id": p["id"], "paper_code": p.get("paper_code"), "title": p["title"], "year": p["year"], "paper_type": p["paper_type"]}
             for f in active_fields:
                 entry[f] = p.get(f, [])
             comparison.append(entry)
@@ -1127,7 +1128,7 @@ def compare_papers(
 
 
 # ---------------------------------------------------------------------------
-# On-demand atomic tools (read_paper_page, analyze_chart)
+# On-demand atomic tools (read_paper_page, recrop_figure, review_figure)
 # ---------------------------------------------------------------------------
 
 
@@ -1186,7 +1187,7 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
             .where(PaperTable.page <= effective_page_end)
         ).all()
 
-        # Fetch figures on this page range (caption + VLM summary + figure_id for analyze_chart)
+        # Fetch figures on this page range (caption, role, and image availability)
         figures = session.scalars(
             select(PaperFigure)
             .where(PaperFigure.paper_id == pid)
@@ -1212,8 +1213,8 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
             page_parts.append(
                 f"## {label} (p. {fig.page})\n"
                 f"Role: {role}\n"
-                f"AI Visual Summary: {summary}\n"
-                f"Figure ID: {fig.id} -> use analyze_chart with this ID for targeted VLM questions"
+                f"Stored Figure Summary: {summary}\n"
+                f"Figure ID: {fig.id}. Inspect the image/crop in the IDE workflow if visual evidence matters."
             )
             figure_refs.append({
                 "figure_id": str(fig.id),
@@ -1234,142 +1235,6 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
             "figure_refs": figure_refs,
             "full_text": full_text,
         }
-
-
-@mcp_server.tool(
-    name="analyze_chart",
-    description="Analyze a specific figure from a paper using the VLM (visual language model) with a custom question. Use this when the stored AI summary is insufficient and you need to ask a targeted question about the chart (e.g. exact crossing point of a curve, specific value on an axis). The VLM response is automatically persisted as a shared note so other agents and humans can see it.",
-)
-async def analyze_chart(figure_id: str, custom_question: str) -> dict[str, Any]:
-    auth = require_mcp_capability("read_papers")
-    settings = get_settings()
-
-    if not settings.writer_api_key:
-        raise ValueError("VLM is not configured. Set LITAI_WRITER_API_KEY to enable chart analysis.")
-
-    # Phase 1: Read figure metadata from DB, then close session immediately.
-    # NOTE: This project uses PostgreSQL (pgvector), not SQLite. PostgreSQL handles
-    # concurrent connections well, but we still avoid holding a session open during
-    # a 10-30 second VLM call — long-lived transactions prevent connection pool recycling
-    # and can cause idle-in-transaction timeouts.
-    fig_meta: dict[str, Any] = {}
-    with session_scope(settings.database_url) as session:
-        fig = session.get(PaperFigure, UUID(figure_id))
-        if not fig:
-            raise ValueError(f"Figure {figure_id} not found")
-
-        if not fig.image_path:
-            raise ValueError("This figure has no associated image file.")
-
-        abs_path = resolve_persisted_artifact_path(
-            fig.image_path,
-            category="figures",
-            settings=settings,
-        )
-        if not abs_path or not abs_path.exists():
-            raise ValueError(f"Image file not found on disk: {fig.image_path}")
-
-        fig_meta = {
-            "paper_id": str(fig.paper_id),
-            "caption": fig.caption,
-            "figure_role": fig.figure_role,
-            "image_abs_path": str(abs_path),
-            "page": fig.page,
-        }
-
-    # Phase 2: VLM call — session is already closed, safe to block.
-    from app.services.vlm_service import VLMService
-    import asyncio
-
-    vlm = VLMService(settings)
-    
-    vlm_failed = False
-    vlm_error = ""
-    result = ""
-    try:
-        result = await asyncio.to_thread(vlm.analyze_image, fig_meta["image_abs_path"], custom_question)
-        if not result:
-            vlm_failed = True
-            vlm_error = "VLM analysis returned empty result"
-    except Exception as e:
-        vlm_failed = True
-        vlm_error = str(e)
-
-    if vlm_failed:
-        note_content = (
-            f"[VLM Fallback] Question: {custom_question}\n"
-            f"Failed to analyze chart due to VLM error: {vlm_error}"
-        )
-        with session_scope(settings.database_url) as session:
-            note = PaperNote(
-                paper_id=UUID(fig_meta["paper_id"]),
-                source=f"analyze_chart_fallback:{auth.source_prefix}",
-                content=note_content,
-                field_name="figure_analysis",
-                page=fig_meta.get("page"),
-                section_title=fig_meta.get("caption"),
-                quoted_text=custom_question,
-            )
-            session.add(note)
-            session.flush()
-        
-        return {
-            "figure_id": figure_id,
-            "paper_id": fig_meta["paper_id"],
-            "caption": fig_meta["caption"],
-            "figure_role": fig_meta["figure_role"],
-            "custom_question": custom_question,
-            "vlm_status": "failed",
-            "vlm_error": vlm_error,
-            "vlm_response": None,
-            "auto_note_created": True,
-            "fallback_used": True,
-        }
-
-    # Phase 3: Auto-persist the VLM response as a shared PaperNote (Blackboard pattern).
-    # This is a system-level action, not an agent-initiated write, so we bypass the
-    # append_notes capability check and write directly to DB. Any AI or human who
-    # calls list_notes will see the analysis trail — "雁过留声".
-    note_content = (
-        f"[VLM Chart Analysis] Question: {custom_question}\n"
-        f"Answer: {result}"
-    )
-    with session_scope(settings.database_url) as session:
-        note = PaperNote(
-            paper_id=UUID(fig_meta["paper_id"]),
-            source=f"analyze_chart:{auth.source_prefix}",
-            content=note_content,
-            field_name="figure_analysis",
-            page=fig_meta.get("page"),
-            section_title=fig_meta.get("caption"),
-            quoted_text=custom_question,
-        )
-        session.add(note)
-        session.flush()
-        session.add(
-            AuditLog(
-                paper_id=note.paper_id,
-                action="analyze_chart_auto_note",
-                source=auth.source_prefix,
-                target_type="paper_note",
-                target_id=str(note.id),
-                payload={
-                    "figure_id": figure_id,
-                    "custom_question": custom_question,
-                },
-            )
-        )
-
-    return {
-        "figure_id": figure_id,
-        "paper_id": fig_meta["paper_id"],
-        "caption": fig_meta["caption"],
-        "figure_role": fig_meta["figure_role"],
-        "custom_question": custom_question,
-        "vlm_status": "success",
-        "vlm_response": result,
-        "auto_note_created": True,
-    }
 
 
 @mcp_server.tool(
@@ -1563,6 +1428,143 @@ def recrop_figure(
         }
 
 
+@mcp_server.tool(
+    name="create_figure_from_bbox",
+    description=(
+        "Create a missing figure object by cropping the original PDF. "
+        "Use this when read_paper_page/PDF evidence shows a figure exists but the parser did not create it. "
+        "Inputs use PDF page coordinates [x0, y0, x1, y1] with TOPLEFT origin; use strategy='full_page' when bbox is uncertain."
+    ),
+)
+def create_figure_from_bbox(
+    paper_id: str,
+    page: int,
+    caption: str,
+    figure_label: str | None = None,
+    figure_role: str | None = None,
+    content_summary: str | None = None,
+    key_elements: list[Any] | None = None,
+    strategy: str = "ai_bbox",
+    bbox: list[float] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("request_parse")
+    if page < 1:
+        raise ValueError("page must be >= 1")
+    if strategy not in ("ai_bbox", "full_page"):
+        raise ValueError("strategy must be 'ai_bbox' or 'full_page'")
+    if strategy == "ai_bbox" and (not bbox or len(bbox) != 4):
+        raise ValueError("bbox must be [x0, y0, x1, y1] when strategy='ai_bbox'")
+    if not caption or not caption.strip():
+        raise ValueError("caption is required")
+
+    settings = get_settings()
+    import fitz
+    import uuid as _uuid
+
+    pid = UUID(paper_id)
+    with session_scope(settings.database_url) as session:
+        paper = _ensure_paper_exists(session, pid)
+        if not paper.pdf_path:
+            raise ValueError("Associated paper PDF path not found")
+        pdf_abs_path = resolve_persisted_artifact_path(
+            paper.pdf_path,
+            category="pdf",
+            settings=settings,
+        )
+        if not pdf_abs_path or not pdf_abs_path.exists():
+            raise ValueError(f"PDF file not found: {paper.pdf_path}")
+
+    doc = fitz.open(str(pdf_abs_path))
+    try:
+        page_index = page - 1
+        if page_index >= len(doc):
+            raise ValueError(f"Page {page} is out of bounds for this PDF")
+        pdf_page = doc[page_index]
+        page_rect = pdf_page.rect
+        if strategy == "full_page":
+            target_rect = page_rect
+        else:
+            target_rect = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3]).intersect(page_rect)
+        if target_rect.is_empty:
+            raise ValueError("Calculated crop rectangle is empty or invalid")
+        pix = pdf_page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), clip=target_rect, alpha=False)
+        filename = f"{pid}_fig_{_uuid.uuid4().hex[:8]}.png"
+        rel_path = f"{pid}/{filename}"
+        abs_path = settings.storage_paths["figures"] / str(pid) / filename
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+        pix.save(str(abs_path))
+        pixel_size = {"width": pix.width, "height": pix.height}
+        bbox_used = [target_rect.x0, target_rect.y0, target_rect.x1, target_rect.y1]
+    finally:
+        doc.close()
+
+    with session_scope(settings.database_url) as session:
+        _ensure_paper_exists(session, pid)
+        figure = PaperFigure(
+            paper_id=pid,
+            caption=caption.strip(),
+            image_path=rel_path,
+            page=page,
+            figure_label=(figure_label or "").strip() or None,
+            figure_role=(figure_role or "").strip() or None,
+            content_summary=(content_summary or "").strip() or None,
+            key_elements=key_elements or None,
+            crop_status="ai_created_crop",
+            crop_source=f"create_figure_from_bbox:{strategy}:{auth.source_prefix}",
+            crop_confidence=0.55 if strategy == "ai_bbox" else 0.35,
+            prov=[
+                {
+                    "action": "create_figure_from_bbox",
+                    "strategy": strategy,
+                    "bbox": {
+                        "l": bbox_used[0],
+                        "t": bbox_used[1],
+                        "r": bbox_used[2],
+                        "b": bbox_used[3],
+                        "coord_origin": "TOPLEFT",
+                    },
+                    "page_no": page,
+                    "pixel_size": pixel_size,
+                    "created_by": auth.source_prefix,
+                    "evidence_policy": "AI-created crop; verify against the PDF page before using image-derived claims.",
+                }
+            ],
+        )
+        session.add(figure)
+        session.flush()
+        session.add(
+            AuditLog(
+                paper_id=pid,
+                action="create_figure_from_bbox",
+                source=auth.source_prefix,
+                target_type="paper_figure",
+                target_id=str(figure.id),
+                payload={
+                    "page": page,
+                    "caption": figure.caption,
+                    "figure_label": figure.figure_label,
+                    "strategy": strategy,
+                    "bbox": bbox_used,
+                    "image_path": rel_path,
+                    "pixel_size": pixel_size,
+                },
+            )
+        )
+        session.flush()
+        return {
+            "status": "success",
+            "paper_id": paper_id,
+            "figure_id": str(figure.id),
+            "caption": figure.caption,
+            "figure_label": figure.figure_label,
+            "page": page,
+            "image_path": rel_path,
+            "bbox_used": bbox_used,
+            "pixel_size": pixel_size,
+            "crop_status": figure.crop_status,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Figure review & coverage tools
 # ---------------------------------------------------------------------------
@@ -1570,28 +1572,48 @@ def recrop_figure(
 
 @mcp_server.tool(
     name="review_figure",
-    description="Record a review verdict for a specific figure. Verdicts: verified (AI summary matches the image), needs_attention (summary is incomplete or misleading), incorrect (summary contradicts the image). The verdict is persisted as a shared note so other agents and humans can see it (Blackboard pattern).",
+    description="Record and optionally apply a review verdict for a specific figure. Verdicts: verified (AI summary matches the image), needs_attention (summary is incomplete or misleading), incorrect (summary contradicts the image). For non-DFT figure metadata, IDE AI may directly update figure_role, content_summary, key_elements, and crop_status after checking the PDF/image evidence.",
 )
 def review_figure(
     figure_id: str,
     verdict: str,
     reasoning: str,
+    figure_role: str | None = None,
+    content_summary: str | None = None,
+    key_elements: list[Any] | None = None,
+    crop_status: str | None = None,
 ) -> dict[str, Any]:
     auth = require_mcp_capability_any("review_corrections", "review_dft")
     if verdict not in ("verified", "needs_attention", "incorrect"):
         raise ValueError("verdict must be one of: verified, needs_attention, incorrect")
+    allowed_crop_status = {"candidate_crop", "recropped", "ai_created_crop", "needs_recrop", "needs_review", "caption_only", "noisy", "noise", "missing", "failed"}
+    if crop_status is not None and crop_status not in allowed_crop_status:
+        raise ValueError("crop_status must be one of: " + ", ".join(sorted(allowed_crop_status)))
 
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         fig = session.get(PaperFigure, UUID(figure_id))
         if not fig:
             raise ValueError(f"Figure {figure_id} not found")
+        applied_updates: dict[str, Any] = {}
+        if figure_role is not None:
+            fig.figure_role = figure_role.strip() or None
+            applied_updates["figure_role"] = fig.figure_role
+        if content_summary is not None:
+            fig.content_summary = content_summary.strip() or None
+            applied_updates["content_summary"] = fig.content_summary
+        if key_elements is not None:
+            fig.key_elements = key_elements or None
+            applied_updates["key_elements"] = fig.key_elements
+        if crop_status is not None:
+            fig.crop_status = crop_status
+            applied_updates["crop_status"] = fig.crop_status
 
-        # Write structured review note (Blackboard pattern — same as analyze_chart auto-note)
+        # Write structured review note (Blackboard pattern).
         note = PaperNote(
             paper_id=fig.paper_id,
             source=f"review_figure:{auth.source_prefix}",
-            content=f"[Figure Review] Verdict: {verdict}\nReasoning: {reasoning}",
+            content=f"[Figure Review] Verdict: {verdict}\nReasoning: {reasoning}\nApplied updates: {applied_updates}",
             field_name="figure_review",
             page=fig.page,
             section_title=fig.caption,
@@ -1611,6 +1633,7 @@ def review_figure(
                     "verdict": verdict,
                     "reasoning": reasoning,
                     "note_id": str(note.id),
+                    "applied_updates": applied_updates,
                 },
             )
         )
@@ -1621,12 +1644,13 @@ def review_figure(
         "verdict": verdict,
         "reviewer": auth.source_prefix,
         "note_created": True,
+        "applied_updates": applied_updates,
     }
 
 
 @mcp_server.tool(
     name="get_review_coverage",
-    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Aggregates review_figure verdicts, analyze_chart auto-notes, and PaperCorrection records to produce a coverage report.",
+    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Aggregates review_figure verdicts, historical chart notes, and PaperCorrection records to produce a coverage report.",
 )
 def get_review_coverage(paper_id: str) -> dict[str, Any]:
     require_mcp_capability("read_papers")

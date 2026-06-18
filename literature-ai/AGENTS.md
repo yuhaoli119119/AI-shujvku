@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## 0.1 Codex Encoding Guardrail
+
+- This rule is specifically for Codex in this repository.
+- If UI text, docs, or source strings look garbled in terminal output, do not assume the repository content is broken.
+- First verify whether the issue is caused by terminal encoding, shell rendering, file decoding, or copy/paste artifacts.
+- Before calling something "mojibake" or "garbled", confirm it against at least one more source of truth such as:
+  - the raw file bytes / explicit UTF-8 read
+  - the browser-rendered UI
+  - the same file opened through a different reader
+- When uncertain, state that the display may be a local decoding problem instead of asserting that the project text itself is corrupted.
+
+
 本文件定义 `literature-ai` 的 AI 协作者最低协作规则。目标是减少误操作、减少误报、减少对当前 D2 数据底座状态的误导。
 
 ## 0. 当前基线

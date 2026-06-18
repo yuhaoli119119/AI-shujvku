@@ -9,6 +9,24 @@ from typing import Any, Protocol
 logger = logging.getLogger(__name__)
 
 
+def _l2_normalize(vector: list[float]) -> list[float]:
+    norm = math.sqrt(sum(float(value) * float(value) for value in vector))
+    if norm == 0:
+        return [float(value) for value in vector]
+    return [round(float(value) / norm, 8) for value in vector]
+
+
+def _cosine_similarity(left: list[float] | None, right: list[float] | None) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    left_norm = math.sqrt(sum(float(value) * float(value) for value in left))
+    right_norm = math.sqrt(sum(float(value) * float(value) for value in right))
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    dot_product = sum(float(a) * float(b) for a, b in zip(left, right))
+    return round(dot_product / (left_norm * right_norm), 6)
+
+
 class EmbeddingService(Protocol):
     """Protocol that all embedding services must satisfy."""
 
@@ -46,12 +64,10 @@ class DeterministicEmbeddingService:
         norm = math.sqrt(sum(value * value for value in vector))
         if norm == 0:
             return vector
-        return [round(value / norm, 8) for value in vector]
+        return _l2_normalize(vector)
 
     def cosine_similarity(self, left: list[float] | None, right: list[float] | None) -> float:
-        if not left or not right or len(left) != len(right):
-            return 0.0
-        return round(sum(a * b for a, b in zip(left, right)), 6)
+        return _cosine_similarity(left, right)
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
@@ -106,7 +122,7 @@ class OpenAICompatibleEmbeddingService:
             data = response.json()
             embedding = self._extract_embedding(data)
             if embedding and len(embedding) == self.dimension:
-                return embedding
+                return _l2_normalize(embedding)
             raise EmbeddingUnavailableError(
                 f"Embedding dimension mismatch: expected {self.dimension}, got {len(embedding) if embedding else 0}"
             )
@@ -117,9 +133,7 @@ class OpenAICompatibleEmbeddingService:
             raise EmbeddingUnavailableError(f"Embedding API call failed: {exc}") from exc
 
     def cosine_similarity(self, left: list[float] | None, right: list[float] | None) -> float:
-        if not left or not right or len(left) != len(right):
-            return 0.0
-        return round(sum(a * b for a, b in zip(left, right)), 6)
+        return _cosine_similarity(left, right)
 
     def _build_embeddings_url(self) -> str:
         if self.api_base.endswith("/embeddings"):

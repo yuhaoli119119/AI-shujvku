@@ -18,6 +18,8 @@ DFT_REVIEW_FIELD_ALIASES = {
     "property_type": "energy_type",
     "energy": "energy_type",
     "energy_type": "energy_type",
+    # DFT review snapshots store the numeric value and its unit together under
+    # "value"; there is no standalone review field named "unit".
     "unit": "value",
     "energy_value": "value",
     "adsorbate": "adsorbate",
@@ -50,6 +52,8 @@ DFT_CORRECTION_FIELD_ALIASES = {
 
 class DFTResultReviewService:
     """Promote evidence-backed DFT candidates through the existing review gate."""
+
+    IMPORTED_NEGATIVE_DECISIONS = {"REJECT", "REJECTED", "BLOCK", "DENY", "DROP"}
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -277,6 +281,92 @@ class DFTResultReviewService:
             "audit_log_id": str(audit.id),
         }
 
+    def revoke_result(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        reviewer: str | None = None,
+        reviewer_note: str | None = None,
+        field_names: list[str] | None = None,
+    ) -> dict[str, Any]:
+        row = self.session.get(DFTResult, result_id)
+        if row is None or row.paper_id != paper_id:
+            raise LookupError("DFT result not found for this paper.")
+
+        snapshot = self.review_service.get_target_field_snapshot("dft_results", row)
+        selected_fields = self._select_review_fields(snapshot, field_names)
+        if not selected_fields:
+            raise ValueError("No DFT review fields are available for revocation.")
+
+        reviews = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(result_id),
+                ExtractionFieldReview.field_name.in_(selected_fields),
+            )
+        ).all()
+        if not reviews:
+            raise ValueError("This DFT result has no accepted review to revoke.")
+
+        note = reviewer_note or "Revoked from the Literature Library DFT panel and returned to the pending queue."
+        for review in reviews:
+            review.reviewer_status = "pending"
+            review.reviewer = reviewer or "codex_review"
+            review.reviewer_note = note
+            payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+            human_verification = payload.get("human_verification") if isinstance(payload.get("human_verification"), dict) else {}
+            review.review_payload = {
+                **payload,
+                "human_verification": {
+                    **human_verification,
+                    "reviewer": reviewer or "codex_review",
+                    "reviewer_note": note,
+                    "decision": "revoked",
+                    "writes_final_truth": False,
+                },
+            }
+            self.session.add(review)
+
+        row.candidate_status = "system_candidate"
+        self.session.add(row)
+        gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="revoke_dft_result_review",
+            source=reviewer or "codex_review",
+            target_type="dft_results",
+            target_id=str(result_id),
+            payload={
+                "field_names": selected_fields,
+                "review_ids": [str(item.id) for item in reviews],
+                "is_exportable": gate.eligible,
+                "blocked_reasons": list(gate.reasons),
+            },
+        )
+        self.session.add(audit)
+        self._add_workflow_job(
+            paper_id=paper_id,
+            action="revoke_dft_result_review",
+            payload={
+                "dft_result_id": str(result_id),
+                "field_names": selected_fields,
+                "is_exportable": gate.eligible,
+                "blocked_reasons": list(gate.reasons),
+            },
+        )
+        self.session.commit()
+        self.session.refresh(audit)
+        return {
+            "paper_id": str(paper_id),
+            "dft_result_id": str(result_id),
+            "field_names": selected_fields,
+            "reviews": [self.review_service._serialize(item).model_dump(mode="json") for item in reviews],
+            "export_safety": self._gate_payload(row, gate),
+            "audit_log_id": str(audit.id),
+        }
+
     def verify_results_batch(
         self,
         *,
@@ -433,6 +523,101 @@ class DFTResultReviewService:
         self.session.refresh(correction)
         return self._correction_payload(correction)
 
+    def apply_imported_opinion(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        opinion: dict[str, Any],
+        reviewer: str | None = None,
+    ) -> dict[str, Any]:
+        row = self.session.get(DFTResult, result_id)
+        if row is None or row.paper_id != paper_id:
+            raise LookupError("DFT result not found for this paper.")
+        if not isinstance(opinion, dict):
+            raise ValueError("A structured imported opinion payload is required.")
+
+        reviewer_name = reviewer or "codex_review"
+        decision = str(opinion.get("decision") or opinion.get("status") or "").strip().upper()
+        if not decision:
+            raise ValueError("Imported opinion is missing a decision.")
+        if decision in {"NEEDS_HUMAN", "NEEDS_MANUAL", "MANUAL"}:
+            raise ValueError("NEEDS_HUMAN opinions cannot be auto-applied to DFT results.")
+
+        evidence_payload = self._imported_evidence_payload(opinion)
+        reason = str(opinion.get("reason") or "").strip() or "Applied imported AI opinion from the DFT review queue."
+        source_label = str(opinion.get("source_label") or opinion.get("source") or "imported_ai").strip()
+
+        if decision in self.IMPORTED_NEGATIVE_DECISIONS:
+            rejected = self.reject_result(
+                paper_id=paper_id,
+                result_id=result_id,
+                confirm_reject_candidate=True,
+                reviewer=reviewer_name,
+                reviewer_note=f"Applied imported AI rejection from {source_label}. {reason}".strip(),
+            )
+            return {
+                "paper_id": str(paper_id),
+                "dft_result_id": str(result_id),
+                "action": "reject",
+                "source_label": source_label,
+                "applied_corrections": [],
+                "review_result": rejected,
+            }
+
+        applied_corrections: list[dict[str, Any]] = []
+        corrected_value = opinion.get("corrected_value")
+        material_identity = self._first_text(
+            corrected_value.get("material_identity") if isinstance(corrected_value, dict) else None,
+            corrected_value.get("material") if isinstance(corrected_value, dict) else None,
+            corrected_value.get("catalyst") if isinstance(corrected_value, dict) else None,
+            opinion.get("normalized_material"),
+            opinion.get("normalized_material_or_catalyst"),
+        )
+
+        if material_identity or row.catalyst_sample_id:
+            binding = self._apply_material_binding(
+                row=row,
+                material_identity=material_identity,
+                reviewer=reviewer_name,
+                reason=reason,
+                evidence_payload=evidence_payload,
+            )
+            if binding:
+                applied_corrections.append(binding)
+
+        for field_name, proposed_value in self._imported_field_updates(row=row, opinion=opinion).items():
+            applied_corrections.append(
+                self._approve_dft_correction(
+                    paper_id=paper_id,
+                    result_id=result_id,
+                    field_name=field_name,
+                    proposed_value=proposed_value,
+                    reviewer=reviewer_name,
+                    reason=reason,
+                    evidence_payload=evidence_payload,
+                )
+            )
+
+        verify_field_names = self._imported_verify_field_names(row=row, applied_corrections=applied_corrections)
+        verified = self.verify_result(
+            paper_id=paper_id,
+            result_id=result_id,
+            confirm_reviewed_against_pdf=True,
+            reviewer=reviewer_name,
+            reviewer_note=f"Applied imported AI opinion from {source_label}. {reason}".strip(),
+            field_names=verify_field_names or None,
+            evidence_payload=evidence_payload,
+        )
+        return {
+            "paper_id": str(paper_id),
+            "dft_result_id": str(result_id),
+            "action": "verify",
+            "source_label": source_label,
+            "applied_corrections": applied_corrections,
+            "review_result": verified,
+        }
+
     def _add_workflow_job(self, *, paper_id: UUID, action: str, payload: dict[str, Any]) -> None:
         paper = self.session.get(Paper, paper_id)
         self.session.add(
@@ -451,6 +636,254 @@ class DFTResultReviewService:
                 result={"status": "recorded"},
             )
         )
+
+    def _apply_material_binding(
+        self,
+        *,
+        row: DFTResult,
+        material_identity: str | None,
+        reviewer: str,
+        reason: str,
+        evidence_payload: dict[str, Any] | list[Any] | None,
+    ) -> dict[str, Any] | None:
+        if not self._has_anchor(evidence_payload):
+            raise ValueError("Applying imported material binding requires a PDF evidence anchor.")
+        target_sample_id = str(row.catalyst_sample_id) if row.catalyst_sample_id else None
+        if material_identity:
+            target_sample_id = self._resolve_or_create_catalyst_sample_id(
+                paper_id=row.paper_id,
+                material_identity=material_identity,
+                reviewer=reviewer,
+                reason=reason,
+                evidence_payload=evidence_payload,
+            )
+        if not target_sample_id:
+            return None
+        return self._approve_dft_correction(
+            paper_id=row.paper_id,
+            result_id=row.id,
+            field_name="catalyst_sample_id",
+            proposed_value=target_sample_id,
+            reviewer=reviewer,
+            reason=reason,
+            evidence_payload=evidence_payload,
+        )
+
+    def _resolve_or_create_catalyst_sample_id(
+        self,
+        *,
+        paper_id: UUID,
+        material_identity: str,
+        reviewer: str,
+        reason: str,
+        evidence_payload: dict[str, Any] | list[Any] | None,
+    ) -> str:
+        first_anchor = self._first_anchor(evidence_payload)
+        proposed_value = {
+            "name": material_identity,
+            "structure_name": material_identity,
+            "evidence_strength": self._first_text(
+                first_anchor.get("quoted_text") if first_anchor else None,
+                reason,
+            ),
+        }
+        correction = PaperCorrection(
+            paper_id=paper_id,
+            source=reviewer,
+            field_name="catalyst_samples",
+            target_path="catalyst_samples:new:create",
+            operation="create",
+            proposed_value=proposed_value,
+            reason=reason,
+            evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
+            status="pending",
+        )
+        self.session.add(correction)
+        self.session.flush()
+        approved = ReviewService(self.session).approve_correction(correction.id, reviewer=reviewer)
+        self.session.flush()
+        payload = approved.evidence_payload if isinstance(approved.evidence_payload, dict) else {}
+        resolution = payload.get("sample_resolution") if isinstance(payload, dict) else {}
+        sample_id = resolution.get("catalyst_sample_id") if isinstance(resolution, dict) else None
+        if not sample_id:
+            raise ValueError("Imported material identity could not be resolved to a catalyst sample.")
+        return str(sample_id)
+
+    def _approve_dft_correction(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        field_name: str,
+        proposed_value: Any,
+        reviewer: str,
+        reason: str,
+        evidence_payload: dict[str, Any] | list[Any] | None,
+    ) -> dict[str, Any]:
+        canonical_field = DFT_CORRECTION_FIELD_ALIASES.get(str(field_name or "").strip(), str(field_name or "").strip())
+        correction = PaperCorrection(
+            paper_id=paper_id,
+            source=reviewer,
+            field_name="dft_results",
+            target_path=f"dft_results:{result_id}:{canonical_field}",
+            operation="replace",
+            proposed_value=proposed_value,
+            reason=reason,
+            evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
+            status="pending",
+        )
+        self.session.add(correction)
+        self.session.flush()
+        approved = ReviewService(self.session).approve_correction(correction.id, reviewer=reviewer)
+        self.session.flush()
+        return {
+            "correction_id": str(approved.id),
+            "field_name": canonical_field,
+            "proposed_value": proposed_value,
+            "status": approved.status,
+        }
+
+    def _imported_field_updates(self, *, row: DFTResult, opinion: dict[str, Any]) -> dict[str, Any]:
+        corrected_value = opinion.get("corrected_value")
+        updates: dict[str, Any] = {}
+        if isinstance(corrected_value, dict):
+            property_value = self._first_text(
+                corrected_value.get("property_type"),
+                corrected_value.get("property"),
+                corrected_value.get("energy_type"),
+                opinion.get("normalized_energy_type"),
+            )
+            if property_value and self._normalized_text(property_value) != self._normalized_text(row.property_type):
+                updates["property_type"] = property_value
+
+            value = corrected_value.get("value")
+            unit = self._first_text(corrected_value.get("unit"))
+            normalized_value, normalized_unit = self._normalize_imported_dft_value(
+                value=value,
+                unit=unit,
+                property_type=property_value or row.property_type,
+            )
+            if value not in (None, ""):
+                numeric_value = normalized_value
+                if numeric_value is not None and self._numeric_key(numeric_value) != self._numeric_key(row.value):
+                    updates["value"] = numeric_value
+
+            if normalized_unit and self._normalized_text(normalized_unit) != self._normalized_text(row.unit):
+                updates["unit"] = normalized_unit
+
+            adsorbate = self._first_text(corrected_value.get("adsorbate"))
+            if adsorbate and self._normalized_text(adsorbate) != self._normalized_text(row.adsorbate):
+                updates["adsorbate"] = adsorbate
+
+            reaction_step = self._first_text(corrected_value.get("reaction_step"))
+            if reaction_step and self._normalized_text(reaction_step) != self._normalized_text(row.reaction_step):
+                updates["reaction_step"] = reaction_step
+            return updates
+
+        field_name = DFT_CORRECTION_FIELD_ALIASES.get(
+            str(opinion.get("field_name") or "").strip(),
+            str(opinion.get("field_name") or "").strip(),
+        )
+        if field_name in ReviewService.ALLOWED_DFT_RESULT_FIELDS and corrected_value not in (None, ""):
+            current_value = getattr(row, field_name, None)
+            if field_name == "value":
+                numeric_value, normalized_unit = self._normalize_imported_dft_value(
+                    value=corrected_value,
+                    unit=row.unit,
+                    property_type=row.property_type,
+                )
+                if numeric_value is not None and self._numeric_key(numeric_value) != self._numeric_key(current_value):
+                    updates["value"] = numeric_value
+                if normalized_unit and self._normalized_text(normalized_unit) != self._normalized_text(row.unit):
+                    updates["unit"] = normalized_unit
+            elif self._normalized_text(corrected_value) != self._normalized_text(current_value):
+                updates[field_name] = corrected_value
+        return updates
+
+    def _imported_verify_field_names(self, *, row: DFTResult, applied_corrections: list[dict[str, Any]]) -> list[str]:
+        preferred = []
+        corrected_fields = {str(item.get("field_name") or "").strip() for item in applied_corrections}
+        if row.catalyst_sample_id or "catalyst_sample_id" in corrected_fields:
+            preferred.append("catalyst")
+        for field_name in ["value", "adsorbate", "energy_type", "reaction_step"]:
+            canonical = DFT_CORRECTION_FIELD_ALIASES.get(field_name, field_name)
+            if canonical in corrected_fields or canonical in {"value", "adsorbate", "property_type", "reaction_step"}:
+                preferred.append(field_name)
+        seen: list[str] = []
+        for field_name in preferred:
+            if field_name not in seen:
+                seen.append(field_name)
+        return seen
+
+    @staticmethod
+    def _imported_evidence_payload(opinion: dict[str, Any]) -> dict[str, Any] | list[Any] | None:
+        payload = opinion.get("evidence_payload")
+        if isinstance(payload, (dict, list)) and has_evidence_anchor(payload):
+            return payload
+        location = opinion.get("evidence_location")
+        if isinstance(location, dict):
+            return location
+        return payload if isinstance(payload, (dict, list)) else None
+
+    @staticmethod
+    def _first_anchor(payload: dict[str, Any] | list[Any] | None) -> dict[str, Any] | None:
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, dict):
+                    return item
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _first_text(*values: Any) -> str | None:
+        for value in values:
+            if value in (None, "", []):
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
+
+    @staticmethod
+    def _normalized_text(value: Any) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    @staticmethod
+    def _numeric_key(value: Any) -> str:
+        if value in (None, ""):
+            return ""
+        try:
+            return f"{float(value):.8g}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    @staticmethod
+    def _normalize_imported_dft_value(
+        *,
+        value: Any,
+        unit: str | None,
+        property_type: Any = None,
+    ) -> tuple[float | None, str | None]:
+        if value in (None, ""):
+            return None, unit
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return None, unit
+        unit_text = str(unit or "").strip()
+        unit_key = unit_text.lower().replace(" ", "")
+        if unit_key in {"mev"}:
+            return numeric_value / 1000.0, "eV"
+        if unit_key in {"ev"}:
+            return numeric_value, "eV"
+        if "gpu" in unit_key:
+            ascii_key = "".join(ch for ch in unit_key if ch.isascii())
+            if any(marker in ascii_key for marker in ("10^3", "x10^3", "103")) or (
+                ascii_key.startswith("10") and ascii_key != "gpu"
+            ):
+                return numeric_value * 1000.0, "GPU"
+            return numeric_value, "GPU"
+        return numeric_value, unit_text or unit
 
     def _select_review_fields(
         self,

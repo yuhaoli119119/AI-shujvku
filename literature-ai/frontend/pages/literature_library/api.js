@@ -2,8 +2,21 @@ const API_BASE = "/api/papers";
 const LIB_API = "/api/libraries";
 const WRITER_API = "/api/writer";
 const EXTERNAL_API = "/api/external-analysis";
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 25;
 const SYSTEM_API = "/api/system";
+const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
+
+function rememberCurrentLibraryName(name) {
+    try {
+        if (name) {
+            window.localStorage.setItem(CURRENT_LIBRARY_STORAGE_KEY, name);
+        } else {
+            window.localStorage.removeItem(CURRENT_LIBRARY_STORAGE_KEY);
+        }
+    } catch (_) {
+        // localStorage can be unavailable in strict browser modes.
+    }
+}
 
 function showToast(message, type) {
     const existing = document.querySelector(".toast");
@@ -91,7 +104,7 @@ const UI_LABELS = {
     },
     source: {
         manual: "手动导入",
-        internal_ai: "网页内 AI",
+        internal_ai: "IDE AI 回写",
         chatgpt_web: "ChatGPT 网页",
         claude_web: "Claude 网页",
         section: "章节",
@@ -112,7 +125,9 @@ const UI_LABELS = {
     candidate_status: {
         pending: "待确认",
         requires_resolution: "需人工处理",
-        materialized: "已生成待确认记录",
+        materialized: "已生成审核记录",
+        ai_reviewed: "AI 已审核",
+        ai_applied: "AI 已修改入库",
         skipped: "已跳过",
         unknown: "未识别"
     }
@@ -162,7 +177,7 @@ function paperTypeBadgeClass(value) {
 function normalizeExternalSourceForApi(value) {
     const raw = String(value || "").trim();
     if (!raw || raw === "手动导入") return "manual";
-    if (raw === "网页内 AI") return "internal_ai";
+    if (raw === "IDE AI 回写") return "internal_ai";
     return raw;
 }
 
@@ -264,9 +279,10 @@ async function loadLibraries() {
         const el = $("librarySelect");
         const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "";
         const quickLibraries = normalizeLibraryListResponse(await fetchJSON(API_BASE + "/libraries"));
+        const quickActive = (quickLibraries || []).find(function(item) { return item.is_active; });
         const selectedName = previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
             ? previousSelection
-            : ((quickLibraries || [])[0] ? quickLibraries[0].name : "");
+            : ((quickActive && quickActive.name) || ((quickLibraries || [])[0] ? quickLibraries[0].name : ""));
         if (el) {
             el.innerHTML = (quickLibraries || []).map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
@@ -276,6 +292,7 @@ async function loadLibraries() {
         }
         const selected = (quickLibraries || []).find(function(item) { return item.name === selectedName; });
         state.currentLibrary = selected || null;
+        rememberCurrentLibraryName(state.currentLibrary ? state.currentLibrary.name : "");
         state.currentLibraryTotal = selected ? Number(selected.paper_count || 0) : 0;
         const status = $("libStatus");
         if (status) status.textContent = selected ? (selected.name + " | " + selected.paper_count + " 篇文献") : "";
@@ -297,6 +314,7 @@ async function loadLibraries() {
             const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
             if (selectedFull) {
                 state.currentLibrary = selectedFull;
+                rememberCurrentLibraryName(selectedFull.name || "");
                 state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
                 if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
             }
@@ -317,6 +335,7 @@ async function loadLibraries() {
         }
         const active = (libraries || []).find(function(item) { return item.is_active; });
         state.currentLibrary = active || null;
+        rememberCurrentLibraryName(active ? active.name : "");
         state.currentLibraryTotal = active ? Number(active.paper_count || 0) : 0;
         const status = $("libStatus");
         if (status) status.textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
@@ -327,17 +346,18 @@ async function loadLibraries() {
 }
 
 async function loadWriterSettings() {
-    try {
-        state.writerSettings = await fetchJSON("/api/settings");
-    } catch (error) {
-        state.writerSettings = null;
-        console.warn("loadWriterSettings failed", error);
-    }
+    state.writerSettings = {
+        writer_backend: "disabled",
+        writer_model: "",
+        writer_api_base: "",
+        writer_api_key: ""
+    };
 }
 
 async function activateLibraryByName(name) {
     if (!name) return;
     try {
+        rememberCurrentLibraryName(name);
         await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
         showToast("已切换到：" + name, "success");
         state.currentOffset = 0;

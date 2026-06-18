@@ -43,7 +43,7 @@ services:
       dockerfile: backend/Dockerfile
     command: >
       sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000
-      --workers $${LITAI_UVICORN_WORKERS:-2}"
+      --workers $${LITAI_UVICORN_WORKERS:-1}"
     environment:
       LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
       LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
@@ -74,8 +74,20 @@ services:
       LITAI_SETTINGS_ADMIN_TOKEN: ${LITAI_SETTINGS_ADMIN_TOKEN:-}
       LITAI_BROWSE_ROOTS: ${LITAI_BROWSE_ROOTS:-/host/users,/data,/legacy}
       LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
+      LITAI_MCP_ALLOW_UNAUTHENTICATED: ${LITAI_MCP_ALLOW_UNAUTHENTICATED:-true}
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
+      # --- Literature Discovery API Keys (findpapers engine) ---
+      # Semantic Scholar: https://www.semanticscholar.org/product/api (free, recommended)
+      FINDPAPERS_SEMANTIC_SCHOLAR_API_TOKEN: ${FINDPAPERS_SEMANTIC_SCHOLAR_API_TOKEN:-}
+      # PubMed: https://www.ncbi.nlm.nih.gov/pmc/tools/developers/ (free)
+      FINDPAPERS_PUBMED_API_TOKEN: ${FINDPAPERS_PUBMED_API_TOKEN:-}
+      # Scopus: https://dev.elsevier.com/ (requires Elsevier account)
+      FINDPAPERS_SCOPUS_API_TOKEN: ${FINDPAPERS_SCOPUS_API_TOKEN:-}
+      # IEEE: https://developer.ieee.org/ (requires IEEE account)
+      FINDPAPERS_IEEE_API_TOKEN: ${FINDPAPERS_IEEE_API_TOKEN:-}
+      # OpenAlex: polite pool with email (optional but recommended for higher rate limit)
+      FINDPAPERS_OPENALEX_API_TOKEN: ${FINDPAPERS_OPENALEX_API_TOKEN:-}
     depends_on:
       - postgres
       - redis
@@ -132,8 +144,15 @@ services:
       LITAI_SETTINGS_ADMIN_TOKEN: ${LITAI_SETTINGS_ADMIN_TOKEN:-}
       LITAI_BROWSE_ROOTS: ${LITAI_BROWSE_ROOTS:-/host/users,/data,/legacy}
       LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
+      LITAI_MCP_ALLOW_UNAUTHENTICATED: ${LITAI_MCP_ALLOW_UNAUTHENTICATED:-true}
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
+      # --- Literature Discovery API Keys (findpapers engine) ---
+      FINDPAPERS_SEMANTIC_SCHOLAR_API_TOKEN: ${FINDPAPERS_SEMANTIC_SCHOLAR_API_TOKEN:-}
+      FINDPAPERS_PUBMED_API_TOKEN: ${FINDPAPERS_PUBMED_API_TOKEN:-}
+      FINDPAPERS_SCOPUS_API_TOKEN: ${FINDPAPERS_SCOPUS_API_TOKEN:-}
+      FINDPAPERS_IEEE_API_TOKEN: ${FINDPAPERS_IEEE_API_TOKEN:-}
+      FINDPAPERS_OPENALEX_API_TOKEN: ${FINDPAPERS_OPENALEX_API_TOKEN:-}
     depends_on:
       - postgres
       - redis

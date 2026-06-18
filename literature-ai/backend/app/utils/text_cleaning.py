@@ -19,6 +19,11 @@ def repair_mojibake_text(text: str | None) -> str | None:
     if not text:
         return text
 
+    # Repair deterministic Unicode offset (e.g. Greek/Coptic block offsets for digits)
+    # 0x0376 to 0x037F mapping to '0' through '9'
+    digit_map = {chr(0x0376 + i): str(i) for i in range(10)}
+    text = text.translate(str.maketrans(digit_map))
+
     candidates = [text]
     if _looks_like_mojibake(text):
         for source_encoding in ("latin-1", "cp1252"):
@@ -33,12 +38,12 @@ def repair_mojibake_text(text: str | None) -> str | None:
 
 
 def _looks_like_mojibake(text: str) -> bool:
-    suspicious_tokens = ("Ã", "Â", "â", "ð", "€", "™", "œ", "�")
+    suspicious_tokens = ("Ã", "Â", "â", "ð", "€", "™", "œ", "�", "Î", "Ï")
     return any(token in text for token in suspicious_tokens)
 
 
 def _mojibake_score(text: str) -> tuple[int, int]:
-    suspicious_tokens = ("Ã", "Â", "â", "ð", "€", "™", "œ", "�")
+    suspicious_tokens = ("Ã", "Â", "â", "ð", "€", "™", "œ", "�", "Î", "Ï")
     suspicious_count = sum(text.count(token) for token in suspicious_tokens)
     replacement_count = text.count("\ufffd")
     return suspicious_count + (replacement_count * 2), len(text)

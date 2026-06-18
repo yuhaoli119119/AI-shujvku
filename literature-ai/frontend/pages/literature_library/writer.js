@@ -1,15 +1,10 @@
 async function ensureWriterStatus() {
-    if (state.writerStatus) {
-        renderWriterStatus();
-        return;
-    }
-    try {
-        state.writerStatus = await fetchJSON(WRITER_API + "/status");
-        renderWriterStatus();
-    } catch (error) {
-        const box = $("writerStatusBox");
-        if (box) box.textContent = "写作器状态读取失败：" + error.message;
-    }
+    state.writerStatus = {
+        backend_used: "disabled",
+        llm_status: "disabled",
+        llm_error: "网页端写作模型已停用；请在 IDE AI 中完成写作整理，优先走 MCP，若当前会话未暴露 MCP 工具可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。"
+    };
+    renderWriterStatus();
 }
 
 function renderWriterStatus() {
@@ -17,13 +12,14 @@ function renderWriterStatus() {
     const box = $("writerStatusBox");
     if (box) {
         box.innerHTML =
-            '<strong>' + esc(state.writerStatus.llm_error ? "写作服务需要检查" : "写作服务已就绪") + '</strong>' +
+            '<strong>网页端写作模型已停用</strong>' +
             '<span class="subtle" style="margin-left:8px;">' + esc(writerStatusText(state.writerStatus)) + '</span>';
     }
 }
 
 function writerStatusText(data) {
     if (!data) return "未返回";
+    if (data.llm_status === "disabled") return data.llm_error || "请使用 IDE AI。";
     if (data.llm_status === "ok") return "AI 已完成生成";
     if (data.llm_status === "fallback") return "已使用规则兜底生成，建议检查 API 设置";
     if (data.llm_error) return "生成遇到问题：" + data.llm_error;
@@ -44,46 +40,6 @@ function renderWriterStatusSummary(data) {
 }
 
 async function generateWriterDraft() {
-    if (!state.selectedPaperId) {
-        showToast("请先选择一篇文献。", "error");
-        return;
-    }
-    const topicEl = $("writerTopic");
-    const topic = topicEl ? topicEl.value.trim() : "";
-    if (!topic) {
-        showToast("请输入写作主题。", "error");
-        return;
-    }
-    showProgress("内部 AI 正在整理归纳...");
-    try {
-        const notesEl = $("writerNotes");
-        const limitEl = $("writerLimit");
-        const data = await fetchJSON(WRITER_API + "/draft", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                topic: topic,
-                paper_ids: [state.selectedPaperId],
-                user_notes: notesEl ? notesEl.value.trim() || null : null,
-                sections: ["outline", "introduction", "dft_results", "discussion", "figure_storyline"],
-                limit_per_type: Number(limitEl ? limitEl.value || 5 : 5)
-            })
-        });
-        const resultEl = $("writerResult");
-        if (resultEl) {
-            resultEl.innerHTML =
-                renderWriterStatusSummary(data) +
-                '<div class="section-card"><h3>提纲</h3><div class="prewrap">' + esc((data.outline || []).join("\n")) + "</div></div>" +
-                '<div class="section-card"><h3>引言</h3><div class="prewrap">' + esc(data.introduction || "") + "</div></div>" +
-                '<div class="section-card"><h3>DFT 结果整理</h3><div class="prewrap">' + esc(data.dft_results || "") + "</div></div>" +
-                '<div class="section-card"><h3>讨论</h3><div class="prewrap">' + esc(data.discussion || "") + "</div></div>" +
-                '<div class="section-card"><h3>图文叙事</h3><div class="prewrap">' + esc((data.figure_storyline || []).join("\n")) + "</div></div>";
-        }
-        showToast("内部 AI 整理完成。", "success");
-    } catch (error) {
-        const resultEl = $("writerResult");
-        if (resultEl) resultEl.innerHTML = '<div class="workspace-empty">写作失败：' + esc(error.message) + "</div>";
-        showToast("内部 AI 整理失败：" + error.message, "error");
-    }
-    hideProgress();
+    showToast("网页端写作模型已停用，请在 IDE AI 中完成写作整理；优先走 MCP，若当前会话未暴露工具可改用仓库内 `literature-ai/backend` 的 `app.mcp.*`。", "info");
+    if (typeof loadAgentGuide === "function") await loadAgentGuide();
 }

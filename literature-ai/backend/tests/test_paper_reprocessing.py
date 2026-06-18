@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -15,6 +16,7 @@ from app.db.models import (
     MechanismClaim,
     Paper,
     PaperFigure,
+    PaperRelationship,
     PaperSection,
     PaperTable,
     WritingCard,
@@ -35,6 +37,15 @@ def test_rerun_stage2_replaces_existing_outputs():
         page.insert_textbox(fitz.Rect(72, 72, 520, 760), pdf_text, fontsize=8)
         doc.save(tmp_path / "paper.pdf")
         doc.close()
+        si_doc = fitz.open()
+        si_page = si_doc.new_page()
+        si_page.insert_textbox(
+            fitz.Rect(72, 72, 520, 760),
+            "Supporting information Table S1. DFT energy = -0.67 eV.",
+            fontsize=9,
+        )
+        si_doc.save(tmp_path / "paper_si.pdf")
+        si_doc.close()
         (tmp_path / "paper.md").write_text("Results markdown", encoding="utf-8")
         (tmp_path / "paper.tei.xml").write_text("<TEI/>", encoding="utf-8")
         (tmp_path / "paper.docling.json").write_text("{}", encoding="utf-8")
@@ -57,6 +68,22 @@ def test_rerun_stage2_replaces_existing_outputs():
                 )
                 session.add(paper)
                 session.flush()
+                si_paper = Paper(
+                    title="Reprocess Me SI",
+                    pdf_path=str(tmp_path / "paper_si.pdf"),
+                    authors=[],
+                    abstract="Supplementary information.",
+                )
+                session.add(si_paper)
+                session.flush()
+                session.add(
+                    PaperRelationship(
+                        source_paper_id=paper.id,
+                        target_paper_id=si_paper.id,
+                        relationship_type="supplementary",
+                        note="Test SI link",
+                    )
+                )
                 session.add(
                     PaperSection(
                         paper_id=paper.id,
@@ -147,7 +174,28 @@ def test_rerun_stage2_replaces_existing_outputs():
                 assert session.query(WritingCard).filter(WritingCard.paper_id == paper.id).count() == 1
                 assert session.query(EvidenceSpan).filter(EvidenceSpan.paper_id == paper.id).count() >= 1
                 workspace_root = tmp_path / "by_id" / str(paper.id)
-                assert (workspace_root / "extraction" / "ai_reading_package.json").exists()
+                package_path = workspace_root / "extraction" / "ai_reading_package.json"
+                assert package_path.exists()
+                package = json.loads(package_path.read_text(encoding="utf-8"))
+                source_documents = package["source_documents"]
+                assert source_documents[0]["source_document_type"] == "main_text"
+                assert source_documents[0]["available"] is True
+                assert source_documents[1]["source_document_type"] == "supplementary_information"
+                linked_si = source_documents[2]
+                assert linked_si["source_document_type"] == "supplementary_information"
+                assert linked_si["available"] is True
+                assert linked_si["related_paper_id"] == str(si_paper.id)
+                assert linked_si["path"] == str(tmp_path / "paper_si.pdf")
+                assert "SI data belongs to this main paper_id" in package["ai_task"]
+                assert "supporting_reference" in package["ai_task"]
+                assert "First repair non-DFT content" in package["ai_task"]
+                assert package["llm_input_policy"]["web_llm_extract"] == "disabled"
+                assert "writing_cards" in package["non_dft_direct_write_policy"]["ai_can_apply_without_human_confirmation"]
+                assert "dft_results" in package["non_dft_direct_write_policy"]["must_not_auto_apply"]
+                assert package["content_coverage"]["structured_counts"]["writing_cards"] == 1
+                assert package["content_coverage"]["structured_counts"]["mechanism_claims"] >= 1
+                assert package["existing_structured_content"]["catalyst_samples"][0]["name"] == "old"
+                assert package["existing_structured_content"]["writing_cards"][0]["paper_type"] == "old"
         finally:
             engine.dispose()
 

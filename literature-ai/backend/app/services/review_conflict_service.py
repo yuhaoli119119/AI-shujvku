@@ -24,7 +24,7 @@ from app.services.review_target_resolver import canonical_target_type
 
 
 DECISION_POSITIVE = {"PASS", "ACCEPT", "APPROVE", "APPROVED", "VERIFIED", "OK"}
-DECISION_NEGATIVE = {"REVISE", "FLAG", "INSUFFICIENT", "REJECT", "REJECTED", "NEEDS_FIX", "FIX", "BLOCK"}
+DECISION_NEGATIVE = {"REVISE", "FLAG", "INSUFFICIENT", "REJECT", "REJECTED", "NEEDS_FIX", "FIX", "BLOCK", "PROPOSED"}
 CORRECTION_STATUSES = {"pending", "rejected", "approved"}
 
 
@@ -238,6 +238,8 @@ class ReviewConflictAggregationService:
             payload = row.normalized_payload if isinstance(row.normalized_payload, dict) else {}
             object_items = [payload] if row.candidate_type == "object_review_audit" and payload else self._external_object_items(payload)
             for item in object_items:
+                if self._is_ephemeral_new_candidate_audit(item):
+                    continue
                 parsed = self._object_target(item, default_paper_id=row.paper_id)
                 if parsed is None:
                     continue
@@ -270,6 +272,21 @@ class ReviewConflictAggregationService:
                 )
         return opinions
 
+    @staticmethod
+    def _is_ephemeral_new_candidate_audit(item: dict[str, Any]) -> bool:
+        try:
+            target_type = canonical_target_type(str(item.get("target_type") or ""))
+        except ValueError:
+            return False
+        decision = str(item.get("decision") or item.get("verdict") or "").strip().lower()
+        target_id = str(
+            item.get("target_id")
+            or item.get("dft_result_id")
+            or item.get("record_id")
+            or ""
+        ).strip().lower()
+        return target_type == "dft_results" and decision == "new_candidate" and target_id == "new"
+
     def _correction_opinions(
         self,
         paper_id: UUID | None,
@@ -280,9 +297,11 @@ class ReviewConflictAggregationService:
         stmt = select(PaperCorrection).where(PaperCorrection.status.in_(CORRECTION_STATUSES))
         if paper_id:
             stmt = stmt.where(PaperCorrection.paper_id == paper_id)
-        rows = self.session.scalars(stmt).all()
+        rows = self._current_correction_rows(self.session.scalars(stmt).all())
         opinions: list[dict[str, Any]] = []
         for row in rows:
+            if self._is_superseded_pending_correction(row, rows):
+                continue
             parsed = self._correction_target(row)
             if parsed is None:
                 continue
@@ -320,6 +339,24 @@ class ReviewConflictAggregationService:
             )
         return opinions
 
+    def _current_correction_rows(self, rows: list[PaperCorrection]) -> list[PaperCorrection]:
+        grouped: dict[tuple[str, str, str, str, str], list[PaperCorrection]] = defaultdict(list)
+        passthrough: list[PaperCorrection] = []
+        for row in rows:
+            parsed = self._correction_target(row)
+            if parsed is None:
+                passthrough.append(row)
+                continue
+            p_id, t_type, t_id, f_name = parsed
+            grouped[(str(p_id), t_type, t_id, f_name, str(row.source or ""))].append(row)
+
+        current = list(passthrough)
+        for items in grouped.values():
+            approved = [item for item in items if item.status == "approved"]
+            pool = approved or items
+            current.append(max(pool, key=lambda item: item.created_at or datetime.min))
+        return current
+
     @staticmethod
     def _external_object_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -346,10 +383,46 @@ class ReviewConflictAggregationService:
         target_path = str(row.target_path or "")
         match = re.match(r"^([^:]+):([^:]+):([^:]+)$", target_path)
         if match:
-            return (row.paper_id, self._safe_canonical_target_type(match.group(1)), match.group(2), match.group(3))
+            collection = self._safe_canonical_target_type(match.group(1))
+            target_id = match.group(2)
+            field_name = match.group(3)
+            if target_id == "new" and field_name == "create":
+                structured_target = self._structured_create_target_id(row)
+                target_id = structured_target or f"correction:{row.id}"
+            return (row.paper_id, collection, target_id, field_name)
         if row.field_name:
             return None
         return None
+
+    @staticmethod
+    def _structured_create_target_id(row: PaperCorrection) -> str | None:
+        evidence = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+        structured = evidence.get("structured_create") if isinstance(evidence, dict) else None
+        if isinstance(structured, dict) and structured.get("target_id"):
+            return str(structured["target_id"])
+        return None
+
+    def _is_superseded_pending_correction(
+        self,
+        row: PaperCorrection,
+        rows: list[PaperCorrection],
+    ) -> bool:
+        if row.status != "pending":
+            return False
+        row_value = self._value_key(row.proposed_value)
+        for other in rows:
+            if other.id == row.id or other.status != "approved":
+                continue
+            if other.paper_id != row.paper_id or other.source != row.source:
+                continue
+            if other.field_name != row.field_name or other.target_path != row.target_path:
+                continue
+            if self._value_key(other.proposed_value) != row_value:
+                continue
+            if other.created_at and row.created_at and other.created_at < row.created_at:
+                continue
+            return True
+        return False
 
     def _object_target(self, item: dict[str, Any], *, default_paper_id: UUID) -> tuple[UUID, str, str, str] | None:
         target_path = item.get("target_path")

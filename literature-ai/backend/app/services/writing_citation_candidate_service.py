@@ -90,12 +90,16 @@ class Snippet:
     locator_status: str = "missing"
     verified: bool = False
     safe_verified: bool = False
+    source_type: str | None = None
+    source_id: str | None = None
     matched_tokens: set[str] = field(default_factory=set)
 
     def response(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "source": self.source,
+            "source_type": self.source_type,
+            "source_id": self.source_id,
             "page": self.page,
             "locator_status": self.locator_status,
             "verified": self.verified,
@@ -351,7 +355,15 @@ class WritingCitationCandidateService:
         for section in sections:
             self._add_if_matching(snippets, section.text, "section", query_tokens, page=section.page_start or section.page_end)
         for row in extraction_rows:
-            self._add_if_matching(snippets, _extraction_text(row), "extraction", query_tokens)
+            target_type = TARGET_TYPE_BY_MODEL.get(type(row))
+            self._add_if_matching(
+                snippets,
+                _extraction_text(row),
+                "extraction",
+                query_tokens,
+                source_type=target_type,
+                source_id=str(getattr(row, "id", "")) or None,
+            )
         return sorted(snippets, key=lambda item: (-len(item.matched_tokens), item.source))[:5]
 
     def _add_if_matching(
@@ -365,6 +377,8 @@ class WritingCitationCandidateService:
         locator_status: str = "missing",
         verified: bool = False,
         safe_verified: bool = False,
+        source_type: str | None = None,
+        source_id: str | None = None,
     ) -> None:
         clean = _clean_text(text)
         if not clean:
@@ -379,6 +393,8 @@ class WritingCitationCandidateService:
                     locator_status=locator_status,
                     verified=verified,
                     safe_verified=safe_verified,
+                    source_type=source_type,
+                    source_id=source_id,
                     matched_tokens=matched,
                 )
             )
@@ -550,19 +566,44 @@ def _extraction_text(row: Any) -> str:
     for name in (
         "claim_text",
         "evidence_text",
+        "evidence_strength",
+        "evidence_types",
         "property_type",
         "value",
         "unit",
+        "rate",
+        "cycle_number",
+        "capacity_value",
+        "sulfur_loading_mg_cm2",
+        "sulfur_content_wt_percent",
+        "electrolyte_sulfur_ratio",
+        "decay_per_cycle",
         "name",
         "catalyst_type",
+        "metal_centers",
+        "coordination",
+        "support",
+        "synthesis_method",
         "software",
         "functional",
+        "dispersion_correction",
+        "pseudopotential",
         "research_gap",
         "proposed_solution",
+        "core_hypothesis",
+        "abstract_logic",
+        "introduction_logic",
+        "discussion_logic",
+        "figure_logic",
     ):
         value = getattr(row, name, None)
         if value not in (None, "", [], {}):
-            values.append(str(value))
+            if isinstance(value, (list, tuple, set)):
+                values.extend(str(item) for item in value if item not in (None, ""))
+            elif isinstance(value, dict):
+                values.extend(str(item) for item in value.values() if item not in (None, "", [], {}))
+            else:
+                values.append(str(value))
     return " ".join(values)
 
 

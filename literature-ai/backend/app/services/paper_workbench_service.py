@@ -15,16 +15,31 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import (
     AuditLog,
+    CatalystSample,
     DFTResult,
+    DFTSetting,
+    ElectrochemicalPerformance,
     EvidenceLocator,
     ExternalAnalysisCandidate,
+    MechanismClaim,
     Paper,
     PaperFigure,
+    PaperNote,
+    PaperRelationship,
     PaperSection,
     PaperTable,
+    WritingCard,
 )
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_audit_service import DFTCompletenessAuditor
+from app.services.dft_rescan_policy import (
+    build_dft_dedupe_signature,
+    normalize_numeric_value,
+    normalize_source_document_type,
+    normalize_unit,
+)
+from app.services.paper_codes import ensure_paper_codes
+from app.services.review_adjudication_service import ReviewAdjudicationService
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.artifact_paths import resolve_persisted_artifact_path
@@ -37,6 +52,18 @@ from app.utils.workbench_status import (
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
 from app.utils.protocol_tracking import protocol_snapshot
+
+
+FINALIZED_DFT_CANDIDATE_STATUSES = {
+    "ML_Ready",
+    "Rejected",
+    "human_reviewed_needs_evidence",
+    "Gemini_Verified",
+    "Human_Confirmed",
+    "Citation_Ready",
+    "verified",
+    "human_verified",
+}
 
 
 class PaperWorkbenchService:
@@ -186,6 +213,7 @@ class PaperWorkbenchService:
         paper = self.session.get(Paper, paper_id)
         if paper is None:
             raise LookupError("Paper not found")
+        ensure_paper_codes(self.session, [paper])
         pdf_path = self._paper_pdf_path(paper)
         quality_report = paper.pdf_quality_report
         if not isinstance(quality_report, dict) or not quality_report.get("quality_status"):
@@ -263,6 +291,7 @@ class PaperWorkbenchService:
         return {
             "schema_version": WORKBENCH_SCHEMA_VERSION,
             "paper_id": str(paper.id),
+            "paper_code": getattr(paper, "paper_code", None),
             "title": paper.title,
             "workflow_status": paper.workflow_status,
             "pdf_quality_status": paper.pdf_quality_status,
@@ -286,19 +315,24 @@ class PaperWorkbenchService:
         limit: int = 100,
         sort_by: str = "recent",
         library_name: str | None = None,
+        summary_only: bool = False,
     ) -> dict[str, Any]:
         paper_stmt = select(Paper)
         normalized_library = normalize_library_name(library_name) if library_name is not None else None
         if normalized_library:
             paper_stmt = paper_stmt.where(build_library_name_clause(Paper.library_name, normalized_library))
         papers = self.session.scalars(paper_stmt).all()
+        if ensure_paper_codes(self.session, papers):
+            self.session.commit()
         paper_ids = {paper.id for paper in papers}
         rows = []
         status_counts: Counter[str] = Counter()
         quality_counts: Counter[str] = Counter()
-        auditor = DFTCompletenessAuditor(self.session)
-        reliability_auditor = ArtifactReliabilityAuditService(self.session, self.settings)
-        conflict_counts = ReviewConflictAggregationService(self.session).count_conflicts_by_paper(paper_ids)
+        auditor = None if summary_only else DFTCompletenessAuditor(self.session)
+        reliability_auditor = None if summary_only else ArtifactReliabilityAuditService(self.session, self.settings)
+        conflict_service = ReviewConflictAggregationService(self.session)
+        conflict_total_counts = conflict_service.count_conflicts_by_paper(paper_ids)
+        conflict_counts = ReviewAdjudicationService(self.session).count_actionable_conflicts_by_paper(paper_ids)
         dft_rows_by_paper: dict[UUID, list[DFTResult]] = {paper_id: [] for paper_id in paper_ids}
         for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id.in_(paper_ids))).all() if paper_ids else []:
             dft_rows_by_paper.setdefault(row.paper_id, []).append(row)
@@ -342,30 +376,52 @@ class PaperWorkbenchService:
             else []
         ):
             candidates_by_paper.setdefault(candidate.paper_id, []).append(candidate)
-        locator_reliability_by_paper = reliability_auditor.paper_locator_reliability_summaries(paper_ids)
-        figure_reliability_by_paper = reliability_auditor.paper_figure_reliability_summaries(
-            paper_ids,
-            check_asset_exists=False,
+        notes_by_paper: dict[UUID, list[PaperNote]] = {paper_id: [] for paper_id in paper_ids}
+        for note in (
+            self.session.scalars(
+                select(PaperNote)
+                .where(PaperNote.paper_id.in_(paper_ids))
+                .order_by(PaperNote.created_at.desc())
+            ).all()
+            if paper_ids
+            else []
+        ):
+            notes_by_paper.setdefault(note.paper_id, []).append(note)
+        locator_reliability_by_paper = (
+            {} if summary_only or reliability_auditor is None else reliability_auditor.paper_locator_reliability_summaries(paper_ids)
+        )
+        figure_reliability_by_paper = (
+            {}
+            if summary_only or reliability_auditor is None
+            else reliability_auditor.paper_figure_reliability_summaries(
+                paper_ids,
+                check_asset_exists=False,
+            )
         )
         all_dft_rows = [row for rows_for_paper in dft_rows_by_paper.values() for row in rows_for_paper]
-        gate_by_id = bulk_export_gate_results(self.session, all_dft_rows, target_type="dft_results")
+        gate_by_id = {} if summary_only else bulk_export_gate_results(self.session, all_dft_rows, target_type="dft_results")
         exportable_counts: dict[UUID, int] = {}
         blocked_counts: dict[UUID, int] = {}
         for paper_id, rows_for_paper in dft_rows_by_paper.items():
             exportable = sum(1 for row in rows_for_paper if gate_by_id.get(str(row.id)) and gate_by_id[str(row.id)].eligible)
             exportable_counts[paper_id] = exportable
             blocked_counts[paper_id] = max(0, len(rows_for_paper) - exportable)
-        dft_audits = auditor.audit_papers(
-            paper_ids,
-            parsed_counts={paper_id: len(rows_for_paper) for paper_id, rows_for_paper in dft_rows_by_paper.items()},
-            exportable_counts=exportable_counts,
-            blocked_counts=blocked_counts,
+        dft_audits = (
+            {}
+            if summary_only or auditor is None
+            else auditor.audit_papers(
+                paper_ids,
+                parsed_counts={paper_id: len(rows_for_paper) for paper_id, rows_for_paper in dft_rows_by_paper.items()},
+                exportable_counts=exportable_counts,
+                blocked_counts=blocked_counts,
+            )
         )
         for paper in papers:
             status_counts[paper.workflow_status or "Imported"] += 1
             quality_counts[paper.pdf_quality_status or "unknown"] += 1
             dft_rows = dft_rows_by_paper.get(paper.id, [])
             dft_count = len(dft_rows)
+            active_dft_count = self._count_active_dft_candidates(dft_rows)
             figures = figure_rows_by_paper.get(paper.id, [])
             figure_count = len(figures)
             table_count = table_counts.get(paper.id, 0)
@@ -430,6 +486,18 @@ class PaperWorkbenchService:
                         "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
                     }
                 )
+            latest_notes = [
+                {
+                    "id": str(note.id),
+                    "source": note.source,
+                    "field_name": note.field_name,
+                    "page": note.page,
+                    "section_title": note.section_title,
+                    "content": note.content,
+                    "created_at": note.created_at.isoformat() if note.created_at else None,
+                }
+                for note in (notes_by_paper.get(paper.id) or [])[:3]
+            ]
             quality_report = paper.pdf_quality_report if isinstance(paper.pdf_quality_report, dict) else {}
             needs_human_confirmation = workflow_needs_human_confirmation(paper.workflow_status, quality_report)
             figure_crop_status_counts = dict(
@@ -445,8 +513,8 @@ class PaperWorkbenchService:
             dft_candidate_status_counts = dict(Counter(row.candidate_status or "system_candidate" for row in dft_rows))
             exportable_count = exportable_counts.get(paper.id, 0)
             blocked_count = blocked_counts.get(paper.id, 0)
-            dft_audit = dft_audits.get(str(paper.id)) or auditor.audit_paper(
-                paper.id,
+            dft_audit = dft_audits.get(str(paper.id)) or self._lightweight_dft_audit(
+                paper,
                 parsed_count=dft_count,
                 exportable_count=exportable_count,
                 blocked_count=blocked_count,
@@ -466,10 +534,22 @@ class PaperWorkbenchService:
                 "top_issues": [],
             }
             pdf_status = build_paper_pdf_status(paper, settings=self.settings)
+            manual_review_progress = self._manual_review_progress(paper.comprehensive_analysis)
+            comprehensive_analysis = paper.comprehensive_analysis if isinstance(paper.comprehensive_analysis, dict) else {}
+            parsed_analysis = {key: value for key, value in comprehensive_analysis.items() if key != "manual_review_progress"}
+            has_parsed_content = bool(
+                paper.abstract
+                or parsed_analysis
+                or dft_count
+                or figure_count
+                or table_count
+                or evidence_count
+            )
             rows.append(
                 {
                     "paper_id": str(paper.id),
-                    "paper_short_id": str(paper.id).split("-")[-1],
+                    "paper_code": getattr(paper, "paper_code", None),
+                    "paper_short_id": getattr(paper, "paper_code", None) or str(paper.id).split("-")[-1],
                     "created_at": paper.created_at.isoformat() if paper.created_at else None,
                     "title": paper.title,
                     "doi": paper.doi,
@@ -483,9 +563,13 @@ class PaperWorkbenchService:
                     "pdf_exists": bool(pdf_status.get("pdf_exists")),
                     "pdf_file_size": pdf_status.get("pdf_file_size"),
                     "pdf_path_kind": pdf_status.get("pdf_path_kind"),
+                    "has_parsed_content": has_parsed_content,
+                    "manual_review_progress": manual_review_progress,
                     "pdf_url": f"/api/papers/{paper.id}/pdf" if pdf_status.get("pdf_exists") else None,
                     "needs_human_confirmation": needs_human_confirmation,
                     "has_dft_candidates": dft_count > 0,
+                    "has_active_dft_candidates": active_dft_count > 0,
+                    "active_dft_candidate_count": active_dft_count,
                     "dft_candidate_count": dft_count,
                     "dft_candidate_status_counts": dft_candidate_status_counts,
                     "dft_audit": dft_audit,
@@ -511,7 +595,10 @@ class PaperWorkbenchService:
                     "object_review_audit_count": len(object_review_candidates),
                     "object_review_audit_source_counts": dict(sorted(object_review_source_counts.items())),
                     "object_review_audits": object_review_audits,
+                    "paper_note_count": len(notes_by_paper.get(paper.id) or []),
+                    "latest_paper_notes": latest_notes,
                     "review_conflict_count": conflict_counts.get(str(paper.id), 0),
+                    "review_conflict_total_count": conflict_total_counts.get(str(paper.id), 0),
                     "workspace_path": paper.workspace_path,
                     "detail_url": f"../literature_library/index.html?paper_id={paper.id}&tab=review",
                     "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
@@ -529,6 +616,77 @@ class PaperWorkbenchService:
             },
             "rows": rows,
         }
+
+    @staticmethod
+    def _is_active_dft_candidate(status: Any) -> bool:
+        normalized = str(status or "system_candidate").strip()
+        return normalized not in FINALIZED_DFT_CANDIDATE_STATUSES
+
+    @classmethod
+    def _count_active_dft_candidates(cls, rows: list[DFTResult]) -> int:
+        if not rows:
+            return 0
+        finalized_signatures = {
+            cls._dft_dedupe_signature(row)
+            for row in rows
+            if not cls._is_active_dft_candidate(row.candidate_status)
+        }
+        finalized_shadow_keys = {
+            cls._dft_shadow_key(row)
+            for row in rows
+            if not cls._is_active_dft_candidate(row.candidate_status)
+        }
+        count = 0
+        for row in rows:
+            if not cls._is_active_dft_candidate(row.candidate_status):
+                continue
+            if cls._dft_dedupe_signature(row) in finalized_signatures:
+                continue
+            shadow_key = cls._dft_shadow_key(row)
+            if shadow_key is not None and shadow_key in finalized_shadow_keys:
+                continue
+            count += 1
+        return count
+
+    @staticmethod
+    def _dft_dedupe_signature(row: DFTResult) -> str:
+        payload = dict(row.evidence_payload) if isinstance(row.evidence_payload, dict) else {}
+        payload.update(
+            {
+                "paper_id": row.paper_id,
+                "adsorbate": row.adsorbate,
+                "property_type": row.property_type,
+                "value": row.value,
+                "unit": row.unit,
+                "reaction_step": row.reaction_step,
+            }
+        )
+        return str(payload.get("dedupe_signature") or build_dft_dedupe_signature(payload))
+
+    @staticmethod
+    def _dft_shadow_key(row: DFTResult) -> tuple[str, str, str, str, int] | None:
+        payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+        anchor = payload.get("material_binding", {}).get("evidence_anchor")
+        if not isinstance(anchor, dict):
+            anchor = {}
+        page = payload.get("page")
+        if page in (None, ""):
+            page = anchor.get("page")
+        try:
+            page_number = int(page)
+        except (TypeError, ValueError):
+            return None
+        source_type = normalize_source_document_type(
+            payload.get("source_document_type") or anchor.get("source_document_type")
+        )
+        source_bucket = "supporting_reference" if source_type == "supporting_reference" else "paper_owned"
+        return (
+            source_bucket,
+            " ".join(str(row.property_type or "").strip().lower().split()),
+            normalize_numeric_value(row.value),
+            normalize_unit(row.unit),
+            page_number,
+        )
 
     @staticmethod
     def _sort_review_center_rows(rows: list[dict[str, Any]], *, sort_by: str) -> list[dict[str, Any]]:
@@ -570,6 +728,72 @@ class PaperWorkbenchService:
             ),
             reverse=True,
         )
+
+    @staticmethod
+    def _manual_review_progress(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+        source = data if isinstance(data, dict) else {}
+        progress = source.get("manual_review_progress") if isinstance(source.get("manual_review_progress"), dict) else {}
+
+        def normalize_entry(module: str) -> dict[str, Any]:
+            raw = progress.get(module)
+            if isinstance(raw, dict):
+                return {
+                    "completed": bool(raw.get("completed")),
+                    "updated_at": raw.get("updated_at"),
+                    "updated_by": raw.get("updated_by"),
+                }
+            return {
+                "completed": bool(raw),
+                "updated_at": None,
+                "updated_by": None,
+            }
+
+        return {
+            "content": normalize_entry("content"),
+            "figures": normalize_entry("figures"),
+            "dft": normalize_entry("dft"),
+        }
+
+    @staticmethod
+    def _lightweight_dft_audit(
+        paper: Paper,
+        *,
+        parsed_count: int,
+        exportable_count: int,
+        blocked_count: int,
+    ) -> dict[str, Any]:
+        status = "Unparsed"
+        if parsed_count > 0:
+            status = "DB_Ready" if exportable_count > 0 and blocked_count == 0 else "Initial_Parsed"
+        if str(paper.workflow_status or "") == "Suspected_Missing":
+            status = "Suspected_Missing"
+        return {
+            "schema_version": "dft_completeness_audit_v1_light",
+            "coverage_status": status,
+            "status_label": {
+                "Unparsed": "未解析",
+                "Initial_Parsed": "初步解析",
+                "Suspected_Missing": "疑似漏提",
+                "DB_Ready": "可入库",
+            }.get(status, status),
+            "detected_signal_count": parsed_count,
+            "detected_sections": 0,
+            "detected_tables": 0,
+            "detected_figures": 0,
+            "parsed_dft_count": parsed_count,
+            "exportable_dft_count": exportable_count,
+            "blocked_dft_count": blocked_count,
+            "suspected_missing_count": 1 if status == "Suspected_Missing" else 0,
+            "coverage_ratio": 1.0 if parsed_count and blocked_count == 0 else 0.0,
+            "unique_candidate_count": parsed_count,
+            "duplicate_evidence_count": 0,
+            "rescan_recommended": status == "Suspected_Missing",
+            "rescan_next_status": "Needs_IDE_Rescan" if status == "Suspected_Missing" else None,
+            "low_recall_warning": status == "Suspected_Missing",
+            "low_recall_reasons": [],
+            "ide_ai_review_recommended": status in {"Initial_Parsed", "Suspected_Missing"},
+            "signal_examples": [],
+        }
 
     def _paper_pdf_path(self, paper: Paper) -> Path | None:
         raw_path = Path(paper.pdf_path) if paper.pdf_path else None
@@ -756,27 +980,39 @@ class PaperWorkbenchService:
         tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id == paper.id)).all()
         figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper.id)).all()
         dft_rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        dft_settings = self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper.id)).all()
+        catalyst_samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper.id)).all()
+        electrochemical_items = self.session.scalars(
+            select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper.id)
+        ).all()
+        mechanism_claims = self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper.id)).all()
+        writing_cards = self.session.scalars(select(WritingCard).where(WritingCard.paper_id == paper.id)).all()
         audit = DFTCompletenessAuditor(self.session).audit_paper(paper.id, parsed_count=len(dft_rows))
-
-        def section_role(section: PaperSection) -> str:
-            title = f"{section.section_title or ''} {section.section_type or ''}".lower()
-            if re.search(r"method|comput|dft|calculation|experimental", title):
-                return "methods"
-            if re.search(r"result|discussion|performance|mechanism", title):
-                return "results_discussion"
-            return "context"
+        source_documents = self._source_documents_for_ai(paper)
+        content_coverage = self._build_content_coverage_summary(
+            paper=paper,
+            sections=sections,
+            tables=tables,
+            figures=figures,
+            dft_settings=dft_settings,
+            dft_rows=dft_rows,
+            catalyst_samples=catalyst_samples,
+            electrochemical_items=electrochemical_items,
+            mechanism_claims=mechanism_claims,
+            writing_cards=writing_cards,
+        )
 
         relevant_sections = [
             {
                 "id": str(section.id),
-                "role": section_role(section),
+                "role": self._section_role_for_coverage(section),
                 "title": section.section_title or section.section_type,
                 "page_start": section.page_start,
                 "page_end": section.page_end,
                 "text": section.text,
             }
             for section in sections
-            if section_role(section) != "context" or any(
+            if self._section_role_for_coverage(section) != "context" or any(
                 example.get("source_id") == str(section.id) for example in audit.get("signal_examples", [])
             )
         ]
@@ -785,7 +1021,63 @@ class PaperWorkbenchService:
             {
                 "schema_version": "ai_reading_package_v1",
                 "paper": self._paper_metadata(paper),
+                "source_documents": source_documents,
                 "abstract": paper.abstract,
+                "llm_input_policy": {
+                    "text_llm_scope": [
+                        "paper metadata",
+                        "abstract",
+                        "text sections",
+                        "parsed markdown tables",
+                        "existing structured candidates",
+                    ],
+                    "excluded_from_text_llm": [
+                        "figure images",
+                        "figure crops",
+                        "icons",
+                        "chart visual value reading",
+                    ],
+                    "image_or_chart_review": "Use a human reviewer or IDE visual inspection; text-only AI must not infer values from images.",
+                    "web_llm_extract": "disabled",
+                    "required_workflow": (
+                        "prepare-ai-context / codex-item -> IDE AI -> import_analysis. Non-DFT "
+                        "metadata, sections, tables, figure metadata, writing_cards, mechanism_claims, "
+                        "electrochemical_performance, catalyst_samples, notes, and relationships may be "
+                        "auto-applied with PDF evidence anchors and module write locks. DFT results/settings "
+                        "remain candidates until the review/export gate passes."
+                    ),
+                },
+                "non_dft_direct_write_policy": {
+                    "ai_can_apply_without_human_confirmation": [
+                        "paper metadata",
+                        "sections",
+                        "tables",
+                        "figure metadata/captions/content_summary",
+                        "writing_cards",
+                        "mechanism_claims",
+                        "electrochemical_performance",
+                        "catalyst_samples",
+                        "notes",
+                        "relationships",
+                    ],
+                    "must_not_auto_apply": [
+                        "dft_results",
+                        "dft_settings",
+                        "DFT export verification",
+                        "figure image recrop/create through import_analysis",
+                    ],
+                    "evidence_required": [
+                        "page, section/section_title, quoted_text, table, figure, or bbox anchor",
+                        "catalyst_samples require a material anchor beyond free-form evidence_text",
+                        "section creation requires a strong text/section/table/figure/bbox anchor",
+                    ],
+                    "write_path": (
+                        "Use import_analysis with auto_apply_review_rules=true plus a module write lock. "
+                        "For figure image cropping, call recrop_figure or create_figure_from_bbox directly, "
+                        "then read back the updated figure record."
+                    ),
+                },
+                "content_coverage": content_coverage,
                 "dft_completeness_audit": audit,
                 "sections": relevant_sections,
                 "tables": [
@@ -805,12 +1097,86 @@ class PaperWorkbenchService:
                         "caption": figure.caption,
                         "page": figure.page,
                         "image_path": figure.image_path,
+                        "text_llm_allowed": False,
+                        "review_route": "human_or_ide_visual_only",
+                        "text_llm_note": "Do not ask a text-only LLM to interpret this figure image/crop or read chart values.",
                         "crop_status": figure.crop_status,
                         "crop_confidence": figure.crop_confidence,
                         "prov": figure.prov,
                     }
                     for figure in figures
                 ],
+                "existing_structured_content": {
+                    "dft_settings": [
+                        {
+                            "id": str(row.id),
+                            "software": row.software,
+                            "functional": row.functional,
+                            "dispersion_correction": row.dispersion_correction,
+                            "pseudopotential": row.pseudopotential,
+                            "cutoff_energy_ev": row.cutoff_energy_ev,
+                            "k_points": row.k_points,
+                            "convergence_settings": row.convergence_settings,
+                            "vacuum_thickness_a": row.vacuum_thickness_a,
+                            "raw_json": row.raw_json,
+                        }
+                        for row in dft_settings
+                    ],
+                    "catalyst_samples": [
+                        {
+                            "id": str(row.id),
+                            "name": row.name,
+                            "catalyst_type": row.catalyst_type,
+                            "metal_centers": row.metal_centers,
+                            "coordination": row.coordination,
+                            "support": row.support,
+                            "synthesis_method": row.synthesis_method,
+                            "evidence_strength": row.evidence_strength,
+                        }
+                        for row in catalyst_samples
+                    ],
+                    "electrochemical_performance": [
+                        {
+                            "id": str(row.id),
+                            "sulfur_loading_mg_cm2": row.sulfur_loading_mg_cm2,
+                            "sulfur_content_wt_percent": row.sulfur_content_wt_percent,
+                            "electrolyte_sulfur_ratio": row.electrolyte_sulfur_ratio,
+                            "capacity_value": row.capacity_value,
+                            "cycle_number": row.cycle_number,
+                            "rate": row.rate,
+                            "decay_per_cycle": row.decay_per_cycle,
+                            "evidence_text": row.evidence_text,
+                        }
+                        for row in electrochemical_items
+                    ],
+                    "mechanism_claims": [
+                        {
+                            "id": str(row.id),
+                            "claim_type": row.claim_type,
+                            "claim_text": row.claim_text,
+                            "evidence_types": row.evidence_types,
+                            "confidence": row.confidence,
+                            "evidence_text": row.evidence_text,
+                        }
+                        for row in mechanism_claims
+                    ],
+                    "writing_cards": [
+                        {
+                            "id": str(row.id),
+                            "paper_type": row.paper_type,
+                            "research_gap": row.research_gap,
+                            "proposed_solution": row.proposed_solution,
+                            "core_hypothesis": row.core_hypothesis,
+                            "evidence_chain": row.evidence_chain,
+                            "section_strategy": row.section_strategy,
+                            "figure_logic": row.figure_logic,
+                            "abstract_logic": row.abstract_logic,
+                            "introduction_logic": row.introduction_logic,
+                            "discussion_logic": row.discussion_logic,
+                        }
+                        for row in writing_cards
+                    ],
+                },
                 "system_candidates": [
                     {
                         "record_id": str(row.id),
@@ -829,12 +1195,182 @@ class PaperWorkbenchService:
                     for row in dft_rows
                 ],
                 "ai_task": (
-                    "Read the full package, extract DFT/material data using the explicit AI protocol, "
-                    "compare with system_candidate hints, report missing/conflicting evidence, and keep "
-                    "all outputs as candidates until review."
+                    "Read the main text and any available supplementary_information source documents. First repair "
+                    "non-DFT content directly through import_analysis when there is checkable PDF evidence: metadata, "
+                    "sections, tables, figure metadata/summaries, writing_cards, mechanism_claims, "
+                    "electrochemical_performance, catalyst_samples, notes, and relationships. For missing sections or "
+                    "writing_cards, create objects with target_path=<collection>:new:create. For existing objects, use "
+                    "replace corrections with target_path=<collection>:<id>:<field>. Figure image crop/create operations "
+                    "must call recrop_figure or create_figure_from_bbox directly instead of import_analysis. Extract "
+                    "DFT data using the explicit AI protocol only as candidates: SI data belongs to this main paper_id, "
+                    "but each candidate must mark evidence_location.source_document_type=supplementary_information. "
+                    "Merge repeated main-text/SI occurrences into one candidate using dedupe_signature and "
+                    "supporting_evidence. Do not treat values from cited or supporting references as this paper's DFT "
+                    "data; mark them source_document_type=supporting_reference and borrowed_from_reference=true or "
+                    "record them only as relationship evidence. Do not estimate values from images, curves, or axis "
+                    "ticks with a text-only model. DFT results/settings are not verified until the existing review/export "
+                    "gate passes."
                 ),
             },
         )
+
+    def _build_content_coverage_summary(
+        self,
+        *,
+        paper: Paper,
+        sections: list[PaperSection],
+        tables: list[PaperTable],
+        figures: list[PaperFigure],
+        dft_settings: list[DFTSetting],
+        dft_rows: list[DFTResult],
+        catalyst_samples: list[CatalystSample],
+        electrochemical_items: list[ElectrochemicalPerformance],
+        mechanism_claims: list[MechanismClaim],
+        writing_cards: list[WritingCard],
+    ) -> dict[str, Any]:
+        role_counts = Counter(self._section_role_for_coverage(section) for section in sections)
+        missing_core_sections: list[str] = []
+        if not str(paper.abstract or "").strip():
+            missing_core_sections.append("abstract")
+        for role in ("introduction", "methods", "results_discussion", "conclusion"):
+            if role_counts.get(role, 0) == 0:
+                missing_core_sections.append(role)
+
+        structured_counts = {
+            "sections": len(sections),
+            "tables": len(tables),
+            "figures": len(figures),
+            "dft_settings": len(dft_settings),
+            "dft_results": len(dft_rows),
+            "catalyst_samples": len(catalyst_samples),
+            "electrochemical_performance": len(electrochemical_items),
+            "mechanism_claims": len(mechanism_claims),
+            "writing_cards": len(writing_cards),
+        }
+        missing_structured_modules = [
+            module
+            for module in (
+                "writing_cards",
+                "mechanism_claims",
+                "electrochemical_performance",
+                "catalyst_samples",
+            )
+            if structured_counts[module] == 0
+        ]
+        recommended_actions: list[str] = []
+        if missing_core_sections:
+            recommended_actions.append(
+                "Create or replace sections with strong PDF anchors for missing abstract/introduction/methods/results/conclusion coverage."
+            )
+        if structured_counts["writing_cards"] == 0:
+            recommended_actions.append(
+                "Create evidence-backed writing_cards covering research_gap, proposed_solution, core_hypothesis, evidence_chain, section_strategy, figure_logic, abstract_logic, introduction_logic, and discussion_logic."
+            )
+        if structured_counts["mechanism_claims"] == 0:
+            recommended_actions.append("Create mechanism_claims for shuttle suppression, catalytic conversion, adsorption, diffusion, or electronic-structure claims when the text supports them.")
+        if structured_counts["electrochemical_performance"] == 0:
+            recommended_actions.append("Create electrochemical_performance rows for loading, capacity, cycle, rate, decay, and electrolyte/sulfur conditions when evidence is present.")
+        if structured_counts["catalyst_samples"] == 0:
+            recommended_actions.append("Create catalyst_samples for named materials/comparators with material anchors before linking mechanism or performance claims.")
+
+        return {
+            "section_role_counts": dict(sorted(role_counts.items())),
+            "structured_counts": structured_counts,
+            "missing_core_sections": missing_core_sections,
+            "missing_structured_modules": missing_structured_modules,
+            "non_dft_modules_open_for_ai_write": [
+                "metadata",
+                "sections",
+                "tables",
+                "figures",
+                "writing_cards",
+                "mechanism_claims",
+                "electrochemical_performance",
+                "catalyst_samples",
+                "notes",
+                "relationships",
+            ],
+            "dft_modules_review_gated": ["dft_results", "dft_settings"],
+            "recommended_ai_actions": recommended_actions,
+            "rag_priority": [
+                "Evidence-backed writing_cards for high-quality review writing",
+                "Mechanism and electrochemical claims with page/quote anchors",
+                "Normalized sections for reliable retrieval and citation insertion",
+            ],
+        }
+
+    @staticmethod
+    def _section_role_for_coverage(section: PaperSection) -> str:
+        title = f"{section.section_title or ''} {section.section_type or ''}".lower()
+        if re.search(r"\babstract\b", title):
+            return "abstract"
+        if re.search(r"intro|background", title):
+            return "introduction"
+        if re.search(r"method|comput|dft|calculation|experimental|synthesis", title):
+            return "methods"
+        if re.search(r"result|discussion|performance|mechanism|characteri[sz]ation", title):
+            return "results_discussion"
+        if re.search(r"conclusion|summary", title):
+            return "conclusion"
+        return "context"
+
+    def _source_documents_for_ai(self, paper: Paper) -> list[dict[str, Any]]:
+        pdf_path = self._paper_pdf_path(paper)
+        workspace_root = self._workspace_root(paper.id)
+        source_documents = [
+            {
+                "source_document_type": "main_text",
+                "label": "Main PDF",
+                "paper_id": str(paper.id),
+                "path": str(pdf_path) if pdf_path is not None else str(workspace_root / "original.pdf"),
+                "available": bool(pdf_path is not None and pdf_path.exists()),
+            },
+            {
+                "source_document_type": "supplementary_information",
+                "label": "SI",
+                "paper_id": str(paper.id),
+                "path": None,
+                "available": False,
+                "note": "SI is treated as a source document for this main paper, not as a separate library paper.",
+            },
+        ]
+        source_documents.extend(self._supplementary_documents_for_ai(paper))
+        return source_documents
+
+    def _supplementary_documents_for_ai(self, paper: Paper) -> list[dict[str, Any]]:
+        relationship_types = {"supplementary", "supplementary_information", "si"}
+        relationships = self.session.scalars(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == paper.id,
+                PaperRelationship.relationship_type.in_(relationship_types),
+            )
+        ).all()
+        documents: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for relationship in relationships:
+            target = self.session.get(Paper, relationship.target_paper_id)
+            if target is None:
+                continue
+            target_path = self._paper_pdf_path(target)
+            path_text = str(target_path) if target_path is not None else None
+            dedupe_key = path_text or str(target.id)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            documents.append(
+                {
+                    "source_document_type": "supplementary_information",
+                    "label": target.title or "SI",
+                    "paper_id": str(paper.id),
+                    "related_paper_id": str(target.id),
+                    "relationship_id": str(relationship.id),
+                    "relationship_type": relationship.relationship_type,
+                    "path": path_text,
+                    "available": bool(target_path is not None and target_path.exists()),
+                    "note": "Linked supplementary PDF is treated as source material for the main paper.",
+                }
+            )
+        return documents
 
     def _write_audit_files(self, paper: Paper, dirs: dict[str, Path]) -> None:
         rows = self.session.scalars(
@@ -925,6 +1461,7 @@ class PaperWorkbenchService:
         return {
             "schema_version": WORKBENCH_SCHEMA_VERSION,
             "paper_id": str(paper.id),
+            "paper_code": getattr(paper, "paper_code", None),
             "library_name": paper.library_name,
             "serial_number": paper.serial_number,
             "title": paper.title,
@@ -942,10 +1479,18 @@ class PaperWorkbenchService:
     @staticmethod
     def dft_evidence_payload(item: dict[str, Any]) -> dict[str, Any]:
         location = item.get("source_location") or {}
-        return {
+        payload = {
             "schema_version": WORKBENCH_SCHEMA_VERSION,
             "protocol": protocol_snapshot("dft_ai_protocol", fallback_version=EXTRACTION_PROTOCOL_VERSION),
             "system_extractor_protocol": protocol_snapshot("dft_results", fallback_version=EXTRACTION_PROTOCOL_VERSION),
+            "source_document_type": item.get("source_document_type") or location.get("source_document_type") or "main_text",
+            "source_document_label": item.get("source_document_label") or location.get("source_document_label") or "Main PDF",
+            "source_locator": location.get("source_locator") or location.get("locator"),
+            "page": location.get("page"),
+            "table": location.get("table"),
+            "section": location.get("section"),
+            "quoted_text": item.get("quoted_text") or item.get("evidence_text"),
+            "supporting_evidence": item.get("supporting_evidence") or [],
             "field_sources": [
                 {
                     "field_name": "value",
@@ -966,3 +1511,11 @@ class PaperWorkbenchService:
                 "and human or second-AI confirmation."
             ),
         }
+        payload["dedupe_signature"] = item.get("dedupe_signature") or build_dft_dedupe_signature(
+            {
+                **item,
+                "evidence_payload": payload,
+                "paper_id": item.get("paper_id"),
+            }
+        )
+        return payload

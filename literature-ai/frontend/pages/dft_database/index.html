@@ -25,7 +25,6 @@
     .filter-field select { width: 150px; }
     #minConfidence { width: 88px; }
     #validationStatus { width: 118px; }
-    .stats-banner { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
     .stat-box { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); padding: 10px 12px; }
     .stat-box .lbl { color: var(--color-text-secondary); font-size: 12px; }
     .stat-box .val { font-size: 22px; font-weight: 800; margin-top: 4px; }
@@ -324,54 +323,22 @@
       <div class="export-note">只导出人工已确认、证据完整、定位准确的记录；候选和需要处理的记录不会导出。</div>
     </section>
 
-    <div class="scroll-area">
-
-    <section class="stats-banner" id="statsBanner" style="display:none;">
-      <div class="stat-box"><div class="lbl">记录数</div><div id="statCount" class="val">-</div></div>
-      <div class="stat-box"><div class="lbl">最小值</div><div id="statMin" class="val">-</div></div>
-      <div class="stat-box"><div class="lbl">最大值</div><div id="statMax" class="val">-</div></div>
-      <div class="stat-box"><div class="lbl">平均值</div><div id="statMean" class="val">-</div></div>
-    </section>
-
-    <section class="panel-card quality-panel" id="qualityPanel">
-      <!-- Top bar: donut + reasons + actions -->
+    <section class="panel-card quality-panel" id="exportSafetyPanel">
       <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:4px;">
         <div style="display:flex; align-items:center; gap:8px;">
-          <strong>候选审核概览</strong>
-          <span title="只有“人工已确认、证据完整、PDF 定位准确”的记录才会进入 CSV / ML 导出。被阻止的记录需要回到文献库 review 页补确认、补证据或修复定位。" style="cursor:help;color:var(--color-text-muted);font-size:13px;">ⓘ</span>
+          <strong>DFT 导出安全概览</strong>
+          <span title="这里只显示全局数量：已确认可导出的 DFT 数据会进入正式数据库表格；需处理的数据只作为数量提示，不在数据库表格中展开。" style="cursor:help;color:var(--color-text-muted);font-size:13px;">ⓘ</span>
         </div>
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-          <span id="qualityGateLabel" class="quality-meta"></span>
-          <button class="btn btn-ghost btn-sm" onclick="loadQualityPanel()">↻ 刷新</button>
-        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadExportSafetyOverview()">↻ 刷新概览</button>
       </div>
-
       <div class="quality-topbar">
-        <div id="qualityDonuts"><!-- Donut + legend injected via JS --></div>
+        <div id="qualityDonuts"><div class="empty-state">正在加载导出安全概览...</div></div>
         <div class="stat-divider"></div>
-        <div class="reason-chips-bar" id="qualityReasonChips"><!-- Reason chips --></div>
-        <div class="actions-bar">
-          <a class="btn btn-primary btn-sm" href="../review_center/index.html">打开审核中心</a>
-          <a class="btn btn-ghost btn-sm" href="../literature_library/index.html">回文献库核对证据</a>
-        </div>
-      </div>
-
-      <!-- Content area -->
-      <div>
-        <div class="panel-actions" style="margin-bottom:10px;">
-          <div class="collapse-header" onclick="toggleCollapse(this)">
-            <span class="collapse-arrow">▼</span>
-            <strong id="qualityListTitle">候选问题汇总</strong>
-          </div>
-        </div>
-        <div class="collapse-body" id="qualityCollapse">
-          <div id="qualityRows" class="quality-list">
-            <div class="empty-state">正在加载质量概览...</div>
-          </div>
-          <div id="qualityCompleteness" class="completeness-list"></div>
-        </div>
+        <div class="reason-chips-bar" id="qualityReasonChips"></div>
       </div>
     </section>
+
+    <div class="scroll-area">
 
     <section class="data-panel">
       <div class="panel-actions">
@@ -415,7 +382,7 @@
   </div>
   <script>
     const API_BASE = "/api/papers";
-    const state = { items: [], qualityRows: [], qualityReason: "", currentLibrary: "", libraries: [] };
+    const state = { items: [], currentLibrary: "", libraries: [] };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function toggleCollapse(header) {
       const body = header.closest(".panel-actions")?.nextElementSibling || header.parentElement.nextElementSibling;
@@ -566,51 +533,10 @@
     function setCurrentLibraryFromSelect() {
       const select = document.getElementById("libraryFilter");
       state.currentLibrary = select ? select.value : "";
-      state.qualityReason = "";
     }
     function applyLibraryParam(params) {
       if (state.currentLibrary) params.set("library_name", state.currentLibrary);
       return params;
-    }
-    async function queryDFT() {
-      await ensureCurrentLibraryName();
-      const prop = document.getElementById("propertyType").value;
-      const adsorbate = document.getElementById("adsorbate").value.trim();
-      const catalyst = document.getElementById("catalystType").value;
-      const minConf = document.getElementById("minConfidence").value || 0.3;
-      const validationStatus = document.getElementById("validationStatus").value;
-      const backendStatus = validationStatus === "validated" ? "exportable" : (validationStatus === "needs_review" ? "needs_review" : "all");
-      const params = applyLibraryParam(new URLSearchParams());
-      params.set("min_confidence", minConf);
-      params.set("limit", "50");
-      params.set("status", backendStatus);
-      if (prop) params.set("property_type", prop);
-      if (adsorbate) params.set("adsorbate", adsorbate);
-      if (catalyst) params.set("catalyst_type", catalyst);
-      const url = `${API_BASE}/compare?${params.toString()}`;
-      const list = document.getElementById("dftList");
-      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询已审核可导出 DFT 数据...</td></tr>';
-      try {
-        const data = await fetchJSON(url);
-        let items = data.items || [];
-        if (!prop) items = items;
-        state.items = items;
-        renderStats(buildStats(items), items.length);
-        renderRows(items);
-        loadQualityPanel();
-      } catch (error) {
-        list.innerHTML = `<tr><td colspan="8" class="empty-state">查询失败：${esc(error.message)}</td></tr>`;
-      }
-    }
-    function qualityQueryUrl() {
-      const prop = document.getElementById("propertyType").value;
-      const adsorbate = document.getElementById("adsorbate").value.trim();
-      let url = `/api/papers/export/dft-review-queue?limit=100&status=needs_review`;
-      if (state.currentLibrary) url += `&library_name=${encodeURIComponent(state.currentLibrary)}`;
-      if (prop) url += `&property_type=${encodeURIComponent(prop)}`;
-      if (adsorbate) url += `&adsorbate=${encodeURIComponent(adsorbate)}`;
-      if (state.qualityReason) url += `&reason=${encodeURIComponent(state.qualityReason)}`;
-      return url;
     }
     function getTechDonutHTML(exportable, blocked) {
       const total = exportable + blocked;
@@ -619,14 +545,11 @@
       const svgSize = 68;
       const cx = svgSize / 2;
       const cy = svgSize / 2;
-
-      let greenPercent = total === 0 ? 0 : exportable / total;
-      let redPercent = total === 0 ? 0 : blocked / total;
-
+      const greenPercent = total === 0 ? 0 : exportable / total;
+      const redPercent = total === 0 ? 0 : blocked / total;
       const greenOffset = circumference * (1 - greenPercent);
       const redOffset = circumference * (1 - redPercent);
       const redRotation = greenPercent * 360;
-
       return `
         <div class="donut-wrap">
           <div style="position:relative; width:${svgSize}px; height:${svgSize}px; display:inline-flex; align-items:center; justify-content:center; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.08)); flex-shrink:0;">
@@ -660,62 +583,75 @@
             <div class="lg-row">
               <div style="display:flex; align-items:center; gap:6px;">
                 <div class="lg-dot" style="background:linear-gradient(135deg, #52c41a, #389e0d); box-shadow: 0 0 4px rgba(82,196,26,0.4);"></div>
-                <span class="lg-label">可导出</span>
+                <span class="lg-label">已导出/可导出</span>
               </div>
-              <span class="lg-val" id="qualityExportable" style="color:var(--color-success);">${exportable}</span>
+              <span class="lg-val" style="color:var(--color-success);">${exportable}</span>
             </div>
             <div class="lg-row">
               <div style="display:flex; align-items:center; gap:6px;">
                 <div class="lg-dot" style="background:linear-gradient(135deg, #ff4d4f, #f5222d); box-shadow: 0 0 4px rgba(255,77,79,0.4);"></div>
-                <span class="lg-label">需处理</span>
+                <span class="lg-label">未导出/需处理</span>
               </div>
-              <span class="lg-val" id="qualityBlocked" style="color:var(--color-danger);">${blocked}</span>
+              <span class="lg-val" style="color:var(--color-danger);">${blocked}</span>
             </div>
           </div>
         </div>
       `;
     }
-
-    async function loadQualityPanel() {
+    async function loadExportSafetyOverview() {
       await ensureCurrentLibraryName();
-      const rowsEl = document.getElementById("qualityRows");
-      if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">正在加载质量概览...</div>';
+      const donutsContainer = document.getElementById("qualityDonuts");
+      const chipsContainer = document.getElementById("qualityReasonChips");
+      if (donutsContainer) donutsContainer.innerHTML = '<div class="empty-state">正在加载导出安全概览...</div>';
       try {
-        const data = await fetchJSON(qualityQueryUrl());
+        const params = applyLibraryParam(new URLSearchParams());
+        params.set("limit", "1");
+        params.set("status", "needs_review");
+        const data = await fetchJSON(`/api/papers/export/dft-review-queue?${params.toString()}`);
         const metadata = data.metadata || {};
-        const exportable = metadata.eligible_count == null ? 0 : metadata.eligible_count;
-        const blocked = metadata.blocked_count == null ? 0 : metadata.blocked_count;
-        const total = exportable + blocked;
-        const donutsContainer = document.getElementById("qualityDonuts");
-        if (donutsContainer) {
-          donutsContainer.innerHTML = getTechDonutHTML(exportable, blocked);
-        }
-        document.getElementById("qualityGateLabel").textContent = "导出门槛：" + gateLabel(metadata.safety_gate);
-        renderReasonChips(metadata.blocked_reasons || {});
-        renderQualityRows(data.rows || []);
-        renderCompletenessHints(data.paper_completeness || []);
+        const exportable = Number(metadata.eligible_count || 0);
+        const rejected = Number((metadata.review_status_counts || {}).rejected || 0);
+        const pending = Math.max(0, Number(metadata.blocked_count || 0) - rejected);
+        if (donutsContainer) donutsContainer.innerHTML = getTechDonutHTML(exportable, pending);
+        const reasons = metadata.blocked_reasons || {};
+        const chips = Object.entries(reasons)
+          .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+          .slice(0, 6)
+          .map(([reason, count]) => '<span class="reason-chip" style="cursor:default;">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>')
+          .join("");
+        if (chipsContainer) chipsContainer.innerHTML = chips || '<span class="quality-meta">当前没有被导出安全门阻止的 DFT 候选。</span>';
       } catch (error) {
-        if (rowsEl) rowsEl.innerHTML = '<div class="empty-state">质量面板加载失败：' + esc(error.message) + '</div>';
+        if (donutsContainer) donutsContainer.innerHTML = '<div class="empty-state">导出安全概览加载失败：' + esc(error.message) + '</div>';
+        if (chipsContainer) chipsContainer.innerHTML = "";
       }
     }
-    function renderReasonChips(reasons) {
-      const el = document.getElementById("qualityReasonChips");
-      if (!el) return;
-      const entries = Object.entries(reasons);
-      if (entries.length === 0 && !state.qualityReason) {
-        el.innerHTML = "";
-        return;
+    async function queryDFT() {
+      await ensureCurrentLibraryName();
+      const prop = document.getElementById("propertyType").value;
+      const adsorbate = document.getElementById("adsorbate").value.trim();
+      const catalyst = document.getElementById("catalystType").value;
+      const minConf = document.getElementById("minConfidence").value || 0.3;
+      const backendStatus = "exportable";
+      const params = applyLibraryParam(new URLSearchParams());
+      params.set("min_confidence", minConf);
+      params.set("limit", "50");
+      params.set("status", backendStatus);
+      if (prop) params.set("property_type", prop);
+      if (adsorbate) params.set("adsorbate", adsorbate);
+      if (catalyst) params.set("catalyst_type", catalyst);
+      const url = `${API_BASE}/compare?${params.toString()}`;
+      const list = document.getElementById("dftList");
+      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询已审核可导出 DFT 数据...</td></tr>';
+      try {
+        const data = await fetchJSON(url);
+        let items = data.items || [];
+        if (!prop) items = items;
+        state.items = items;
+        renderResultSummary(data.total == null ? items.length : Number(data.total), items.length);
+        renderRows(items);
+      } catch (error) {
+        list.innerHTML = `<tr><td colspan="8" class="empty-state">查询失败：${esc(error.message)}</td></tr>`;
       }
-      let html = '<button type="button" class="reason-chip ' + (!state.qualityReason ? "active" : "") + '" onclick="setQualityReason(\'\')">全部原因<span class="chip-count">全部</span></button>';
-      html += entries.map(([reason, count]) => {
-        const active = state.qualityReason === reason ? " active" : "";
-        return '<button type="button" class="reason-chip' + active + '" onclick="setQualityReason(\'' + esc(reason) + '\')">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></button>';
-      }).join("");
-      el.innerHTML = html;
-    }
-    function setQualityReason(reason) {
-      state.qualityReason = reason || "";
-      loadQualityPanel();
     }
     function firstLocator(row) {
       if (row && row.primary_evidence_locator) return row.primary_evidence_locator;
@@ -1003,161 +939,10 @@
     function handleEvidenceBackdropClick(event) {
       if (event && event.target && event.target.id === "evidenceModal") closeEvidenceModal();
     }
-    function showQueueEvidence(index) {
-      const item = state.qualityRows[index];
-      if (!item) return;
-      const locator = firstLocator(item);
-      const page = item.evidence_page || (locator && locator.page);
-      const locators = Array.isArray(item.evidence_locators) ? item.evidence_locators : [];
-      const audits = Array.isArray(item.latest_external_audit_opinions) ? item.latest_external_audit_opinions : [];
-      const objectAudits = Array.isArray(item.object_review_audits) ? item.object_review_audits : [];
-      const conflicts = Array.isArray(item.field_conflicts) ? item.field_conflicts : [];
-      const locatorRows = locators.length
-        ? locators.map(loc => {
-          const locationParts = ['page ' + (loc.page || "-"), locatorStatusLabel(loc.locator_status)];
-          const sourceLabel = sourceTypeLabel(loc.source_type);
-          if (sourceLabel) locationParts.push(sourceLabel);
-          if (loc.section) locationParts.push(loc.section);
-          if (loc.table_id) locationParts.push("table");
-          if (loc.figure_id) locationParts.push("figure");
-          if (loc.warning_reason) locationParts.push("warning: " + loc.warning_reason);
-          return '<div class="quality-meta">' + esc(locationParts.join(" / ")) + '</div>';
-        }).join("")
-        : '<div class="quality-meta">No evidence locator is attached to this row.</div>';
-      const locatorWarnings = Array.isArray(item.locator_reliability_warnings) && item.locator_reliability_warnings.length
-        ? item.locator_reliability_warnings.map(locatorWarningLabel).join(", ")
-        : "none";
-      const auditRows = audits.length
-        ? audits.map(audit => '<div class="quality-meta"><strong>' + esc(audit.source_label || audit.source || "external audit") + '</strong>: ' + esc(audit.verdict || "-") + ' / ' + esc(audit.recommended_action || "-") + ' / ' + esc(audit.verification_status || "unverified") + '</div>').join("")
-        : '<div class="quality-meta">No external audit opinion has been imported for this paper.</div>';
-      document.getElementById("evidenceDetail").innerHTML =
-        renderFragmentLocationRows(item) +
-        '<div class="quality-status-grid" style="margin-top:10px;">' +
-          '<div class="readable-field"><div class="k">DFT row</div><div class="v">' + esc(item.property_type || "-") + ' / ' + esc(item.adsorbate || "-") + ' = ' + esc(item.value == null ? "-" : item.value) + ' ' + esc(item.unit || "") + '</div></div>' +
-          '<div class="readable-field"><div class="k">入库状态</div><div class="v">' + esc(item.is_exportable ? "可导出" : "待处理") + ' / ' + esc((item.blocked_reasons || []).map(reasonLabel).join(", ") || "无") + '</div></div>' +
-          '<div class="readable-field"><div class="k">Review status</div><div class="v">' + esc(reviewStatusLabel(item.review_status)) + ' / ' + esc(item.recommended_action || "-") + '</div></div>' +
-        '</div>' +
-        '<div class="quality-actions">' +
-          renderDftPdfButton(item, "btn btn-primary btn-sm") +
-          '<a class="btn btn-ghost btn-sm" href="../review_center/index.html">去审核中心处理</a>' +
-        '</div>' +
-        renderFragmentContext(item) +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">原定位记录</div><div class="v">' + locatorRows + '<div class="quality-meta">定位摘要：' + esc(locatorSummary(item)) + '</div><div class="quality-meta">定位告警：' + esc(locatorWarnings) + '</div></div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">最新外部审核</div><div class="v">' + auditRows + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">对象级审核</div><div class="v">' + renderObjectAuditRows(objectAudits) + '</div></div>' +
-        '<div class="readable-field" style="margin-top:10px;"><div class="k">AI 冲突</div><div class="v">' + renderConflictRows(conflicts) + '</div></div>';
-      document.getElementById("validationSummary").textContent = item.evidence_text ? "已加载这条 DFT 记录的文章片段证据。" : "这条 DFT 记录缺少证据原文。";
-      setEvidenceModalHeader(item.property_type || "DFT 候选证据", (item.title || "文献") + (item.year ? " | " + item.year : ""));
-      revealEvidencePanel();
-    }
-    function renderQualityRows(rows) {
-      const el = document.getElementById("qualityRows");
-      const title = document.getElementById("qualityListTitle");
-      if (title) title.textContent = state.qualityReason ? ("处理原因：" + reasonLabel(state.qualityReason)) : "候选问题汇总";
-      if (!el) return;
-      state.qualityRows = rows || [];
-      if (!rows.length) {
-        el.innerHTML = '<div class="empty-state">当前筛选下没有待处理的 DFT 候选。</div>';
-        return;
-      }
-      el.innerHTML = rows.slice(0, 30).map((row, idx) => {
-        const locator = firstLocator(row);
-        const page = row.evidence_page || (locator && locator.page);
-        const reasons = (row.blocked_reasons || row.issue_flags || []).map(reasonLabel).join(", ") || "none";
-        const rowClass = row.is_exportable ? "quality-row exportable" : "quality-row";
-        const valueText = [row.property_type || "-", row.adsorbate || "-", row.value == null ? "-" : row.value, row.unit || ""].join(" ");
-        const evidencePreview = row.evidence_preview || row.evidence_text || "No evidence text.";
-        return '<div class="' + rowClass + '">' +
-          '<div class="quality-row-header">' +
-            '<div class="quality-row-title">' +
-              '<div class="quality-pill">' + esc(row.is_exportable ? "可导出" : "待处理") + '</div>' +
-              '<h4>' + esc(valueText) + '</h4>' +
-              '<div class="quality-meta">' + esc(row.title || "文献") + '</div>' +
-            '</div>' +
-            '<div class="quality-meta" style="text-align:right;min-width:120px;">' + esc(row.year || "-") + '<br>' + esc(row.candidate_source_label || row.candidate_status || "候选") + '</div>' +
-          '</div>' +
-          '<div class="queue-field-grid">' +
-            '<div class="readable-field"><div class="k">证据定位</div><div class="v">' + esc(locatorSummary(row)) + '</div></div>' +
-            '<div class="readable-field"><div class="k">阻断原因</div><div class="v">' + esc(reasons) + '</div></div>' +
-            '<div class="readable-field"><div class="k">建议处理</div><div class="v">' + esc(row.recommended_action || "-") + '</div></div>' +
-          '</div>' +
-          '<div class="queue-evidence-preview">' + esc(evidencePreview) + '</div>' +
-          '<div class="audit-strip">' + renderAuditChips(row.latest_external_audit_opinions) + '</div>' +
-          '<div class="audit-strip">' + renderLocatorReliabilityChips(row) + '</div>' +
-          '<div class="audit-strip">' + renderObjectAuditChips(row.object_review_audits, row.object_review_audits_count) + '</div>' +
-          '<div class="audit-strip">' + renderConflictChips(row.field_conflicts) + '</div>' +
-          '<div class="quality-actions">' +
-            '<button class="btn btn-primary btn-sm" type="button" onclick="showQueueEvidence(' + idx + ')">查看证据</button>' +
-            renderDftPdfButton(row, "btn btn-ghost btn-sm") +
-            '<a class="btn btn-ghost btn-sm" href="../review_center/index.html">去审核中心处理</a>' +
-          '</div>' +
-        '</div>';
-      }).join("");
-      return;
-      if (!rows.length) {
-        el.innerHTML = '<div class="empty-state">当前筛选下没有需要处理的 DFT 候选。正式库仍只显示已审核可导出数据。</div>';
-        return;
-      }
-      const issueCounts = {};
-      rows.forEach(row => {
-        (row.issue_flags || row.blocked_reasons || []).forEach(reason => {
-          issueCounts[reason] = (issueCounts[reason] || 0) + 1;
-        });
-      });
-      const chips = Object.entries(issueCounts).slice(0, 8).map(([reason, count]) => {
-        return '<span class="reason-chip" style="cursor:default;">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>';
-      }).join("");
-      el.innerHTML = '<div class="quality-row">' +
-        '<div class="quality-pill">候选区已隔离</div>' +
-        '<h4>候选 DFT 数据不在正式数据库页展开</h4>' +
-        '<div class="quality-meta">当前筛选下有 ' + esc(rows.length) + ' 条候选需要审核。请到审核中心执行确认入库、合并重复、退回重抽、重新定位证据或拒绝候选。</div>' +
-        '<div class="reason-chips" style="margin-top:10px;">' + (chips || '<span class="quality-meta">暂无问题分类。</span>') + '</div>' +
-      '</div>';
-    }
-    function renderCompletenessHints(items) {
-      const el = document.getElementById("qualityCompleteness");
-      if (!el) return;
-      const flagged = (items || []).filter(item => (item.hints || []).length);
-      if (!flagged.length) {
-        el.innerHTML = '<div class="quality-meta" style="grid-column: 1 / -1; margin-bottom: -4px;">论文级处理提示：当前筛选下没有发现含 DFT 候选且需要补材料的论文。</div>';
-        return;
-      }
-      el.innerHTML = '<div class="quality-meta" style="grid-column: 1 / -1; margin-bottom: -4px;"><strong>论文级处理提示</strong>：仅列出当前筛选下含 DFT 候选且存在风险的 ' + esc(flagged.length) + ' 篇论文。</div>' + flagged.slice(0, 8).map(item => {
-        return '<div class="completeness-row">' +
-          '<div class="quality-meta"><a href="' + esc(item.library_detail_url || "#") + '">' + esc(item.title || item.paper_id || "Paper") + '</a></div>' +
-          '<div class="quality-meta">完整性状态：' + esc(item.dft_completeness_label || item.dft_completeness_status || "-") + '；检测线索：' + esc((item.dft_audit && item.dft_audit.detected_signal_count) || 0) + '；疑似漏提：' + esc((item.dft_audit && item.dft_audit.suspected_missing_count) || 0) + '</div>' +
-          '<div class="quality-meta">可导出 DFT：' + esc(item.exportable_dft_results || 0) + '；需处理 DFT：' + esc(item.blocked_dft_results || 0) + '；催化剂样本：' + esc(item.catalyst_samples || 0) + '；DFT 设置：' + esc(item.dft_settings || 0) + '</div>' +
-          '<div class="quality-meta">提示：' + esc((item.hints || []).map(completenessHintLabel).join("；")) + '</div>' +
-        '</div>';
-      }).join("");
-    }
-    function renderStats(stats, count) {
-      const banner = document.getElementById("statsBanner");
-      banner.style.display = count ? "grid" : "none";
-      document.getElementById("statCount").textContent = stats.count || count || 0;
-      document.getElementById("statMin").textContent = stats.min != null ? `${stats.min} ${stats.unit || ""}` : "-";
-      document.getElementById("statMax").textContent = stats.max != null ? `${stats.max} ${stats.unit || ""}` : "-";
-      document.getElementById("statMean").textContent = stats.mean != null ? `${stats.mean} ${stats.unit || ""}` : "-";
-      const status = document.getElementById("validationStatus").value;
-      const suffix = status === "validated" ? "已审核可导出 DFT 记录" : (status === "needs_review" ? "候选需审核 DFT 记录" : "DFT 记录（含候选）");
-      document.getElementById("resultSummary").textContent = `${count} 条${suffix}`;
-    }
-    function buildStats(items) {
-      const propertyTypes = new Set((items || []).map(item => item.property_type || "").filter(Boolean));
-      const units = new Set((items || []).map(item => item.unit || "").filter(Boolean));
-      if (propertyTypes.size > 1 || units.size > 1) {
-        return { count: (items || []).length };
-      }
-      const values = (items || []).map(item => Number(item.value)).filter(value => Number.isFinite(value));
-      if (!values.length) return {};
-      const sum = values.reduce((total, value) => total + value, 0);
-      return {
-        count: values.length,
-        min: Math.round(Math.min(...values) * 10000) / 10000,
-        max: Math.round(Math.max(...values) * 10000) / 10000,
-        mean: Math.round((sum / values.length) * 10000) / 10000,
-        unit: (items.find(item => item.unit) || {}).unit || "",
-      };
+    function renderResultSummary(total, shown) {
+      const suffix = "条已审核可导出 DFT 记录";
+      const label = total === shown ? `${total} ${suffix}` : `${total} ${suffix}（当前显示 ${shown} 条）`;
+      document.getElementById("resultSummary").textContent = label;
     }
     function renderRows(items) {
       const list = document.getElementById("dftList");
@@ -1169,8 +954,8 @@
         const catName = item.catalysts && item.catalysts[0] ? item.catalysts[0].name : "-";
         const conf = Number(item.confidence || 0);
         const cls = conf >= 0.8 ? "high" : conf >= 0.5 ? "medium" : "low";
-        const validation = item.validation_status || "needs_review";
-        const validationColor = validation === "validated" ? "var(--color-success)" : "var(--color-warning)";
+        const validation = "validated";
+        const validationColor = "var(--color-success)";
         return `<tr>
           <td><strong>${esc(catName)}</strong></td>
           <td>${esc(item.adsorbate || "-")}</td>
@@ -1190,7 +975,7 @@
         renderFragmentLocationRows(item) +
         '<div class="quality-status-grid" style="margin-top:10px;">' +
           '<div class="readable-field"><div class="k">置信度</div><div class="v">' + esc(item.confidence == null ? "-" : item.confidence) + '</div></div>' +
-          '<div class="readable-field"><div class="k">校验状态</div><div class="v">' + esc(validationStatusLabel(item.validation_status || "needs_review")) + '</div></div>' +
+          '<div class="readable-field"><div class="k">校验状态</div><div class="v">' + esc(validationStatusLabel("validated")) + '</div></div>' +
         '</div>' +
         renderFragmentContext(item);
       document.getElementById("validationSummary").textContent = item.evidence_text ? "已显示文章片段证据。" : "这条记录缺少证据原文。";
@@ -1200,83 +985,6 @@
     function setExportSafetyStatus(message) {
       const el = document.getElementById("exportSafetyStatus");
       if (el) el.textContent = message;
-    }
-    async function verifyDftQueueRow(paperId, resultId) {
-      if (!paperId || !resultId) return;
-      const confirmed = window.confirm("请确认你已经对照 PDF 原文、页码定位和证据文本核验了这条 DFT 数据。");
-      if (!confirmed) return;
-      try {
-        await fetchJSON(`/api/papers/${encodeURIComponent(paperId)}/dft-results/${encodeURIComponent(resultId)}/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirm_reviewed_against_pdf: true,
-            reviewer: "user_codex_review",
-            reviewer_note: "Verified from the DFT review queue after checking PDF evidence and locator."
-          })
-        });
-        showToast("DFT 数据已标记为已核验。");
-        await loadQualityPanel();
-      } catch (error) {
-        showToast("DFT 核验失败：" + error.message);
-      }
-    }
-    async function rejectDftQueueRow(paperId, resultId) {
-      if (!paperId || !resultId) return;
-      const confirmed = window.confirm("请确认这条 DFT 候选是误抽取、证据不支持或不适合进入数据集。拒绝后它会保留审计记录，但不再出现在默认待核验队列。");
-      if (!confirmed) return;
-      try {
-        await fetchJSON(`/api/papers/${encodeURIComponent(paperId)}/dft-results/${encodeURIComponent(resultId)}/reject`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirm_reject_candidate: true,
-            reviewer: "user_codex_review",
-            reviewer_note: "Rejected from the DFT review queue as an unsupported or suspicious candidate."
-          })
-        });
-        showToast("DFT 候选已拒绝。");
-        await loadQualityPanel();
-      } catch (error) {
-        showToast("DFT 拒绝失败：" + error.message);
-      }
-    }
-    async function proposeDftQueueCorrection(paperId, resultId) {
-      if (!paperId || !resultId) return;
-      const fieldName = window.prompt("要修正的 DFT 字段，例如 value、unit、adsorbate、property_type：", "value");
-      if (!fieldName) return;
-      const fieldKey = fieldName.trim();
-      const rawValue = window.prompt("修正后的值：");
-      if (rawValue === null) return;
-      const reason = window.prompt("修正理由：", "Checked against the source PDF/evidence and found a mismatch.");
-      if (!reason || !reason.trim()) return;
-      let proposedValue = rawValue.trim();
-      if (["value", "confidence"].includes(fieldKey)) {
-        const numericValue = Number(proposedValue);
-        if (!Number.isFinite(numericValue)) {
-          showToast("数值字段需要输入有效数字。");
-          return;
-        }
-        proposedValue = numericValue;
-      }
-      try {
-        await fetchJSON(`/api/papers/${encodeURIComponent(paperId)}/dft-results/${encodeURIComponent(resultId)}/corrections`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirm_correction_proposal: true,
-            field_name: fieldKey,
-            proposed_value: proposedValue,
-            reason: reason.trim(),
-            reviewer: "user_codex_review",
-            evidence_payload: { source: "dft_review_queue" }
-          })
-        });
-        showToast("DFT 修正提议已提交，等待审核应用。");
-        await loadQualityPanel();
-      } catch (error) {
-        showToast("DFT 修正提议失败：" + error.message);
-      }
     }
     async function exportCSV() {
       await ensureCurrentLibraryName();
@@ -1370,9 +1078,10 @@
         if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
         const metadata = data && data.metadata ? data.metadata : {};
         const exported = Number(metadata.eligible_count || 0);
-        const blocked = Number(metadata.blocked_count || 0);
+        const rejected = Number((metadata.review_status_counts || {}).rejected || 0);
+        const pending = Math.max(0, Number(metadata.blocked_count || 0) - rejected);
         const gate = metadata.safety_gate || "safe_verified_with_required_evidence";
-        setExportSafetyStatus(`ML 导出规则：${gateLabel(gate)}；可导出 ${exported} 条；需处理 ${blocked} 条。`);
+        setExportSafetyStatus(`ML 导出规则：${gateLabel(gate)}；可导出 ${exported} 条；待完成 ${pending} 条；已拒绝 ${rejected} 条。`);
 
         const pretty = JSON.stringify(data || {}, null, 2);
         const blob = new Blob([pretty], { type: "application/json;charset=utf-8" });
@@ -1384,7 +1093,7 @@
         link.click();
         link.remove();
         URL.revokeObjectURL(downloadUrl);
-        showToast(`ML 数据集导出完成：${exported} 条可用，${blocked} 条被安全门阻止`);
+        showToast(`ML 数据集导出完成：${exported} 条可用，${pending} 条待完成，${rejected} 条已拒绝`);
       } catch (error) {
         setExportSafetyStatus("ML 数据集导出失败：" + error.message);
         showToast("ML 数据集导出失败：" + error.message);
@@ -1397,7 +1106,10 @@
       document.addEventListener("keydown", event => {
         if (event.key === "Escape") closeEvidenceModal();
       });
-      loadLibraries().finally(queryDFT);
+      loadLibraries().finally(() => {
+        loadExportSafetyOverview();
+        queryDFT();
+      });
     });
   </script>
 </body>

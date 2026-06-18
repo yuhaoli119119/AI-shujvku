@@ -10,12 +10,19 @@ role:
     - The assigned science/text model may act as dft_data_auditor for DFT rows and extraction completeness.
     - The reviewer role is not fixed by model name; it is fixed by the evidence package, task instruction, and recorded agent_role/model_name.
     - A reviewer must not silently promote its own extraction. Independent review or human confirmation is required.
+    - First compare the paper type inferred from the original PDF with the system-parsed paper type; if they differ, directly correct the parsed type and use the corrected type for the rest of the audit.
   forbidden:
     - Do not invent values.
     - Do not repair values from general knowledge.
     - Do not estimate precise values from figures unless the value is explicitly readable.
     - Do not accept a record without evidence location.
     - Do not accept a record if MCP/API did not expose the paper artifact status, parsed evidence packet, and prior internal/external audit opinions.
+  fallback_when_ide_mcp_is_missing:
+    - If the current IDE session does not expose MCP tools, do not stop at tool-missing.
+    - Use the repository-native backend path in `literature-ai/backend` and call `app.mcp.context.mcp_auth_context` plus the needed functions from `app.mcp.server` directly.
+    - Treat repository-native reads and imports as MCP-equivalent evidence access for this workflow, but keep them traceable in notes or the payload.
+    - Do not bypass the repository code with ad hoc PDF parsing scripts or local file reimplementation.
+    - Only if both the IDE MCP tools and the repository-native backend path fail may the worker report `blocked_by_missing_mcp_tool` or `blocked_by_evidence_api_unavailable`.
 
 input_package_must_include:
   - candidate_record
@@ -52,29 +59,44 @@ must_check:
   - get_review_coverage has been checked for unreviewed sections/tables/figures and prior external_audit_opinion records.
   - For image audit tasks, figure crop matches the intended figure/subfigure and does not omit axes, legends, labels, or panels needed for the claim.
   - For DFT audit tasks, related tables/figures/sections have been checked for missing rows from the same material/adsorbate/property family.
+  - For image audit tasks, check whether the crop is too large, too small, off-target, or mixed with surrounding text/adjacent figures.
+  - For image audit tasks, state what the figure actually shows in concrete scientific terms; do not repeat the caption with superficial rewording.
+  - For image audit tasks, explicitly mention whether the crop keeps the full scientific content needed for later review: panels, axes, legends, labels, markers, structures, reaction arrows, and annotations.
+  - For image audit tasks, compare the paper's actual figure numbering and total figure/subfigure coverage in the PDF against the current parsed figure objects; do not stop at reviewing only the existing crop list.
 
 allowed_decisions:
-  - accept
-  - reject
-  - needs_fix
-  - suspected_duplicate
-  - suspected_missing
+  - PASS
+  - PROPOSED
+  - REJECT
+  - NEEDS_HUMAN
+  - new_candidate
 
 decision_rules:
-  accept:
+  PASS:
     - All required scientific fields are correct.
     - Evidence text and location directly support the value.
-    - Locator is precise enough for human verification.
-  reject:
+    - Locator is precise enough for verification.
+    - No field needs correction.
+  PROPOSED:
+    - The record is valid but a field, unit, method, material identity, or locator must be corrected or completed.
+    - corrected_value must contain the complete normalized DFT row, not only the changed field.
+  REJECT:
     - Evidence contradicts the value or field.
     - Candidate is not a DFT/material data record.
     - Value appears hallucinated or unsupported.
-  needs_fix:
-    - The record may be valid but a field, unit, method, or locator is incomplete.
-  suspected_duplicate:
     - Same paper contains a near-identical normalized catalyst/adsorbate/property/value/unit/location record.
-  suspected_missing:
+  NEEDS_HUMAN:
+    - PDF evidence, material identity, unit scaling, duplicate relation, or locator cannot be confirmed.
+  new_candidate:
     - Evidence package contains DFT-relevant text/table/caption that appears unextracted.
+    - For any paper, when a missing DFT row should be stably added to the system queue, submit `decision=new_candidate` with a full structured `corrected_value` and import it with `auto_apply_review_rules=true` so the backend materializes an unverified DFTResult candidate.
+
+unit_policy:
+  - Normalize energy values to eV. If the PDF reports meV, divide by 1000 and set unit="eV".
+  - Normalize permeance to GPU. If the PDF reports 10^3 GPU, multiply by 1000 and set unit="GPU".
+  - Keep percent values as unit="%".
+  - Preserve the original expression in corrected_value.raw_value, corrected_value.raw_unit, or evidence_location.quoted_text.
+  - Never mark PASS if unit scaling is ambiguous; use PROPOSED when you can normalize it, otherwise NEEDS_HUMAN.
 
 output_format:
   agent_role: string
@@ -83,9 +105,17 @@ output_format:
   protocol_sha256: string_or_null
   writes_final_truth: false
   human_confirmation_required: true
-  decision: one_of_allowed_decisions
+  decision: PASS_or_PROPOSED_or_REJECT_or_NEEDS_HUMAN_or_new_candidate
   can_promote_to_exportable_database: boolean
-  corrected_record: object_or_null
+  corrected_value:
+    property: string_or_null
+    adsorbate: string_or_null
+    material: string_or_null
+    method: string_or_null
+    value: number_or_null
+    unit: string_or_null
+    raw_value: string_or_number_or_null
+    raw_unit: string_or_null
   reasons: list
   evidence_location:
     pdf_page: integer_or_null
@@ -105,11 +135,24 @@ output_format:
 
 promotion_policy:
   - accept alone from second AI is not enough if the workflow requires human confirmation.
-  - Records with needs_fix, suspected_duplicate, suspected_missing, reject, or missing locator remain candidates.
+  - PASS from one AI only confirms the checked fields; it does not establish full-row consensus.
+  - PROPOSED must include material, property, value, unit, method/condition, and evidence_location before it can be auto-adopted.
+  - REJECT duplicate must include duplicate_of when possible.
+  - Records with PROPOSED, REJECT, NEEDS_HUMAN, new_candidate, or missing locator remain candidates until the system adopts the opinion and the safety gate passes.
   - Only reviewed/exportable records can appear in the final DFT database, ML export, and trusted matrix.
   - Image audit accept only confirms the visual evidence/crop; it does not validate a DFT numeric row unless the row is checked separately.
   - If internal_data_read_status is incomplete or unreadable, can_promote_to_exportable_database must be false.
   - If the paper exists only as a Literature Intake candidate and has not been ingested into papers, it is not eligible for extraction audit or export.
+
+image_audit_micro_checklist:
+  - Check paper-level coverage: compare the PDF's figure numbering and total figure/subfigure count against current figure objects, and identify missing figures or missing subfigures.
+  - Check crop size: reject or revise if the crop is mostly whitespace, page background, or surrounding text.
+  - Check crop completeness: reject or revise if key panels, axes, legends, labels, or subfigures are cut off.
+  - Check crop precision: reject or revise if the crop includes the wrong figure, multiple unrelated figures, or large unrelated margins.
+  - Check omission risk: if the PDF has a figure/subfigure with no corresponding object or crop, explicitly call for create_figure_from_bbox or a new figure object instead of silently ignoring it.
+  - Check analysis quality: content_summary must describe the visual/scientific content, not paraphrase the caption.
+  - Check key_elements quality: list concrete elements such as materials, structures, curves, axes, peaks, legends, or reaction steps; never use placeholders.
+  - Give a figure-specific judgment for each image, not a batch-level generic comment.
 
 traceability_policy:
   - Every audit must be persisted as an AuditLog, ExtractionFieldReview.review_payload.ai_audits entry, PaperNote, PaperCorrection, ExternalAnalysisRun, or WorkflowJob.

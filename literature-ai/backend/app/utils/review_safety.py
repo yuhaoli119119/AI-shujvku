@@ -160,6 +160,8 @@ def has_safe_verified_review(
 def has_required_evidence_text(row: Any) -> bool:
     if isinstance(row, DFTResult):
         return not _is_blank(row.evidence_text)
+    if isinstance(row, CatalystSample):
+        return not _is_blank(row.evidence_strength)
     return not _is_blank(getattr(row, "evidence_text", None))
 
 
@@ -233,12 +235,40 @@ def _catalyst_has_material_identity(catalyst: CatalystSample | None) -> bool:
     )
 
 
+def _dft_payload_has_material_identity(row: DFTResult) -> bool:
+    payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+    corrected_value = payload.get("corrected_value")
+    if not isinstance(corrected_value, dict):
+        corrected_value = {}
+    return any(
+        not _is_blank(value)
+        for value in (
+            payload.get("material_identity"),
+            payload.get("material"),
+            payload.get("structure_name"),
+            corrected_value.get("material_identity"),
+            corrected_value.get("material"),
+            corrected_value.get("structure_name"),
+        )
+    )
+
+
 def has_required_material_identity(session: Session, row: Any) -> bool:
     if not isinstance(row, DFTResult):
+        return True
+    if _dft_payload_has_material_identity(row):
         return True
     if _is_blank(row.catalyst_sample_id):
         return False
     return _catalyst_has_material_identity(session.get(CatalystSample, row.catalyst_sample_id))
+
+
+def is_borrowed_supporting_reference(row: Any) -> bool:
+    payload = getattr(row, "evidence_payload", None)
+    if not isinstance(payload, dict):
+        return False
+    source_type = str(payload.get("source_document_type") or "").strip().lower()
+    return source_type == "supporting_reference" or bool(payload.get("borrowed_from_reference"))
 
 
 def _safe_locator_from_parts(
@@ -366,8 +396,11 @@ def build_export_gate_reason(
     has_evidence_text: bool,
     has_safe_locator: bool,
     has_material_identity: bool = True,
+    borrowed_supporting_reference: bool = False,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
+    if borrowed_supporting_reference:
+        reasons.append("supporting_reference_not_main_paper_data")
     if not has_material_identity:
         reasons.append("missing_material_identity")
     if not has_review:
@@ -418,6 +451,7 @@ def is_export_eligible_extraction(
         has_evidence_text=has_evidence_text,
         has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
         has_material_identity=has_required_material_identity(session, row),
+        borrowed_supporting_reference=is_borrowed_supporting_reference(row),
     )
     review_status = safe_review.reviewer_status if safe_review is not None else (
         ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews})) if reviews else "missing"
@@ -533,10 +567,11 @@ def bulk_export_gate_results(
             has_evidence_text=has_required_evidence_text(row),
             has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
             has_material_identity=(
-                str(row.catalyst_sample_id) in material_identity_ids
+                _dft_payload_has_material_identity(row) or str(row.catalyst_sample_id) in material_identity_ids
                 if is_dft_target and isinstance(row, DFTResult)
                 else True
             ),
+            borrowed_supporting_reference=is_dft_target and is_borrowed_supporting_reference(row),
         )
         review_status = safe_review.reviewer_status if safe_review is not None else (
             ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews}))

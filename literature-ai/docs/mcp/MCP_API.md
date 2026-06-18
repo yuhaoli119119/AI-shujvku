@@ -73,6 +73,14 @@ If you want audit logs to distinguish tools or agents, create multiple keys with
 
 Natural-language tasks such as "parse this paper", "audit DFT data", "check images", "check writing cards", "check mechanism claims", "check tables", or "import this external AI review" should be interpreted through [AI_TASK_ROUTING.md](./AI_TASK_ROUTING.md). Do not infer a fixed division of labor from model names. The user assigns the AI role per task, and `source`, `source_label`, `agent_role`, or `model_name` should record what happened in that run.
 
+For LAN multi-computer workflows, see [LAN_MULTI_AI_WORKFLOW.md](./LAN_MULTI_AI_WORKFLOW.md). The short version is:
+
+- DFT review opinions may be submitted concurrently by two or more AI clients.
+- Non-DFT direct writes must first acquire a module write lock.
+- Ordinary candidate-only imports can set `auto_apply_review_rules=false` and do not require a write lock.
+- DFT `new_candidate` is the important exception: if you want missing DFT rows to enter the system's unverified DFT candidate queue automatically, send `decision=new_candidate` with a structured `corrected_value` and use `auto_apply_review_rules=true`. This materializes an unverified `DFTResult` candidate and still does not mark it exportable or final.
+- Other computers should use MCP/API only; they should not directly modify the host file folder.
+
 Use this flow when any IDE AI needs to review already parsed literature:
 
 1. `query_papers` to find the paper.
@@ -116,6 +124,50 @@ Paper-level audit payload example:
 The `source` and `source_label` should describe the role you assigned for that run, such as `assigned_figure_audit`, `assigned_data_audit`, `assigned_parse_review`, or `manual_second_pass`.
 
 The import creates an `external_audit_opinion` candidate with `verification_status=unverified`. It is visible in the review center, but it does not write final truth and does not unlock ML export.
+
+## Module Write Locks
+
+Direct AI writes for non-DFT modules are guarded by short-lived leases. A client must acquire a lock before calling `import_analysis` with `auto_apply_review_rules=true` when the payload can directly apply notes, corrections, relationships, figure/table changes, sections, or writing-card changes.
+
+MCP tools:
+
+```text
+acquire_module_write_lock
+release_module_write_lock
+```
+
+HTTP API:
+
+```text
+POST /api/module-locks/acquire
+POST /api/module-locks/release
+POST /api/module-locks/validate
+GET  /api/module-locks
+```
+
+Supported module scopes:
+
+```text
+sections
+writing_cards
+figures
+tables
+content
+metadata
+notes
+relationships
+all_non_dft
+```
+
+Typical flow:
+
+```text
+acquire_module_write_lock(paper_id, module_name="content", locked_by="ai_pc_2")
+import_analysis(..., reviewer="ai_pc_2", auto_apply_review_rules=true, write_lock_token="<token>")
+release_module_write_lock("<token>")
+```
+
+If another AI already holds the same paper/module lock, acquisition fails with `module_write_lock_conflict`. If a direct write is attempted without a valid token, it fails with `module_write_lock_required`.
 
 Object-level audit payload example:
 

@@ -4,6 +4,11 @@ instruction: >
   Draft only the requested manuscript sections. Stay strictly inside the retrieved Li-S / DFT evidence pack,
   preserve the topic domain, and never substitute a different field such as ORR, CO2 reduction, or generic catalysis.
   If evidence is thin, keep the wording narrow and qualitative rather than filling gaps with background knowledge.
+  Before drafting, verify whether the paper type inferred from the original PDF matches the system-parsed paper type; if they disagree, correct the parsed type immediately and base the writing plan on the corrected classification.
+workflow_fallback:
+  - Prefer project MCP/context reads when gathering evidence for writing.
+  - If the current IDE session does not expose MCP tools, switch to the repository-native backend path in `literature-ai/backend` and call `app.mcp.context.mcp_auth_context` plus `app.mcp.server` functions directly instead of stopping at tool-missing.
+  - Repository-native fallback must still rely on project evidence paths and preserve traceability; do not substitute ad hoc local parsing scripts.
 style:
   tone: "formal scientific"
   numeric_policy: "only use values that appear in retrieved facts or evidence text"

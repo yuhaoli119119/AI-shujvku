@@ -36,6 +36,7 @@ from app.mcp.context import MCPAuthInfo, mcp_auth_context
 from app.mcp.server import (
     append_note,
     approve_correction,
+    acquire_module_write_lock,
     get_correction_detail,
     get_codex_context,
     get_correction_queue,
@@ -118,6 +119,17 @@ def _admin_auth() -> MCPAuthInfo:
             {"read_papers", "append_notes", "propose_corrections", "request_parse", "review_corrections"}
         ),
         raw_key="litmcp_admin",
+    )
+
+
+def _ai_reviewer_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="ai_pc_1",
+        display_name="AI PC 1",
+        capabilities=frozenset(
+            {"read_papers", "append_notes", "propose_corrections", "request_parse", "review_corrections"}
+        ),
+        raw_key="litmcp_ai_pc_1",
     )
 
 
@@ -904,6 +916,80 @@ def test_mcp_propose_dft_result_correction_enters_review_queue(mcp_test_env):
         audit = session.scalar(select(AuditLog).where(AuditLog.action == "propose_dft_result_correction"))
         assert audit is not None
         assert audit.target_id == correction["id"]
+
+
+def test_ai_reviewer_mcp_approve_non_dft_requires_module_lock(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="AI Review Lock Target", abstract="Old abstract", pdf_path="review-lock.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        correction = propose_correction(
+            paper_id=paper_id,
+            field_name="abstract",
+            target_path="abstract",
+            operation="replace",
+            proposed_value="Locked abstract",
+            reason="AI proposes a safer abstract.",
+        )
+
+    with mcp_auth_context(_ai_reviewer_auth()):
+        with pytest.raises(ValueError, match="module_write_lock_required"):
+            approve_correction(correction["id"])
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="content",
+            locked_by="ai_pc_1",
+        )
+        approved = approve_correction(correction["id"], write_lock_token=lock["lock_token"])
+        assert approved["status"] == "approved"
+        assert approved["reviewed_by"] == "ai_pc_1"
+
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.abstract == "Locked abstract"
+
+
+def test_import_analysis_defaults_reviewer_to_mcp_source_for_lock_validation(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Default Reviewer Lock Target", abstract="Old abstract", pdf_path="review-lock.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="content",
+        )
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="claude_overall_review",
+            source_label="claude_overall_review",
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+            raw_payload={
+                "correction_proposals": [
+                    {
+                        "field_name": "abstract",
+                        "target_path": "abstract",
+                        "operation": "replace",
+                        "proposed_value": "Rewritten abstract",
+                        "reason": "Evidence-backed rewrite.",
+                        "evidence_payload": {"page": 1, "quoted_text": "Old abstract"},
+                    }
+                ]
+            },
+        )
+
+    assert imported["reviewer"] == "claude"
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.abstract == "Rewritten abstract"
 
 
 def test_admin_mcp_review_flow_applies_or_rejects_corrections(mcp_test_env):

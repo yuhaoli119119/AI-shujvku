@@ -21,15 +21,15 @@ from app.parsers.grobid_parser import GrobidParseResult, GrobidParser
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.artifact_store import ArtifactStore
 from app.services.pdf_image_extractor import PdfImageExtractor
-from app.services.vlm_service import VLMService
 from app.services.embedding import EmbeddingUnavailableError, get_embedding_service
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_identity import PaperIdentityService
+from app.services.paper_codes import ensure_paper_codes
 from app.services.paper_serials import renumber_library_papers_by_year
 from app.services.parse_quality_auditor import ParseQualityAuditor
 from app.services.paper_workbench_service import PaperWorkbenchService
-from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
+from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
 from app.utils.text_cleaning import normalize_text_tree
 
@@ -162,6 +162,8 @@ class PaperIngestionService:
                     pdf_quality_report=quality_report,
                 )
                 self.session.add(paper)
+                self.session.flush()
+                ensure_paper_codes(self.session, [paper])
                 self.session.commit()
                 self.session.refresh(paper)
                 raise RuntimeError(f"docling_parse_failed:{paper.id} {exc}") from exc
@@ -286,6 +288,67 @@ class PaperIngestionService:
         setattr(paper, "_ingest_status", "completed")
         return paper
 
+    async def reparse_existing_paper(self, paper_id: UUID) -> Paper:
+        paper = self.session.get(Paper, paper_id)
+        if paper is None:
+            raise ValueError("Paper not found")
+        stored_pdf = resolve_persisted_artifact_path(
+            paper.pdf_path,
+            category="pdf",
+            settings=self.settings,
+            must_exist=False,
+        ) or Path(paper.pdf_path or "")
+        if not stored_pdf.exists():
+            raise FileNotFoundError("Paper PDF is missing")
+
+        quality_report = PaperWorkbenchService.assess_pdf_path(stored_pdf, self.settings)
+        try:
+            grobid_result = await self.grobid_parser.parse_pdf(stored_pdf)
+        except Exception as exc:
+            logger.warning("Grobid parsing failed during reparse for %s: %s", paper_id, exc, exc_info=True)
+            grobid_result = GrobidParseResult(
+                metadata={"title": paper.title or stored_pdf.name},
+                abstract=paper.abstract or "",
+                sections=[],
+                references=[],
+                tei_xml="",
+            )
+        try:
+            docling_result = await self.docling_parser.parse_pdf(stored_pdf)
+            unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
+        except Exception as exc:
+            logger.error("Docling reparse failed for %s: %s", paper_id, exc, exc_info=True)
+            paper.oa_status = "parse_failed"
+            paper.workflow_status = "Needs_Human_Confirmation"
+            self.workbench.apply_quality_report(paper, quality_report)
+            self.session.add(paper)
+            self.session.commit()
+            self.session.refresh(paper)
+            try:
+                self.workbench.prepare_paper_workspace(paper.id)
+            except Exception:
+                logger.exception("Failed to refresh Codex workspace after reparse failure for paper %s", paper.id)
+            raise RuntimeError(f"docling_parse_failed:{paper.id} {exc}") from exc
+
+        if quality_report.get("needs_human_confirmation"):
+            unified = self._document_metadata_only(unified)
+        else:
+            if paper.workflow_status == "Needs_Human_Confirmation":
+                paper.workflow_status = "Quality_Checked"
+            if str(paper.oa_status or "").strip().lower() in {"parse_failed", "quality_blocked"}:
+                paper.oa_status = "reparsed"
+
+        reparsed = self._merge_into_existing_paper(
+            paper,
+            unified,
+            external_metadata=None,
+            source_reference=paper.source_path,
+            oa_status=paper.oa_status,
+            quality_report=quality_report,
+        )
+        setattr(reparsed, "_ingest_status", "reparsed")
+        return reparsed
+
     def ingest_pdf_sync(self, source_path: Path, original_filename: str) -> Paper:
         import asyncio
 
@@ -307,6 +370,7 @@ class PaperIngestionService:
             source_reference=source_reference,
             classify_callback=self.extraction_pipeline._rule_based_classify,
         )
+        ensure_paper_codes(self.session, [paper])
         renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
         self.session.refresh(paper)
@@ -424,59 +488,8 @@ class PaperIngestionService:
             self.artifacts.settings.storage_paths["figures"],
         )
 
-        # Optional Level 2 VLM Classification & Level 3 Numerical Extraction
-        if self.artifacts.settings.writer_api_key:
-            vlm = VLMService(self.artifacts.settings)
-            prompt = """你是一位材料科学论文图表分析与数值提取专家。分析这张论文图片，返回 JSON 格式的分析结果：
-
-{
-  "figure_role": "crystal_structure | electronic_structure | reaction_pathway | phase_diagram | morphology | spectroscopy | electrochemistry | performance | schematic | comparison | other",
-  "role_confidence": 0.0-1.0,
-  "content_summary": "一句话描述图片内容，如'Fe-N4单原子催化剂上CO2吸附的优化构型及吸附能'",
-  "key_elements": ["Fe-N4", "CO2", "adsorption energy", "-1.23 eV"],
-  "numerical_data_points": [
-    {
-      "metric_name": "指标名称，例如 onset_potential | overpotential | tafel_slope | capacity | energy_barrier | adsorption_energy | d_band_center | band_gap | other_metric",
-      "metric_value": 150.0,
-      "unit": "单位，例如 mV | V | mA/cm² | mAh/g | eV | etc",
-      "sample_label": "对应的样品名或图例标签，例如 Fe-N4/C, Pt/C",
-      "conditions": {"electrolyte": "0.1 M KOH", "scan_rate": "5 mV/s"},
-      "confidence": 0.0-1.0
-    }
-  ]
-}
-
-分类标准：
-- crystal_structure: 原子/分子构型、晶胞、吸附位、缺陷结构
-- electronic_structure: DOS图、能带、电荷密度差、Bader电荷可视化
-- reaction_pathway: NEB能垒图、反应坐标、过渡态
-- phase_diagram: 稳定性相图、Pourbaix图、凸包图
-- morphology: SEM/TEM/AFM/HRTEM 等形貌图
-- spectroscopy: XRD/Raman/FTIR/XPS/EXAFS 等光谱
-- electrochemistry: CV/LSV/Tafel/EIS/恒流充放电曲线
-- performance: 循环寿命/倍率/容量/效率等性能图
-- schematic: 机理示意图、装置图、流程图
-- comparison: 与其他工作对比的柱状图/雷达图/表格
-
-数值提取指南：
-1. 仅当图片类型属于关键数据图（如 electrochemistry, performance, reaction_pathway, crystal_structure, electronic_structure, comparison）且能读出具体数值时，才填充 "numerical_data_points" 列表。否则，填充空列表 []。
-2. 尽量提取对电催化（CO2RR/ORR/HER/OER）或锂硫电池有决定性意义的定量数据点。例如：onset_potential、overpotential (特别是过电位10mA/cm²处的数值)、tafel_slope、容量、循环性能、能垒、吸附能等。
-3. 准确关联样品名（"sample_label"），这对于图例/多条曲线的对比图至关重要。不确定的样品可使用 logical label。
-"""
-            for figure in figures:
-                if figure.image_path:
-                    abs_path = self.artifacts.settings.storage_paths["figures"] / figure.image_path
-                    if abs_path.exists():
-                        try:
-                            res = await asyncio.to_thread(vlm.analyze_image, str(abs_path), prompt)
-                            if res:
-                                figure.figure_role = res.get("figure_role", figure.figure_role)
-                                figure.role_confidence = res.get("role_confidence")
-                                figure.content_summary = res.get("content_summary")
-                                figure.key_elements = res.get("key_elements")
-                                figure.numerical_data_points = res.get("numerical_data_points")
-                        except Exception as e:
-                            logger.warning(f"VLM analysis failed for figure {figure.caption} during ingestion: {e}")
+        # Web-side model figure analysis is disabled. Keep extracted crops and
+        # captions for IDE/MCP AI or human review instead of calling a backend model.
 
         return UnifiedPaperDocument(
             metadata=normalized_metadata,
@@ -525,6 +538,7 @@ class PaperIngestionService:
         if quality_report:
             self.workbench.apply_quality_report(paper, quality_report)
         if quality_report and quality_report.get("needs_human_confirmation"):
+            ensure_paper_codes(self.session, [paper])
             renumber_library_papers_by_year(self.session, paper.library_name)
             self.session.commit()
             self.session.refresh(paper)
@@ -556,6 +570,7 @@ class PaperIngestionService:
             paper,
             candidate_count=self._stage2_candidate_count(summary),
         )
+        ensure_paper_codes(self.session, [paper])
         renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
         self.session.refresh(paper)
@@ -594,6 +609,7 @@ class PaperIngestionService:
         self.session.flush()
 
         if quality_report and quality_report.get("needs_human_confirmation"):
+            ensure_paper_codes(self.session, [paper])
             self.session.commit()
             self.session.refresh(paper)
             try:
@@ -628,6 +644,7 @@ class PaperIngestionService:
             paper,
             candidate_count=self._stage2_candidate_count(summary),
         )
+        ensure_paper_codes(self.session, [paper])
         renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
         self.session.refresh(paper)
@@ -668,6 +685,7 @@ class PaperIngestionService:
         )
         self.session.add(paper)
         self.session.flush()
+        ensure_paper_codes(self.session, [paper])
         renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
         self.session.refresh(paper)
@@ -725,7 +743,7 @@ class PaperIngestionService:
         for figure in document.figures:
             caption_text = figure.caption or "Figure"
 
-            # Build enhanced text for vector indexing: caption + VLM summary + numerical data points
+            # Build enhanced text for vector indexing: caption + stored figure metadata + numerical data points
             enhanced_text = caption_text
             if figure.content_summary:
                 enhanced_text += f"\n[AI Visual Summary]: {figure.content_summary}"

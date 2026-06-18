@@ -333,6 +333,30 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
         engine.dispose()
 
 
+def test_dft_export_blocks_supporting_reference_rows_from_main_paper_export(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            row.evidence_payload = {
+                "source_document_type": "supporting_reference",
+                "borrowed_from_reference": True,
+                "source_document_label": "Ref. 32",
+            }
+            _safe_review(session, paper, row)
+            _evidence_ref(session, paper, row, page=6)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert response.headers["x-d1-exported-count"] == "0"
+            assert "supporting_reference_not_main_paper_data" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
 def test_dft_export_rejects_imported_page_anchor_from_unsafe_review(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:

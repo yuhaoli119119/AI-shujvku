@@ -1,8 +1,6 @@
-import json
 import logging
 from typing import Any, Type, TypeVar
 
-from openai import OpenAI
 from pydantic import BaseModel
 
 from app.config import Settings
@@ -47,88 +45,27 @@ global_cost_tracker = CostTracker()
 
 
 class LLMService:
+    DISABLED_REASON = "Web-side LLM is disabled. Use IDE/MCP AI for parsing, review, and verification."
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.model = settings.writer_model or "gpt-4o-mini"
-        self.client = OpenAI(
-            api_key=settings.writer_api_key or "sk-dummy",
-            base_url=settings.writer_api_base,
-        )
+        self.client = None
 
     def is_configured(self) -> bool:
-        """Return True only when the Writer LLM has the fields needed to call an API."""
-        return (
-            bool(self.settings.writer_api_key)
-            and self.settings.writer_api_key != "sk-dummy"
-            and bool(self.settings.writer_api_base)
-            and bool(self.model)
-        )
+        """Web-side LLM execution is intentionally disabled.
+
+        Parsing and verification are handled by IDE/MCP AI so the web app never
+        sends paper text or credentials to a Writer/internal-parser LLM.
+        """
+        return False
 
     def structured_extract(self, system_prompt: str, user_prompt: str, response_format: Type[T]) -> T | None:
-        """Calls the LLM with structured output parsing (JSON schema)."""
-        if not self.is_configured():
-            logger.warning("LLMService is not configured (missing API key). Falling back.")
-            return None
-
-        try:
-            global_cost_tracker.pre_check()
-            schema_json = response_format.model_json_schema()
-            
-            full_system = (
-                f"{system_prompt}\n\n"
-                f"You MUST output raw JSON. The JSON must perfectly match this JSON Schema:\n"
-                f"{json.dumps(schema_json, indent=2)}"
-            )
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": full_system},
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.1,
-                timeout=self.settings.writer_timeout_seconds or 60.0,
-            )
-
-            usage = response.usage
-            if usage:
-                global_cost_tracker.account(usage.prompt_tokens, usage.completion_tokens)
-
-            content = response.choices[0].message.content
-            if not content:
-                return None
-
-            return response_format.model_validate_json(content)
-
-        except Exception as e:
-            logger.error(f"LLM extraction failed: {e}", exc_info=True)
-            return None
+        """Disabled compatibility method for old web-side LLM callers."""
+        logger.info(self.DISABLED_REASON)
+        return None
 
     def complete_text(self, system_prompt: str, user_prompt: str) -> str | None:
-        """Call the Writer LLM for plain text output without changing application state."""
-        if not self.is_configured():
-            logger.warning("LLMService is not configured (missing Writer API fields).")
-            return None
-
-        try:
-            global_cost_tracker.pre_check()
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.1,
-                timeout=self.settings.writer_timeout_seconds or 60.0,
-            )
-
-            usage = response.usage
-            if usage:
-                global_cost_tracker.account(usage.prompt_tokens, usage.completion_tokens)
-
-            content = response.choices[0].message.content
-            return content.strip() if content else None
-        except Exception as e:
-            logger.error(f"LLM text completion failed: {e}", exc_info=True)
-            return None
+        """Disabled compatibility method for old web-side LLM callers."""
+        logger.info(self.DISABLED_REASON)
+        return None

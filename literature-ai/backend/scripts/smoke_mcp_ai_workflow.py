@@ -30,10 +30,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("mcp").setLevel(logging.WARNING)
 
 
-def _resolve_api_key(explicit_key: str | None) -> str:
+def _resolve_api_key(explicit_key: str | None) -> str | None:
     if explicit_key:
         return explicit_key
-    configs = parse_mcp_api_keys(get_settings().mcp_api_keys)
+    settings = get_settings()
+    if settings.mcp_allow_unauthenticated or not str(settings.mcp_api_keys or "").strip():
+        return None
+    configs = parse_mcp_api_keys(settings.mcp_api_keys)
     for config in configs.values():
         if "review_corrections" not in config.capabilities:
             return config.raw_key
@@ -111,49 +114,68 @@ def _candidate_status(run_id: str | None) -> dict[str, Any]:
 
 async def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     api_key = _resolve_api_key(args.api_key)
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     output: dict[str, Any] = {
         "mcp_url": args.mcp_url,
         "source": SMOKE_SOURCE,
-        "api_key_mode": "explicit" if args.api_key else "auto_non_admin",
+        "api_key_mode": "explicit" if args.api_key else ("auto_non_admin" if api_key else "keyless_local"),
         "rollback": False,
     }
 
-    async with streamablehttp_client(args.mcp_url, headers=headers) as (read_stream, write_stream, _):
+    async with streamablehttp_client(args.mcp_url, headers=headers, terminate_on_close=False) as (
+        read_stream,
+        write_stream,
+        _,
+    ):
         async with ClientSession(read_stream, write_stream) as client:
             await client.initialize()
 
-            papers = await _call(
-                client,
-                "query_papers",
-                {
-                    "q": args.query,
-                    "sort_by": "created_at",
-                    "sort_order": "desc",
-                    "limit": args.limit,
-                },
-            )
-            output["query_returned"] = papers.get("returned", 0)
-
             selected_context: dict[str, Any] | None = None
             selected_paper: dict[str, Any] | None = None
-            for paper in papers.get("items") or []:
+            papers: dict[str, Any] = {"items": [], "returned": 0}
+            if args.paper_id:
                 context = await _call(
                     client,
                     "get_codex_context",
                     {
-                        "paper_id": paper["id"],
-                        "max_sections": 4,
-                        "max_figures": 6,
-                        "max_tables": 4,
-                        "max_candidates": 12,
+                        "paper_id": args.paper_id,
+                        "max_sections": args.max_sections,
+                        "max_figures": args.max_figures,
+                        "max_tables": args.max_tables,
+                        "max_candidates": args.max_candidates,
                     },
                 )
-                gate = ((context.get("context") or {}).get("external_audit_precondition") or {})
-                if args.allow_not_ready or gate.get("status") == "ready":
-                    selected_context = context
-                    selected_paper = paper
-                    break
+                selected_context = context
+                selected_paper = ((context.get("context") or {}).get("paper") or {"id": args.paper_id})
+            else:
+                papers = await _call(
+                    client,
+                    "query_papers",
+                    {
+                        "q": args.query,
+                        "sort_by": "created_at",
+                        "sort_order": "desc",
+                        "limit": args.limit,
+                    },
+                )
+                for paper in papers.get("items") or []:
+                    context = await _call(
+                        client,
+                        "get_codex_context",
+                        {
+                            "paper_id": paper["id"],
+                            "max_sections": args.max_sections,
+                            "max_figures": args.max_figures,
+                            "max_tables": args.max_tables,
+                            "max_candidates": args.max_candidates,
+                        },
+                    )
+                    gate = ((context.get("context") or {}).get("external_audit_precondition") or {})
+                    if args.allow_not_ready or gate.get("status") == "ready":
+                        selected_context = context
+                        selected_paper = paper
+                        break
+            output["query_returned"] = papers.get("returned", 0)
 
             if selected_context is None or selected_paper is None:
                 output.update(
@@ -167,7 +189,7 @@ async def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
             context_payload = selected_context.get("context") or {}
             content = context_payload.get("content") or {}
             gate = context_payload.get("external_audit_precondition") or {}
-            paper_id = selected_paper["id"]
+            paper_id = selected_paper.get("id") or selected_paper.get("paper_id") or args.paper_id
             output.update(
                 {
                     "status": "running",
@@ -182,16 +204,24 @@ async def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
 
             item_type, item_id = _first_item(selected_context)
             if item_type and item_id:
-                item_context = await _call(
-                    client,
-                    "get_codex_item",
-                    {"paper_id": paper_id, "item_type": item_type, "item_id": item_id},
-                )
-                output["item_probe"] = {
-                    "item_type": item_type,
-                    "item_id": item_id,
-                    "schema_version": item_context.get("schema_version"),
-                }
+                try:
+                    item_context = await _call(
+                        client,
+                        "get_codex_item",
+                        {"paper_id": paper_id, "item_type": item_type, "item_id": item_id},
+                    )
+                    output["item_probe"] = {
+                        "item_type": item_type,
+                        "item_id": item_id,
+                        "schema_version": item_context.get("schema_version"),
+                    }
+                except Exception as exc:
+                    output["item_probe"] = {
+                        "status": "failed",
+                        "item_type": item_type,
+                        "item_id": item_id,
+                        "error": str(exc),
+                    }
             else:
                 output["item_probe"] = {"status": "skipped", "reason": "no supported item found"}
 
@@ -235,8 +265,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke-test the IDE AI MCP paper-review workflow over HTTP.")
     parser.add_argument("--mcp-url", default="http://localhost:8000/mcp/", help="Streamable HTTP MCP URL.")
     parser.add_argument("--api-key", default=None, help="Ordinary IDE AI MCP bearer token. Defaults to the first configured non-admin key.")
+    parser.add_argument("--paper-id", default=None, help="Probe a specific paper ID instead of searching.")
     parser.add_argument("--query", default="", help="Optional paper search query.")
     parser.add_argument("--limit", type=int, default=20, help="Number of recent papers to scan.")
+    parser.add_argument("--max-sections", type=int, default=1, help="Max sections to request from get_codex_context.")
+    parser.add_argument("--max-figures", type=int, default=1, help="Max figures to request from get_codex_context.")
+    parser.add_argument("--max-tables", type=int, default=0, help="Max tables to request from get_codex_context.")
+    parser.add_argument("--max-candidates", type=int, default=1, help="Max structured candidates to request from get_codex_context.")
     parser.add_argument("--allow-not-ready", action="store_true", help="Allow probing the first paper even if artifact gate is not ready.")
     parser.add_argument("--keep", action="store_true", help="Keep the smoke external analysis run instead of deleting it.")
     args = parser.parse_args()

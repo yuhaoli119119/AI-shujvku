@@ -16,6 +16,7 @@ from app.api.intake import router as intake_router
 from app.api.jobs import router as jobs_router
 from app.api.libraries import router as libraries_router
 from app.api.library_filter import router as library_filter_router
+from app.api.module_locks import router as module_locks_router
 from app.api.papers import router as papers_router
 from app.api.references import router as references_router
 from app.api.retrieval import router as retrieval_router
@@ -28,8 +29,10 @@ from app.api.workbench import router as workbench_router
 from app.api.writer import router as writer_router
 from app.api.writing import router as writing_router
 from app.config import get_settings
+from app.db.session import session_scope
 from app.mcp import mcp_http_app, mcp_server
 from app.mcp.auth import enforce_mcp_auth
+from app.services.workflow_jobs import expire_stale_activity
 from app.utils.active_database import activate_active_library_database
 
 @asynccontextmanager
@@ -46,6 +49,18 @@ async def lifespan(_: FastAPI):
         info["db_url_masked"],
         info.get("effective_db_path"),
     )
+    settings = get_settings()
+    try:
+        with session_scope(settings.database_url) as session:
+            cleanup = expire_stale_activity(session)
+        if cleanup["workflow_jobs"] or cleanup["parse_jobs"]:
+            startup_logger.warning(
+                "Expired stale background activity on startup: workflow_jobs=%s parse_jobs=%s",
+                cleanup["workflow_jobs"],
+                cleanup["parse_jobs"],
+            )
+    except Exception:
+        startup_logger.exception("Failed to expire stale background activity during startup")
     async with AsyncExitStack() as stack:
         await stack.enter_async_context(mcp_server.session_manager.run())
         yield
@@ -76,6 +91,7 @@ app.include_router(impact_metadata_router, prefix="/api/library/impact-metadata"
 app.include_router(library_filter_router, prefix="/api/library/papers", tags=["library-filter"])
 app.include_router(intake_router, prefix="/api/intake", tags=["intake"])
 app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
+app.include_router(module_locks_router, prefix="/api/module-locks", tags=["module-locks"])
 app.include_router(papers_router, prefix="/api/papers", tags=["papers"])
 app.include_router(references_router, prefix="/api/papers", tags=["references"])
 app.include_router(writing_router, prefix="/api/writing", tags=["writing"])

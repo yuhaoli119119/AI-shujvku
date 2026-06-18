@@ -6,6 +6,13 @@ description: >
   Rule-based writing card skeleton extractor for academic papers.
   No LLM dependency — uses sentence-level pattern matching, structural heuristics,
   and standard IMRaD templates.
+  First check whether the paper type inferred from the original PDF matches the system-parsed paper type; if not, correct the parsed type immediately before generating or auditing the writing card.
+
+ai_review_fallback:
+  - When an IDE AI later audits, enriches, or writes back writing-card content, it should prefer MCP/context tools first.
+  - If the current IDE session does not expose MCP tools, do not stop at tool-missing; switch to the repository-native backend path in `literature-ai/backend` and call `app.mcp.context.mcp_auth_context` plus `app.mcp.server` functions directly.
+  - Repository-native fallback must still use the project code path and preserve traceability through `import_analysis`, notes, or audit payloads.
+  - Do not replace this with ad hoc local parsing scripts that bypass repository rules.
 
 input:
   type: UnifiedPaperDocument

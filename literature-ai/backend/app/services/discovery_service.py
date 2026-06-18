@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import math
 import sys
+import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+import os
 
 import httpx
 
@@ -16,12 +19,32 @@ from app.utils.text_cleaning import normalize_text_tree
 _SEARCH_CACHE_TTL_SECONDS = 600
 _SEARCH_CACHE_MAX_ENTRIES = 128
 _SEARCH_CACHE: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
+_SEARCH_CACHE_LOCK = threading.Lock()
+
+
+class _ClassProperty:
+    def __init__(self, fget):
+        self.fget = fget
+
+    def __get__(self, obj, owner):
+        return self.fget(owner)
 
 
 class DiscoveryService:
     """Thin adapter over direct provider APIs plus the legacy download engine."""
 
-    DEFAULT_SEARCH_PROVIDERS = ["openalex", "arxiv"]
+    # Base providers – always available (no API key needed)
+    _BASE_SEARCH_PROVIDERS = ["openalex", "arxiv"]
+    # Extended providers – activated when their API key is configured
+    _EXTENDED_SEARCH_PROVIDERS = ["semantic_scholar", "pubmed", "scopus", "ieee"]
+    # API key environment variable mapping
+    _PROVIDER_KEY_ENV = {
+        "semantic_scholar": "FINDPAPERS_SEMANTIC_SCHOLAR_API_TOKEN",
+        "pubmed": "FINDPAPERS_PUBMED_API_TOKEN",
+        "scopus": "FINDPAPERS_SCOPUS_API_TOKEN",
+        "ieee": "FINDPAPERS_IEEE_API_TOKEN",
+    }
+
     DEFAULT_DOWNLOAD_PROVIDERS = ["openalex", "crossref", "arxiv", "semantic_scholar", "web_scraping"]
 
     def __init__(self) -> None:
@@ -29,6 +52,16 @@ class DiscoveryService:
         from findpapers import Engine
 
         self.engine = Engine()
+
+    @_ClassProperty
+    def DEFAULT_SEARCH_PROVIDERS(cls) -> list[str]:  # type: ignore[override]
+        """Dynamically build the default search provider list based on configured API keys."""
+        providers = list(cls._BASE_SEARCH_PROVIDERS)
+        for provider in cls._EXTENDED_SEARCH_PROVIDERS:
+            env_var = cls._PROVIDER_KEY_ENV.get(provider, "")
+            if env_var and os.environ.get(env_var, "").strip():
+                providers.append(provider)
+        return providers
 
     def search(
         self,
@@ -52,7 +85,8 @@ class DiscoveryService:
             tuple(sorted(target_types or [])),
         )
         now = time.monotonic()
-        cached = _SEARCH_CACHE.get(cache_key)
+        with _SEARCH_CACHE_LOCK:
+            cached = _SEARCH_CACHE.get(cache_key)
         if cached and now - cached[0] <= _SEARCH_CACHE_TTL_SECONDS:
             return [dict(item) for item in cached[1]]
 
@@ -85,11 +119,12 @@ class DiscoveryService:
 
     @staticmethod
     def _cache_search_result(cache_key: tuple[Any, ...], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX_ENTRIES:
-            oldest_key = min(_SEARCH_CACHE.items(), key=lambda item: item[1][0])[0]
-            _SEARCH_CACHE.pop(oldest_key, None)
         snapshot = [dict(item) for item in items]
-        _SEARCH_CACHE[cache_key] = (time.monotonic(), snapshot)
+        with _SEARCH_CACHE_LOCK:
+            if len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX_ENTRIES:
+                oldest_key = min(_SEARCH_CACHE.items(), key=lambda item: item[1][0])[0]
+                _SEARCH_CACHE.pop(oldest_key, None)
+            _SEARCH_CACHE[cache_key] = (time.monotonic(), snapshot)
         return [dict(item) for item in snapshot]
 
     def fetch_metadata(

@@ -16,6 +16,7 @@ from app.db.models import (
     CatalystSample,
     DFTResult,
     EvidenceLocator,
+    ExtractionFieldReview,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     Paper,
@@ -67,8 +68,17 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
         paper = Paper(title="Verification paper", pdf_path="verification.pdf", workflow_status="Initial_Parsed")
         session.add(paper)
         session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Li2S4 adsorption surface",
+            catalyst_type="model_surface",
+            support="graphene",
+        )
+        session.add(catalyst)
+        session.flush()
         row = DFTResult(
             paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
             property_type="adsorption_energy",
             adsorbate="Li2S4",
             value=-1.2,
@@ -234,6 +244,93 @@ def test_verification_session_rejects_ambiguous_paper_ref_across_libraries(verif
     assert "ambiguous" in detail or "multiple libraries" in detail or "library" in detail
 
 
+def test_settle_ai_dft_reviews_endpoint_is_idempotent(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Endpoint settlement paper", pdf_path="endpoint.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Graphdiyne",
+            catalyst_type="graphdiyne",
+            support="graphdiyne",
+        )
+        session.add(catalyst)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="band_gap",
+            adsorbate="2-AGDYNR",
+            value=0.825,
+            unit="eV",
+            evidence_text="The band gap is 0.825 eV.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=3,
+                evidence_text="The band gap is 0.825 eV.",
+                locator_status="exact_page",
+                locator_confidence=0.95,
+            )
+        )
+        for source_label in ("ai-1", "ai-2"):
+            run = ExternalAnalysisRun(
+                paper_id=paper.id,
+                source="ide_ai",
+                source_label=source_label,
+                raw_payload={},
+                normalized_payload={},
+                mapping_status="mapped",
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": str(row.id),
+                        "field_name": "value",
+                        "decision": "PASS",
+                        "corrected_value": 0.825,
+                        "confidence": 0.93,
+                        "normalized_material": "graphdiyne",
+                        "normalized_energy_type": "band_gap",
+                        "evidence_location": {"page": 3, "quoted_text": "0.825 eV"},
+                    },
+                    status="pending",
+                )
+            )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    first = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
+    second = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["auto_applied_count"] == 1
+    assert second.json()["auto_applied_count"] == 0
+
+    with Session() as session:
+        reviews = session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == UUID(paper_id))).all()
+        assert len(reviews) == 1
+        assert {review.reviewer_status for review in reviews} == {"verified"}
+
+
 def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
     Session = verification_env
     with Session() as session:
@@ -308,6 +405,272 @@ def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
         ).all()
         assert {item.materialized_target_type for item in candidates} == {"catalyst_sample"}
         assert {item.materialized_target_id for item in candidates} == {str(samples[0].id)}
+
+
+def test_materialized_new_candidate_can_settle_with_independent_value_pass(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Missing-row follow-up", pdf_path="missing-row.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="work_function",
+            adsorbate="H2",
+            value=5.77,
+            unit="eV",
+            reaction_step="DFT-PBE",
+            source_section="Page 3",
+            evidence_text="Pt work function is 5.77 eV.",
+            candidate_status="new_candidate",
+            evidence_payload={
+                "page": 3,
+                "quoted_text": "work functions of Ir and Pt are relatively high, at 5.59 eV and 5.77 eV",
+                "material_identity": "Pt monometallic (001) surface on Pd seed symmetry",
+                "source_document_type": "main",
+            },
+            extraction_protocol_version="ide_ai_new_candidate_v1",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=3,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.95,
+            )
+        )
+        new_candidate_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-lane-new",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        value_pass_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-lane-pass",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add_all([new_candidate_run, value_pass_run])
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=new_candidate_run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material": "Pt monometallic (001) surface on Pd seed symmetry",
+                        "property": "work_function",
+                        "energy_type": "work_function",
+                        "value": 5.77,
+                        "unit": "eV",
+                        "method": "DFT-PBE",
+                    },
+                    "normalized_material": "Pt monometallic (001) surface on Pd seed symmetry",
+                    "normalized_energy_type": "work_function",
+                    "confidence": 0.91,
+                    "evidence_location": {
+                        "page": 3,
+                        "quoted_text": "work functions of Ir and Pt are relatively high, at 5.59 eV and 5.77 eV",
+                    },
+                },
+                status="materialized",
+                materialized_target_type="dft_results",
+                materialized_target_id=str(row.id),
+            )
+        )
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=value_pass_run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": str(row.id),
+                    "field_name": "value",
+                    "decision": "PASS",
+                    "corrected_value": 5.77,
+                    "normalized_material": "Pt monometallic (001) surface on Pd seed symmetry",
+                    "normalized_energy_type": "work_function",
+                    "confidence": 0.93,
+                    "evidence_location": {
+                        "page": 3,
+                        "quoted_text": "work functions of Ir and Pt are relatively high, at 5.59 eV and 5.77 eV",
+                    },
+                },
+                status="candidate",
+            )
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    client = TestClient(app)
+    settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
+    assert settled.status_code == 200
+    payload = settled.json()
+    assert payload["auto_applied_count"] == 1
+
+    with Session() as session:
+        stored = session.get(DFTResult, row_id)
+        assert stored.catalyst_sample_id is not None
+        reviews = session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(row_id),
+            )
+        ).all()
+        assert len(reviews) == 1
+        assert {review.reviewer_status for review in reviews} == {"verified"}
+
+
+def test_field_level_proposal_can_settle_with_independent_value_pass(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Field proposal follow-up", pdf_path="field-proposal.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="Ru")
+        session.add(sample)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=sample.id,
+            property_type="adsorption_energy",
+            adsorbate="H",
+            value=-0.67,
+            unit="eV",
+            reaction_step="DFT-PBE",
+            source_section="Page 4",
+            evidence_text="Ru OH* adsorption energy is -0.67 eV.",
+            candidate_status="new_candidate",
+            evidence_payload={
+                "page": 4,
+                "quoted_text": "Ru OH* adsorption energy is -0.67 eV.",
+                "material_identity": "Ru",
+                "source_document_type": "main",
+            },
+            extraction_protocol_version="ide_ai_new_candidate_v1",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=4,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.95,
+            )
+        )
+        proposal_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-lane-proposal",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        value_pass_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-lane-pass",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add_all([proposal_run, value_pass_run])
+        session.flush()
+        proposal_candidate = ExternalAnalysisCandidate(
+            run_id=proposal_run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "dft_results",
+                "target_id": str(row.id),
+                "field_name": "adsorbate",
+                "decision": "PROPOSED",
+                "corrected_value": "OH*",
+                "normalized_material": "Ru",
+                "normalized_energy_type": "adsorption_energy",
+                "confidence": 0.91,
+                "evidence_location": {
+                    "page": 4,
+                    "section": "DFT results",
+                    "quoted_text": "Ru OH* adsorption energy is -0.67 eV.",
+                },
+            },
+            status="materialized",
+            materialized_target_type="dft_results",
+            materialized_target_id=str(row.id),
+        )
+        pass_candidate = ExternalAnalysisCandidate(
+            run_id=value_pass_run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "dft_results",
+                "target_id": str(row.id),
+                "field_name": "value",
+                "decision": "PASS",
+                "corrected_value": -0.67,
+                "normalized_material": "Ru monometallic (001) surface on Pd seed symmetry",
+                "normalized_energy_type": "adsorption_energy",
+                "confidence": 0.88,
+                "evidence_location": {
+                    "page": 4,
+                    "table": "Figure 2",
+                    "quoted_text": "Ru OH* adsorption energy is -0.67 eV.",
+                },
+            },
+            status="candidate",
+        )
+        session.add_all([proposal_candidate, pass_candidate])
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    client = TestClient(app)
+    settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
+    assert settled.status_code == 200
+    payload = settled.json()
+    assert payload["auto_applied_count"] == 1
+    assert payload["need_repair_count"] == 0
+
+    with Session() as session:
+        stored = session.get(DFTResult, row_id)
+        assert stored.adsorbate == "OH*"
+        assert stored.catalyst_sample_id is not None
+        reviews = session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(row_id),
+            )
+        ).all()
+        assert len(reviews) == 1
+        assert {review.reviewer_status for review in reviews} == {"verified"}
 
 
 def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):

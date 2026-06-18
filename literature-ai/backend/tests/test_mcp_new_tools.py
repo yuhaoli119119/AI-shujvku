@@ -136,80 +136,15 @@ class TestRetrieveEvidence:
 # ---------------------------------------------------------------------------
 
 class TestReviewPaper:
-    @patch("app.mcp.server.session_scope")
-    @patch("app.mcp.server.get_settings")
     @patch("app.mcp.server.require_mcp_capability")
-    @patch("app.mcp.server.PaperQueryService")
-    @patch("app.mcp.server.ExternalAnalysisService")
-    @patch("app.mcp.server.build_internal_ai_review_blob")
-    @patch("app.mcp.server.run_in_threadpool")
     @pytest.mark.asyncio
-    async def test_review_paper_success(self, mock_threadpool, mock_build_blob, MockService,
-                                         MockQueryService, mock_auth, mock_settings, mock_session_scope):
+    async def test_review_paper_is_disabled(self, mock_auth):
         from app.mcp.server import review_paper
 
         mock_auth.return_value = MagicMock()
-        mock_settings.return_value = _make_mock_settings()
 
-        mock_session = MagicMock()
-        mock_session_scope.return_value.__enter__ = MagicMock(return_value=mock_session)
-        mock_session_scope.return_value.__exit__ = MagicMock(return_value=False)
-
-        # Mock paper detail
-        detail = _make_paper_detail()
-        MockQueryService.return_value.get_paper_detail.return_value = detail
-
-        # Mock build blob
-        mock_build_blob.return_value = '{"paper": {}}'
-
-        # Mock ExternalAnalysisService
-        mock_service_instance = MagicMock()
-        mock_service_instance.llm.is_configured.return_value = True
-        normalized = ExternalAnalysisNormalizedModel()
-        mock_threadpool.return_value = normalized
-        mock_sanitize = MagicMock(return_value=normalized)
-
-        mock_run = MagicMock()
-        mock_run.id = uuid4()
-        mock_run.mapping_status = "normalized"
-        mock_service_instance.import_run.return_value = mock_run
-        mock_service_instance.list_candidates.return_value = []
-        MockService.return_value = mock_service_instance
-
-        # Patch sanitize_internal_corrections
-        with patch("app.mcp.server.sanitize_internal_corrections", return_value=normalized):
-            result = await review_paper(paper_id=str(detail.id))
-
-        assert result["mapping_status"] == "normalized"
-        mock_service_instance.import_run.assert_called_once()
-        mock_session.commit.assert_called_once()
-
-    @patch("app.mcp.server.session_scope")
-    @patch("app.mcp.server.get_settings")
-    @patch("app.mcp.server.require_mcp_capability")
-    @patch("app.mcp.server.PaperQueryService")
-    @patch("app.mcp.server.ExternalAnalysisService")
-    @pytest.mark.asyncio
-    async def test_review_paper_llm_not_configured(self, MockService, MockQueryService,
-                                                     mock_auth, mock_settings, mock_session_scope):
-        from app.mcp.server import review_paper
-
-        mock_auth.return_value = MagicMock()
-        mock_settings.return_value = _make_mock_settings()
-
-        mock_session = MagicMock()
-        mock_session_scope.return_value.__enter__ = MagicMock(return_value=mock_session)
-        mock_session_scope.return_value.__exit__ = MagicMock(return_value=False)
-
-        detail = _make_paper_detail()
-        MockQueryService.return_value.get_paper_detail.return_value = detail
-
-        mock_service_instance = MagicMock()
-        mock_service_instance.llm.is_configured.return_value = False
-        MockService.return_value = mock_service_instance
-
-        with pytest.raises(ValueError, match="not configured"):
-            await review_paper(paper_id=str(detail.id))
+        with pytest.raises(ValueError, match="Backend-owned LLM review is disabled"):
+            await review_paper(paper_id=str(uuid4()))
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ CREATE TABLE papers (
 	docling_json_path TEXT, 
 	markdown_path TEXT, 
 	serial_number INTEGER, 
+	paper_code VARCHAR(16),
 	comprehensive_analysis JSONB, 
 	paper_type VARCHAR(20), 
 	type_confidence FLOAT, 
@@ -92,6 +93,23 @@ CREATE TABLE audit_logs (
 	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE SET NULL
+);
+
+
+CREATE TABLE module_write_locks (
+	id UUID NOT NULL, 
+	paper_id UUID NOT NULL, 
+	module_name VARCHAR(64) NOT NULL, 
+	locked_by VARCHAR(128) NOT NULL, 
+	lock_token VARCHAR(64) NOT NULL, 
+	status VARCHAR(32) DEFAULT 'active' NOT NULL, 
+	expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	released_at TIMESTAMP WITHOUT TIME ZONE, 
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
+	metadata JSONB, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE
 );
 
 
@@ -568,6 +586,7 @@ CREATE INDEX ix_papers_type_confidence ON papers (type_confidence);
 CREATE INDEX ix_papers_paper_type ON papers (paper_type);
 CREATE INDEX ix_papers_pdf_quality_status ON papers (pdf_quality_status);
 CREATE INDEX ix_papers_serial_number ON papers (serial_number);
+CREATE UNIQUE INDEX uq_papers_paper_code ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> '';
 
 CREATE UNIQUE INDEX ix_share_tokens_token ON share_tokens (token);
 
@@ -576,6 +595,14 @@ CREATE INDEX ix_workflow_jobs_status ON workflow_jobs (status);
 CREATE INDEX ix_workflow_jobs_library_name ON workflow_jobs (library_name);
 
 CREATE INDEX ix_audit_logs_paper_id ON audit_logs (paper_id);
+
+CREATE INDEX ix_module_write_locks_paper_id ON module_write_locks (paper_id);
+CREATE INDEX ix_module_write_locks_module_name ON module_write_locks (module_name);
+CREATE INDEX ix_module_write_locks_locked_by ON module_write_locks (locked_by);
+CREATE UNIQUE INDEX ix_module_write_locks_lock_token ON module_write_locks (lock_token);
+CREATE INDEX ix_module_write_locks_status ON module_write_locks (status);
+CREATE INDEX ix_module_write_locks_expires_at ON module_write_locks (expires_at);
+CREATE UNIQUE INDEX uq_module_write_locks_active_scope ON module_write_locks (paper_id, module_name) WHERE status = 'active';
 
 CREATE INDEX ix_catalyst_samples_paper_id ON catalyst_samples (paper_id);
 

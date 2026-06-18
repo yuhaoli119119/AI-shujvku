@@ -9,6 +9,7 @@ role_boundary:
     - Rule-based DFT hints are only stored as system_candidate records.
     - System candidates must never enter the final DFT/ML database without review.
   ai_extraction:
+    - First verify whether the paper type inferred from the original PDF matches the system-parsed paper type; if they disagree, correct the parsed type immediately before trusting downstream DFT candidates.
     - Before extracting or reviewing values, compare the system-parsed sections, tables, figures, and locators against the original PDF pages.
     - If parser structure, table split, figure crop, page mapping, or locator anchoring looks wrong, record parse defects first and do not pretend the parsed package is already trustworthy.
     - Read the full evidence package, not only rows pre-extracted by rules.
@@ -126,6 +127,13 @@ MCP_tooling_context:
     - get_review_coverage(paper_id) now exposes latest_external_audits, external_audit_count, and external_audit_source_distribution so other AI workers can see prior internal verification opinions.
     - external_audit_opinion candidates are visible review evidence, not final truth; they remain subject to conflict checks and human/final gates.
     - If MCP cannot read sections, tables, figures, locators, artifacts, or previous audit opinions, the correct output is needs_fix or blocked_by_unreadable_internal_data, not accept.
+  local_fallback_when_mcp_ui_is_missing:
+    - If the current IDE session does not expose MCP tools, do not stop at "tool missing" by default.
+    - First try the repository-native execution path from the local workspace: run code in `literature-ai/backend` and call `app.mcp.context.mcp_auth_context` plus the relevant functions from `app.mcp.server` directly.
+    - Use the same repository-backed data sources and authentication model as MCP would use. Do not invent paper data, and do not bypass the repository code with ad hoc parsing or local PDF extraction scripts.
+    - If the backend code path works, treat it as a valid MCP-equivalent evidence path for reading `get_codex_context`, `get_codex_item`, `read_paper_page`, and `import_analysis`.
+    - Only after both the IDE MCP tools and the repository-native fallback fail may the worker report `blocked_by_missing_mcp_tool` or `blocked_by_evidence_api_unavailable`.
+    - Record in notes or audit payloads that the result came from the repository-native fallback path rather than the IDE tool registry.
 
 required_fields_per_dft_record:
   - catalyst_or_material
@@ -232,6 +240,11 @@ ai_worker_protocol:
     - The assigned text/science model may audit DFT rows if it receives the evidence packet and this protocol.
     - The reviewer must check exact numeric value, unit, catalyst/material, adsorbate, property type, method/condition, locator, duplicates, and suspected missing rows.
     - PASS/accept from an AI does not unlock export unless the configured human/final gate also passes.
+    - Use only PASS, PROPOSED, REJECT, NEEDS_HUMAN, or new_candidate for object_review_audits.
+    - When a missing DFT row is found, submit it as decision=new_candidate with a complete structured corrected_value and use import_analysis(auto_apply_review_rules=true) so the row is materialized into the unverified DFT candidate queue instead of remaining only an external audit note.
+    - PASS confirms only fields that were checked; full-row auto-adoption requires normalized material, property, value, unit, method/condition, and PDF evidence.
+    - Normalize energy to eV: meV values must be divided by 1000. Preserve the raw expression in raw_value/raw_unit or quoted_text.
+    - Normalize permeance to GPU: values reported as 10^3 GPU must be multiplied by 1000. Preserve the raw expression in raw_value/raw_unit or quoted_text.
   ai_a_initial_extract:
     - First compare parsed materials with the original PDF and record parse defects or locator defects when found.
     - Read abstract, methods, results/discussion, all tables, all captions, DFT-related text, and supporting evidence package.
@@ -243,6 +256,8 @@ ai_worker_protocol:
   ai_c_third_adjudicator:
     - Read the original PDF, the parsed evidence package, and both prior AI opinions.
     - Decide whether to adopt all, reject all, or partially adopt the disputed object-level results.
+    - If evidence page or quote is missing, actively locate it in the original PDF; return NEEDS_HUMAN only after the PDF cannot support a reliable decision.
+    - Resolve unit scaling explicitly using the unit policy before returning PASS or PROPOSED.
     - Output object_review_audit entries with adjudication_role=third_ai, adjudication_scope=conflict_resolution, and selected_source_ids.
   judge:
     - Compare AI-A, AI-B, and system_candidate hints.
@@ -277,6 +292,8 @@ output_schema:
     normalized_property_type: string
     value: number
     unit: string
+    raw_value: string
+    raw_unit: string
     calculation_method_or_condition: string
     evidence:
       text_excerpt: string

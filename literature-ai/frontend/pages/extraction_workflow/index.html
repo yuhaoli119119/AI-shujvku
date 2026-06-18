@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>提取向导 - Literature AI</title>
+  <title>高级提取协议 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
@@ -78,6 +78,45 @@
       font-size: 13px;
       line-height: 1.6;
       color: rgba(255,255,255,0.75);
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0 0;
+    }
+    .hero-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      border-radius: 8px;
+      padding: 7px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.14);
+      color: #fff;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .hero-action.primary {
+      background: #fff;
+      color: var(--color-primary);
+      border-color: #fff;
+    }
+    .advanced-note {
+      margin: 0 0 16px;
+      border: 1px solid var(--color-border);
+      border-left: 4px solid var(--color-primary);
+      border-radius: 12px;
+      background: var(--color-surface);
+      padding: 14px 16px;
+      color: var(--color-text-secondary);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .advanced-note strong {
+      color: var(--color-text);
     }
     .hero-badges {
       display: flex;
@@ -598,13 +637,17 @@
       <div class="hero-inner">
         <div class="hero-eyebrow">
           <span class="dot"></span>
-          Worker Extraction Flow
+          Advanced Protocol Reference
         </div>
-        <h1>按证据拆文献，按记录逐项提取</h1>
+        <h1>高级：提取协议与调试参考</h1>
         <p class="hero-desc">
-          系统只负责把 PDF 拆成可读证据包；AI 负责按协议提取候选；指定 AI 或第二 AI 和人工负责审核。
-          候选数据不直接进入 DFT 数据库、ML 导出或可信可视化。
+          这个页面不再作为日常工作入口。日常检索、总体解析、图表/章节/表格补全、DFT 核验指令都从审核中心发起；
+          本页只保留给开发者和 IDE AI 查看协议规则、MCP 工具说明和排错参考。
         </p>
+        <div class="hero-actions">
+          <a class="hero-action primary" href="../review_center/index.html">进入审核中心</a>
+          <a class="hero-action" href="../settings/index.html#protocol">查看提取协议</a>
+        </div>
         <div class="hero-badges">
           <span class="hero-badge">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
@@ -628,6 +671,12 @@
           </span>
         </div>
       </div>
+    </section>
+
+    <section class="advanced-note">
+      <strong>主流程已经迁移：</strong>
+      非 DFT 内容由 IDE AI 在审核中心复制指令后直接通过 <code>import_analysis</code> 修正或新增入库；
+      DFT 数据继续走多 AI 冲突核验。这里展示的是底层协议和调试工具，不要求用户逐项操作。
     </section>
 
     <!-- ===== Protocol Status Bar ===== -->

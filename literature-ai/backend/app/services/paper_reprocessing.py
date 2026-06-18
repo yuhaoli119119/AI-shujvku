@@ -50,7 +50,7 @@ class PaperReprocessingService:
         self.session.add(paper)
         self.session.commit()
 
-        workspace_summary = self.workbench.prepare_paper_workspace(paper.id)
+        workspace_summary = self.workbench.prepare_paper_workspace(paper.id, render_pages=True)
         self.session.refresh(paper)
         artifact_status = build_paper_artifact_status(paper, settings=self.settings)
 

@@ -10,8 +10,12 @@ from app.db.models import (
     DFTResult,
     DFTSetting,
     MechanismClaim,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
     Paper,
+    PaperCorrection,
     PaperFigure,
+    PaperNote,
     PaperSection,
     PaperTable,
     WritingCard,
@@ -124,6 +128,277 @@ def test_detail_payload_cleans_pdf_text_without_flattening_table_markdown():
             assert detail.figures[0].content_summary == "A flow summary"
             assert detail.dft_results_items[0].source_section == "configuration"
             assert "configuration has a clear effect" in detail.dft_results_items[0].evidence_text
+
+        engine.dispose()
+
+
+def test_table_review_status_recognizes_legacy_codex_item_corrections():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'table_review_status.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Table Review Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            table = PaperTable(
+                paper_id=paper.id,
+                caption="Table 3",
+                markdown_content="| raw |\n| --- |\n| Ef fi ciency |",
+                page=9,
+                extraction_source="docling",
+            )
+            session.add(table)
+            session.flush()
+            correction = PaperCorrection(
+                paper_id=paper.id,
+                source="ide_ai",
+                field_name="markdown_content",
+                target_path=f"codex_item:{table.id}",
+                operation="replace",
+                proposed_value="| raw |\n| --- |\n| Efficiency |",
+                reason="IDE AI corrected table parser output.",
+                status="pending",
+            )
+            session.add(correction)
+            session.commit()
+
+            pending_detail = PaperQueryService(session).get_paper_detail(paper.id)
+            assert pending_detail.tables[0].table_review_status == "pending_correction"
+
+            correction.status = "approved"
+            correction.reviewed_by = "ide_ai"
+            session.add(correction)
+            session.commit()
+
+            approved_detail = PaperQueryService(session).get_paper_detail(paper.id)
+            assert approved_detail.tables[0].table_review_status == "verified"
+
+        engine.dispose()
+
+
+def test_detail_review_status_recognizes_legacy_ai_materialized_records():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'legacy_ai.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Legacy AI Paper", pdf_path="paper.pdf", abstract="Abstract text", authors=["A"])
+            session.add(paper)
+            session.flush()
+            section = PaperSection(
+                paper_id=paper.id,
+                section_title="Introduction",
+                section_type="introduction",
+                text="Legacy reviewed section text",
+            )
+            figure = PaperFigure(
+                paper_id=paper.id,
+                caption="Figure 1",
+                image_path="figures/legacy.png",
+                page=1,
+                figure_role="plot",
+                crop_status="candidate_crop",
+            )
+            session.add_all([section, figure])
+            session.flush()
+
+            run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="legacy_overall")
+            session.add(run)
+            session.flush()
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="note",
+                    normalized_payload={"field_name": "sections:semantic_structure", "content": "[AI_REVIEWED]"},
+                    status="materialized",
+                )
+            )
+            session.add(
+                PaperNote(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    field_name=f"figures:{figure.id}:figure_role",
+                    content="[AI_REVIEWED] figure role checked",
+                )
+            )
+            session.add(
+                PaperCorrection(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    field_name="sections",
+                    target_path=f"sections:{section.id}:section_title",
+                    operation="replace",
+                    proposed_value="Abstract & Introduction",
+                    reason="IDE AI approved section normalization.",
+                    status="approved",
+                    reviewed_by="ide_ai",
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail.sections_review_status == "ai_verified"
+            assert detail.figures_review_status == "ai_verified"
+
+        engine.dispose()
+
+
+def test_detail_review_status_recognizes_approved_ide_ai_corrections():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'approved_corrections.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Approved Correction Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            section = PaperSection(
+                paper_id=paper.id,
+                section_title="Introduction",
+                section_type="introduction",
+                text="Section text",
+            )
+            session.add(section)
+            session.flush()
+            session.add(
+                PaperCorrection(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    field_name="sections",
+                    target_path=f"sections:{section.id}:section_title",
+                    operation="replace",
+                    proposed_value="Introduction",
+                    reason="IDE AI approved section correction.",
+                    status="approved",
+                    reviewed_by="ide_ai",
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail.sections_review_status == "ai_verified"
+
+        engine.dispose()
+
+
+def test_detail_excludes_page_and_deprecated_sections_from_display():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'display_sections.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Section Filter Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            session.add_all(
+                [
+                    PaperSection(
+                        paper_id=paper.id,
+                        section_title="Page 1",
+                        section_type="body",
+                        text="Whole-page parser dump",
+                        page_start=1,
+                        page_end=1,
+                    ),
+                    PaperSection(
+                        paper_id=paper.id,
+                        section_title="[DEPRECATED] Replaced by structured Results",
+                        section_type="deprecated_stale",
+                        text="Deprecated stale section",
+                        page_start=2,
+                        page_end=2,
+                    ),
+                    PaperSection(
+                        paper_id=paper.id,
+                        section_title="Results and discussion",
+                        section_type="results",
+                        text="Clean structured section",
+                        page_start=3,
+                        page_end=4,
+                    ),
+                ]
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail is not None
+            assert [section.section_title for section in detail.sections] == ["Results and discussion"]
+
+        engine.dispose()
+
+
+def test_detail_payload_exposes_figure_approved_correction_fields():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_corrections.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Figure Correction Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            figure = PaperFigure(
+                paper_id=paper.id,
+                caption="Figure 1",
+                image_path="figures/figure_1.png",
+                page=1,
+                figure_label="fig_1",
+                crop_status="candidate_crop",
+            )
+            session.add(figure)
+            session.flush()
+            for field_name in ("figure_role", "content_summary", "key_elements"):
+                session.add(
+                    PaperCorrection(
+                        paper_id=paper.id,
+                        source="ide_ai",
+                        field_name="figures",
+                        target_path=f"figures:{figure.id}:{field_name}",
+                        operation="replace",
+                        proposed_value="reviewed",
+                        reason=f"Approved {field_name}",
+                        status="approved",
+                        reviewed_by="antigravity",
+                    )
+                )
+            session.add(
+                PaperCorrection(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    field_name="figures",
+                    target_path=f"figures:{figure.id}:caption",
+                    operation="replace",
+                    proposed_value="pending caption",
+                    reason="Pending changes should not be exposed as approved.",
+                    status="pending",
+                    reviewed_by="antigravity",
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail is not None
+            assert detail.figures[0].approved_correction_count == 3
+            assert set(detail.figures[0].approved_correction_fields) == {
+                "figure_role",
+                "content_summary",
+                "key_elements",
+            }
 
         engine.dispose()
 

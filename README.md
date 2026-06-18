@@ -9,6 +9,7 @@
 **当前基线**：
 - **数据库**：`PostgreSQL + pgvector` 是唯一且默认的活跃业务数据源（Docker Compose 中 `postgres` 容器必须启动）
 - **MCP 工具**：27 个，覆盖提取→裁切→审核→分享的完整闭环
+- **AI 后备路径**：IDE 会话如果没挂上 MCP 工具，可直接走 `literature-ai/backend` 里的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 本地后备实现
 - **权限体系**：6 级 capability（`read_papers` / `append_notes` / `propose_corrections` / `request_parse` / `review_corrections` / `review_dft`）
 - **多 AI 协作**：Blackboard 模式，AI 分析结果自动落盘为 PaperNote（"雁过留声"）
 - **只读分享**：通过 `create_share_token` 生成安全链接，外部用户可查看论文/图表/DFT/审阅记录，不可修改

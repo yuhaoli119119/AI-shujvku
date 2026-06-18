@@ -633,6 +633,8 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert by_title["Review center paper"]["pdf_artifact_status"]["pdf_exists"] is True
     assert by_title["Review center paper"]["pdf_artifact_status"]["pdf_path_kind"] == "storage_relative"
     assert by_title["Review center paper"]["has_dft_candidates"] is True
+    assert by_title["Review center paper"]["has_active_dft_candidates"] is True
+    assert by_title["Review center paper"]["active_dft_candidate_count"] == 1
     assert by_title["Review center paper"]["evidence_count"] == 1
     assert by_title["Review center paper"]["locator_issue_count"] == 1
     assert by_title["Review center paper"]["locator_issue_counts"]["missing_page"] == 1
@@ -971,7 +973,138 @@ def test_review_conflicts_api_and_review_center_counts(workbench_env):
     center = client.get("/api/workbench/review-center?limit=50")
     assert center.status_code == 200
     row_payload = next(item for item in center.json()["rows"] if item["paper_id"] == paper_id)
-    assert row_payload["review_conflict_count"] == 1
+    assert row_payload["review_conflict_total_count"] == 1
+    assert row_payload["review_conflict_count"] == 0
+
+
+def test_review_center_suppresses_conflicts_when_current_value_already_matches_finalized_truth(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Resolved conflict paper", pdf_path="resolved-conflict.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="activation_energy",
+            value=0.109,
+            unit="eV",
+            evidence_text="109 meV from Table 1.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="0.109",
+                reviewed_value="0.109",
+                unit="eV",
+                evidence_text="109 meV from Table 1.",
+                reviewer_status="verified",
+                reviewer="codex_low_risk_auto",
+                reviewer_note="Verified from imported evidence.",
+            )
+        )
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="codex_low_risk_auto",
+                field_name="dft_results",
+                target_path=f"dft_results:{row.id}:value",
+                operation="replace",
+                proposed_value=0.109,
+                reason="Normalized 109 meV into eV final storage.",
+                status="approved",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=109.0,
+            confidence=0.95,
+            locator_status="exact_page",
+            evidence_text="109 meV from Table 1.",
+            source="gemini-finalized",
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    conflicts = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}")
+    assert conflicts.status_code == 200
+    assert conflicts.json()["conflict_count"] == 1
+    assert conflicts.json()["rows"][0]["adjudication"]["recommended_action"] == "verify"
+
+    center = client.get("/api/workbench/review-center?limit=50")
+    assert center.status_code == 200
+    row_payload = next(item for item in center.json()["rows"] if item["paper_id"] == paper_id)
+    assert row_payload["has_dft_candidates"] is True
+    assert row_payload["has_active_dft_candidates"] is False
+    assert row_payload["active_dft_candidate_count"] == 0
+    assert row_payload["review_conflict_total_count"] == 1
+    assert row_payload["review_conflict_count"] == 0
+
+
+def test_review_center_suppresses_duplicate_system_candidate_when_finalized_row_exists(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Duplicate system candidate paper", pdf_path="duplicate-system-candidate.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="permeance",
+                    adsorbate="H2 through large deformable GDY membrane (1620 C atoms)",
+                    value=782000,
+                    unit="GPU",
+                    candidate_status="ML_Ready",
+                    evidence_text="Finalized permeance value.",
+                    reaction_step="300 K, ILJ+AIREBO, deformable",
+                    evidence_payload={
+                        "material_binding": {
+                            "evidence_anchor": {
+                                "page": 8,
+                                "source_document_type": "main",
+                            }
+                        }
+                    },
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="permeance",
+                    adsorbate="H2",
+                    value=782000,
+                    unit="GPU",
+                    candidate_status="system_candidate",
+                    evidence_text="Duplicate system candidate for the same finalized value.",
+                    reaction_step="MD simulation",
+                    evidence_payload={
+                        "page": 8,
+                        "source_document_type": "main",
+                    },
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    center = client.get("/api/workbench/review-center?limit=50")
+    assert center.status_code == 200
+    row_payload = next(item for item in center.json()["rows"] if item["paper_id"] == paper_id)
+    assert row_payload["has_dft_candidates"] is True
+    assert row_payload["dft_candidate_count"] == 2
+    assert row_payload["has_active_dft_candidates"] is False
+    assert row_payload["active_dft_candidate_count"] == 0
 
 
 def _seed_object_review_audit(

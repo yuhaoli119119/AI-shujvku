@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob
+from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
@@ -147,6 +147,72 @@ def test_list_papers_api_supports_year_serial_sorting(setup_test_db):
     assert response.status_code == 200
     payload = response.json()
     assert [item["title"] for item in payload] == ["2019-001", "2019-003", "2018-010"]
+
+
+def test_paper_api_exposes_stable_paper_id_on_list_and_detail(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Stable identity paper", pdf_path="identity.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    list_response = client.get("/api/papers")
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert list_payload[0]["id"] == paper_id
+    assert list_payload[0]["paper_id"] == paper_id
+
+    detail_response = client.get(f"/api/papers/{paper_id}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["id"] == paper_id
+    assert detail_payload["paper_id"] == paper_id
+
+
+def test_light_paper_detail_keeps_verified_writing_cards(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Light detail writing card paper", pdf_path="paper.pdf")
+        session.add(paper)
+        session.flush()
+        session.add(PaperSection(paper_id=paper.id, section_title="Intro", text="Heavy section text"))
+        session.add(
+            WritingCard(
+                paper_id=paper.id,
+                paper_type="A",
+                research_gap="AI reviewed writing card",
+                proposed_solution="Use this card for RAG writing.",
+                figure_logic='[{"fig_id":"Figure_1","purpose":"summary"}]',
+            )
+        )
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="ide_ai",
+                field_name="writing_cards",
+                target_path="writing_cards",
+                operation="replace",
+                proposed_value={"status": "reviewed"},
+                reason="IDE AI approved writing card.",
+                status="approved",
+                reviewed_by="ide_ai",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    response = client.get(f"/api/papers/{paper_id}", params={"mode": "light"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sections"] == []
+    assert payload["writing_cards_review_status"] == "ai_verified"
+    assert len(payload["writing_cards_items"]) == 1
+    assert payload["writing_cards_items"][0]["research_gap"] == "AI reviewed writing card"
 
 
 def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):
@@ -939,6 +1005,15 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     assert active_queue.status_code == 200
     assert active_queue.json()["rows"] == []
 
+    context_response = client.get(f"/api/papers/{paper_id}/codex-context")
+    assert context_response.status_code == 200
+    readiness = context_response.json()["context"]["dft_export_readiness"]
+    assert readiness["total_candidates"] == 1
+    assert readiness["active_candidates"] == 0
+    assert readiness["rejected_count"] == 1
+    assert readiness["blocked_count"] == 0
+    assert readiness["blocked_reasons"] == {}
+
     rejected_queue = client.get("/api/papers/export/dft-review-queue", params={"status": "rejected"})
     assert rejected_queue.status_code == 200
     rejected_row = rejected_queue.json()["rows"][0]
@@ -1119,6 +1194,56 @@ def test_dft_aggregation_endpoints_filter_by_library_name(setup_test_db):
     assert aggregate["library_name"] == "石墨炔"
     assert set(aggregate["adsorbate_groups"]) == {"h2o"}
     assert set(aggregate["catalyst_groups"]) == {"fegdy"}
+
+
+def test_compare_dft_results_only_attaches_bound_catalyst_sample(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Graphdiyne material property paper",
+            year=2026,
+            library_name="石墨炔",
+            pdf_path="graphdiyne-material.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="Fe-GDY", support="graphdiyne")
+        session.add(sample)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=sample.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H",
+                    value=-0.31,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="cohesive_energy",
+                    adsorbate="alpha-GDY",
+                    value=-8.19,
+                    unit="eV/atom",
+                    confidence=0.9,
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/papers/compare",
+        params={"library_name": "石墨炔", "status": "all", "min_confidence": 0.0, "limit": 10},
+    )
+    assert response.status_code == 200
+    items = {item["property_type"]: item for item in response.json()["items"]}
+
+    assert items["adsorption_energy"]["catalysts"][0]["name"] == "Fe-GDY"
+    assert items["cohesive_energy"]["catalysts"] == []
 
 
 def test_compare_dft_results_without_property_type_returns_all_types(setup_test_db):
@@ -1944,6 +2069,41 @@ def test_discovery_download_falls_back_to_metadata_only_ingest(setup_test_db, mo
         assert paper.library_name == "MetaLibrary"
         assert paper.pdf_path == ""
         assert paper.oa_status == "metadata_only"
+
+
+def test_discovery_download_short_circuits_existing_doi_before_remote_fetch(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        existing = Paper(
+            library_name="FastLane",
+            doi="10.1000/existing-fast",
+            title="Existing Fast Paper",
+            year=2024,
+            pdf_path="existing-fast.pdf",
+            oa_status="metadata_only",
+        )
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        existing_id = str(existing.id)
+
+    def fail_fetch_metadata(self, identifier, providers=None):
+        raise AssertionError("fetch_metadata should not run for an already indexed DOI")
+
+    monkeypatch.setattr(papers_api.DiscoveryService, "fetch_metadata", fail_fetch_metadata)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/discovery/download",
+        json={"identifier": "https://doi.org/10.1000/existing-fast", "library_name": "FastLane"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "already_exists"
+    assert data["paper_id"] == existing_id
+    assert data["title"] == "Existing Fast Paper"
 
 
 def test_metadata_only_same_doi_upsert_reuses_paper(setup_test_db):

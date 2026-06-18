@@ -25,12 +25,23 @@ from app.db.models import Base
 
 _engines: dict[str, object] = {}
 _session_factories: dict[str, sessionmaker[Session]] = {}
+_initialized_urls: set[str] = set()  # Track which DB URLs have already been initialized
 logger = logging.getLogger(__name__)
 
 
 def get_engine(database_url: str):
     if database_url not in _engines:
-        engine = create_engine(database_url, future=True, pool_size=20, max_overflow=50)
+        engine_kwargs: dict[str, object] = {
+            "future": True,
+            "pool_size": 20,
+            "max_overflow": 50,
+        }
+        if database_url.startswith("postgresql+psycopg"):
+            # Disable psycopg3 auto-prepared statements. They can become unstable
+            # across pooled/background worker connections and have been observed to
+            # leave ingest jobs stuck with DuplicatePreparedStatement errors.
+            engine_kwargs["connect_args"] = {"prepare_threshold": None}
+        engine = create_engine(database_url, **engine_kwargs)
         _engines[database_url] = engine
         _session_factories[database_url] = sessionmaker(
             bind=engine,
@@ -42,7 +53,20 @@ def get_engine(database_url: str):
     return _engines[database_url]
 
 
-def init_db(database_url: str) -> None:
+def init_db(database_url: str, *, force: bool = False) -> None:
+    """Initialize the database schema and run migrations.
+
+    Args:
+        database_url: SQLAlchemy connection string.
+        force: If True, re-run migrations even if this URL was already initialized.
+               Use after schema changes that need to be applied immediately.
+    """
+    # Skip redundant initialization — migrations are idempotent but expensive
+    # (each init_db call does ~50 inspector.get_columns() queries on PostgreSQL).
+    if not force and database_url in _initialized_urls:
+        logger.debug("init_db: %s already initialized, skipping migrations", _mask_url_internal(database_url))
+        return
+
     engine = get_engine(database_url)
     if engine.dialect.name == "postgresql":
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
@@ -176,6 +200,32 @@ def init_db(database_url: str) -> None:
             )
             execute_migration_step(
                 "papers",
+                "paper_code",
+                (
+                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_code VARCHAR(16)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE papers ADD COLUMN paper_code VARCHAR(16)"
+                ),
+            )
+            try:
+                if engine.dialect.name == "postgresql":
+                    connection.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_paper_code "
+                            "ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> ''"
+                        )
+                    )
+                else:
+                    connection.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_paper_code "
+                            "ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> ''"
+                        )
+                    )
+            except Exception:
+                logger.exception("Automatic database migration failed while indexing papers.paper_code")
+            execute_migration_step(
+                "papers",
                 "type_confidence",
                 (
                     "ALTER TABLE papers ADD COLUMN IF NOT EXISTS type_confidence DOUBLE PRECISION"
@@ -237,6 +287,14 @@ def init_db(database_url: str) -> None:
                     else "ALTER TABLE papers ADD COLUMN workspace_path TEXT"
                 ),
             )
+            try:
+                from app.services.paper_codes import ensure_paper_codes
+
+                with Session(engine) as backfill_session:
+                    ensure_paper_codes(backfill_session)
+                    backfill_session.commit()
+            except Exception:
+                logger.exception("Automatic database migration failed while backfilling papers.paper_code")
             execute_migration_step(
                 "paper_tables",
                 "prov",
@@ -609,6 +667,18 @@ def init_db(database_url: str) -> None:
                 ),
             )
 
+    # Mark this URL as initialized so subsequent init_db() calls can skip
+    _initialized_urls.add(database_url)
+
+
+def _mask_url_internal(database_url: str) -> str:
+    """Mask credentials in a database URL for logging."""
+    if "@" in database_url:
+        return database_url.split("@")[-1]
+    if database_url.startswith("sqlite:///"):
+        return f"sqlite:///{Path(database_url.removeprefix('sqlite:///')).name}"
+    return "***"
+
 
 def get_db_session():
     from app.config import get_settings
@@ -676,6 +746,7 @@ def switch_database(database_url: str, storage_root: str | None = None) -> None:
     if old_url in _engines:
         old_engine = _engines.pop(old_url, None)
         _session_factories.pop(old_url, None)
+        _initialized_urls.discard(old_url)
         if old_engine:
             old_engine.dispose()
 
