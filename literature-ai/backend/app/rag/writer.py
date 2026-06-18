@@ -173,6 +173,8 @@ class Writer:
             "Mechanistic interpretation linked to sulfur redox behavior",
             "Implications for electrochemical performance and figure sequence",
         ]
+        if retrieved.get("catalyst_samples"):
+            outline.insert(2, "Catalyst identity, coordination environment, and support structure")
         if retrieved.get("electrochemical_performance"):
             outline.append("Electrochemical validation and structure-performance correlation")
         return outline
@@ -180,8 +182,13 @@ class Writer:
     def _build_introduction(self, topic: str, retrieved: dict[str, list[dict[str, Any]]], target_paper_type: str | None) -> str:
         cards = retrieved.get("writing_cards", [])
         mechanisms = retrieved.get("mechanism_claims", [])
+        catalysts = retrieved.get("catalyst_samples", [])
         gap = cards[0].get("research_gap") if cards else "prior studies still lack a stable way to balance polysulfide adsorption and fast conversion"
-        solution = cards[0].get("proposed_solution") if cards else "single-atom or dual-atom catalytic centers are introduced to tune sulfur redox chemistry"
+        default_solution = "single-atom or dual-atom catalytic centers are introduced to tune sulfur redox chemistry"
+        if catalysts:
+            catalyst_name = catalysts[0].get("name") or "the reported catalyst"
+            default_solution = f"{catalyst_name} is used as the material platform to tune sulfur redox chemistry"
+        solution = cards[0].get("proposed_solution") if cards else default_solution
         mechanism = mechanisms[0].get("text") if mechanisms else "the catalytic site is expected to strengthen sulfur-species binding while accelerating bidirectional conversion"
         
         if target_paper_type and target_paper_type.startswith("R"):
@@ -241,6 +248,7 @@ class Writer:
     def _build_discussion(self, topic: str, retrieved: dict[str, list[dict[str, Any]]], target_paper_type: str | None) -> str:
         mechanisms = retrieved.get("mechanism_claims", [])
         electrochem = retrieved.get("electrochemical_performance", [])
+        catalysts = retrieved.get("catalyst_samples", [])
         parts = []
         if mechanisms:
             top_claim = mechanisms[0]
@@ -248,6 +256,20 @@ class Writer:
                 f"For {topic}, the mechanistic anchor is {top_claim.get('text')}. "
                 "This claim should be discussed together with the corresponding DFT descriptors rather than as an isolated statement."
             )
+        if catalysts:
+            catalyst = catalysts[0]
+            identity = ", ".join(
+                str(item)
+                for item in [
+                    catalyst.get("name"),
+                    catalyst.get("catalyst_type"),
+                    catalyst.get("coordination"),
+                    catalyst.get("support"),
+                ]
+                if item
+            )
+            if identity:
+                parts.append(f"The catalyst identity should remain explicit throughout the discussion: {identity}.")
         if electrochem:
             perf = electrochem[0]
             perf_bits = []
@@ -285,7 +307,9 @@ class Writer:
                 if storyline:
                     return storyline
         storyline = []
-        if retrieved.get("sections"):
+        if retrieved.get("catalyst_samples"):
+            storyline.append("Figure 1: catalyst structure and coordination evidence")
+        elif retrieved.get("sections"):
             storyline.append("Figure 1: catalyst structure and coordination evidence")
         if retrieved.get("dft_results"):
             storyline.append("Figure 2: adsorption energies, free-energy profile, or kinetic barriers")

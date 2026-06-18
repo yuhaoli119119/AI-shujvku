@@ -40,10 +40,17 @@ router = APIRouter()
 def review_center(
     limit: int = Query(default=100, ge=1, le=500),
     sort_by: str = Query(default="recent"),
+    library_name: str | None = Query(default=None, description="Filter by literature library"),
+    summary_only: bool = Query(default=False, description="Return a lightweight row summary for the review center table"),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    return PaperWorkbenchService(session, settings).review_center(limit=limit, sort_by=sort_by)
+    return PaperWorkbenchService(session, settings).review_center(
+        limit=limit,
+        sort_by=sort_by,
+        library_name=library_name,
+        summary_only=summary_only,
+    )
 
 
 @router.get("/review-conflicts")
@@ -165,10 +172,11 @@ def manually_resolve_review_conflict(
 @router.get("/artifact-reliability")
 def get_artifact_reliability_audit(
     limit: int = Query(default=100, ge=1, le=500),
+    library_name: str | None = Query(default=None),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    return ArtifactReliabilityAuditService(session, settings).audit_library(limit=limit)
+    return ArtifactReliabilityAuditService(session, settings).audit_library(limit=limit, library_name=library_name)
 
 
 @router.get("/papers/{paper_id}/artifact-reliability")

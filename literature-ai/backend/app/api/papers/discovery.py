@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -95,10 +95,24 @@ async def discovery_download_and_ingest(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
-    service = DiscoveryService()
-    raw_paper, metadata = await run_in_threadpool(service.fetch_metadata, payload.identifier, payload.providers)
-
     target_library = normalize_library_name(payload.library_name)
+    normalized_identifier_doi = PaperIdentityService.normalize_doi(payload.identifier)
+    if normalized_identifier_doi:
+        existing = _find_existing_paper(
+            session,
+            doi=normalized_identifier_doi,
+            title=None,
+            library_name=target_library,
+        )
+        if existing:
+            return IngestResponse(paper_id=existing.id, title=existing.title, status="already_exists")
+
+    service = DiscoveryService()
+    try:
+        raw_paper, metadata = await run_in_threadpool(service.fetch_metadata, payload.identifier, payload.providers)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     doi = metadata.get("doi")
     existing = _find_existing_paper(session, doi=doi, title=metadata.get("title"), library_name=target_library)
     if existing:

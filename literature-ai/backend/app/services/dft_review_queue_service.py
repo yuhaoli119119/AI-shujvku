@@ -76,6 +76,7 @@ class DFTReviewQueueService:
         dft_rows = [row for row, _paper in rows]
         gate_by_id = bulk_export_gate_results(self.session, dft_rows, target_type="dft_results")
         locators_by_id = self._bulk_locator_payloads(dft_rows)
+        catalysts_by_paper = self._bulk_catalyst_payloads({paper.id for _row, paper in rows})
         external_audits_by_paper = self._bulk_external_audit_payloads({paper.id for _row, paper in rows})
         object_audits_by_target = self._bulk_object_review_audit_payloads(
             {paper.id for _row, paper in rows},
@@ -116,6 +117,7 @@ class DFTReviewQueueService:
                     row,
                     paper,
                     gate,
+                    catalysts_by_paper.get(str(paper.id), []),
                     locators_by_id.get(str(row.id), []),
                     external_audits_by_paper.get(str(paper.id), []),
                     object_audits_by_target.get(str(row.id), []),
@@ -240,6 +242,7 @@ class DFTReviewQueueService:
         row: DFTResult,
         paper: Paper,
         gate: Any,
+        paper_catalysts: list[dict[str, Any]] | None = None,
         locators: list[dict[str, Any]] | None = None,
         external_audits: list[dict[str, Any]] | None = None,
         object_review_audits: list[dict[str, Any]] | None = None,
@@ -254,6 +257,11 @@ class DFTReviewQueueService:
         sanity_flags = self._sanity_flags(row)
         issues = self._issue_payloads(row, reasons, sanity_flags, locators, gate)
         figure_reliability = self._figure_reliability(row, locators, gate)
+        paper_catalysts = paper_catalysts or []
+        linked_catalyst = next(
+            (item for item in paper_catalysts if item["id"] == str(row.catalyst_sample_id)),
+            None,
+        )
         return {
             "record_id": result_id,
             "dft_result_id": result_id,
@@ -267,9 +275,14 @@ class DFTReviewQueueService:
             "value": row.value,
             "unit": row.unit,
             "reaction_step": row.reaction_step,
+            "catalyst_sample_id": str(row.catalyst_sample_id) if row.catalyst_sample_id else None,
+            "material_binding_status": "bound" if row.catalyst_sample_id else "unbound",
+            "linked_catalyst_sample": linked_catalyst,
+            "candidate_catalyst_samples": paper_catalysts[:8],
             "source_section": row.source_section,
             "source_figure": row.source_figure,
             "evidence_text": row.evidence_text,
+            "evidence_payload": row.evidence_payload,
             "evidence_preview": self._shorten(row.evidence_text),
             "primary_evidence_locator": primary_locator,
             "primary_locator_reliability": locator_reliability["primary_locator"],
@@ -324,6 +337,29 @@ class DFTReviewQueueService:
                 else f"../literature_library/index.html?paper_id={paper_id}&tab=review"
             ),
         }
+
+    def _bulk_catalyst_payloads(self, paper_ids: set[UUID]) -> dict[str, list[dict[str, Any]]]:
+        if not paper_ids:
+            return {}
+        payloads: dict[str, list[dict[str, Any]]] = {str(pid): [] for pid in paper_ids}
+        rows = self.session.scalars(
+            select(CatalystSample)
+            .where(CatalystSample.paper_id.in_(paper_ids))
+            .order_by(CatalystSample.paper_id.asc(), CatalystSample.id.asc())
+        ).all()
+        for row in rows:
+            payloads.setdefault(str(row.paper_id), []).append(
+                {
+                    "id": str(row.id),
+                    "name": row.name,
+                    "catalyst_type": row.catalyst_type,
+                    "metal_centers": row.metal_centers or [],
+                    "coordination": row.coordination,
+                    "support": row.support,
+                    "evidence_strength": row.evidence_strength,
+                }
+            )
+        return payloads
 
     def _locator_payloads(self, row: DFTResult) -> list[dict[str, Any]]:
         locators = self.session.scalars(
@@ -525,6 +561,8 @@ class DFTReviewQueueService:
         if gate.eligible:
             return "ready_for_ml_export"
         reason_set = set(reasons)
+        if "missing_material_identity" in reason_set:
+            return "bind_material_identity"
         if "missing_evidence_text" in reason_set:
             return "add_evidence_text"
         if "missing_evidence" in reason_set:
@@ -656,6 +694,7 @@ class DFTReviewQueueService:
         gate: Any,
     ) -> list[dict[str, Any]]:
         issue_map = {
+            "missing_material_identity": ("缺少材料/结构绑定", "danger"),
             "missing_review": ("缺人工确认", "warning"),
             "unsafe_review": ("复核状态不安全", "danger"),
             "missing_evidence_text": ("缺证据原文", "danger"),

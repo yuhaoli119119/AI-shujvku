@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     writer_timeout_seconds: float = 30.0
     writer_fallback_backend: str = "rule"
     mcp_enabled: bool = True
+    mcp_allow_unauthenticated: bool = True
     mcp_api_keys: str = ""
     mcp_server_name: str = "Literature AI MCP"
     force_configured_database: bool = True

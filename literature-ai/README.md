@@ -10,7 +10,8 @@ The application does not treat any AI output as final truth by default.
 - AI roles are assigned per task by the user. Codex, Gemini, GLM, Claude, or another IDE AI may parse, inspect figures, audit DFT data, summarize evidence, or perform a second pass.
 - Model names do not grant trust. All AI outputs remain candidates until they pass the required evidence, review, and confirmation gates.
 - PostgreSQL with pgvector is the active business database. SQLite is legacy/import/test infrastructure only.
-- MCP is the controlled collaboration surface for IDE AI workers and other clients.
+- MCP is the preferred controlled collaboration surface for IDE AI workers and other clients.
+- If the current IDE session does not expose MCP tools, the repository-native backend path in `backend/` may be used as the fallback execution route via `app.mcp.context.mcp_auth_context` and `app.mcp.server`.
 
 ## Main Components
 
@@ -47,6 +48,8 @@ AI paper context bundle:
 - MCP: `get_codex_context`
 
 The tool name still uses `codex-context` for compatibility, but the bundle is available to any assigned AI reviewer or parser.
+
+If MCP tools are unavailable in the current IDE session, use the backend-native `app.mcp.*` path from `backend/` instead of stopping at tool-missing.
 
 ## Documentation Rules
 

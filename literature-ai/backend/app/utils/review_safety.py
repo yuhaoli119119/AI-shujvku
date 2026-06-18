@@ -8,6 +8,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    CatalystSample,
     DFTResult,
     EvidenceClaim,
     EvidenceLocator,
@@ -159,6 +160,8 @@ def has_safe_verified_review(
 def has_required_evidence_text(row: Any) -> bool:
     if isinstance(row, DFTResult):
         return not _is_blank(row.evidence_text)
+    if isinstance(row, CatalystSample):
+        return not _is_blank(row.evidence_strength)
     return not _is_blank(getattr(row, "evidence_text", None))
 
 
@@ -217,6 +220,57 @@ def has_required_evidence_reference(
     return False
 
 
+def _catalyst_has_material_identity(catalyst: CatalystSample | None) -> bool:
+    if catalyst is None:
+        return False
+    return any(
+        not _is_blank(value)
+        for value in (
+            catalyst.name,
+            catalyst.catalyst_type,
+            catalyst.metal_centers,
+            catalyst.coordination,
+            catalyst.support,
+        )
+    )
+
+
+def _dft_payload_has_material_identity(row: DFTResult) -> bool:
+    payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+    corrected_value = payload.get("corrected_value")
+    if not isinstance(corrected_value, dict):
+        corrected_value = {}
+    return any(
+        not _is_blank(value)
+        for value in (
+            payload.get("material_identity"),
+            payload.get("material"),
+            payload.get("structure_name"),
+            corrected_value.get("material_identity"),
+            corrected_value.get("material"),
+            corrected_value.get("structure_name"),
+        )
+    )
+
+
+def has_required_material_identity(session: Session, row: Any) -> bool:
+    if not isinstance(row, DFTResult):
+        return True
+    if _dft_payload_has_material_identity(row):
+        return True
+    if _is_blank(row.catalyst_sample_id):
+        return False
+    return _catalyst_has_material_identity(session.get(CatalystSample, row.catalyst_sample_id))
+
+
+def is_borrowed_supporting_reference(row: Any) -> bool:
+    payload = getattr(row, "evidence_payload", None)
+    if not isinstance(payload, dict):
+        return False
+    source_type = str(payload.get("source_document_type") or "").strip().lower()
+    return source_type == "supporting_reference" or bool(payload.get("borrowed_from_reference"))
+
+
 def _safe_locator_from_parts(
     *,
     page: Any,
@@ -244,7 +298,12 @@ def _locator_summary(
     paper_id: Any,
     target_type: str,
     target_id: Any,
+    reviews: list[ExtractionFieldReview] | None = None,
 ) -> tuple[str, str]:
+    for review in reviews or []:
+        if _review_has_safe_imported_page_anchor(review):
+            return "exact_pdf_page", "exact_page"
+
     target_id_str = str(target_id)
     target_types = _target_type_values(target_type)
     if not _table_exists(session, "evidence_locators"):
@@ -336,8 +395,14 @@ def build_export_gate_reason(
     has_evidence_reference: bool,
     has_evidence_text: bool,
     has_safe_locator: bool,
+    has_material_identity: bool = True,
+    borrowed_supporting_reference: bool = False,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
+    if borrowed_supporting_reference:
+        reasons.append("supporting_reference_not_main_paper_data")
+    if not has_material_identity:
+        reasons.append("missing_material_identity")
     if not has_review:
         reasons.append("missing_review")
     elif not has_safe_review:
@@ -377,6 +442,7 @@ def is_export_eligible_extraction(
         paper_id=row.paper_id,
         target_type=target_type,
         target_id=row.id,
+        reviews=reviews,
     )
     reasons = build_export_gate_reason(
         has_review=has_review,
@@ -384,6 +450,8 @@ def is_export_eligible_extraction(
         has_evidence_reference=has_evidence_reference,
         has_evidence_text=has_evidence_text,
         has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
+        has_material_identity=has_required_material_identity(session, row),
+        borrowed_supporting_reference=is_borrowed_supporting_reference(row),
     )
     review_status = safe_review.reviewer_status if safe_review is not None else (
         ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews})) if reviews else "missing"
@@ -411,6 +479,8 @@ def bulk_export_gate_results(
     row_by_id = {str(row.id): row for row in rows}
     target_ids = set(row_by_id)
     paper_ids = {row.paper_id for row in rows}
+    dft_aliases = {_normalized(value) for value in _target_type_values("dft_results")}
+    is_dft_target = _normalized(target_type) in dft_aliases
 
     reviews_by_target: dict[str, list[ExtractionFieldReview]] = {target_id: [] for target_id in target_ids}
     if _table_exists(session, "extraction_field_reviews"):
@@ -468,6 +538,18 @@ def bulk_export_gate_results(
             evidence_reference_ids.add(target_id_str)
             claim_pages_by_target[target_id_str].append((page_start, page_end))
 
+    material_identity_ids: set[str] = set()
+    if is_dft_target:
+        catalyst_ids = {
+            row.catalyst_sample_id
+            for row in rows
+            if isinstance(row, DFTResult) and not _is_blank(row.catalyst_sample_id)
+        }
+        if catalyst_ids:
+            for catalyst in session.scalars(select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))).all():
+                if _catalyst_has_material_identity(catalyst):
+                    material_identity_ids.add(str(catalyst.id))
+
     gates: dict[str, ExportGateResult] = {}
     for target_id, row in row_by_id.items():
         reviews = reviews_by_target.get(target_id, [])
@@ -476,6 +558,7 @@ def bulk_export_gate_results(
             locators_by_target.get(target_id, []),
             span_pages_by_target.get(target_id, []),
             claim_pages_by_target.get(target_id, []),
+            reviews,
         )
         reasons = build_export_gate_reason(
             has_review=bool(reviews),
@@ -483,6 +566,12 @@ def bulk_export_gate_results(
             has_evidence_reference=target_id in evidence_reference_ids,
             has_evidence_text=has_required_evidence_text(row),
             has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
+            has_material_identity=(
+                _dft_payload_has_material_identity(row) or str(row.catalyst_sample_id) in material_identity_ids
+                if is_dft_target and isinstance(row, DFTResult)
+                else True
+            ),
+            borrowed_supporting_reference=is_dft_target and is_borrowed_supporting_reference(row),
         )
         review_status = safe_review.reviewer_status if safe_review is not None else (
             ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews}))
@@ -504,7 +593,12 @@ def _bulk_locator_summary(
     locators: list[EvidenceLocator],
     span_pages: list[Any],
     claim_pages: list[tuple[Any, Any]],
+    reviews: list[ExtractionFieldReview] | None = None,
 ) -> tuple[str, str]:
+    for review in reviews or []:
+        if _review_has_safe_imported_page_anchor(review):
+            return "exact_pdf_page", "exact_page"
+
     if locators:
         if any(
             _safe_locator_from_parts(
@@ -547,6 +641,30 @@ def _bulk_locator_summary(
     if claim_pages:
         return "text_evidence_only", "missing_page"
     return "text_evidence_only", "missing_locator"
+
+
+def _review_has_safe_imported_page_anchor(review: ExtractionFieldReview) -> bool:
+    if not is_safe_verified_review(review):
+        return False
+    review_payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+    imported = review_payload.get("imported_evidence_payload")
+    imported_items = imported if isinstance(imported, list) else [imported]
+    return any(
+        isinstance(item, dict)
+        and _safe_locator_from_parts(
+            page=item.get("page"),
+            locator_status="exact_page",
+            evidence_text=(
+                item.get("quoted_text")
+                or item.get("evidence_text")
+                or item.get("section")
+                or item.get("table")
+                or item.get("figure")
+                or "reviewed PDF page"
+            ),
+        )
+        for item in imported_items
+    )
 
 
 def summarize_gate_results(results: list[ExportGateResult]) -> dict[str, Any]:

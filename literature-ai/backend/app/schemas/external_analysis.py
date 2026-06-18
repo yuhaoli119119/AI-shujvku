@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ExternalAnalysisImportRequest(BaseModel):
@@ -12,6 +12,22 @@ class ExternalAnalysisImportRequest(BaseModel):
     source: str = Field(..., description="Source system, e.g. chatgpt, claude_web, manual")
     source_label: str | None = Field(default=None, description="Optional human-readable source label")
     raw_text: str | None = None
+    auto_apply_review_rules: bool = Field(
+        default=False,
+        description="When True, immediately try to apply the minimal IDE-AI review rules after import.",
+    )
+    reviewer: str | None = Field(
+        default=None,
+        description="Reviewer label recorded when auto_apply_review_rules materializes eligible results.",
+    )
+    write_lock_token: str | None = Field(
+        default=None,
+        description="Module write lock token required when auto_apply_review_rules directly applies non-DFT outputs.",
+    )
+    write_lock_tokens: list[str] = Field(
+        default_factory=list,
+        description="Additional module write lock tokens for multi-module direct AI writes.",
+    )
     raw_payload: dict[str, Any] | list[Any] | str | None = Field(
         default=None,
         description=(
@@ -20,6 +36,19 @@ class ExternalAnalysisImportRequest(BaseModel):
             "evidence_location, and corrected_value."
         ),
     )
+
+    @model_validator(mode="after")
+    def require_analysis_content(self) -> "ExternalAnalysisImportRequest":
+        has_text = bool(str(self.raw_text or "").strip())
+        payload = self.raw_payload
+        has_payload = payload is not None
+        if isinstance(payload, str):
+            has_payload = bool(payload.strip())
+        elif isinstance(payload, (dict, list)):
+            has_payload = bool(payload)
+        if not has_text and not has_payload:
+            raise ValueError("import_analysis requires non-empty raw_text or raw_payload")
+        return self
 
 
 class ExternalObjectReviewAuditPayload(BaseModel):

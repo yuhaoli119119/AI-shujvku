@@ -22,9 +22,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import Base, LiteratureIntakeCandidate, LiteratureIntakeSession, Paper
+from app.db.models import Base, LiteratureIntakeCandidate, LiteratureIntakeSession, Paper, WorkflowJob
 from app.db.session import get_db_session
 from app.main import app
+from app.services.intake_screening_service import IntakeScreeningService, ScreeningResult
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +296,66 @@ def test_duplicate_doi_detected(client, db_session):
         assert c["duplicate_paper_id"] is not None
 
 
+def test_intake_search_keeps_screening_result_aligned_after_relevance_sort(client):
+    raw_results = [
+        {
+            "identifier": "10.1234/low",
+            "title": "Low relevance raw paper",
+            "doi": "10.1234/low",
+            "year": 2021,
+            "journal": "Raw Journal",
+            "authors": ["Low Author"],
+            "abstract": "weak match",
+            "url": "https://example.com/low",
+            "databases": ["openalex"],
+        },
+        {
+            "identifier": "10.1234/high",
+            "title": "High relevance raw paper",
+            "doi": "10.1234/high",
+            "year": 2024,
+            "journal": "Raw Journal",
+            "authors": ["High Author"],
+            "abstract": "strong match",
+            "url": "https://example.com/high",
+            "databases": ["openalex"],
+        },
+    ]
+
+    def fake_screen(self, items, **kwargs):
+        return [
+            ScreeningResult(
+                identifier="10.1234/high",
+                relevance_score=0.95,
+                screening_tier="recommended",
+                screening_reason="high paper reason",
+            ),
+            ScreeningResult(
+                identifier="10.1234/low",
+                relevance_score=0.25,
+                screening_tier="weak",
+                screening_reason="low paper reason",
+            ),
+        ]
+
+    with patch("app.services.discovery_service.DiscoveryService.search", return_value=raw_results):
+        with patch.object(IntakeScreeningService, "screen", fake_screen):
+            resp = client.post("/api/intake/search", json={
+                "query": "single atom DFT",
+                "library_name": "test_lib",
+                "max_results": 2,
+            })
+
+    assert resp.status_code == 200, resp.text
+    candidates = resp.json()["candidates"]
+    assert candidates[0]["doi"] == "10.1234/high"
+    assert candidates[0]["title"] == "High relevance raw paper"
+    assert candidates[0]["relevance_score"] == 0.95
+    assert candidates[0]["screening_reason"] == "high paper reason"
+    assert candidates[1]["doi"] == "10.1234/low"
+    assert candidates[1]["title"] == "Low relevance raw paper"
+
+
 # ===========================================================================
 # TEST 6: 批量 ingest-approved — 只触发 approved 候选
 # ===========================================================================
@@ -326,6 +387,63 @@ def test_duplicate_doi_detection_is_library_scoped(client, db_session):
     assert all(c["duplicate_paper_id"] is None for c in same_doi)
 
 
+def test_duplicate_doi_detection_normalizes_prefix_case_and_whitespace(db_session):
+    existing = Paper(
+        title="Normalized DOI Paper",
+        doi="10.xxxx/abc",
+        library_name="test_lib",
+        pdf_path="mock.pdf",
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    items = [
+        {"title": "Variant DOI 1", "doi": "10.xxxx/abc", "abstract": "battery anode", "year": 2024},
+        {"title": "Variant DOI 2", "doi": "https://doi.org/10.xxxx/abc", "abstract": "battery anode", "year": 2024},
+        {"title": "Variant DOI 3", "doi": "doi:10.xxxx/abc", "abstract": "battery anode", "year": 2024},
+        {"title": "Variant DOI 4", "doi": "  HTTPS://DOI.ORG/10.XXXX/ABC  ", "abstract": "battery anode", "year": 2024},
+    ]
+
+    results = IntakeScreeningService(db_session, library_name="test_lib").screen(
+        items,
+        user_need="battery anode",
+        query="battery anode",
+    )
+
+    assert len(results) == len(items)
+    assert all(result.is_duplicate for result in results)
+    assert {result.duplicate_paper_id for result in results} == {str(existing.id)}
+
+
+def test_title_duplicate_detection_requires_high_confidence_identity(db_session):
+    db_session.add(
+        Paper(
+            title="Lithium-Ion Battery Technology",
+            year=2024,
+            library_name="test_lib",
+            pdf_path="mock.pdf",
+        )
+    )
+    db_session.commit()
+
+    results = IntakeScreeningService(db_session, library_name="test_lib").screen(
+        [
+            {
+                "title": "Advances in Lithium-Ion Battery Technology for EV",
+                "year": 2024,
+                "abstract": "battery anode electrolyte",
+            }
+        ],
+        user_need="battery anode",
+        query="battery anode",
+    )
+
+    assert len(results) == 1
+    assert results[0].is_duplicate is False
+    assert results[0].duplicate_paper_id is None
+
+
 def test_batch_ingest_approved_only(client, db_session):
     """batch ingest-approved 只处理 approved 候选，pending/rejected 被跳过。"""
     sess, candidates = make_session_with_candidates(db_session, n_pending=3)
@@ -350,6 +468,24 @@ def test_batch_ingest_approved_only(client, db_session):
 # ===========================================================================
 # TEST 7: 批量 ingest-approved — 无 approved 候选 → 422
 # ===========================================================================
+
+def test_batch_ingest_uses_intake_session_library_when_not_explicit(client, db_session):
+    """ingest-approved should carry the intake session library into job and payload."""
+    sess, candidates = make_session_with_candidates(db_session, n_pending=1, library_name="SessionLibrary")
+    candidate = candidates[0]
+    client.post(f"/api/intake/candidates/{candidate.id}/approve")
+
+    with patch("app.api.intake.dispatch_job", return_value="threadpool"):
+        response = client.post(f"/api/intake/sessions/{sess.id}/ingest-approved")
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    updated = db_session.get(LiteratureIntakeCandidate, candidate.id)
+    job = db_session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == updated.ingest_job_id))
+    assert job is not None
+    assert job.library_name == "SessionLibrary"
+    assert job.payload["library_name"] == "SessionLibrary"
+
 
 def test_batch_ingest_no_approved_returns_422(client, db_session):
     """无 approved 候选时批量 ingest 应返回 422。"""

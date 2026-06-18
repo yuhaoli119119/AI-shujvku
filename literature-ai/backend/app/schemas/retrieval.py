@@ -21,11 +21,17 @@ class RetrievalSearchRequest(BaseModel):
 class RetrievalSearchResult(BaseModel):
     score: float
     source: str
+    source_type: str | None = None
+    source_id: str | None = None
     paper_id: UUID
+    paper_code: str | None = None
     chunk_id: str | None = None
     section_id: UUID | None = None
     section_title: str | None = None
     text: str
+    page: int | None = None
+    evidence_text: str | None = None
+    review_status: str | None = None
     page_start: int | None = None
     page_end: int | None = None
     score_breakdown: dict[str, float] = Field(default_factory=dict)
@@ -40,4 +46,3 @@ class RetrievalSearchResponse(BaseModel):
     reranker: dict[str, Any]
     total: int
     items: list[RetrievalSearchResult] = Field(default_factory=list)
-

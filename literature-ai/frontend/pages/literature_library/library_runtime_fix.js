@@ -38,7 +38,12 @@ activateLibraryByName = async function(name) {
         await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
         state.currentOffset = 0;
         await loadLibraries();
-        refreshCurrentPage();
+        if (typeof fetchPapers === "function") {
+            fetchPapers();
+        }
+        if (typeof initSSE === "function") {
+            initSSE();
+        }
         showToast("已切换到：" + name, "success");
     } catch (error) {
         showToast("切库失败：" + error.message, "error");

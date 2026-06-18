@@ -25,7 +25,7 @@
         </div>
 
         <div class="toolbar" id="mainToolbar">
-            <div class="toolbar-row">
+            <div class="toolbar-row toolbar-main">
                 <span class="toolbar-label">当前库：</span>
                 <select id="librarySelect" class="library-select" onchange="activateLibraryByName(this.value)">
                     <option value="">加载中...</option>
@@ -34,6 +34,7 @@
                 <button class="btn ghost" onclick="openImportLibraryDialog()">导入已有库</button>
                 <button class="btn danger" onclick="removeCurrentLibrary()">移除库</button>
                 <span id="libStatus" class="status-line subtle"></span>
+                <button class="btn ghost small" onclick="toggleDashboard()" id="dashboardToggleBtn">收起面板</button>
             </div>
             <div class="toolbar-row">
                 <div id="libraryRuntimeInfo" class="runtime-info-card subtle">正在读取当前文献库路径...</div>
@@ -47,7 +48,6 @@
                         <button type="button" data-add-mode="pdf" onclick="openAddLiteraturePanel('pdf')">上传 PDF</button>
                         <button type="button" data-add-mode="doi" onclick="openAddLiteraturePanel('doi')">DOI / URL 下载</button>
                         <button type="button" data-add-mode="online" onclick="openAddLiteraturePanel('online')">在线检索</button>
-                        <button type="button" data-add-mode="ai" onclick="openAddLiteraturePanel('ai')">AI 自动搜文献</button>
                         <button type="button" data-add-mode="folder" onclick="openAddLiteraturePanel('folder')">导入本地文件夹</button>
                     </div>
                 </div>
@@ -84,7 +84,6 @@
                 </div>
                 <button class="btn ghost small" onclick="toggleSidebar()" id="toggleSidebarBtn" style="margin-left: 12px;">隐藏列表</button>
                 <button class="btn ghost small" onclick="toggleWorkspace()" id="toggleWorkspaceBtn">隐藏详情</button>
-                <button class="btn ghost small" onclick="toggleDashboard()" id="dashboardToggleBtn" style="margin-left: 8px;">收起面板</button>
             </div>
         </div>
 
@@ -105,7 +104,7 @@
                 <div id="workspaceEmpty" class="workspace-empty">
                     <div>
                         <h2>选择一篇文献查看详情</h2>
-                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、AI 候选 DFT 数据、写作卡和 AI 审阅结果。</p>
+                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、候选 DFT 数据、写作卡和 IDE AI 回写结果。</p>
                     </div>
                 </div>
 
@@ -119,13 +118,13 @@
                             </div>
                             <div class="paper-actionbar">
                                 <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
-                                <button class="btn ghost small" onclick="openPaperDetailPage()">打开详情</button>
-                                <button class="btn ghost small" onclick="rerunExtraction()">刷新 AI 解析材料</button>
+                                <button class="btn ghost small" onclick="openSelectedReviewCenter()">审核中心</button>
+                                <button class="btn ghost small" onclick="reparseSelectedPaper()">重新解析</button>
+                                <button class="btn ghost small" onclick="rerunExtraction()">刷新 IDE AI 材料</button>
                                 <div class="dropdown" id="paperMoreDropdown">
                                     <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
                                     <div id="paperMoreMenu" class="dropdown-menu right">
                                         <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
-                                        <button type="button" onclick="runInternalAIParse()">生成 AI 详细审阅</button>
                                         <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
                                         <button type="button" onclick="openAggregateView()">查看聚合视图</button>
                                         <button type="button" onclick="promptAddRelationship(state.selectedPaperId)">添加关联文献</button>
@@ -139,11 +138,11 @@
                     <div class="tabs">
                         <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
                         <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
-                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">AI 候选 DFT 数据</button>
+                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">候选 DFT 数据</button>
                         <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">章节</button>
                         <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
                         <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
-                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI 审阅与确认</button>
+                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">任务日志</button>
                     </div>
 
                     <section id="tab-summary" class="tab-panel active">
@@ -166,14 +165,11 @@
                     <section id="tab-writing" class="tab-panel">
                         <div id="writingContent"></div>
                         <div class="writer-block compact-writer">
-                            <h3>生成整理结果</h3>
-                            <div id="writerStatusBox" class="subtle" style="margin-bottom:12px;">加载写作器状态...</div>
+                            <h3>IDE AI 写作整理</h3>
+                            <div id="writerStatusBox" class="subtle" style="margin-bottom:12px;">网页端写作模型已停用。需要写作整理时，请在 IDE AI 中读取文献证据、候选 DFT 数据和写作卡，再回到网页核对证据状态。</div>
                             <div class="writer-toolbar">
-                                <input id="writerTopic" class="search-input" type="text" placeholder="写作主题">
-                                <input id="writerLimit" class="small-input" type="number" min="1" max="20" value="5" placeholder="证据数">
-                                <button class="btn ghost" onclick="generateWriterDraft()">生成</button>
+                                <button class="btn ghost" onclick="loadAgentGuide()">显示 IDE AI 指南</button>
                             </div>
-                            <textarea id="writerNotes" placeholder="给内部 AI 的补充要求，例如：重点整理机理链条、列出关键 DFT 结果、突出存在争议的数据。"></textarea>
                         </div>
                         <div id="writerResult"></div>
                     </section>
@@ -184,32 +180,10 @@
 
                     <section id="tab-review" class="tab-panel">
                         <div class="writer-block ai-review-section">
-                            <h3>旧兼容：网页内 AI 审阅</h3>
-                            <p class="subtle">这一入口仅为兼容旧流程保留，不是当前主工作流。推荐优先使用下方 IDE / MCP AI 审阅入口；系统主线是先准备材料，再由 IDE 中的 AI 接手解析、审核和回写候选。</p>
-                            <div id="internalAIConfigGuide"></div>
+                            <h3>任务日志</h3>
+                            <p class="subtle">按时间记录每个 AI 导入、审核、写回了什么。</p>
                             <div class="modal-actions" style="justify-content:flex-start;">
-                                <button class="btn ghost" onclick="runInternalAIParse()">使用旧兼容入口</button>
-                                <button class="btn ghost" onclick="window.location.href='../settings/index.html'">打开设置页</button>
-                            </div>
-                        </div>
-                        <div class="writer-block ai-review-section">
-                            <h3>IDE / MCP AI 审阅</h3>
-                            <p class="subtle">这是当前主工作流。先读取 MCP 指南，再让 IDE 中的 AI 读取文献、证据、codex context 和 item context，并通过 import_analysis / correction 流程回写候选。</p>
-                            <div class="modal-actions" style="justify-content:flex-start;">
-                                <button class="btn ghost" onclick="loadAgentGuide()">显示 MCP 指南</button>
-                            </div>
-                            <div id="mcpGuideBox"></div>
-                        </div>
-                        <div class="writer-block ai-review-section">
-                            <h3>导入外部 AI 审阅结果</h3>
-                            <div class="external-toolbar">
-                                <input id="externalSource" class="medium-input" type="text" value="手动导入" placeholder="来源">
-                                <input id="externalSourceLabel" class="medium-input" type="text" value="外部 AI 审阅结果" placeholder="来源名称">
-                            </div>
-                            <textarea id="externalRawText" placeholder="把外部 AI 返回的审阅文本或 JSON 粘贴到这里，然后导入。"></textarea>
-                            <div class="modal-actions" style="margin-top:12px;">
-                                <button class="btn primary" onclick="importExternalAnalysis()">导入审阅结果</button>
-                                <button class="btn ghost" onclick="loadExternalRuns()">刷新审阅记录</button>
+                                <button class="btn ghost" onclick="loadExternalRuns()">刷新任务日志</button>
                             </div>
                         </div>
                         <div id="externalRuns"></div>
@@ -231,7 +205,6 @@
                 <button class="ingest-tab active" data-ingest-mode="pdf" onclick="switchAcquisitionMode('pdf')">上传 PDF</button>
                 <button class="ingest-tab" data-ingest-mode="doi" onclick="switchAcquisitionMode('doi')">DOI / URL 下载</button>
                 <button class="ingest-tab" data-ingest-mode="online" onclick="switchAcquisitionMode('online')">在线检索</button>
-                <button class="ingest-tab" data-ingest-mode="ai" onclick="switchAcquisitionMode('ai')">AI 自动搜文献</button>
                 <button class="ingest-tab" data-ingest-mode="folder" onclick="switchAcquisitionMode('folder')">本地文件夹</button>
             </div>
 
@@ -271,24 +244,13 @@
                 </div>
             </div>
 
-            <div id="acq-ai" class="acq-panel" style="display:none;">
-                <label for="aiSearchQuery">AI 文献检索提示词</label>
-                <div class="inline-form">
-                    <input id="aiSearchQuery" class="search-input" type="text" placeholder="例如：lithium sulfur battery CeO2 catalyst mechanism">
-                    <input id="aiSearchMaxResults" class="small-input" type="number" value="100" min="1" max="100" title="单次最多检索 100 篇">
-                    <input id="aiWorkflowMaxDownloads" class="small-input" type="number" value="100" min="1" max="100" title="单次最多收录 100 篇">
-                    <button class="btn primary" onclick="runAISearch()">AI 搜索</button>
-                    <button class="btn ghost" onclick="runAIWorkflow()">搜索并收录</button>
-                </div>
-            </div>
-
             <div id="acq-folder" class="acq-panel" style="display:none;">
                 <div class="section-card no-margin">
                     <h3>导入本地文件夹</h3>
                     <div class="subtle">批量扫描本地 PDF 目前由 Ingestion Center / MCP 工具承接。这里保留清晰入口，避免文献库页面重复堆叠批量导入控件。</div>
                     <div class="modal-actions" style="justify-content:flex-start;">
                         <button class="btn primary" onclick="window.location.href='../ingestion/index.html'">前往 Ingestion Center</button>
-                        <button class="btn ghost" onclick="showFolderImportGuide()">查看 MCP 指南</button>
+                        <button class="btn ghost" onclick="showFolderImportGuide()">查看 IDE AI 指南</button>
                     </div>
                 </div>
             </div>
@@ -406,13 +368,13 @@
     </div>
 
     <script src="./state.js?v=20260606-ui3" defer></script>
-    <script src="./api.js?v=20260603-zhfix1" defer></script>
+    <script src="./api.js?v=20260614-review-ui1" defer></script>
     <script src="./library_runtime_fix.js?v=20260603-zhfix1" defer></script>
     <script src="./render-list.js?v=20260603-zhfix1" defer></script>
-    <script src="./render-detail.js?v=20260606-ui3" defer></script>
+    <script src="./render-detail.js?v=20260614-review-ui2" defer></script>
     <script src="./jobs.js?v=20260603-zhfix1" defer></script>
     <script src="./writer.js?v=20260531-aiuxfix" defer></script>
-    <script src="./review.js?v=20260531-aiuxfix" defer></script>
-    <script src="./page.js?v=20260606-ui3" defer></script>
+    <script src="./review.js?v=20260614-review-ui1" defer></script>
+    <script src="./page.js?v=20260614-review-ui1" defer></script>
 </body>
 </html>

@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob
+from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
@@ -147,6 +147,72 @@ def test_list_papers_api_supports_year_serial_sorting(setup_test_db):
     assert response.status_code == 200
     payload = response.json()
     assert [item["title"] for item in payload] == ["2019-001", "2019-003", "2018-010"]
+
+
+def test_paper_api_exposes_stable_paper_id_on_list_and_detail(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Stable identity paper", pdf_path="identity.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    list_response = client.get("/api/papers")
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert list_payload[0]["id"] == paper_id
+    assert list_payload[0]["paper_id"] == paper_id
+
+    detail_response = client.get(f"/api/papers/{paper_id}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["id"] == paper_id
+    assert detail_payload["paper_id"] == paper_id
+
+
+def test_light_paper_detail_keeps_verified_writing_cards(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Light detail writing card paper", pdf_path="paper.pdf")
+        session.add(paper)
+        session.flush()
+        session.add(PaperSection(paper_id=paper.id, section_title="Intro", text="Heavy section text"))
+        session.add(
+            WritingCard(
+                paper_id=paper.id,
+                paper_type="A",
+                research_gap="AI reviewed writing card",
+                proposed_solution="Use this card for RAG writing.",
+                figure_logic='[{"fig_id":"Figure_1","purpose":"summary"}]',
+            )
+        )
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="ide_ai",
+                field_name="writing_cards",
+                target_path="writing_cards",
+                operation="replace",
+                proposed_value={"status": "reviewed"},
+                reason="IDE AI approved writing card.",
+                status="approved",
+                reviewed_by="ide_ai",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    response = client.get(f"/api/papers/{paper_id}", params={"mode": "light"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sections"] == []
+    assert payload["writing_cards_review_status"] == "ai_verified"
+    assert len(payload["writing_cards_items"]) == 1
+    assert payload["writing_cards_items"][0]["research_gap"] == "AI reviewed writing card"
 
 
 def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):
@@ -417,11 +483,31 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
             evidence_text="The Li adsorption energy on the vacancy defect is -1.23 eV.",
             confidence=0.82,
         )
+        catalyst_a = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            metal_centers=[],
+            coordination="single vacancy",
+            support="graphene",
+            evidence_strength="section_and_figure",
+        )
+        catalyst_b = CatalystSample(
+            paper_id=paper.id,
+            name="Pristine graphene",
+            catalyst_type="graphene",
+            metal_centers=[],
+            coordination=None,
+            support="graphene",
+            evidence_strength="section_only",
+        )
         session.add_all(
             [
                 section,
                 figure,
                 dft_result,
+                catalyst_a,
+                catalyst_b,
                 MechanismClaim(
                     paper_id=paper.id,
                     claim_type="defect_adsorption",
@@ -440,6 +526,24 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
         )
         session.flush()
         session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="codex_test",
+                field_name="catalyst_samples",
+                target_path=f"catalyst_samples:{catalyst_a.id}:name",
+                operation="replace",
+                proposed_value="Single-vacancy graphene",
+                reason="Figure 1 and methods section identify a vacancy-defect graphene model.",
+                evidence_payload={
+                    "page": 3,
+                    "section": "Computational Methods",
+                    "figure": "Figure 1",
+                    "quoted_text": "VASP and PBE were used to model a graphene single-vacancy defect supercell.",
+                },
+                status="pending",
+            )
+        )
+        session.add(
             EvidenceLocator(
                 paper_id=paper.id,
                 target_type="dft_result",
@@ -456,6 +560,7 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
         paper_id = paper.id
         figure_id = figure.id
         dft_result_id = dft_result.id
+        catalyst_a_id = catalyst_a.id
 
     client = TestClient(app)
     response = client.get(f"/api/papers/{paper_id}/codex-context")
@@ -475,13 +580,13 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     assert data["context"]["structured_candidates"]["dft_results"][0]["candidate_status"] == "candidate_unverified"
     dft_safety = data["context"]["structured_candidates"]["dft_results"][0]["export_safety"]
     assert dft_safety["is_exportable"] is False
-    assert dft_safety["blocked_reasons"] == ["missing_review"]
+    assert dft_safety["blocked_reasons"] == ["missing_material_identity", "missing_review"]
     readiness = data["context"]["dft_export_readiness"]
     assert readiness["safety_gate"] == "safe_verified_with_required_evidence"
     assert readiness["total_candidates"] == 1
     assert readiness["eligible_count"] == 0
     assert readiness["blocked_count"] == 1
-    assert readiness["blocked_reasons"] == {"missing_review": 1}
+    assert readiness["blocked_reasons"] == {"missing_material_identity": 1, "missing_review": 1}
     assert data["context"]["evidence_locators"]["status_counts"]["exact_page"] == 1
     assert any(item["code"] == "dft_unverified" for item in data["context"]["warnings"])
     assert any(item["code"] == "dft_export_blocked" for item in data["context"]["warnings"])
@@ -496,16 +601,36 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     item_data = item_response.json()
     assert item_data["schema_version"] == "codex_item_context_v1"
     assert item_data["item_type"] == "dft_result"
-    assert item_data["context"]["item"]["export_safety"]["blocked_reasons"] == ["missing_review"]
+    assert item_data["context"]["item"]["export_safety"]["blocked_reasons"] == ["missing_material_identity", "missing_review"]
+    assert item_data["context"]["source_assets"]["pdf_url"].endswith(f"/api/papers/{paper_id}/pdf")
+    assert item_data["context"]["item"]["binding_status"] == "unbound"
+    assert item_data["context"]["item"]["requires_explicit_material_choice"] is True
+    assert len(item_data["context"]["item"]["candidate_catalyst_samples"]) == 2
+    assert item_data["context"]["item"]["candidate_catalyst_samples"][0]["name"] == "Vacancy graphene"
     assert item_data["context"]["evidence_locators"]["items"][0]["page"] == 4
     assert item_data["context"]["nearby_context"]["related_sections"][0]["title"] == "Computational Methods"
+    assert any("open the original pdf" in action.lower() for action in item_data["context"]["recommended_next_actions"])
+    assert any("fall back to the first sample" in action.lower() for action in item_data["context"]["recommended_next_actions"])
     assert "Codex Item: dft_result" in item_data["markdown"]
+    assert "Open the original PDF evidence first" in item_data["markdown"]
 
     figure_response = client.get(f"/api/papers/{paper_id}/codex-item/figure/{figure_id}")
     assert figure_response.status_code == 200
     figure_data = figure_response.json()
     assert figure_data["context"]["item"]["image_review"]["review_required"] is True
     assert figure_data["context"]["nearby_context"]["related_sections"][0]["title"] == "Computational Methods"
+
+    sample_response = client.get(f"/api/papers/{paper_id}/codex-item/catalyst_sample/{catalyst_a_id}")
+    assert sample_response.status_code == 200
+    sample_data = sample_response.json()
+    assert sample_data["context"]["source_assets"]["pdf_url"].endswith(f"/api/papers/{paper_id}/pdf")
+    assert sample_data["context"]["item"]["sample_identity_status"] == "usable_identity"
+    assert sample_data["context"]["item"]["evidence_anchor_status"] == "sufficient"
+    assert sample_data["context"]["item"]["dependent_dft_summary"]["total"] == 1
+    assert sample_data["context"]["correction_history"]["count"] == 1
+    assert sample_data["context"]["correction_history"]["items"][0]["evidence_anchor"]["figure"] == "Figure 1"
+    assert any("open the original pdf" in action.lower() for action in sample_data["context"]["recommended_next_actions"])
+    assert "Allowed correction fields: name, catalyst_type, metal_centers, coordination, support, synthesis_method, evidence_strength." in sample_data["markdown"]
 
     invalid_response = client.get(f"/api/papers/{paper_id}/codex-item/not_supported/{figure_id}")
     assert invalid_response.status_code == 400
@@ -635,8 +760,18 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
         )
         session.add(paper)
         session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            coordination="single vacancy",
+            support="graphene",
+        )
+        session.add(catalyst)
+        session.flush()
         dft_result = DFTResult(
             paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
             adsorbate="Li",
             property_type="adsorption_energy",
             value=-1.23,
@@ -648,6 +783,7 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
         )
         missing_locator_result = DFTResult(
             paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
             adsorbate="Na",
             property_type="adsorption_energy",
             value=-0.5,
@@ -807,7 +943,7 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     response = client.get("/api/papers/export/dft-review-queue")
     assert response.status_code == 200
     queue_row = response.json()["rows"][0]
-    assert queue_row["blocked_reasons"] == ["missing_review"]
+    assert queue_row["blocked_reasons"] == ["missing_material_identity", "missing_review"]
     assert queue_row["can_mark_verified"] is False
     assert queue_row["recommended_action"] == "inspect_suspicious_candidate"
     assert "adsorbate_looks_like_reference" in queue_row["sanity_flags"]
@@ -862,12 +998,21 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     assert rejected_payload["dft_result_id"] == str(row_id)
     assert rejected_payload["export_safety"]["is_exportable"] is False
     assert rejected_payload["export_safety"]["review_status"] == "rejected"
-    assert rejected_payload["export_safety"]["blocked_reasons"] == ["unsafe_review"]
+    assert rejected_payload["export_safety"]["blocked_reasons"] == ["missing_material_identity", "unsafe_review"]
     assert all(item["reviewer_status"] == "rejected" for item in rejected_payload["reviews"])
 
     active_queue = client.get("/api/papers/export/dft-review-queue")
     assert active_queue.status_code == 200
     assert active_queue.json()["rows"] == []
+
+    context_response = client.get(f"/api/papers/{paper_id}/codex-context")
+    assert context_response.status_code == 200
+    readiness = context_response.json()["context"]["dft_export_readiness"]
+    assert readiness["total_candidates"] == 1
+    assert readiness["active_candidates"] == 0
+    assert readiness["rejected_count"] == 1
+    assert readiness["blocked_count"] == 0
+    assert readiness["blocked_reasons"] == {}
 
     rejected_queue = client.get("/api/papers/export/dft-review-queue", params={"status": "rejected"})
     assert rejected_queue.status_code == 200
@@ -879,7 +1024,7 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     dataset = client.get("/api/papers/export/dft-dataset").json()
     assert dataset["metadata"]["eligible_count"] == 0
     assert dataset["metadata"]["blocked_count"] == 1
-    assert dataset["metadata"]["blocked_reasons"] == {"unsafe_review": 1}
+    assert dataset["metadata"]["blocked_reasons"] == {"missing_material_identity": 1, "unsafe_review": 1}
 
     with Session() as session:
         saved_correction = session.scalar(select(PaperCorrection).where(PaperCorrection.target_path == f"dft_results:{row_id}:unit"))
@@ -891,6 +1036,86 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         audit = session.scalar(select(AuditLog).where(AuditLog.action == "reject_dft_result"))
         assert audit is not None
         assert audit.target_id == str(row_id)
+
+
+def test_propose_dft_catalyst_binding_requires_anchor_and_valid_sample(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Binding proposal paper", year=2026, pdf_path="binding-proposal.pdf")
+        other_paper = Paper(title="Other paper", year=2026, pdf_path="other-binding.pdf")
+        session.add_all([paper, other_paper])
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.11,
+            unit="eV",
+            reaction_step="adsorption",
+            evidence_text="Table 2 shows Li2S4 adsorption on vacancy graphene.",
+            confidence=0.82,
+        )
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            coordination="single vacancy",
+            support="graphene",
+        )
+        other_catalyst = CatalystSample(
+            paper_id=other_paper.id,
+            name="Other sample",
+            catalyst_type="other",
+        )
+        session.add_all([row, catalyst, other_catalyst])
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+        catalyst_id = catalyst.id
+        other_catalyst_id = other_catalyst.id
+
+    client = TestClient(app)
+    missing_anchor = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": True,
+            "field_name": "catalyst_sample_id",
+            "proposed_value": str(catalyst_id),
+            "reason": "This DFT row belongs to the vacancy graphene structure.",
+        },
+    )
+    assert missing_anchor.status_code == 400
+    assert "evidence anchor" in missing_anchor.json()["detail"]
+
+    wrong_paper_sample = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": True,
+            "field_name": "catalyst_sample_id",
+            "proposed_value": str(other_catalyst_id),
+            "reason": "Try cross-paper binding.",
+            "evidence_payload": {"evidence_location": {"page": 6, "table": "Table 2", "quoted_text": "vacancy graphene"}},
+        },
+    )
+    assert wrong_paper_sample.status_code == 400
+    assert "does not belong to this paper" in wrong_paper_sample.json()["detail"]
+
+    correction_response = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/corrections",
+        json={
+            "confirm_correction_proposal": True,
+            "field_name": "catalyst_sample_id",
+            "proposed_value": str(catalyst_id),
+            "reason": "Table 2 and the caption both identify vacancy graphene as the host.",
+            "reviewer": "codex_test",
+            "evidence_payload": {"evidence_location": {"page": 6, "section": "Results", "table": "Table 2", "quoted_text": "vacancy graphene"}},
+        },
+    )
+    assert correction_response.status_code == 200
+    correction = correction_response.json()["correction"]
+    assert correction["target_path"] == f"dft_results:{row_id}:catalyst_sample_id"
+    assert correction["proposed_value"] == str(catalyst_id)
 
 
 def test_dft_aggregation_endpoints_filter_by_library_name(setup_test_db):
@@ -969,6 +1194,56 @@ def test_dft_aggregation_endpoints_filter_by_library_name(setup_test_db):
     assert aggregate["library_name"] == "石墨炔"
     assert set(aggregate["adsorbate_groups"]) == {"h2o"}
     assert set(aggregate["catalyst_groups"]) == {"fegdy"}
+
+
+def test_compare_dft_results_only_attaches_bound_catalyst_sample(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Graphdiyne material property paper",
+            year=2026,
+            library_name="石墨炔",
+            pdf_path="graphdiyne-material.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="Fe-GDY", support="graphdiyne")
+        session.add(sample)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=sample.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H",
+                    value=-0.31,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="cohesive_energy",
+                    adsorbate="alpha-GDY",
+                    value=-8.19,
+                    unit="eV/atom",
+                    confidence=0.9,
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/papers/compare",
+        params={"library_name": "石墨炔", "status": "all", "min_confidence": 0.0, "limit": 10},
+    )
+    assert response.status_code == 200
+    items = {item["property_type"]: item for item in response.json()["items"]}
+
+    assert items["adsorption_energy"]["catalysts"][0]["name"] == "Fe-GDY"
+    assert items["cohesive_energy"]["catalysts"] == []
 
 
 def test_compare_dft_results_without_property_type_returns_all_types(setup_test_db):
@@ -1672,6 +1947,22 @@ def test_ai_workflow_job_list_retry_and_cancel_endpoints(setup_test_db, monkeypa
         assert session.get(WorkflowJob, failed_job_id).status == "failed"
 
 
+def test_discovery_download_returns_not_found_when_metadata_is_unavailable(setup_test_db, monkeypatch):
+    def fake_fetch_metadata(self, identifier, providers=None):
+        raise ValueError("No paper metadata found for the given identifier")
+
+    monkeypatch.setattr(papers_api.DiscoveryService, "fetch_metadata", fake_fetch_metadata)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/discovery/download",
+        json={"identifier": "10.1000/missing", "library_name": "MissingLibrary", "providers": ["arxiv"]},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "No paper metadata found for the given identifier"}
+
+
 def test_discovery_download_falls_back_to_direct_pdf_url(setup_test_db, monkeypatch):
     class DummyPaper:
         pass
@@ -1778,6 +2069,41 @@ def test_discovery_download_falls_back_to_metadata_only_ingest(setup_test_db, mo
         assert paper.library_name == "MetaLibrary"
         assert paper.pdf_path == ""
         assert paper.oa_status == "metadata_only"
+
+
+def test_discovery_download_short_circuits_existing_doi_before_remote_fetch(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        existing = Paper(
+            library_name="FastLane",
+            doi="10.1000/existing-fast",
+            title="Existing Fast Paper",
+            year=2024,
+            pdf_path="existing-fast.pdf",
+            oa_status="metadata_only",
+        )
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        existing_id = str(existing.id)
+
+    def fail_fetch_metadata(self, identifier, providers=None):
+        raise AssertionError("fetch_metadata should not run for an already indexed DOI")
+
+    monkeypatch.setattr(papers_api.DiscoveryService, "fetch_metadata", fail_fetch_metadata)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/discovery/download",
+        json={"identifier": "https://doi.org/10.1000/existing-fast", "library_name": "FastLane"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "already_exists"
+    assert data["paper_id"] == existing_id
+    assert data["title"] == "Existing Fast Paper"
 
 
 def test_metadata_only_same_doi_upsert_reuses_paper(setup_test_db):

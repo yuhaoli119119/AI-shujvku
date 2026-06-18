@@ -129,6 +129,12 @@ function switchTab(tab) {
     syncQueryParams();
     if (state.selectedPaper && typeof rerenderSelectedDetail === "function") {
         rerenderSelectedDetail(state.selectedPaperId);
+        if (tab === "dft" && typeof decorateDftReadinessPanel === "function") {
+            decorateDftReadinessPanel(state.selectedPaper);
+        }
+    }
+    if (state.selectedPaperId && typeof ensureFullPaperDetailForTab === "function") {
+        ensureFullPaperDetailForTab(tab);
     }
     if (tab === "writing") {
         ensureWriterStatus();
@@ -137,6 +143,9 @@ function switchTab(tab) {
         }
     }
     if (tab === "review" && state.selectedPaperId) loadExternalRuns();
+    if ((tab === "review" || tab === "dft") && state.selectedPaperId && typeof loadPaperDetailEnrichment === "function") {
+        loadPaperDetailEnrichment(state.selectedPaperId, state.detailLoadToken);
+    }
     if (tab === "review" && !state.selectedPaperId) loadAgentGuide();
 }
 
@@ -160,10 +169,10 @@ function renderLibraryEmptyState() {
         emptyEl.innerHTML =
             '<div class="empty-state-card">' +
                 '<h2>当前库还没有文献</h2>' +
-                '<p>上传 PDF、输入 DOI / URL，或使用 AI 自动搜文献来建立你的第一个文献库。</p>' +
+                '<p>上传 PDF、输入 DOI / URL，或使用在线检索来建立你的第一个文献库。</p>' +
                 '<div class="empty-actions">' +
                     '<button class="btn primary" onclick="openAddLiteraturePanel(\'pdf\')">添加文献</button>' +
-                    '<button class="btn ghost" onclick="openAddLiteraturePanel(\'ai\')">AI 搜文献</button>' +
+                    '<button class="btn ghost" onclick="openAddLiteraturePanel(\'online\')">在线检索</button>' +
                 '</div>' +
             '</div>';
     }
@@ -176,7 +185,7 @@ function renderNoSelectionState() {
         emptyEl.innerHTML =
             '<div class="empty-state-card">' +
                 '<h2>选择一篇文献查看详情</h2>' +
-                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、AI 候选 DFT 数据、写作卡和 AI 审阅结果。</p>' +
+                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、候选 DFT 数据、写作卡和 IDE AI 回写结果。</p>' +
             '</div>';
     }
     showEmptyWorkspace();
@@ -213,11 +222,25 @@ function updatePager() {
 }
 
 async function fetchPapers() {
+    const requestSeq = (state.paperListRequestSeq || 0) + 1;
+    state.paperListRequestSeq = requestSeq;
+    const requestLibrary = getCurrentLibraryName();
     try {
         renderPaperListSkeleton();
         const params = getFilters();
         const data = await fetchJSON(API_BASE + "?" + params.toString());
+        if (requestSeq !== state.paperListRequestSeq || requestLibrary !== getCurrentLibraryName()) {
+            return;
+        }
         const normalized = normalizePaperListResponse(data);
+        if (requestLibrary) {
+            const mismatched = normalized.papers.filter(function(paper) {
+                return paper && paper.library_name && paper.library_name !== requestLibrary;
+            });
+            if (mismatched.length) {
+                throw new Error("文献列表返回了非当前库记录，已拒绝渲染：" + mismatched.length + " 条");
+            }
+        }
         state.papers = normalized.papers;
         if (normalized.total !== null) {
             state.currentLibraryTotal = normalized.total;
@@ -228,7 +251,20 @@ async function fetchPapers() {
         updatePager();
 
         if (state.selectedPaperId) {
-            await loadPaperDetail(state.selectedPaperId);
+            const selectedStillListed = state.papers.some(function(paper) {
+                return paper && String(paper.id) === String(state.selectedPaperId);
+            });
+            if (state.selectedPaper && String(state.selectedPaper.id) === String(state.selectedPaperId)) {
+                renderWorkspaceHeader(state.selectedPaper);
+                renderDetail(state.selectedPaper, state.selectedPaperAudit || null);
+                showWorkspace();
+            } else if (selectedStillListed) {
+                await loadPaperDetail(state.selectedPaperId);
+            } else {
+                state.selectedPaperId = null;
+                state.selectedPaper = null;
+                renderNoSelectionState();
+            }
         } else if (!state.papers.length && state.currentLibraryTotal === 0) {
             renderLibraryEmptyState();
         } else {
@@ -485,14 +521,14 @@ async function confirmDeleteCurrentPaper(event) {
 }
 
 async function showFolderImportGuide() {
-    setAcquisitionResult('<div class="workspace-empty small-empty">正在读取 MCP 批量导入指南...</div>');
+    setAcquisitionResult('<div class="workspace-empty small-empty">正在读取 IDE AI 批量导入指南...</div>');
     try {
         const guide = await fetchJSON("/api/system/agent-guide");
         const entry = guide.recommended_entrypoint || {};
         const tools = guide.mcp && Array.isArray(guide.mcp.common_tools) ? guide.mcp.common_tools : [];
         setAcquisitionResult(
             '<div class="section-card"><h3>本地文件夹批量导入指南</h3>' +
-            '<div class="subtle">批量扫描文件夹由 MCP 工具 <strong>scan_local_pdfs</strong> 和 <strong>ingest_pdf_batch</strong> 执行；网页端请先前往 Ingestion Center 处理常规上传。</div>' +
+            '<div class="subtle">批量扫描文件夹优先由 MCP 工具 <strong>scan_local_pdfs</strong> 和 <strong>ingest_pdf_batch</strong> 执行；如果当前会话未暴露 MCP 工具，可改用仓库内 <strong>literature-ai/backend</strong> 的 <strong>app.mcp.*</strong> 后备路径。网页端请先前往 Ingestion Center 处理常规上传。</div>' +
             '<div class="readable-grid" style="margin-top:12px;">' +
                 '<div class="readable-field"><div class="k">推荐入口</div><div class="v">' + esc((entry.method || "") + " " + (entry.path || "")) + '</div></div>' +
                 '<div class="readable-field"><div class="k">MCP 地址</div><div class="v">' + esc((guide.mcp && guide.mcp.url) || "/mcp") + '</div></div>' +
@@ -820,8 +856,10 @@ initSplitDrag();
 initActionMenus();
 ensureClassificationToolbarButton();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
-loadLibraries().finally(fetchPapers);
-initSSE();
+loadLibraries().finally(function() {
+    fetchPapers();
+    initSSE();
+});
 switchTab(state.currentTab);
 if (state.openAddOnLoad) {
     openAddLiteraturePanel(state.openAddOnLoad);

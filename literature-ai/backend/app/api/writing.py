@@ -59,6 +59,7 @@ class CitationCandidateFiltersPayload(BaseModel):
 class CitationCandidatePayload(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     max_candidates: int = Field(default=10, ge=1, le=50)
+    library_name: str | None = None
     filters: CitationCandidateFiltersPayload = Field(default_factory=CitationCandidateFiltersPayload)
     include_unverified_suggestions: bool = True
     include_pending_review: bool = True
@@ -116,6 +117,7 @@ async def citation_candidates(
     request = CitationCandidateRequest(
         text=payload.text,
         max_candidates=payload.max_candidates,
+        library_name=payload.library_name,
         filters=filters,
         include_unverified_suggestions=payload.include_unverified_suggestions,
         include_pending_review=payload.include_pending_review,

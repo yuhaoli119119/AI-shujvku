@@ -20,9 +20,12 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+
+from app.config import get_settings
 
 router = APIRouter()
 
@@ -177,44 +180,27 @@ def _writer_status_from_values(
     api_key: str | None,
     model: str | None,
 ) -> dict[str, Any]:
-    missing = []
-    if not api_base:
-        missing.append("writer_api_base")
-    if not api_key:
-        missing.append("writer_api_key")
-    if not model:
-        missing.append("writer_model")
-    configured = not missing
     return {
         "backend": backend or "rule",
         "model": model or "N/A",
-        "configured": configured,
+        "configured": False,
+        "disabled": True,
         "has_api_base": bool(api_base),
         "has_api_key": bool(api_key),
-        "missing": missing,
-        "message": "Writer LLM 已配置" if configured else "Writer LLM 尚未配置完整",
+        "missing": [],
+        "message": "网页端写作/解析模型已停用；解析、核对和审阅请通过 IDE / MCP AI 执行。",
     }
 
 
 def _internal_parser_status_from_writer(writer_status: dict[str, Any]) -> dict[str, Any]:
-    missing_map = {
-        "writer_api_base": "internal_parser_api_base",
-        "writer_api_key": "internal_parser_api_key",
-        "writer_model": "internal_parser_model",
-    }
-    missing = [missing_map.get(item, item) for item in writer_status.get("missing", [])]
-    configured = bool(writer_status.get("configured"))
     return {
-        "configured": configured,
-        "backend": writer_status.get("backend", "rule"),
-        "model": writer_status.get("model", "N/A"),
-        "uses": "writer_llm",
-        "missing": missing,
-        "message": (
-            "Internal parser LLM configured"
-            if configured
-            else "Internal AI parsing is not configured; it uses the Writer LLM connection, not Embedding."
-        ),
+        "configured": False,
+        "disabled": True,
+        "backend": "ide_mcp",
+        "model": "IDE/MCP AI",
+        "uses": "ide_mcp_ai",
+        "missing": [],
+        "message": "网页端解析已停用；请使用 prepare-ai-context / codex-item / import_analysis 由 IDE AI 回写结果。",
     }
 
 
@@ -251,10 +237,7 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
         "embedding_api_key": "embedding_api_key",
         "embedding_model": "embedding_model",
         "embedding_dimension": "embedding_dimension",
-        "writer_backend": "writer_backend",
-        "writer_model": "writer_model",
-        "writer_api_base": "writer_api_base",
-        "writer_api_key": "writer_api_key",
+        "mcp_allow_unauthenticated": "mcp_allow_unauthenticated",
         "mcp_api_keys": "mcp_api_keys",
     }
 
@@ -276,20 +259,8 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
 
 
 def sync_writer_settings_from_session(session, settings) -> dict[str, str]:
-    """Apply persisted Writer settings from the current session's database."""
-    persisted = _read_persisted_settings_from_session(session)
-    if not persisted:
-        return {}
-
-    writer_keys = ("writer_backend", "writer_model", "writer_api_base", "writer_api_key")
-    overrides = {key: persisted[key] for key in writer_keys if key in persisted}
-    if not overrides:
-        return {}
-
-    _apply_settings_to_runtime(overrides)
-    for key, value in overrides.items():
-        object.__setattr__(settings, key, value)
-    return overrides
+    """Compatibility no-op: web-side model settings are disabled."""
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -303,14 +274,58 @@ _MANAGED_KEYS = [
     "embedding_api_key",
     "embedding_model",
     "embedding_dimension",
+    "mcp_allow_unauthenticated",
+    "mcp_api_keys",
+]
+
+_DEPRECATED_WEB_AI_KEYS = {
     "writer_backend",
     "writer_model",
     "writer_api_base",
     "writer_api_key",
-    "mcp_api_keys",
-]
+}
 
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _clean_base_url(value: str) -> str:
+    base_url = str(value or "").strip().rstrip("/")
+    if base_url.endswith("/mcp"):
+        base_url = base_url[:-4].rstrip("/")
+    return base_url
+
+
+def _split_host_port(netloc: str) -> tuple[str, int | None]:
+    parsed = urlparse("//" + str(netloc or "").strip().rsplit("@", 1)[-1])
+    host = parsed.hostname or str(netloc or "").strip().rsplit("@", 1)[-1].split(":", 1)[0].strip("[]")
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    return host, port
+
+
+def _is_probable_container_bridge_host(host: str) -> bool:
+    """Return true for Docker/WSL-style bridge IPs that IDEs often cannot reach."""
+
+    try:
+        ip = ipaddress.ip_address(str(host or "").strip())
+    except ValueError:
+        return False
+    if ip.version != 4:
+        return False
+    return ip in ipaddress.ip_network("172.16.0.0/12")
+
+
+def _mcp_runner_command(request: Request | None) -> str:
+    """Pick the command form most MCP clients can spawn on the user's OS."""
+
+    user_agent = ""
+    if request is not None:
+        user_agent = str(request.headers.get("user-agent") or "").lower()
+    if "windows" in user_agent or os.name == "nt":
+        return "npx.cmd"
+    return "npx"
 
 
 def _is_local_request_host(client_host: str) -> bool:
@@ -329,6 +344,65 @@ def _is_local_request_host(client_host: str) -> bool:
     return ip.is_loopback
 
 
+def _is_local_request_target(request: Request) -> bool:
+    host_header = (request.headers.get("host") or "").strip()
+    host = host_header.rsplit("@", 1)[-1].split(":", 1)[0].strip("[]")
+    if _is_local_request_host(host):
+        return True
+
+    for header_name in ("origin", "referer"):
+        header_value = (request.headers.get(header_name) or "").strip()
+        if not header_value:
+            continue
+        parsed = urlparse(header_value)
+        if _is_local_request_host(parsed.hostname or ""):
+            return True
+    return False
+
+
+def _advertised_base_url(
+    request: Request | None,
+    *,
+    fallback_host: str = "localhost",
+    fallback_port: int = 8000,
+) -> str:
+    """Build an MCP URL that the user's IDE can actually reach.
+
+    Socket probing inside Docker often returns an internal bridge IP such as
+    172.x, so prefer the browser/request host used to open Literature AI.
+    """
+
+    explicit_base_url = os.environ.get("LITAI_PUBLIC_BASE_URL") or os.environ.get("LITAI_MCP_PUBLIC_BASE_URL")
+    if explicit_base_url:
+        return _clean_base_url(explicit_base_url)
+
+    if request is not None:
+        host_header = (request.headers.get("host") or "").strip()
+        scheme = (request.headers.get("x-forwarded-proto") or getattr(getattr(request, "url", None), "scheme", "") or "http").split(",", 1)[0].strip()
+        if host_header:
+            host, port = _split_host_port(host_header)
+            if _is_probable_container_bridge_host(host):
+                return f"{scheme}://localhost:{port or fallback_port}"
+            return f"{scheme}://{host_header.rstrip('/')}"
+
+        for header_name in ("origin", "referer"):
+            header_value = (request.headers.get(header_name) or "").strip()
+            if not header_value:
+                continue
+            parsed = urlparse(header_value)
+            if parsed.scheme and parsed.netloc:
+                if _is_probable_container_bridge_host(parsed.hostname or ""):
+                    return f"{parsed.scheme}://localhost:{parsed.port or fallback_port}"
+                return f"{parsed.scheme}://{parsed.netloc}"
+
+    host = str(fallback_host or "localhost").strip().strip("/")
+    if _is_probable_container_bridge_host(host):
+        host = "localhost"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{fallback_port}"
+
+
 def _enforce_settings_write_access(request: Request) -> None:
     settings = __import__("app.config", fromlist=["get_settings"]).get_settings()
     provided_token = request.headers.get("X-Settings-Token") or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
@@ -341,6 +415,9 @@ def _enforce_settings_write_access(request: Request) -> None:
         return
 
     if _is_local_request_host(client_host):
+        return
+
+    if _is_local_request_target(request):
         return
 
     raise HTTPException(
@@ -377,6 +454,9 @@ async def update_settings_api(request: SettingsUpdateRequest, raw_request: Reque
 
     kv_pairs: dict[str, str | None] = {}
     for item in request.settings:
+        if item.key in _DEPRECATED_WEB_AI_KEYS:
+            kv_pairs[item.key] = None
+            continue
         if item.key not in _MANAGED_KEYS:
             raise HTTPException(status_code=400, detail=f"Unknown setting key: {item.key}")
         # If the value looks like a masked value (contains ****), skip it
@@ -423,23 +503,23 @@ async def get_services_status() -> dict[str, Any]:
         "configured": bool(emb_api_base and emb_api_key) if emb_provider == "openai_compatible" else True,
     }
 
-    # Writer status
-    writer_api_base = persisted.get("writer_api_base") or settings.writer_api_base
-    writer_api_key = persisted.get("writer_api_key") or settings.writer_api_key
-    writer_model = persisted.get("writer_model") or settings.writer_model
-
     writer_status = _writer_status_from_values(
-        backend=persisted.get("writer_backend") or settings.writer_backend,
-        api_base=writer_api_base,
-        api_key=writer_api_key,
-        model=writer_model,
+        backend="disabled",
+        api_base=None,
+        api_key=None,
+        model="IDE/MCP AI",
     )
 
     # MCP status
     mcp_status = {
         "enabled": settings.mcp_enabled,
+        "allow_unauthenticated": settings.mcp_allow_unauthenticated,
         "has_keys": bool(persisted.get("mcp_api_keys") or settings.mcp_api_keys),
-        "default_policy": "disabled unless explicitly enabled for trusted local/dev use" if not settings.mcp_enabled else "enabled",
+        "default_policy": (
+            "disabled unless explicitly enabled for trusted local/dev use"
+            if not settings.mcp_enabled
+            else ("open on trusted local/private networks" if settings.mcp_allow_unauthenticated else "bearer key required")
+        ),
     }
 
     return {
@@ -476,10 +556,10 @@ async def get_extraction_protocols() -> dict[str, Any]:
 
 
 @router.get("/ide-prompts")
-async def get_ide_prompts() -> dict[str, Any]:
+async def get_ide_prompts(request: Request) -> dict[str, Any]:
     """Generate IDE connection prompts and MCP config snippets.
 
-    Uses the current host IP/hostname to build correct URLs.
+    Uses the browser/request host first, then falls back to detected local IP.
     """
     import socket
 
@@ -493,30 +573,63 @@ async def get_ide_prompts() -> dict[str, Any]:
         local_ip = "localhost"
 
     hostname = socket.gethostname()
-    base_url = f"http://{local_ip}:8000"
-    mcp_url = f"{base_url}/mcp"
+    settings = get_settings()
+    base_url = _advertised_base_url(request, fallback_host=local_ip, fallback_port=8000)
+    mcp_url = f"{base_url}/mcp/"
 
     sample_key = "litmcp_your_key"
+    auth_required = not settings.mcp_allow_unauthenticated and bool(settings.mcp_api_keys)
+
+    server_config: dict[str, Any] = {
+        "command": _mcp_runner_command(request),
+        "args": [
+            "-y", "mcp-remote",
+            mcp_url,
+            "--transport", "http-only",
+            "--allow-http",
+        ],
+    }
+    if auth_required:
+        server_config["args"].extend(["--header", "Authorization:${LITAI_AUTH_HEADER}"])
+        server_config["env"] = {
+            "LITAI_AUTH_HEADER": f"Bearer {sample_key}",
+        }
 
     cursor_config = {
         "mcpServers": {
-            "literature-ai": {
-                "command": "npx",
-                "args": [
-                    "-y", "mcp-remote",
-                    mcp_url,
-                    "--transport", "http-only",
-                    "--allow-http",
-                    "--header", "Authorization:${LITAI_AUTH_HEADER}",
-                ],
-                "env": {
-                    "LITAI_AUTH_HEADER": f"Bearer {sample_key}",
-                },
-            }
+            "literature-ai": server_config,
         }
     }
 
     import json
+    auth_text = f"Bearer {sample_key}" if auth_required else "无需 Key / No key required on trusted local/private networks"
+    review_prompt = (
+        "You are an IDE AI reviewing papers inside the user's Literature AI project.\n"
+        "Do not edit MCP config files unless the user explicitly asks you to configure MCP. First use the MCP tools already exposed by the current IDE/project session.\n"
+        "Look for a project MCP server named literature-ai and tools such as query_papers, get_paper, get_codex_context, read_paper_page, import_analysis, recrop_figure, and create_figure_from_bbox.\n\n"
+        "Required first step:\n"
+        "- Inspect the current available MCP/tool list in the IDE. If literature-ai tools are already available, start the review directly with those tools.\n"
+        "- If the tools are not visible, ask the user to reload/restart the IDE MCP session; do not rewrite mcp_config.json, do not invent a new server, and do not keep retrying stale 172.x addresses.\n"
+        "- Only if the user explicitly asks for manual MCP setup, use this fallback information: MCP URL = "
+        f"{mcp_url}; Auth = {auth_text}; config = {json.dumps(cursor_config, ensure_ascii=False)}.\n\n"
+        "Core workflow rules:\n"
+        "- The web-side writer/internal parser is disabled. Use MCP tools and import_analysis for review and write-back.\n"
+        "- Do not only write an audit report. For evidence-backed non-DFT content, write fixes back with import_analysis(auto_apply_review_rules=true) under a valid module write lock such as content or all_non_dft.\n"
+        "- Non-DFT direct-write modules include metadata, sections, tables, figure metadata/captions/summaries, writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, notes, and relationships.\n"
+        "- DFT is the hard safety boundary. Do not single-AI-final-approve dft_results or dft_settings. For DFT, create review/audit/correction candidates and keep export behind explicit evidence review.\n"
+        "- Figure image/crop operations are direct MCP actions only: use recrop_figure or create_figure_from_bbox. Do not submit bbox/image crop requests through import_analysis.\n"
+        "- For RAG-ready facts, preserve source_type, source_id, paper_code, page, evidence_text, review_status, and evidence_locator when available.\n"
+        "- Raw parser sections and parser-derived writing cards are not trusted knowledge. They must not be shown as final content or used by RAG/writing until an IDE AI review writes back ai_reviewed/ai_applied content with PDF evidence.\n"
+        "- Catalyst samples must have a material identity and evidence anchor before being used for writing/RAG or linked to mechanism, electrochemical, or DFT records.\n"
+        "- Writing support should use writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, figure cards, and verified DFT candidates where allowed by the safety gate.\n"
+        "- Do not overwrite English evidence fields with Chinese translations. Put Chinese only in derived *_zh fields where available, writing cards, or review notes.\n"
+        "- Generate dynamic source_label values such as <agent_name>_overall_<YYYYMMDD_HHMMSS>; never reuse a fixed date.\n\n"
+        "Useful tools:\n"
+        "- query_papers, get_paper, get_codex_context, get_codex_item, get_paper_knowledge, retrieve_evidence, read_paper_page\n"
+        "- import_analysis, append_note, propose_correction, propose_dft_result_correction\n"
+        "- get_dft_review_queue, verify_dft_result, reject_dft_result, approve_correction, reject_correction\n"
+        "- recrop_figure, create_figure_from_bbox, review_figure, get_review_coverage, compare_papers, insert_word_citation\n"
+    )
 
     return {
         "base_url": base_url,
@@ -524,26 +637,33 @@ async def get_ide_prompts() -> dict[str, Any]:
         "local_ip": local_ip,
         "hostname": hostname,
         "sample_key": sample_key,
+        "auth_required": auth_required,
         "cursor_config": cursor_config,
         "cursor_config_json": json.dumps(cursor_config, indent=2, ensure_ascii=False),
         "vscode_config": cursor_config,  # Same format
         "vscode_config_json": json.dumps(cursor_config, indent=2, ensure_ascii=False),
-        "suggested_prompt": (
-            f"我现在需要你连接我的 Literature AI 知识库系统来帮助我查文献。\n"
-            f"连接方式：MCP 协议\n"
+        "suggested_prompt": review_prompt,
+        "legacy_suggested_prompt": (
+            f"请先使用你当前 IDE/项目会话已经暴露的 Literature AI MCP 工具，不要先改 mcp_config.json，也不要默认手工配置 MCP。\n"
+            f"如果当前工具列表里已经有 literature-ai 相关工具，就直接开始；如果没有，再请用户重载/重启 IDE MCP 会话。\n"
+            f"只有当用户明确要求手工配置 MCP 时，才使用下面的兜底信息：\n"
             f"服务地址：{mcp_url}\n"
-            f"认证方式：Bearer {sample_key}\n\n"
-            f"配置 JSON（直接写入你的 MCP 配置文件）：\n"
+            f"认证方式：{'Bearer ' + sample_key if auth_required else '无需 Key（本机/内网直连）'}\n"
+            f"配置 JSON（仅在用户明确要求手工配置时使用）：\n"
             f"```json\n{json.dumps(cursor_config, indent=2, ensure_ascii=False)}\n```\n\n"
             f"连接成功后，你可以使用以下工具：\n"
             f"- query_papers：搜索论文\n"
             f"- get_paper：获取论文详情\n"
+            f"- get_codex_context / get_codex_item：读取审核上下文\n"
+            f"- read_paper_page：核对 PDF 原文页证据\n"
+            f"- recrop_figure / create_figure_from_bbox：修复或创建图像证据\n"
             f"- append_note：添加笔记\n"
             f"- propose_correction：提出修订建议\n"
+            f"- import_analysis：除 DFT 最终确认外，按证据将 AI 审核结果写回\n"
             f"- scan_local_pdfs：扫描本地 PDF\n"
             f"- ingest_pdf_batch：批量导入 PDF\n"
             f"- get_correction_queue：查看修订队列\n"
             f"- approve_correction / reject_correction：审批修订\n\n"
-            f"请先确认连接成功，然后根据我的需求使用对应工具。"
+            f"如果当前项目工具已可用，就不要再回到手工配置流程。"
         ),
     }

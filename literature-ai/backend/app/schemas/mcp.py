@@ -60,3 +60,5 @@ class MCPParseJobResponse(BaseModel):
 
 class MCPCorrectionDecisionRequest(BaseModel):
     reason: str | None = None
+    write_lock_token: str | None = None
+    write_lock_tokens: list[str] = Field(default_factory=list)

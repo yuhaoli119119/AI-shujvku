@@ -14,11 +14,11 @@ class PaperWriterPromptBuilder:
     """Loads writer prompt config and prepares backend-ready prompt payloads."""
 
     SECTION_EVIDENCE_ORDER: dict[str, list[str]] = {
-        "outline": ["writing_cards", "mechanism_claims", "dft_results", "electrochemical_performance"],
-        "introduction": ["writing_cards", "mechanism_claims", "sections"],
-        "dft_results": ["dft_results", "mechanism_claims", "sections"],
-        "discussion": ["mechanism_claims", "dft_results", "electrochemical_performance", "writing_cards"],
-        "figure_storyline": ["writing_cards", "dft_results", "electrochemical_performance", "mechanism_claims"],
+        "outline": ["writing_cards", "catalyst_samples", "mechanism_claims", "dft_results", "electrochemical_performance"],
+        "introduction": ["writing_cards", "catalyst_samples", "mechanism_claims", "sections"],
+        "dft_results": ["dft_results", "catalyst_samples", "mechanism_claims", "sections"],
+        "discussion": ["mechanism_claims", "catalyst_samples", "dft_results", "electrochemical_performance", "writing_cards"],
+        "figure_storyline": ["catalyst_samples", "writing_cards", "dft_results", "electrochemical_performance", "mechanism_claims"],
     }
 
     def __init__(self, prompt_path: Path | None = None) -> None:
@@ -229,7 +229,11 @@ class PaperWriterPromptBuilder:
     def _compact_item(self, evidence_type: str, item: dict[str, Any]) -> dict[str, Any]:
         return {
             "source_type": evidence_type,
+            "source_id": item.get("source_id") or self._json_safe(item.get("object_id")),
             "paper_id": self._json_safe(item.get("paper_id")),
+            "paper_code": item.get("paper_code"),
+            "page": item.get("page") or item.get("page_start"),
+            "review_status": item.get("review_status"),
             "score": item.get("score"),
             "summary": self._summarize_item(evidence_type, item),
             "evidence_excerpt": (item.get("evidence_text") or item.get("text") or "")[:320],
@@ -254,6 +258,20 @@ class PaperWriterPromptBuilder:
             return ", ".join(bits) or "electrochemical evidence"
         if evidence_type == "mechanism_claims":
             return item.get("text") or "mechanism claim"
+        if evidence_type == "catalyst_samples":
+            bits = []
+            if item.get("name"):
+                bits.append(str(item["name"]))
+            if item.get("catalyst_type"):
+                bits.append(str(item["catalyst_type"]))
+            metals = item.get("metal_centers") or []
+            if metals:
+                bits.append("metal centers: " + ", ".join(str(metal) for metal in metals))
+            if item.get("coordination"):
+                bits.append(f"coordination: {item['coordination']}")
+            if item.get("support"):
+                bits.append(f"support: {item['support']}")
+            return "; ".join(bits) or "catalyst identity"
         if evidence_type == "writing_cards":
             return " | ".join(
                 filter(None, [item.get("research_gap"), item.get("proposed_solution"), item.get("core_hypothesis")])

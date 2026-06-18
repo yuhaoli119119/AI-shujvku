@@ -1,5 +1,5 @@
 name: dft_material_ai_extraction_protocol
-version: system_candidate_dft_v1_1
+version: system_candidate_dft_v1_2
 stage: ai_extraction_and_review_gate
 
 role_boundary:
@@ -9,6 +9,9 @@ role_boundary:
     - Rule-based DFT hints are only stored as system_candidate records.
     - System candidates must never enter the final DFT/ML database without review.
   ai_extraction:
+    - First verify whether the paper type inferred from the original PDF matches the system-parsed paper type; if they disagree, correct the parsed type immediately before trusting downstream DFT candidates.
+    - Before extracting or reviewing values, compare the system-parsed sections, tables, figures, and locators against the original PDF pages.
+    - If parser structure, table split, figure crop, page mapping, or locator anchoring looks wrong, record parse defects first and do not pretend the parsed package is already trustworthy.
     - Read the full evidence package, not only rows pre-extracted by rules.
     - Extract scientific DFT/material data from evidence.
     - Compare new AI extraction with system_candidate hints and report missing/conflicting evidence.
@@ -30,14 +33,26 @@ intake_boundary:
     - Only papers that already exist in the active library can be used for DFT extraction, review, writing, export, or MCP evidence retrieval.
 
 evidence_first_rules:
+  - The AI must actively inspect the original PDF, not only the parsed markdown or context bundle.
+  - Parsed sections, tables, figure crops, and locators are candidate aids; high-risk DFT or chart conclusions must be checked against the original PDF first.
   - Every non-empty scientific field must be supported by a text/table/figure locator.
   - Do not infer a numeric value from trends, curves, colors, or pathway images unless the value is explicitly readable in the paper text/table/caption.
   - If a figure gives only a visual trend, mark the value as pending or needs_fix.
   - PDF original page, section title, table number, figure number, caption, and excerpt are preferred over parser-only text.
   - Cropped figures are candidate locators only; verify them against the full PDF page and caption.
   - Data without evidence location must not be promoted.
+  - If the evidence packet has text and section metadata but no PDF page, keep the row as text_only evidence. Do not infer a page from a similar section title, nearby figure, or approximate text match.
+  - Missing PDF pages may be investigated by an assigned IDE AI when the user asks, but any proposed page remains a candidate until reviewed. The web UI must not pretend to run an AI page lookup unless a real audited backend workflow exists.
 
 workflow_stages:
+  parse_vs_pdf_check:
+    goal: Compare the system-generated reading package with the original PDF before trusting any parsed section, table, figure, or locator.
+    required_output:
+      - parser_readability_status
+      - pdf_checked_pages
+      - parse_defects
+      - trustworthy_sections_tables_figures
+      - blocked_targets_due_to_parse_error
   scope_gate:
     goal: Decide whether the paper is in scope before extracting rows.
     required_output:
@@ -91,17 +106,34 @@ workflow_stages:
       - human_confirmation_required
       - internal_data_read_status
       - prior_external_audit_summary
+  third_ai_adjudication:
+    goal: When the first two AI opinions disagree on a high-risk target, a third AI may adjudicate after reading the original PDF and both prior opinions.
+    required_output:
+      - adjudication_role
+      - adjudication_scope
+      - selected_source_ids
+      - adopt_reject_partial_decision
+      - object_level_evidence_anchors
+      - adjudication_notes
 
 MCP_tooling_context:
   purpose: MCP tools expose evidence packets, page reads, figure crops, chart audits, share tokens, and repair actions to AI workers.
   rule: MCP tool output is supporting evidence, not final truth.
   traceability: Every MCP-assisted AI action must be recorded in AuditLog, task center, field review, external analysis run, or PaperNote.
   internal_verification_read_path:
+    - The worker must inspect the original PDF page or page-derived artifact before trusting parsed structure for high-risk review.
     - Before auditing, external AI workers should read paper readiness through get_paper or get_codex_context and inspect artifact_status when present.
     - artifact_ready_for_external_audit must be true, or the worker must report blocking_errors and warnings instead of pretending the paper was fully readable.
     - get_review_coverage(paper_id) now exposes latest_external_audits, external_audit_count, and external_audit_source_distribution so other AI workers can see prior internal verification opinions.
     - external_audit_opinion candidates are visible review evidence, not final truth; they remain subject to conflict checks and human/final gates.
     - If MCP cannot read sections, tables, figures, locators, artifacts, or previous audit opinions, the correct output is needs_fix or blocked_by_unreadable_internal_data, not accept.
+  local_fallback_when_mcp_ui_is_missing:
+    - If the current IDE session does not expose MCP tools, do not stop at "tool missing" by default.
+    - First try the repository-native execution path from the local workspace: run code in `literature-ai/backend` and call `app.mcp.context.mcp_auth_context` plus the relevant functions from `app.mcp.server` directly.
+    - Use the same repository-backed data sources and authentication model as MCP would use. Do not invent paper data, and do not bypass the repository code with ad hoc parsing or local PDF extraction scripts.
+    - If the backend code path works, treat it as a valid MCP-equivalent evidence path for reading `get_codex_context`, `get_codex_item`, `read_paper_page`, and `import_analysis`.
+    - Only after both the IDE MCP tools and the repository-native fallback fail may the worker report `blocked_by_missing_mcp_tool` or `blocked_by_evidence_api_unavailable`.
+    - Record in notes or audit payloads that the result came from the repository-native fallback path rather than the IDE tool registry.
 
 required_fields_per_dft_record:
   - catalyst_or_material
@@ -128,6 +160,19 @@ required_fields_per_dft_record:
   - protocol_sha256
   - human_confirmation_required
   - notes
+
+DFT_locator_boundary:
+  page_capture:
+    - Capture pdf_page only when it is present in the original PDF page context, page-derived artifact, table/figure metadata, or explicit locator supplied to the worker.
+    - If page context is absent, output pdf_page: null and explain the missing locator in notes or known_missing.
+  text_only_rows:
+    - Text-only DFT evidence can remain reviewable through paper title, DOI, source section, and evidence_text.
+    - Text-only DFT evidence must not be exported as ML/CSV training data until an exact page locator and the required review gates exist.
+  forbidden:
+    - Do not fabricate page numbers.
+    - Do not infer exact pages from similarity alone.
+    - Do not use page recovery to mark DFT rows verified, approve corrections, bind materials, or unlock export.
+    - Do not add or rely on a web UI "AI find PDF page" action unless it is backed by an audited backend workflow.
 
 property_types:
   examples:
@@ -185,6 +230,7 @@ ai_worker_protocol:
     - Every AI operation must leave a trace in task center, audit logs, field reviews, shared notes, correction proposals, or external analysis runs.
     - Review suggestions are inspected from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, PaperNote records, and AuditLog entries.
     - External AI workers must first confirm they can read the active library paper, artifact status, parsed content, review coverage, and prior external_audit_opinion records through MCP or API.
+    - For DFT rows, chart values, and other high-risk targets, the worker must compare parsed content with the original PDF before returning PASS, REVISE, or adjudication.
     - "A second AI review that did not read the internal verification data must declare internal_data_read_status: unreadable or incomplete and cannot return can_promote_to_exportable_database: true."
   image_audit:
     - The assigned VLM-capable model may audit figure crops, captions, full-page screenshots, and chart interpretations.
@@ -194,12 +240,25 @@ ai_worker_protocol:
     - The assigned text/science model may audit DFT rows if it receives the evidence packet and this protocol.
     - The reviewer must check exact numeric value, unit, catalyst/material, adsorbate, property type, method/condition, locator, duplicates, and suspected missing rows.
     - PASS/accept from an AI does not unlock export unless the configured human/final gate also passes.
+    - Use only PASS, PROPOSED, REJECT, NEEDS_HUMAN, or new_candidate for object_review_audits.
+    - When a missing DFT row is found, submit it as decision=new_candidate with a complete structured corrected_value and use import_analysis(auto_apply_review_rules=true) so the row is materialized into the unverified DFT candidate queue instead of remaining only an external audit note.
+    - PASS confirms only fields that were checked; full-row auto-adoption requires normalized material, property, value, unit, method/condition, and PDF evidence.
+    - Normalize energy to eV: meV values must be divided by 1000. Preserve the raw expression in raw_value/raw_unit or quoted_text.
+    - Normalize permeance to GPU: values reported as 10^3 GPU must be multiplied by 1000. Preserve the raw expression in raw_value/raw_unit or quoted_text.
   ai_a_initial_extract:
+    - First compare parsed materials with the original PDF and record parse defects or locator defects when found.
     - Read abstract, methods, results/discussion, all tables, all captions, DFT-related text, and supporting evidence package.
     - Output structured candidate records only when evidence is located.
   ai_b_independent_review:
+    - Re-check the original PDF instead of trusting the first AI's parse assumptions.
     - Independently rescan the same evidence package.
     - Report missing records, conflicts, weak evidence, and duplicate candidates.
+  ai_c_third_adjudicator:
+    - Read the original PDF, the parsed evidence package, and both prior AI opinions.
+    - Decide whether to adopt all, reject all, or partially adopt the disputed object-level results.
+    - If evidence page or quote is missing, actively locate it in the original PDF; return NEEDS_HUMAN only after the PDF cannot support a reliable decision.
+    - Resolve unit scaling explicitly using the unit policy before returning PASS or PROPOSED.
+    - Output object_review_audit entries with adjudication_role=third_ai, adjudication_scope=conflict_resolution, and selected_source_ids.
   judge:
     - Compare AI-A, AI-B, and system_candidate hints.
     - Produce one merged candidate set plus conflict report.
@@ -233,6 +292,8 @@ output_schema:
     normalized_property_type: string
     value: number
     unit: string
+    raw_value: string
+    raw_unit: string
     calculation_method_or_condition: string
     evidence:
       text_excerpt: string
@@ -259,6 +320,12 @@ output_schema:
     notes: string
     internal_data_read_status: readable | incomplete | unreadable
     prior_external_audits_checked: boolean
+    parser_readability_status: readable | partially_reliable | unreliable
+    parse_defects: list
+    pdf_checked_pages: list
+    adjudication_role: string
+    adjudication_scope: string
+    selected_source_ids: list
   report:
     detected_dft_signal_count: integer
     parsed_candidate_count: integer

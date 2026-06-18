@@ -24,6 +24,7 @@ class ReviewAdjudicationService:
     RELIABLE_LOCATOR_STATUSES = {"exact_page", "exact_bbox", "candidate"}
     HIGH_CONFIDENCE = 0.82
     MEDIUM_CONFIDENCE = 0.65
+    AUTO_CONFLICT_DOMINANT_RATIO = 0.85
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -49,6 +50,23 @@ class ReviewAdjudicationService:
             "manual": counts.get("manual", 0),
             "total": sum(counts.values()),
         }
+
+    @staticmethod
+    def is_actionable_conflict(row: dict[str, Any]) -> bool:
+        adjudication = row.get("adjudication") or {}
+        action = str(adjudication.get("recommended_action") or "").strip().lower()
+        if not action:
+            return bool(row.get("conflict"))
+        return action != "verify"
+
+    def count_actionable_conflicts_by_paper(self, paper_ids: set[UUID]) -> dict[str, int]:
+        if not paper_ids:
+            return {}
+        counts = {str(paper_id): 0 for paper_id in paper_ids}
+        for paper_id in paper_ids:
+            payload = self.list_with_adjudication(paper_id=paper_id, limit=1000)
+            counts[str(paper_id)] = sum(1 for row in (payload.get("rows") or []) if self.is_actionable_conflict(row))
+        return counts
 
     def evaluate_row(self, row: dict[str, Any]) -> dict[str, Any]:
         opinions = list(row.get("opinions") or [])
@@ -475,7 +493,12 @@ class ReviewAdjudicationService:
             return "manual", "high"
         if has_conflict and ("decision_conflict" in conflict_types) and metrics["dominant_ratio"] < 0.66:
             return "manual", "high"
-        if has_conflict and metrics["exact_locator_count"] >= 2 and metrics["high_confidence_count"] >= 2 and metrics["dominant_ratio"] >= 0.75:
+        if (
+            has_conflict
+            and metrics["exact_locator_count"] >= 2
+            and metrics["high_confidence_count"] >= 2
+            and metrics["dominant_ratio"] >= self.AUTO_CONFLICT_DOMINANT_RATIO
+        ):
             return "auto", "low"
         if not has_conflict and metrics["exact_locator_count"] >= 1 and metrics["high_confidence_count"] >= 1:
             return "auto", "low"
@@ -595,10 +618,8 @@ class ReviewAdjudicationService:
     def _opinion_score(self, opinion: dict[str, Any]) -> float:
         score = 0.0
         decision_bucket = self._decision_bucket(opinion.get("decision") or opinion.get("status"))
-        if decision_bucket == "positive":
-            score += 1.2
-        elif decision_bucket == "negative":
-            score += 0.8
+        if decision_bucket in {"positive", "negative"}:
+            score += 1.0
         locator_status = self._locator_status(opinion)
         if locator_status in self.EXACT_LOCATOR_STATUSES:
             score += 1.0
@@ -655,9 +676,9 @@ class ReviewAdjudicationService:
     @staticmethod
     def _decision_bucket(decision: Any) -> str:
         normalized = str(decision or "").strip().upper()
-        if normalized in {"PASS", "ACCEPT", "APPROVE", "APPROVED", "VERIFIED", "OK", "PROPOSED"}:
+        if normalized in {"PASS", "ACCEPT", "APPROVE", "APPROVED", "VERIFIED", "OK"}:
             return "positive"
-        if normalized in {"REVISE", "FLAG", "INSUFFICIENT", "REJECT", "REJECTED", "NEEDS_FIX", "FIX", "BLOCK"}:
+        if normalized in {"REVISE", "FLAG", "INSUFFICIENT", "REJECT", "REJECTED", "NEEDS_FIX", "FIX", "BLOCK", "PROPOSED"}:
             return "negative"
         return "neutral"
 

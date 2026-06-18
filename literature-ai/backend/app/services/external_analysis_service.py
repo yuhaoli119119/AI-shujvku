@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, or_, select
@@ -17,11 +17,20 @@ from app.db.models import (
     ExternalAnalysisRun,
     Paper,
     PaperCorrection,
+    PaperFigure,
     PaperNote,
     PaperRelationship,
+    PaperTable,
+    WorkflowJob,
 )
+from app.services.dft_rescan_policy import build_dft_dedupe_signature, normalize_source_document_type
 from app.services.llm_service import LLMService
+from app.services.module_write_lock_service import ModuleWriteLockService
+from app.services.paper_identity import PaperIdentityService
+from app.services.review_service import ReviewService
 from app.utils.artifact_status import build_paper_artifact_status
+from app.utils.evidence_anchors import has_evidence_anchor, has_material_correction_anchor
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 
@@ -82,8 +91,19 @@ class ExternalObjectReviewAuditModel(BaseModel):
     target_id: str
     field_name: str | None = None
     decision: str | None = None
+    adjudication_role: str | None = None
+    adjudication_scope: str | None = None
+    selected_source_ids: list[str] = Field(default_factory=list)
+    normalized_energy_type: str | None = None
+    normalized_material: str | None = None
+    structure_name: str | None = None
+    adsorbate: str | None = None
+    reaction_step: str | None = None
     evidence_checked: bool | None = None
     evidence_location: dict[str, Any] | list[Any] | str | None = None
+    dedupe_signature: str | None = None
+    borrowed_from_reference: bool = False
+    supporting_evidence: list[Any] = Field(default_factory=list)
     blocking_errors: list[Any] = Field(default_factory=list)
     recommended_action: str | None = None
     corrected_value: Any = None
@@ -115,6 +135,7 @@ class MaterializationResult:
     created_notes: int = 0
     created_corrections: int = 0
     created_relationships: int = 0
+    auto_applied_corrections: int = 0
     skipped_candidates: int = 0
 
 
@@ -141,6 +162,7 @@ class ExternalAnalysisService:
         normalized, mapping_status, mapping_error = self._normalize_input(
             raw_text=sanitized_raw_text,
             raw_payload=sanitized_raw_payload,
+            source_paper=paper,
         )
         run = ExternalAnalysisRun(
             paper_id=paper_id,
@@ -162,6 +184,7 @@ class ExternalAnalysisService:
                 source=source,
                 paper_id=paper_id,
             )
+            self._reject_direct_tool_only_corrections(normalized)
             normalized_payload = normalized.model_dump(mode="json")
             external_audit_precondition = self._external_audit_precondition(paper) if normalized.external_audit_opinions else None
             if external_audit_precondition and external_audit_precondition["status"] != "ready":
@@ -194,9 +217,88 @@ class ExternalAnalysisService:
                 },
             )
         )
+        self._record_import_activity_job(
+            paper=paper,
+            run=run,
+            normalized=normalized,
+            source=source,
+            source_label=source_label,
+        )
         self.session.flush()
         self.session.refresh(run)
         return run
+
+    def _record_import_activity_job(
+        self,
+        *,
+        paper: Paper,
+        run: ExternalAnalysisRun,
+        normalized: ExternalAnalysisNormalizedModel | None,
+        source: str,
+        source_label: str | None,
+    ) -> None:
+        label = str(source_label or source or "ide_ai").strip() or "ide_ai"
+        candidate_count = self._normalized_candidate_count(normalized)
+        action = "import_analysis"
+        title = f"IDE AI analysis imported: {label}"
+        self.session.add(
+            WorkflowJob(
+                job_id=str(uuid4()),
+                type="agent_activity",
+                status="completed",
+                library_name=normalize_library_name(paper.library_name),
+                payload={
+                    "agent": label,
+                    "action": action,
+                    "title": title,
+                    "paper_id": str(paper.id),
+                    "paper_code": paper.paper_code,
+                    "paper_title": paper.title,
+                    "source": source,
+                    "source_label": source_label,
+                    "external_analysis_run_id": str(run.id),
+                },
+                progress={
+                    "phase": action,
+                    "action": action,
+                    "message": title,
+                    "agent": label,
+                    "paper_id": str(paper.id),
+                    "paper_code": paper.paper_code,
+                },
+                result={
+                    "metrics": {
+                        "success_count": 1 if not run.mapping_error else 0,
+                        "failure_count": 1 if run.mapping_error else 0,
+                        "candidate_count": candidate_count,
+                    },
+                    "details": {
+                        "mapping_status": run.mapping_status,
+                        "mapping_error": run.mapping_error,
+                        "paper_code": paper.paper_code,
+                        "source": source,
+                        "source_label": source_label,
+                    },
+                    "artifacts": [{"type": "external_analysis_run", "run_id": str(run.id)}],
+                    "success_count": 1 if not run.mapping_error else 0,
+                    "failure_count": 1 if run.mapping_error else 0,
+                },
+                runtime_context={},
+            )
+        )
+
+    @staticmethod
+    def _normalized_candidate_count(normalized: ExternalAnalysisNormalizedModel | None) -> int:
+        if normalized is None:
+            return 0
+        return (
+            len(normalized.external_audit_opinions)
+            + len(normalized.object_review_audits)
+            + len(normalized.review_notes)
+            + len(normalized.correction_proposals)
+            + len(normalized.supporting_papers)
+            + len(normalized.unmapped_items)
+        )
 
     def list_runs(self, paper_id: UUID | None = None) -> list[ExternalAnalysisRun]:
         stmt = select(ExternalAnalysisRun).order_by(ExternalAnalysisRun.created_at.desc())
@@ -320,6 +422,25 @@ class ExternalAnalysisService:
                 candidate.materialized_target_id = str(note.id)
                 result.created_notes += 1
             elif candidate.candidate_type == "correction":
+                if payload.get("field_name") == "catalyst_samples" and not has_material_correction_anchor(
+                    payload.get("evidence_payload")
+                ):
+                    candidate.status = "requires_resolution"
+                    self.session.add(candidate)
+                    result.skipped_candidates += 1
+                    continue
+                if (
+                    payload.get("field_name") == "catalyst_samples"
+                    and payload.get("operation") == "create"
+                    and (
+                        payload.get("target_path") != "catalyst_samples:new:create"
+                        or not isinstance(payload.get("proposed_value"), dict)
+                    )
+                ):
+                    candidate.status = "requires_resolution"
+                    self.session.add(candidate)
+                    result.skipped_candidates += 1
+                    continue
                 correction = PaperCorrection(
                     paper_id=candidate.paper_id,
                     source=run.source,
@@ -386,6 +507,225 @@ class ExternalAnalysisService:
         self.session.flush()
         return result
 
+    def auto_apply_non_dft_review_outputs(
+        self,
+        run_id: UUID,
+        *,
+        reviewer: str = "ide_ai",
+        write_lock_tokens: list[str] | None = None,
+    ) -> MaterializationResult:
+        """Materialize IDE AI outputs that are safe outside the DFT review lane.
+
+        Non-DFT notes and corrections are operational outputs: notes mark a module as
+        IDE-reviewed, and eligible corrections are immediately approved/applied so
+        RAG can use the cleaned records. DFT results/settings stay out of this path
+        and must go through the dedicated review/export workflow.
+        """
+
+        run = self.get_run(run_id)
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.run_id == run.id)
+            .order_by(ExternalAnalysisCandidate.created_at.asc())
+        ).all()
+        required_modules = self._required_auto_apply_modules(candidates)
+        lock_check = ModuleWriteLockService(self.session).require_write(
+            paper_id=run.paper_id,
+            module_names=required_modules,
+            lock_tokens=write_lock_tokens,
+            locked_by=reviewer,
+        )
+        result = MaterializationResult()
+        review_service = ReviewService(self.session)
+
+        for candidate in candidates:
+            if candidate.status not in {"pending", "requires_resolution"}:
+                result.skipped_candidates += 1
+                continue
+            payload = candidate.normalized_payload or {}
+
+            if candidate.candidate_type == "note":
+                note = PaperNote(
+                    paper_id=candidate.paper_id,
+                    source=run.source,
+                    content=payload.get("content", ""),
+                    field_name=payload.get("field_name"),
+                    page=payload.get("page"),
+                    section_title=payload.get("section_title"),
+                    quoted_text=payload.get("quoted_text"),
+                )
+                self.session.add(note)
+                self.session.flush()
+                candidate.status = "ai_reviewed"
+                candidate.materialized_target_type = "paper_note"
+                candidate.materialized_target_id = str(note.id)
+                result.created_notes += 1
+                self.session.add(candidate)
+                continue
+
+            if candidate.candidate_type == "correction":
+                if not self._is_auto_applicable_non_dft_correction(payload):
+                    candidate.status = "requires_resolution"
+                    self.session.add(candidate)
+                    result.skipped_candidates += 1
+                    continue
+                correction = PaperCorrection(
+                    paper_id=candidate.paper_id,
+                    source=run.source,
+                    field_name=payload.get("field_name", ""),
+                    target_path=payload.get("target_path", ""),
+                    operation=payload.get("operation", "replace"),
+                    proposed_value=payload.get("proposed_value"),
+                    reason=payload.get("reason", ""),
+                    evidence_payload=self._external_candidate_evidence_payload(
+                        run,
+                        payload.get("evidence_payload"),
+                    ),
+                    status="pending",
+                )
+                self.session.add(correction)
+                self.session.flush()
+                try:
+                    review_service.approve_correction(correction.id, reviewer, write_lock_tokens=write_lock_tokens)
+                except Exception as exc:
+                    correction.status = "requires_resolution"
+                    correction.reviewed_by = reviewer
+                    correction.reviewed_at = None
+                    candidate.status = "requires_resolution"
+                    candidate.mapping_reason = str(exc)
+                    self.session.add(correction)
+                    self.session.add(candidate)
+                    result.skipped_candidates += 1
+                    continue
+                candidate.status = "ai_applied"
+                candidate.materialized_target_type = "paper_correction"
+                candidate.materialized_target_id = str(correction.id)
+                result.created_corrections += 1
+                result.auto_applied_corrections += 1
+                self.session.add(candidate)
+                continue
+
+            if candidate.candidate_type == "relationship":
+                target_paper_id = payload.get("target_paper_id")
+                if not target_paper_id:
+                    candidate.status = "requires_resolution"
+                    result.skipped_candidates += 1
+                    self.session.add(candidate)
+                    continue
+                relationship = PaperRelationship(
+                    source_paper_id=candidate.paper_id,
+                    target_paper_id=UUID(str(target_paper_id)),
+                    relationship_type=payload.get("relationship_type", "supports"),
+                    note=payload.get("note"),
+                    created_by=reviewer,
+                )
+                self.session.add(relationship)
+                self.session.flush()
+                candidate.status = "ai_applied"
+                candidate.materialized_target_type = "paper_relationship"
+                candidate.materialized_target_id = str(relationship.id)
+                result.created_relationships += 1
+                self.session.add(candidate)
+                continue
+
+            result.skipped_candidates += 1
+
+        self.session.add(
+            AuditLog(
+                paper_id=run.paper_id,
+                action="auto_apply_non_dft_external_analysis",
+                source=reviewer,
+                target_type="external_analysis_run",
+                target_id=str(run.id),
+                payload={
+                    "created_notes": result.created_notes,
+                    "created_corrections": result.created_corrections,
+                    "created_relationships": result.created_relationships,
+                    "auto_applied_corrections": result.auto_applied_corrections,
+                    "skipped_candidates": result.skipped_candidates,
+                    "source_run_id": str(run.id),
+                    "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
+                    "writes_final_truth": True,
+                    "requires_human_confirmation": False,
+                    "dft_outputs_excluded": True,
+                    "write_lock": {
+                        "required_modules": lock_check.required_modules,
+                        "covered_modules": lock_check.covered_modules,
+                        "lock_ids": lock_check.lock_ids,
+                    },
+                },
+            )
+        )
+        self.session.flush()
+        return result
+
+    def _required_auto_apply_modules(self, candidates: list[ExternalAnalysisCandidate]) -> list[str]:
+        modules: set[str] = set()
+        for candidate in candidates:
+            if candidate.status not in {"pending", "requires_resolution"}:
+                continue
+            payload = candidate.normalized_payload or {}
+            if candidate.candidate_type == "note":
+                modules.add("notes")
+            elif candidate.candidate_type == "correction":
+                if self._is_auto_applicable_non_dft_correction(payload):
+                    modules.add(
+                        ModuleWriteLockService.module_from_field(
+                            payload.get("field_name"),
+                            payload.get("target_path"),
+                        )
+                    )
+            elif candidate.candidate_type == "relationship" and payload.get("target_paper_id"):
+                modules.add("relationships")
+        return sorted(modules)
+
+    @staticmethod
+    def _is_auto_applicable_non_dft_correction(payload: dict[str, Any]) -> bool:
+        field_name = str(payload.get("field_name") or "").strip()
+        target_path = str(payload.get("target_path") or "").strip()
+        operation = str(payload.get("operation") or "replace").strip().lower()
+        if operation not in {"replace", "create"}:
+            return False
+        denied_fields = {
+            "dft_results",
+            "dft_result",
+            "dft_settings",
+            "dft_setting",
+        }
+        if field_name in denied_fields:
+            return False
+        if target_path.split(":", 1)[0] in denied_fields:
+            return False
+        allowed_top_level = ReviewService.ALLOWED_PAPER_FIELDS
+        allowed_structured = {
+            "figures",
+            "tables",
+            "sections",
+            "writing_cards",
+            "mechanism_claims",
+            "electrochemical_performance",
+            "catalyst_samples",
+        }
+        evidence_payload = payload.get("evidence_payload")
+        if field_name == "catalyst_samples" and not has_material_correction_anchor(evidence_payload):
+            return False
+        if operation == "create":
+            return (
+                field_name in allowed_structured
+                and target_path == f"{field_name}:new:create"
+                and isinstance(payload.get("proposed_value"), dict)
+                and has_evidence_anchor(evidence_payload)
+            )
+        if field_name in allowed_top_level and target_path in {field_name, ""}:
+            return True
+        if field_name in allowed_structured and target_path.startswith(field_name + ":"):
+            if field_name in {"mechanism_claims", "electrochemical_performance"} and not has_evidence_anchor(
+                evidence_payload
+            ):
+                return False
+            return True
+        return False
+
     @staticmethod
     def _external_candidate_evidence_payload(
         run: ExternalAnalysisRun,
@@ -410,29 +750,73 @@ class ExternalAnalysisService:
         )
         return payload
 
+    @staticmethod
+    def _correction_candidate_status(correction: ExternalCorrectionProposalModel) -> str:
+        if correction.field_name == "catalyst_samples" and not has_material_correction_anchor(
+            correction.evidence_payload
+        ):
+            return "requires_resolution"
+        if correction.field_name == "catalyst_samples" and correction.operation == "create":
+            if correction.target_path != "catalyst_samples:new:create" or not isinstance(correction.proposed_value, dict):
+                return "requires_resolution"
+        if correction.operation == "create" and correction.field_name in ReviewService.STRUCTURED_CREATE_TARGETS:
+            if (
+                correction.target_path != f"{correction.field_name}:new:create"
+                or not isinstance(correction.proposed_value, dict)
+                or not has_evidence_anchor(correction.evidence_payload)
+            ):
+                return "requires_resolution"
+        return "pending"
+
+    @staticmethod
+    def _reject_direct_tool_only_corrections(normalized: ExternalAnalysisNormalizedModel) -> None:
+        direct_tool_ops = {
+            "recrop_figure": "recrop_figure",
+            "create_figure_from_bbox": "create_figure_from_bbox",
+        }
+        blocked: list[str] = []
+        for correction in normalized.correction_proposals:
+            operation = str(correction.operation or "").strip().lower()
+            if operation in direct_tool_ops:
+                blocked.append(operation)
+        if blocked:
+            tools = ", ".join(sorted(set(blocked)))
+            raise ValueError(
+                "direct_mcp_tool_required:"
+                f"{tools} must be called directly through MCP and must not be submitted through import_analysis. "
+                "Do the crop/create operation now with the real tool, then read back the figure image_path/crop_status."
+            )
+
     def _normalize_input(
         self,
         raw_text: str | None,
         raw_payload: dict[str, Any] | list[Any] | str | None,
+        source_paper: Paper | None = None,
     ) -> tuple[ExternalAnalysisNormalizedModel | None, str, str | None]:
         parsed = self._extract_structured_payload(raw_text=raw_text, raw_payload=raw_payload)
         if isinstance(parsed, dict):
             try:
                 normalized = ExternalAnalysisNormalizedModel.model_validate(parsed)
-                return self._post_process_normalized(normalized, parsed), "normalized", None
+                return self._post_process_normalized(normalized, parsed, source_paper=source_paper), "normalized", None
             except Exception:
                 llm_normalized = self._llm_normalize(raw_text=raw_text, raw_payload=parsed)
                 if llm_normalized:
-                    return self._post_process_normalized(llm_normalized, parsed), "normalized_with_llm", None
-                return self._heuristic_normalize(parsed), "heuristic", None
+                    return self._post_process_normalized(llm_normalized, parsed, source_paper=source_paper), "normalized_with_llm", None
+                return self._post_process_normalized(
+                    self._heuristic_normalize(parsed),
+                    source_paper=source_paper,
+                ), "heuristic", None
 
         if isinstance(parsed, list):
-            return self._heuristic_normalize({"unmapped_items": parsed}), "heuristic", None
+            return self._post_process_normalized(
+                self._heuristic_normalize({"unmapped_items": parsed}),
+                source_paper=source_paper,
+            ), "heuristic", None
 
         if isinstance(parsed, str) and parsed.strip():
             llm_normalized = self._llm_normalize(raw_text=parsed, raw_payload=None)
             if llm_normalized:
-                return self._post_process_normalized(llm_normalized), "normalized_with_llm", None
+                return self._post_process_normalized(llm_normalized, source_paper=source_paper), "normalized_with_llm", None
             return ExternalAnalysisNormalizedModel(
                 review_notes=[ExternalReviewNoteModel(content=parsed, mapping_reason="Fallback free-text note import")]
             ), "free_text_fallback", None
@@ -443,14 +827,19 @@ class ExternalAnalysisService:
         self,
         normalized: ExternalAnalysisNormalizedModel,
         raw_payload: dict[str, Any] | None = None,
+        source_paper: Paper | None = None,
     ) -> ExternalAnalysisNormalizedModel:
         supporting = []
         for item in normalized.supporting_papers:
-            resolved_target = self._resolve_target_paper_id(item)
+            resolved_target, resolution_reason = self._resolve_target_paper_id(item, source_paper=source_paper)
+            mapping_reason = item.mapping_reason
+            if resolution_reason and not resolved_target:
+                mapping_reason = resolution_reason
             supporting.append(
                 item.model_copy(
                     update={
                         "target_paper_id": resolved_target or item.target_paper_id,
+                        "mapping_reason": mapping_reason,
                     }
                 )
             )
@@ -469,7 +858,91 @@ class ExternalAnalysisService:
                     continue
                 object_reviews.append(ExternalObjectReviewAuditModel.model_validate(item))
                 existing_keys[key] = len(object_reviews) - 1
-        return normalized.model_copy(update={"supporting_papers": supporting, "object_review_audits": object_reviews})
+        corrections = self._normalize_legacy_codex_item_corrections(
+            normalized.correction_proposals,
+            source_paper=source_paper,
+        )
+        return normalized.model_copy(
+            update={
+                "supporting_papers": supporting,
+                "object_review_audits": object_reviews,
+                "correction_proposals": corrections,
+            }
+        )
+
+    def _normalize_legacy_codex_item_corrections(
+        self,
+        corrections: list[ExternalCorrectionProposalModel],
+        *,
+        source_paper: Paper | None,
+    ) -> list[ExternalCorrectionProposalModel]:
+        if not corrections or source_paper is None:
+            return corrections
+        normalized: list[ExternalCorrectionProposalModel] = []
+        for correction in corrections:
+            target_path = str(correction.target_path or "").strip()
+            field_name = str(correction.field_name or "").strip()
+            if not target_path.lower().startswith("codex_item:"):
+                normalized.append(correction)
+                continue
+            item_id = target_path.split(":", 1)[1].strip()
+            mapped = self._resolve_legacy_codex_item_target(
+                paper_id=source_paper.id,
+                item_id=item_id,
+                field_name=field_name,
+            )
+            if mapped is None:
+                normalized.append(correction)
+                continue
+            collection, attribute = mapped
+            normalized.append(
+                correction.model_copy(
+                    update={
+                        "field_name": collection,
+                        "target_path": f"{collection}:{item_id}:{attribute}",
+                        "mapping_reason": (
+                            correction.mapping_reason
+                            or f"Normalized legacy codex_item target to structured {collection} correction."
+                        ),
+                    }
+                )
+            )
+        return normalized
+
+    def _resolve_legacy_codex_item_target(
+        self,
+        *,
+        paper_id: UUID,
+        item_id: str,
+        field_name: str,
+    ) -> tuple[str, str] | None:
+        normalized_field = str(field_name or "").strip().lower()
+        try:
+            item_uuid = UUID(item_id)
+        except (TypeError, ValueError):
+            return None
+        table = self.session.get(PaperTable, item_uuid)
+        if table is not None and table.paper_id == paper_id:
+            table_fields = {"caption", "markdown_content", "page", "extraction_source", "prov"}
+            return ("tables", normalized_field if normalized_field in table_fields else "markdown_content")
+        figure = self.session.get(PaperFigure, item_uuid)
+        if figure is not None and figure.paper_id == paper_id:
+            figure_fields = {
+                "caption",
+                "image_path",
+                "page",
+                "figure_label",
+                "figure_role",
+                "role_confidence",
+                "content_summary",
+                "key_elements",
+                "prov",
+                "crop_status",
+                "crop_confidence",
+                "crop_source",
+            }
+            return ("figures", normalized_field if normalized_field in figure_fields else "content_summary")
+        return None
 
     def _external_audit_precondition(self, paper: Paper) -> dict[str, Any]:
         artifact_status = build_paper_artifact_status(paper, settings=self.settings)
@@ -503,6 +976,17 @@ class ExternalAnalysisService:
                 )
             )
         for correction in normalized.correction_proposals:
+            status = self._correction_candidate_status(correction)
+            mapping_reason = correction.mapping_reason
+            if (
+                correction.field_name == "catalyst_samples"
+                and status == "requires_resolution"
+                and "evidence anchor" not in str(mapping_reason or "").lower()
+            ):
+                mapping_reason = (
+                    "Catalyst sample corrections require at least one PDF evidence anchor: "
+                    "page, section, quoted_text, table, or figure."
+                )
             self.session.add(
                 ExternalAnalysisCandidate(
                     run_id=run.id,
@@ -510,9 +994,9 @@ class ExternalAnalysisService:
                     candidate_type="correction",
                     normalized_payload=correction.model_dump(mode="json"),
                     confidence=correction.confidence,
-                    mapping_reason=correction.mapping_reason,
+                    mapping_reason=mapping_reason,
                     evidence_payload=correction.evidence_payload,
-                    status="pending",
+                    status=status,
                 )
             )
         for relationship in normalized.supporting_papers:
@@ -566,6 +1050,14 @@ class ExternalAnalysisService:
             "decision": payload.get("decision"),
             "evidence_checked": payload.get("evidence_checked"),
             "evidence_location": payload.get("evidence_location"),
+            "source_document_type": normalize_source_document_type(
+                (payload.get("evidence_location") or {}).get("source_document_type")
+                if isinstance(payload.get("evidence_location"), dict)
+                else None
+            ),
+            "dedupe_signature": payload.get("dedupe_signature"),
+            "supporting_evidence": payload.get("supporting_evidence") or [],
+            "borrowed_from_reference": bool(payload.get("borrowed_from_reference")),
             "blocking_errors": payload.get("blocking_errors") or [],
             "recommended_action": payload.get("recommended_action"),
             "verification_status": "unverified",
@@ -706,19 +1198,36 @@ class ExternalAnalysisService:
             mapping_reason="Paper-level external audit payload imported as candidate opinion",
         )
 
-    def _resolve_target_paper_id(self, relationship: ExternalSupportingPaperModel) -> str | None:
+    def _resolve_target_paper_id(
+        self,
+        relationship: ExternalSupportingPaperModel,
+        *,
+        source_paper: Paper | None = None,
+    ) -> tuple[str | None, str | None]:
         if relationship.target_paper_id:
-            return relationship.target_paper_id
+            return relationship.target_paper_id, None
 
         conditions = []
         if relationship.target_doi:
-            conditions.append(Paper.doi == relationship.target_doi)
+            normalized_doi = PaperIdentityService.normalize_doi(relationship.target_doi)
+            if normalized_doi:
+                conditions.append(Paper.doi == normalized_doi)
         if relationship.target_title:
             conditions.append(Paper.title.ilike(relationship.target_title))
         if not conditions:
-            return None
-        target = self.session.scalar(select(Paper).where(or_(*conditions)).limit(1))
-        return str(target.id) if target else None
+            return None, None
+
+        stmt = select(Paper).where(or_(*conditions))
+        if source_paper is not None:
+            stmt = stmt.where(build_library_name_clause(Paper.library_name, source_paper.library_name))
+            stmt = stmt.where(Paper.id != source_paper.id)
+        stmt = stmt.order_by(Paper.created_at.asc(), Paper.id.asc()).limit(2)
+        targets = self.session.scalars(stmt).all()
+        if len(targets) == 1:
+            return str(targets[0].id), None
+        if len(targets) > 1:
+            return None, "Relationship target is ambiguous within the source paper library; keep target_paper_id unresolved."
+        return None, None
 
     def _extract_structured_payload(
         self,
@@ -756,6 +1265,39 @@ class ExternalAnalysisService:
         supporting = payload.get("supporting_papers") or payload.get("relationships") or []
         object_reviews = self._extract_object_review_audits(payload)
         unmapped = payload.get("unmapped_items") or []
+        candidate_items = payload.get("candidates")
+        if isinstance(candidate_items, dict):
+            candidate_items = [candidate_items]
+        if isinstance(candidate_items, list):
+            notes = list(notes) if isinstance(notes, list) else [notes]
+            corrections = list(corrections) if isinstance(corrections, list) else [corrections]
+            supporting = list(supporting) if isinstance(supporting, list) else [supporting]
+            unmapped = list(unmapped) if isinstance(unmapped, list) else [unmapped]
+            for item in candidate_items:
+                if not isinstance(item, dict):
+                    unmapped.append({"raw_item": str(item), "mapping_reason": "Unsupported candidates item"})
+                    continue
+                kind = str(item.get("candidate_type") or item.get("type") or "").strip().lower()
+                if kind in {"paper_note", "note", "review_note"}:
+                    notes.append(
+                        {
+                            "content": item.get("content") or item.get("summary") or item.get("reason") or "",
+                            "field_name": item.get("field_name"),
+                            "page": item.get("page"),
+                            "section_title": item.get("section_title"),
+                            "quoted_text": item.get("quoted_text"),
+                            "confidence": item.get("confidence"),
+                            "mapping_reason": item.get("mapping_reason") or "Mapped from raw_payload.candidates",
+                        }
+                    )
+                elif kind in {"correction", "correction_proposal"}:
+                    corrections.append(item)
+                elif kind in {"relationship", "supporting_paper"}:
+                    supporting.append(item)
+                elif kind in {"object_review_audit", "object_review", "field_review"} and self._is_object_review_item(item):
+                    object_reviews.append(self._normalize_object_review_item(item))
+                else:
+                    unmapped.append({"raw_payload": item, "mapping_reason": "Unrecognized raw_payload.candidates item"})
 
         if not any([notes, corrections, supporting, object_reviews, unmapped]):
             unmapped = [{"raw_payload": payload}]
@@ -805,6 +1347,10 @@ class ExternalAnalysisService:
 
     @staticmethod
     def _is_object_review_item(item: dict[str, Any]) -> bool:
+        decision = str(item.get("decision") or item.get("verdict") or "").strip().lower()
+        target_type = str(item.get("target_type") or "").strip().lower()
+        if target_type in {"dft_results", "dft_result"} and decision == "new_candidate" and item.get("corrected_value"):
+            return True
         return bool(
             (item.get("target_type") or item.get("target_path"))
             and (item.get("target_id") or item.get("target_path") or item.get("dft_result_id") or item.get("record_id"))
@@ -826,8 +1372,36 @@ class ExternalAnalysisService:
             normalized["field_name"] = normalized.get("field")
         if "target_id" not in normalized:
             normalized["target_id"] = normalized.get("dft_result_id") or normalized.get("record_id")
+        decision_text = str(normalized.get("decision") or normalized.get("verdict") or "").strip().lower()
+        target_type_text = str(normalized.get("target_type") or "").strip().lower()
+        if not normalized.get("target_id") and target_type_text in {"dft_results", "dft_result"} and decision_text == "new_candidate":
+            normalized["target_id"] = "new"
+        if "field_name" not in normalized and target_type_text in {"dft_results", "dft_result"} and decision_text == "new_candidate":
+            normalized["field_name"] = "dft_results"
         if "decision" not in normalized and "verdict" in normalized:
             normalized["decision"] = normalized.get("verdict")
+        evidence_location = normalized.get("evidence_location")
+        corrected_value = normalized.get("corrected_value") or normalized.get("proposed_value")
+        if isinstance(evidence_location, dict):
+            evidence_location = dict(evidence_location)
+            evidence_location["source_document_type"] = normalize_source_document_type(
+                evidence_location.get("source_document_type")
+            )
+            normalized["evidence_location"] = evidence_location
+        if target_type_text in {"dft_results", "dft_result"}:
+            source_type = normalize_source_document_type(
+                (evidence_location or {}).get("source_document_type") if isinstance(evidence_location, dict) else None
+            )
+            if source_type == "supporting_reference":
+                normalized["borrowed_from_reference"] = True
+            signature_payload = {
+                **normalized,
+                "corrected_value": corrected_value if isinstance(corrected_value, dict) else {},
+                "evidence_location": evidence_location if isinstance(evidence_location, dict) else {},
+            }
+            normalized["dedupe_signature"] = normalized.get("dedupe_signature") or build_dft_dedupe_signature(
+                signature_payload
+            )
         if "corrected_value" not in normalized and "proposed_value" in normalized:
             normalized["corrected_value"] = normalized.get("proposed_value")
         if "reason" not in normalized:
@@ -935,6 +1509,11 @@ def build_internal_ai_review_blob(detail) -> str:
             if hasattr(detail.artifact_status, "model_dump")
             else detail.artifact_status,
         },
+        "source_assets": {
+            "pdf_url": f"/api/papers/{detail.id}/pdf",
+            "pdf_path": detail.pdf_path,
+            "workspace_path": detail.workspace_path,
+        },
         "external_audit_precondition": {
             "status": "ready"
             if getattr(detail.artifact_status, "artifact_ready_for_external_audit", False)
@@ -943,7 +1522,19 @@ def build_internal_ai_review_blob(detail) -> str:
         },
         "comprehensive_analysis": detail.comprehensive_analysis,
         "dft_settings_items": [item.model_dump(mode="json") for item in detail.dft_settings_items[:20]],
-        "catalyst_samples_items": [item.model_dump(mode="json") for item in detail.catalyst_samples_items[:20]],
+        "catalyst_samples_items": [
+            {
+                **item.model_dump(mode="json"),
+                "dependent_dft_count": sum(
+                    1
+                    for row in detail.dft_results_items
+                    if str(row.catalyst_sample_id) == str(item.id)
+                    or (len(detail.catalyst_samples_items) == 1 and not row.catalyst_sample_id)
+                ),
+                "single_sample_paper": len(detail.catalyst_samples_items) == 1,
+            }
+            for item in detail.catalyst_samples_items[:20]
+        ],
         "dft_results_items": [item.model_dump(mode="json") for item in detail.dft_results_items[:40]],
         "electrochemical_performance_items": [
             item.model_dump(mode="json") for item in detail.electrochemical_performance_items[:30]

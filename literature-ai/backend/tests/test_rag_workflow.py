@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import (
     Base,
+    CatalystSample,
     DFTResult,
     ElectrochemicalPerformance,
     EvidenceSpan,
@@ -35,6 +36,16 @@ def test_retriever_writer_and_citation_guard_work_together():
                 paper = Paper(title="RAG Paper", pdf_path="rag.pdf", authors=[])
                 session.add(paper)
                 session.flush()
+                catalyst_sample = CatalystSample(
+                    paper_id=paper.id,
+                    name="Fe-N4 catalyst",
+                    catalyst_type="single_atom",
+                    metal_centers=["Fe"],
+                    support="N-doped carbon",
+                    evidence_strength="Fe-N4 catalyst was supported on N-doped carbon.",
+                )
+                session.add(catalyst_sample)
+                session.flush()
 
                 session.add(
                     PaperSection(
@@ -58,6 +69,7 @@ def test_retriever_writer_and_citation_guard_work_together():
                 )
                 dft_result = DFTResult(
                     paper_id=paper.id,
+                    catalyst_sample_id=catalyst_sample.id,
                     adsorbate="Li2S4",
                     property_type="adsorption_energy",
                     value=-1.23,
@@ -77,7 +89,7 @@ def test_retriever_writer_and_citation_guard_work_together():
                     claim_type="lips_conversion",
                     claim_text="Fe-N4 accelerates LiPS conversion by strengthening intermediate binding.",
                     evidence_types=["Li2S4", "DOS"],
-                    evidence_text="The catalyst accelerates LiPS conversion through stronger Li2S4 binding.",
+                    evidence_text="These data indicate that stronger Li2S4 binding accelerates LiPS conversion.",
                 )
                 session.add_all([dft_result, electrochemical, mechanism])
                 session.flush()
@@ -99,17 +111,18 @@ def test_retriever_writer_and_citation_guard_work_together():
                         ],
                     )
                 )
-                for target_type, row, field_name in [
-                    ("dft_results", dft_result, "value"),
-                    ("electrochemical_performance", electrochemical, "capacity"),
-                    ("mechanism_claims", mechanism, "claim_text"),
+                for target_type, row, field_name, evidence_text in [
+                    ("catalyst_samples", catalyst_sample, "name", catalyst_sample.evidence_strength),
+                    ("dft_results", dft_result, "value", dft_result.evidence_text),
+                    ("electrochemical_performance", electrochemical, "capacity", electrochemical.evidence_text),
+                    ("mechanism_claims", mechanism, "claim_text", mechanism.evidence_text),
                 ]:
                     session.add(
                         EvidenceSpan(
                             paper_id=paper.id,
                             object_type=target_type,
                             object_id=str(row.id),
-                            text=row.evidence_text,
+                            text=evidence_text,
                             page=1,
                         )
                     )
@@ -121,17 +134,26 @@ def test_retriever_writer_and_citation_guard_work_together():
                             field_name=field_name,
                             reviewer_status="verified",
                             target_resolution_status="active",
-                            evidence_text=row.evidence_text,
+                            evidence_text=evidence_text,
                         )
                     )
                 session.commit()
 
                 retrieved = Retriever(session).retrieve("Fe-N4 Li2S4 adsorption conversion lithium sulfur", [paper.id], 3)
+                assert retrieved["catalyst_samples"]
                 assert retrieved["dft_results"]
+                assert retrieved["electrochemical_performance"]
                 assert retrieved["mechanism_claims"]
                 assert retrieved["writing_cards"]
                 assert "score_breakdown" in retrieved["dft_results"][0]
                 assert "semantic" in retrieved["dft_results"][0]["score_breakdown"]
+                for evidence_type in ["catalyst_samples", "electrochemical_performance", "mechanism_claims"]:
+                    item = retrieved[evidence_type][0]
+                    assert item["source_type"]
+                    assert item["source_id"]
+                    assert item["review_status"] == "verified"
+                    assert item["page"] == 1
+                    assert item["evidence_locator"]["locator_status"] == "exact_page"
 
                 draft = Writer(session, settings=Settings(writer_backend="rule")).write(
                     topic="Fe-N4 single-atom catalysts for lithium-sulfur cathodes",
@@ -152,6 +174,8 @@ def test_retriever_writer_and_citation_guard_work_together():
                     retrieved=retrieved,
                 )
                 assert prompt_payload["evidence_pack"]["dft_results"]
+                assert any(item["source_type"] == "catalyst_samples" for item in prompt_payload["evidence_pack"]["introduction"])
+                assert all("source_id" in item for item in prompt_payload["evidence_pack"]["introduction"])
                 assert prompt_payload["numeric_guardrails"]
                 assert all("summary" in item for item in prompt_payload["evidence_pack"]["dft_results"])
                 assert all("numeric_values" in item for item in prompt_payload["evidence_pack"]["discussion"])
@@ -176,8 +200,8 @@ def test_retriever_writer_and_citation_guard_work_together():
                     paper_ids=[paper.id],
                 )
                 assert llm_draft["backend_used"] == "openai_compatible"
-                assert llm_draft["llm_status"] == "missing_configuration"
-                assert "writer_api_base" in llm_draft["llm_diagnostics"]["missing_configuration"]
+                assert llm_draft["llm_status"] == "disabled"
+                assert llm_draft["llm_diagnostics"]["mode"] == "disabled"
 
                 llm_status = Writer(
                     session,
@@ -188,8 +212,8 @@ def test_retriever_writer_and_citation_guard_work_together():
                     ),
                 ).status()
                 assert llm_status["backend_used"] == "openai_compatible"
-                assert llm_status["llm_status"] == "missing_configuration"
-                assert "writer_api_base" in llm_status["llm_diagnostics"]["missing_configuration"]
+                assert llm_status["llm_status"] == "disabled"
+                assert llm_status["llm_diagnostics"]["mode"] == "disabled"
 
                 guard = CitationGuard()
                 verdict = guard.validate("The adsorption energy is -9.99 eV.", retrieved)
@@ -293,11 +317,9 @@ def test_openai_compatible_backend_diagnostics_and_parsing():
         rule_sections={"discussion": "rule discussion"},
         messages=[{"role": "user", "content": "hello"}],
     )
-    assert missing["llm_status"] == "missing_configuration"
-    assert "writer_api_base" in (missing["llm_error"] or "")
-    assert "writer_api_key" in (missing["llm_error"] or "")
-    assert missing["llm_diagnostics"]["mode"] == "missing_configuration"
-    assert "writer_api_base" in missing["llm_diagnostics"]["missing_configuration"]
+    assert missing["llm_status"] == "disabled"
+    assert "IDE/MCP AI" in (missing["llm_error"] or "")
+    assert missing["llm_diagnostics"]["mode"] == "disabled"
 
     assert backend._build_chat_completions_url("https://api.example.com/v1") == "https://api.example.com/v1/chat/completions"
     assert backend._build_chat_completions_url("https://api.example.com/v1/chat/completions") == "https://api.example.com/v1/chat/completions"

@@ -67,6 +67,11 @@ class DFTResultListModel(BaseModel):
 # 规则定义
 # ---------------------------------------------------------------------------
 
+# M4: 数值捕获正则 — 支持科学计数法
+# 原始: [\-\+]?\d+[.]?\d*
+# 增强: 同时匹配 "1.5 × 10^3", "2.3e-4", 以及普通小数
+_NUMERIC_PAT = r"(?:[\-\+]?\d+(?:\.\d+)?(?:\s*[×x·]\s*10\^[\-\+]?\d+|[\-]?[\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207b]+)?|[eE][\-\+]?\d+|[\-\+]?\d+[.]?\d*)"
+
 # 吸附质关键词 → 标准名映射
 ADSORBATE_MAP: dict[str, str] = {
     "s8": "S8",
@@ -125,10 +130,15 @@ TABLE_HEADER_CATEGORY_RULES: list[tuple[re.Pattern[str], str, str | None]] = [
 
 NUMERIC_CATEGORIES = {
     "adsorption_energy",
+    "activation_energy",
+    "binding_energy",
+    "cohesive_energy",
     "formation_energy",
+    "fluorination_energy",
     "gibbs_free_energy_change",
     "reaction_barrier",
     "migration_barrier",
+    "permeation_barrier",
     "li2s_decomposition_barrier",
     "li2s_nucleation_barrier",
     "bader_charge",
@@ -139,6 +149,19 @@ NUMERIC_CATEGORIES = {
     "magnetic_moment",
     "limiting_potential",
     "overpotential",
+    "lattice_constant",
+    "interlayer_distance",
+    "pore_diameter",
+    "permeance",
+    "adsorption_molecule_fraction",
+    "young_modulus",
+    "seebeck_coefficient",
+    "zt",
+    "electrical_conductance",
+    "thermal_conductance",
+    "thermal_conductivity",
+    "carrier_mobility",
+    "optical_absorption_peak",
 }
 TABLE_ONLY_NUMERIC_CATEGORIES = {"limiting_potential", "overpotential"}
 NON_NUMERIC_DFT_CLAIM_CATEGORIES = {"dos_claim", "charge_density_difference_claim"}
@@ -200,6 +223,27 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
     "charge_density_difference_claim": [
         r"(?:charge\s+density\s+difference|\u0394\u03c1|CDD|electron\s+density\s+difference).{0,150}",
         ],
+    # Text/table LLM extraction categories for computational-material papers.
+    # Rule patterns are intentionally empty; these are populated by LLM output
+    # and persisted through the same DFTResult candidate/review chain.
+    "activation_energy": [],
+    "binding_energy": [],
+    "cohesive_energy": [],
+    "fluorination_energy": [],
+    "permeation_barrier": [],
+    "lattice_constant": [],
+    "interlayer_distance": [],
+    "pore_diameter": [],
+    "permeance": [],
+    "adsorption_molecule_fraction": [],
+    "young_modulus": [],
+    "seebeck_coefficient": [],
+    "zt": [],
+    "electrical_conductance": [],
+    "thermal_conductance": [],
+    "thermal_conductivity": [],
+    "carrier_mobility": [],
+    "optical_absorption_peak": [],
 }
 
 GRAPHITE_DEFECT_CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
@@ -312,7 +356,129 @@ def _extract_sentence_around_match(text: str, match_start: int, match_end: int) 
 
 
 def _match_crosses_sentence(match_text: str) -> bool:
-    return bool(re.search(r"\.\s+[A-Z]", match_text or ""))
+    """检测正则匹配文本是否跨越了句子边界.
+
+    跨句匹配是 DFT 提取产生假阳性的主要原因之一：
+    正则中 .{0,80} / .{0,120} 等宽泛量词可能把分属不同句子的
+    "属性名" 和 "数值" 错误地关联在一起。
+
+    检测策略：在匹配文本内部寻找 ". 大写字母" 或 "? 大写字母"
+    的模式（排除首字符，因为匹配开始位置可能在句中）。
+    """
+    text = match_text or ""
+    if len(text) < 4:
+        return False
+    # 排除首字符（匹配起点可能在句中），检测内部是否有句号+大写
+    inner = text[1:]
+    if re.search(r"[.!?]\s+[A-Z]", inner):
+        return True
+    # 分号+大写也视为跨句
+    if re.search(r";\s+[A-Z]", inner):
+        return True
+    return False
+
+
+def _parse_scientific_notation(text: str) -> float | None:
+    """解析科学计数法表达的数值.
+
+    支持格式:
+      - "1.5 × 10^3" / "1.5 × 10⁻³"  (LaTeX / Unicode 上标)
+      - "1.5e3" / "1.5E-4"             (编程风格)
+      - "1.5 × 10³"                     (Unicode 上标数字)
+      - "1.5·10^3"                       (中间点)
+      - "1.5 x 10^3"                     (小写 x)
+      - "10³" / "10⁻³"                  (纯上标)
+
+    Returns:
+        解析后的 float，或 None（如果不是科学计数法格式）
+    """
+    if not text:
+        return None
+    text = text.strip()
+
+    # Unicode 上标数字 → 普通数字 + 负号处理
+    superscript_map = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
+    normalized = text.translate(superscript_map)
+
+    # 模式 1: "1.5 × 10^3" / "1.5 x 10^-4" / "1.5·10^3"
+    m = re.match(
+        r"^\s*([-\+]?\d+(?:\.\d+)?)\s*[×x·]\s*10\^([-\+]?\d+)\s*$",
+        normalized,
+    )
+    if m:
+        try:
+            mantissa = float(m.group(1))
+            exponent = int(m.group(2))
+            return mantissa * (10 ** exponent)
+        except (ValueError, OverflowError):
+            return None
+
+    # 模式 2: "1.5e3" / "1.5E-4" (Python 原生)
+    m = re.match(r"^\s*([-\+]?\d+(?:\.\d+)?)[eE]([-\+]?\d+)\s*$", normalized)
+    if m:
+        try:
+            return float(normalized)
+        except (ValueError, OverflowError):
+            return None
+
+    # 模式 3: 纯 "10^3" / "10^-4"（无尾数）
+    m = re.match(r"^\s*10\^([-\+]?\d+)\s*$", normalized)
+    if m:
+        try:
+            exponent = int(m.group(1))
+            return float(10 ** exponent)
+        except (ValueError, OverflowError):
+            return None
+
+    return None
+
+
+def _parse_numeric_value(text: str) -> float | None:
+    """统一的数值解析入口：先尝试科学计数法，再走普通浮点.
+
+    这是对 _parse_float 的增强替代，用于表格单元格和 LLM 输出字段。
+    规则提取器中的正则已捕获简单小数，但表格/LLM 渠道可能拿到
+    "1.5 × 10^3" 这样的原始值。
+    """
+    if not text:
+        return None
+    normalized = _normalize_numeric_text(text).strip()
+
+    # 先试科学计数法
+    sci = _parse_scientific_notation(normalized)
+    if sci is not None:
+        return sci
+
+    # 检测 "数字 × 10^指数" 嵌入在更大字符串中
+    m = re.search(
+        r"([-\+]?\d+(?:\.\d+)?)\s*[×x·]\s*10\^([-\+]?\d+)",
+        normalized,
+    )
+    if m:
+        try:
+            mantissa = float(m.group(1))
+            exponent = int(m.group(2))
+            return mantissa * (10 ** exponent)
+        except (ValueError, OverflowError):
+            pass
+
+    # Unicode 上标版本
+    superscript_map = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
+    norm2 = normalized.translate(superscript_map)
+    m = re.search(
+        r"([-\+]?\d+(?:\.\d+)?)\s*[×x·]\s*10\^([-\+]?\d+)",
+        norm2,
+    )
+    if m:
+        try:
+            mantissa = float(m.group(1))
+            exponent = int(m.group(2))
+            return mantissa * (10 ** exponent)
+        except (ValueError, OverflowError):
+            pass
+
+    # 兜底：普通浮点
+    return _parse_float(normalized)
 
 
 def _normalize_numeric_text(text: str) -> str:
@@ -344,6 +510,12 @@ def _parse_uncertainty_float(value: str | None) -> float | None:
 
 
 def _parse_match_float(match: re.Match[str], group_index: int) -> float | None:
+    """从正则匹配组中解析数值，增强支持科学计数法.
+
+    M4 修复：原始 _parse_match_float 仅做 float()，无法处理
+    正则匹配到的 "1.5 × 10^3" 或 "2.3e-4" 等科学计数法字符串。
+    现在先尝试 _parse_numeric_value，失败再走原始逻辑。
+    """
     value = match.group(group_index)
     if value is None:
         return None
@@ -351,13 +523,67 @@ def _parse_match_float(match: re.Match[str], group_index: int) -> float | None:
     start = match.start(group_index)
     if normalized.startswith("-") and start > 0 and match.string[start - 1].isdigit():
         normalized = normalized[1:]
-    return float(normalized)
+    # M4: 先尝试科学计数法解析
+    sci = _parse_numeric_value(normalized)
+    if sci is not None:
+        return sci
+    # 兜底：原始逻辑
+    try:
+        return float(normalized)
+    except (ValueError, OverflowError):
+        return None
 
 
 def _looks_like_reference_token(value: str | None) -> bool:
     if not value:
         return False
     return re.fullmatch(r"\[?\d+(?:[-,]\d+)*\]?", value.strip()) is not None
+
+
+def _looks_like_safe_table_label(value: str | None) -> bool:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return False
+    if len(text) > 48:
+        return False
+    if any(mark in text for mark in (";", ":", "=")):
+        return False
+    token_count = len(re.findall(r"[A-Za-z0-9\u4e00-\u9fff\-\+/().]+", text))
+    if token_count > 6:
+        return False
+    lowered = text.lower()
+    if re.search(r"\b(changed|increase[sd]?|decrease[sd]?|stable|unstable|discussed|observed|shows?|indicates?)\b", lowered):
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9\u4e00-\u9fff\-\+/().\s]+", text))
+
+
+def _category_semantic_conflict(category: str, evidence: str, value: float | None, unit: str | None) -> bool:
+    lowered = (evidence or "").lower()
+    normalized_unit = (unit or "").strip().lower()
+    dimensional_markers = (
+        "diameter",
+        "pore size",
+        "pore diameter",
+        "lattice constant",
+        "lattice parameter",
+        "bond length",
+        "interlayer distance",
+        "thickness",
+        "width",
+        "length",
+        "nm",
+        "angstrom",
+        "å",
+        " a ",
+    )
+    if category in {"band_gap", "work_function"}:
+        if normalized_unit in {"a", "å", "nm", "pm"}:
+            return True
+        if any(marker in lowered for marker in dimensional_markers):
+            return True
+        if category == "band_gap" and value is not None and value > 10:
+            return True
+    return False
 
 
 def _should_keep_result(category: str, adsorbate: str | None, value: float | None, evidence: str) -> bool:
@@ -538,18 +764,29 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
             row_text = " | ".join(row)
             adsorbate = None
             if adsorbate_col is not None and adsorbate_col < len(row):
-                adsorbate = _resolve_adsorbate(row[adsorbate_col]) or row[adsorbate_col].strip() or None
+                raw_adsorbate = row[adsorbate_col].strip()
+                adsorbate = _resolve_adsorbate(raw_adsorbate)
+                if adsorbate is None and _looks_like_safe_table_label(raw_adsorbate):
+                    adsorbate = raw_adsorbate or None
             for col_idx, (category, default_unit) in category_columns.items():
                 if col_idx >= len(row):
                     continue
                 cell = row[col_idx].strip()
                 if not cell:
                     continue
+                # M4 修复：支持科学计数法（1.5 × 10^3, 2.3e-4, 1.5×10³ 等）
                 cell = _normalize_numeric_text(cell)
-                value_match = re.search(r"[-+]?\d*\.?\d+", cell)
+                value_match = re.search(
+                    r"(?:"
+                    r"[-+]?\d+(?:\.\d+)?\s*[×x·]\s*10\^[-+]?\d+"  # 1.5 × 10^3
+                    r"|[-+]?\d+(?:\.\d+)?[eE][-+]?\d+"              # 1.5e3
+                    r"|[-+]?\d*\.?\d+"                               # 普通小数
+                    r")",
+                    cell,
+                )
                 if category in NUMERIC_CATEGORIES and not value_match:
                     continue
-                value = _parse_float(value_match.group(0)) if value_match else None
+                value = _parse_numeric_value(value_match.group(0)) if value_match else None
                 unit_match = re.search(r"(eV|meV|kJ/mol|kcal/mol|e[\u2212-]?|electrons?)", cell, re.IGNORECASE)
                 unit = None
                 if unit_match:
@@ -560,6 +797,8 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                 header = headers[col_idx]
                 evidence = f"{header}: {cell}; row: {row_text}"
                 adsorbate_value = _resolve_adsorbate(row_text) or adsorbate or _resolve_adsorbate(evidence)
+                if _category_semantic_conflict(category, evidence, value, unit):
+                    continue
                 if not _should_keep_result(category, adsorbate_value, value, evidence):
                     continue
                 results.append(
@@ -642,7 +881,15 @@ def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, p
                     )
                 )
                 continue
-            value_match = re.search(r"[-+]?\d*\.?\d+", cell)
+            # M4 修复：支持科学计数法
+            value_match = re.search(
+                r"(?:"
+                r"[-+]?\d+(?:\.\d+)?\s*[×x·]\s*10\^[-+]?\d+"
+                r"|[-+]?\d+(?:\.\d+)?[eE][-+]?\d+"
+                r"|[-+]?\d*\.?\d+"
+                r")",
+                cell,
+            )
             if not value_match:
                 continue
             unit_match = re.search(r"(V|eV|meV)", cell, re.IGNORECASE)
@@ -652,7 +899,7 @@ def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, p
                 DFTResultItem(
                     category=category,
                     adsorbate=_resolve_adsorbate(evidence),
-                    value=_parse_float(value_match.group(0)),
+                    value=_parse_numeric_value(value_match.group(0)),
                     unit=unit,
                     reaction_step=context,
                     evidence_text=evidence[:450],
@@ -811,11 +1058,17 @@ class DFTResultsExtractor:
             logger.info("Running hybrid LLM DFT extraction")
             system_prompt = (
                 "You are an expert materials science data extractor.\n"
-                "Extract all explicit DFT calculation results for single/dual-atom catalysts (SAC/DAC) and Li-S battery applications.\n"
+                "Extract all explicit DFT and first-principles calculation results for computational materials papers, "
+                "including graphdiyne/graphyne systems, single/dual-atom catalysts (SAC/DAC), and Li-S battery applications.\n"
                 "Categories: adsorption_energy, formation_energy, gibbs_free_energy_change, reaction_barrier, migration_barrier, "
                 "li2s_decomposition_barrier, li2s_nucleation_barrier, bader_charge, charge_transfer, d_band_center, "
-                "band_gap, work_function, magnetic_moment, dos_claim, charge_density_difference_claim.\n"
-                "Only return claims that are directly supported by the provided text, captions, or tables.\n"
+                "band_gap, work_function, magnetic_moment, activation_energy, binding_energy, cohesive_energy, fluorination_energy, "
+                "permeation_barrier, lattice_constant, interlayer_distance, pore_diameter, permeance, "
+                "adsorption_molecule_fraction, young_modulus, seebeck_coefficient, zt, electrical_conductance, "
+                "thermal_conductance, thermal_conductivity, carrier_mobility, optical_absorption_peak, dos_claim, "
+                "charge_density_difference_claim.\n"
+                "Only return claims that are directly supported by the provided text or tables.\n"
+                "Do not infer values from images, plots, graphical symbols, or figure-only content.\n"
                 "For numeric categories, keep the exact value and unit from the paper; do not infer missing numbers."
             )
             text_to_process = self._build_focus_text(doc)
@@ -833,10 +1086,9 @@ class DFTResultsExtractor:
         abstract = getattr(doc, "abstract", "") or ""
         sections = getattr(doc, "sections", []) or []
         tables = getattr(doc, "tables", []) or []
-        figures = getattr(doc, "figures", []) or []
         markdown = getattr(doc, "markdown", "") or ""
         section_regex = re.compile(
-            r"(comput|dft|theor|result|discuss|mechan|electronic|dos|band|adsor|free energy|barrier|migration|formation|vacancy|defect|graphene|graphite|stone|bader|charge)",
+            r"(comput|dft|first.princip|theor|result|discuss|mechan|electronic|dos|band|adsor|free energy|barrier|migration|formation|vacancy|defect|graphene|graphite|graphdiyne|graphyne|gdy|thermoelectric|optical|lattice|cohesive|binding|permeation|bader|charge)",
             re.IGNORECASE,
         )
         parts: list[str] = []
@@ -854,10 +1106,6 @@ class DFTResultsExtractor:
             content = getattr(tbl, "markdown_content", "") or ""
             if content or caption:
                 parts.append(f"## Table: {caption}\n{content[:3000]}")
-        for fig in figures[:12]:
-            caption = getattr(fig, "caption", "") or ""
-            if caption and section_regex.search(caption):
-                parts.append(f"## Figure Caption\n{caption[:1200]}")
         if not parts and markdown:
             parts.append(markdown[:max_chars])
         combined = "\n\n".join(parts)
@@ -952,7 +1200,10 @@ class DFTResultsExtractor:
             else:
                 pattern, vg, ug = pat_tuple, 1, 2
             for m in re.finditer(pattern, text, re.IGNORECASE):
-                if category in GRAPHITE_DEFECT_CATEGORY_RULES and _match_crosses_sentence(m.group(0)):
+                # M3 修复：对所有类别做跨句检测，防止 .{0,80} 宽泛量词跨句误匹配
+                # 例外：dos_claim / charge_density_difference_claim 是声明型类别，
+                # 匹配文本天然跨越多句，不做跨句过滤
+                if category not in NON_NUMERIC_DFT_CLAIM_CATEGORIES and _match_crosses_sentence(m.group(0)):
                     continue
                 try:
                     val = _parse_match_float(m, vg) if vg else None

@@ -241,6 +241,12 @@ def canonicalize_persisted_artifact_reference(
     except ValueError:
         pass
 
+    backend_data_root = BACKEND_ROOT / "data"
+    try:
+        return resolved.relative_to(backend_data_root).as_posix()
+    except ValueError:
+        pass
+
     try:
         return resolved.relative_to(library_root).as_posix()
     except ValueError:

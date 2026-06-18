@@ -381,12 +381,17 @@ def get_active_database_info() -> dict[str, Any]:
 
 
 def activate_active_library_database() -> dict[str, Any]:
-    """Initialize the configured database without runtime SQLite auto-switching."""
+    """Ensure the configured database is initialized and return its info.
+
+    On the first call this runs full schema creation + migrations.
+    Subsequent calls skip init_db (the guard in init_db detects duplicates),
+    making library switching fast.
+    """
     from app.config import get_settings
     from app.db.session import init_db
 
     settings = get_settings()
-    init_db(settings.database_url)
+    init_db(settings.database_url)  # idempotent — skips if already initialized
     info = get_active_database_info()
     return info
 

@@ -277,9 +277,62 @@ def test_artifact_reliability_audit_api_is_read_only(audit_env):
     assert list_response.status_code == 200
     list_payload = list_response.json()
     assert list_payload["metadata"]["read_only"] is True
+    assert list_payload["metadata"]["search_scope"] == "all_libraries"
     assert list_payload["summary"]["paper_count"] == 1
     assert list_payload["summary"]["locator_issue_counts"]["missing_page"] == 1
     assert _current_snapshot(Session, paper_id) == before
+
+
+def test_artifact_reliability_audit_filters_by_library_name(audit_env):
+    _, _, Session = audit_env
+    with Session() as session:
+        paper_a = Paper(title="Library A artifact paper", pdf_path="a.pdf", library_name="库A")
+        paper_b = Paper(title="Library B artifact paper", pdf_path="b.pdf", library_name="库B")
+        session.add_all([paper_a, paper_b])
+        session.flush()
+        session.add_all(
+            [
+                EvidenceLocator(
+                    paper_id=paper_a.id,
+                    source_type="text",
+                    target_type="dft_results",
+                    target_id="a-row",
+                    field_name="value",
+                    evidence_text="Library A missing page evidence.",
+                    page=None,
+                    locator_status="missing_page",
+                    locator_confidence=0.2,
+                    parser_source="test",
+                ),
+                EvidenceLocator(
+                    paper_id=paper_b.id,
+                    source_type="text",
+                    target_type="dft_results",
+                    target_id="b-row",
+                    field_name="value",
+                    evidence_text="Library B missing page evidence.",
+                    page=None,
+                    locator_status="missing_page",
+                    locator_confidence=0.2,
+                    parser_source="test",
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/workbench/artifact-reliability", params={"library_name": "库A"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata"]["read_only"] is True
+    assert payload["metadata"]["library_name"] == "库A"
+    assert payload["metadata"]["search_scope"] == "library"
+    assert payload["summary"]["paper_count"] == 1
+    assert len(payload["rows"]) == 1
+    assert payload["rows"][0]["title"] == "Library A artifact paper"
+    assert payload["summary"]["locator_issue_counts"]["missing_page"] == 1
+    assert all(row["title"] != "Library B artifact paper" for row in payload["rows"])
 
 
 def test_locator_reliability_summary_classifies_core_statuses():

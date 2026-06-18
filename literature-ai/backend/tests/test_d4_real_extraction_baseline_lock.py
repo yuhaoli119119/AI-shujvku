@@ -178,7 +178,7 @@ def test_text_only_writing_evidence_without_safe_review_payload_is_blocked(tmp_p
         engine.dispose()
 
 
-def test_active_database_info_uses_temp_registry_and_temp_sqlite_only(tmp_path, monkeypatch):
+def test_active_database_info_ignores_temp_sqlite_when_configured_database_is_postgresql(tmp_path, monkeypatch):
     registry_path = tmp_path / "library.json"
     active_root = tmp_path / "libraries" / "default"
     active_root.mkdir(parents=True)
@@ -218,8 +218,9 @@ def test_active_database_info_uses_temp_registry_and_temp_sqlite_only(tmp_path, 
 
     info = active_database.get_active_database_info()
 
-    assert info["active_library_db_path"] == str(db_path.resolve())
-    assert info["effective_db_path"] == str(db_path.resolve())
-    assert info["effective_db_papers_total"] == 1
-    assert info["matches_active_library_db_path"] is True
-    assert str(tmp_path.resolve()) in info["effective_db_path"]
+    assert info["configured_db_kind"] == "postgresql"
+    assert info["active_library_db_path"] is None
+    assert info["active_library_root"] == str(active_root.resolve())
+    assert info["effective_db_path"] is None
+    assert info["effective_db_papers_total"] == 0
+    assert info["matches_active_library_db_path"] is False

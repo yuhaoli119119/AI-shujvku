@@ -150,6 +150,26 @@ def _normalize_energy_value(value: float | None, unit: str | None, property_type
     return None, None
 
 
+def normalize_dft_display_value(value: float | None, unit: str | None) -> tuple[float | None, str | None]:
+    """Normalize final DFT display/export values while keeping raw values separately."""
+    if value is None:
+        return value, unit
+    unit_text = str(unit or "").strip()
+    unit_key = unit_text.lower().replace(" ", "")
+    if unit_key == "mev":
+        return value / 1000.0, "eV"
+    if unit_key == "ev":
+        return value, "eV"
+    if "gpu" in unit_key:
+        ascii_key = "".join(ch for ch in unit_key if ch.isascii())
+        if any(marker in ascii_key for marker in ("10^3", "x10^3", "103")) or (
+            ascii_key.startswith("10") and ascii_key != "gpu"
+        ):
+            return value * 1000.0, "GPU"
+        return value, "GPU"
+    return value, unit_text or unit
+
+
 def _dft_quality_row_payload(row: DR, paper: P, gate) -> dict:
     reasons = list(gate.reasons)
     has_blocking_review_reason = bool({"missing_review", "unsafe_review"} & set(reasons))
@@ -257,8 +277,6 @@ def build_dft_ml_dataset(
     for dr, paper, gate in eligible_rows:
         paper_id_str = str(paper.id)
         direct_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
-        fallback_catalyst = catalysts_by_paper.get(paper_id_str, [None])[0]
-        primary_catalyst = direct_catalyst or fallback_catalyst
         paper_settings = settings_by_paper.get(paper_id_str, [])
 
         norm_val, norm_unit = _normalize_energy_value(dr.value, dr.unit, dr.property_type)
@@ -276,7 +294,7 @@ def build_dft_ml_dataset(
                     "normalized_value": norm_val,
                     "normalized_unit": norm_unit,
                 },
-                "catalyst": _catalyst_payload(primary_catalyst),
+                "catalyst": _catalyst_payload(direct_catalyst),
                 "catalyst_candidates": [
                     payload
                     for payload in (_catalyst_payload(catalyst) for catalyst in catalysts_by_paper.get(paper_id_str, []))
@@ -364,6 +382,8 @@ def build_dft_csv_rows(
             "adsorbate",
             "value",
             "unit",
+            "raw_value",
+            "raw_unit",
             "reaction_step",
             "source_section",
             "source_figure",
@@ -384,6 +404,7 @@ def build_dft_csv_rows(
         gate_results.append(gate)
         if not gate.eligible:
             continue
+        display_value, display_unit = normalize_dft_display_value(dr.value, dr.unit)
         authors_str = ", ".join(paper.authors) if isinstance(paper.authors, list) else (paper.authors or "")
         writer.writerow(
             [
@@ -395,6 +416,8 @@ def build_dft_csv_rows(
                 authors_str,
                 dr.property_type or "",
                 dr.adsorbate or "",
+                display_value if display_value is not None else "",
+                display_unit or "",
                 dr.value if dr.value is not None else "",
                 dr.unit or "",
                 dr.reaction_step or "",

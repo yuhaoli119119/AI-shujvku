@@ -6,7 +6,7 @@
 GET /api/papers/export/dft-dataset
 ```
 
-The endpoint keeps the existing safety gate strict: only DFT rows with `safe_verified` human review, required evidence text/reference, and an exact PDF locator are included in `records`. Blocked candidates are summarized in `metadata.blocked_reasons`; they are not exported as training facts.
+The endpoint keeps the existing safety gate strict: only DFT rows with `safe_verified` human review, required evidence text/reference, and an exact PDF locator are included in `records`. Text-only rows with paper/section/evidence text but no PDF page remain review candidates only. Blocked candidates are summarized in `metadata.blocked_reasons`; they are not exported as training facts.
 
 ## Top-Level Shape
 

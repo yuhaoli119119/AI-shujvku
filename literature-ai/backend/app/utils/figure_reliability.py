@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import Settings
-from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
 
 
 def build_figure_image_review(
@@ -18,7 +18,12 @@ def build_figure_image_review(
     prov = _get(figure, "prov") or []
     bbox = first_bbox(prov)
     bbox_size = bbox_size_points(bbox)
-    full_page_image_path = first_prov_value(prov, "full_page_image_path")
+    full_page_image_path = canonical_full_page_snapshot_reference(figure, settings=settings)
+    full_page_asset_path = (
+        resolve_persisted_artifact_path(full_page_image_path, category="figures", settings=settings)
+        if check_asset_exists and full_page_image_path
+        else None
+    )
     asset_path = (
         resolve_persisted_artifact_path(image_path, category="figures", settings=settings)
         if check_asset_exists
@@ -36,7 +41,7 @@ def build_figure_image_review(
         flags.append("missing_parser_bbox")
     if _get(figure, "page") is None:
         flags.append("missing_pdf_page")
-    if not full_page_image_path:
+    if not full_page_image_path or (check_asset_exists and full_page_asset_path is None):
         flags.append("missing_full_page_snapshot")
     if is_small_crop(pixel_size, bbox_size):
         flags.append("small_crop_or_subfigure")
@@ -58,6 +63,7 @@ def build_figure_image_review(
         "flags": list(dict.fromkeys(flags)),
         "local_path": str(asset_path) if asset_path else None,
         "full_page_image_path": full_page_image_path,
+        "local_full_page_path": str(full_page_asset_path) if full_page_asset_path else None,
         "file_size_bytes": file_size,
         "pixel_size": pixel_size if isinstance(pixel_size, dict) else None,
         "bbox_points": bbox,
@@ -69,6 +75,35 @@ def build_figure_image_review(
         if flags
         else "Parser crop is available; still treat it as an unverified figure candidate.",
     }
+
+
+def canonical_full_page_snapshot_reference(figure: Any, *, settings: Settings) -> str | None:
+    prov = _get(figure, "prov") or []
+    raw = first_prov_value(prov, "full_page_image_path")
+    page_no = _get(figure, "page")
+    paper_id = _get(figure, "paper_id")
+    resolved = (
+        resolve_persisted_artifact_path(raw, category="figures", settings=settings)
+        if raw
+        else None
+    )
+    if resolved is None and paper_id and page_no:
+        fallback_roots = [
+            settings.storage_root,
+            Path(__file__).resolve().parents[2] / "data" / "storage",
+        ]
+        page_name = f"page_{int(page_no):03d}.png"
+        for root in fallback_roots:
+            candidate = root / "by_id" / str(paper_id) / "pages" / page_name
+            if candidate.exists():
+                resolved = candidate
+                break
+    canonical = canonicalize_persisted_artifact_reference(
+        resolved or raw,
+        category="figures",
+        settings=settings,
+    )
+    return canonical
 
 
 def first_bbox(prov: list[Any] | None) -> dict[str, Any] | None:

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import Settings
 from app.db.models import (
     Base,
+    CatalystSample,
     DFTResult,
     EvidenceSpan,
     ExternalAnalysisCandidate,
@@ -303,5 +304,59 @@ def test_unreviewed_extraction_fact_is_not_retrieved_for_writing(tmp_path):
 
             assert len(retrieved["mechanism_claims"]) == 1
             assert retrieved["mechanism_claims"][0]["claim_type"] == "safe"
+    finally:
+        engine.dispose()
+
+
+def test_unreviewed_catalyst_sample_is_not_retrieved_for_writing(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            unsafe = CatalystSample(
+                paper_id=paper.id,
+                name="Unsafe Fe-N4 catalyst",
+                catalyst_type="single_atom",
+                metal_centers=["Fe"],
+                evidence_strength="Unsafe catalyst evidence should not enter writing.",
+            )
+            safe = CatalystSample(
+                paper_id=paper.id,
+                name="Safe Fe-N4 catalyst",
+                catalyst_type="single_atom",
+                metal_centers=["Fe"],
+                support="N-doped carbon",
+                evidence_strength="Safe Fe-N4 catalyst evidence.",
+            )
+            session.add_all([unsafe, safe])
+            session.flush()
+            session.add_all(
+                [
+                    EvidenceSpan(
+                        paper_id=paper.id,
+                        object_type="catalyst_samples",
+                        object_id=str(safe.id),
+                        text="Safe Fe-N4 catalyst evidence.",
+                        page=1,
+                    ),
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="catalyst_samples",
+                        target_id=str(safe.id),
+                        field_name="name",
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text="Safe Fe-N4 catalyst evidence.",
+                    ),
+                ]
+            )
+            session.commit()
+
+            retrieved = Retriever(session).retrieve("safe Fe-N4 catalyst evidence", [paper.id], 5)
+
+            assert len(retrieved["catalyst_samples"]) == 1
+            assert retrieved["catalyst_samples"][0]["name"] == "Safe Fe-N4 catalyst"
+            assert retrieved["catalyst_samples"][0]["source_type"] == "catalyst_sample"
+            assert retrieved["catalyst_samples"][0]["review_status"] == "verified"
     finally:
         engine.dispose()

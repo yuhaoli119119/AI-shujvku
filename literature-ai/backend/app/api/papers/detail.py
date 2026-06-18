@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -39,18 +41,52 @@ class RelationshipCreateResponse(BaseModel):
     status: str
     id: UUID
 
+
+class DFTImportedOpinionApplyRequest(BaseModel):
+    opinion: dict[str, Any]
+    reviewer: str | None = None
+
+
+class ManualReviewProgressRequest(BaseModel):
+    module: str
+    completed: bool
+    reviewer: str | None = None
+
 from app.services.codex_context_service import CodexContextService
 from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.llm_service import LLMService
+from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.pdf_image_extractor import PdfImageExtractor
+from app.services.verification_session_service import VerificationSessionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 router = APIRouter()
+
+
+def _copy_paper_detail(detail: PaperDetailResponse, updates: dict) -> PaperDetailResponse:
+    if hasattr(detail, "model_copy"):
+        return detail.model_copy(update=updates)
+    return detail.copy(update=updates)
+
+
+def _lightweight_paper_detail(detail: PaperDetailResponse) -> PaperDetailResponse:
+    """Keep the default detail payload small; heavy text is loaded only on demand."""
+    return _copy_paper_detail(
+        detail,
+        {
+            "sections": [],
+            "paper_notes": [],
+            "outgoing_relationships": [],
+            "incoming_relationships": [],
+            "references": [],
+            "full_translation_zh": None,
+        },
+    )
 
 
 TRANSLATION_SYSTEM_PROMPT = (
@@ -77,10 +113,35 @@ def _build_translation_prompt(title: str, text: str) -> str:
 
 def _source_only_translation_notice(text: str) -> str:
     return (
-        "【未配置 Writer LLM，当前显示原文占位而非正式译文。"
-        "请在设置页配置 Writer API 后重新生成中文译文。】\n\n"
+        "【网页端翻译 LLM 已停用，当前显示原文占位而非正式译文。"
+        "如需中文译文，请在 IDE AI 中基于原文和证据链整理。】\n\n"
         + text
     )
+
+
+def _manual_review_progress(data: dict[str, Any] | None) -> dict[str, Any]:
+    source = data if isinstance(data, dict) else {}
+    progress = source.get("manual_review_progress") if isinstance(source.get("manual_review_progress"), dict) else {}
+
+    def normalize_entry(module: str) -> dict[str, Any]:
+        raw = progress.get(module)
+        if isinstance(raw, dict):
+            return {
+                "completed": bool(raw.get("completed")),
+                "updated_at": raw.get("updated_at"),
+                "updated_by": raw.get("updated_by"),
+            }
+        return {
+            "completed": bool(raw),
+            "updated_at": None,
+            "updated_by": None,
+        }
+
+    return {
+        "content": normalize_entry("content"),
+        "figures": normalize_entry("figures"),
+        "dft": normalize_entry("dft"),
+    }
 
 
 def _collect_translation_sources(
@@ -151,11 +212,91 @@ def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, sett
 
 
 @router.get("/{paper_id}", response_model=PaperDetailResponse)
-async def get_paper(paper_id: UUID, session: Session = Depends(get_db_session)) -> PaperDetailResponse:
+async def get_paper(
+    paper_id: UUID,
+    mode: str = Query("full", pattern="^(light|full)$"),
+    session: Session = Depends(get_db_session),
+) -> PaperDetailResponse:
     detail = PaperQueryService(session).get_paper_detail(paper_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
+    if mode == "light":
+        return _lightweight_paper_detail(detail)
     return detail
+
+
+@router.post("/{paper_id}/settle-ai-dft-reviews")
+async def settle_ai_dft_reviews(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    summary = VerificationSessionService(session, settings).settle_ai_dft_reviews_for_paper(
+        paper_id=paper_id,
+        reviewer="literature_library_dft",
+    )
+    if (
+        summary.get("waiting_second_ai_count", 0) == 0
+        and summary.get("need_third_ai_count", 0) == 0
+        and summary.get("need_repair_count", 0) == 0
+    ):
+        analysis = dict(paper.comprehensive_analysis or {})
+        progress = _manual_review_progress(analysis)
+        progress["dft"] = {
+            "completed": True,
+            "updated_at": datetime.now(UTC).isoformat(),
+            "updated_by": "literature_library_dft",
+        }
+        analysis["manual_review_progress"] = progress
+        paper.comprehensive_analysis = analysis
+        session.add(paper)
+    session.commit()
+    return summary
+
+
+@router.post("/{paper_id}/manual-review-progress")
+async def set_manual_review_progress(
+    paper_id: UUID,
+    payload: ManualReviewProgressRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    module = str(payload.module or "").strip().lower()
+    if module not in {"content", "figures", "dft"}:
+        raise HTTPException(status_code=400, detail="module must be one of: content, figures, dft")
+    analysis = dict(paper.comprehensive_analysis or {})
+    progress = _manual_review_progress(analysis)
+    progress[module] = {
+        "completed": bool(payload.completed),
+        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_by": str(payload.reviewer or "literature_library").strip() or "literature_library",
+    }
+    analysis["manual_review_progress"] = progress
+    paper.comprehensive_analysis = analysis
+    session.add(paper)
+    session.add(
+        AuditLog(
+            paper_id=paper_id,
+            action="set_manual_review_progress",
+            source=progress[module]["updated_by"],
+            target_type="paper",
+            target_id=str(paper_id),
+            payload={
+                "module": module,
+                "completed": bool(payload.completed),
+            },
+        )
+    )
+    session.commit()
+    return {
+        "paper_id": str(paper_id),
+        "manual_review_progress": progress,
+    }
 
 
 @router.get("/{paper_id}/codex-context", response_model=CodexContextResponse)
@@ -295,6 +436,50 @@ async def propose_dft_result_correction(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return DFTResultCorrectionProposalResponse(correction=correction)
+
+
+@router.post("/{paper_id}/dft-results/{result_id}/apply-imported-opinion")
+async def apply_imported_dft_opinion(
+    paper_id: UUID,
+    result_id: UUID,
+    payload: DFTImportedOpinionApplyRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    try:
+        return DFTResultReviewService(session).apply_imported_opinion(
+            paper_id=paper_id,
+            result_id=result_id,
+            opinion=payload.opinion,
+            reviewer=payload.reviewer,
+        )
+    except LookupError as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/dft-results/{result_id}/revoke-review", response_model=DFTResultVerifyResponse)
+async def revoke_dft_result_review(
+    paper_id: UUID,
+    result_id: UUID,
+    payload: DFTResultVerifyRequest,
+    session: Session = Depends(get_db_session),
+) -> DFTResultVerifyResponse:
+    try:
+        result = DFTResultReviewService(session).revoke_result(
+            paper_id=paper_id,
+            result_id=result_id,
+            reviewer=payload.reviewer,
+            reviewer_note=payload.reviewer_note,
+            field_names=payload.field_names,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DFTResultVerifyResponse.model_validate(result)
 
 
 @router.post("/{paper_id}/translation/preview", response_model=PaperTranslationPreviewResponse)
@@ -460,6 +645,57 @@ def prepare_external_ai_context(
 
     settings = get_settings()
     summary = PaperReprocessingService(session=session, settings=settings).rerun_stage2(paper_id)
+    return _build_extraction_run_response(paper_id, summary)
+
+
+@router.post("/{paper_id}/reparse", response_model=ExtractionRunResponse)
+async def reparse_existing_paper(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+):
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    settings = get_settings()
+    try:
+        await PaperIngestionService(session=session, settings=settings).reparse_existing_paper(paper_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    detail = PaperQueryService(session).get_paper_detail(paper_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Paper not found after reparse")
+    summary = {
+        "action": "reparse_existing_pdf",
+        "status": "completed",
+        "llm_required": False,
+        "material_rebuild_completed": True,
+        "external_ai_ready": bool(getattr(detail.artifact_status, "artifact_ready_for_external_audit", False)),
+        "workflow_status": detail.workflow_status,
+        "workspace_path": detail.workspace_path,
+        "refreshed_materials": [
+            "pdf_parse",
+            "tei",
+            "markdown",
+            "docling_json",
+            "workspace",
+            "stage2_candidates",
+        ],
+        "next_actions": [
+            "Re-open the paper detail page and verify sections, figures, tables, and DFT candidates.",
+            "If AI review is needed, continue with prepare-ai-context / codex-item / import_analysis.",
+        ],
+        "notes": list(getattr(detail.artifact_status, "blocking_errors", []) or []),
+        "dft_settings": detail.counts.dft_settings,
+        "catalyst_samples": detail.counts.catalyst_samples,
+        "dft_results": detail.counts.dft_results,
+        "electrochemical_performance": detail.counts.electrochemical_performance,
+        "mechanism_claims": detail.counts.mechanism_claims,
+        "writing_cards": detail.counts.writing_cards,
+    }
     return _build_extraction_run_response(paper_id, summary)
 
 

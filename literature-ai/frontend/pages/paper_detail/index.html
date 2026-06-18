@@ -34,6 +34,10 @@
     .tab-pane.active { display: block; }
     .prewrap { white-space: pre-wrap; line-height: 1.75; font-size: 14px; }
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 14px; overflow: auto; }
+    .md-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+    .md-table th, .md-table td { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; vertical-align: top; }
+    .md-table th { background: var(--color-surface-alt); font-weight: 800; white-space: nowrap; }
+    .md-table td { background: var(--color-surface); line-height: 1.5; }
     .section-item, .evidence-card, .structured-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); padding: 12px; margin-bottom: 10px; }
     .section-title { font-weight: 800; margin-bottom: 8px; }
     .evidence-card button { width: 100%; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; font-weight: 800; padding: 0; }
@@ -182,6 +186,35 @@
       return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
     }
 
+    function renderPipeTable(md) {
+      if (!md || typeof md !== "string") return "";
+      var lines = md.trim().split("\n");
+      if (lines.length < 3) return '<pre class="mono">' + esc(md) + '</pre>';
+      var allPipe = true;
+      for (var i = 0; i < Math.min(lines.length, 3); i++) {
+        var t = lines[i].trim();
+        if (!(t.indexOf("|") === 0 && t.lastIndexOf("|") === t.length - 1)) { allPipe = false; break; }
+      }
+      if (!allPipe) return '<pre class="mono">' + esc(md) + '</pre>';
+      // Too many columns → keep as monospace to avoid layout breakage
+      var colCount = lines[0].split("|").slice(1, -1).length;
+      if (colCount > 6) return '<pre class="mono">' + esc(md) + '</pre>';
+      var html = '<table class="md-table"><thead><tr>';
+      var headers = lines[0].split("|").slice(1, -1);
+      headers.forEach(function(h) { html += '<th>' + esc(h.trim()) + '</th>'; });
+      html += '</tr></thead><tbody>';
+      for (var j = 1; j < lines.length; j++) {
+        var line = lines[j].trim();
+        if (/^\|[\s\-:]+\|/.test(line)) continue;
+        html += '<tr>';
+        var cells = line.split("|").slice(1, -1);
+        cells.forEach(function(c) { html += '<td>' + esc(c.trim()) + '</td>'; });
+        html += '</tr>';
+      }
+      html += '</tbody></table>';
+      return html;
+    }
+
     function showToast(msg) {
       const toast = document.getElementById("toast");
       toast.textContent = msg;
@@ -317,6 +350,64 @@
           </div>
         `;
       }).join("");
+    }
+
+    function isPlaceholderFigureKeyElement(value) {
+      const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      return ["verified_figure", "figure_verified", "reviewed_figure", "ai_verified", "verified"].includes(normalized);
+    }
+
+    function formatFigureKeyElementsForDisplay(keyElements) {
+      if (!keyElements.length) return "-";
+      const text = keyElements.join(", ");
+      if (keyElements.every(isPlaceholderFigureKeyElement)) {
+        return text + " (placeholder; needs concrete elements)";
+      }
+      if (keyElements.some(isPlaceholderFigureKeyElement)) {
+        return text + " (contains placeholder)";
+      }
+      return text;
+    }
+
+    function renderFigureDetailCard(figure, index) {
+      const keyElements = Array.isArray(figure.key_elements) ? figure.key_elements : [];
+      const approvedFields = Array.isArray(figure.approved_correction_fields) ? figure.approved_correction_fields : [];
+      const imageReview = figure.image_review || {};
+      const imageSrc = figure.asset_url || (figure.image_path ? `${API_BASE}/assets/${figure.image_path}` : "");
+      const rows = [
+        ["Figure label", figure.figure_label || "-"],
+        ["PDF page", figure.page || "-"],
+        ["Role", figure.figure_role || "unclassified"],
+        ["Crop status", figure.crop_status || "-"],
+        ["Crop source", figure.crop_source || "-"],
+        ["Image path", figure.image_path || "-"],
+        ["Content summary", figure.content_summary || "-"],
+        ["Key elements", formatFigureKeyElementsForDisplay(keyElements)],
+        ["Image review flags", Array.isArray(figure.flags) && figure.flags.length ? figure.flags.join(", ") : "none"],
+        ["Full-page snapshot", imageReview.full_page_image_path ? "present" : "missing"],
+        ["Approved correction count", figure.approved_correction_count || 0],
+        ["Approved correction fields", approvedFields.length ? approvedFields.join(", ") : "-"],
+        ["Object audit count", figure.object_review_audit_count || 0],
+        ["Conflict count", figure.conflict_count || 0],
+      ];
+      const imageHtml = imageSrc
+        ? `<figure style="margin:12px 0 0;border:1px solid var(--color-border);border-radius:var(--radius);background:var(--color-surface);padding:10px;"><img src="${esc(imageSrc)}" loading="lazy" alt="${esc(figure.figure_label || `Figure ${index + 1}`)}" style="display:block;width:100%;max-height:520px;object-fit:contain;"><figcaption class="muted" style="margin-top:8px;">${esc(figure.caption || figure.figure_label || "")}</figcaption></figure>`
+        : '<div class="empty-state warning" style="padding:18px 12px;">No figure image path available.</div>';
+      return `
+        <div class="section-item">
+          <div class="section-title">Figure ${index + 1}</div>
+          <div class="prewrap">${esc(figure.caption || figure.figure_role || "No caption")}</div>
+          <div class="kv-grid" style="margin-top:10px;">
+            ${rows.map(([label, value]) => `
+              <div class="kv-item">
+                <div class="kv-label">${esc(label)}</div>
+                <div class="kv-value">${esc(value)}</div>
+              </div>
+            `).join("")}
+          </div>
+          ${imageHtml}
+        </div>
+      `;
     }
 
     function renderTranslationSectionOptions() {
@@ -531,21 +622,15 @@
         : '<div class="empty-state">暂无解析章节。</div>';
 
       document.getElementById("figuresList").innerHTML = (paper.figures || []).length
-        ? (paper.figures || []).map((figure, index) => `
-            <div class="section-item">
-              <div class="section-title">图 ${index + 1}</div>
-              <div class="prewrap">${esc(figure.caption || figure.figure_role || "暂无说明")}</div>
-              <div class="muted">页码：${esc(figure.page || "-")}</div>
-            </div>
-          `).join("")
-        : '<div class="empty-state">暂无已提取图片。</div>';
+        ? (paper.figures || []).map(renderFigureDetailCard).join("")
+        : '<div class="empty-state">No extracted figures.</div>';
 
       document.getElementById("tablesList").innerHTML = (paper.tables || []).length
         ? (paper.tables || []).map((table, index) => `
             <div class="section-item">
               <div class="section-title">表 ${index + 1}</div>
               <div class="muted">${esc(table.caption || "暂无说明")}</div>
-              <div class="mono">${esc(table.markdown_content || "")}</div>
+              ${renderPipeTable(table.markdown_content || "")}
             </div>
           `).join("")
         : "";

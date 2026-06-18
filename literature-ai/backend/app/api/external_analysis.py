@@ -17,13 +17,7 @@ from app.schemas.external_analysis import (
     ExternalAnalysisRunResponse,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
-from app.services.external_analysis_service import ExternalAnalysisNormalizedModel
-from app.services.external_analysis_service import (
-    _truncate,
-    build_internal_ai_review_blob as _build_internal_ai_review_blob,
-    sanitize_internal_corrections as _sanitize_internal_corrections,
-)
-from app.services.paper_query import PaperQueryService
+from app.services.verification_session_service import VerificationSessionService
 
 router = APIRouter()
 
@@ -55,6 +49,9 @@ async def import_external_analysis(
     settings: Settings = Depends(get_settings),
 ) -> ExternalAnalysisRunResponse:
     try:
+        effective_reviewer = (
+            str(payload.reviewer or payload.source_label or payload.source or "ide_ai").strip() or "ide_ai"
+        )
         service = ExternalAnalysisService(session=session, settings=settings)
         run = service.import_run(
             paper_id=payload.paper_id,
@@ -63,11 +60,26 @@ async def import_external_analysis(
             raw_text=payload.raw_text,
             raw_payload=payload.raw_payload,
         )
+        if payload.auto_apply_review_rules:
+            write_lock_tokens = [*payload.write_lock_tokens]
+            if payload.write_lock_token:
+                write_lock_tokens.append(payload.write_lock_token)
+            service.auto_apply_non_dft_review_outputs(
+                run.id,
+                reviewer=effective_reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            VerificationSessionService(session, settings).apply_import_rules_for_paper(
+                paper_id=payload.paper_id,
+                reviewer=effective_reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
         session.commit()
         return _serialize_run(service, run)
     except ValueError as exc:
         session.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith(("module_write_lock_required", "module_write_lock_conflict")) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("/runs", response_model=list[ExternalAnalysisRunResponse])
@@ -155,83 +167,7 @@ def internal_ai_parse_paper(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> InternalAIParseResponse:
-    sync_writer_settings_from_session(session, settings)
-    service = ExternalAnalysisService(session=session, settings=settings)
-    detail = PaperQueryService(session).get_paper_detail(paper_id)
-    if not detail:
-        raise HTTPException(status_code=404, detail="Paper not found")
-    if not service.llm.is_configured():
-        raise HTTPException(status_code=400, detail="Internal AI is not configured")
-
-    review_blob = _build_internal_ai_review_blob(detail)
-    system_prompt = (
-        "You are an internal scientific curation agent for a literature database. "
-        "Review the provided parsed-paper bundle and produce a detailed, human-readable scientific review in review_notes. "
-        "Always include several substantive review_notes when the bundle contains enough text: main contribution, methods/materials, "
-        "DFT or electrochemical evidence when present, mechanism logic, figure/table extraction quality, extraction gaps, and data-quality risks. "
-        "Write review_notes in clear Chinese unless the source field itself must be quoted. "
-        "If figure crops look like publisher logos, CrossMark badges, headers, or other decorative/non-scientific snippets, flag them as extraction noise. "
-        "Do not treat noisy figure crops as scientific figures; instead explain that the PDF page or caption must be checked. "
-        "For catalyst support, synthesis method, coordination, DFT settings, energy values, and writing cards, prefer concrete quoted evidence. "
-        "Use correction_proposals only for concrete field fixes, "
-        "and supporting_papers only when an existing linked paper can be inferred from DOI/title clues already present. "
-        "Do not invent evidence, identifiers, values, or target paths. If evidence is incomplete, explain the gap in review_notes instead of guessing. "
-        "For top-level paper fields, only use these correction field_name values: doi, title, year, journal, authors, abstract, oa_status, license. "
-        "For those top-level fields, set target_path exactly equal to field_name. "
-        "For structured corrections, only use field_name values from dft_results, mechanism_claims, electrochemical_performance, catalyst_samples, dft_settings, writing_cards, "
-        "and set target_path strictly as <collection>:<row_id>:<field> using row ids that already exist in the provided bundle."
-    )
-    user_prompt = (
-        "Analyze this parsed literature record and extraction output. "
-        "First create detailed review_notes that a researcher can read directly. Then identify any clear normalization corrections "
-        "and supporting-paper relationships that are safe to keep as candidates. For every note or correction, include page, section_title, "
-        "quoted_text, confidence, and mapping_reason when the bundle provides enough evidence.\n\n"
-        f"{review_blob}"
-    )
-
-    normalized = service.llm.structured_extract(system_prompt, user_prompt, ExternalAnalysisNormalizedModel)
-    if normalized is None:
-        raise HTTPException(status_code=502, detail="Internal AI failed to produce structured output")
-    normalized = _sanitize_internal_corrections(normalized)
-
-    service.delete_runs_for_paper_source(paper_id, "internal_ai")
-    run = service.import_run(
-        paper_id=paper_id,
-        source="internal_ai",
-        source_label=payload.source_label,
-        raw_text=None,
-        raw_payload=normalized.model_dump(mode="json"),
-    )
-    created_notes = 0
-    created_corrections = 0
-    created_relationships = 0
-    skipped_candidates = 0
-    auto_applied_corrections = 0
-
-    if payload.auto_apply:
-        materialized = service.materialize_candidates(
-            run_id=run.id,
-            candidate_ids=None,
-            explicit_all=True,
-            created_by="internal_ai",
-        )
-        created_notes = materialized.created_notes
-        created_corrections = materialized.created_corrections
-        created_relationships = materialized.created_relationships
-        skipped_candidates = materialized.skipped_candidates
-        # D2-1 safety boundary: internal AI may suggest and materialize pending
-        # corrections, but only the human correction/review routes may approve or
-        # verify them. Keep auto_applied_corrections at 0 for compatibility.
-
-    session.commit()
-    return InternalAIParseResponse(
-        run_id=run.id,
-        mapping_status=run.mapping_status,
-        created_notes=created_notes,
-        created_corrections=created_corrections,
-        created_relationships=created_relationships,
-        auto_applied_corrections=auto_applied_corrections,
-        skipped_candidates=skipped_candidates,
-        llm_status="ok",
-        llm_error=None,
+    raise HTTPException(
+        status_code=410,
+        detail="网页端解析已停用；请通过 IDE/MCP AI 使用 prepare-ai-context、codex-item 和 import_analysis。",
     )

@@ -23,6 +23,7 @@ from app.db.models import (
     PaperSection,
     WritingCard,
 )
+from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import is_safe_verified_review
 
 
@@ -75,6 +76,7 @@ class CitationCandidateFilters:
 class CitationCandidateRequest:
     text: str
     max_candidates: int = 10
+    library_name: str | None = None
     filters: CitationCandidateFilters = field(default_factory=CitationCandidateFilters)
     include_unverified_suggestions: bool = True
     include_pending_review: bool = True
@@ -88,12 +90,16 @@ class Snippet:
     locator_status: str = "missing"
     verified: bool = False
     safe_verified: bool = False
+    source_type: str | None = None
+    source_id: str | None = None
     matched_tokens: set[str] = field(default_factory=set)
 
     def response(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "source": self.source,
+            "source_type": self.source_type,
+            "source_id": self.source_id,
             "page": self.page,
             "locator_status": self.locator_status,
             "verified": self.verified,
@@ -112,7 +118,11 @@ class WritingCitationCandidateService:
         if len(query_tokens) < 2:
             raise ValueError("text must contain at least two searchable terms")
 
-        papers = list(self.session.scalars(select(Paper)).all())
+        paper_stmt = select(Paper)
+        normalized_library = normalize_library_name(request.library_name) if request.library_name is not None else None
+        if request.library_name is not None:
+            paper_stmt = paper_stmt.where(build_library_name_clause(Paper.library_name, normalized_library))
+        papers = list(self.session.scalars(paper_stmt).all())
         eligibility = {row.paper_id: row for row in self.session.scalars(select(PaperCitationEligibility)).all()}
         impacts = {row.paper_id: row for row in self.session.scalars(select(PaperImpactMetadata)).all()}
         reviews = _group_by_paper(self.session.scalars(select(ExtractionFieldReview)).all())
@@ -192,6 +202,11 @@ class WritingCitationCandidateService:
         candidates = candidates[: request.max_candidates]
         return {
             "query_text": request.text,
+            "metadata": {
+                "library_name": normalized_library,
+                "search_scope": "library" if request.library_name is not None else "all_libraries",
+                "total_papers_considered": len(papers),
+            },
             "candidate_count": len(candidates),
             "candidates": candidates,
             "excluded_count": len(excluded_reasons),
@@ -340,7 +355,15 @@ class WritingCitationCandidateService:
         for section in sections:
             self._add_if_matching(snippets, section.text, "section", query_tokens, page=section.page_start or section.page_end)
         for row in extraction_rows:
-            self._add_if_matching(snippets, _extraction_text(row), "extraction", query_tokens)
+            target_type = TARGET_TYPE_BY_MODEL.get(type(row))
+            self._add_if_matching(
+                snippets,
+                _extraction_text(row),
+                "extraction",
+                query_tokens,
+                source_type=target_type,
+                source_id=str(getattr(row, "id", "")) or None,
+            )
         return sorted(snippets, key=lambda item: (-len(item.matched_tokens), item.source))[:5]
 
     def _add_if_matching(
@@ -354,6 +377,8 @@ class WritingCitationCandidateService:
         locator_status: str = "missing",
         verified: bool = False,
         safe_verified: bool = False,
+        source_type: str | None = None,
+        source_id: str | None = None,
     ) -> None:
         clean = _clean_text(text)
         if not clean:
@@ -368,6 +393,8 @@ class WritingCitationCandidateService:
                     locator_status=locator_status,
                     verified=verified,
                     safe_verified=safe_verified,
+                    source_type=source_type,
+                    source_id=source_id,
                     matched_tokens=matched,
                 )
             )
@@ -444,6 +471,7 @@ class WritingCitationCandidateService:
             warnings.append("impact_factor_needs_metadata")
         return {
             "paper_id": str(paper.id),
+            "library_name": paper.library_name,
             "title": paper.title,
             "year": paper.year,
             "journal": paper.journal,
@@ -538,19 +566,44 @@ def _extraction_text(row: Any) -> str:
     for name in (
         "claim_text",
         "evidence_text",
+        "evidence_strength",
+        "evidence_types",
         "property_type",
         "value",
         "unit",
+        "rate",
+        "cycle_number",
+        "capacity_value",
+        "sulfur_loading_mg_cm2",
+        "sulfur_content_wt_percent",
+        "electrolyte_sulfur_ratio",
+        "decay_per_cycle",
         "name",
         "catalyst_type",
+        "metal_centers",
+        "coordination",
+        "support",
+        "synthesis_method",
         "software",
         "functional",
+        "dispersion_correction",
+        "pseudopotential",
         "research_gap",
         "proposed_solution",
+        "core_hypothesis",
+        "abstract_logic",
+        "introduction_logic",
+        "discussion_logic",
+        "figure_logic",
     ):
         value = getattr(row, name, None)
         if value not in (None, "", [], {}):
-            values.append(str(value))
+            if isinstance(value, (list, tuple, set)):
+                values.extend(str(item) for item in value if item not in (None, ""))
+            elif isinstance(value, dict):
+                values.extend(str(item) for item in value.values() if item not in (None, "", [], {}))
+            else:
+                values.append(str(value))
     return " ".join(values)
 
 

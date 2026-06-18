@@ -3,6 +3,7 @@ from pathlib import Path
 from app.config import Settings
 from app.parsers.docling_parser import DoclingParser
 from app.services.discovery_service import DiscoveryService
+from app.services.paper_query import PaperQueryService
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 
 
@@ -23,6 +24,21 @@ def test_normalize_text_tree_repairs_nested_values():
     assert normalized["title"] == "Café"
     assert normalized["authors"] == ["Guang‐Jie Xia"]
     assert normalized["nested"]["abstract"] == "François"
+
+
+def test_repair_mojibake_text_repairs_shifted_digit_block():
+    shifted = "doi s" + "".join(chr(0x0376 + i) for i in [4, 1]) + "598-024-67393-z"
+    assert repair_mojibake_text(shifted) == "doi s41598-024-67393-z"
+
+
+def test_repair_mojibake_text_repairs_latin1_decoded_greek_symbols():
+    assert repair_mojibake_text("\u00ce\u00b1 absorption") == "\u03b1 absorption"
+    assert repair_mojibake_text("\u00ce\u00b5 dielectric") == "\u03b5 dielectric"
+
+
+def test_paper_query_clean_pdf_text_repairs_existing_stored_mojibake():
+    shifted = "s" + "".join(chr(0x0376 + i) for i in [4, 1]) + "598-024-67393-z"
+    assert PaperQueryService._clean_pdf_text(shifted) == "s41598-024-67393-z"
 
 
 def test_discovery_service_serialize_repairs_text_fields():

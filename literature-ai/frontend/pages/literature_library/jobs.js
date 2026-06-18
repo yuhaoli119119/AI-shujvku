@@ -8,10 +8,28 @@ function disconnectSSE() {
 function initSSE() {
     if (location.protocol === "file:") return;
     disconnectSSE();
+    const streamLibraryName = getCurrentLibraryName();
+    if (!streamLibraryName) {
+        state.paperStreamLibraryName = "";
+        return;
+    }
+    state.paperStreamLibraryName = streamLibraryName;
     state.eventSource = new EventSource(API_BASE + "/stream?" + getFilters().toString());
     state.eventSource.addEventListener("papers_update", function(event) {
         try {
-            state.papers = JSON.parse(event.data) || [];
+            if (state.paperStreamLibraryName !== getCurrentLibraryName()) {
+                return;
+            }
+            const papers = JSON.parse(event.data) || [];
+            const mismatched = papers.filter(function(paper) {
+                return paper && paper.library_name && paper.library_name !== state.paperStreamLibraryName;
+            });
+            if (mismatched.length) {
+                console.error("Rejected cross-library SSE papers_update", mismatched);
+                showToast("实时刷新返回了非当前库记录，已拒绝渲染", "error");
+                return;
+            }
+            state.papers = papers;
             renderPaperList();
             if (typeof updatePager === "function") {
                 updatePager();
@@ -121,94 +139,19 @@ function renderDiscoveryResults(data, stats, title, prefixHtml) {
 }
 
 function getAIQueryRewriteModel() {
-    if (!state.writerSettings) return null;
-    const model = (state.writerSettings.writer_model || "").trim();
-    return model || null;
+    return null;
 }
 
 function getAIQueryRewriteHint() {
-    if (!state.writerSettings) return "";
-    const backend = (state.writerSettings.writer_backend || "").trim() || "rule";
-    const apiBase = (state.writerSettings.writer_api_base || "").trim();
-    const apiKey = (state.writerSettings.writer_api_key || "").trim();
-    if (!apiBase || !apiKey || backend === "rule") {
-        return "当前未配置可用的 Writer LLM，已退回普通关键词检索。请在设置页填写 Writer LLM 配置。";
-    }
-    return "";
+    return "网页端 AI 检索已停用；请使用在线检索，或让 IDE AI 优先通过 MCP 搜索并入库。若当前会话未暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。";
 }
 
 async function runAISearch() {
-    const aiQuery = $("aiSearchQuery");
-    const searchInput = $("searchInput");
-    const query = ((aiQuery ? aiQuery.value : "") || (searchInput ? searchInput.value : "")).trim();
-    if (!query) {
-        showToast("请输入 AI 搜索查询。", "error");
-        return;
-    }
-    openAddLiteraturePanel("ai");
-    if (aiQuery) aiQuery.value = query;
-    setAcquisitionResult('<div class="workspace-empty small-empty">AI 正在扩展查询并筛选文献...</div>');
-    try {
-        const maxResults = $("aiSearchMaxResults");
-        const data = await fetchJSON(API_BASE + "/ai_search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                query: query,
-                model: getAIQueryRewriteModel(),
-                max_results: clampSearchLimit(maxResults ? maxResults.value : 100),
-                providers: [],
-                skip_guard: false
-            })
-        });
-        const papers = data && data.papers ? data.papers : [];
-        if (!papers.length) {
-            setAcquisitionResult('<div class="workspace-empty small-empty">AI 没有返回结果。</div>');
-            return;
-        }
-        const stats = mergeDiscoveryResults(papers);
-        const prefix = '<div class="writer-block"><h3>AI 自动搜索结果</h3><div class="subtle">已根据你的检索词扩展候选文献；结果会自动去重，下载失败也会先保留元数据，之后可以补 PDF。</div></div>';
-        renderDiscoveryResults({ items: state.discoveryCache }, stats, "AI 自动搜索结果", prefix);
-    } catch (error) {
-        setAcquisitionResult('<div class="workspace-empty small-empty">AI 搜索失败：' + esc(error.message) + "</div>");
-    }
+    showToast("网页端 AI 检索已停用，请使用在线检索或 IDE AI；优先走 MCP，若当前会话未暴露工具可改用仓库内 `literature-ai/backend` 的 `app.mcp.*`。", "info");
 }
 
 async function runAIWorkflow() {
-    const aiQuery = $("aiSearchQuery");
-    const searchInput = $("searchInput");
-    const query = ((aiQuery ? aiQuery.value : "") || (searchInput ? searchInput.value : "")).trim();
-    if (!query) {
-        showToast("请输入 AI 搜索查询。", "error");
-        return;
-    }
-    openAddLiteraturePanel("ai");
-    showProgress("AI 工作流已转入后台，不会卡住页面...");
-    try {
-        const maxResults = $("aiSearchMaxResults");
-        const maxDownloads = $("aiWorkflowMaxDownloads");
-        const job = await fetchJSON(API_BASE + "/ai_workflow/jobs", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                query: query,
-                library_name: getCurrentLibraryName(),
-                model: getAIQueryRewriteModel(),
-                max_results: clampSearchLimit(maxResults ? maxResults.value : 100),
-                max_downloads: clampSearchLimit(maxDownloads ? maxDownloads.value : 100),
-                providers: [],
-                skip_existing: true
-            })
-        });
-        state.aiWorkflowJobId = job.job_id;
-        renderAIWorkflowJob(job);
-        pollAIWorkflowJob(job.job_id);
-        showToast("AI 工作流已进入后台任务。", "success");
-    } catch (error) {
-        setAcquisitionResult('<div class="workspace-empty small-empty">AI 工作流失败：' + esc(error.message) + "</div>");
-        showToast("AI 工作流失败：" + error.message, "error");
-    }
-    hideProgress();
+    showToast("网页端 AI 工作流已停用，请使用在线检索或 IDE AI；优先走 MCP，若当前会话未暴露工具可改用仓库内 `literature-ai/backend` 的 `app.mcp.*`。", "info");
 }
 
 async function pollAIWorkflowJob(jobId) {
@@ -476,6 +419,7 @@ async function openJobCenter() {
 }
 
 function renderJobCenter(jobs) {
+    const displayItems = groupWorkflowDownloadJobs(jobs);
     const counts = jobs.reduce(function(acc, job) {
         const status = job.status || "unknown";
         acc[status] = (acc[status] || 0) + 1;
@@ -492,8 +436,117 @@ function renderJobCenter(jobs) {
         "</div>" +
         jobCenterFiltersHtml() +
         "</div>" +
-        (jobs.length ? jobs.map(renderWorkflowJobCard).join("") : '<div class="section-card"><h3>暂无任务</h3><div class="muted">当前筛选下没有任务。</div></div>')
+        (displayItems.length ? displayItems.map(function(item) {
+            return item.group ? renderWorkflowJobGroupCard(item) : renderWorkflowJobCard(item.job);
+        }).join("") : '<div class="section-card"><h3>暂无任务</h3><div class="muted">当前筛选下没有任务。</div></div>')
     );
+}
+
+function groupWorkflowDownloadJobs(jobs) {
+    const groups = new Map();
+    const items = [];
+    jobs.forEach(function(job) {
+        if (!isPerPaperWorkflowDownloadJob(job)) {
+            items.push({ group: false, job: job });
+            return;
+        }
+        const created = new Date(job.created_at || job.updated_at || 0);
+        const when = new Date(job.updated_at || job.created_at || 0);
+        const bucket = Number.isNaN(created.getTime()) ? "unknown" : Math.floor(created.getTime() / (10 * 60 * 1000));
+        const key = [job.library_name || "", job.type || "", bucket].join("|");
+        if (!groups.has(key)) {
+            const group = { group: true, key: key, jobs: [], sortTime: when.getTime() || 0 };
+            groups.set(key, group);
+            items.push(group);
+        }
+        groups.get(key).jobs.push(job);
+    });
+    return items.map(function(item) {
+        if (!item.group) return item;
+        item.jobs.sort(function(a, b) {
+            return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
+        });
+        item.sortTime = Math.max.apply(null, item.jobs.map(function(job) {
+            return new Date(job.updated_at || job.created_at || 0).getTime() || 0;
+        }));
+        return item;
+    }).sort(function(a, b) {
+        const aTime = a.group ? a.sortTime : new Date((a.job || {}).updated_at || (a.job || {}).created_at || 0).getTime();
+        const bTime = b.group ? b.sortTime : new Date((b.job || {}).updated_at || (b.job || {}).created_at || 0).getTime();
+        return (bTime || 0) - (aTime || 0);
+    });
+}
+
+function isPerPaperWorkflowDownloadJob(job) {
+    if (!job || job.type !== "discovery_download_ingest") return false;
+    const summary = job.summary || {};
+    const progress = job.progress || {};
+    const result = job.result || {};
+    const total = Number(firstPresent(summary.total, progress.total, result.total, 1));
+    return total <= 1;
+}
+
+function renderWorkflowJobGroupCard(group) {
+    const jobs = group.jobs || [];
+    const first = jobs[0] || {};
+    const completed = jobs.filter(function(job) { return job.status === "completed"; }).length;
+    const failed = jobs.filter(function(job) { return job.status === "failed"; }).length;
+    const cancelled = jobs.filter(function(job) { return job.status === "cancelled"; }).length;
+    const running = jobs.filter(function(job) { return job.status === "queued" || job.status === "running"; }).length;
+    const status = running ? "running" : failed ? "failed" : cancelled ? "cancelled" : "completed";
+    const success = jobs.reduce(function(sum, job) {
+        const summary = job.summary || {};
+        const progress = job.progress || {};
+        const result = job.result || {};
+        const value = Number(firstPresent(summary.success_count, progress.ingested, result.status ? 1 : 0, 0));
+        return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+    const metadataOnly = jobs.filter(function(job) { return (job.result || {}).status === "metadata_only"; }).length;
+    const groupId = "workflow-job-group-" + String(group.key || "group").replace(/[^A-Za-z0-9_-]+/g, "-");
+    const statusLabels = {
+        running: "运行中",
+        completed: "已完成",
+        failed: "有失败",
+        cancelled: "已取消",
+    };
+    const statusMessage = running
+        ? "同一时间段触发的单篇下载入库任务已合并展示。"
+        : failed
+            ? "本组里存在失败任务，可展开逐条重试。"
+            : cancelled
+                ? "本组任务已取消，可展开查看各条记录。"
+                : "同一时间段触发的单篇下载入库任务已合并展示。";
+    return '<div class="section-card" id="' + esc(groupId) + '">' +
+        '<h3>批量下载入库 · ' + esc(jobs.length) + ' 篇 · ' + esc(statusLabels[status] || status) + '</h3>' +
+        '<div class="subtle">文献库 ' + esc(first.library_name || "-") + ' | 更新时间 ' + esc(formatJobTime(first.updated_at || first.created_at)) + '</div>' +
+        '<div class="muted" style="margin-top:8px;">' + esc(statusMessage) + '</div>' +
+        '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;">' +
+            renderJobMetric("成功", success) +
+            renderJobMetric("元数据", metadataOnly) +
+            renderJobMetric("失败", failed) +
+            renderJobMetric("已取消", cancelled) +
+            renderJobMetric("运行中", running) +
+        '</div>' +
+        '<div class="modal-actions" style="justify-content:flex-start;"><button class="btn ghost small" onclick="toggleWorkflowJobGroup(' + JSON.stringify(groupId).replace(/"/g, "&quot;") + ')">展开详情</button></div>' +
+        '<div class="workflow-job-group-details" hidden>' + jobs.map(renderWorkflowJobCard).join("") + '</div>' +
+    '</div>';
+}
+
+function firstPresent() {
+    for (let index = 0; index < arguments.length; index += 1) {
+        const value = arguments[index];
+        if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return "-";
+}
+
+function toggleWorkflowJobGroup(groupId) {
+    const card = document.getElementById(groupId);
+    const detail = card ? card.querySelector(".workflow-job-group-details") : null;
+    const button = card ? card.querySelector(".modal-actions button") : null;
+    if (!detail) return;
+    detail.hidden = !detail.hidden;
+    if (button) button.textContent = detail.hidden ? "展开详情" : "收起详情";
 }
 
 function renderWorkflowJobCard(job) {
@@ -653,12 +706,31 @@ async function rerunExtraction() {
         const summary = $("summaryContent");
         if (summary) {
             summary.insertAdjacentHTML("afterbegin",
-                '<div class="section-card"><h3>最近一次 AI 材料刷新结果</h3><div class="subtle">状态：' + esc(data.status || data.job_status || "已提交") + (data.external_ai_ready ? " | 外部 AI 可继续接手" : " | 仍需补齐材料或人工检查") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
+                '<div class="section-card"><h3>最近一次 IDE AI 材料刷新结果</h3><div class="subtle">状态：' + esc(data.status || data.job_status || "已提交") + (data.external_ai_ready ? " | IDE AI 可继续接手" : " | 仍需补齐材料或人工检查") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
             );
         }
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
         showToast("刷新 AI 解析材料失败：" + error.message, "error");
+    }
+    hideProgress();
+}
+
+async function reparseSelectedPaper() {
+    if (!state.selectedPaperId) return;
+    showProgress("正在基于当前 PDF 重新解析文献...");
+    try {
+        const data = await fetchJSON(API_BASE + "/" + state.selectedPaperId + "/reparse", { method: "POST" });
+        showToast("重新解析完成，可重新检查章节、图表和 DFT 候选。", "success");
+        const summary = $("summaryContent");
+        if (summary) {
+            summary.insertAdjacentHTML("afterbegin",
+                '<div class="section-card"><h3>最近一次重新解析结果</h3><div class="subtle">状态：' + esc(data.status || "completed") + (data.workflow_status ? " | workflow=" + esc(data.workflow_status) : "") + (data.workspace_path ? " | workspace=" + esc(data.workspace_path) : "") + "</div></div>"
+            );
+        }
+        await loadPaperDetail(state.selectedPaperId);
+    } catch (error) {
+        showToast("重新解析失败：" + error.message, "error");
     }
     hideProgress();
 }

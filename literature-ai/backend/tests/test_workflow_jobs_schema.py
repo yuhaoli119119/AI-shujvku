@@ -1,10 +1,13 @@
 import asyncio
 import tempfile
+from datetime import datetime, timedelta
 from uuid import uuid4
 from pathlib import Path
 
 import pytest
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from app.db import session as db_session
 from app.config import Settings
@@ -13,11 +16,14 @@ from app.api.jobs import AgentActivityRequest, record_agent_activity
 from app.api.jobs import delete_workflow_job
 from app.api.papers.listing import get_paper_type_stats
 from app.api.papers.workflow import delete_ai_workflow_job
+from app.services import workflow_jobs as workflow_jobs_service
 from app.services.workflow_jobs import (
+    JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
     JOB_TYPE_AGENT_ACTIVITY,
     JobPreflightError,
     clone_job_for_retry_with_status,
     create_job_or_reuse_active,
+    run_discovery_download_ingest_job,
     serialize_job,
     validate_extraction_preflight,
 )
@@ -213,7 +219,7 @@ def test_paper_type_stats_are_database_backed_and_empty_when_no_papers():
         factory = db_session._session_factories[db_url]
         session = factory()
         try:
-            empty = asyncio.run(get_paper_type_stats("DefaultLibrary", session=session))
+            empty = get_paper_type_stats("DefaultLibrary", session=session)
             assert empty["total"] == 0
             assert [item["count"] for item in empty["items"]] == [0, 0, 0, 0]
 
@@ -227,7 +233,7 @@ def test_paper_type_stats_are_database_backed_and_empty_when_no_papers():
             )
             session.commit()
 
-            stats = asyncio.run(get_paper_type_stats("DefaultLibrary", session=session))
+            stats = get_paper_type_stats("DefaultLibrary", session=session)
             counts = {item["key"]: item["count"] for item in stats["items"]}
             assert stats["total"] == 3
             assert counts == {"A": 1, "B": 1, "C": 0, "uncategorized": 1}
@@ -428,6 +434,147 @@ def test_extraction_preflight_requires_parsed_body_sections():
             assert excinfo.value.code == "parsed_text_missing"
         finally:
             session.close()
+            db_session.get_engine(db_url).dispose()
+            db_session._session_factories.pop(db_url, None)
+            db_session._engines.pop(db_url, None)
+
+
+def test_create_job_or_reuse_active_ignores_stale_running_job():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "stale_jobs.db"
+        db_url = f"sqlite:///{db_path}"
+        db_session.init_db(db_url)
+
+        factory = db_session._session_factories[db_url]
+        session = factory()
+        try:
+            stale_job = WorkflowJob(
+                job_id="stale-discovery",
+                type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
+                status="running",
+                library_name="StaleLibrary",
+                payload={"identifier": "10.1000/stale", "library_name": "StaleLibrary"},
+                progress={"phase": "fetch_metadata"},
+                runtime_context={},
+                created_at=datetime.utcnow() - timedelta(hours=2),
+                updated_at=datetime.utcnow() - timedelta(hours=2),
+            )
+            session.add(stale_job)
+            session.commit()
+
+            job, reused = create_job_or_reuse_active(
+                session,
+                job_type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
+                library_name="StaleLibrary",
+                payload={"identifier": "10.1000/stale", "library_name": "StaleLibrary"},
+                runtime_context={},
+                progress={"phase": "queued"},
+            )
+
+            session.refresh(stale_job)
+            assert reused is False
+            assert job.job_id != stale_job.job_id
+            assert stale_job.status == "failed"
+            assert stale_job.progress["stale_cleanup"] is True
+        finally:
+            session.close()
+            db_session.get_engine(db_url).dispose()
+            db_session._session_factories.pop(db_url, None)
+            db_session._engines.pop(db_url, None)
+
+
+def test_run_discovery_download_ingest_job_rolls_back_and_falls_back_to_metadata_only():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "discovery_job.db"
+        db_url = f"sqlite:///{db_path}"
+        storage_root = Path(tmpdir) / "storage"
+        db_session.init_db(db_url)
+
+        factory = db_session._session_factories[db_url]
+        session = factory()
+        try:
+            session.add(
+                WorkflowJob(
+                    job_id="job-discovery-stable",
+                    type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
+                    status="queued",
+                    library_name="StableLibrary",
+                    payload={"identifier": "10.1000/fallback", "library_name": "StableLibrary"},
+                    progress={"phase": "queued"},
+                    runtime_context={},
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        settings = Settings(database_url=db_url, storage_root=storage_root)
+
+        class DummyPaper:
+            pass
+
+        def fake_fetch_metadata(self, identifier, providers=None):
+            return DummyPaper(), {
+                "identifier": identifier,
+                "title": "Recovered Metadata Only",
+                "doi": "10.1000/recovered-meta",
+                "year": 2025,
+                "journal": "Stable Journal",
+                "authors": ["Alice"],
+                "abstract": "Recovered after rollback",
+                "url": "https://example.com/recovered-meta",
+            }
+
+        async def fake_download(*args, **kwargs):
+            pdf_path = Path(tmpdir) / "downloaded.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 test")
+            return pdf_path
+
+        async def fake_ingest_pdf(self, *args, **kwargs):
+            first = Paper(
+                id=uuid4(),
+                library_name="StableLibrary",
+                title="first",
+                authors=[],
+                pdf_path="first.pdf",
+            )
+            self.session.add(first)
+            self.session.flush()
+            duplicate = Paper(
+                id=first.id,
+                library_name="StableLibrary",
+                title="duplicate",
+                authors=[],
+                pdf_path="duplicate.pdf",
+            )
+            self.session.add(duplicate)
+            with pytest.raises(IntegrityError):
+                self.session.flush()
+            raise RuntimeError("ingest_pdf left the session dirty")
+
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            monkeypatch.setattr(workflow_jobs_service, "get_settings", lambda: settings)
+            monkeypatch.setattr(workflow_jobs_service.DiscoveryService, "fetch_metadata", fake_fetch_metadata)
+            monkeypatch.setattr(workflow_jobs_service, "download_discovery_candidate", fake_download)
+            monkeypatch.setattr(workflow_jobs_service.PaperIngestionService, "ingest_pdf", fake_ingest_pdf)
+
+            run_discovery_download_ingest_job("job-discovery-stable", db_url)
+
+            verify_session = factory()
+            try:
+                stored_job = verify_session.get(WorkflowJob, "job-discovery-stable")
+                paper = verify_session.scalar(select(Paper).where(Paper.doi == "10.1000/recovered-meta"))
+                assert stored_job is not None
+                assert stored_job.status == "completed"
+                assert stored_job.result["status"] == "metadata_only"
+                assert paper is not None
+                assert paper.oa_status == "metadata_only"
+                assert paper.pdf_path == ""
+            finally:
+                verify_session.close()
+        finally:
+            monkeypatch.undo()
             db_session.get_engine(db_url).dispose()
             db_session._session_factories.pop(db_url, None)
             db_session._engines.pop(db_url, None)

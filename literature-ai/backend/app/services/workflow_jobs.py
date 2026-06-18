@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -15,7 +15,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import Paper, PaperSection, WorkflowJob
+from app.db.models import Paper, PaperSection, ParseJob, WorkflowJob
 from app.db.session import session_scope
 from app.schemas.api import (
     AIWorkflowFailedItemResponse,
@@ -47,6 +47,8 @@ JOB_TYPE_LOCAL_PDF_PATH_INGEST = "local_pdf_path_ingest"
 JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST = "discovery_download_ingest"
 JOB_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
 ACTIVE_JOB_STATUSES = {"queued", "running"}
+STALE_WORKFLOW_JOB_MINUTES = 45
+STALE_PARSE_JOB_MINUTES = 45
 
 FAILURE_MESSAGES: dict[str, tuple[str, str]] = {
     "missing_identifier": ("缺少可检索标识", "请补充 DOI、URL、arXiv ID 或更完整的题名后再试。"),
@@ -81,6 +83,71 @@ def validate_job_status(status: str) -> str:
     if status not in JOB_STATUSES:
         raise ValueError(f"Unsupported workflow job status: {status}")
     return status
+
+
+def expire_stale_activity(
+    session: Session,
+    *,
+    now: datetime | None = None,
+    workflow_minutes: int = STALE_WORKFLOW_JOB_MINUTES,
+    parse_minutes: int = STALE_PARSE_JOB_MINUTES,
+) -> dict[str, int]:
+    now = now or datetime.utcnow()
+    workflow_cutoff = now - timedelta(minutes=max(1, workflow_minutes))
+    parse_cutoff = now - timedelta(minutes=max(1, parse_minutes))
+    expired_workflow = 0
+    expired_parse = 0
+
+    stale_jobs = list(
+        session.scalars(
+            select(WorkflowJob)
+            .where(WorkflowJob.status.in_(ACTIVE_JOB_STATUSES))
+            .where(WorkflowJob.updated_at < workflow_cutoff)
+        ).all()
+    )
+    for job in stale_jobs:
+        progress = job.progress if isinstance(job.progress, dict) else {}
+        job.status = "failed"
+        job.progress = _merge_progress(
+            progress,
+            {
+                "phase": "failed",
+                "failure_code": "job_error",
+                "stale_cleanup": True,
+                "stale_timeout_minutes": workflow_minutes,
+            },
+        )
+        job.error = (
+            "Runtime cleanup marked this job as failed after no progress update "
+            f"for more than {workflow_minutes} minutes."
+        )
+        job.updated_at = now
+        session.add(job)
+        expired_workflow += 1
+
+    stale_parse_jobs = list(
+        session.scalars(
+            select(ParseJob)
+            .where(ParseJob.status.in_(("pending", "queued", "running")))
+            .where(ParseJob.updated_at < parse_cutoff)
+        ).all()
+    )
+    for job in stale_parse_jobs:
+        job.status = "failed"
+        job.error_message = (
+            "Runtime cleanup marked this parse job as failed after no progress "
+            f"update for more than {parse_minutes} minutes."
+        )
+        job.updated_at = now
+        session.add(job)
+        expired_parse += 1
+
+    if expired_workflow or expired_parse:
+        session.commit()
+    return {
+        "workflow_jobs": expired_workflow,
+        "parse_jobs": expired_parse,
+    }
 
 
 def build_job_runtime_context(settings: Settings) -> dict[str, Any]:
@@ -422,6 +489,7 @@ def find_active_equivalent_job(
     payload: dict[str, Any] | None,
     exclude_job_id: str | None = None,
 ) -> WorkflowJob | None:
+    expire_stale_activity(session)
     target_key = _normalized_job_key(job_type, library_name, payload)
     stmt = (
         select(WorkflowJob)
@@ -477,6 +545,7 @@ def list_jobs(
     status: str | None = None,
     limit: int = 50,
 ) -> list[WorkflowJob]:
+    expire_stale_activity(session)
     stmt = select(WorkflowJob)
     if job_type:
         stmt = stmt.where(WorkflowJob.type == job_type)
@@ -489,6 +558,7 @@ def list_jobs(
 
 
 def get_job(session: Session, job_id: str) -> WorkflowJob | None:
+    expire_stale_activity(session)
     return session.get(WorkflowJob, job_id)
 
 
@@ -650,6 +720,19 @@ def _find_existing_paper(
     return None
 
 
+def _candidate_lookup_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _raw_result_lookup(raw: dict[str, Any]) -> list[str]:
+    keys = []
+    for field in ("doi", "identifier", "url", "title"):
+        key = _candidate_lookup_key(raw.get(field))
+        if key:
+            keys.append(key)
+    return keys
+
+
 def validate_extraction_preflight(
     session: Session,
     *,
@@ -721,6 +804,49 @@ async def download_discovery_candidate(
             return await run_in_threadpool(service.download_pdf_url, str(pdf_url), dest_dir, filename)
         except Exception:
             raise primary_exc
+
+
+def _result_status_for_paper(paper: Paper) -> str:
+    oa_status = str(getattr(paper, "oa_status", "") or "").strip().lower()
+    if oa_status in {"metadata_only", "needs_upload"}:
+        return "metadata_only"
+    return "completed"
+
+
+def _recover_or_create_metadata_only_paper(
+    session: Session,
+    *,
+    ingestion: PaperIngestionService,
+    metadata: dict[str, Any],
+    identifier: str,
+    target_library: str,
+) -> tuple[Paper, str]:
+    try:
+        session.rollback()
+    except Exception:
+        logger.exception("Failed to rollback ingestion session before metadata-only fallback for %s", identifier)
+        raise
+
+    existing = _find_existing_paper(
+        session,
+        doi=metadata.get("doi"),
+        title=metadata.get("title"),
+        year=metadata.get("year"),
+        arxiv_id=PaperIdentityService.extract_arxiv_id(
+            str(metadata.get("arxiv_id") or metadata.get("identifier") or metadata.get("url") or identifier)
+        ),
+        library_name=target_library,
+    )
+    if existing is not None:
+        return existing, _result_status_for_paper(existing)
+
+    paper = ingestion.ingest_metadata_only(
+        external_metadata=metadata,
+        identifier=identifier,
+        library_name=target_library,
+        source_reference=metadata.get("url") or identifier,
+    )
+    return paper, "metadata_only"
 
 
 def _external_metadata_from_ingest_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -855,28 +981,37 @@ def run_discovery_download_ingest_job(job_id: str, control_database_url: str | N
                 result = {"paper_id": str(existing.id), "title": existing.title, "status": "already_exists"}
             else:
                 ingestion = PaperIngestionService(session=job_session, settings=runtime_settings)
-                status = "completed"
                 try:
                     with TemporaryDirectory() as tmpdir:
                         pdf_path = asyncio.run(download_discovery_candidate(service, raw_paper, metadata, Path(tmpdir)))
-                        paper = asyncio.run(
-                            ingestion.ingest_pdf(
-                                source_path=pdf_path,
-                                original_filename=pdf_path.name,
-                                copy_pdf=True,
-                                external_metadata=metadata,
-                                source_reference=None,
-                                library_name=target_library,
+                        try:
+                            paper = asyncio.run(
+                                ingestion.ingest_pdf(
+                                    source_path=pdf_path,
+                                    original_filename=pdf_path.name,
+                                    copy_pdf=True,
+                                    external_metadata=metadata,
+                                    source_reference=None,
+                                    library_name=target_library,
+                                )
                             )
-                        )
+                            status = _result_status_for_paper(paper)
+                        except Exception:
+                            paper, status = _recover_or_create_metadata_only_paper(
+                                job_session,
+                                ingestion=ingestion,
+                                metadata=metadata,
+                                identifier=identifier,
+                                target_library=target_library,
+                            )
                 except Exception:
-                    paper = ingestion.ingest_metadata_only(
-                        external_metadata=metadata,
+                    paper, status = _recover_or_create_metadata_only_paper(
+                        job_session,
+                        ingestion=ingestion,
+                        metadata=metadata,
                         identifier=identifier,
-                        library_name=target_library,
-                        source_reference=metadata.get("url") or identifier,
+                        target_library=target_library,
                     )
-                    status = "metadata_only"
                 result = {"paper_id": str(paper.id), "title": paper.title, "status": status}
             assert_job_not_cancelled(job_session, job_id)
 
@@ -1023,22 +1158,32 @@ async def execute_ai_workflow(
                         metadata,
                         Path(tmpdir),
                     )
-                    paper = await ingestion.ingest_pdf(
-                        source_path=pdf_path,
-                        original_filename=pdf_path.name,
-                        copy_pdf=True,
-                        external_metadata=metadata,
-                        source_reference=None,
-                        library_name=target_library,
-                    )
+                    try:
+                        paper = await ingestion.ingest_pdf(
+                            source_path=pdf_path,
+                            original_filename=pdf_path.name,
+                            copy_pdf=True,
+                            external_metadata=metadata,
+                            source_reference=None,
+                            library_name=target_library,
+                        )
+                        item_status = _result_status_for_paper(paper)
+                    except Exception:
+                        paper, item_status = _recover_or_create_metadata_only_paper(
+                            session,
+                            ingestion=ingestion,
+                            metadata=metadata,
+                            identifier=identifier,
+                            target_library=target_library,
+                        )
             except Exception:
-                paper = ingestion.ingest_metadata_only(
-                    external_metadata=metadata,
+                paper, item_status = _recover_or_create_metadata_only_paper(
+                    session,
+                    ingestion=ingestion,
+                    metadata=metadata,
                     identifier=identifier,
-                    library_name=target_library,
-                    source_reference=metadata.get("url") or identifier,
+                    target_library=target_library,
                 )
-                item_status = "metadata_only"
 
             ingested.append(
                 AIWorkflowIngestedPaperResponse(
@@ -1522,8 +1667,17 @@ async def execute_intake_search_workflow(
         )
 
         # 4. 写候选，不写 papers
+        raw_by_idx: dict[str, dict[str, Any]] = {}
+        for raw in raw_results:
+            for key in _raw_result_lookup(raw):
+                raw_by_idx.setdefault(key, raw)
+
         candidates = []
-        for sr, raw in zip(screening_results, raw_results):
+        for sr in screening_results:
+            raw = raw_by_idx.get(_candidate_lookup_key(sr.identifier))
+            if raw is None:
+                logger.warning("Skipping intake screening result with no matching raw result: %s", sr.identifier)
+                continue
             status = "duplicate" if sr.is_duplicate else "pending_review"
             c = LiteratureIntakeCandidate(
                 session_id=s.id,

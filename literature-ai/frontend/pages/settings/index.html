@@ -170,6 +170,68 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
+        .prompt-bubble-wrap {
+            display: flex;
+            justify-content: flex-start;
+        }
+        .prompt-bubble {
+            position: relative;
+            width: min(100%, 860px);
+            padding: 16px 18px 18px;
+            border-radius: 18px 18px 18px 6px;
+            border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+            background:
+                radial-gradient(circle at top right, color-mix(in srgb, var(--color-primary) 10%, transparent), transparent 38%),
+                linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 10%, var(--color-surface)) 0%, var(--color-surface) 100%);
+            box-shadow: var(--shadow-card);
+            color: var(--color-text);
+        }
+        .prompt-bubble::after {
+            content: "";
+            position: absolute;
+            left: 18px;
+            bottom: -10px;
+            width: 18px;
+            height: 18px;
+            border-left: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+            border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+            background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface));
+            transform: rotate(-45deg);
+            border-bottom-left-radius: 4px;
+        }
+        .prompt-bubble-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            padding-right: 86px;
+        }
+        .prompt-bubble-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: var(--color-primary);
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 16%, transparent);
+            flex-shrink: 0;
+        }
+        .prompt-bubble-title {
+            font-size: var(--font-size-sm);
+            font-weight: 700;
+            color: var(--color-text);
+        }
+        .prompt-bubble-subtitle {
+            font-size: var(--font-size-xs);
+            color: var(--color-text-secondary);
+        }
+        .prompt-bubble-text {
+            min-height: 48px;
+            font-family: var(--font-mono);
+            font-size: var(--font-size-xs);
+            line-height: 1.75;
+            color: var(--color-text-secondary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
         .copy-btn {
             position: absolute;
             top: 8px;
@@ -291,6 +353,12 @@
             flex-wrap: wrap;
             margin-bottom: 14px;
         }
+        .protocol-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 8px;
+        }
         .protocol-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -382,7 +450,7 @@
         <div id="section-api" class="section-content active">
             <div class="panel" id="status-panel">
                 <div class="panel-title">服务状态</div>
-                <div class="panel-desc">查看 Embedding、Writer、内部解析和 MCP 的当前可用状态。</div>
+                <div class="panel-desc">查看 Embedding、网页端 AI 停用状态和 MCP 的当前可用状态。</div>
                 <div id="status-content" class="badge-row">
                     <span class="badge badge-warn">加载中</span>
                 </div>
@@ -410,8 +478,8 @@
                 <div id="embedding-api-fields">
                     <div class="field-row">
                         <div class="field">
-                            <label for="embedding_api_base">API Base URL <span class="hint">例如 https://api.deepseek.com/v1</span></label>
-                            <input type="text" id="embedding_api_base" placeholder="https://api.deepseek.com/v1">
+                            <label for="embedding_api_base">API Base URL <span class="hint">例如 https://api.example.com/v1</span></label>
+                            <input type="text" id="embedding_api_base" placeholder="https://api.example.com/v1">
                         </div>
                         <div class="field">
                             <label for="embedding_api_key">API Key</label>
@@ -432,29 +500,8 @@
             </div>
 
             <div class="panel">
-                <div class="panel-title">Writer LLM 配置</div>
-                <div class="panel-desc">用于 AI Writer 和内部解析。未配置完整时，写作和网页内 AI 审阅都可能不可用。</div>
-                <div class="field">
-                    <label for="writer_backend">Backend</label>
-                    <select id="writer_backend">
-                        <option value="openai_compatible">openai_compatible（在线 API）</option>
-                        <option value="rule">rule（纯模板，不推荐）</option>
-                    </select>
-                </div>
-                <div class="field-row">
-                    <div class="field">
-                        <label for="writer_api_base">API Base URL <span class="hint">例如 https://api.deepseek.com</span></label>
-                        <input type="text" id="writer_api_base" placeholder="https://api.deepseek.com">
-                    </div>
-                    <div class="field">
-                        <label for="writer_api_key">API Key</label>
-                        <input type="password" id="writer_api_key" placeholder="填写 Writer API Key">
-                    </div>
-                </div>
-                <div class="field">
-                    <label for="writer_model">Model <span class="hint">例如 deepseek-chat / gpt-4.1-mini</span></label>
-                    <input type="text" id="writer_model" placeholder="deepseek-chat">
-                </div>
+                <div class="panel-title">网页端 AI 已停用</div>
+                <div class="panel-desc">本页不再保存网页端模型配置。解析、核对和审阅统一由 IDE AI 通过 MCP 读取材料并回写结果，避免网页和 IDE 两套 AI 路径互相绕。</div>
             </div>
 
             <div class="panel">
@@ -482,10 +529,20 @@
 
                 <div class="field">
                     <label>一键提示词</label>
-                    <div class="code-block">
+                    <div class="prompt-bubble-wrap">
+                    <div class="prompt-bubble">
                         <button class="copy-btn" onclick="copyText('prompt-text')">复制</button>
-                        <div id="prompt-text">加载中...</div>
+                        <div class="prompt-bubble-head">
+                            <span class="prompt-bubble-dot"></span>
+                            <div>
+                                <div class="prompt-bubble-title">IDE AI 指令</div>
+                                <div class="prompt-bubble-subtitle">复制后直接发给 IDE 内的 AI</div>
+                            </div>
+                        </div>
+                        <div id="prompt-text" class="prompt-bubble-text">加载中...</div>
                     </div>
+                    </div>
+                </div>
                 </div>
 
                 <div class="field">
@@ -526,7 +583,10 @@
                         <div class="panel-title">当前提取协议</div>
                         <div class="panel-desc">这些协议来自项目的 prompt / rule 配置，明确定义系统预处理、AI 抽取、第二指定 AI 复核、证据定位和人工入库闸门。系统规则 DFT 结果只作为 system_candidate 候选。</div>
                     </div>
-                    <button class="btn btn-ghost" onclick="loadExtractionProtocols()">刷新协议</button>
+                    <div class="protocol-actions">
+                        <a class="btn btn-ghost" href="../extraction_workflow/index.html">高级协议参考</a>
+                        <button class="btn btn-ghost" onclick="loadExtractionProtocols()">刷新协议</button>
+                    </div>
                 </div>
                 <div id="protocol-list" class="protocol-grid">
                     <div class="protocol-card">加载中...</div>
@@ -577,7 +637,7 @@
                         <button class="active" onclick="showGuidePane('overview', event)">功能总览</button>
                         <button onclick="showGuidePane('startup', event)">启动与入口</button>
                         <button onclick="showGuidePane('library', event)">文献入库</button>
-                        <button onclick="showGuidePane('review', event)">AI 审阅与确认</button>
+                        <button onclick="showGuidePane('review', event)">IDE 审阅与确认</button>
                         <button onclick="showGuidePane('writer', event)">写作与证据</button>
                         <button onclick="showGuidePane('ide', event)">IDE / MCP</button>
                         <button onclick="showGuidePane('troubleshooting', event)">排查问题</button>
@@ -593,8 +653,8 @@
                                 <ul>
                                     <li>文献库：上传 PDF、按 DOI / URL 入库、阅读摘要、章节和图表。</li>
                                     <li>DFT 数据库 / 机理知识：适合做横向比对和聚合浏览。</li>
-                                    <li>AI 审阅与确认：生成候选建议，再走人工核对。</li>
-                                    <li>AI Writer：基于文献和证据链生成草稿。</li>
+                                    <li>IDE 审阅与确认：IDE AI 通过 MCP 回写候选，再走人工核对。</li>
+                                    <li>写作辅助：基于文献和证据链整理草稿材料。</li>
                                     <li>设置：集中管理 API、MCP 和界面主题。</li>
                                 </ul>
                             </div>
@@ -633,11 +693,11 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
 
                         <div id="guide-pane-review" class="guide-pane">
                             <div class="guide-section">
-                                <h3>AI 审阅与确认流程</h3>
+                                <h3>IDE 审阅与确认流程</h3>
                                 <ol>
                                     <li>在文献库选中论文。</li>
-                                    <li>生成网页内 AI 审阅或导入外部 AI 结果。</li>
-                                    <li>筛选候选内容，生成待确认记录。</li>
+                                    <li>在 IDE 中调用 MCP，读取 prepare-ai-context / codex-item 材料。</li>
+                                    <li>由 IDE AI 核对证据并通过 import_analysis 回写候选。</li>
                                     <li>最后在人工确认工作台核对证据并确认。</li>
                                 </ol>
                             </div>
@@ -646,7 +706,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                         <div id="guide-pane-writer" class="guide-pane">
                             <div class="guide-section">
                                 <h3>写作与证据</h3>
-                                <p>AI Writer 依赖已入库文献、检索结果和证据链。还在 review / pending 状态的数据，不应直接当作正式结论使用。</p>
+                                <p>写作辅助依赖已入库文献、检索结果和证据链。还在 review / pending 状态的数据，不应直接当作正式结论使用；需要 AI 判断时请在 IDE 中完成。</p>
                             </div>
                         </div>
 
@@ -793,11 +853,6 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                 document.getElementById("embedding_model").value = data.embedding_model || "text-embedding-3-small";
                 document.getElementById("embedding_dimension").value = data.embedding_dimension || "1536";
 
-                document.getElementById("writer_backend").value = data.writer_backend || "openai_compatible";
-                document.getElementById("writer_api_base").value = data.writer_api_base || "";
-                document.getElementById("writer_api_key").value = data.writer_api_key || "";
-                document.getElementById("writer_model").value = data.writer_model || "deepseek-chat";
-
                 document.getElementById("mcp_api_keys").value = data.mcp_api_keys || "";
                 toggleEmbeddingFields();
             } catch (e) {
@@ -808,25 +863,12 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
         async function loadStatus() {
             try {
                 const data = await fetchSettingsJSON(`${API_BASE}/api/settings/status`);
-                const writerMissing = data.writer && data.writer.missing && data.writer.missing.length
-                    ? "缺少 " + data.writer.missing.join(" / ")
-                    : "";
-                const writerDetail = data.writer && data.writer.configured
-                    ? `${data.writer.backend} / ${data.writer.model}`
-                    : ((data.writer && data.writer.message) || "Writer LLM 尚未配置完整") + (writerMissing ? " · " + writerMissing : "");
-
-                const parser = data.internal_parser || data.writer || {};
-                const parserMissing = parser.missing && parser.missing.length
-                    ? "缺少 " + parser.missing.join(" / ")
-                    : "";
-                const parserDetail = parser.configured
-                    ? `复用 Writer LLM / ${parser.model}`
-                    : (parser.message || "内部解析配置未完成") + (parserMissing ? " · " + parserMissing : "");
+                const parser = data.internal_parser || {};
+                const parserDetail = parser.message || "网页端 AI 已停用，解析与核对由 IDE / MCP AI 执行。";
 
                 document.getElementById("status-content").innerHTML = [
                     makeBadge("Embedding", data.embedding && data.embedding.configured, `${data.embedding.provider} / ${data.embedding.model}`),
-                    makeBadge("Writer", data.writer && data.writer.configured, writerDetail),
-                    makeBadge("内部解析", parser.configured, parserDetail),
+                    makeBadge("网页端 AI", false, parserDetail),
                     makeBadge("MCP", data.mcp && data.mcp.has_keys, data.mcp && data.mcp.enabled ? "已启用" : "未启用")
                 ].join("");
             } catch (e) {
@@ -844,10 +886,6 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                 { key: "embedding_api_key", value: document.getElementById("embedding_api_key").value || null },
                 { key: "embedding_model", value: document.getElementById("embedding_model").value || null },
                 { key: "embedding_dimension", value: document.getElementById("embedding_dimension").value || null },
-                { key: "writer_backend", value: document.getElementById("writer_backend").value },
-                { key: "writer_api_base", value: document.getElementById("writer_api_base").value || null },
-                { key: "writer_api_key", value: document.getElementById("writer_api_key").value || null },
-                { key: "writer_model", value: document.getElementById("writer_model").value || null },
                 { key: "mcp_api_keys", value: document.getElementById("mcp_api_keys").value || null }
             ];
 

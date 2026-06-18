@@ -1,24 +1,12 @@
 function renderInternalAIConfigGuide(message, status) {
     const guide = $("internalAIConfigGuide");
-    const missingMap = {
-        internal_parser_api_base: "旧兼容内置审阅 API Base URL（复用 Writer LLM）",
-        internal_parser_api_key: "旧兼容内置审阅 API Key（复用 Writer LLM）",
-        internal_parser_model: "旧兼容内置审阅 Model（复用 Writer LLM）",
-        writer_api_base: "Writer API Base URL",
-        writer_api_key: "Writer API Key",
-        writer_model: "Writer Model"
-    };
-    const missing = status && status.missing ? status.missing.map(function(item) {
-        return missingMap[item] || item;
-    }) : [];
-    const detail = missing.length ? "缺少：" + missing.join(" / ") + "。" : "";
     if (guide) {
         guide.innerHTML =
-            '<div class="section-card" style="border-color:var(--color-warning);background:var(--color-warning-bg);">' +
-            '<div class="subtle" style="color:var(--color-warning);">' + esc(message) + "</div>" +
-            (detail ? '<div class="subtle" style="margin-top:8px;">' + esc(detail) + "</div>" : "") +
+            '<div class="section-card">' +
+            '<h3>IDE AI 审阅入口</h3>' +
+            '<div class="subtle">' + esc(message) + "</div>" +
             '<div class="modal-actions" style="justify-content:flex-start;">' +
-            '<button class="btn primary small" onclick="window.location.href=\'../settings/index.html\'">打开设置页</button>' +
+            '<button class="btn primary small" onclick="loadAgentGuide()">显示 IDE AI 指南</button>' +
             "</div></div>";
     }
 }
@@ -27,7 +15,7 @@ function candidateTypeLabel(type) {
     if (type === "correction") return "修正建议";
     if (type === "note") return "阅读笔记";
     if (type === "relationship") return "文献关系";
-    return "AI 审阅项";
+    return "IDE AI 回写项";
 }
 
 function renderCandidatePayload(payload) {
@@ -55,35 +43,16 @@ function renderCandidatePayload(payload) {
 }
 
 function renderInternalParseSummary(data) {
-    const candidates = data && Array.isArray(data.candidates) ? data.candidates : [];
-    const pending = candidates.filter(function(item) {
-        return item.status === "pending" || item.status === "requires_resolution";
-    }).length;
-    return '<div class="section-card"><h3>最近一次旧兼容网页内 AI 审阅</h3>' +
-        '<div class="subtle">这是旧兼容入口生成的候选审阅摘要，不会直接改库。当前主流程仍应优先使用 IDE / MCP AI 读取材料并回写候选。</div>' +
-        '<div class="readable-grid" style="margin-top:10px;">' +
-            '<div class="readable-field"><div class="k">审阅项总数</div><div class="v">' + esc(candidates.length) + '</div></div>' +
-            '<div class="readable-field"><div class="k">待处理</div><div class="v">' + esc(pending) + '</div></div>' +
-            '<div class="readable-field"><div class="k">下一步</div><div class="v">展开审阅项，选择可信内容并生成待确认记录。</div></div>' +
-        '</div>' +
+    return '<div class="section-card"><h3>网页端解析已停用</h3>' +
+        '<div class="subtle">请在 IDE 中优先使用 MCP 读取材料、核验证据，并通过 import_analysis 回写候选；如果当前会话没暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 直接读取和回写。</div>' +
     '</div>';
 }
 
 async function ensureInternalAIConfigured() {
-    try {
-        const status = await fetchJSON("/api/settings/status");
-        const internalParser = status && (status.internal_parser || status.writer);
-        if (internalParser && internalParser.configured) {
-            return true;
-        }
-        const message = "旧兼容网页内 AI 审阅尚未配置：它复用 Writer LLM 连接，但这不是当前主工作流。若你确实要走旧兼容入口，请在设置 -> API 配置中补 Writer LLM 的 Base URL / API Key / Model。";
-        renderInternalAIConfigGuide(message, internalParser || null);
-        showToast(message, "error");
-        return false;
-    } catch (error) {
-        showToast("无法确认内部解析配置状态：" + error.message, "error");
-        return false;
-    }
+    const message = "网页端解析审阅已停用。请在 IDE 中优先执行 prepare-ai-context / codex-item / import_analysis；如果当前会话没挂上 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。";
+    renderInternalAIConfigGuide(message, null);
+    showToast(message, "info");
+    return false;
 }
 
 async function runInternalAIParse() {
@@ -92,57 +61,9 @@ async function runInternalAIParse() {
         return;
     }
     switchTab("review");
-    if (!(await ensureInternalAIConfigured())) {
-        hideProgress(true);
-        return;
-    }
-    showProgress("旧兼容网页内 AI 入口正在生成候选审阅；当前推荐主流程仍是 IDE / MCP AI。");
-    let hideImmediately = false;
-    try {
-        const data = await fetchJSON(EXTERNAL_API + "/papers/" + state.selectedPaperId + "/internal-parse", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                source_label: "旧兼容网页内 AI 审阅",
-                auto_apply: false
-            })
-        });
-        const extRawText = $("externalRawText");
-        if (extRawText) extRawText.value = "";
-        showToast("旧兼容网页内 AI 审阅已生成；建议继续以 IDE / MCP AI 为主线处理。", "success");
-        const extRuns = $("externalRuns");
-        if (extRuns) {
-            extRuns.insertAdjacentHTML(
-                "afterbegin",
-                renderInternalParseSummary(data)
-            );
-        }
-        await loadExternalRuns();
-    } catch (error) {
-        hideImmediately = true;
-        const guide = $("internalAIConfigGuide");
-        const internalParserMessage = "旧兼容网页内 AI 审阅尚未配置：它复用 Writer LLM 连接，但这不是当前主工作流。推荐改用 IDE / MCP AI；若要继续旧兼容入口，请在设置 -> API 配置 中填写 Writer API Key / Base URL / Model。";
-        const message = "旧兼容网页内 AI 审阅尚未配置。推荐改用 IDE / MCP AI；如需继续旧兼容入口，请填写 Writer API Key / Base URL / Model。";
-        if (error.status === 400 && String(error.message || "").includes("Internal AI is not configured")) {
-            hideProgress(true);
-            if (guide) {
-                guide.innerHTML =
-                    '<div class="section-card" style="border-color:var(--color-warning);background:var(--color-warning-bg);">' +
-                    '<div class="subtle" style="color:var(--color-warning);">' + internalParserMessage + "</div>" +
-                    '<div class="modal-actions" style="justify-content:flex-start;">' +
-                    '<button class="btn primary small" onclick="window.location.href=\'../settings/index.html\'">打开设置页</button>' +
-                    "</div></div>";
-            }
-            showToast(internalParserMessage, "error");
-        } else {
-            const extRuns = $("externalRuns");
-            if (extRuns) {
-                extRuns.innerHTML = '<div class="workspace-empty">旧兼容网页内 AI 审阅生成失败：' + esc(error.message) + "</div>";
-            }
-            showToast("旧兼容网页内 AI 审阅生成失败：" + error.message, "error");
-        }
-    }
-    hideProgress(hideImmediately);
+    await ensureInternalAIConfigured();
+    await loadAgentGuide();
+    hideProgress(true);
 }
 
 async function loadAgentGuide() {
@@ -156,9 +77,12 @@ async function loadAgentGuide() {
             const entry = guide.recommended_entrypoint || {};
             const endpoints = Array.isArray(guide.http_endpoints) ? guide.http_endpoints : [];
             const tools = guide.mcp && Array.isArray(guide.mcp.common_tools) ? guide.mcp.common_tools : [];
+            const overallPrompt = guide.suggested_client_prompt || "";
             mcpGuide.innerHTML =
-                '<div class="section-card"><h3>IDE / MCP AI 审阅指南</h3>' +
-                '<div class="subtle">外部 IDE / MCP AI 可以读取文献、追加笔记、提出修正或触发解析；本区只展示入口，不会自动写入正式数据。</div>' +
+                '<div class="section-card"><h3>IDE AI 审阅指南</h3>' +
+                '<div class="subtle">IDE AI 可以优先通过 MCP 读取文献、追加笔记、提出修正或触发解析；如果当前会话没有暴露 MCP 工具，也可以直接使用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` 与 `app.mcp.server` 作为后备路径。本区只展示入口，不会自动写入正式数据。</div>' +
+                (overallPrompt ? '<div class="modal-actions" style="justify-content:flex-start;margin-top:10px;"><button class="btn primary small" onclick="copyOverallParseInstruction()">复制总体解析指令</button></div>' : '') +
+                (overallPrompt ? '<details style="margin-top:10px;"><summary>总体解析指令</summary><div id="overallParseInstruction" class="mono prewrap">' + esc(overallPrompt) + '</div></details>' : '') +
                 '<div class="readable-grid" style="margin-top:10px;">' +
                     '<div class="readable-field"><div class="k">推荐入口</div><div class="v">' + esc((entry.method || "") + " " + (entry.path || "")) + '</div></div>' +
                     '<div class="readable-field"><div class="k">适用场景</div><div class="v">' + esc(entry.description || "通过外部工具读取和审阅文献。") + '</div></div>' +
@@ -172,8 +96,19 @@ async function loadAgentGuide() {
                 '</details></div>';
         }
     } catch (error) {
-        showToast("读取 IDE / MCP 指南失败：" + error.message, "error");
+        showToast("读取 IDE AI 指南失败：" + error.message, "error");
     }
+}
+
+async function copyOverallParseInstruction() {
+    const el = $("overallParseInstruction");
+    const text = el ? el.textContent : "";
+    if (!text) {
+        showToast("暂无总体解析指令。", "error");
+        return;
+    }
+    await navigator.clipboard.writeText(text);
+    showToast("总体解析指令已复制。", "success");
 }
 
 async function importExternalAnalysis() {
@@ -184,10 +119,10 @@ async function importExternalAnalysis() {
     const extRawText = $("externalRawText");
     const raw = extRawText ? extRawText.value.trim() : "";
     if (!raw) {
-        showToast("请粘贴外部 AI 返回结果。", "error");
+        showToast("请粘贴 IDE AI 返回结果。", "error");
         return;
     }
-    showProgress("正在导入外部 AI 审阅结果...");
+    showProgress("正在导入 IDE AI 回写结果...");
     let rawPayload = raw;
     try {
         rawPayload = JSON.parse(raw);
@@ -201,12 +136,12 @@ async function importExternalAnalysis() {
             body: JSON.stringify({
                 paper_id: state.selectedPaperId,
                 source: normalizeExternalSourceForApi(extSource ? extSource.value : "manual"),
-                source_label: extSourceLabel ? (extSourceLabel.value.trim() || "外部 AI 审阅结果") : "外部 AI 审阅结果",
+                source_label: extSourceLabel ? (extSourceLabel.value.trim() || "IDE AI 回写结果") : "IDE AI 回写结果",
                 raw_text: typeof rawPayload === "string" ? rawPayload : null,
                 raw_payload: rawPayload
             })
         });
-        showToast("外部 AI 审阅结果已导入。", "success");
+        showToast("IDE AI 回写结果已导入。", "success");
         if (extRawText) extRawText.value = "";
         await loadExternalRuns();
     } catch (error) {
@@ -226,12 +161,17 @@ async function loadExternalRuns() {
         contextGuide.setAttribute("data-quality-reason", state.qualityReasonContext);
         contextGuide.insertAdjacentHTML("afterbegin", reasonBanner);
     }
-    if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">正在加载 AI 审阅记录...</div>';
+    if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">正在加载 IDE AI 回写记录...</div>';
     try {
         const runs = await fetchJSON(EXTERNAL_API + "/runs?paper_id=" + encodeURIComponent(state.selectedPaperId));
         state.externalRuns = runs || [];
+        if (state.currentTab === "review" && state.selectedPaperId) {
+            rerenderSelectedDetail(state.selectedPaperId);
+            if (extRuns) extRuns.innerHTML = "";
+            return;
+        }
         if (!state.externalRuns.length) {
-            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 AI 审阅记录。点“生成详细审阅”后，AI 会先产出阅读笔记、修正建议和关联建议；确认前不会写入正式数据。</div>';
+            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 IDE AI 回写记录。请在 IDE 中优先读取 MCP 材料并通过 import_analysis 回写候选；如果当前会话没暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。确认前不会写入正式数据。</div>';
             return;
         }
         if (extRuns) {
@@ -243,13 +183,12 @@ async function loadExternalRuns() {
                     '<div class="run-card">' +
                         '<h4>' + esc(run.source_label || uiLabel("source", run.source) || "未命名候选源") + "</h4>" +
                         '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(uiLabel("mapping_status", run.mapping_status || "-")) + "</div>" +
-                        '<div class="subtle" style="margin-top:8px;">用途：这里是 AI 的详细审阅草稿。阅读笔记用于快速理解论文；修正/关联建议用于补全或纠错。点击“生成待确认记录”后，还需要人工在 review 流程里确认，才算可靠数据。</div>' +
+                        '<div class="subtle" style="margin-top:8px;">用途：这里显示 IDE AI 通过 import_analysis 回写的结果。阅读笔记用于快速理解论文；修正/关联建议用于补全或纠错。DFT 数据仍按审核中心的多 AI 冲突流程处理。</div>' +
                         (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
                         '<div class="candidate-toolbar" style="margin-top:12px;">' +
-                            '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量生成待确认记录</button>' +
-                            '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中生成待确认记录</button>' +
+                            '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量生成审核记录</button>' +
+                            '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中生成审核记录</button>' +
                             '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开审阅项（' + (run.candidates || []).length + "）</button>" +
-                            '<a class="btn ghost small" style="text-decoration:none;" href="/pages/external_analysis_workbench/index.html?paper_id=' + encodeURIComponent(state.selectedPaperId) + '">人工确认工作台</a>' +
                             '<button class="btn ghost small" onclick="deleteExternalRun(\'' + run.id + '\')">删除记录</button>' +
                         "</div>" +
                         '<div id="run-candidates-' + run.id + '" style="display:none;">' +
@@ -263,7 +202,7 @@ async function loadExternalRuns() {
             }).join("");
         }
     } catch (error) {
-        if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">AI 审阅记录加载失败：' + esc(error.message) + "</div>";
+        if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">IDE AI 回写记录加载失败：' + esc(error.message) + "</div>";
     }
 }
 
@@ -278,7 +217,7 @@ function renderCandidates(runId, candidates) {
             ? '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;margin:0;"><input type="checkbox" class="candidate-select" data-run-id="' + escAttr(runId) + '" value="' + escAttr(candidateId) + '">选择</label>'
             : '<span class="muted" style="font-size:12px;">已处理</span>';
         var singleAction = isPending && candidateId
-            ? '<button class="btn ghost small" onclick="materializeCandidate(\'' + escAttr(runId) + '\', \'' + escAttr(candidateId) + '\')">生成待确认记录</button>'
+            ? '<button class="btn ghost small" onclick="materializeCandidate(\'' + escAttr(runId) + '\', \'' + escAttr(candidateId) + '\')">生成审核记录</button>'
             : "";
         var candidateLabel = "";
         if (item.candidate_type === "correction") {
@@ -319,34 +258,34 @@ async function materializeRun(runId) {
         return;
     }
     var ok = confirm(
-        "将处理 " + pendingCount + " 个 AI 审阅项，生成待确认记录。\n\n" +
-        "这不是人工 verified，只是把 AI 草稿送进人工确认流程；请去“人工确认工作台”核对证据并确认。\n\n" +
+        "将处理 " + pendingCount + " 个 IDE AI 回写项，生成审核记录。\n\n" +
+        "这不是人工 verified，只是把 IDE AI 草稿转成系统可追踪的审核记录；DFT 数据仍按审核中心流程处理。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
-    showProgress("正在生成待确认记录...");
+    showProgress("正在生成审核记录...");
     try {
         await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/materialize", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ explicit_all: true, created_by: "web_user" })
         });
-        showToast("已生成待确认记录，请在人工确认工作台核对证据。", "success");
+        showToast("已生成可追踪审核记录。", "success");
         await loadExternalRuns();
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
-        showToast("生成待确认记录失败：" + error.message, "error");
+        showToast("生成审核记录失败：" + error.message, "error");
     }
     hideProgress();
 }
 
 async function deleteExternalRun(runId) {
-    var ok = confirm("删除这条 AI 审阅记录？已生成的人工确认记录不会被删除。");
+    var ok = confirm("删除这条 IDE AI 回写记录？已生成的人工确认记录不会被删除。");
     if (!ok) return;
-    showProgress("正在删除 AI 审阅记录...");
+    showProgress("正在删除 IDE AI 回写记录...");
     try {
         await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/delete", { method: "POST" });
-        showToast("AI 审阅记录已删除。", "success");
+        showToast("IDE AI 回写记录已删除。", "success");
         await loadExternalRuns();
     } catch (error) {
         showToast("删除失败：" + error.message, "error");
@@ -363,7 +302,7 @@ async function materializeSelectedCandidates(runId) {
         return input.value;
     });
     if (!ids.length) {
-        showToast("请先选择要生成记录的 AI 候选建议。", "error");
+        showToast("请先选择要生成记录的 IDE AI 回写候选。", "error");
         return;
     }
     await materializeCandidateIds(runId, ids);
@@ -372,23 +311,23 @@ async function materializeSelectedCandidates(runId) {
 async function materializeCandidateIds(runId, candidateIds) {
     if (!candidateIds.length) return;
     var ok = confirm(
-        "将处理 " + candidateIds.length + " 个 AI 审阅项，生成待确认记录。\n\n" +
-        "这不是人工 verified，只是把 AI 草稿送进人工确认流程；请去“人工确认工作台”核对证据并确认。\n\n" +
+        "将处理 " + candidateIds.length + " 个 IDE AI 回写项，生成审核记录。\n\n" +
+        "这不是人工 verified，只是把 IDE AI 草稿转成系统可追踪的审核记录；DFT 数据仍按审核中心流程处理。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
-    showProgress("正在生成待确认记录...");
+    showProgress("正在生成审核记录...");
     try {
         await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/materialize", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ candidate_ids: candidateIds, created_by: "web_user" })
         });
-        showToast("已生成待确认记录，请在人工确认工作台核对证据。", "success");
+        showToast("已生成可追踪审核记录。", "success");
         await loadExternalRuns();
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
-        showToast("生成待确认记录失败：" + error.message, "error");
+        showToast("生成审核记录失败：" + error.message, "error");
     }
     hideProgress();
 }

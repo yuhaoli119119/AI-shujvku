@@ -31,6 +31,7 @@ from app.services.intake_screening_service import IntakeScreeningService
 from app.services.workflow_jobs import (
     JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
     create_job,
+    create_job_or_reuse_active,
     dispatch_job,
     get_job,
     serialize_job,
@@ -135,6 +136,19 @@ def _get_candidate_or_404(session: Session, candidate_id: UUID) -> LiteratureInt
     return c
 
 
+def _candidate_lookup_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _raw_result_lookup(raw: dict[str, Any]) -> list[str]:
+    keys = []
+    for field in ("doi", "identifier", "url", "title"):
+        key = _candidate_lookup_key(raw.get(field))
+        if key:
+            keys.append(key)
+    return keys
+
+
 def _trigger_ingest_job(
     candidate: LiteratureIntakeCandidate,
     session: Session,
@@ -143,14 +157,12 @@ def _trigger_ingest_job(
 ) -> dict[str, Any]:
     """为一个已 approved 的候选创建 ingest job 并派发。"""
     # 构建与现有 discovery_download_ingest 兼容的 payload
-    target_library = normalize_library_name(library_name or candidate.session.library_name if hasattr(candidate, "session") else None)
     # 直接从候选字段获取 library_name（通过 session_id 反查开销较大，改用 JOIN）
     stmt = select(LiteratureIntakeSession.library_name).where(
         LiteratureIntakeSession.id == candidate.session_id
     )
     sess_lib = session.scalar(stmt)
-    if library_name is None:
-        library_name = normalize_library_name(sess_lib)
+    effective_library = normalize_library_name(library_name or sess_lib)
 
     identifier = candidate.doi or candidate.identifier or candidate.url or candidate.title or ""
     if not identifier:
@@ -159,7 +171,7 @@ def _trigger_ingest_job(
     payload = {
         "identifier": identifier,
         "providers": candidate.providers or [],
-        "library_name": library_name,
+        "library_name": effective_library,
         # 传递候选原始元数据，供 ingest_metadata_only 降级时使用
         "title": candidate.title,
         "doi": candidate.doi,
@@ -173,10 +185,10 @@ def _trigger_ingest_job(
     bind = session.get_bind()
     db_url = bind.engine.url.render_as_string(hide_password=False) if bind else None
 
-    job = create_job(
+    job, reused = create_job_or_reuse_active(
         session,
         job_type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
-        library_name=library_name,
+        library_name=effective_library,
         payload=payload,
         runtime_context={},
         progress={
@@ -194,8 +206,11 @@ def _trigger_ingest_job(
     session.commit()
     session.refresh(candidate)
 
-    dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
-    return serialize_job(job)
+    if not reused:
+        dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
+    data = serialize_job(job)
+    data["deduplicated"] = reused
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +269,16 @@ async def intake_search(
         )
 
         # 4. 写入候选（不入 papers 表）
-        raw_by_idx = {r.get("doi") or r.get("identifier") or r.get("title"): r for r in raw_results}
+        raw_by_idx: dict[str, dict[str, Any]] = {}
+        for raw in raw_results:
+            for key in _raw_result_lookup(raw):
+                raw_by_idx.setdefault(key, raw)
         candidates: list[LiteratureIntakeCandidate] = []
-        for sr, raw in zip(screening_results, raw_results):
+        for sr in screening_results:
+            raw = raw_by_idx.get(_candidate_lookup_key(sr.identifier))
+            if raw is None:
+                logger.warning("Skipping intake screening result with no matching raw result: %s", sr.identifier)
+                continue
             status = "duplicate" if sr.is_duplicate else "pending_review"
             c = LiteratureIntakeCandidate(
                 session_id=session_id,
@@ -538,6 +560,6 @@ async def batch_ingest_approved(
         "message": (
             f"已为 {len(triggered)} 篇候选创建入库任务"
             + (f"，{len(failed)} 篇失败" if failed else "")
-            + "。入库过程在后台进行，可通过任务中心查看进度。"
+            + "。入库过程在后台进行，可通过入库页的文献入库进度查看状态。"
         ),
     }

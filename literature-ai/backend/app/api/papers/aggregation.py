@@ -7,6 +7,7 @@ import logging
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -27,6 +28,7 @@ from app.services.dft_export_service import (
     _optional_text_filter,
     build_dft_csv_rows,
     build_dft_ml_dataset,
+    normalize_dft_display_value,
 )
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
@@ -257,7 +259,10 @@ async def compare_dft_results(
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
 ):
-    fetch_limit = limit if (status or "").strip().lower() in {"all", "any", ""} else min(limit * 5, 2500)
+    normalized_status = (status or "all").strip().lower()
+    # Export eligibility is computed after loading candidate rows, so a small SQL
+    # LIMIT can hide valid exportable records that appear later in value order.
+    fetch_limit = limit if normalized_status in {"all", "any", ""} else 2500
     stmt = (
         select(DR, P)
         .join(P, DR.paper_id == P.id)
@@ -277,36 +282,36 @@ async def compare_dft_results(
         stmt = stmt.where(build_library_name_clause(P.library_name, library_name))
 
     rows = session.execute(stmt).all()
-    catalyst_by_paper: dict[str, list] = defaultdict(list)
+    catalyst_by_id: dict[str, dict[str, Any]] = {}
     if rows:
         cat_rows = session.scalars(select(CS).where(CS.paper_id.in_([row[1].id for row in rows]))).all()
         for cat in cat_rows:
-            catalyst_by_paper[str(cat.paper_id)].append(
-                {
-                    "name": cat.name,
-                    "type": cat.catalyst_type,
-                    "metal_centers": cat.metal_centers,
-                    "coordination": cat.coordination,
-                    "support": cat.support,
-                }
-            )
+            catalyst_by_id[str(cat.id)] = {
+                "id": str(cat.id),
+                "name": cat.name,
+                "type": cat.catalyst_type,
+                "metal_centers": cat.metal_centers,
+                "coordination": cat.coordination,
+                "support": cat.support,
+            }
 
     items = []
     gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
 
     for dr, paper in rows:
         pid = str(paper.id)
-        catalysts = catalyst_by_paper.get(pid, [])
+        linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
+        catalysts = [linked_catalyst] if linked_catalyst else []
         if catalyst_type:
             catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
-            if not catalysts and catalyst_by_paper.get(pid):
+            if not catalysts:
                 continue
         gate = gate_by_id[str(dr.id)]
-        normalized_status = (status or "exportable").strip().lower()
         if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
             continue
         if normalized_status in {"needs_review", "candidate", "blocked"} and gate.eligible:
             continue
+        display_value, display_unit = normalize_dft_display_value(dr.value, dr.unit)
         items.append(
             {
                 "paper_id": pid,
@@ -316,12 +321,15 @@ async def compare_dft_results(
                 "year": paper.year,
                 "property_type": dr.property_type,
                 "adsorbate": dr.adsorbate,
-                "value": dr.value,
-                "unit": dr.unit,
+                "value": display_value,
+                "unit": display_unit,
+                "raw_value": dr.value,
+                "raw_unit": dr.unit,
                 "reaction_step": dr.reaction_step,
                 "confidence": dr.confidence,
                 "candidate_status": dr.candidate_status or "system_candidate",
                 "evidence_text": dr.evidence_text,
+                "evidence_payload": dr.evidence_payload,
                 "source_section": dr.source_section,
                 "source_figure": dr.source_figure,
                 "catalysts": catalysts,

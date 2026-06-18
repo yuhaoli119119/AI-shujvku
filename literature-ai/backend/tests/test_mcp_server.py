@@ -14,9 +14,11 @@ from app.config import get_settings
 from app.db.models import (
     AuditLog,
     Base,
+    CatalystSample,
     DFTResult,
     ElectrochemicalPerformance,
     EvidenceLocator,
+    ExtractionFieldReview,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     MechanismClaim,
@@ -34,6 +36,7 @@ from app.mcp.context import MCPAuthInfo, mcp_auth_context
 from app.mcp.server import (
     append_note,
     approve_correction,
+    acquire_module_write_lock,
     get_correction_detail,
     get_codex_context,
     get_correction_queue,
@@ -52,7 +55,9 @@ from app.mcp.server import (
     query_papers,
     reject_correction,
     scan_local_pdfs,
+    scan_duplicate_dois,
 )
+from app.utils.library_names import DEFAULT_LIBRARY_NAME
 
 
 @pytest.fixture
@@ -114,6 +119,17 @@ def _admin_auth() -> MCPAuthInfo:
             {"read_papers", "append_notes", "propose_corrections", "request_parse", "review_corrections"}
         ),
         raw_key="litmcp_admin",
+    )
+
+
+def _ai_reviewer_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="ai_pc_1",
+        display_name="AI PC 1",
+        capabilities=frozenset(
+            {"read_papers", "append_notes", "propose_corrections", "request_parse", "review_corrections"}
+        ),
+        raw_key="litmcp_ai_pc_1",
     )
 
 
@@ -188,6 +204,26 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
         assert [item.action for item in audit_logs] == ["append_note", "propose_correction"]
+
+
+def test_scan_duplicate_dois_groups_default_library_aliases(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        session.add_all(
+            [
+                Paper(title="Default Alias One", doi="10.1000/default-alias", library_name=DEFAULT_LIBRARY_NAME, pdf_path="one.pdf"),
+                Paper(title="Default Alias Two", doi="10.1000/default-alias", library_name="Codex ????????", pdf_path="two.pdf"),
+                Paper(title="Other Library", doi="10.1000/default-alias", library_name="OtherLibrary", pdf_path="three.pdf"),
+            ]
+        )
+        session.commit()
+
+    with mcp_auth_context(_auth()):
+        payload = scan_duplicate_dois()
+
+    duplicate = next(item for item in payload["duplicates"] if item["doi"] == "10.1000/default-alias")
+    assert duplicate["library_name"] == DEFAULT_LIBRARY_NAME
+    assert duplicate["count"] == 2
+    assert len(duplicate["paper_ids"]) == 2
 
 
 def test_mcp_query_papers_sort_by_created_at(mcp_test_env):
@@ -272,7 +308,9 @@ def test_mcp_get_codex_item_returns_low_token_dft_context(mcp_test_env):
     assert payload["schema_version"] == "codex_item_context_v1"
     assert payload["item_type"] == "dft_result"
     assert payload["context"]["item"]["value"] == 7.5
-    assert payload["context"]["export_safety"]["blocked_reasons"] == ["missing_review"]
+    blocked_reasons = payload["context"]["export_safety"]["blocked_reasons"]
+    assert "missing_material_identity" in blocked_reasons
+    assert "missing_review" in blocked_reasons
     assert payload["context"]["evidence_locators"]["items"][0]["page"] == 5
 
 
@@ -479,6 +517,97 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
         assert stored_candidate.normalized_payload["writes_final_truth"] is False
 
 
+def test_mcp_import_analysis_auto_applies_dual_ai_dft_reviews(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Auto Apply DFT Paper", pdf_path="mcp-auto-apply.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Vacancy graphene",
+            catalyst_type="defective_graphene",
+            coordination="single vacancy",
+            support="graphene",
+        )
+        session.add(catalyst)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            reaction_step="adsorption",
+            evidence_text="Table 1 reports -1.20 eV for Li2S4 adsorption.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=7,
+                evidence_text="Table 1 reports -1.20 eV for Li2S4 adsorption.",
+                locator_status="exact_page",
+                locator_confidence=0.95,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": row_id,
+                "field_name": "value",
+                "decision": "PASS",
+                "corrected_value": -1.2,
+                "evidence_checked": True,
+                "confidence": 0.91,
+                "reason": "Table 1 confirms the DFT value.",
+                "evidence_location": {"page": 7, "table": "Table 1", "quoted_text": "-1.20 eV"},
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        first = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit A",
+            raw_payload=payload,
+        )
+        second = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit B",
+            raw_payload=payload,
+        )
+
+    assert first["candidate_count"] == 1
+    assert second["candidate_count"] == 1
+    assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
+    assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
+
+    with Session(mcp_test_env["engine"]) as session:
+        stored_row = session.get(DFTResult, UUID(row_id))
+        candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+        reviews = session.query(ExtractionFieldReview).all()
+
+    assert stored_row is not None
+    assert stored_row.candidate_status == "ML_Ready"
+    assert {candidate.status for candidate in candidates} == {"materialized"}
+    assert reviews
+    assert {review.reviewer_status for review in reviews} == {"verified"}
+
+
 def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="MCP DFT Queue Paper", doi="10.1000/dft-queue", year=2025, pdf_path="queue.pdf")
@@ -577,10 +706,11 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
     assert len(payload["rows"]) == 1
     row = payload["rows"][0]
     assert row["record_id"] == row_id
-    assert row["blocked_reasons"] == ["missing_review"]
-    assert row["recommended_action"] == "verify_against_pdf"
+    assert "missing_material_identity" in row["blocked_reasons"]
+    assert "missing_review" in row["blocked_reasons"]
+    assert row["recommended_action"] == "bind_material_identity"
     assert row["sanity_flags"] == []
-    assert row["can_mark_verified"] is True
+    assert row["can_mark_verified"] is False
     assert row["evidence_locators"][0]["page"] == 7
     assert row["primary_evidence_locator"]["page"] == 7
     assert row["evidence_page"] == 7
@@ -724,7 +854,8 @@ def test_admin_mcp_reject_dft_result_leaves_active_queue(mcp_test_env):
         rejected_queue = get_dft_review_queue(paper_id=paper_id, status="rejected")
 
     assert rejected["export_safety"]["review_status"] == "rejected"
-    assert rejected["export_safety"]["blocked_reasons"] == ["unsafe_review"]
+    assert "missing_material_identity" in rejected["export_safety"]["blocked_reasons"]
+    assert "unsafe_review" in rejected["export_safety"]["blocked_reasons"]
     assert active_queue["rows"] == []
     assert rejected_queue["rows"][0]["record_id"] == row_id
     assert rejected_queue["rows"][0]["decision_status"] == "rejected"
@@ -785,6 +916,80 @@ def test_mcp_propose_dft_result_correction_enters_review_queue(mcp_test_env):
         audit = session.scalar(select(AuditLog).where(AuditLog.action == "propose_dft_result_correction"))
         assert audit is not None
         assert audit.target_id == correction["id"]
+
+
+def test_ai_reviewer_mcp_approve_non_dft_requires_module_lock(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="AI Review Lock Target", abstract="Old abstract", pdf_path="review-lock.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        correction = propose_correction(
+            paper_id=paper_id,
+            field_name="abstract",
+            target_path="abstract",
+            operation="replace",
+            proposed_value="Locked abstract",
+            reason="AI proposes a safer abstract.",
+        )
+
+    with mcp_auth_context(_ai_reviewer_auth()):
+        with pytest.raises(ValueError, match="module_write_lock_required"):
+            approve_correction(correction["id"])
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="content",
+            locked_by="ai_pc_1",
+        )
+        approved = approve_correction(correction["id"], write_lock_token=lock["lock_token"])
+        assert approved["status"] == "approved"
+        assert approved["reviewed_by"] == "ai_pc_1"
+
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.abstract == "Locked abstract"
+
+
+def test_import_analysis_defaults_reviewer_to_mcp_source_for_lock_validation(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Default Reviewer Lock Target", abstract="Old abstract", pdf_path="review-lock.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="content",
+        )
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="claude_overall_review",
+            source_label="claude_overall_review",
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+            raw_payload={
+                "correction_proposals": [
+                    {
+                        "field_name": "abstract",
+                        "target_path": "abstract",
+                        "operation": "replace",
+                        "proposed_value": "Rewritten abstract",
+                        "reason": "Evidence-backed rewrite.",
+                        "evidence_payload": {"page": 1, "quoted_text": "Old abstract"},
+                    }
+                ]
+            },
+        )
+
+    assert imported["reviewer"] == "claude"
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.abstract == "Rewritten abstract"
 
 
 def test_admin_mcp_review_flow_applies_or_rejects_corrections(mcp_test_env):

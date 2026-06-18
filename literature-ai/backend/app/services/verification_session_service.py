@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
@@ -11,7 +13,10 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import (
     AuditLog,
+    CatalystSample,
     DFTResult,
+    EvidenceLocator,
+    ExtractionFieldReview,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     Paper,
@@ -22,6 +27,7 @@ from app.db.models import (
 )
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.review_conflict_service import (
     DECISION_NEGATIVE,
@@ -29,9 +35,14 @@ from app.services.review_conflict_service import (
     ReviewConflictAggregationService,
 )
 from app.services.review_service import ReviewService
+from app.services.review_target_resolver import canonical_target_type
+from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.library_names import DEFAULT_LIBRARY_NAME, normalize_library_name
+from app.utils.review_safety import is_safe_verified_review
 
 
 class VerificationSessionService:
+    HIGH_RISK_IDE_TARGET_TYPES = {"dft_results", "catalyst_samples"}
     HIGH_RISK_SCOPES = {
         "all": {"dft_results", "mechanism_claims", "electrochemical_performance", "catalyst_samples", "dft_settings"},
         "dft_only": {"dft_results"},
@@ -43,6 +54,12 @@ class VerificationSessionService:
         "writing_only": {"review_notes"},
     }
     DFT_FIELD_ALIASES = {
+        "catalyst": "catalyst_sample_id",
+        "catalyst_id": "catalyst_sample_id",
+        "catalyst_sample": "catalyst_sample_id",
+        "catalyst_sample_id": "catalyst_sample_id",
+        "material_binding": "catalyst_sample_id",
+        "structure_binding": "catalyst_sample_id",
         "energy_type": "property_type",
         "property_type": "property_type",
         "energy": "property_type",
@@ -56,7 +73,6 @@ class VerificationSessionService:
         "confidence": "confidence",
         "evidence_text": "evidence_text",
     }
-
     def __init__(self, session: Session, settings: Settings) -> None:
         self.session = session
         self.settings = settings
@@ -107,7 +123,7 @@ class VerificationSessionService:
             job_id=session_id,
             type="verification_session",
             status="completed",
-            library_name=selected[0].library_name or "默认文献库",
+            library_name=selected[0].library_name or DEFAULT_LIBRARY_NAME,
             payload=payload,
             progress={"prepared": len(selected), "completed": True},
             result={
@@ -152,6 +168,517 @@ class VerificationSessionService:
             "settlement": result.get("settlement"),
             "created_at": payload.get("created_at"),
         }
+
+    def apply_import_rules_for_paper(
+        self,
+        *,
+        paper_id: UUID,
+        reviewer: str,
+        write_lock_tokens: list[str] | None = None,
+    ) -> dict[str, Any]:
+        new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
+        required_modules = self._required_direct_write_modules_for_paper(paper_id)
+        try:
+            lock_check = ModuleWriteLockService(self.session).require_write(
+                paper_id=paper_id,
+                module_names=required_modules,
+                lock_tokens=write_lock_tokens,
+                locked_by=reviewer,
+            )
+        except ValueError as exc:
+            if not new_dft_summary.get("materialized_count"):
+                raise
+            summary = {
+                "paper_id": str(paper_id),
+                "new_dft_candidates": new_dft_summary,
+                "single_ai": {
+                    "materialized_count": 0,
+                    "materialized_items": [],
+                    "skipped_count": 0,
+                    "skipped_items": [],
+                },
+                "object_reviews": {
+                    "applied_count": 0,
+                    "applied_items": [],
+                    "pending_count": 0,
+                    "pending_items": [],
+                    "skipped_count": 1,
+                    "skipped_items": [{"reason": str(exc)}],
+                },
+                "write_lock": {
+                    "required_modules": required_modules,
+                    "covered_modules": [],
+                    "lock_ids": [],
+                    "error": str(exc),
+                },
+            }
+            self.session.add(
+                AuditLog(
+                    paper_id=paper_id,
+                    action="apply_ide_review_rules",
+                    source=reviewer,
+                    target_type="paper",
+                    target_id=str(paper_id),
+                    payload=summary,
+                )
+            )
+            self.session.flush()
+            return summary
+        low_risk_summary = self._auto_materialize_single_ai_candidates(paper_id=paper_id, reviewer=reviewer)
+        dft_settlement_summary = self.settle_ai_dft_reviews_for_paper(
+            paper_id=paper_id,
+            reviewer=reviewer,
+            write_lock_tokens=write_lock_tokens,
+        )
+        object_review_summary = self._auto_apply_object_review_candidates(
+            paper_id=paper_id,
+            reviewer=reviewer,
+            write_lock_tokens=write_lock_tokens,
+            exclude_target_types={"dft_results"},
+        )
+        summary = {
+            "paper_id": str(paper_id),
+            "new_dft_candidates": new_dft_summary,
+            "single_ai": low_risk_summary,
+            "object_reviews": {
+                "applied_count": dft_settlement_summary["auto_applied_count"],
+                "applied_items": dft_settlement_summary["auto_applied_items"],
+                "pending_count": (
+                    dft_settlement_summary["waiting_second_ai_count"]
+                    + dft_settlement_summary["need_third_ai_count"]
+                    + dft_settlement_summary["need_repair_count"]
+                ),
+                "pending_items": (
+                    dft_settlement_summary["waiting_second_ai_items"]
+                    + dft_settlement_summary["need_third_ai_items"]
+                    + dft_settlement_summary["need_repair_items"]
+                ),
+                "skipped_count": dft_settlement_summary["skipped_count"],
+                "skipped_items": dft_settlement_summary["skipped_items"],
+            },
+            "dft_settlement": dft_settlement_summary,
+            "non_dft_object_reviews": object_review_summary,
+            "write_lock": {
+                "required_modules": lock_check.required_modules,
+                "covered_modules": lock_check.covered_modules,
+                "lock_ids": lock_check.lock_ids,
+            },
+        }
+        self.session.add(
+            AuditLog(
+                paper_id=paper_id,
+                action="apply_ide_review_rules",
+                source=reviewer,
+                target_type="paper",
+                target_id=str(paper_id),
+                payload=summary,
+            )
+        )
+        self.session.flush()
+        return summary
+
+    def settle_ai_dft_reviews_for_paper(
+        self,
+        *,
+        paper_id: UUID,
+        reviewer: str,
+        write_lock_tokens: list[str] | None = None,
+    ) -> dict[str, Any]:
+        rows = self.session.scalars(
+            select(DFTResult)
+            .where(DFTResult.paper_id == paper_id)
+            .order_by(DFTResult.id.asc())
+        ).all()
+        audits_by_target = self._paper_dft_audit_candidates(paper_id)
+        auto_applied: list[dict[str, Any]] = []
+        need_third_ai: list[dict[str, Any]] = []
+        need_repair: list[dict[str, Any]] = []
+        waiting_second_ai: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+
+        for row in rows:
+            row_id = str(row.id)
+            if self._has_settled_dft_review(paper_id=paper_id, target_id=row_id):
+                continue
+            audits = audits_by_target.get(row_id, [])
+            row_summary = self._settle_dft_row_from_existing_audits(
+                row=row,
+                audits=audits,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            status = row_summary.pop("status")
+            if status == "auto_applied":
+                auto_applied.append(row_summary)
+            elif status == "need_third_ai":
+                need_third_ai.append(row_summary)
+            elif status == "need_repair":
+                need_repair.append(row_summary)
+            elif status == "waiting_second_ai":
+                waiting_second_ai.append(row_summary)
+            else:
+                skipped.append(row_summary)
+
+        self.session.flush()
+        summary = {
+            "paper_id": str(paper_id),
+            "auto_applied_count": len(auto_applied),
+            "auto_applied_items": auto_applied,
+            "need_third_ai_count": len(need_third_ai),
+            "need_third_ai_items": need_third_ai,
+            "need_repair_count": len(need_repair),
+            "need_repair_items": need_repair,
+            "waiting_second_ai_count": len(waiting_second_ai),
+            "waiting_second_ai_items": waiting_second_ai,
+            "skipped_count": len(skipped),
+            "skipped_items": skipped,
+        }
+        gate_counts = self._dft_settlement_counts(paper_id)
+        summary.update(
+            {
+                "exportable_count": gate_counts["exportable_count"],
+                "blocked_reason_counts": gate_counts["blocked_reason_counts"],
+                "gate_need_third_ai_count": gate_counts["need_third_ai_count"],
+                "gate_need_repair_count": gate_counts["need_repair_count"],
+                "gate_waiting_second_ai_count": gate_counts["waiting_second_ai_count"],
+            }
+        )
+        self.session.add(
+            AuditLog(
+                paper_id=paper_id,
+                action="settle_ai_dft_reviews",
+                source=reviewer,
+                target_type="paper",
+                target_id=str(paper_id),
+                payload={
+                    "paper_id": str(paper_id),
+                    "auto_applied_count": summary["auto_applied_count"],
+                    "need_third_ai_count": summary["need_third_ai_count"],
+                    "need_repair_count": summary["need_repair_count"],
+                    "blocked_reason_counts": summary["blocked_reason_counts"],
+                    "exportable_count": summary["exportable_count"],
+                    "waiting_second_ai_count": summary["waiting_second_ai_count"],
+                },
+            )
+        )
+        self.session.flush()
+        return summary
+
+    def _materialize_new_dft_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
+        rows = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+                ExternalAnalysisCandidate.status.in_(("candidate", "pending", "requires_resolution")),
+            )
+            .order_by(ExternalAnalysisCandidate.created_at.asc())
+        ).all()
+        existing_by_signature = self._existing_new_dft_signatures(paper_id)
+        materialized: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for candidate, run in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            decision = str(payload.get("decision") or "").strip().lower()
+            target_id = str(payload.get("target_id") or "").strip().lower()
+            if target_type != "dft_results" or (decision != "new_candidate" and target_id != "new"):
+                continue
+            if bool(payload.get("borrowed_from_reference")):
+                skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
+                continue
+            candidate_item, reason = self._new_dft_candidate_item(payload, run=run)
+            if candidate_item is None:
+                skipped.append({"candidate_id": str(candidate.id), "reason": reason})
+                candidate.status = "requires_resolution"
+                self.session.add(candidate)
+                continue
+            signature = candidate_item["signature"]
+            existing = existing_by_signature.get(signature)
+            if existing is None:
+                existing = self._insert_new_dft_candidate(
+                    paper_id=paper_id,
+                    candidate_item=candidate_item,
+                    source_label=run.source_label or run.source or reviewer,
+                )
+                existing_by_signature[signature] = existing
+                action = "created"
+            else:
+                action = "deduplicated"
+            candidate.status = "materialized"
+            candidate.materialized_target_type = "dft_results"
+            candidate.materialized_target_id = str(existing.id)
+            self.session.add(candidate)
+            materialized.append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "action": action,
+                    "dft_result_id": str(existing.id),
+                    "property_type": existing.property_type,
+                    "value": existing.value,
+                    "unit": existing.unit,
+                }
+            )
+        if materialized:
+            self.session.add(
+                AuditLog(
+                    paper_id=paper_id,
+                    action="materialize_new_dft_candidates",
+                    source=reviewer,
+                    target_type="paper",
+                    target_id=str(paper_id),
+                    payload={
+                        "created_or_linked_count": len(materialized),
+                        "skipped_count": len(skipped),
+                        "policy": "IDE AI new_candidate rows become unverified DFTResult candidates only; they are not exportable/RAG-ready until the existing DFT safety gate passes.",
+                    },
+                )
+            )
+        self.session.flush()
+        return {
+            "materialized_count": len(materialized),
+            "materialized_items": materialized,
+            "skipped_count": len(skipped),
+            "skipped_items": skipped,
+        }
+
+    def _new_dft_candidate_item(
+        self,
+        payload: dict[str, Any],
+        *,
+        run: ExternalAnalysisRun,
+    ) -> tuple[dict[str, Any] | None, str]:
+        corrected = payload.get("corrected_value")
+        if not isinstance(corrected, dict):
+            return None, "missing_structured_corrected_value"
+        material_identity = self._first_text(
+            corrected.get("material_identity"),
+            corrected.get("material"),
+            corrected.get("catalyst"),
+            payload.get("normalized_material"),
+            payload.get("normalized_material_or_catalyst"),
+        )
+        property_type = self._normalize_dft_property(
+            self._first_text(
+                corrected.get("property_type"),
+                corrected.get("property"),
+                corrected.get("energy_type"),
+                payload.get("normalized_energy_type"),
+            )
+        )
+        value = self._float_or_none(corrected.get("value"))
+        unit = self._first_text(corrected.get("unit"))
+        evidence = payload.get("evidence_location") or payload.get("evidence_payload")
+        if not material_identity:
+            return None, "missing_material_identity"
+        if not property_type:
+            return None, "missing_property_type"
+        if value is None:
+            return None, "missing_value"
+        if not unit:
+            return None, "missing_unit"
+        if not has_evidence_anchor(evidence):
+            return None, "missing_evidence_anchor"
+        evidence_payload = evidence if isinstance(evidence, dict) else {"evidence": evidence}
+        source_table = self._first_text(corrected.get("source_table"), evidence_payload.get("table"))
+        source_section = self._first_text(
+            evidence_payload.get("section"),
+            evidence_payload.get("section_title"),
+            f"Page {evidence_payload.get('page')}" if evidence_payload.get("page") not in (None, "") else None,
+        )
+        source_figure = self._first_text(corrected.get("source_figure"), source_table, evidence_payload.get("figure"))
+        method = self._first_text(corrected.get("method"), corrected.get("calculation_method"))
+        temperature = self._first_text(corrected.get("temperature"), corrected.get("temperature_label"))
+        reaction_step = self._first_text(
+            corrected.get("reaction_step"),
+            " | ".join(part for part in [method, temperature] if part),
+        )
+        adsorbate = self._first_text(corrected.get("adsorbate"), payload.get("adsorbate"), "H2")
+        evidence_text = self._first_text(
+            evidence_payload.get("quoted_text"),
+            evidence_payload.get("evidence_text"),
+            payload.get("reason"),
+        )
+        merged_evidence_payload = {
+            **evidence_payload,
+            "material_identity": material_identity,
+            "source_label": run.source_label,
+            "source": run.source,
+            "corrected_value": corrected,
+            "dedupe_signature": payload.get("dedupe_signature"),
+            "import_policy": "new_candidate_unverified_dft_result",
+        }
+        signature = self._new_dft_signature(
+            material_identity=material_identity,
+            property_type=property_type,
+            value=value,
+            unit=unit,
+            reaction_step=reaction_step,
+            source_figure=source_figure,
+            page=evidence_payload.get("page"),
+        )
+        return (
+            {
+                "material_identity": material_identity,
+                "property_type": property_type,
+                "adsorbate": adsorbate,
+                "value": value,
+                "unit": unit,
+                "reaction_step": reaction_step,
+                "source_section": source_section,
+                "source_figure": source_figure,
+                "evidence_text": evidence_text,
+                "confidence": payload.get("confidence"),
+                "evidence_payload": merged_evidence_payload,
+                "signature": signature,
+            },
+            "",
+        )
+
+    def _insert_new_dft_candidate(
+        self,
+        *,
+        paper_id: UUID,
+        candidate_item: dict[str, Any],
+        source_label: str,
+    ) -> DFTResult:
+        row = DFTResult(
+            paper_id=paper_id,
+            adsorbate=candidate_item["adsorbate"],
+            property_type=candidate_item["property_type"],
+            value=candidate_item["value"],
+            unit=candidate_item["unit"],
+            reaction_step=candidate_item["reaction_step"],
+            source_section=candidate_item["source_section"],
+            source_figure=candidate_item["source_figure"],
+            evidence_text=candidate_item["evidence_text"],
+            confidence=candidate_item["confidence"],
+            candidate_status="new_candidate",
+            evidence_payload=candidate_item["evidence_payload"],
+            extraction_protocol_version="ide_ai_new_candidate_v1",
+        )
+        self.session.add(row)
+        self.session.flush()
+        self._upsert_new_dft_locator(row, candidate_item["evidence_payload"], source_label=source_label)
+        return row
+
+    def _upsert_new_dft_locator(self, row: DFTResult, evidence_payload: dict[str, Any], *, source_label: str) -> None:
+        page = self._int_or_none(evidence_payload.get("page"))
+        if page is None:
+            return
+        locator = EvidenceLocator(
+            paper_id=row.paper_id,
+            source_type="table" if evidence_payload.get("table") else "pdf",
+            target_type="dft_results",
+            target_id=str(row.id),
+            field_name="value",
+            page=page,
+            section=evidence_payload.get("section") or evidence_payload.get("section_title") or row.source_section,
+            evidence_text=str(evidence_payload.get("quoted_text") or evidence_payload.get("evidence_text") or row.evidence_text or "PDF evidence"),
+            locator_status="exact_page",
+            locator_confidence=float(row.confidence or 0.8),
+            parser_source=str(source_label or "external_ai_review")[:32],
+        )
+        self.session.add(locator)
+
+    def _existing_new_dft_signatures(self, paper_id: UUID) -> dict[tuple[str, ...], DFTResult]:
+        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        signatures: dict[tuple[str, ...], DFTResult] = {}
+        for row in rows:
+            evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+            material_identity = self._first_text(evidence_payload.get("material_identity"))
+            signature = self._new_dft_signature(
+                material_identity=material_identity,
+                property_type=row.property_type,
+                value=row.value,
+                unit=row.unit,
+                reaction_step=row.reaction_step,
+                source_figure=row.source_figure,
+                page=evidence_payload.get("page"),
+            )
+            signatures.setdefault(signature, row)
+        return signatures
+
+    @staticmethod
+    def _new_dft_signature(
+        *,
+        material_identity: Any,
+        property_type: Any,
+        value: Any,
+        unit: Any,
+        reaction_step: Any,
+        source_figure: Any,
+        page: Any,
+    ) -> tuple[str, ...]:
+        value_part = "" if value is None else f"{float(value):.8g}"
+        return tuple(
+            str(part or "").strip().lower()
+            for part in (material_identity, property_type, value_part, unit, reaction_step, source_figure, page)
+        )
+
+    @staticmethod
+    def _normalize_dft_property(value: Any) -> str | None:
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "activation_energy": "activation_energy",
+            "activation": "activation_energy",
+            "permeance": "permeance",
+            "permeability": "permeance",
+            "adsorption_energy": "adsorption_energy",
+            "reaction_barrier": "reaction_barrier",
+            "permeation_barrier": "permeation_barrier",
+        }
+        return aliases.get(text, text or None)
+
+    @staticmethod
+    def _first_text(*values: Any) -> str | None:
+        for value in values:
+            if value in (None, "", []):
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return None
+
+    @staticmethod
+    def _float_or_none(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _int_or_none(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _required_direct_write_modules_for_paper(self, paper_id: UUID) -> list[str]:
+        rows = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            .where(ExternalAnalysisCandidate.paper_id == paper_id)
+            .where(ExternalAnalysisCandidate.status.in_(("candidate", "pending", "requires_resolution")))
+        ).all()
+        modules: set[str] = set()
+        for candidate, _run in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            if candidate.candidate_type != "object_review_audit":
+                continue
+            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            if target_type == "dft_results":
+                continue
+            try:
+                modules.add(ModuleWriteLockService.module_from_field(target_type))
+            except ValueError:
+                continue
+        return sorted(modules)
 
     def settle_session(self, session_id: str, *, reviewer: str) -> dict[str, Any]:
         job = self._get_session_job(session_id)
@@ -287,34 +814,52 @@ class VerificationSessionService:
             stmt = select(Paper).where(
                 or_(
                     func.lower(Paper.doi) == ref.lower(),
+                    func.lower(Paper.paper_code) == ref.lower(),
                     func.lower(Paper.title) == ref.lower(),
                 )
-            )
-            exact = self.session.scalars(stmt).first()
+            ).order_by(Paper.created_at.desc(), Paper.id.desc())
+            exact = self._select_unambiguous_paper(ref, self.session.scalars(stmt).all())
             if exact is not None:
                 resolved[str(exact.id)] = exact
                 continue
-            fuzzy = self.session.scalars(
-                select(Paper)
-                .where(or_(Paper.title.ilike(f"%{ref}%"), Paper.doi.ilike(f"%{ref}%")))
-                .order_by(Paper.created_at.desc())
-                .limit(1)
-            ).first()
+            fuzzy = self._select_unambiguous_paper(
+                ref,
+                self.session.scalars(
+                    select(Paper)
+                    .where(or_(Paper.title.ilike(f"%{ref}%"), Paper.doi.ilike(f"%{ref}%"), Paper.paper_code.ilike(f"%{ref}%")))
+                    .order_by(Paper.created_at.desc(), Paper.id.desc())
+                ).all(),
+            )
             if fuzzy is not None:
                 resolved[str(fuzzy.id)] = fuzzy
         return list(resolved.values())
+
+    @staticmethod
+    def _select_unambiguous_paper(ref: str, papers: list[Paper]) -> Paper | None:
+        if not papers:
+            return None
+        libraries = {normalize_library_name(paper.library_name) for paper in papers}
+        if len(libraries) > 1:
+            ordered_libraries = ", ".join(sorted(libraries))
+            raise ValueError(
+                f"Ambiguous paper reference {ref!r}: matched papers in multiple libraries ({ordered_libraries}). "
+                "Use a paper UUID to select the intended paper."
+            )
+        return papers[0]
 
     def _paper_summary(self, paper: Paper) -> dict[str, Any]:
         dft_count = self.session.scalar(select(func.count()).select_from(DFTResult).where(DFTResult.paper_id == paper.id)) or 0
         writing_count = self.session.scalar(select(func.count()).select_from(WritingCard).where(WritingCard.paper_id == paper.id)) or 0
         return {
             "paper_id": str(paper.id),
+            "paper_code": getattr(paper, "paper_code", None),
             "title": paper.title,
             "doi": paper.doi,
             "year": paper.year,
             "journal": paper.journal,
             "workspace_prepare_url": f"/api/papers/{paper.id}/prepare-ai-context",
             "codex_context_url": f"/api/papers/{paper.id}/codex-context",
+            "read_paper_page_url_template": f"/api/papers/{paper.id}/pages/{{page_no}}",
             "dft_result_count": int(dft_count),
             "writing_card_count": int(writing_count),
         }
@@ -340,8 +885,10 @@ class VerificationSessionService:
                     "import_mode": "object_review_audits",
                     "required_fields": ["target_type", "target_id", "field_name", "decision", "corrected_value", "evidence_location"],
                     "instruction": (
-                        "Use MCP /api/papers/{paper_id}/codex-context and /codex-item to inspect evidence, "
-                        "then import object_review_audits through import_analysis with the assigned source_label."
+                        "First compare the parsed materials with the original PDF page via read_paper_page, then use "
+                        "MCP /api/papers/{paper_id}/codex-context and /codex-item to inspect evidence. "
+                        "Record parse defects if the system split tables/figures/locators incorrectly, then import "
+                        "object_review_audits through import_analysis with the assigned source_label."
                     ),
                 }
             )
@@ -425,6 +972,846 @@ class VerificationSessionService:
             "materialized_note_ids": materialized_note_ids,
         }
 
+    def _auto_materialize_single_ai_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type.in_(("note", "correction")),
+            )
+            .order_by(ExternalAnalysisCandidate.created_at.asc())
+        ).all()
+        external_service = ExternalAnalysisService(self.session, self.settings)
+        materialized: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for candidate in candidates:
+            if candidate.status not in {"pending", "requires_resolution"}:
+                skipped.append({"candidate_id": str(candidate.id), "reason": f"status={candidate.status}"})
+                continue
+            if candidate.candidate_type == "note" and not self._note_has_anchor(candidate):
+                skipped.append({"candidate_id": str(candidate.id), "reason": "missing_evidence_anchor"})
+                continue
+            if candidate.candidate_type == "correction" and not self._correction_candidate_has_anchor(candidate):
+                skipped.append({"candidate_id": str(candidate.id), "reason": "missing_evidence_anchor"})
+                continue
+            result = external_service.materialize_candidates(
+                run_id=candidate.run_id,
+                candidate_ids=[candidate.id],
+                explicit_all=False,
+                created_by=reviewer,
+            )
+            approved_status = None
+            if candidate.candidate_type == "correction" and candidate.materialized_target_id:
+                approved = ReviewService(self.session).approve_correction(UUID(str(candidate.materialized_target_id)), reviewer=reviewer)
+                approved_status = approved.status
+            materialized.append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate_type": candidate.candidate_type,
+                    "materialized_target_type": candidate.materialized_target_type,
+                    "materialized_target_id": candidate.materialized_target_id,
+                    "approved_status": approved_status,
+                    "created_notes": result.created_notes,
+                    "created_corrections": result.created_corrections,
+                }
+            )
+        self.session.flush()
+        return {
+            "materialized_count": len(materialized),
+            "materialized_items": materialized,
+            "skipped_count": len(skipped),
+            "skipped_items": skipped,
+        }
+
+    def _auto_apply_object_review_candidates(
+        self,
+        *,
+        paper_id: UUID,
+        reviewer: str,
+        write_lock_tokens: list[str] | None = None,
+        include_target_types: set[str] | None = None,
+        exclude_target_types: set[str] | None = None,
+    ) -> dict[str, Any]:
+        rows = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+            )
+            .order_by(ExternalAnalysisCandidate.created_at.asc())
+        ).all()
+        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for candidate, run in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            if include_target_types is not None and target_type not in include_target_types:
+                continue
+            if exclude_target_types is not None and target_type in exclude_target_types:
+                continue
+            target_id = str(payload.get("target_id") or "").strip()
+            field_name = str(payload.get("field_name") or "").strip()
+            if not target_type or not target_id or not field_name:
+                continue
+            if target_type == "dft_results" and (
+                target_id.lower() == "new"
+                or str(payload.get("decision") or "").strip().lower() == "new_candidate"
+                or bool(payload.get("borrowed_from_reference"))
+            ):
+                continue
+            identity = str(
+                payload.get("source_label")
+                or run.source_label
+                or payload.get("source")
+                or run.source
+                or candidate.id
+            ).strip()
+            grouped[(target_type, target_id, field_name)].append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate": candidate,
+                    "paper_id": str(candidate.paper_id),
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "field_name": field_name,
+                    "decision": str(payload.get("decision") or "").upper(),
+                    "corrected_value": payload.get("corrected_value", payload.get("value")),
+                    "confidence": payload.get("confidence"),
+                    "reason": payload.get("reason"),
+                    "source_label": run.source_label,
+                    "source": payload.get("source") or run.source,
+                    "source_identity": identity,
+                    "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
+                    "adjudication_role": payload.get("adjudication_role"),
+                    "adjudication_scope": payload.get("adjudication_scope"),
+                    "selected_source_ids": payload.get("selected_source_ids"),
+                    "raw_payload": payload,
+                }
+            )
+
+        applied: list[dict[str, Any]] = []
+        pending: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for (target_type, target_id, field_name), opinions in grouped.items():
+            deduped: dict[str, dict[str, Any]] = {}
+            for opinion in opinions:
+                if opinion["candidate"].status not in {"candidate", "pending", "requires_resolution"}:
+                    continue
+                key = opinion["source_identity"]
+                current = deduped.get(key)
+                if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
+                    deduped[key] = opinion
+            eligible = [item for item in deduped.values() if self._opinion_has_anchor(item)]
+            third_ai = [item for item in eligible if str(item.get("adjudication_role") or "").strip().lower() == "third_ai"]
+            if target_type == "dft_results" and eligible and not all(
+                self._dft_has_material_identity(item, target_id=target_id, field_name=field_name)
+                for item in eligible
+            ):
+                pending.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": "missing_dft_material_identity",
+                        "eligible_opinion_count": len(eligible),
+                    }
+                )
+                continue
+            if target_type in self.HIGH_RISK_IDE_TARGET_TYPES:
+                if third_ai:
+                    adopted = max(third_ai, key=lambda item: item.get("confidence") or 0)
+                elif len(eligible) < 2:
+                    pending.append(
+                        {
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": "awaiting_two_ai_reviews",
+                            "eligible_opinion_count": len(eligible),
+                        }
+                    )
+                    continue
+                else:
+                    signature_groups = {
+                        self._review_consensus_key(item, target_type=target_type, target_id=target_id, field_name=field_name): item
+                        for item in eligible
+                    }
+                    if len(signature_groups) != 1:
+                        pending.append(
+                            {
+                                "target_type": target_type,
+                                "target_id": target_id,
+                                "field_name": field_name,
+                                "reason": self._consensus_disagreement_reason(
+                                    eligible,
+                                    target_type=target_type,
+                                    target_id=target_id,
+                                    field_name=field_name,
+                                ),
+                                "eligible_opinion_count": len(eligible),
+                            }
+                        )
+                        continue
+                    adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
+            else:
+                if not eligible:
+                    skipped.append(
+                        {
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": "missing_evidence_anchor",
+                        }
+                    )
+                    continue
+                signature_groups = {
+                    self._review_consensus_key(item, target_type=target_type, target_id=target_id, field_name=field_name): item
+                    for item in eligible
+                }
+                if not third_ai and len(signature_groups) != 1:
+                    pending.append(
+                        {
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": self._consensus_disagreement_reason(
+                                eligible,
+                                target_type=target_type,
+                                target_id=target_id,
+                                field_name=field_name,
+                            ),
+                            "eligible_opinion_count": len(eligible),
+                        }
+                    )
+                    continue
+                adopted = max(third_ai, key=lambda item: item.get("confidence") or 0) if third_ai else max(eligible, key=lambda item: item.get("confidence") or 0)
+            try:
+                result = self._apply_selected_opinion(
+                    paper_id=paper_id,
+                    target_type=target_type,
+                    target_id=target_id,
+                    field_name=field_name,
+                    reviewer=reviewer,
+                    opinion=adopted,
+                    dual_ai_consensus=target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
+                    adjudicated_by_third_ai=bool(third_ai and adopted in third_ai),
+                    write_lock_tokens=write_lock_tokens,
+                )
+            except Exception as exc:
+                skipped.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": str(exc),
+                    }
+                )
+                continue
+            materialized_target_type, materialized_target_id = self._materialized_target_ref(result)
+            for opinion in opinions:
+                opinion["candidate"].status = self._object_review_candidate_status_for_result(result)
+                opinion["candidate"].materialized_target_type = materialized_target_type
+                opinion["candidate"].materialized_target_id = materialized_target_id
+                self.session.add(opinion["candidate"])
+            applied.append(
+                {
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "field_name": field_name,
+                    "action": result.get("action"),
+                    "materialized_target_type": materialized_target_type,
+                    "materialized_target_id": materialized_target_id,
+                    "dual_ai_required": target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
+                    "adjudication_role": adopted.get("adjudication_role"),
+                }
+            )
+        self.session.flush()
+        return {
+            "applied_count": len(applied),
+            "applied_items": applied,
+            "pending_count": len(pending),
+            "pending_items": pending,
+            "skipped_count": len(skipped),
+            "skipped_items": skipped,
+        }
+
+    def _paper_dft_audit_candidates(self, paper_id: UUID) -> dict[str, list[dict[str, Any]]]:
+        rows = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+            )
+            .order_by(ExternalAnalysisCandidate.created_at.asc(), ExternalAnalysisCandidate.id.asc())
+        ).all()
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for candidate, run in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            target_id = str(payload.get("target_id") or "").strip()
+            decision = str(payload.get("decision") or "").strip().lower()
+            if (
+                target_type == "dft_results"
+                and (target_id.lower() == "new" or decision == "new_candidate")
+                and str(candidate.materialized_target_type or "").strip().lower() == "dft_results"
+                and str(candidate.materialized_target_id or "").strip()
+            ):
+                # Repeated new_candidate imports for the same missing row should
+                # participate in later DFT settlement against the materialized row.
+                target_id = str(candidate.materialized_target_id).strip()
+            if target_type != "dft_results" or not target_id or target_id.lower() == "new":
+                continue
+            grouped[target_id].append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate": candidate,
+                    "target_id": target_id,
+                    "field_name": str(payload.get("field_name") or "").strip(),
+                    "decision": str(payload.get("decision") or "").strip().upper(),
+                    "corrected_value": payload.get("corrected_value", payload.get("value")),
+                    "confidence": payload.get("confidence"),
+                    "reason": payload.get("reason"),
+                    "source_label": str(payload.get("source_label") or run.source_label or run.source or "").strip(),
+                    "source": str(payload.get("source") or run.source or "").strip(),
+                    "source_identity": str(
+                        payload.get("source_label")
+                        or run.source_label
+                        or payload.get("source")
+                        or run.source
+                        or candidate.id
+                    ).strip(),
+                    "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
+                    "adjudication_role": payload.get("adjudication_role"),
+                    "adjudication_scope": payload.get("adjudication_scope"),
+                    "selected_source_ids": payload.get("selected_source_ids"),
+                    "raw_payload": payload,
+                    "status": candidate.status,
+                }
+            )
+        return grouped
+
+    def _settle_dft_row_from_existing_audits(
+        self,
+        *,
+        row: DFTResult,
+        audits: list[dict[str, Any]],
+        reviewer: str,
+        write_lock_tokens: list[str] | None,
+    ) -> dict[str, Any]:
+        row_ref = {
+            "record_id": str(row.id),
+            "field_name": "value",
+            "property_type": row.property_type,
+            "value": row.value,
+            "unit": row.unit,
+        }
+        if not audits:
+            row_ref["reason"] = "awaiting_two_ai_reviews"
+            row_ref["status"] = "waiting_second_ai"
+            return row_ref
+
+        deduped: dict[str, dict[str, Any]] = {}
+        for audit in audits:
+            if audit["status"] not in {"candidate", "pending", "requires_resolution", "materialized"}:
+                continue
+            current = deduped.get(audit["source_identity"])
+            if current is None or (audit.get("confidence") or 0) >= (current.get("confidence") or 0):
+                deduped[audit["source_identity"]] = audit
+        opinions = list(deduped.values())
+        anchored = [audit for audit in opinions if self._opinion_has_anchor(audit)]
+        if opinions and not anchored:
+            row_ref["reason"] = "missing_evidence_anchor"
+            row_ref["status"] = "need_repair"
+            return row_ref
+
+        third_ai = [
+            audit for audit in anchored
+            if str(audit.get("adjudication_role") or "").strip().lower() == "third_ai"
+        ]
+        if third_ai:
+            adopted = max(third_ai, key=lambda item: item.get("confidence") or 0)
+            result = self._apply_dft_consensus_outcome(
+                row=row,
+                adopted=adopted,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            for audit in audits:
+                audit["candidate"].status = "materialized"
+                self.session.add(audit["candidate"])
+            row_ref.update(result)
+            row_ref["status"] = "auto_applied"
+            return row_ref
+
+        if len(anchored) < 2:
+            row_ref["reason"] = "awaiting_two_ai_reviews"
+            row_ref["eligible_opinion_count"] = len(anchored)
+            row_ref["status"] = "waiting_second_ai"
+            return row_ref
+
+        if all(self._is_negative_dft_decision(audit.get("decision")) for audit in anchored):
+            result = self._apply_reject_all(
+                paper_id=row.paper_id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                reviewer=reviewer,
+            )
+            for audit in audits:
+                audit["candidate"].status = "materialized"
+                self.session.add(audit["candidate"])
+            row_ref.update(
+                {
+                    "action": result.get("action"),
+                    "review_result": result.get("result"),
+                }
+            )
+            row_ref["status"] = "auto_applied"
+            return row_ref
+
+        has_reject = any(self._is_negative_dft_decision(audit.get("decision")) for audit in anchored)
+        has_positive = any(str(audit.get("decision") or "").strip().upper() in {"PASS", "PROPOSED"} for audit in anchored)
+        if has_reject and has_positive:
+            row_ref["reason"] = "decision_conflict"
+            row_ref["status"] = "need_third_ai"
+            return row_ref
+
+        whole_row = self._latest_dft_whole_row_proposal(anchored)
+        supporting_pass = self._supporting_value_pass_for_row(row, anchored, whole_row)
+        if whole_row and not supporting_pass:
+            row_ref["reason"] = "awaiting_matching_second_ai"
+            row_ref["status"] = "need_third_ai"
+            return row_ref
+        if whole_row and supporting_pass:
+            result = self._apply_dft_whole_row_consensus(
+                row=row,
+                proposal=whole_row,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            for audit in audits:
+                audit["candidate"].status = "materialized"
+                self.session.add(audit["candidate"])
+            row_ref.update(result)
+            row_ref["status"] = "auto_applied"
+            return row_ref
+
+        supported_field_proposal = self._latest_supported_dft_field_proposal(row, anchored)
+        if supported_field_proposal is not None:
+            proposal, supporting_pass = supported_field_proposal
+            result = self._apply_dft_whole_row_consensus(
+                row=row,
+                proposal=self._synthesize_dft_whole_row_proposal(
+                    row=row,
+                    proposal=proposal,
+                    supporting_pass=supporting_pass,
+                ),
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            for audit in audits:
+                audit["candidate"].status = "materialized"
+                self.session.add(audit["candidate"])
+            row_ref.update(result)
+            row_ref["status"] = "auto_applied"
+            return row_ref
+
+        pass_values = [audit for audit in anchored if str(audit.get("decision") or "").strip().upper() == "PASS"]
+        if len(pass_values) >= 2 and self._all_pass_opinions_match(row, pass_values):
+            if not self._dft_material_identities_compatible(
+                pass_values,
+                target_id=str(row.id),
+                field_name="value",
+            ):
+                row_ref["reason"] = "material_identity_conflict"
+                row_ref["status"] = "need_repair"
+                return row_ref
+            adopted = max(pass_values, key=lambda item: item.get("confidence") or 0)
+            result = self._apply_dft_consensus_outcome(
+                row=row,
+                adopted=adopted,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            for audit in audits:
+                audit["candidate"].status = "materialized"
+                self.session.add(audit["candidate"])
+            row_ref.update(result)
+            row_ref["status"] = "auto_applied"
+            return row_ref
+
+        if any(not self._dft_has_material_identity(audit, target_id=str(row.id), field_name=str(audit.get("field_name") or "")) for audit in anchored):
+            row_ref["reason"] = "missing_dft_material_identity"
+            row_ref["status"] = "need_repair"
+            return row_ref
+
+        identity_keys = {
+            self._dft_identity_key(
+                audit,
+                target_id=str(row.id),
+                field_name=str(audit.get("field_name") or ""),
+            )
+            for audit in anchored
+        }
+        if len(identity_keys) > 1:
+            row_ref["reason"] = "material_identity_conflict"
+            row_ref["status"] = "need_repair"
+            return row_ref
+
+        row_ref["reason"] = "value_conflict"
+        row_ref["status"] = "need_third_ai"
+        return row_ref
+
+    def _apply_dft_consensus_outcome(
+        self,
+        *,
+        row: DFTResult,
+        adopted: dict[str, Any],
+        reviewer: str,
+        write_lock_tokens: list[str] | None,
+    ) -> dict[str, Any]:
+        field_name = str(adopted.get("field_name") or "value").strip() or "value"
+        if field_name == "dft_results":
+            return self._apply_dft_whole_row_consensus(
+                row=row,
+                proposal=adopted,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+        result = self._apply_dft_opinion(
+            paper_id=row.paper_id,
+            target_id=str(row.id),
+            field_name=field_name,
+            reviewer=reviewer,
+            opinion=adopted,
+            dual_ai_consensus=True,
+            adjudicated_by_third_ai=str(adopted.get("adjudication_role") or "").strip().lower() == "third_ai",
+            evidence_payload=self._materialize_evidence_payload(adopted),
+            write_lock_tokens=write_lock_tokens,
+        )
+        return {
+            "action": result.get("action"),
+            "review_result": result.get("result"),
+        }
+
+    def _apply_dft_whole_row_consensus(
+        self,
+        *,
+        row: DFTResult,
+        proposal: dict[str, Any],
+        reviewer: str,
+        write_lock_tokens: list[str] | None,
+    ) -> dict[str, Any]:
+        corrected = proposal.get("corrected_value")
+        if not isinstance(corrected, dict):
+            raise ValueError("Whole-row DFT consensus is missing corrected_value.")
+        evidence_payload = self._materialize_evidence_payload(proposal)
+        self._apply_dft_material_binding_if_needed(
+            row=row,
+            opinion=proposal,
+            reviewer=reviewer,
+            evidence_payload=evidence_payload,
+        )
+        self.session.flush()
+        self.session.refresh(row)
+        for source_field, target_field in (
+            ("property_type", "property_type"),
+            ("property", "property_type"),
+            ("energy_type", "property_type"),
+            ("adsorbate", "adsorbate"),
+            ("reaction_step", "reaction_step"),
+            ("unit", "unit"),
+            ("value", "value"),
+        ):
+            if source_field not in corrected:
+                continue
+            proposed_value = corrected.get(source_field)
+            current_value = getattr(row, target_field, None)
+            if self._value_key(proposed_value) == self._value_key(current_value):
+                continue
+            self._apply_structured_correction(
+                paper_id=row.paper_id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name=target_field,
+                reviewer=reviewer,
+                proposed_value=proposed_value,
+                evidence_payload=evidence_payload,
+                dual_ai_consensus=True,
+                adjudicated_by_third_ai=str(proposal.get("adjudication_role") or "").strip().lower() == "third_ai",
+                write_lock_tokens=write_lock_tokens,
+            )
+            self.session.flush()
+            self.session.refresh(row)
+        verify_value = corrected.get("value", row.value)
+        verify_opinion = {
+            **proposal,
+            "field_name": "value",
+            "decision": "PASS",
+            "corrected_value": verify_value,
+        }
+        result = self._apply_dft_opinion(
+            paper_id=row.paper_id,
+            target_id=str(row.id),
+            field_name="value",
+            reviewer=reviewer,
+            opinion=verify_opinion,
+            dual_ai_consensus=True,
+            adjudicated_by_third_ai=str(proposal.get("adjudication_role") or "").strip().lower() == "third_ai",
+            evidence_payload=evidence_payload,
+            write_lock_tokens=write_lock_tokens,
+        )
+        return {
+            "action": result.get("action"),
+            "review_result": result.get("result"),
+        }
+
+    def _dft_settlement_counts(self, paper_id: UUID) -> dict[str, Any]:
+        from app.services.dft_review_queue_service import DFTReviewQueueService
+
+        queue = DFTReviewQueueService(self.session).list_queue(
+            paper_id=paper_id,
+            status="all",
+            limit=1000,
+        )
+        rows = list(queue.get("rows") or [])
+        blocked_reason_counts = dict((queue.get("metadata") or {}).get("blocked_reasons") or {})
+        need_repair_count = 0
+        need_third_ai_count = 0
+        waiting_second_ai_count = 0
+        for row in rows:
+            reasons = set(row.get("blocked_reasons") or [])
+            audits = row.get("object_review_audits") or []
+            anchored = [audit for audit in audits if self._opinion_has_anchor({"evidence_payload": audit.get("evidence_location")})]
+            if row.get("is_exportable"):
+                continue
+            if reasons & {"missing_material_identity", "missing_evidence", "missing_evidence_text", "unsafe_locator"}:
+                need_repair_count += 1
+                continue
+            if len(anchored) < 2 and audits:
+                waiting_second_ai_count += 1
+                continue
+            if audits:
+                need_third_ai_count += 1
+        return {
+            "exportable_count": sum(1 for row in rows if row.get("is_exportable")),
+            "blocked_reason_counts": blocked_reason_counts,
+            "need_third_ai_count": need_third_ai_count,
+            "need_repair_count": need_repair_count,
+            "waiting_second_ai_count": waiting_second_ai_count,
+        }
+
+    def _has_settled_dft_review(self, *, paper_id: UUID, target_id: str) -> bool:
+        reviews = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(target_id),
+            )
+        ).all()
+        return any(
+            is_safe_verified_review(review)
+            or str(review.reviewer_status or "").strip().lower() == "rejected"
+            for review in reviews
+        )
+
+    @staticmethod
+    def _is_negative_dft_decision(decision: Any) -> bool:
+        return str(decision or "").strip().upper() in {"REJECT", "REJECTED", "BLOCK", "DENY", "DROP"}
+
+    @staticmethod
+    def _latest_dft_whole_row_proposal(audits: list[dict[str, Any]]) -> dict[str, Any] | None:
+        proposals = [
+            audit for audit in audits
+            if str(audit.get("decision") or "").strip().upper() in {"PROPOSED", "NEW_CANDIDATE"}
+            and str(audit.get("field_name") or "").strip() == "dft_results"
+            and isinstance(audit.get("corrected_value"), dict)
+        ]
+        if not proposals:
+            return None
+        proposals.sort(key=lambda item: (str(item.get("source_identity") or ""), item.get("confidence") or 0), reverse=True)
+        return proposals[0]
+
+    def _supporting_value_pass_for_row(
+        self,
+        row: DFTResult,
+        audits: list[dict[str, Any]],
+        proposal: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if proposal is None:
+            return None
+        proposed_target = self._normalized_dft_audit_target(row, proposal)
+        proposal_source = str(proposal.get("source_identity") or "")
+        for audit in audits:
+            if str(audit.get("decision") or "").strip().upper() != "PASS":
+                continue
+            if str(audit.get("field_name") or "").strip() != "value":
+                continue
+            if str(audit.get("source_identity") or "") == proposal_source:
+                continue
+            if not self._same_normalized_dft_value(proposed_target, self._normalized_dft_audit_target(row, audit)):
+                continue
+            return audit
+        return None
+
+    def _latest_supported_dft_field_proposal(
+        self,
+        row: DFTResult,
+        audits: list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        proposals = [
+            audit for audit in audits
+            if str(audit.get("decision") or "").strip().upper() in {"PROPOSED", "NEW_CANDIDATE"}
+            and str(audit.get("field_name") or "").strip() not in {"", "dft_results"}
+        ]
+        proposals.sort(key=lambda item: (item.get("confidence") or 0, str(item.get("source_identity") or "")), reverse=True)
+        for proposal in proposals:
+            supporting_pass = self._supporting_value_pass_for_field_proposal(row, audits, proposal)
+            if supporting_pass is not None:
+                return proposal, supporting_pass
+        return None
+
+    def _supporting_value_pass_for_field_proposal(
+        self,
+        row: DFTResult,
+        audits: list[dict[str, Any]],
+        proposal: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        proposal_source = str(proposal.get("source_identity") or "")
+        proposal_field = str(proposal.get("field_name") or "").strip()
+        row_value_target = {"value": row.value, "unit": str(row.unit or "").strip().lower().replace(" ", "")}
+        for audit in audits:
+            if str(audit.get("decision") or "").strip().upper() != "PASS":
+                continue
+            if str(audit.get("field_name") or "").strip() != "value":
+                continue
+            if str(audit.get("source_identity") or "") == proposal_source:
+                continue
+            if not self._material_identity_values_compatible(
+                self._dft_material_identity_value(proposal, target_id=str(row.id)),
+                self._dft_material_identity_value(audit, target_id=str(row.id)),
+            ):
+                continue
+            if proposal_field == "value":
+                if not self._same_normalized_dft_value(
+                    self._normalized_dft_audit_target(row, proposal),
+                    self._normalized_dft_audit_target(row, audit),
+                ):
+                    continue
+            elif not self._same_normalized_dft_value(row_value_target, self._normalized_dft_audit_target(row, audit)):
+                continue
+            return audit
+        return None
+
+    def _synthesize_dft_whole_row_proposal(
+        self,
+        *,
+        row: DFTResult,
+        proposal: dict[str, Any],
+        supporting_pass: dict[str, Any],
+    ) -> dict[str, Any]:
+        corrected = {
+            "property_type": row.property_type,
+            "adsorbate": row.adsorbate,
+            "reaction_step": row.reaction_step,
+            "unit": row.unit,
+            "value": row.value,
+        }
+        supporting_corrected = supporting_pass.get("corrected_value")
+        if isinstance(supporting_corrected, dict):
+            if supporting_corrected.get("unit") not in (None, ""):
+                corrected["unit"] = supporting_corrected.get("unit")
+            if supporting_corrected.get("value") not in (None, ""):
+                corrected["value"] = supporting_corrected.get("value")
+        elif supporting_corrected not in (None, ""):
+            corrected["value"] = supporting_corrected
+        mapped_field = self.DFT_FIELD_ALIASES.get(str(proposal.get("field_name") or "").strip(), str(proposal.get("field_name") or "").strip())
+        corrected[mapped_field] = proposal.get("corrected_value")
+        return {
+            **proposal,
+            "field_name": "dft_results",
+            "corrected_value": corrected,
+        }
+
+    def _all_pass_opinions_match(self, row: DFTResult, audits: list[dict[str, Any]]) -> bool:
+        normalized = [self._normalized_dft_audit_target(row, audit) for audit in audits]
+        first = next((item for item in normalized if item.get("value") is not None), None)
+        if first is None:
+            return False
+        return all(self._same_normalized_dft_value(first, item) for item in normalized if item.get("value") is not None)
+
+    def _dft_material_identities_compatible(
+        self,
+        audits: list[dict[str, Any]],
+        *,
+        target_id: str | None = None,
+        field_name: str | None = None,
+    ) -> bool:
+        materials = [
+            self._dft_material_identity_value(audit, target_id=target_id, field_name=field_name)
+            for audit in audits
+        ]
+        materials = [material for material in materials if material]
+        if len(materials) < 2:
+            return True
+        first = materials[0]
+        return all(self._material_identity_values_compatible(first, material) for material in materials[1:])
+
+    def _dft_material_identity_value(
+        self,
+        opinion: dict[str, Any],
+        *,
+        target_id: str | None = None,
+        field_name: str | None = None,
+    ) -> str:
+        return str(self._dft_identity_key(opinion, target_id=target_id, field_name=field_name)[1] or "")
+
+    def _material_identity_values_compatible(self, left: str, right: str) -> bool:
+        if not left or not right:
+            return False
+        return self._material_identity_parts_compatible(left, right)
+
+    @staticmethod
+    def _material_identity_parts_compatible(left: str, right: str) -> bool:
+        if left == right:
+            return True
+        if left in right or right in left:
+            return True
+        left_tokens = {
+            token
+            for token in re.split(r"[^a-z0-9]+", left.lower())
+            if len(token) >= 5
+        }
+        right_tokens = {
+            token
+            for token in re.split(r"[^a-z0-9]+", right.lower())
+            if len(token) >= 5
+        }
+        return bool(left_tokens & right_tokens)
+
+    @staticmethod
+    def _normalized_dft_audit_target(row: DFTResult, audit: dict[str, Any]) -> dict[str, Any]:
+        corrected = audit.get("corrected_value")
+        value = corrected.get("value") if isinstance(corrected, dict) else corrected
+        unit = corrected.get("unit") if isinstance(corrected, dict) else row.unit
+        try:
+            numeric = float(value) if value is not None else None
+        except (TypeError, ValueError):
+            numeric = None
+        normalized_unit = str(unit or "").strip().lower().replace(" ", "")
+        if normalized_unit == "mev" and numeric is not None:
+            return {"value": numeric / 1000.0, "unit": "ev"}
+        return {"value": numeric, "unit": normalized_unit}
+
+    @staticmethod
+    def _same_normalized_dft_value(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        if left.get("value") is None or right.get("value") is None:
+            return False
+        if str(left.get("unit") or "") != str(right.get("unit") or ""):
+            return False
+        tolerance = max(1e-9, abs(float(left["value"])) * 1e-6)
+        return abs(float(left["value"]) - float(right["value"])) <= tolerance
+
     def _settle_high_risk_targets(
         self,
         *,
@@ -458,6 +1845,7 @@ class VerificationSessionService:
             )
             grouped[key].append(
                 {
+                    "candidate": candidate,
                     "candidate_id": str(candidate.id),
                     "paper_id": str(candidate.paper_id),
                     "target_type": target_type,
@@ -471,13 +1859,21 @@ class VerificationSessionService:
                     "source_id": str(candidate.id),
                     "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
                     "human_confirmation_required": bool(payload.get("human_confirmation_required", True)),
+                    "raw_payload": payload,
                 }
             )
         auto_applied: list[dict[str, Any]] = []
         pending_conflicts: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for (paper_id_text, target_type, target_id, field_name), opinions in grouped.items():
-            decision = self._consensus_opinion(opinions, primary_label=primary_label, secondary_label=secondary_label)
+            decision = self._consensus_opinion(
+                opinions,
+                primary_label=primary_label,
+                secondary_label=secondary_label,
+                target_type=target_type,
+                target_id=target_id,
+                field_name=field_name,
+            )
             if decision["status"] != "consensus":
                 pending_conflicts.append(
                     {
@@ -499,7 +1895,17 @@ class VerificationSessionService:
                 opinion=decision["opinion"],
                 dual_ai_consensus=True,
             )
+            materialized_target_type, materialized_target_id = self._materialized_target_ref(adopted)
+            for opinion in opinions:
+                candidate = opinion.get("candidate")
+                if candidate is None:
+                    continue
+                candidate.status = "materialized"
+                candidate.materialized_target_type = materialized_target_type
+                candidate.materialized_target_id = materialized_target_id
+                self.session.add(candidate)
             auto_applied.append(adopted)
+        self.session.flush()
         missing_dual = max(0, len(grouped) - len(auto_applied) - len(pending_conflicts))
         if missing_dual:
             skipped.append({"reason": "insufficient_dual_ai_pairs", "count": missing_dual})
@@ -513,7 +1919,16 @@ class VerificationSessionService:
             "skipped_items": skipped,
         }
 
-    def _consensus_opinion(self, opinions: list[dict[str, Any]], *, primary_label: str, secondary_label: str) -> dict[str, Any]:
+    def _consensus_opinion(
+        self,
+        opinions: list[dict[str, Any]],
+        *,
+        primary_label: str,
+        secondary_label: str,
+        target_type: str,
+        target_id: str,
+        field_name: str,
+    ) -> dict[str, Any]:
         by_label = {item.get("source_label"): item for item in opinions if item.get("source_label") in {primary_label, secondary_label}}
         if primary_label not in by_label or secondary_label not in by_label:
             return {"status": "pending", "reason": "awaiting_both_ai_reviews"}
@@ -521,10 +1936,21 @@ class VerificationSessionService:
         secondary = by_label[secondary_label]
         if not self._opinion_has_anchor(primary) or not self._opinion_has_anchor(secondary):
             return {"status": "manual", "reason": "missing_evidence_anchor"}
+        if target_type == "dft_results" and (
+            not self._dft_has_material_identity(primary, target_id=target_id, field_name=field_name)
+            or not self._dft_has_material_identity(secondary, target_id=target_id, field_name=field_name)
+        ):
+            return {"status": "manual", "reason": "missing_dft_material_identity"}
         if str(primary.get("decision") or "") != str(secondary.get("decision") or ""):
             return {"status": "manual", "reason": "decision_conflict"}
         if self._value_key(primary.get("corrected_value")) != self._value_key(secondary.get("corrected_value")):
             return {"status": "manual", "reason": "value_conflict"}
+        if target_type == "dft_results" and self._dft_identity_key(primary, target_id=target_id, field_name=field_name) != self._dft_identity_key(
+            secondary,
+            target_id=target_id,
+            field_name=field_name,
+        ):
+            return {"status": "manual", "reason": "identity_conflict"}
         adopted = primary if (primary.get("confidence") or 0) >= (secondary.get("confidence") or 0) else secondary
         return {"status": "consensus", "reason": "dual_ai_match", "opinion": adopted}
 
@@ -538,11 +1964,14 @@ class VerificationSessionService:
         reviewer: str,
         opinion: dict[str, Any],
         dual_ai_consensus: bool = False,
+        adjudicated_by_third_ai: bool = False,
+        write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
         decision = str(opinion.get("decision") or "").upper()
-        if decision in DECISION_NEGATIVE:
-            return self._apply_reject_all(paper_id=paper_id, target_type=target_type, target_id=target_id, reviewer=reviewer)
+        evidence_payload = self._materialize_evidence_payload(opinion)
         if target_type == "dft_results":
+            if decision in {"REJECT", "REJECTED", "BLOCK"} and opinion.get("corrected_value") in (None, ""):
+                return self._apply_reject_all(paper_id=paper_id, target_type=target_type, target_id=target_id, reviewer=reviewer)
             return self._apply_dft_opinion(
                 paper_id=paper_id,
                 target_id=target_id,
@@ -550,7 +1979,14 @@ class VerificationSessionService:
                 reviewer=reviewer,
                 opinion=opinion,
                 dual_ai_consensus=dual_ai_consensus,
+                adjudicated_by_third_ai=adjudicated_by_third_ai,
+                evidence_payload=evidence_payload,
+                write_lock_tokens=write_lock_tokens,
             )
+        if target_type in {"tables", "figures"} and decision in DECISION_POSITIVE and opinion.get("corrected_value") in (None, ""):
+            return {"action": "mark_reviewed", "target_type": target_type, "target_id": target_id}
+        if decision in DECISION_NEGATIVE and opinion.get("corrected_value") in (None, ""):
+            return {"action": "reject", "target_type": target_type, "target_id": target_id}
         return self._apply_structured_correction(
             paper_id=paper_id,
             target_type=target_type,
@@ -558,8 +1994,10 @@ class VerificationSessionService:
             field_name=field_name,
             reviewer=reviewer,
             proposed_value=opinion.get("corrected_value", opinion.get("value")),
-            evidence_payload=opinion.get("evidence_payload"),
+            evidence_payload=evidence_payload,
             dual_ai_consensus=dual_ai_consensus,
+            adjudicated_by_third_ai=adjudicated_by_third_ai,
+            write_lock_tokens=write_lock_tokens,
         )
 
     def _apply_reject_all(self, *, paper_id: UUID, target_type: str, target_id: str, reviewer: str) -> dict[str, Any]:
@@ -583,6 +2021,9 @@ class VerificationSessionService:
         reviewer: str,
         opinion: dict[str, Any],
         dual_ai_consensus: bool,
+        adjudicated_by_third_ai: bool,
+        evidence_payload: Any,
+        write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
         row = self.session.get(DFTResult, UUID(str(target_id)))
         if row is None or row.paper_id != paper_id:
@@ -590,7 +2031,18 @@ class VerificationSessionService:
         mapped_field = self.DFT_FIELD_ALIASES.get(field_name, field_name)
         proposed_value = opinion.get("corrected_value", opinion.get("value"))
         current_value = getattr(row, mapped_field, None) if hasattr(row, mapped_field) else None
-        note = "Dual-AI consensus auto-adopted through the DFT safety gate." if dual_ai_consensus else "Manual adjudication selected this AI opinion."
+        self._apply_dft_material_binding_if_needed(
+            row=row,
+            opinion=opinion,
+            reviewer=reviewer,
+            evidence_payload=evidence_payload,
+        )
+        self.session.flush()
+        self.session.refresh(row)
+        note = self._materialization_note(
+            dual_ai_consensus=dual_ai_consensus,
+            adjudicated_by_third_ai=adjudicated_by_third_ai,
+        )
         if mapped_field == "value" and self._value_key(proposed_value) == self._value_key(current_value):
             result = DFTResultReviewService(self.session).verify_result(
                 paper_id=paper_id,
@@ -599,6 +2051,7 @@ class VerificationSessionService:
                 reviewer=reviewer,
                 reviewer_note=note,
                 field_names=["value"],
+                evidence_payload=evidence_payload,
             )
             return {"action": "verify", "target_type": "dft_results", "target_id": target_id, "result": result}
         return self._apply_structured_correction(
@@ -608,8 +2061,10 @@ class VerificationSessionService:
             field_name=mapped_field,
             reviewer=reviewer,
             proposed_value=proposed_value,
-            evidence_payload=opinion.get("evidence_payload"),
+            evidence_payload=evidence_payload,
             dual_ai_consensus=dual_ai_consensus,
+            adjudicated_by_third_ai=adjudicated_by_third_ai,
+            write_lock_tokens=write_lock_tokens,
         )
 
     def _apply_structured_correction(
@@ -623,35 +2078,119 @@ class VerificationSessionService:
         proposed_value: Any,
         evidence_payload: Any,
         dual_ai_consensus: bool,
+        adjudicated_by_third_ai: bool,
+        write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
+        target_collection = self._correction_collection_name(target_type)
+        is_sample_create = (
+            target_collection == "catalyst_samples"
+            and str(target_id).strip().lower() in {"new", "create"}
+            and str(field_name).strip().lower() == "create"
+        )
         correction = PaperCorrection(
             paper_id=paper_id,
             source=reviewer,
-            field_name=target_type,
-            target_path=f"{target_type}:{target_id}:{field_name}",
-            operation="replace",
+            field_name=target_collection,
+            target_path="catalyst_samples:new:create" if is_sample_create else f"{target_collection}:{target_id}:{field_name}",
+            operation="create" if is_sample_create else "replace",
             proposed_value=proposed_value,
-            reason=(
-                "Dual-AI consensus auto-adopted through the correction approval gate."
-                if dual_ai_consensus
-                else "Manual adjudication adopted the selected AI opinion through the correction approval gate."
+            reason=self._materialization_note(
+                dual_ai_consensus=dual_ai_consensus,
+                adjudicated_by_third_ai=adjudicated_by_third_ai,
             ),
             evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
             status="pending",
         )
         self.session.add(correction)
         self.session.flush()
-        approved = ReviewService(self.session).approve_correction(correction.id, reviewer=reviewer)
+        approved = ReviewService(self.session).approve_correction(
+            correction.id,
+            reviewer=reviewer,
+            write_lock_tokens=write_lock_tokens,
+        )
         self.session.flush()
+        sample_resolution = (
+            (approved.evidence_payload or {}).get("sample_resolution")
+            if isinstance(approved.evidence_payload, dict)
+            else None
+        )
+        resolved_target_id = (
+            sample_resolution.get("catalyst_sample_id")
+            if isinstance(sample_resolution, dict)
+            else target_id
+        )
         return {
             "action": "approve_correction",
-            "target_type": target_type,
-            "target_id": target_id,
+            "target_type": target_collection,
+            "target_id": resolved_target_id,
             "correction_id": str(approved.id),
             "field_name": field_name,
             "proposed_value": proposed_value,
             "result": {"status": approved.status, "reviewed_by": approved.reviewed_by},
         }
+
+    def _apply_dft_material_binding_if_needed(
+        self,
+        *,
+        row: DFTResult,
+        opinion: dict[str, Any],
+        reviewer: str,
+        evidence_payload: Any,
+    ) -> None:
+        corrected_value = opinion.get("corrected_value")
+        material_identity = self._first_text(
+            corrected_value.get("material_identity") if isinstance(corrected_value, dict) else None,
+            corrected_value.get("material") if isinstance(corrected_value, dict) else None,
+            corrected_value.get("catalyst") if isinstance(corrected_value, dict) else None,
+            opinion.get("normalized_material"),
+            opinion.get("normalized_material_or_catalyst"),
+        )
+        if not material_identity and not row.catalyst_sample_id:
+            return
+        DFTResultReviewService(self.session)._apply_material_binding(  # noqa: SLF001 - reuse existing safe binding flow
+            row=row,
+            material_identity=material_identity,
+            reviewer=reviewer,
+            reason=str(opinion.get("reason") or "").strip() or "Applied AI-reviewed DFT material binding through the verification safety gate.",
+            evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
+        )
+
+    @staticmethod
+    def _correction_collection_name(target_type: str) -> str:
+        lowered = str(target_type or "").strip().lower()
+        if lowered in {"figure", "figures"}:
+            return "figures"
+        if lowered in {"table", "tables"}:
+            return "tables"
+        return lowered
+
+    @staticmethod
+    def _materialized_target_ref(result: dict[str, Any]) -> tuple[str | None, str | None]:
+        action = str(result.get("action") or "").strip()
+        if action == "approve_correction" and result.get("target_type") == "catalyst_samples":
+            return ("catalyst_sample", str(result.get("target_id") or "") or None)
+        if action == "approve_correction":
+            return ("paper_correction", str(result.get("correction_id") or "") or None)
+        target_type = str(result.get("target_type") or "").strip() or None
+        target_id = str(result.get("target_id") or "") or None
+        return (target_type, target_id)
+
+    @staticmethod
+    def _object_review_candidate_status_for_result(result: dict[str, Any]) -> str:
+        action = str(result.get("action") or "").strip().lower()
+        if action == "approve_correction":
+            return "ai_applied"
+        if action in {"mark_reviewed", "reject"}:
+            return "ai_reviewed"
+        return "materialized"
+
+    @staticmethod
+    def _correction_candidate_has_anchor(candidate: ExternalAnalysisCandidate) -> bool:
+        payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+        evidence_payload = payload.get("evidence_payload")
+        if VerificationSessionService._opinion_has_anchor({"evidence_payload": evidence_payload}):
+            return True
+        return VerificationSessionService._opinion_has_anchor({"evidence_payload": candidate.evidence_payload})
 
     @staticmethod
     def _note_has_anchor(candidate: ExternalAnalysisCandidate) -> bool:
@@ -670,22 +2209,156 @@ class VerificationSessionService:
 
     @staticmethod
     def _opinion_has_anchor(opinion: dict[str, Any]) -> bool:
-        payload = opinion.get("evidence_payload")
-        if isinstance(payload, dict):
-            locator = payload.get("locator") if isinstance(payload.get("locator"), dict) else payload
-            for key in ("page", "section", "figure", "table", "evidence_text", "quoted_text", "section_title"):
-                value = locator.get(key) if isinstance(locator, dict) else None
-                if value is not None and str(value).strip():
-                    return True
-        if isinstance(payload, list):
-            return any(VerificationSessionService._opinion_has_anchor({"evidence_payload": item}) for item in payload if isinstance(item, dict))
-        return False
+        return has_evidence_anchor(opinion.get("evidence_payload"))
 
     @staticmethod
     def _value_key(value: Any) -> Any:
         if isinstance(value, float):
             return round(value, 8)
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
         return value
+
+    def _review_consensus_key(
+        self,
+        opinion: dict[str, Any],
+        *,
+        target_type: str,
+        target_id: str,
+        field_name: str,
+    ) -> tuple[Any, ...]:
+        key: tuple[Any, ...] = (
+            str(opinion.get("decision") or ""),
+            self._value_key(opinion.get("corrected_value")),
+        )
+        if target_type == "dft_results":
+            key = key + self._dft_identity_key(opinion, target_id=target_id, field_name=field_name)
+        return key
+
+    def _consensus_disagreement_reason(
+        self,
+        opinions: list[dict[str, Any]],
+        *,
+        target_type: str,
+        target_id: str,
+        field_name: str,
+    ) -> str:
+        if target_type != "dft_results":
+            return "ai_disagreement"
+        value_keys = {
+            (str(item.get("decision") or ""), self._value_key(item.get("corrected_value")))
+            for item in opinions
+        }
+        if len(value_keys) > 1:
+            return "ai_disagreement"
+        identity_keys = {
+            self._dft_identity_key(item, target_id=target_id, field_name=field_name)
+            for item in opinions
+        }
+        if len(identity_keys) > 1:
+            return "ai_identity_disagreement"
+        return "ai_disagreement"
+
+    def _dft_identity_key(
+        self,
+        opinion: dict[str, Any],
+        *,
+        target_id: str | None = None,
+        field_name: str | None = None,
+    ) -> tuple[Any, ...]:
+        payload = opinion.get("raw_payload") if isinstance(opinion.get("raw_payload"), dict) else {}
+        if not payload:
+            payload = opinion
+        row = None
+        if target_id:
+            try:
+                row = self.session.get(DFTResult, UUID(str(target_id)))
+            except (TypeError, ValueError):
+                row = None
+        mapped_field = self.DFT_FIELD_ALIASES.get(str(field_name or "").strip(), str(field_name or "").strip())
+        corrected_value = opinion.get("corrected_value")
+
+        def pick(field: str, *keys: str, fallback: Any = None) -> Any:
+            if mapped_field == field and corrected_value not in (None, ""):
+                return corrected_value
+            for key in keys:
+                value = payload.get(key)
+                if value not in (None, "", []):
+                    return value
+            return fallback
+
+        row_material = None
+        if isinstance(row, DFTResult) and row.catalyst_sample_id:
+            sample = self.session.get(CatalystSample, row.catalyst_sample_id)
+            row_material = sample.name if sample and sample.name else str(row.catalyst_sample_id)
+        material_identity = pick(
+            "catalyst_sample_id",
+            "catalyst_sample_id",
+            "normalized_material",
+            "normalized_material_or_catalyst",
+            "material",
+            "catalyst",
+            fallback=row_material,
+        )
+        property_type = pick(
+            "property_type",
+            "normalized_energy_type",
+            "property_type",
+            "energy_type",
+            fallback=row.property_type if isinstance(row, DFTResult) else None,
+        )
+        structure_name = pick("structure_name", "structure_name")
+        adsorbate = pick("adsorbate", "adsorbate", fallback=row.adsorbate if isinstance(row, DFTResult) else None)
+        reaction_step = pick(
+            "reaction_step",
+            "reaction_step",
+            fallback=row.reaction_step if isinstance(row, DFTResult) else None,
+        )
+        return tuple(
+            self._normalized_identity_part(value)
+            for value in (property_type, material_identity, structure_name, adsorbate, reaction_step)
+        )
+
+    @staticmethod
+    def _normalized_identity_part(value: Any) -> str:
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).strip().lower()
+        return str(value or "").strip().lower()
+
+    def _dft_has_material_identity(
+        self,
+        opinion: dict[str, Any],
+        *,
+        target_id: str | None = None,
+        field_name: str | None = None,
+    ) -> bool:
+        identity = self._dft_identity_key(opinion, target_id=target_id, field_name=field_name)
+        return len(identity) > 1 and bool(identity[1])
+
+    @staticmethod
+    def _materialization_note(*, dual_ai_consensus: bool, adjudicated_by_third_ai: bool) -> str:
+        if adjudicated_by_third_ai:
+            return "Third-AI adjudication adopted this opinion through the existing verify/correction safety gate."
+        if dual_ai_consensus:
+            return "Dual-AI consensus auto-adopted through the existing verify/correction safety gate."
+        return "Manual adjudication adopted this AI opinion through the existing verify/correction safety gate."
+
+    @staticmethod
+    def _materialize_evidence_payload(opinion: dict[str, Any]) -> Any:
+        payload = opinion.get("evidence_payload")
+        if not isinstance(payload, dict):
+            return payload
+        merged = dict(payload)
+        extra = {
+            "adjudication_role": opinion.get("adjudication_role"),
+            "adjudication_scope": opinion.get("adjudication_scope"),
+            "selected_source_ids": opinion.get("selected_source_ids"),
+            "review_decision": opinion.get("decision"),
+            "review_source": opinion.get("source"),
+            "review_source_label": opinion.get("source_label"),
+        }
+        merged.update({key: value for key, value in extra.items() if value not in (None, "", [])})
+        return merged
 
     def _get_session_job(self, session_id: str) -> WorkflowJob:
         job = self.session.get(WorkflowJob, session_id)

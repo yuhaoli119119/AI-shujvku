@@ -10,7 +10,7 @@
 
 筛选层次：
   1. 规则评分：关键词命中、年份、期刊、PDF 可得性、去重。
-  2. LLM 增强（可选）：有 Writer LLM 配置时生成 screening_reason；否则 fallback 到规则理由。
+  2. IDE AI 可在 MCP 侧复核；本服务只生成规则理由。
 
 注意：本服务不写数据库，只返回评分结果；由 intake API 负责落库。
 """
@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Paper
+from app.services.paper_identity import PaperIdentityService
 from app.utils.library_names import build_library_name_clause
 
 
@@ -187,28 +188,32 @@ def _detect_duplicate(
     session: Session,
     doi: str | None,
     title: str | None,
+    year: int | None = None,
     library_name: str | None = None,
 ) -> str | None:
     """在 papers 表中检测是否有重复条目，返回已有 paper_id（字符串）或 None。"""
     if doi:
-        doi_clean = doi.strip().lower().lstrip("https://doi.org/").lstrip("doi:")
-        stmt = select(Paper.id).where(Paper.doi.ilike(f"%{doi_clean}%"))
-        if library_name:
-            stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
-        stmt = stmt.limit(1)
-        result = session.scalar(stmt)
-        if result:
-            return str(result)
+        doi_clean = PaperIdentityService.normalize_doi(doi)
+        if doi_clean:
+            stmt = select(Paper.id).where(Paper.doi == doi_clean)
+            if library_name:
+                stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
+            stmt = stmt.order_by(Paper.created_at.asc(), Paper.id.asc()).limit(1)
+            result = session.scalar(stmt)
+            if result:
+                return str(result)
     if title:
-        # 模糊标题去重：取前 60 字符做 ilike
-        title_prefix = title.strip()[:60]
-        stmt = select(Paper.id).where(Paper.title.ilike(f"%{title_prefix}%"))
+        incoming = {"title": title, "year": year}
+        stmt = select(Paper).where(Paper.title.is_not(None))
         if library_name:
             stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
-        stmt = stmt.limit(1)
-        result = session.scalar(stmt)
-        if result:
-            return str(result)
+        for paper in session.scalars(stmt).all():
+            report = PaperIdentityService.identity_match_report(
+                incoming,
+                PaperIdentityService.metadata_for_paper(paper),
+            )
+            if report["decision"] == "high_confidence_title_year":
+                return str(paper.id)
     return None
 
 
@@ -217,12 +222,7 @@ def _detect_duplicate(
 # ---------------------------------------------------------------------------
 
 class IntakeScreeningService:
-    """候选文献规则筛选服务（MVP 版，无需外部 AI 调用）。
-
-    可选 LLM 增强：如果传入 llm_client（符合 llm_service 接口），
-    会尝试为 recommended/maybe 候选生成更丰富的 screening_reason。
-    失败时自动 fallback 到规则理由，不抛出异常。
-    """
+    """候选文献规则筛选服务（MVP 版，无需外部 AI 调用）。"""
 
     def __init__(
         self,
@@ -264,9 +264,10 @@ class IntakeScreeningService:
             )
             doi = item.get("doi")
             title = item.get("title")
+            year = item.get("year")
 
             # 1. 去重
-            dup_id = _detect_duplicate(self._session, doi, title, self._library_name)
+            dup_id = _detect_duplicate(self._session, doi, title, year, self._library_name)
             is_dup = dup_id is not None
 
             # 2. 规则评分
@@ -283,7 +284,7 @@ class IntakeScreeningService:
 
             tier = _tier_from_score(score)
 
-            # 3. 生成理由（LLM 优先，fallback 到规则）
+            # 3. 生成规则理由；IDE AI 可在 MCP 侧继续复核。
             reason = self._generate_reason(
                 item, score, tier, risk_flags, query_tokens, user_need=user_need
             )
@@ -313,23 +314,5 @@ class IntakeScreeningService:
         *,
         user_need: str,
     ) -> str:
-        """生成筛选理由；有 LLM 时增强，否则纯规则。"""
-        rule_reason = _rule_reason(item, score, tier, risk_flags, query_tokens)
-        if not self._llm or tier == "weak":
-            return rule_reason
-        try:
-            title = item.get("title") or "未知标题"
-            abstract_snippet = (item.get("abstract") or "")[:300]
-            prompt = (
-                f"研究需求：{user_need}\n"
-                f"论文标题：{title}\n"
-                f"摘要片段：{abstract_snippet}\n"
-                f"规则评分：{score:.2f}（{tier}）\n"
-                "请用1-2句话简洁说明该论文与研究需求的相关性，以及是否值得纳入文献库。"
-            )
-            llm_reason = self._llm.generate(prompt, max_tokens=120)
-            if llm_reason and len(llm_reason.strip()) > 10:
-                return f"[LLM] {llm_reason.strip()}"
-        except Exception:
-            pass
-        return rule_reason
+        """生成规则筛选理由。"""
+        return _rule_reason(item, score, tier, risk_flags, query_tokens)

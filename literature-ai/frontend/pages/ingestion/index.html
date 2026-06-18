@@ -819,8 +819,8 @@
                 <div class="panel-card">
                     <div class="panel-heading" style="margin-bottom: 8px;">
                         <div>
-                            <h2 class="panel-title">任务中心</h2>
-                            <p class="panel-desc" style="display:none;">按日期查看批量检索与收录任务。运行中任务可取消，失败或已取消任务可重试。</p>
+                            <h2 class="panel-title">文献入库进度</h2>
+                            <p class="panel-desc" style="display:none;">这里只显示文献入库相关记录。运行中任务可取消，失败或已取消任务可重试。</p>
                         </div>
                     </div>
 
@@ -849,9 +849,9 @@
                         <div class="calendar-grid" id="jobCalendar"></div>
                     </div>
 
-                    <div class="selected-date-title" id="selectedDateTitle">当天任务</div>
+                    <div class="selected-date-title" id="selectedDateTitle">当日入库记录</div>
                     <div class="job-list" id="jobQueue">
-                        <div class="empty-state">当前没有后台收录任务。</div>
+                        <div class="empty-state">当前没有文献入库记录。</div>
                     </div>
                 </div>
             </aside>
@@ -863,6 +863,7 @@
     <script>
         const API_BASE = "/api/papers";
         const JOBS_API = "/api/jobs";
+        const INGESTION_JOB_TYPES = ["discovery_download_ingest", "local_pdf_path_ingest"];
         const LIB_API = "/api/libraries";
         const state = {
             activeTab: "pdf",
@@ -1524,16 +1525,7 @@
                 return;
             }
             try {
-                let data;
-                try {
-                    data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
-                } catch (error) {
-                    if (!error || (error.status !== 404 && error.status !== 422)) {
-                        throw error;
-                    }
-                    data = [];
-                }
-                state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
+                state.jobs = await fetchIngestionJobs(state.currentLibrary);
                 syncSelectedJobDateWithJobs();
                 state.statsPollTick += 1;
                 const hasActiveJobs = state.jobs.some(job => ["queued", "running"].includes(job.status));
@@ -1542,7 +1534,7 @@
                 }
             } catch (error) {
                 state.jobs = [];
-                showToast(`任务列表加载失败：${error.message}`, "error");
+                showToast(`入库记录加载失败：${error.message}`, "error");
             }
             renderAllJobs();
         }
@@ -1558,9 +1550,9 @@
                 return;
             }
             try {
-                const data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(state.currentLibrary)}&limit=80`);
+                const data = await fetchIngestionJobs(state.currentLibrary);
                 if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
-                state.jobs = Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
+                state.jobs = data;
                 syncSelectedJobDateWithJobs();
                 state.statsPollTick += 1;
                 const hasActiveJobs = state.jobs.some(job => ["queued", "running"].includes(job.status));
@@ -1570,9 +1562,36 @@
             } catch (error) {
                 if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
                 state.jobs = [];
-                showToast(`Job list load failed: ${error.message}`, "error");
+                showToast(`入库记录加载失败：${error.message}`, "error");
             }
             renderAllJobs();
+        }
+
+        async function fetchIngestionJobs(libraryName) {
+            const requests = INGESTION_JOB_TYPES.map(async jobType => {
+                try {
+                    const data = await fetchJSON(
+                        `${JOBS_API}?library_name=${encodeURIComponent(libraryName)}&type=${encodeURIComponent(jobType)}&limit=80`
+                    );
+                    return Array.isArray(data) ? data : Array.isArray(data && data.items) ? data.items : [];
+                } catch (error) {
+                    if (!error || (error.status !== 404 && error.status !== 422)) {
+                        throw error;
+                    }
+                    return [];
+                }
+            });
+            const groups = await Promise.all(requests);
+            const merged = [];
+            const seen = new Set();
+            groups.flat().forEach(job => {
+                const key = job && job.job_id ? job.job_id : "";
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                merged.push(job);
+            });
+            merged.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+            return merged;
         }
 
         function reuseLastQuery() {
@@ -1652,9 +1671,9 @@
             container.innerHTML = items.map(job => {
                 const summary = job.summary || {};
                 const status = job.status || "queued";
-                const title = summary.title || summary.query || summary.source_label || job.type || "后台任务";
+                const title = summary.title || summary.query || summary.source_label || job.type || "入库任务";
                 const count = firstPresent(summary.success_count, job.progress && job.progress.ingested, 0);
-                const countLabel = job.type === "agent_activity" ? "处理项" : "已入库";
+                const countLabel = "已入库";
                 return `
                     <article class="mini-item">
                         <div class="mini-item-head">
@@ -1662,7 +1681,7 @@
                             <span class="status-pill ${esc(status)}">${esc(status)}</span>
                         </div>
                         <div class="muted">更新于 ${esc(formatJobTime(job.updated_at || job.created_at))}</div>
-                        <div class="muted">${esc(countLabel)} ${esc(count)} ${job.type === "agent_activity" ? "项" : "篇"}</div>
+                        <div class="muted">${esc(countLabel)} ${esc(count)} 篇</div>
                     </article>
                 `;
             }).join("");
@@ -1731,13 +1750,109 @@
         function renderJobsList() {
             const container = document.getElementById("jobQueue");
             const jobs = filteredJobs().filter(job => jobDateKey(job) === state.selectedDate);
-            document.getElementById("selectedDateTitle").textContent = `${state.selectedDate} 的任务`;
+            document.getElementById("selectedDateTitle").textContent = `${state.selectedDate} 的入库记录`;
             if (!jobs.length) {
-                container.innerHTML = '<div class="empty-state">这一天没有匹配当前筛选条件的任务。</div>';
+                container.innerHTML = '<div class="empty-state">这一天没有匹配当前筛选条件的入库记录。</div>';
                 return;
             }
-            container.innerHTML = jobs.map(renderJobCard).join("");
+            const displayItems = groupDownloadIngestJobs(jobs);
+            container.innerHTML = displayItems.map(item => item.group ? renderJobGroupCard(item) : renderJobCard(item.job)).join("");
             appendDeleteButtons(jobs);
+        }
+
+        function groupDownloadIngestJobs(jobs) {
+            const groups = new Map();
+            const items = [];
+            jobs.forEach(job => {
+                if (!isPerPaperDownloadJob(job)) {
+                    items.push({ group: false, job });
+                    return;
+                }
+                const created = new Date(job.created_at || job.updated_at || 0);
+                const updated = new Date(job.updated_at || job.created_at || 0);
+                const bucket = Number.isNaN(created.getTime()) ? "unknown" : Math.floor(created.getTime() / (10 * 60 * 1000));
+                const key = [jobDateKey(job), job.type, job.library_name || "", bucket].join("|");
+                if (!groups.has(key)) {
+                    const group = { group: true, key, jobs: [], sortTime: updated.getTime() || 0 };
+                    groups.set(key, group);
+                    items.push(group);
+                }
+                groups.get(key).jobs.push(job);
+            });
+            return items.map(item => {
+                if (!item.group) return item;
+                item.jobs.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+                item.sortTime = Math.max(...item.jobs.map(job => new Date(job.updated_at || job.created_at || 0).getTime() || 0));
+                return item;
+            }).sort((a, b) => {
+                const aTime = a.group ? a.sortTime : new Date((a.job || {}).updated_at || (a.job || {}).created_at || 0).getTime();
+                const bTime = b.group ? b.sortTime : new Date((b.job || {}).updated_at || (b.job || {}).created_at || 0).getTime();
+                return (bTime || 0) - (aTime || 0);
+            });
+        }
+
+        function isPerPaperDownloadJob(job) {
+            if (!job || job.type !== "discovery_download_ingest") return false;
+            const summary = job.summary || {};
+            const progress = job.progress || {};
+            const result = job.result || {};
+            const total = Number(firstPresent(summary.total, progress.total, result.total, 1));
+            return total <= 1;
+        }
+
+        function renderJobGroupCard(group) {
+            const jobs = group.jobs || [];
+            const first = jobs[0] || {};
+            const completed = jobs.filter(job => job.status === "completed").length;
+            const failed = jobs.filter(job => job.status === "failed").length;
+            const running = jobs.filter(job => ["queued", "running"].includes(job.status)).length;
+            const status = running ? "running" : failed ? "failed" : "completed";
+            const successCount = jobs.reduce((sum, job) => {
+                const summary = job.summary || {};
+                const progress = job.progress || {};
+                const result = job.result || {};
+                const value = Number(firstPresent(summary.success_count, progress.ingested, result.status ? 1 : 0, 0));
+                return sum + (Number.isFinite(value) ? value : 0);
+            }, 0);
+            const metadataOnly = jobs.filter(job => (job.result || {}).status === "metadata_only").length;
+            const detailId = "job-group-" + safeDomId(group.key);
+            const statusLabels = { running: "运行中", completed: "已完成", failed: "有失败" };
+            return `
+                <article class="job-card grouped-job-card" id="${detailId}">
+                    <div class="job-card-header">
+                        <span class="job-id">批量下载入库 · ${esc(jobs.length)} 篇</span>
+                        <span class="status-pill ${esc(status)}">${esc(statusLabels[status] || status)}</span>
+                    </div>
+                    <div class="muted">
+                        类型：在线下载队列入库<br>
+                        文献库：${esc(first.library_name || "-")}<br>
+                        更新时间：${esc(formatJobTime(first.updated_at || first.created_at))}
+                    </div>
+                    <div class="job-progress">
+                        <strong>同一时间段触发的单篇入库任务已合并展示。</strong><br>
+                        成功入库：${esc(successCount)} 篇 | 元数据：${esc(metadataOnly)} 篇 | 失败：${esc(failed)} 篇 | 运行中：${esc(running)} 篇
+                    </div>
+                    <div class="job-actions">
+                        <button class="btn btn-ghost btn-sm" onclick="toggleJobGroup('${detailId}')">展开详情</button>
+                    </div>
+                    <div class="job-group-details" hidden>
+                        ${jobs.map(renderJobCard).join("")}
+                    </div>
+                </article>
+            `;
+        }
+
+        function safeDomId(value) {
+            return String(value || "group").replace(/[^A-Za-z0-9_-]+/g, "-");
+        }
+
+        function toggleJobGroup(groupId) {
+            const card = document.getElementById(groupId);
+            const detail = card ? card.querySelector(".job-group-details") : null;
+            const button = card ? card.querySelector(".job-actions button") : null;
+            if (!detail) return;
+            detail.hidden = !detail.hidden;
+            if (button) button.textContent = detail.hidden ? "展开详情" : "收起详情";
         }
 
         function renderJobCard(job) {
@@ -1755,11 +1870,11 @@
             const successCount = firstPresent(summary.success_count, progress.ingested, "-");
             const failureCount = firstPresent(summary.failure_count, progress.failed, "-");
             const message = summary.message || progress.message || statusMessage(status);
-            const successLabel = job.type === "agent_activity" ? "处理项" : "成功入库";
-            const failureLabel = job.type === "agent_activity" ? "异常项" : "失败数";
-            const countUnit = job.type === "agent_activity" ? "项" : "篇";
+            const successLabel = "成功入库";
+            const failureLabel = "失败数";
+            const countUnit = "篇";
             const canCancel = status === "queued" || status === "running";
-            const canRetry = (status === "failed" || status === "cancelled") && job.type !== "agent_activity";
+            const canRetry = status === "failed" || status === "cancelled";
 
             return `
                 <article class="job-card" id="job-card-${esc(job.job_id)}">
@@ -1768,7 +1883,7 @@
                         <span class="status-pill ${esc(status)}">${esc(labels[status] || status)}</span>
                     </div>
                     <div class="muted">
-                        类型：${esc(summary.source_label || job.type || "批量文献检索与入库")}<br>
+                        类型：${esc(summary.source_label || job.type || "文献入库任务")}<br>
                         更新时间：${esc(formatJobTime(job.updated_at || job.created_at))}
                     </div>
                     <div class="job-progress">

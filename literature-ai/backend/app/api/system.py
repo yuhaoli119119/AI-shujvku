@@ -136,9 +136,9 @@ async def get_agent_guide() -> dict:
             "mode": "codex_mcp_first",
             "description": "Connect through MCP first so Codex can query papers, read full parsed records, retrieve evidence, append notes, and propose corrections. Use batch ingestion only as an optional acquisition helper.",
             "method": "MCP",
-            "path": "/mcp",
+            "path": "/mcp/",
             "json_schema_hint": {
-                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "analyze_chart", "review_figure", "get_review_coverage", "get_field_disputes", "scan_duplicate_dois"],
+                "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "review_figure", "get_review_coverage", "get_field_disputes", "scan_duplicate_dois"],
                 "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure"],
                 "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper", "get_parse_status", "recrop_figure"],
                 "writing_tools": ["insert_word_citation"],
@@ -243,9 +243,9 @@ async def get_agent_guide() -> dict:
             },
         ],
         "mcp": {
-            "url": "/mcp",
+            "url": "/mcp/",
             "transport": "streamable_http",
-            "auth": "Authorization: Bearer <mcp_api_key>",
+            "auth": "Optional on trusted local/private networks; otherwise Authorization: Bearer <mcp_api_key>",
             "recommended_when": "Use MCP as the primary Codex interface for interactive paper reading, evidence retrieval, note taking, imported analysis, comparison, and correction proposals.",
             "common_tools": [
                 "query_papers",
@@ -258,7 +258,6 @@ async def get_agent_guide() -> dict:
                 "retrieve_evidence",
                 "compare_papers",
                 "read_paper_page",
-                "analyze_chart",
                 "review_figure",
                 "get_review_coverage",
                 "get_field_disputes",
@@ -281,6 +280,7 @@ async def get_agent_guide() -> dict:
                 "ingest_pdf_batch",
                 "get_parse_status",
                 "recrop_figure",
+                "create_figure_from_bbox",
                 "create_share_token",
                 "scan_duplicate_dois",
             ],
@@ -293,32 +293,41 @@ async def get_agent_guide() -> dict:
             ],
             "purpose": "After HTTP or MCP work completes, the desktop client can sync candidate results back into the local project library.",
         },
-        "llm_configuration": {
-            "env_prefix": "LITAI_",
-            "required_for_live_llm": [
-                "LITAI_WRITER_BACKEND=openai_compatible",
-                "LITAI_WRITER_MODEL=<model_name>",
-                "LITAI_WRITER_API_BASE=<openai_compatible_base_url>",
-                "LITAI_WRITER_API_KEY=<api_key>",
-            ],
-            "note": "Writer/internal parser settings are optional compatibility paths. They are not required for the primary IDE-AI-over-MCP workflow.",
+        "ai_workflow": {
+            "mode": "ide_mcp_only",
+            "note": "Web-side model execution is disabled. Use IDE AI over MCP to read materials and import candidates.",
         },
         "ingestion_config": {
             "auto_run_stage2_extraction": settings.auto_run_stage2_extraction,
             "description": "When True, ingestion may still create backend candidate outputs. Regardless of that setting, the supported manual recovery path is to prepare AI-readable materials (workspace, evidence, codex context, AI reading package) and let IDE AI continue via MCP/import_analysis instead of requiring any backend-owned LLM deep parse.",
         },
+        "safety_boundaries": {
+            "dft_page_locators": [
+                "DFT rows with paper provenance, source section, and evidence text but no exact PDF page must remain text_only candidates.",
+                "Do not infer exact PDF pages from approximate similarity, nearby figures, or section-title matches.",
+                "Do not expose a web UI AI page-lookup action unless a real audited backend workflow exists.",
+                "Ad hoc page investigation belongs to the assigned IDE AI when requested by the user; any proposed page remains a candidate until reviewed.",
+                "Missing-page repair must not mark DFT rows verified, approve corrections, bind materials, or unlock CSV/ML export.",
+            ],
+        },
         "suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
-            "Then connect to /mcp and prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections, export_ml_dataset to export verified data as JSON or CSV for machine learning. "
+            "Then inspect the current IDE/project MCP tool list and use the already exposed literature-ai tools first. Do not rewrite mcp_config.json or invent a new MCP server unless the user explicitly asks for manual MCP setup. Only if the current project session truly does not expose literature-ai should you reconnect to /mcp/ (streamable_http; no key is required on trusted local/private networks unless the server explicitly asks for one). Prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections, export_ml_dataset to export verified data as JSON or CSV for machine learning. "
             "Use read_paper_page to read a specific page when evidence is truncated or missing context. "
-            "Use analyze_chart for targeted VLM analysis of figures when the stored AI summary is insufficient. "
+            "Inspect figures in the IDE workflow when stored captions or crops are insufficient. "
             "Use recrop_figure to recalculate and persist an image crop. You can use 'full_page', 'wider', or 'ai_bbox' strategies. "
+            "Figure image operations are direct-tool-only: when recropping an existing figure, you MUST call the MCP recrop_figure tool with the current figure_id and strategy='full_page'/'wider'/'ai_bbox'. Do not submit recrop_figure, bbox, or proposed_value={'bbox':...} through import_analysis/correction_proposals; the backend rejects that path. After calling recrop_figure, read back the figure and confirm image_path, crop_status, crop_source, and page. If you cannot access the MCP tool, report that you are blocked instead of saying the request was submitted. "
+            "Use create_figure_from_bbox when a figure is missing entirely: read the PDF page, choose a bbox or full_page strategy, crop from the original PDF, and create the figure object directly. "
             "Use review_figure to store structured human/AI judgements on whether a figure's analysis is correct. "
             "Use get_review_coverage to check which figures, tables, and sections have been reviewed. "
             "Use get_field_disputes to find conflicting values proposed by different AIs. Includes historically resolved disputes (status='resolved') so later AIs know what was already settled. "
             "Use scan_duplicate_dois to find papers that share the same DOI, which may indicate duplicates in the system. "
             "Use create_share_token to generate a read-only share link for others to view papers, figures, DFT data, and audit logs without MCP access. "
             "IMPORTANT: The primary workflow does not depend on a backend-owned LLM. Even if auto_run_stage2_extraction is disabled, or backend writer/internal parser settings are missing, the system can still prepare AI-readable materials. In that mode, YOU (the AI) should first read the prepared workspace, codex context, item context, and evidence package, then continue analysis through MCP/import_analysis, notes, corrections, and review-safe candidate flows. The paper can remain in a material-ready state while waiting for IDE-AI follow-up. "
+            "Overall parse review instruction: do not only write a report. For non-DFT text metadata, tables, sections, and writing cards, directly write fixes back through import_analysis with auto_apply_review_rules=true and a valid write lock. Figure image creation/recropping is the exception: never use import_analysis for image files or bbox crop requests; call recrop_figure/create_figure_from_bbox directly. DFT data must not be directly final-approved by one AI; write object_review_audits or correction candidates only and keep the existing multi-AI conflict/consensus workflow. "
+            "IMPORTANT evidence_location format for auto-apply: evidence_location must be a structured dict with at least one anchor key (page, table, figure, quoted_text, section, bbox, evidence_text). A plain string like \"PDF page 13, Table 5\" is accepted as quoted_text, but the preferred form is {\"page\": 13, \"table\": \"Table 5\", \"quoted_text\": \"...\"}. Structured keys enable reliable page-level evidence tracing; use the dict form whenever the exact page/figure/table is known. ",
+            "Figure review must cover every figure object, not only figures that already look correct. For each scientific figure, write or correct figure_role, content_summary, key_elements, page, caption, and crop_status/crop_quality; mark non-scientific images as figure_role='noise' or crop_status='noisy'. key_elements must be concrete visual/scientific elements such as materials, structures, curves, axes, orbitals, reaction steps, or panels; never use placeholders like verified_figure, ai_verified, reviewed, or ok. Check continuous figure numbering, compare the paper's actual figure/subfigure count in the PDF against current parsed figure objects, confirm whether any figures are missing entirely, and check caption agreement with the PDF page, image_path readability, crop alignment, and whether create_figure_from_bbox, recrop_figure, review_figure, or another MCP/API tool is needed to create missing figures or repair bad crops. A figure without image_path, page, caption, figure_role, and content_summary is not RAG-ready; missing or placeholder key_elements must be corrected or clearly flagged as an analysis gap. Abstract/section review must check whether the abstract is missing, whether sections are crude Page 1/Page 2 splits, and whether normalized section_title and section_type should be created. Generate source_label dynamically, for example <agent_name>_overall_<YYYYMMDD_HHMMSS>; never use a fixed date. Do not overwrite English evidence fields with Chinese translation. Put Chinese only in *_zh derived fields where available, or in writing cards/review notes. "
+            "Strict count and DFT safety update: never stop at a web UI display limit; compare the source PDF and context counts, and review all figure objects one by one. If a paper has 16 figures, all 16 must be checked, corrected, or explicitly marked reviewed. For DFT rows, verify material identity, property or energy type, value, unit, evidence text, source document type, and exact page/locator. Do not PASS or export DFT rows when material identity, review status, evidence text, or locator is missing; keep them as candidates behind the export safety gate. "
             "Use /api/intake/search for external candidate discovery, then approve and ingest candidates through the controlled intake endpoints. Do not use the legacy /api/papers/ai_workflow direct-ingest endpoint."
         ),
     }
