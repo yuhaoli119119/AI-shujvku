@@ -1298,13 +1298,27 @@ async def test_parse_paper_reuses_existing_paper_and_records_job(mcp_test_env, m
 
 
 def test_mcp_http_auth_middleware_requires_api_key(mcp_test_env):
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://localhost") as client:
+        invalid_host = client.get(
+            "/mcp/",
+            headers={
+                "Host": "evil.example",
+                "Authorization": "Bearer litmcp_claude",
+            },
+        )
+        assert invalid_host.status_code == 421
+        assert invalid_host.text == "Invalid Host header"
+
         response = client.get("/mcp")
         assert response.status_code == 401
         assert response.json()["detail"] == "Missing MCP API key"
 
+        invalid_key = client.get("/mcp", headers={"Authorization": "Bearer not-a-real-key"})
+        assert invalid_key.status_code == 401
+        assert invalid_key.json()["detail"] == "Invalid MCP API key"
+
         authorized = client.get("/mcp", headers={"Authorization": "Bearer litmcp_claude"})
-        assert authorized.status_code != 401
+        assert authorized.status_code not in {401, 403, 421}
 
 
 def test_http_correction_review_api_requires_admin_and_applies_update(mcp_test_env):

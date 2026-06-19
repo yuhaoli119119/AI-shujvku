@@ -259,7 +259,7 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
 
 
 def sync_writer_settings_from_session(session, settings) -> dict[str, str]:
-    """Compatibility no-op: web-side model settings are disabled."""
+    """Compatibility no-op: deprecated web-side writer settings stay disabled."""
     return {}
 
 

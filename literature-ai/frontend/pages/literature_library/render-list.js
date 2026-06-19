@@ -89,8 +89,11 @@ function renderPaperList() {
         const displayCode = paper.paper_code || "";
         const metaLine = esc(paper.journal || "未知期刊") + (paper.doi ? ' | DOI: ' + esc(paper.doi) : '') + pdfSizeStr;
 
+        const hasPdf = paperHasPdf(paper);
+        const shouldHideNoPdfWorkflowChip = !hasPdf;
+
         let wfChip = "";
-        if (paper.workflow_status && paper.workflow_status !== "Imported") {
+        if (paper.workflow_status && paper.workflow_status !== "Imported" && !shouldHideNoPdfWorkflowChip) {
             wfChip = '<span class="status-chip ' + workflowClass(paper.workflow_status) + '" title="流程状态: ' + esc(paper.workflow_status) + '">' + esc(workflowMeta(paper.workflow_status)) + '</span>';
         }
 
@@ -100,13 +103,13 @@ function renderPaperList() {
         }
 
         const parsedStateIsRedundant = Boolean(
-            paper.pdf_path &&
+            hasPdf &&
             (paper.tei_path || paper.markdown_path || (paper.counts && paper.counts.sections > 0)) &&
             paper.workflow_status &&
             paper.workflow_status !== "Imported"
         );
         const primaryStatusChip = parsedStateIsRedundant ? "" : paperStatusChip(paper);
-        const qualityChip = paper.pdf_quality_status
+        const qualityChip = hasPdf && paper.pdf_quality_status
             ? '<span class="status-chip ' + qualityChipClass(paper.pdf_quality_status) + '" title="PDF 质量: ' + esc(paper.pdf_quality_status) + '">' + esc(qualityLabel(paper.pdf_quality_status)) + '</span>'
             : "";
         const dftCompletenessChip = paper.dft_completeness_status

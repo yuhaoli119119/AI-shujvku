@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -128,6 +129,7 @@ class ModuleWriteLockService:
 
     DEFAULT_TTL_MINUTES = 30
     MAX_TTL_MINUTES = 240
+    AUDIT_SOURCE_MAX_LENGTH = 64
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -347,11 +349,12 @@ class ModuleWriteLockService:
         return bool(cls._scope_set(left) & cls._scope_set(right))
 
     def _audit(self, lock: ModuleWriteLock, *, action: str, source: str) -> None:
+        normalized_source = self._normalize_audit_source(source)
         self.session.add(
             AuditLog(
                 paper_id=lock.paper_id,
                 action=action,
-                source=source,
+                source=normalized_source,
                 target_type="module_write_lock",
                 target_id=str(lock.id),
                 payload={
@@ -365,3 +368,14 @@ class ModuleWriteLockService:
                 },
             )
         )
+
+    @classmethod
+    def _normalize_audit_source(cls, source: str | None) -> str:
+        value = str(source or "").strip() or "system"
+        if len(value) <= cls.AUDIT_SOURCE_MAX_LENGTH:
+            return value
+        digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
+        keep = cls.AUDIT_SOURCE_MAX_LENGTH - len(digest) - 1
+        if keep <= 0:
+            return digest[: cls.AUDIT_SOURCE_MAX_LENGTH]
+        return f"{value[:keep]}:{digest}"

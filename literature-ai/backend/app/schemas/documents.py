@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class UnifiedSection(BaseModel):
@@ -12,6 +12,10 @@ class UnifiedSection(BaseModel):
     text: str
     page_start: int | None = None
     page_end: int | None = None
+    section_level: int | None = Field(default=None, validation_alias=AliasChoices("section_level", "level"))
+    section_number: str | None = None
+    parent_heading: str | None = Field(default=None, validation_alias=AliasChoices("parent_heading", "parent_title"))
+    heading_path: list[str] = Field(default_factory=list)
 
 
 class UnifiedTable(BaseModel):

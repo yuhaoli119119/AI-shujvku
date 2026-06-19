@@ -87,26 +87,49 @@ class GrobidParser:
 
         sections: list[dict[str, Any]] = []
         body_divs = root.xpath("//tei:text/tei:body/tei:div", namespaces=NS)
-        for index, div in enumerate(body_divs, start=1):
-            head = self._join_text(div.xpath("./tei:head//text()", namespaces=NS)).strip()
-            
-            elements = div.xpath(".//tei:p | .//tei:item | .//tei:formula | .//tei:figDesc | .//tei:note", namespaces=NS)
-            parts = []
-            for el in elements:
-                parts.append(self._join_text(el.xpath(".//text()", namespaces=NS)))
-            text = "\n\n".join(part.strip() for part in parts if part.strip())
-            
-            if not text:
-                continue
-            sections.append(
-                {
-                    "section_title": head or f"Section {index}",
-                    "section_type": self._infer_section_type(head),
-                    "text": text,
-                    "page_start": None,
-                    "page_end": None,
-                }
+        section_counter = 0
+
+        def visit_div(div: etree._Element, *, level: int, parent_path: list[str]) -> None:
+            nonlocal section_counter
+            section_counter += 1
+            head_nodes = div.xpath("./tei:head", namespaces=NS)
+            head_node = head_nodes[0] if head_nodes else None
+            head = self._join_text(head_node.xpath(".//text()", namespaces=NS)).strip() if head_node is not None else ""
+            display_head = head or None
+            heading_path = [*parent_path, display_head] if display_head else [*parent_path]
+            raw_head_number = str(head_node.get("n") or "").strip() if head_node is not None else ""
+            number_match = re.match(r"^\s*(\d+(?:\.\d+)*)\b", head) if not raw_head_number else None
+            section_number = raw_head_number or (number_match.group(1) if number_match else None)
+
+            # Read only this div's own content. Nested divs are emitted separately
+            # so parent text does not duplicate every child section.
+            elements = div.xpath(
+                "./tei:p | ./tei:item | ./tei:formula | ./tei:figDesc | ./tei:note | ./tei:list/tei:item",
+                namespaces=NS,
             )
+            parts = [self._join_text(el.xpath(".//text()", namespaces=NS)) for el in elements]
+            text = "\n\n".join(part.strip() for part in parts if part.strip())
+
+            if text:
+                sections.append(
+                    {
+                        "section_title": " > ".join(heading_path) if heading_path else None,
+                        "section_type": self._infer_section_type(head or (parent_path[-1] if parent_path else "")),
+                        "text": text,
+                        "page_start": None,
+                        "page_end": None,
+                        "level": level,
+                        "section_number": section_number,
+                        "parent_title": parent_path[-1] if parent_path else None,
+                        "heading_path": heading_path,
+                    }
+                )
+
+            for child in div.xpath("./tei:div", namespaces=NS):
+                visit_div(child, level=level + 1, parent_path=heading_path)
+
+        for div in body_divs:
+            visit_div(div, level=1, parent_path=[])
 
         references = []
         for ref in root.xpath("//tei:listBibl/tei:biblStruct", namespaces=NS):

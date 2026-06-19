@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.api.settings import _advertised_base_url, _enforce_settings_write_access, _is_local_request_host, _mcp_runner_command
 from app.config import get_settings
@@ -185,3 +186,31 @@ def test_writer_settings_keys_are_cleanup_only(setup_test_db):
     payload = client.get("/api/settings").json()
     assert "writer_api_key" not in payload
     assert "writer_api_base" not in payload
+
+
+def test_settings_api_hides_residual_writer_keys_from_persisted_db(setup_test_db):
+    engine = setup_test_db
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS app_settings ("
+                "  key   VARCHAR(255) PRIMARY KEY,"
+                "  value TEXT"
+                ")"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO app_settings (key, value) VALUES (:key, :value)"),
+            [
+                {"key": "writer_api_key", "value": "persisted-secret-key"},
+                {"key": "writer_api_base", "value": "https://writer.example.test"},
+                {"key": "writer_model", "value": "persisted-model"},
+            ],
+        )
+
+    client = TestClient(app)
+    payload = client.get("/api/settings").json()
+
+    assert "writer_api_key" not in payload
+    assert "writer_api_base" not in payload
+    assert "writer_model" not in payload

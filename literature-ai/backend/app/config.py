@@ -1,11 +1,49 @@
 from functools import lru_cache
+import logging
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.utils.project_paths import BACKEND_ROOT, PROJECT_ROOT
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+logger = logging.getLogger(__name__)
+_reported_storage_root_conflicts: set[tuple[str, str, str]] = set()
+
+
+def _looks_explicit_absolute_path(value: str | Path) -> bool:
+    text = str(value).strip()
+    if not text:
+        return False
+    return Path(text).is_absolute() or text.startswith(("/", "\\"))
+
+
+def _resolve_storage_root(value: str | Path) -> Path:
+    text = str(value).strip()
+    if not text:
+        return (PROJECT_ROOT / "data" / "storage").resolve()
+    if _looks_explicit_absolute_path(text):
+        return Path(text)
+    return (PROJECT_ROOT / text).resolve()
+
+
+def _warn_if_shadow_storage_roots_exist(active_root: Path) -> None:
+    repo_storage_root = (PROJECT_ROOT / "data" / "storage").resolve()
+    backend_storage_root = (BACKEND_ROOT / "data" / "storage").resolve()
+    if repo_storage_root == backend_storage_root:
+        return
+    if not repo_storage_root.exists() or not backend_storage_root.exists():
+        return
+    key = (str(repo_storage_root), str(backend_storage_root), str(active_root))
+    if key in _reported_storage_root_conflicts:
+        return
+    _reported_storage_root_conflicts.add(key)
+    logger.warning(
+        "Detected multiple storage roots on host: repo=%s backend=%s; using %s",
+        repo_storage_root,
+        backend_storage_root,
+        active_root,
+    )
 
 
 class Settings(BaseSettings):
@@ -36,6 +74,9 @@ class Settings(BaseSettings):
     markdown_dir: str = "markdown"
     docling_enabled: bool = True
     docling_do_ocr: bool = False
+    # Automatically enable OCR only when preflight says native text is insufficient.
+    # OCR output still remains subject to the human-confirmation safety boundary.
+    docling_auto_ocr: bool = True
     docling_force_full_page_ocr: bool = False
     docling_num_threads: int = 4
     docling_document_timeout: float | None = 120.0
@@ -59,6 +100,7 @@ class Settings(BaseSettings):
     mcp_api_keys: str = ""
     mcp_server_name: str = "Literature AI MCP"
     force_configured_database: bool = True
+    enable_deprecated_db_endpoints: bool = False
     settings_admin_token: str | None = None
     browse_roots: str = "/host/users,/data,/legacy"
 
@@ -75,6 +117,13 @@ class Settings(BaseSettings):
         env_prefix="LITAI_",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _normalize_storage_root(self) -> "Settings":
+        normalized_root = _resolve_storage_root(self.storage_root)
+        object.__setattr__(self, "storage_root", normalized_root)
+        _warn_if_shadow_storage_roots_exist(normalized_root)
+        return self
 
     @property
     def storage_paths(self) -> dict[str, Path]:

@@ -1565,8 +1565,8 @@ def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, 
     assert response.status_code == 200
     data = response.json()
     assert data["prompt_used"] == "CO2 reduction catalyst"
-    assert data["llm_status"] == "missing_configuration"
-    assert data["llm_diagnostics"]["missing_configuration"] == ["writer_api_base", "writer_api_key"]
+    assert data["llm_status"] == "disabled"
+    assert data["llm_diagnostics"]["mode"] == "disabled"
     assert data["providers"] == ["openalex", "arxiv"]
     assert data["result_annotation_status"] == "not_applicable"
     assert data["papers"][0]["guard_status"] == "not_applicable"
@@ -1575,43 +1575,12 @@ def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, 
     assert captured["limit"] == 3
 
 
-def test_ai_search_uses_rewritten_query_when_llm_available(setup_test_db, monkeypatch):
+def test_ai_search_does_not_call_writer_backend_even_when_credentials_exist(setup_test_db, monkeypatch):
     monkeypatch.setenv("LITAI_WRITER_API_BASE", "https://llm.example/v1")
     monkeypatch.setenv("LITAI_WRITER_API_KEY", "secret")
     get_settings.cache_clear()
 
     captured = {}
-
-    class DummyResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": "[CO2] AND [single atom catalyst]",
-                        }
-                    }
-                ]
-            }
-
-    class DummyClient:
-        def __init__(self, timeout):
-            captured["timeout"] = timeout
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def post(self, url, headers=None, json=None):
-            captured["url"] = url
-            captured["headers"] = headers
-            captured["json"] = json
-            return DummyResponse()
 
     def fake_search(self, query, providers=None, limit=10, target_types=None):
         captured["query"] = query
@@ -1619,7 +1588,10 @@ def test_ai_search_uses_rewritten_query_when_llm_available(setup_test_db, monkey
         captured["limit"] = limit
         return []
 
-    monkeypatch.setattr("httpx.Client", DummyClient)
+    def http_client_should_not_run(*args, **kwargs):
+        raise AssertionError("deprecated web writer path must remain disabled")
+
+    monkeypatch.setattr("httpx.Client", http_client_should_not_run)
     monkeypatch.setattr(papers_api.DiscoveryService, "search", fake_search)
 
     client = TestClient(app)
@@ -1635,15 +1607,43 @@ def test_ai_search_uses_rewritten_query_when_llm_available(setup_test_db, monkey
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["prompt_used"] == "[CO2] AND [single atom catalyst]"
-    assert data["llm_status"] == "ok"
+    assert data["prompt_used"] == "find CO2 reduction SAC papers"
+    assert data["llm_status"] == "disabled"
     assert data["providers"] == ["pubmed"]
     assert data["result_annotation_status"] == "skipped_by_request"
-    assert captured["url"] == "https://llm.example/v1/chat/completions"
-    assert captured["json"]["model"] == "deepseek-chat"
-    assert captured["query"] == "[CO2] AND [single atom catalyst]"
+    assert captured["query"] == "find CO2 reduction SAC papers"
     assert captured["providers"] == ["pubmed"]
     assert captured["limit"] == 5
+    assert "secret" not in response.text
+
+
+def test_ai_search_does_not_leak_manual_writer_settings_in_response(setup_test_db, monkeypatch):
+    monkeypatch.setenv("LITAI_WRITER_API_BASE", "https://llm.example/v1")
+    monkeypatch.setenv("LITAI_WRITER_API_KEY", "secret")
+    get_settings.cache_clear()
+
+    captured = {}
+
+    def fake_search(self, query, providers=None, limit=10, target_types=None):
+        captured["query"] = query
+        return []
+
+    monkeypatch.setattr(papers_api.DiscoveryService, "search", fake_search)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ai_search",
+        json={"query": "empty rewrite query", "max_results": 3},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["prompt_used"] == "empty rewrite query"
+    assert data["llm_status"] == "disabled"
+    assert data["llm_error"] is None
+    assert data["llm_diagnostics"]["mode"] == "disabled"
+    assert captured["query"] == "empty rewrite query"
+    assert "secret" not in response.text
 
 
 def test_list_papers_filters_by_source_path(setup_test_db):
@@ -2286,6 +2286,9 @@ def _install_ingest_document_stubs(monkeypatch, metadata: dict[str, object], sec
             "comprehensive_analysis": 0,
         }
 
+    # These identity tests use intentionally invalid PDF bytes. Force only the
+    # parser decision so they remain focused on merge/conflict behavior.
+    monkeypatch.setattr(PaperIngestionService, "_quality_allows_initial_parse", staticmethod(lambda _: True))
     monkeypatch.setattr("app.services.paper_ingestion.GrobidParser.parse_pdf", fake_grobid_parse)
     monkeypatch.setattr("app.services.paper_ingestion.DoclingParser.parse_pdf", fake_docling_parse)
     monkeypatch.setattr(papers_api.PaperIngestionService, "_build_unified_document", fake_build_unified_document)

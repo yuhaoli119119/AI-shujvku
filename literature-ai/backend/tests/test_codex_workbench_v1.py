@@ -35,6 +35,7 @@ from app.services.paper_query import PaperQueryService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.services.review_adjudication_service import ReviewAdjudicationService
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.workbench_status import workflow_needs_human_confirmation
 
 
@@ -81,6 +82,63 @@ def test_pdf_quality_missing_file_is_blocked(workbench_env):
     assert report["parse_allowed"] is False
     assert report["needs_human_confirmation"] is True
     assert report["markdown_trust"] == "unavailable"
+
+
+def test_artifact_status_missing_pdf_reference_does_not_pose_as_invalid_pdf(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(
+            title="Metadata only placeholder",
+            pdf_path="",
+            oa_status="metadata_only",
+            workflow_status="Needs_Human_Confirmation",
+            pdf_quality_status="Broken",
+            pdf_quality_report={
+                "quality_status": "Broken",
+                "quality_score": 0.0,
+                "reason": "missing_pdf_reference",
+                "parse_allowed": False,
+                "needs_human_confirmation": True,
+                "metrics": {"file_exists": False},
+            },
+            workspace_path="by_id/test-metadata-only",
+        )
+        session.add(paper)
+        session.commit()
+
+        status = build_paper_artifact_status(paper, settings=get_settings())
+
+    assert "missing_pdf" in status["blocking_errors"]
+    assert "invalid_pdf_content" not in status["blocking_errors"]
+
+
+def test_prepare_workspace_keeps_metadata_only_paper_out_of_fake_broken_state(workbench_env):
+    _, storage_root, Session = workbench_env
+    with Session() as session:
+        paper = Paper(
+            title="Metadata placeholder",
+            abstract="Metadata-only abstract",
+            pdf_path="",
+            oa_status="metadata_only",
+            workflow_status="Imported",
+        )
+        session.add(paper)
+        session.commit()
+        paper_id = paper.id
+
+        summary = PaperWorkbenchService(session, get_settings()).prepare_paper_workspace(paper_id)
+        session.refresh(paper)
+
+    workspace_root = storage_root / "by_id" / str(paper_id)
+    assert summary["workflow_status"] == "Imported"
+    assert summary["pdf_quality_status"] is None
+    assert paper.workflow_status == "Imported"
+    assert paper.pdf_quality_status is None
+    assert paper.pdf_quality_report is None
+    with (workspace_root / "quality_report.json").open("r", encoding="utf-8") as handle:
+        quality = json.load(handle)
+    assert quality["quality_status"] == "Broken"
+    assert quality["reason"] == "missing_pdf_reference"
 
 
 def test_pdf_quality_text_pdf_is_parseable(workbench_env):
@@ -542,6 +600,7 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
         paper = Paper(
             title="Review center paper",
             pdf_path="paper.pdf",
+            library_name="审核库A",
             workflow_status="Needs_Human_Confirmation",
             pdf_quality_status="D_scan_unclear",
             pdf_quality_score=0.1,
@@ -629,6 +688,7 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
     assert data["metadata"]["status_counts"]["Needs_Human_Confirmation"] == 1
     by_title = {row["title"]: row for row in data["rows"]}
     assert by_title["Review center paper"]["needs_human_confirmation"] is True
+    assert by_title["Review center paper"]["library_name"] == "审核库A"
     assert by_title["Review center paper"]["pdf_exists"] is True
     assert by_title["Review center paper"]["pdf_url"].endswith(f"/api/papers/{by_title['Review center paper']['paper_id']}/pdf")
     assert by_title["Review center paper"]["pdf_artifact_status"]["pdf_exists"] is True

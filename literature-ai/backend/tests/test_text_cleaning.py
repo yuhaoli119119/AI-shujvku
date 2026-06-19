@@ -80,7 +80,10 @@ def test_docling_parser_respects_disabled_flag_and_falls_back(tmp_path: Path):
     result = parser.parse_pdf_sync(pdf_path)
 
     assert result.json_payload["fallback"] is True
-    assert "Warning" in result.markdown
+    assert result.json_payload["parse_blocked"] is True
+    assert result.json_payload["parse_warning"].startswith("[Warning]")
+    assert result.markdown == ""
+    assert result.page_blocks == []
 
 
 def test_docling_source_path_uses_ascii_temp_copy_for_unicode_absolute_path(tmp_path: Path):

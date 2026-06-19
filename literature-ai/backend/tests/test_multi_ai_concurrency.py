@@ -18,6 +18,7 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     Paper,
+    PaperCorrection,
     PaperFigure,
     VerificationSessionPaperClaim,
     WritingCard,
@@ -27,6 +28,7 @@ from app.services.extraction_review_service import ExtractionReviewService
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.services.paper_reprocessing import PaperReprocessingService
+from app.services.review_service import ReviewService
 from app.services.verification_session_service import VerificationSessionService
 
 
@@ -401,6 +403,152 @@ def test_recrop_stale_write_removes_rendered_orphan_file(tmp_path, monkeypatch):
             stored = session.get(PaperFigure, figure_id)
             assert stored.image_path == "old/figure.png"
             assert stored.write_version == 2
+    finally:
+        engine.dispose()
+
+
+def test_review_service_recrop_approval_updates_figure_and_evidence(tmp_path, monkeypatch):
+    pytest.importorskip("fitz")
+    engine, factory = _database(tmp_path, "review-recrop-success.db")
+    storage_root = tmp_path / "storage"
+    pdf_path = storage_root / "pdf" / "paper.pdf"
+    pdf_path.parent.mkdir(parents=True)
+    monkeypatch.setattr(
+        "app.services.review_service.get_settings",
+        lambda: Settings(storage_root=storage_root, database_url="sqlite://"),
+    )
+
+    import fitz
+
+    document = fitz.open()
+    document.new_page(width=200, height=200)
+    document.save(pdf_path)
+    document.close()
+
+    with factory() as session:
+        paper = Paper(title="Review recrop", pdf_path=str(pdf_path), authors=[])
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Figure 1",
+            image_path="old/figure.png",
+            page=1,
+            write_version=1,
+        )
+        correction = PaperCorrection(
+            paper_id=paper.id,
+            source="dual_ai",
+            field_name="figures",
+            target_path=f"figures:{figure.id}:prov",
+            operation="recrop_figure",
+            proposed_value={"strategy": "full_page"},
+            reason="Use a full-page recrop.",
+            evidence_payload={"page": 1, "quoted_text": "Figure 1"},
+            status="pending",
+        )
+        session.add_all([figure, correction])
+        session.commit()
+        correction_id = correction.id
+        figure_id = figure.id
+
+    try:
+        with factory() as session:
+            service = ReviewService(session)
+            approved = service.approve_correction(correction_id, reviewer="dual_ai")
+            session.commit()
+
+            assert approved.status == "approved"
+            assert approved.evidence_payload["recrop_result"]["figure_id"] == str(figure_id)
+
+        with factory() as session:
+            stored = session.get(PaperFigure, figure_id)
+            correction = session.get(PaperCorrection, correction_id)
+            assert stored is not None
+            assert stored.image_path != "old/figure.png"
+            assert stored.crop_status == "recropped"
+            assert stored.crop_source == "recrop:full_page:review_service"
+            assert stored.write_version == 2
+            assert stored.prov[-1]["action"] == "recrop_figure"
+            assert stored.prov[-1]["source_correction_id"] == str(correction_id)
+            assert correction is not None
+            assert correction.status == "approved"
+            assert correction.evidence_payload["recrop_result"]["image_path"] == stored.image_path
+            assert (storage_root / "figures" / str(stored.paper_id) / Path(stored.image_path).name).exists()
+    finally:
+        engine.dispose()
+
+
+def test_review_service_recrop_stale_write_removes_rendered_orphan_file(tmp_path, monkeypatch):
+    pytest.importorskip("fitz")
+    engine, factory = _database(tmp_path, "review-recrop-stale.db")
+    storage_root = tmp_path / "storage"
+    pdf_path = storage_root / "pdf" / "paper.pdf"
+    pdf_path.parent.mkdir(parents=True)
+    monkeypatch.setattr(
+        "app.services.review_service.get_settings",
+        lambda: Settings(storage_root=storage_root, database_url="sqlite://"),
+    )
+
+    import fitz
+
+    document = fitz.open()
+    document.new_page(width=200, height=200)
+    document.save(pdf_path)
+    document.close()
+
+    with factory() as session:
+        paper = Paper(title="Review recrop race", pdf_path=str(pdf_path), authors=[])
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Figure 1",
+            image_path="old/figure.png",
+            page=1,
+            write_version=1,
+        )
+        correction = PaperCorrection(
+            paper_id=paper.id,
+            source="dual_ai",
+            field_name="figures",
+            target_path=f"figures:{figure.id}:prov",
+            operation="recrop_figure",
+            proposed_value={"strategy": "full_page"},
+            reason="Use a full-page recrop.",
+            evidence_payload={"page": 1, "quoted_text": "Figure 1"},
+            status="pending",
+        )
+        session.add_all([figure, correction])
+        session.commit()
+        correction_id = correction.id
+        figure_id = figure.id
+
+    original_render = ReviewService._render_figure_recrop_plan
+
+    def competing_render(self, recrop_plan):
+        rendered = original_render(self, recrop_plan)
+        with factory() as competing_session:
+            competing_session.execute(
+                update(PaperFigure).where(PaperFigure.id == figure_id).values(write_version=2)
+            )
+            competing_session.commit()
+        return rendered
+
+    monkeypatch.setattr(ReviewService, "_render_figure_recrop_plan", competing_render)
+
+    try:
+        with factory() as session:
+            with pytest.raises(ValueError, match="write_conflict:figure_version_stale"):
+                ReviewService(session).approve_correction(correction_id, reviewer="dual_ai")
+
+        assert list((storage_root / "figures").rglob("*.png")) == []
+        with factory() as session:
+            stored = session.get(PaperFigure, figure_id)
+            correction = session.get(PaperCorrection, correction_id)
+            assert stored.image_path == "old/figure.png"
+            assert stored.write_version == 2
+            assert correction.status == "pending"
     finally:
         engine.dispose()
 

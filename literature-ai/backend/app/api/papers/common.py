@@ -22,7 +22,7 @@ def rewrite_ai_search_query(
 ) -> tuple[str, str | None, str | None, dict[str, Any]]:
     diagnostics: dict[str, Any] = {
         "mode": "disabled",
-        "requested_model": model,
+        "requested_model": str(model or settings.writer_model or "").strip() or None,
         "message": "Web-side AI query rewrite is disabled; use the raw query or IDE/MCP AI.",
     }
     return query, "disabled", None, diagnostics

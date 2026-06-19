@@ -12,6 +12,16 @@ class SwitchDbPayload(BaseModel):
     database_url: str
 
 
+def _ensure_deprecated_db_endpoints_enabled() -> None:
+    from app.config import get_settings
+
+    if not bool(getattr(get_settings(), "enable_deprecated_db_endpoints", False)):
+        raise HTTPException(
+            status_code=410,
+            detail="Deprecated database endpoints are disabled. Use the libraries API.",
+        )
+
+
 @router.get("/db-info")
 async def get_db_info() -> dict:
     from app.config import get_settings
@@ -68,6 +78,7 @@ async def switch_db(payload: SwitchDbPayload) -> dict:
     """已废弃。请改用 POST /api/libraries/{name}/activate 切换库。"""
     from app.config import get_settings
 
+    _ensure_deprecated_db_endpoints_enabled()
     if bool(getattr(get_settings(), "force_configured_database", False)):
         raise HTTPException(
             status_code=400,
@@ -92,18 +103,20 @@ async def upload_db(file: UploadFile = File(...)) -> dict:
     """已废弃。请改用 POST /api/libraries 或 POST /api/libraries/import 管理库。"""
     from app.config import get_settings
 
+    _ensure_deprecated_db_endpoints_enabled()
     if bool(getattr(get_settings(), "force_configured_database", False)):
         raise HTTPException(
             status_code=400,
             detail="Runtime SQLite upload/switch is disabled because LITAI_FORCE_CONFIGURED_DATABASE=true.",
         )
-    if not file.filename or not file.filename.lower().endswith((".sqlite", ".db", ".sqlite3")):
+    safe_filename = Path(file.filename or "").name
+    if not safe_filename or safe_filename != file.filename or not safe_filename.lower().endswith((".sqlite", ".db", ".sqlite3")):
         raise HTTPException(status_code=400, detail="只允许 SQLite 文件 (.sqlite, .db, .sqlite3)")
 
     upload_dir = Path("data/uploaded_dbs")
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    dest_path = upload_dir / file.filename
+    dest_path = upload_dir / safe_filename
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -114,7 +127,7 @@ async def upload_db(file: UploadFile = File(...)) -> dict:
     return {
         "status": "ok",
         "database_url": database_url,
-        "filename": file.filename,
+        "filename": safe_filename,
         "warning": "此 API 已废弃，请改用 POST /api/libraries 或 POST /api/libraries/import",
     }
 
@@ -136,7 +149,7 @@ async def get_agent_guide() -> dict:
             "mode": "codex_mcp_first",
             "description": "Connect through MCP first so Codex can query papers, read full parsed records, retrieve evidence, append notes, and propose corrections. Use batch ingestion only as an optional acquisition helper.",
             "method": "MCP",
-            "path": "/mcp/",
+            "path": "/mcp",
             "json_schema_hint": {
                 "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "review_figure", "get_review_coverage", "get_field_disputes", "scan_duplicate_dois"],
                 "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure"],
@@ -243,7 +256,7 @@ async def get_agent_guide() -> dict:
             },
         ],
         "mcp": {
-            "url": "/mcp/",
+            "url": "/mcp",
             "transport": "streamable_http",
             "auth": "Optional on trusted local/private networks; otherwise Authorization: Bearer <mcp_api_key>",
             "recommended_when": "Use MCP as the primary Codex interface for interactive paper reading, evidence retrieval, note taking, imported analysis, comparison, and correction proposals.",

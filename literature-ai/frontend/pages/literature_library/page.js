@@ -19,11 +19,11 @@ function paperStatusChip(paper) {
         return '<span class="status-chip failed">解析失败</span>';
     }
     // 4. parsed
-    if (paper.pdf_path && (paper.tei_path || paper.markdown_path || (paper.counts && paper.counts.sections > 0))) {
+    if (paperHasPdf(paper) && (paper.tei_path || paper.markdown_path || (paper.counts && paper.counts.sections > 0))) {
         return '<span class="status-chip parsed">已解析</span>';
     }
     // 5. pdf_available
-    if (paper.pdf_path) {
+    if (paperHasPdf(paper)) {
         return '<span class="status-chip pdf-available">PDF已上传</span>';
     }
     return '<span class="status-chip none">状态未知</span>';
@@ -147,6 +147,8 @@ function syncQueryParams() {
     const url = new URL(window.location.href);
     if (state.selectedPaperId) url.searchParams.set("paper_id", state.selectedPaperId);
     else url.searchParams.delete("paper_id");
+    if (state.currentLibrary && state.currentLibrary.name) url.searchParams.set("library_name", state.currentLibrary.name);
+    else url.searchParams.delete("library_name");
     url.searchParams.set("tab", state.currentTab);
     window.history.replaceState({}, "", url.toString());
 }
@@ -346,18 +348,26 @@ async function fetchPapers() {
 
         if (state.selectedPaperId) {
             const selectedStillListed = state.papers.some(function(paper) {
-                return paper && String(paper.id) === String(state.selectedPaperId);
+                const stablePaperId = paper && (paper.paper_id || paper.id);
+                return stablePaperId && String(stablePaperId) === String(state.selectedPaperId);
             });
-            if (state.selectedPaper && String(state.selectedPaper.id) === String(state.selectedPaperId)) {
+            const selectedStableId = state.selectedPaper && (state.selectedPaper.paper_id || state.selectedPaper.id);
+            if (selectedStableId && String(selectedStableId) === String(state.selectedPaperId)) {
                 renderWorkspaceHeader(state.selectedPaper);
                 renderDetail(state.selectedPaper, state.selectedPaperAudit || null);
                 showWorkspace();
-            } else if (selectedStillListed) {
-                await loadPaperDetail(state.selectedPaperId);
             } else {
-                state.selectedPaperId = null;
-                state.selectedPaper = null;
-                renderNoSelectionState();
+                try {
+                    await loadPaperDetail(state.selectedPaperId);
+                } catch (detailError) {
+                    console.warn("loadPaperDetail for selected paper failed", detailError);
+                    if (selectedStillListed) {
+                        throw detailError;
+                    }
+                    state.selectedPaperId = null;
+                    state.selectedPaper = null;
+                    renderNoSelectionState();
+                }
             }
         } else if (!state.papers.length && state.currentLibraryTotal === 0) {
             renderLibraryEmptyState();
@@ -419,7 +429,10 @@ function selectPaperById(paperId) {
         return;
     }
     state.selectedPaperId = paperId;
-    state.selectedPaper = state.papers.find(function(paper) { return String(paper.id) === String(paperId); }) || state.selectedPaper;
+    state.selectedPaper = state.papers.find(function(paper) {
+        const stablePaperId = paper && (paper.paper_id || paper.id);
+        return stablePaperId && String(stablePaperId) === String(paperId);
+    }) || state.selectedPaper;
     updateRowSelectionUI();
     if (typeof loadPaperDetail === "function") loadPaperDetail(paperId);
 }

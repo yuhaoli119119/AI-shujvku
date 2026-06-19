@@ -158,10 +158,13 @@ class PaperWorkbenchService:
         elif total_text_chars >= max(600, page_count * 120) and text_page_ratio >= 0.35:
             status, reason, parse_allowed = "B_text_partial", "native_text_is_partial", True
         elif image_page_ratio >= 0.5:
-            ocr_enabled = bool(getattr(settings, "docling_do_ocr", False)) if settings else False
+            ocr_enabled = bool(
+                getattr(settings, "docling_do_ocr", False)
+                or getattr(settings, "docling_auto_ocr", False)
+            ) if settings else False
             status = "C_scan_clear"
             reason = "scan_or_image_pdf_requires_ocr"
-            parse_allowed = ocr_enabled
+            parse_allowed = False
         else:
             status, reason, parse_allowed = "D_scan_unclear", "too_little_text_or_image_signal", False
 
@@ -172,7 +175,10 @@ class PaperWorkbenchService:
             metrics=metrics,
             parse_allowed=parse_allowed,
             created_at=now,
-            ocr_enabled=bool(getattr(settings, "docling_do_ocr", False)) if settings else False,
+            ocr_enabled=bool(
+                getattr(settings, "docling_do_ocr", False)
+                or (status == "C_scan_clear" and getattr(settings, "docling_auto_ocr", False))
+            ) if settings else False,
         )
 
     @staticmethod
@@ -186,6 +192,9 @@ class PaperWorkbenchService:
         created_at: str,
         ocr_enabled: bool = False,
     ) -> dict[str, Any]:
+        initial_parse_allowed = bool(
+            parse_allowed and status in {"A_text_readable", "B_text_partial"}
+        )
         markdown_trust = {
             "A_text_readable": "high_native_text",
             "B_text_partial": "medium_native_text",
@@ -199,8 +208,8 @@ class PaperWorkbenchService:
             "quality_status": status,
             "quality_score": score,
             "reason": reason,
-            "parse_allowed": bool(parse_allowed),
-            "needs_human_confirmation": not bool(parse_allowed),
+            "parse_allowed": initial_parse_allowed,
+            "needs_human_confirmation": not initial_parse_allowed,
             "markdown_trust": markdown_trust,
             "ocr_policy": {
                 "ocr_enabled": bool(ocr_enabled),
@@ -265,7 +274,7 @@ class PaperWorkbenchService:
                 backup_root.replace(workspace_root)
             raise
         paper.workspace_path = self._workspace_ref(workspace_root)
-        if paper.workflow_status in (None, "", "Imported"):
+        if paper.workflow_status in (None, "", "Imported") and str(quality_report.get("reason") or "").strip() != "missing_pdf_reference":
             paper.workflow_status = "Quality_Checked"
         self.session.add(
             AuditLog(
@@ -325,6 +334,15 @@ class PaperWorkbenchService:
                 self.session.rollback()
 
     def apply_quality_report(self, paper: Paper, quality_report: dict[str, Any]) -> None:
+        missing_pdf_reference = (
+            str(quality_report.get("reason") or "").strip() == "missing_pdf_reference"
+            and (not str(getattr(paper, "pdf_path", "") or "").strip() or getattr(paper, "oa_status", None) == "metadata_only")
+        )
+        if missing_pdf_reference:
+            paper.pdf_quality_status = None
+            paper.pdf_quality_score = None
+            paper.pdf_quality_report = None
+            return
         paper.pdf_quality_status = quality_report.get("quality_status")
         paper.pdf_quality_score = quality_report.get("quality_score")
         paper.pdf_quality_report = quality_report
@@ -608,6 +626,7 @@ class PaperWorkbenchService:
                     "paper_id": str(paper.id),
                     "paper_code": getattr(paper, "paper_code", None),
                     "paper_short_id": getattr(paper, "paper_code", None) or str(paper.id).split("-")[-1],
+                    "library_name": paper.library_name,
                     "created_at": paper.created_at.isoformat() if paper.created_at else None,
                     "title": paper.title,
                     "doi": paper.doi,
@@ -953,6 +972,10 @@ class PaperWorkbenchService:
                     "section_type": row.section_type,
                     "page_start": row.page_start,
                     "page_end": row.page_end,
+                    "section_level": row.section_level,
+                    "section_number": row.section_number,
+                    "parent_heading": row.parent_heading,
+                    "heading_path": row.heading_path or [],
                     "text": row.text,
                     "evidence_state": "parsed_source_text",
                 }
@@ -1073,6 +1096,10 @@ class PaperWorkbenchService:
                 "title": section.section_title or section.section_type,
                 "page_start": section.page_start,
                 "page_end": section.page_end,
+                "section_level": section.section_level,
+                "section_number": section.section_number,
+                "parent_heading": section.parent_heading,
+                "heading_path": section.heading_path or [],
                 "text": section.text,
             }
             for section in sections

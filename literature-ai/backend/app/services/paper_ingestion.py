@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db.models import AuditLog, Paper, PaperChunk, PaperFigure, PaperSection, PaperTable, FigureDataPoint, EvidenceSpan
+from app.parsers.body_boundary_cleaner import BodyBoundaryCleaner, BoundaryCleanupPlan
 from app.parsers.docling_parser import DoclingParser
 from app.parsers.grobid_parser import GrobidParseResult, GrobidParser
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
@@ -122,30 +123,38 @@ class PaperIngestionService:
         else:
             stored_pdf = source_path
         quality_report = PaperWorkbenchService.assess_pdf_path(stored_pdf, self.settings)
-        try:
-            grobid_result = await self.grobid_parser.parse_pdf(stored_pdf)
-        except Exception as exc:
-            logger.warning("Grobid parsing failed for %s: %s", original_filename, exc, exc_info=True)
+        parse_allowed = self._quality_allows_initial_parse(quality_report)
+        if not parse_allowed:
             grobid_result = GrobidParseResult(
-                metadata={"title": original_filename},
-                abstract="",
+                metadata={"title": original_filename, **(external_metadata or {})},
+                abstract=str((external_metadata or {}).get("abstract") or ""),
                 sections=[],
                 references=[],
                 tei_xml="",
             )
-        try:
-            docling_result = await self.docling_parser.parse_pdf(stored_pdf)
-            unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
-        except Exception as exc:
-            logger.error("Docling parsing or unified building failed for %s: %s", original_filename, exc, exc_info=True)
-            if quality_report.get("needs_human_confirmation"):
-                unified = self._build_quality_blocked_document(
-                    stored_pdf=stored_pdf,
-                    original_filename=original_filename,
-                    grobid_result=grobid_result,
-                    external_metadata=external_metadata,
+            unified = self._build_quality_blocked_document(
+                stored_pdf=stored_pdf,
+                original_filename=original_filename,
+                grobid_result=grobid_result,
+                external_metadata=external_metadata,
+            )
+        else:
+            try:
+                grobid_result = await self.grobid_parser.parse_pdf(stored_pdf)
+            except Exception as exc:
+                logger.warning("Grobid parsing failed for %s: %s", original_filename, exc, exc_info=True)
+                grobid_result = GrobidParseResult(
+                    metadata={"title": original_filename},
+                    abstract="",
+                    sections=[],
+                    references=[],
+                    tei_xml="",
                 )
-            else:
+            try:
+                docling_result = await self.docling_parser.parse_pdf(stored_pdf)
+                unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
+            except Exception as exc:
+                logger.error("Docling parsing or unified building failed for %s: %s", original_filename, exc, exc_info=True)
                 library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
                 ext = external_metadata or {"title": original_filename}
                 paper = Paper(
@@ -202,7 +211,11 @@ class PaperIngestionService:
         title = identity_metadata.get("title")
         year = identity_metadata.get("year")
         arxiv_id = identity_metadata.get("arxiv_id")
-        oa_status = ingest_source or self._infer_oa_status(source_reference=source_reference, copy_pdf=copy_pdf)
+        oa_status = (
+            "quality_blocked"
+            if not parse_allowed
+            else ingest_source or self._infer_oa_status(source_reference=source_reference, copy_pdf=copy_pdf)
+        )
 
         if attach_to_paper_id is not None:
             target_paper = self.session.get(Paper, attach_to_paper_id)
@@ -302,33 +315,59 @@ class PaperIngestionService:
             raise FileNotFoundError("Paper PDF is missing")
 
         quality_report = PaperWorkbenchService.assess_pdf_path(stored_pdf, self.settings)
-        try:
-            grobid_result = await self.grobid_parser.parse_pdf(stored_pdf)
-        except Exception as exc:
-            logger.warning("Grobid parsing failed during reparse for %s: %s", paper_id, exc, exc_info=True)
+        parse_allowed = self._quality_allows_initial_parse(quality_report)
+        if not parse_allowed:
             grobid_result = GrobidParseResult(
-                metadata={"title": paper.title or stored_pdf.name},
+                metadata={
+                    "title": paper.title or stored_pdf.name,
+                    "doi": paper.doi,
+                    "year": paper.year,
+                    "journal": paper.journal,
+                    "authors": paper.authors or [],
+                },
                 abstract=paper.abstract or "",
                 sections=[],
                 references=[],
                 tei_xml="",
             )
-        try:
-            docling_result = await self.docling_parser.parse_pdf(stored_pdf)
-            unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
-        except Exception as exc:
-            logger.error("Docling reparse failed for %s: %s", paper_id, exc, exc_info=True)
-            paper.oa_status = "parse_failed"
-            paper.workflow_status = "Needs_Human_Confirmation"
-            self.workbench.apply_quality_report(paper, quality_report)
-            self.session.add(paper)
-            self.session.commit()
-            self.session.refresh(paper)
+            unified = self._build_quality_blocked_document(
+                stored_pdf=stored_pdf,
+                original_filename=paper.title or stored_pdf.name,
+                grobid_result=grobid_result,
+                external_metadata=None,
+            )
+            self._clear_document_entities(paper.id)
+            self.extraction_pipeline._delete_existing_stage2(paper.id)
+            paper.comprehensive_analysis = None
+            paper.oa_status = "quality_blocked"
+        else:
             try:
-                self.workbench.prepare_paper_workspace(paper.id)
-            except Exception:
-                logger.exception("Failed to refresh Codex workspace after reparse failure for paper %s", paper.id)
-            raise RuntimeError(f"docling_parse_failed:{paper.id} {exc}") from exc
+                grobid_result = await self.grobid_parser.parse_pdf(stored_pdf)
+            except Exception as exc:
+                logger.warning("Grobid parsing failed during reparse for %s: %s", paper_id, exc, exc_info=True)
+                grobid_result = GrobidParseResult(
+                    metadata={"title": paper.title or stored_pdf.name},
+                    abstract=paper.abstract or "",
+                    sections=[],
+                    references=[],
+                    tei_xml="",
+                )
+            try:
+                docling_result = await self.docling_parser.parse_pdf(stored_pdf)
+                unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
+            except Exception as exc:
+                logger.error("Docling reparse failed for %s: %s", paper_id, exc, exc_info=True)
+                paper.oa_status = "parse_failed"
+                paper.workflow_status = "Needs_Human_Confirmation"
+                self.workbench.apply_quality_report(paper, quality_report)
+                self.session.add(paper)
+                self.session.commit()
+                self.session.refresh(paper)
+                try:
+                    self.workbench.prepare_paper_workspace(paper.id)
+                except Exception:
+                    logger.exception("Failed to refresh Codex workspace after reparse failure for paper %s", paper.id)
+                raise RuntimeError(f"docling_parse_failed:{paper.id} {exc}") from exc
 
         if quality_report.get("needs_human_confirmation"):
             unified = self._document_metadata_only(unified)
@@ -348,6 +387,13 @@ class PaperIngestionService:
         )
         setattr(reparsed, "_ingest_status", "reparsed")
         return reparsed
+
+    @staticmethod
+    def _quality_allows_initial_parse(quality_report: dict[str, Any]) -> bool:
+        return bool(
+            quality_report.get("parse_allowed")
+            and quality_report.get("quality_status") in {"A_text_readable", "B_text_partial"}
+        )
 
     def ingest_pdf_sync(self, source_path: Path, original_filename: str) -> Paper:
         import asyncio
@@ -427,6 +473,34 @@ class PaperIngestionService:
         normalized_figures = normalize_text_tree(docling_result.figures) or []
         normalized_page_blocks = normalize_text_tree(docling_result.page_blocks) or []
 
+        parse_blocked = bool(normalized_payload.get("parse_blocked"))
+        parse_quality = normalized_payload.get("parse_quality") if isinstance(normalized_payload.get("parse_quality"), dict) else {}
+        cleanup_plan = BoundaryCleanupPlan.from_metadata(parse_quality.get("boundary_cleanup"))
+        if not cleanup_plan.removable_signatures and normalized_page_blocks:
+            cleanup_plan = BodyBoundaryCleaner.analyze(normalized_page_blocks)
+            parse_quality["boundary_cleanup"] = cleanup_plan.to_metadata()
+            normalized_payload["parse_quality"] = parse_quality
+
+        # GROBID sections are independent of Docling parse availability. Apply
+        # only exact boundary signatures confirmed from Docling page analysis.
+        normalized_sections = BodyBoundaryCleaner.clean_sections(normalized_sections, cleanup_plan)
+
+        if parse_blocked:
+            normalized_markdown = ""
+            normalized_page_blocks = []
+            normalized_tables = []
+            normalized_figures = []
+            normalized_payload["pages"] = []
+            normalized_payload["texts"] = []
+        else:
+            normalized_markdown = BodyBoundaryCleaner.clean_text(normalized_markdown, cleanup_plan)
+            normalized_page_blocks = BodyBoundaryCleaner.clean_page_blocks(normalized_page_blocks, cleanup_plan)
+            if isinstance(normalized_payload.get("pages"), list):
+                normalized_payload["pages"] = normalized_page_blocks
+            for item in normalized_payload.get("texts") or []:
+                if isinstance(item, dict) and item.get("text"):
+                    item["text"] = BodyBoundaryCleaner.clean_text(str(item["text"]), cleanup_plan)
+
         if self._is_placeholder_title(normalized_metadata.get("title"), stored_pdf):
             derived_title = self._derive_title_from_docling(normalized_markdown, normalized_page_blocks)
             if derived_title:
@@ -449,6 +523,12 @@ class PaperIngestionService:
             for section in normalized_sections
             if section.get("text")
         ]
+
+        docling_headers = self._extract_docling_section_headers(
+            normalized_payload,
+            document_title=normalized_metadata.get("title"),
+        )
+        sections = self._repair_section_metadata_from_docling(sections, docling_headers)
 
         if not sections and normalized_page_blocks:
             sections = [
@@ -506,6 +586,133 @@ class PaperIngestionService:
             markdown_path=markdown_path,
             docling_json_path=json_path,
         )
+
+    @staticmethod
+    def _extract_docling_section_headers(
+        payload: dict[str, Any],
+        *,
+        document_title: str | None,
+    ) -> list[dict[str, Any]]:
+        headers: list[dict[str, Any]] = []
+        title_norm = PaperIngestionService._normalize_heading_text(document_title)
+        seen: set[tuple[str, int | None]] = set()
+        for item in payload.get("texts") or []:
+            if not isinstance(item, dict) or item.get("label") != "section_header":
+                continue
+            text = PaperIngestionService._compact_heading_text(item.get("text"))
+            if not text:
+                continue
+            if title_norm and PaperIngestionService._normalize_heading_text(text) == title_norm:
+                continue
+            prov = item.get("prov") or []
+            page_no = None
+            if prov and isinstance(prov[0], dict):
+                page_no = prov[0].get("page_no")
+            key = (PaperIngestionService._normalize_heading_text(text), int(page_no) if page_no is not None else None)
+            if key in seen:
+                continue
+            seen.add(key)
+            headers.append(
+                {
+                    "text": text,
+                    "page_no": int(page_no) if page_no is not None else None,
+                    "level": item.get("level"),
+                }
+            )
+        return headers
+
+    @classmethod
+    def _repair_section_metadata_from_docling(
+        cls,
+        sections: list[UnifiedSection],
+        docling_headers: list[dict[str, Any]],
+    ) -> list[UnifiedSection]:
+        if not sections or not docling_headers:
+            return sections
+        repaired: list[UnifiedSection] = []
+        used_headers: set[int] = set()
+        for section in sections:
+            payload = section.model_dump()
+            title = cls._compact_heading_text(payload.get("section_title"))
+            replacement = cls._matching_docling_header(title, docling_headers, used_headers)
+            if title and replacement and cls._should_replace_section_title(title, replacement["text"]):
+                payload["section_title"] = replacement["text"]
+                heading_path = list(payload.get("heading_path") or [])
+                if heading_path:
+                    heading_path[-1] = replacement["text"]
+                else:
+                    heading_path = [replacement["text"]]
+                payload["heading_path"] = heading_path
+                if payload.get("section_level") is None:
+                    payload["section_level"] = replacement.get("level")
+                if payload.get("page_start") is None:
+                    payload["page_start"] = replacement.get("page_no")
+                if payload.get("page_end") is None:
+                    payload["page_end"] = replacement.get("page_no")
+                used_headers.add(replacement["index"])
+            elif cls._is_placeholder_section_title(title):
+                payload["section_title"] = None
+                payload["heading_path"] = []
+            repaired.append(UnifiedSection(**payload))
+        return repaired
+
+    @classmethod
+    def _matching_docling_header(
+        cls,
+        section_title: str | None,
+        docling_headers: list[dict[str, Any]],
+        used_headers: set[int],
+    ) -> dict[str, Any] | None:
+        if not section_title:
+            return None
+        section_norm = cls._normalize_heading_text(section_title)
+        best: dict[str, Any] | None = None
+        best_score = 0
+        for index, header in enumerate(docling_headers):
+            if index in used_headers:
+                continue
+            header_text = cls._compact_heading_text(header.get("text"))
+            if not header_text:
+                continue
+            header_norm = cls._normalize_heading_text(header_text)
+            score = 0
+            if header_norm == section_norm:
+                score = 80
+            elif header_norm.startswith(section_norm) and len(header_norm) > len(section_norm) + 8:
+                score = 100
+            elif section_norm.startswith(header_norm) and len(section_norm) > len(header_norm) + 8:
+                score = 40
+            if score > best_score:
+                best_score = score
+                best = {**header, "index": index}
+        return best if best_score >= 90 else None
+
+    @classmethod
+    def _should_replace_section_title(cls, current_title: str | None, candidate_title: str | None) -> bool:
+        if not candidate_title:
+            return False
+        if cls._is_placeholder_section_title(current_title):
+            return True
+        current_norm = cls._normalize_heading_text(current_title)
+        candidate_norm = cls._normalize_heading_text(candidate_title)
+        return candidate_norm.startswith(current_norm) and len(candidate_norm) > len(current_norm) + 8
+
+    @staticmethod
+    def _is_placeholder_section_title(title: str | None) -> bool:
+        text = PaperIngestionService._compact_heading_text(title)
+        if not text:
+            return True
+        return bool(re.fullmatch(r"Section\s+\d+", text, flags=re.IGNORECASE))
+
+    @staticmethod
+    def _compact_heading_text(value: Any) -> str | None:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        return text or None
+
+    @staticmethod
+    def _normalize_heading_text(value: Any) -> str:
+        text = PaperIngestionService._compact_heading_text(value) or ""
+        return re.sub(r"[^a-z0-9]+", "", text.lower())
 
     def _persist(
         self,
@@ -716,6 +923,10 @@ class PaperIngestionService:
                 text=section.text,
                 page_start=section.page_start,
                 page_end=section.page_end,
+                section_level=section.section_level,
+                section_number=section.section_number,
+                parent_heading=section.parent_heading,
+                heading_path=section.heading_path,
             )
 
         for table in document.tables:
@@ -771,6 +982,7 @@ class PaperIngestionService:
                 text=enhanced_text,
                 page_start=figure.page,
                 page_end=figure.page,
+                create_chunks=False,
             )
 
             if figure.numerical_data_points:
@@ -871,6 +1083,11 @@ class PaperIngestionService:
         text: str,
         page_start: int | None,
         page_end: int | None,
+        section_level: int | None = None,
+        section_number: str | None = None,
+        parent_heading: str | None = None,
+        heading_path: list[str] | None = None,
+        create_chunks: bool = True,
     ) -> PaperSection:
         section = PaperSection(
             paper_id=paper_id,
@@ -879,10 +1096,16 @@ class PaperIngestionService:
             text=text,
             page_start=page_start,
             page_end=page_end,
+            section_level=section_level,
+            section_number=section_number,
+            parent_heading=parent_heading,
+            heading_path=heading_path or [],
             embedding=self._embed_text(text),
         )
         self.session.add(section)
         self.session.flush()
+        if not create_chunks:
+            return section
         for index, chunk_text in enumerate(self._chunk_text(text), start=1):
             self.session.add(
                 PaperChunk(
@@ -928,21 +1151,87 @@ class PaperIngestionService:
 
     @classmethod
     def _chunk_text(cls, text: str, *, max_tokens: int = 800, overlap: int = 120) -> list[str]:
-        tokens = cls._chunk_tokens(text)
-        if not tokens:
+        if max_tokens <= 0:
             return []
-        if len(tokens) <= max_tokens:
-            return [" ".join(tokens)]
+        units = cls._structural_chunk_units(text, max_tokens=max_tokens)
+        if not units:
+            return []
+
         chunks: list[str] = []
-        step = max(1, max_tokens - overlap)
-        for start in range(0, len(tokens), step):
-            chunk_tokens = tokens[start : start + max_tokens]
-            if not chunk_tokens:
-                break
-            chunks.append(" ".join(chunk_tokens))
-            if start + max_tokens >= len(tokens):
-                break
+        current: list[str] = []
+        current_count = 0
+        for unit in units:
+            unit_count = len(cls._chunk_tokens(unit))
+            if current and current_count + unit_count > max_tokens:
+                chunks.append("\n\n".join(current).strip())
+                overlap_units: list[str] = []
+                overlap_count = 0
+                for previous in reversed(current):
+                    previous_count = len(cls._chunk_tokens(previous))
+                    if overlap_count + previous_count > overlap:
+                        break
+                    overlap_units.insert(0, previous)
+                    overlap_count += previous_count
+                if not overlap_units and overlap > 0:
+                    tail = cls._chunk_tokens(current[-1])[-overlap:]
+                    overlap_units = [" ".join(tail)] if tail else []
+                    overlap_count = len(tail)
+                while overlap_units and overlap_count + unit_count > max_tokens:
+                    removed = overlap_units.pop(0)
+                    overlap_count -= len(cls._chunk_tokens(removed))
+                current = overlap_units
+                current_count = overlap_count
+            current.append(unit)
+            current_count += unit_count
+        if current:
+            chunks.append("\n\n".join(current).strip())
         return chunks
+
+    @classmethod
+    def _structural_chunk_units(cls, text: str, *, max_tokens: int) -> list[str]:
+        blocks = [block.strip() for block in re.split(r"\n\s*\n+", text or "") if block.strip()]
+        units: list[str] = []
+        for block in blocks:
+            block_tokens = cls._chunk_tokens(block)
+            if len(block_tokens) <= max_tokens:
+                units.append(block)
+                continue
+
+            sentences = [
+                sentence.strip()
+                for sentence in re.split(r"(?<=[.!?。！？])\s+", block)
+                if sentence.strip()
+            ]
+            if len(sentences) <= 1:
+                units.extend(
+                    " ".join(block_tokens[start : start + max_tokens])
+                    for start in range(0, len(block_tokens), max_tokens)
+                )
+                continue
+
+            sentence_group: list[str] = []
+            sentence_group_count = 0
+            for sentence in sentences:
+                sentence_tokens = cls._chunk_tokens(sentence)
+                if len(sentence_tokens) > max_tokens:
+                    if sentence_group:
+                        units.append(" ".join(sentence_group))
+                        sentence_group = []
+                        sentence_group_count = 0
+                    units.extend(
+                        " ".join(sentence_tokens[start : start + max_tokens])
+                        for start in range(0, len(sentence_tokens), max_tokens)
+                    )
+                    continue
+                if sentence_group and sentence_group_count + len(sentence_tokens) > max_tokens:
+                    units.append(" ".join(sentence_group))
+                    sentence_group = []
+                    sentence_group_count = 0
+                sentence_group.append(sentence)
+                sentence_group_count += len(sentence_tokens)
+            if sentence_group:
+                units.append(" ".join(sentence_group))
+        return units
 
     def _clear_document_entities(self, paper_id: UUID) -> None:
         self.session.execute(

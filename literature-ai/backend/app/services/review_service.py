@@ -200,6 +200,8 @@ class ReviewService:
             reviewer=reviewer,
             write_lock_tokens=write_lock_tokens,
         )
+        if self._is_figure_recrop_correction(correction):
+            return self._approve_figure_recrop_correction(correction_id, reviewer)
         claimed = self.session.execute(
             update(PaperCorrection)
             .where(PaperCorrection.id == correction_id, PaperCorrection.status == "pending")
@@ -337,93 +339,119 @@ class ReviewService:
 
         raise ValueError(f"Correction field is not review-applicable yet: {correction.field_name}")
 
-    def _apply_figure_recrop_correction(self, correction: PaperCorrection) -> None:
-        figure = self._resolve_figure_for_recrop(correction)
-        paper = self.session.get(Paper, correction.paper_id)
-        if not paper or not paper.pdf_path:
-            raise ValueError("Paper PDF is missing; cannot recrop figure")
-        settings = get_settings()
-        pdf_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
-        if pdf_path is None or not pdf_path.exists():
-            raise ValueError("Paper PDF file is missing on disk; cannot recrop figure")
-        if figure.page is None or int(figure.page) < 1:
-            raise ValueError("Figure page is missing; cannot recrop figure")
+    @staticmethod
+    def _is_figure_recrop_correction(correction: PaperCorrection) -> bool:
+        return correction.operation == "recrop_figure" and correction.field_name == "figures"
 
-        rect_kind, bbox = self._parse_recrop_payload(correction.proposed_value)
-        import fitz
-        import uuid as _uuid
+    def _approve_figure_recrop_correction(
+        self,
+        correction_id: UUID,
+        reviewer: str,
+    ) -> PaperCorrection:
+        correction = self._get_correction(correction_id)
+        recrop_plan = self._prepare_figure_recrop_plan(correction)
+        # Close the short read transaction before PDF rendering/file I/O.
+        self.session.rollback()
 
-        doc = fitz.open(str(pdf_path))
+        rendered: dict[str, Any] | None = None
         try:
-            page_index = int(figure.page) - 1
-            if page_index < 0 or page_index >= len(doc):
-                raise ValueError("Figure page is outside the PDF page range")
-            page = doc[page_index]
-            target_rect = page.rect if rect_kind == "full_page" else fitz.Rect(*bbox)
-            target_rect = target_rect.intersect(page.rect)
-            if target_rect.is_empty:
-                raise ValueError("Requested crop bbox is empty or outside the page")
-            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), clip=target_rect, alpha=False)
-            if pix.width < 16 or pix.height < 16:
-                raise ValueError("Requested crop bbox produced an image that is too small")
-            filename = f"{correction.paper_id}_fig_{_uuid.uuid4().hex[:8]}.png"
-            rel_path = f"{correction.paper_id}/{filename}"
-            abs_path = settings.storage_paths["figures"] / str(correction.paper_id) / filename
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            pix.save(str(abs_path))
-            pixel_size = {"width": pix.width, "height": pix.height}
-            bbox_used = [target_rect.x0, target_rect.y0, target_rect.x1, target_rect.y1]
-        finally:
-            doc.close()
-
-        old_path = figure.image_path
-        figure.image_path = rel_path
-        figure.crop_status = "recropped"
-        figure.crop_source = f"recrop:{rect_kind}:review_service"
-        figure.crop_confidence = 0.9 if rect_kind == "ai_bbox" else 0.8
-        prov_entry = {
-            "action": "recrop_figure",
-            "strategy": rect_kind,
-            "bbox": {
-                "l": bbox_used[0],
-                "t": bbox_used[1],
-                "r": bbox_used[2],
-                "b": bbox_used[3],
-                "coord_origin": "TOPLEFT",
-            },
-            "pixel_size": pixel_size,
-            "previous_path": old_path,
-            "recropped_by": correction.reviewed_by or correction.source,
-            "source_correction_id": str(correction.id),
-        }
-        if figure.prov is None:
-            figure.prov = []
-        if isinstance(figure.prov, dict):
-            figure.prov = [figure.prov]
-        figure.prov.append(prov_entry)
-        flag_modified(figure, "prov")
-        correction.evidence_payload = {
-            **dict(correction.evidence_payload or {}),
-            "recrop_result": {
-                "figure_id": str(figure.id),
-                "image_path": rel_path,
-                "strategy": rect_kind,
-                "bbox_used": bbox_used,
-                "pixel_size": pixel_size,
-            },
-        }
-        self.session.add(figure)
-        self.session.add(correction)
-        self.session.add(
-            AuditLog(
-                paper_id=correction.paper_id,
-                action="recrop_figure",
-                source=correction.reviewed_by or correction.source,
-                target_type="paper_figure",
-                target_id=str(figure.id),
-                payload=correction.evidence_payload["recrop_result"],
+            rendered = self._render_figure_recrop_plan(recrop_plan)
+            claimed = self.session.execute(
+                update(PaperCorrection)
+                .where(PaperCorrection.id == correction_id, PaperCorrection.status == "pending")
+                .values(status="applying")
+                .execution_options(synchronize_session=False)
             )
-        )
+            if claimed.rowcount != 1:
+                raise ValueError("write_conflict:correction_version_stale")
+
+            correction = self._get_correction(correction_id)
+            prov_entry = {
+                "action": "recrop_figure",
+                "strategy": recrop_plan["rect_kind"],
+                "bbox": {
+                    "l": rendered["bbox_used"][0],
+                    "t": rendered["bbox_used"][1],
+                    "r": rendered["bbox_used"][2],
+                    "b": rendered["bbox_used"][3],
+                    "coord_origin": "TOPLEFT",
+                },
+                "pixel_size": rendered["pixel_size"],
+                "previous_path": recrop_plan["old_image_path"],
+                "recropped_by": reviewer,
+                "source_correction_id": str(correction.id),
+            }
+            next_prov = list(recrop_plan["prov"])
+            next_prov.append(prov_entry)
+            updated = self.session.execute(
+                update(PaperFigure)
+                .where(
+                    PaperFigure.id == recrop_plan["figure_id"],
+                    PaperFigure.write_version == recrop_plan["write_version"],
+                )
+                .values(
+                    image_path=rendered["rel_path"],
+                    crop_status="recropped",
+                    crop_source=f"recrop:{recrop_plan['rect_kind']}:review_service",
+                    crop_confidence=0.9 if recrop_plan["rect_kind"] == "ai_bbox" else 0.8,
+                    prov=next_prov,
+                    write_version=recrop_plan["write_version"] + 1,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if updated.rowcount != 1:
+                if self.session.get(PaperFigure, recrop_plan["figure_id"]) is None:
+                    raise ValueError(
+                        f"Figure {recrop_plan['figure_id']} not found during write-back (race condition)"
+                    )
+                raise ValueError("write_conflict:figure_version_stale")
+
+            correction.status = "approved"
+            correction.reviewed_by = reviewer
+            correction.reviewed_at = datetime.utcnow()
+            correction.evidence_payload = {
+                **dict(correction.evidence_payload or {}),
+                "recrop_result": {
+                    "figure_id": str(recrop_plan["figure_id"]),
+                    "image_path": rendered["rel_path"],
+                    "strategy": recrop_plan["rect_kind"],
+                    "bbox_used": rendered["bbox_used"],
+                    "pixel_size": rendered["pixel_size"],
+                },
+            }
+            self.session.add(correction)
+            self.session.add(
+                AuditLog(
+                    paper_id=correction.paper_id,
+                    action="recrop_figure",
+                    source=correction.reviewed_by or correction.source,
+                    target_type="paper_figure",
+                    target_id=str(recrop_plan["figure_id"]),
+                    payload={
+                        "strategy": recrop_plan["rect_kind"],
+                        "new_bbox": rendered["bbox_used"],
+                        "new_image_path": rendered["rel_path"],
+                        "old_image_path": recrop_plan["old_image_path"],
+                        "source_correction_id": str(correction.id),
+                    },
+                )
+            )
+            self.session.flush()
+            return correction
+        except Exception:
+            self.session.rollback()
+            if rendered is not None:
+                rendered["abs_path"].unlink(missing_ok=True)
+            raise
+
+    def _apply_figure_recrop_correction(self, correction: PaperCorrection) -> None:
+        reviewer = correction.reviewed_by or correction.source
+        approved = self._approve_figure_recrop_correction(correction.id, reviewer)
+        correction.status = approved.status
+        correction.reviewed_by = approved.reviewed_by
+        correction.reviewed_at = approved.reviewed_at
+        correction.evidence_payload = approved.evidence_payload
+        flag_modified(correction, "evidence_payload")
 
     def _resolve_figure_for_recrop(self, correction: PaperCorrection) -> PaperFigure:
         try:
@@ -481,6 +509,65 @@ class ReviewService:
                 raise ValueError("recrop_figure bbox must be [left, top, right, bottom]")
             return "ai_bbox", bbox
         raise ValueError("recrop_figure requires strategy='full_page' or numeric bbox/new_bbox")
+
+    def _prepare_figure_recrop_plan(self, correction: PaperCorrection) -> dict[str, Any]:
+        figure = self._resolve_figure_for_recrop(correction)
+        paper = self.session.get(Paper, correction.paper_id)
+        if not paper or not paper.pdf_path:
+            raise ValueError("Paper PDF is missing; cannot recrop figure")
+        settings = get_settings()
+        pdf_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
+        if pdf_path is None or not pdf_path.exists():
+            raise ValueError("Paper PDF file is missing on disk; cannot recrop figure")
+        if figure.page is None or int(figure.page) < 1:
+            raise ValueError("Figure page is missing; cannot recrop figure")
+        rect_kind, bbox = self._parse_recrop_payload(correction.proposed_value)
+        prov = figure.prov or []
+        if isinstance(prov, dict):
+            prov = [prov]
+        return {
+            "paper_id": correction.paper_id,
+            "figure_id": figure.id,
+            "page": int(figure.page),
+            "rect_kind": rect_kind,
+            "bbox": bbox,
+            "pdf_path": pdf_path,
+            "old_image_path": figure.image_path,
+            "prov": list(prov),
+            "write_version": int(figure.write_version or 1),
+        }
+
+    def _render_figure_recrop_plan(self, recrop_plan: dict[str, Any]) -> dict[str, Any]:
+        settings = get_settings()
+        import fitz
+        import uuid as _uuid
+
+        doc = fitz.open(str(recrop_plan["pdf_path"]))
+        try:
+            page_index = recrop_plan["page"] - 1
+            if page_index < 0 or page_index >= len(doc):
+                raise ValueError("Figure page is outside the PDF page range")
+            page = doc[page_index]
+            target_rect = page.rect if recrop_plan["rect_kind"] == "full_page" else fitz.Rect(*recrop_plan["bbox"])
+            target_rect = target_rect.intersect(page.rect)
+            if target_rect.is_empty:
+                raise ValueError("Requested crop bbox is empty or outside the page")
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), clip=target_rect, alpha=False)
+            if pix.width < 16 or pix.height < 16:
+                raise ValueError("Requested crop bbox produced an image that is too small")
+            filename = f"{recrop_plan['paper_id']}_fig_{_uuid.uuid4().hex[:8]}.png"
+            rel_path = f"{recrop_plan['paper_id']}/{filename}"
+            abs_path = settings.storage_paths["figures"] / str(recrop_plan["paper_id"]) / filename
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            pix.save(str(abs_path))
+            return {
+                "rel_path": rel_path,
+                "abs_path": abs_path,
+                "pixel_size": {"width": pix.width, "height": pix.height},
+                "bbox_used": [target_rect.x0, target_rect.y0, target_rect.x1, target_rect.y1],
+            }
+        finally:
+            doc.close()
 
     def _apply_catalyst_sample_create(self, correction: PaperCorrection) -> None:
         if not has_material_correction_anchor(correction.evidence_payload):

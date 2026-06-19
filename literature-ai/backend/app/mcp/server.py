@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections import Counter
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
 
 from app.config import get_settings
@@ -35,10 +38,43 @@ from app.services.word_citation_insertion_service import WordCitationInsertReque
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
 
+
+def _allowed_mcp_hosts() -> list[str]:
+    hosts = {
+        "localhost",
+        "localhost:*",
+        "127.0.0.1",
+        "127.0.0.1:*",
+        "::1",
+        "[::1]",
+        "[::1]:*",
+    }
+    for raw in (
+        os.environ.get("LITAI_PUBLIC_BASE_URL"),
+        os.environ.get("LITAI_MCP_PUBLIC_BASE_URL"),
+    ):
+        if not raw:
+            continue
+        parsed = urlparse(str(raw).strip())
+        host = (parsed.hostname or "").strip()
+        if not host:
+            continue
+        hosts.add(host)
+        hosts.add(f"{host}:*")
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        hosts.add("testserver")
+        hosts.add("testserver:*")
+    return sorted(hosts)
+
+
 mcp_server = FastMCP(
     get_settings().mcp_server_name,
     json_response=True,
     streamable_http_path="/",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_mcp_hosts(),
+    ),
 )
 mcp_http_app = mcp_server.streamable_http_app()
 
@@ -968,7 +1004,7 @@ def retrieve_evidence(
 
 @mcp_server.tool(
     name="review_paper",
-    description="Deprecated compatibility tool. Backend-owned LLM review is disabled; IDE AI should read get_codex_context / get_codex_item / read_paper_page evidence and write candidates through import_analysis.",
+    description="DISABLED and deprecated compatibility tool; it always raises and never runs backend-owned LLM review. Use get_codex_context / get_codex_item / read_paper_page, then import_analysis.",
 )
 async def review_paper(
     paper_id: str,

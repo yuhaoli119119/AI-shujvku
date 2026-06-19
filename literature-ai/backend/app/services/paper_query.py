@@ -821,6 +821,10 @@ class PaperQueryService:
             text=cls._clean_pdf_text(item.text) or "",
             page_start=item.page_start,
             page_end=item.page_end,
+            section_level=item.section_level,
+            section_number=item.section_number,
+            parent_heading=cls._clean_pdf_text(item.parent_heading),
+            heading_path=[cls._clean_pdf_text(value) or "" for value in (item.heading_path or []) if cls._clean_pdf_text(value)],
         )
 
     @classmethod

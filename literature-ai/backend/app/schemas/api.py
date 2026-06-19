@@ -111,6 +111,10 @@ class PaperSectionResponse(BaseModel):
     text: str
     page_start: int | None = None
     page_end: int | None = None
+    section_level: int | None = None
+    section_number: str | None = None
+    parent_heading: str | None = None
+    heading_path: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

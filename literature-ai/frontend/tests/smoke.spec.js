@@ -1418,8 +1418,6 @@ async function mockApi(route) {
         embedding_model: 'text-embedding-3-small',
         embedding_dimension: '1536',
         writer_backend: 'openai_compatible',
-        writer_api_base: '',
-        writer_api_key: '',
         writer_model: 'deepseek-chat',
         mcp_api_keys: '',
       });
@@ -2443,6 +2441,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(conflictOverlay).toContainText('只读聚合，不自动合并');
     await page.locator('#infoOverlay .modal-close').click();
 
+    await missingRow.locator('[data-action="open-details"]').click();
+    const missingDetailOverlay = page.locator('#infoOverlay.open');
+    await expect(missingDetailOverlay).toBeVisible();
+    await expect(missingDetailOverlay).toContainText('无 PDF | 当前文献没有可用 PDF 文件。');
+    await expect(missingDetailOverlay).not.toContainText('文件异常');
+    await page.locator('#infoOverlay .modal-close').click();
+
     expect(writeCalls).toEqual([]);
   });
 
@@ -2748,7 +2753,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('button[data-tab="figures"]');
 
     const figures = page.locator('#figuresContent');
-    await expect(figures).toContainText('Crop status: needs_review');
+    await expect(figures).toContainText('Crop status: 待核对');
     await expect(figures).toContainText('Figure reliability: needs review');
     await expect(figures).toContainText('Image review: required');
     await expect(figures).toContainText('Flags: missing_parser_bbox');
@@ -2829,12 +2834,16 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('.paper-row').first().click();
     await page.click('button[data-tab="review"]');
 
-    await expect(page.locator('#tab-review')).toContainText('IDE / MCP AI');
+    await expect(page.locator('#tab-review')).toContainText('任务日志');
+    await expect(page.locator('#tab-review')).toContainText('刷新任务日志');
     await expect(page.locator('#tab-review button[onclick="runInternalAIParse()"]')).toHaveCount(0);
-    await page.locator('#tab-review button[onclick="loadAgentGuide()"]').click();
+    await expect(page.locator('#tab-review button[onclick="loadAgentGuide()"]')).toHaveCount(0);
+    await page.click('button[data-tab="writing"]');
+    await page.locator('#tab-writing button[onclick="loadAgentGuide()"]').click();
     await expect(page.locator('#mcpGuideBox')).toContainText('IDE / MCP AI');
     await expect(page.locator('#mcpGuideBox')).toContainText('/mcp');
     await expect(page.locator('#mcpGuideBox')).toContainText('prepare-ai-context');
+    await expect(page.locator('#mcpGuideBox')).toContainText('codex-item');
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 
@@ -2847,10 +2856,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           embedding: { configured: true, provider: 'deterministic', model: 'text-embedding-3-small' },
           writer: {
             configured: false,
-            backend: 'rule',
-            model: 'gpt-4.1-mini',
-            missing: ['writer_api_base', 'writer_api_key'],
-            message: 'Writer LLM is not configured',
+            disabled: true,
+            backend: 'disabled',
+            model: '',
+            missing: [],
+            message: 'Web-side Writer LLM is disabled',
           },
           internal_parser: {
             configured: false,
@@ -2869,11 +2879,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('.paper-row').first().click();
     await page.click('button[data-tab="review"]');
 
-    await expect(page.locator('#tab-review')).toContainText('prepare-ai-context');
-    await expect(page.locator('#tab-review')).toContainText('codex-context');
-    await expect(page.locator('#tab-review')).toContainText('codex-item');
+    await expect(page.locator('#tab-review')).toContainText('任务日志');
     await expect(page.locator('#tab-review button[onclick="runInternalAIParse()"]')).toHaveCount(0);
-    await expect(page.locator('#internalAIConfigGuide')).toHaveCount(0);
+    await expect(page.locator('#tab-review button[onclick="loadAgentGuide()"]')).toHaveCount(0);
+    await page.click('button[data-tab="writing"]');
+    await page.locator('#tab-writing button[onclick="loadAgentGuide()"]').click();
+    await expect(page.locator('#mcpGuideBox')).toContainText('/api/papers/{paper_id}/prepare-ai-context');
+    await expect(page.locator('#mcpGuideBox')).toContainText('codex-item');
+    await expect(page.locator('#tab-writing')).not.toContainText('text-embedding-3-small');
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 
@@ -2946,6 +2959,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
             journal: 'Journal of Metadata',
             paper_type: 'research',
             oa_status: 'metadata_only',
+            workflow_status: 'Needs_Human_Confirmation',
+            pdf_quality_status: 'Broken',
             counts: { sections: 0, figures: 0, dft_results: 0, writing_cards: 0 }
           }
         ]);
@@ -2955,7 +2970,278 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.status-chip.meta')).toContainText('无 PDF');
+    const row = page.locator('.paper-row[data-id="paper-meta-only"]');
+    await expect(row).toContainText('无 PDF');
+    await expect(row).not.toContainText('待人工审核');
+    await expect(row).not.toContainText('文件异常');
+  });
+
+  test('business flow: literature library trusts artifact_status pdf_exists even without pdf_path', async ({ page }) => {
+    const artifactPdfPaper = {
+      id: 'paper-artifact-pdf',
+      paper_id: 'paper-artifact-pdf',
+      title: 'Artifact Status PDF Paper',
+      year: 2025,
+      journal: 'Journal of Artifact Truth',
+      paper_type: 'research',
+      pdf_path: null,
+      pdf_url: null,
+      oa_status: 'uploaded',
+      workflow_status: 'Initial_Parsed',
+      artifact_status: {
+        pdf_exists: true,
+        pdf_file_size: 2048,
+        pdf_path_kind: 'storage_relative',
+        blocking_errors: [],
+        warnings: [],
+      },
+      counts: { sections: 3, figures: 1, dft_results: 0, writing_cards: 0 },
+    };
+
+    await page.route(/\/api\/papers(\?|$)/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, [artifactPdfPaper]);
+      }
+      return route.fallback();
+    });
+
+    await page.route(/\/api\/papers\/paper-artifact-pdf(?:\?.*)?$/, route => {
+      return jsonResponse(route, {
+        ...artifactPdfPaper,
+        abstract: 'Detail payload only exposes artifact_status.pdf_exists as the PDF truth source.',
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+
+    const row = page.locator('.paper-row[data-id="paper-artifact-pdf"]');
+    await expect(row).toContainText('Artifact Status PDF Paper');
+    await expect(row).not.toContainText('无 PDF');
+
+    await row.click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#pdfEvidenceHeaderBtn')).toHaveText('查看 PDF');
+    await expect(page.locator('#pdfEvidenceHeaderBtn')).toBeEnabled();
+    await expect(page.locator('#summaryContent')).not.toContainText('尚无 PDF');
+    await expect(page.locator('#summaryContent')).toContainText('查看 PDF / 证据定位');
+  });
+
+  test('business flow: explicit missing artifact overrides stale pdf_path', async ({ page }) => {
+    const missingArtifactPaper = {
+      id: 'paper-missing-artifact',
+      paper_id: 'paper-missing-artifact',
+      title: 'Missing Artifact Paper',
+      year: 2025,
+      journal: 'Journal of Artifact Truth',
+      paper_type: 'research',
+      pdf_path: 'storage/pdf/stale-reference.pdf',
+      pdf_url: null,
+      pdf_exists: false,
+      oa_status: 'uploaded',
+      workflow_status: 'Initial_Parsed',
+      pdf_quality_status: 'A_text_readable',
+      artifact_status: {
+        pdf_exists: false,
+        blocking_errors: ['missing_pdf'],
+        warnings: [],
+      },
+      counts: { sections: 3, figures: 1, dft_results: 0, writing_cards: 0 },
+    };
+
+    await page.route(/\/api\/papers(\?|$)/, route => {
+      if (route.request().method() === 'GET') {
+        return jsonResponse(route, [missingArtifactPaper]);
+      }
+      return route.fallback();
+    });
+
+    await page.route(/\/api\/papers\/paper-missing-artifact(?:\?.*)?$/, route => {
+      return jsonResponse(route, {
+        ...missingArtifactPaper,
+        abstract: 'The stored path is stale and must not imply an available PDF.',
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+
+    const row = page.locator('.paper-row[data-id="paper-missing-artifact"]');
+    await expect(row).toContainText('无 PDF');
+    await expect(row).not.toContainText('PDF已上传');
+    await expect(row).not.toContainText('文件可读');
+
+    await row.click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#pdfEvidenceHeaderBtn')).toHaveText('PDF 未上传');
+    await expect(page.locator('#pdfEvidenceHeaderBtn')).toBeDisabled();
+  });
+
+  test('business flow: review center inspect link preserves library context', async ({ page }) => {
+    await page.route(/\/api\/workbench\/review-center(\?.*)?$/, route => {
+      return jsonResponse(route, {
+        schema_version: 'workbench_review_center_v1',
+        metadata: {
+          returned: 1,
+          total: 1,
+          limit: 5000,
+          has_more: false,
+          sort_by: 'recent',
+          status_counts: { Initial_Parsed: 1 },
+          quality_counts: { A_text_readable: 1 },
+        },
+        rows: [
+          {
+            paper_id: 'paper-review-link',
+            paper_code: 'U0023',
+            paper_short_id: 'U0023',
+            library_name: '双原子催化剂',
+            title: 'Review Link Paper',
+            year: 2025,
+            journal: 'Journal of Context',
+            doi: '10.1000/context',
+            workflow_status: 'Initial_Parsed',
+            pdf_quality_status: 'A_text_readable',
+            pdf_exists: true,
+            pdf_artifact_status: { pdf_exists: true, pdf_path_kind: 'stored', pdf_file_size: 1234, blocking_errors: [] },
+            has_parsed_content: true,
+            manual_review_progress: { content: false, figures: false, dft: false },
+            pdf_url: '/api/papers/paper-review-link/pdf',
+            needs_human_confirmation: true,
+            has_dft_candidates: false,
+            has_active_dft_candidates: false,
+            active_dft_candidate_count: 0,
+            dft_candidate_count: 0,
+            dft_candidate_status_counts: {},
+            dft_audit: { status_label: 'Unparsed', detected_signal_count: 0, parsed_dft_count: 0, suspected_missing_count: 0 },
+            dft_completeness_status: 'Unparsed',
+            dft_completeness_label: '未解析',
+            suspected_missing_dft_count: 0,
+            figure_count: 0,
+            figure_crop_status_counts: {},
+            unreliable_figure_count: 0,
+            figure_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+            figure_issue_count: 0,
+            figure_issue_counts: {},
+            top_figure_issues: [],
+            table_count: 0,
+            evidence_count: 0,
+            locator_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+            locator_issue_count: 0,
+            locator_issue_counts: {},
+            top_locator_issues: [],
+            external_audit_count: 0,
+            external_audit_source_counts: {},
+            external_audit_opinions: [],
+            object_review_audit_count: 0,
+            object_review_audit_source_counts: {},
+            object_review_audits: [],
+            paper_note_count: 0,
+            latest_paper_notes: [],
+            review_conflict_count: 0,
+            review_conflict_total_count: 0,
+            workspace_path: '/workspace/review-link',
+          },
+        ],
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+    await page.waitForTimeout(500);
+
+    const href = await page.locator('#rows tr a:has-text("查看")').first().getAttribute('href');
+    expect(href).toContain('paper_id=paper-review-link');
+    expect(href).toContain('tab=');
+    expect(href).toContain('library_name=' + encodeURIComponent('双原子催化剂'));
+  });
+
+  test('business flow: literature library loads selected paper detail even when not in current page list', async ({ page }) => {
+    const selectedPaperId = 'paper-off-page';
+    const listRows = Array.from({ length: 25 }, (_, index) => ({
+      id: `paper-list-${index + 1}`,
+      paper_id: `paper-list-${index + 1}`,
+      title: `Paged Library Paper ${String(index + 1).padStart(2, '0')}`,
+      year: 2025,
+      journal: 'Journal of Paging',
+      paper_type: 'research',
+      library_name: '双原子催化剂',
+      workflow_status: 'Initial_Parsed',
+      pdf_quality_status: 'A_text_readable',
+      counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+    }));
+    const selectedPaperDetail = {
+      id: selectedPaperId,
+      paper_id: selectedPaperId,
+      title: 'Off Page Selected Paper',
+      year: 2024,
+      journal: 'Journal of Direct Detail Loading',
+      paper_type: 'research',
+      library_name: '双原子催化剂',
+      pdf_path: null,
+      oa_status: 'uploaded',
+      artifact_status: {
+        pdf_exists: true,
+        pdf_file_size: 2048,
+        pdf_path_kind: 'storage_relative',
+        blocking_errors: [],
+        warnings: [],
+      },
+      pdf_quality_status: 'A_text_readable',
+      counts: { sections: 2, figures: 1, dft_results: 0, writing_cards: 0 },
+      abstract: 'This paper should load by paper_id even when it is not visible in the current page list.',
+      sections: [],
+      tables: [],
+      figures: [],
+      paper_notes: [],
+      dft_settings_items: [],
+      catalyst_samples_items: [],
+      dft_results_items: [],
+      electrochemical_performance_items: [],
+      mechanism_claims_items: [],
+      writing_cards_items: [],
+      figure_data_points_items: [],
+      outgoing_relationships: [],
+      incoming_relationships: [],
+      references: [],
+      abstract_review_status: 'raw_only',
+      sections_review_status: 'raw_only',
+      writing_cards_review_status: 'missing',
+      figures_review_status: 'missing',
+      dft_review_status: 'missing',
+      translation_review_status: 'missing',
+      rag_quality: {},
+    };
+
+    await page.route(/\/api\/papers(\?.*)?$/, route => {
+      const url = new URL(route.request().url());
+      if (route.request().method() === 'GET' && url.pathname === '/api/papers') {
+        return jsonResponse(route, listRows);
+      }
+      return route.fallback();
+    });
+
+    await page.route(/\/api\/papers\/libraries$/, route => {
+      return jsonResponse(route, [{ name: '双原子催化剂', paper_count: 25, is_active: true }]);
+    });
+
+    await page.route(/\/api\/libraries$/, route => {
+      return jsonResponse(route, [{ name: '双原子催化剂', paper_count: 25, is_active: true, root_path: '/libraries/dual-atom' }]);
+    });
+
+    await page.route(new RegExp(`/api/papers/${selectedPaperId}(?:\\?.*)?$`), route => {
+      return jsonResponse(route, selectedPaperDetail);
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=${selectedPaperId}&tab=summary&library_name=${encodeURIComponent('双原子催化剂')}`);
+    await page.waitForTimeout(1000);
+
+    await expect(page.locator('#paperTitle')).toHaveText('Off Page Selected Paper');
+    await expect(page.locator('#workspaceBody')).toBeVisible();
+    await expect(page.locator('#workspaceEmpty')).not.toBeVisible();
+    await expect(page.locator('#pdfEvidenceHeaderBtn')).toHaveText('查看 PDF');
+    await expect(page.locator('#librarySelect')).toHaveValue('双原子催化剂');
   });
 
   test('business flow: metadata-only attach pdf and workflow status checks', async ({ page }) => {
@@ -3361,13 +3647,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-
-    await page.click('#addLiteratureBtn');
-    await page.click('#addLiteratureMenu [data-add-mode="ai"]');
-    await page.fill('#aiSearchQuery', 'test query');
-    await page.click('#addLiteratureDialog button:has-text("搜索并收录")');
-
-    await page.waitForTimeout(1000);
+    await page.evaluate(() => window.pollAIWorkflowJob && window.pollAIWorkflowJob('job-1'));
+    await expect(page.locator('#acquisitionResult')).toContainText('AI 后台检索 / 收录任务');
     
     const resultBox = page.locator('#acquisitionResult');
     await expect(resultBox.locator('.status-chip.parsed').first()).toContainText('已收录');

@@ -46,7 +46,7 @@ class RetrievalService:
     def search(self, payload: RetrievalSearchRequest) -> RetrievalSearchResponse:
         is_full_context = payload.mode == "full_context" and bool(payload.paper_ids)
         if is_full_context:
-            items = self._full_context(payload.paper_ids, payload.limit)
+            items = self._search_full_context(payload.paper_ids, payload.limit)
         else:
             retrieved = self.retriever.retrieve(
                 query=payload.query,
@@ -85,6 +85,93 @@ class RetrievalService:
             total=len(limited),
             items=limited,
         )
+
+    def _search_full_context(self, paper_ids: list[UUID], limit: int) -> list[RetrievalSearchResult]:
+        ordered_paper_ids: list[UUID] = []
+        seen_paper_ids: set[UUID] = set()
+        for paper_id in paper_ids:
+            if paper_id in seen_paper_ids:
+                continue
+            seen_paper_ids.add(paper_id)
+            ordered_paper_ids.append(paper_id)
+        if not ordered_paper_ids:
+            return []
+
+        sections_by_paper: list[list[tuple[PaperSection, str, str]]] = []
+        seen_section_ids: set[UUID] = set()
+        for paper_id in ordered_paper_ids:
+            valid_sections: list[tuple[PaperSection, str, str]] = []
+            stmt = (
+                select(PaperSection)
+                .where(PaperSection.paper_id == paper_id)
+                .order_by(PaperSection.page_start.asc().nulls_last(), PaperSection.id.asc())
+            )
+            for section in self.session.scalars(stmt).all():
+                if section.id in seen_section_ids:
+                    continue
+                text = (section.text or "").strip()
+                if not text:
+                    continue
+                text = _clean_retrieval_text(text)
+                if not text:
+                    continue
+                seen_section_ids.add(section.id)
+                valid_sections.append(
+                    (section, text, _clean_retrieval_text(section.section_title))
+                )
+            sections_by_paper.append(valid_sections)
+
+        allocations = [0] * len(sections_by_paper)
+        remaining_slots = min(limit, sum(len(sections) for sections in sections_by_paper))
+        while remaining_slots > 0:
+            active_papers = [
+                paper_index
+                for paper_index, sections in enumerate(sections_by_paper)
+                if allocations[paper_index] < len(sections)
+            ]
+            if not active_papers:
+                break
+            for paper_index in active_papers:
+                if remaining_slots <= 0:
+                    break
+                allocations[paper_index] += 1
+                remaining_slots -= 1
+
+        items: list[RetrievalSearchResult] = []
+        index = 0
+        for paper_index, sections in enumerate(sections_by_paper):
+            for section, text, section_title in sections[: allocations[paper_index]]:
+                chunk_key = str(section.id)
+                score = round(max(0.1, 1.0 - index * 0.001), 4)
+                index += 1
+                items.append(
+                    RetrievalSearchResult(
+                        score=score,
+                        source="full_context",
+                        paper_id=section.paper_id,
+                        chunk_id=chunk_key,
+                        section_id=section.id,
+                        section_title=section_title,
+                        text=text,
+                        page_start=section.page_start,
+                        page_end=section.page_end,
+                        score_breakdown={"bm25": 0.0, "vector": 0.0, "hybrid": score},
+                        evidence=EvidenceRef(
+                            paper_id=section.paper_id,
+                            chunk_id=chunk_key,
+                            section_id=section.id,
+                            page_span=PageSpan(page_start=section.page_start, page_end=section.page_end),
+                            evidence_text=text[:1200],
+                            confidence=score,
+                            source="full_context",
+                            section_title=section_title,
+                            target_type="section",
+                            target_id=chunk_key,
+                        ),
+                        metadata={"section_type": section.section_type},
+                    )
+                )
+        return items
 
     def _full_context(self, paper_ids: list[UUID], limit: int) -> list[RetrievalSearchResult]:
         items: list[RetrievalSearchResult] = []

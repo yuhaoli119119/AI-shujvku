@@ -147,6 +147,10 @@ class PaperSection(Base):
     text: Mapped[str] = mapped_column(sa.Text)
     page_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    section_level: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    section_number: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    parent_heading: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    heading_path: Mapped[list | None] = mapped_column(json_type(), nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(VectorType(EMBEDDING_DIMENSION), nullable=True)
 
 

@@ -2971,7 +2971,11 @@
 
       tbody.innerHTML = rows.map(function (row, idx) {
         const inspectTarget = getInspectTarget(row);
-        const detailUrl = "../literature_library/index.html?paper_id=" + encodeURIComponent(row.paper_id) + "&tab=" + encodeURIComponent(inspectTarget.tab);
+        const detailParams = new URLSearchParams();
+        detailParams.set("paper_id", row.paper_id);
+        detailParams.set("tab", inspectTarget.tab);
+        if (row.library_name) detailParams.set("library_name", row.library_name);
+        const detailUrl = "../literature_library/index.html?" + detailParams.toString();
         const extraction = compactExtractionMeta(row);
         const progress = compactManualReviewProgress(row);
         const suspectedMissing = extraction.suspectedMissing;

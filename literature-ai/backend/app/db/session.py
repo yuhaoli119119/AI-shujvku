@@ -306,6 +306,42 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 ),
             )
             execute_migration_step(
+                "paper_sections",
+                "section_level",
+                (
+                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS section_level INTEGER"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_sections ADD COLUMN section_level INTEGER"
+                ),
+            )
+            execute_migration_step(
+                "paper_sections",
+                "section_number",
+                (
+                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS section_number VARCHAR(64)"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_sections ADD COLUMN section_number VARCHAR(64)"
+                ),
+            )
+            execute_migration_step(
+                "paper_sections",
+                "parent_heading",
+                (
+                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS parent_heading TEXT"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_sections ADD COLUMN parent_heading TEXT"
+                ),
+            )
+            execute_migration_step(
+                "paper_sections",
+                "heading_path",
+                (
+                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS heading_path JSONB"
+                    if engine.dialect.name == "postgresql"
+                    else "ALTER TABLE paper_sections ADD COLUMN heading_path JSON"
+                ),
+            )
+            execute_migration_step(
                 "paper_figures",
                 "role_confidence",
                 (

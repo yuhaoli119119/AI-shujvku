@@ -68,7 +68,10 @@ def _unauthenticated_mcp_allowed(request: Request) -> bool:
         return False
     if not _request_source_is_trusted(request):
         return False
-    return settings.mcp_allow_unauthenticated or not parse_mcp_api_keys(settings.mcp_api_keys)
+    configured_keys = parse_mcp_api_keys(settings.mcp_api_keys)
+    if configured_keys:
+        return False
+    return settings.mcp_allow_unauthenticated
 
 
 def _anonymous_mcp_auth() -> MCPAuthInfo:

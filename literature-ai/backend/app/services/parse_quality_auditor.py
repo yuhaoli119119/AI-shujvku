@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from difflib import SequenceMatcher
 import hashlib
 import re
 from typing import Iterable
@@ -42,7 +43,74 @@ class ParseQualityAuditor:
             if current is None or cls._table_score(table) > cls._table_score(current):
                 best_by_key[key] = table
 
-        return [*best_by_key.values(), *unnumbered]
+        deduped = [*best_by_key.values(), *unnumbered]
+        return cls._merge_continued_tables(deduped)
+
+    @classmethod
+    def _merge_continued_tables(cls, tables: list[UnifiedTable]) -> list[UnifiedTable]:
+        ordered = sorted(tables, key=lambda table: (table.page is None, table.page or 0))
+        merged: list[UnifiedTable] = []
+        for table in ordered:
+            if not merged or not cls._is_high_confidence_continuation(merged[-1], table):
+                merged.append(table)
+                continue
+
+            previous = merged[-1]
+            previous_lines = (previous.markdown_content or "").splitlines()
+            next_lines = (table.markdown_content or "").splitlines()
+            if cls._markdown_header(previous.markdown_content) == cls._markdown_header(table.markdown_content):
+                next_lines = next_lines[2:]
+            pages = sorted({page for page in (previous.page, table.page) if page is not None})
+            for item in previous.prov:
+                if isinstance(item, dict):
+                    for page in item.get("merged_pages") or []:
+                        if isinstance(page, int):
+                            pages.append(page)
+                    page = item.get("page_no") or item.get("page")
+                    if isinstance(page, int):
+                        pages.append(page)
+            pages = sorted(set(pages))
+            merged[-1] = previous.model_copy(
+                update={
+                    "markdown_content": "\n".join([*previous_lines, *next_lines]).strip(),
+                    "prov": [*previous.prov, *table.prov, {"merged_pages": pages, "merge_rule": "high_confidence_continuation"}],
+                }
+            )
+        return merged
+
+    @classmethod
+    def _is_high_confidence_continuation(cls, first: UnifiedTable, second: UnifiedTable) -> bool:
+        first_pages = [first.page] if first.page is not None else []
+        for item in first.prov:
+            if isinstance(item, dict):
+                first_pages.extend(page for page in (item.get("merged_pages") or []) if isinstance(page, int))
+        if not first_pages or second.page != max(first_pages) + 1:
+            return False
+        first_number = cls._table_number(first.caption)
+        second_number = cls._table_number(second.caption)
+        continued = bool(re.search(r"\b(?:continued|continuation)\b", second.caption or "", re.IGNORECASE))
+        if first_number is None or second_number != first_number:
+            return False
+        first_header = cls._markdown_header(first.markdown_content)
+        second_header = cls._markdown_header(second.markdown_content)
+        if not first_header or first_header != second_header:
+            return False
+        first_caption = cls._caption_without_continuation(first.caption)
+        second_caption = cls._caption_without_continuation(second.caption)
+        similarity = SequenceMatcher(None, first_caption, second_caption).ratio()
+        return continued or similarity >= 0.78
+
+    @staticmethod
+    def _markdown_header(markdown: str | None) -> tuple[str, ...]:
+        lines = [line.strip() for line in (markdown or "").splitlines() if line.strip()]
+        if len(lines) < 2 or "|" not in lines[0] or "---" not in lines[1]:
+            return ()
+        return tuple(re.sub(r"\s+", " ", cell).strip().casefold() for cell in lines[0].strip("|").split("|"))
+
+    @staticmethod
+    def _caption_without_continuation(caption: str | None) -> str:
+        value = re.sub(r"\b(?:continued|continuation)\b", "", caption or "", flags=re.IGNORECASE)
+        return re.sub(r"\W+", " ", value).strip().casefold()
 
     @classmethod
     def clean_figures_before_extraction(cls, figures: Iterable[UnifiedFigure]) -> list[UnifiedFigure]:

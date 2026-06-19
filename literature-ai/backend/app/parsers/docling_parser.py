@@ -11,6 +11,7 @@ import tempfile
 from typing import Any
 
 from app.config import Settings
+from app.parsers.body_boundary_cleaner import BodyBoundaryCleaner
 from app.utils.figure_filtering import is_decorative_figure
 
 logger = logging.getLogger(__name__)
@@ -30,11 +31,20 @@ class DoclingParser:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.ocr_required = False
 
-    async def parse_pdf(self, pdf_path: Path) -> DoclingParseResult:
-        return self.parse_pdf_sync(pdf_path)
+    def _ocr_enabled(self, *, ocr_required: bool) -> bool:
+        return bool(
+            self.settings.docling_do_ocr
+            or (ocr_required and self.settings.docling_auto_ocr)
+        )
 
-    def parse_pdf_sync(self, pdf_path: Path) -> DoclingParseResult:
+    async def parse_pdf(self, pdf_path: Path, *, ocr_required: bool = False) -> DoclingParseResult:
+        effective_ocr_required = bool(ocr_required or self.ocr_required)
+        self.ocr_required = False
+        return self.parse_pdf_sync(pdf_path, ocr_required=effective_ocr_required)
+
+    def parse_pdf_sync(self, pdf_path: Path, *, ocr_required: bool = False) -> DoclingParseResult:
         try:
             if not self.settings.docling_enabled:
                 return self._fallback_parse(pdf_path)
@@ -58,9 +68,10 @@ class DoclingParser:
                 pipeline_kwargs["artifacts_path"] = str(artifacts_path)
 
             pipeline_options = PdfPipelineOptions(**pipeline_kwargs)
-            pipeline_options.do_ocr = self.settings.docling_do_ocr
+            ocr_enabled = self._ocr_enabled(ocr_required=ocr_required)
+            pipeline_options.do_ocr = ocr_enabled
             pipeline_options.do_table_structure = True
-            if self.settings.docling_do_ocr:
+            if ocr_enabled:
                 pipeline_options.ocr_options = EasyOcrOptions(
                     force_full_page_ocr=self.settings.docling_force_full_page_ocr,
                 )
@@ -75,9 +86,24 @@ class DoclingParser:
             document = result.document
             markdown = self._export_markdown(document)
             payload = self._export_json(document)
+            parse_quality = payload.get("parse_quality") if isinstance(payload.get("parse_quality"), dict) else {}
+            payload["parse_quality"] = parse_quality
+            raw_page_blocks = self._extract_page_blocks(payload)
+            cleanup_plan = BodyBoundaryCleaner.analyze(raw_page_blocks)
+            page_blocks = BodyBoundaryCleaner.clean_page_blocks(raw_page_blocks, cleanup_plan)
+            markdown = BodyBoundaryCleaner.clean_text(markdown, cleanup_plan)
+            if isinstance(payload.get("pages"), list):
+                payload["pages"] = page_blocks
+            parse_quality.update(
+                {
+                    "ocr_enabled": ocr_enabled,
+                    "ocr_required": bool(ocr_required),
+                    "markdown_trust": "ocr_unverified" if ocr_enabled else "native_or_mixed_unverified",
+                    "boundary_cleanup": cleanup_plan.to_metadata(),
+                }
+            )
             tables = self._extract_tables(payload)
             figures = self._extract_figures(payload)
-            page_blocks = self._extract_page_blocks(payload)
             return DoclingParseResult(
                 markdown=markdown,
                 json_payload=payload,
@@ -458,6 +484,12 @@ class DoclingParser:
         ]
 
     @staticmethod
+    def _clean_running_headers_footers(page_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Compatibility wrapper around the reusable boundary cleaner."""
+        plan = BodyBoundaryCleaner.analyze(page_blocks)
+        return BodyBoundaryCleaner.clean_page_blocks(page_blocks, plan)
+
+    @staticmethod
     def _is_decorative_figure(caption: str | None, prov: list) -> bool:
         """Detect decorative figures such as CrossMark, publisher logos, and bare labels."""
         return is_decorative_figure(caption, prov)
@@ -699,18 +731,41 @@ class DoclingParser:
                 f"[Warning] No pages extracted from PDF file {pdf_path}. The file may be empty or corrupted."
             )
 
-        markdown_parts = []
         page_blocks = []
         is_empty = all(not text.strip() for text in text_pages)
         if is_empty:
             warning_msg = "[Warning] This is a scanned PDF. No OCR text could be extracted."
-            markdown_parts.append(f"## Page 1\n\n{warning_msg}\n")
-            page_blocks.append({"page": 1, "text": warning_msg})
+            payload = {
+                "pages": [],
+                "tables": [],
+                "figures": [],
+                "fallback": True,
+                "parse_blocked": True,
+                "parse_warning": warning_msg,
+                "parse_quality": {
+                    "ocr_enabled": False,
+                    "ocr_required": True,
+                    "markdown_trust": "unavailable",
+                },
+            }
+            return DoclingParseResult(
+                markdown="",
+                json_payload=payload,
+                tables=[],
+                figures=[],
+                page_blocks=[],
+            )
         else:
             for index, text in enumerate(text_pages, start=1):
-                markdown_parts.append(f"## Page {index}\n\n{text.strip()}\n")
                 page_blocks.append({"page": index, "text": text})
 
+        cleanup_plan = BodyBoundaryCleaner.analyze(page_blocks)
+        page_blocks = BodyBoundaryCleaner.clean_page_blocks(page_blocks, cleanup_plan)
+        markdown_parts = [
+            f"## Page {block.get('page', index)}\n\n{block.get('text', '').strip()}\n"
+            for index, block in enumerate(page_blocks, start=1)
+            if block.get("text", "").strip()
+        ]
         tables = DoclingParser._extract_fallback_tables(page_blocks)
         figures = DoclingParser._extract_fallback_figures(page_blocks)
         payload = {
@@ -718,6 +773,12 @@ class DoclingParser:
             "tables": tables,
             "figures": figures,
             "fallback": True,
+            "parse_quality": {
+                "ocr_enabled": False,
+                "ocr_required": False,
+                "markdown_trust": "native_text_unverified",
+                "boundary_cleanup": cleanup_plan.to_metadata(),
+            },
         }
         return DoclingParseResult(
             markdown="\n".join(markdown_parts).strip(),
@@ -729,18 +790,23 @@ class DoclingParser:
 
     @staticmethod
     def _warning_fallback_result(warning_msg: str) -> DoclingParseResult:
-        page_blocks = [{"page": 1, "text": warning_msg}]
         payload = {
-            "pages": page_blocks,
+            "pages": [],
             "tables": [],
             "figures": [],
             "fallback": True,
             "parse_warning": warning_msg,
+            "parse_blocked": True,
+            "parse_quality": {
+                "ocr_enabled": False,
+                "ocr_required": False,
+                "markdown_trust": "unavailable",
+            },
         }
         return DoclingParseResult(
-            markdown=f"## Page 1\n\n{warning_msg}",
+            markdown="",
             json_payload=payload,
             tables=[],
             figures=[],
-            page_blocks=page_blocks,
+            page_blocks=[],
         )

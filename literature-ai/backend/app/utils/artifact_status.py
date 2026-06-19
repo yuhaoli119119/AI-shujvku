@@ -236,11 +236,12 @@ def build_paper_artifact_status(paper: Paper, *, settings: Settings | None = Non
     quality_status = str(paper.pdf_quality_status or quality_report.get("quality_status") or "").strip()
     quality_reason = str(quality_report.get("reason") or "").strip()
     workflow_status = str(getattr(paper, "workflow_status", "") or "").strip()
+    missing_pdf_reference = quality_reason == "missing_pdf_reference"
 
     blocking_errors: list[str] = []
     if not pdf_exists:
         blocking_errors.append("missing_pdf")
-    if quality_status == "Broken" or quality_reason.startswith("pdf_open_failed"):
+    if (quality_status == "Broken" and not missing_pdf_reference) or quality_reason.startswith("pdf_open_failed"):
         blocking_errors.append("invalid_pdf_content")
     if workflow_status in {"Needs_Human_Confirmation", "parse_failed", "needs_reingest", "metadata_only"}:
         blocking_errors.append("workflow_blocked_for_external_audit")

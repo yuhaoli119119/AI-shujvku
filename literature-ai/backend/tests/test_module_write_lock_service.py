@@ -112,6 +112,31 @@ def test_module_write_lock_scope_and_release(tmp_path):
         engine.dispose()
 
 
+def test_module_write_lock_audit_truncates_long_owner_source(tmp_path):
+    engine, SessionLocal = _session(tmp_path, "module_lock_long_owner.db")
+    try:
+        with Session(engine) as session:
+            paper = Paper(title="Long Owner Lock Paper", pdf_path="paper.pdf", authors=[])
+            session.add(paper)
+            session.commit()
+
+            owner = f"paper_operation:prepare_workspace:{uuid4().hex}"
+            lock = ModuleWriteLockService(session).acquire(
+                paper_id=paper.id,
+                module_name="all_non_dft",
+                locked_by=owner,
+            )
+            ModuleWriteLockService(session).release(lock_token=lock.lock_token, released_by=owner)
+            session.commit()
+
+            logs = session.scalars(select(AuditLog).where(AuditLog.target_id == str(lock.id)).order_by(AuditLog.created_at.asc())).all()
+            assert [item.action for item in logs] == ["acquire_module_write_lock", "release_module_write_lock"]
+            assert all(len(item.source) <= ModuleWriteLockService.AUDIT_SOURCE_MAX_LENGTH for item in logs)
+            assert all(item.source != owner for item in logs)
+    finally:
+        engine.dispose()
+
+
 def test_module_write_lock_expired_lock_can_be_reacquired(tmp_path):
     engine, SessionLocal = _session(tmp_path, "module_lock_expiry.db")
     try:

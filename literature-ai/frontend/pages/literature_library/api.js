@@ -208,7 +208,15 @@ function renderDoiMeta(raw) {
 }
 
 function paperHasPdf(paper) {
-    return !!(paper && paper.pdf_path && paper.oa_status !== "metadata_only" && paper.oa_status !== "needs_upload");
+    if (!paper) return false;
+    if (paper.oa_status === "metadata_only" || paper.oa_status === "needs_upload") return false;
+    const artifactStatus = paper.artifact_status && typeof paper.artifact_status === "object"
+        ? paper.artifact_status
+        : (paper.pdf_artifact_status && typeof paper.pdf_artifact_status === "object" ? paper.pdf_artifact_status : {});
+    if (paper.pdf_exists === true || artifactStatus.pdf_exists === true) return true;
+    if (paper.pdf_exists === false || artifactStatus.pdf_exists === false) return false;
+    if (typeof paper.pdf_url === "string" && paper.pdf_url.trim()) return true;
+    return !!paper.pdf_path;
 }
 
 function getCurrentLibraryName() {
@@ -277,12 +285,15 @@ function normalizeLibraryListResponse(data) {
 async function loadLibraries() {
     try {
         const el = $("librarySelect");
+        const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
         const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "";
         const quickLibraries = normalizeLibraryListResponse(await fetchJSON(API_BASE + "/libraries"));
         const quickActive = (quickLibraries || []).find(function(item) { return item.is_active; });
-        const selectedName = previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
-            ? previousSelection
-            : ((quickActive && quickActive.name) || ((quickLibraries || [])[0] ? quickLibraries[0].name : ""));
+        const selectedName = requestedLibrary && (quickLibraries || []).some(function(item) { return item.name === requestedLibrary; })
+            ? requestedLibrary
+            : (previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
+                ? previousSelection
+                : ((quickActive && quickActive.name) || ((quickLibraries || [])[0] ? quickLibraries[0].name : "")));
         if (el) {
             el.innerHTML = (quickLibraries || []).map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
@@ -302,7 +313,9 @@ async function loadLibraries() {
             const fullEl = $("librarySelect");
             const currentValue = fullEl ? fullEl.value : selectedName;
             const active = (libraries || []).find(function(item) { return item.is_active; });
-            const keepName = currentValue || (active && active.name) || selectedName;
+            const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
+                ? requestedLibrary
+                : (currentValue || (active && active.name) || selectedName);
             if (fullEl && libraries && libraries.length) {
                 fullEl.innerHTML = libraries.map(function(item) {
                     const isSelected = item.name === keepName;
@@ -326,19 +339,25 @@ async function loadLibraries() {
         try {
             const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
             const el = $("librarySelect");
+            const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
             if (el) {
+                const active = (libraries || []).find(function(item) { return item.is_active; });
+                const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
+                    ? requestedLibrary
+                    : ((active && active.name) || "");
                 el.innerHTML = libraries.map(function(item) {
-                return '<option value="' + esc(item.name) + '"' + (item.is_active ? " selected" : "") + ">" +
+                return '<option value="' + esc(item.name) + '"' + (item.name === keepName ? " selected" : "") + ">" +
                     esc(item.name) + (item.is_active ? "（当前）" : "") +
                 "</option>";
             }).join("");
         }
         const active = (libraries || []).find(function(item) { return item.is_active; });
-        state.currentLibrary = active || null;
-        rememberCurrentLibraryName(active ? active.name : "");
-        state.currentLibraryTotal = active ? Number(active.paper_count || 0) : 0;
+        const selected = requestedLibrary && (libraries || []).find(function(item) { return item.name === requestedLibrary; });
+        state.currentLibrary = selected || active || null;
+        rememberCurrentLibraryName(state.currentLibrary ? state.currentLibrary.name : "");
+        state.currentLibraryTotal = state.currentLibrary ? Number(state.currentLibrary.paper_count || 0) : 0;
         const status = $("libStatus");
-        if (status) status.textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
+        if (status) status.textContent = state.currentLibrary ? ((state.currentLibrary.root_path || state.currentLibrary.name) + " | " + state.currentLibraryTotal + " 篇文献") : "";
         } catch (fallbackError) {
             console.error("loadLibraries fallback failed", fallbackError);
         }
@@ -348,9 +367,7 @@ async function loadLibraries() {
 async function loadWriterSettings() {
     state.writerSettings = {
         writer_backend: "disabled",
-        writer_model: "",
-        writer_api_base: "",
-        writer_api_key: ""
+        writer_model: ""
     };
 }
 
