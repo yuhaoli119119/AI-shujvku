@@ -18,6 +18,8 @@ from curl_cffi.requests import Response as _CurlResponse
 from curl_cffi.requests import Session as _CurlSession
 from curl_cffi.requests.errors import RequestsError as _CurlError
 
+from app.security.urls import UnsafeOutboundURL, validate_public_http_url
+
 from findpapers.core.paper import Paper
 from findpapers.utils.logging_config import configure_verbose_logging
 from findpapers.utils.parallel import execute_tasks
@@ -730,15 +732,25 @@ class DownloadRunner:
         """
         try:
             logger.debug("GET %s", url)
+            current = validate_public_http_url(url)
             with _CurlSession(impersonate="chrome") as session:
-                response = session.get(
-                    url,
-                    proxies=proxies,
-                    verify=ssl_verify,
-                    allow_redirects=True,
-                    timeout=timeout,
-                )
-        except _CurlError:
+                for redirect_count in range(6):
+                    response = session.get(
+                        current,
+                        proxies=proxies,
+                        verify=ssl_verify,
+                        allow_redirects=False,
+                        timeout=timeout,
+                    )
+                    if response.status_code not in {301, 302, 303, 307, 308}:
+                        break
+                    if redirect_count >= 5:
+                        raise UnsafeOutboundURL("Too many outbound redirects")
+                    location = response.headers.get("location")
+                    if not location:
+                        break
+                    current = validate_public_http_url(urllib.parse.urljoin(current, location))
+        except (_CurlError, UnsafeOutboundURL):
             logger.debug("Request failed for %s", url, exc_info=True)
             return None
         content_type = response.headers.get("content-type", "unknown").split(";")[0].strip()

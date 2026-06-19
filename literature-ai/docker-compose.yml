@@ -4,12 +4,11 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      # Dev-only defaults. Override in any shared or remote environment.
       POSTGRES_DB: literature_ai
       POSTGRES_USER: literature_ai
-      POSTGRES_PASSWORD: literature_ai
+      POSTGRES_PASSWORD: ${LITAI_POSTGRES_PASSWORD:?Set LITAI_POSTGRES_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/app/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
@@ -17,25 +16,24 @@ services:
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: server /data --console-address ":9001"
     environment:
-      # Dev-only defaults. Override in any shared or remote environment.
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${LITAI_MINIO_ACCESS_KEY:?Set LITAI_MINIO_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${LITAI_MINIO_SECRET_KEY:?Set LITAI_MINIO_SECRET_KEY in .env}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
 
   grobid:
     image: lfoppiano/grobid:0.8.1
     ports:
-      - "8070:8070"
+      - "127.0.0.1:8070:8070"
 
   backend:
     build:
@@ -43,17 +41,17 @@ services:
       dockerfile: backend/Dockerfile
     command: >
       sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000
-      --workers $${LITAI_UVICORN_WORKERS:-1}"
+      --workers $${LITAI_UVICORN_WORKERS:-1} --no-access-log"
     environment:
-      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:${LITAI_POSTGRES_PASSWORD:?Set LITAI_POSTGRES_PASSWORD in .env}@postgres:5432/literature_ai
       LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_ENABLE_DEPRECATED_DB_ENDPOINTS: ${LITAI_ENABLE_DEPRECATED_DB_ENDPOINTS:-false}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
       LITAI_MINIO_ENDPOINT: minio:9000
-      LITAI_MINIO_ACCESS_KEY: minioadmin
-      LITAI_MINIO_SECRET_KEY: minioadmin
+      LITAI_MINIO_ACCESS_KEY: ${LITAI_MINIO_ACCESS_KEY:?Set LITAI_MINIO_ACCESS_KEY in .env}
+      LITAI_MINIO_SECRET_KEY: ${LITAI_MINIO_SECRET_KEY:?Set LITAI_MINIO_SECRET_KEY in .env}
       LITAI_STORAGE_ROOT: /data/storage
       LITAI_EMBEDDING_PROVIDER: ${LITAI_EMBEDDING_PROVIDER:-openai_compatible}
       LITAI_EMBEDDING_API_BASE: ${LITAI_EMBEDDING_API_BASE:-https://api.siliconflow.cn/v1}
@@ -74,9 +72,13 @@ services:
       LITAI_WRITER_FALLBACK_BACKEND: ${LITAI_WRITER_FALLBACK_BACKEND:-rule}
       LITAI_WRITER_PROMPT_PATH: ${LITAI_WRITER_PROMPT_PATH:-prompts/paper_writer.yaml}
       LITAI_SETTINGS_ADMIN_TOKEN: ${LITAI_SETTINGS_ADMIN_TOKEN:-}
+      LITAI_OWNER_API_TOKEN: ${LITAI_OWNER_API_TOKEN:?Set LITAI_OWNER_API_TOKEN in .env}
+      LITAI_EXPORTS_ENABLED: ${LITAI_EXPORTS_ENABLED:-false}
       LITAI_BROWSE_ROOTS: ${LITAI_BROWSE_ROOTS:-/host/users,/data,/legacy}
+      LITAI_LOCAL_INGEST_ROOTS: ${LITAI_LOCAL_INGEST_ROOTS:-/host/users}
+      LITAI_SHARE_PUBLIC_BASE_URL: ${LITAI_SHARE_PUBLIC_BASE_URL:-http://localhost:8080}
       LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
-      LITAI_MCP_ALLOW_UNAUTHENTICATED: ${LITAI_MCP_ALLOW_UNAUTHENTICATED:-true}
+      LITAI_MCP_ALLOW_UNAUTHENTICATED: "false"
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
       # --- Literature Discovery API Keys (findpapers engine) ---
@@ -95,17 +97,37 @@ services:
       - redis
       - grobid
       - minio
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
       - ./prompts:/prompts:ro
       - ./data:/data
-      - ./data/docling_cache:/root/.cache/docling
+      - ./data/docling_cache:/home/litai/.cache/docling
       # Host user directory browsing is optional. Override LITAI_HOST_USERS_ROOT on macOS/Linux.
       # If you do not need host directory browsing, comment this line out.
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
+
+  owner-gateway:
+    image: nginx:1.27-alpine
+    depends_on:
+      - backend
+    environment:
+      LITAI_OWNER_API_TOKEN: ${LITAI_OWNER_API_TOKEN:?Set LITAI_OWNER_API_TOKEN in .env}
+    ports:
+      - "127.0.0.1:8000:8080"
+    volumes:
+      - ./deploy/nginx/owner.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+  share-gateway:
+    image: nginx:1.27-alpine
+    depends_on:
+      - backend
+    ports:
+      - "${LITAI_SHARE_BIND_IP:-0.0.0.0}:${LITAI_SHARE_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/nginx/share.conf:/etc/nginx/conf.d/default.conf:ro
 
   worker:
     build:
@@ -117,15 +139,15 @@ services:
       --prefetch-multiplier=1
       --max-tasks-per-child=${LITAI_CELERY_MAX_TASKS_PER_CHILD:-5}
     environment:
-      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
+      LITAI_DATABASE_URL: postgresql+psycopg://literature_ai:${LITAI_POSTGRES_PASSWORD:?Set LITAI_POSTGRES_PASSWORD in .env}@postgres:5432/literature_ai
       LITAI_FORCE_CONFIGURED_DATABASE: ${LITAI_FORCE_CONFIGURED_DATABASE:-true}
       LITAI_ENABLE_DEPRECATED_DB_ENDPOINTS: ${LITAI_ENABLE_DEPRECATED_DB_ENDPOINTS:-false}
       LITAI_CELERY_BROKER_URL: redis://redis:6379/0
       LITAI_CELERY_RESULT_BACKEND: redis://redis:6379/1
       LITAI_GROBID_URL: http://grobid:8070
       LITAI_MINIO_ENDPOINT: minio:9000
-      LITAI_MINIO_ACCESS_KEY: minioadmin
-      LITAI_MINIO_SECRET_KEY: minioadmin
+      LITAI_MINIO_ACCESS_KEY: ${LITAI_MINIO_ACCESS_KEY:?Set LITAI_MINIO_ACCESS_KEY in .env}
+      LITAI_MINIO_SECRET_KEY: ${LITAI_MINIO_SECRET_KEY:?Set LITAI_MINIO_SECRET_KEY in .env}
       LITAI_STORAGE_ROOT: /data/storage
       LITAI_EMBEDDING_PROVIDER: ${LITAI_EMBEDDING_PROVIDER:-openai_compatible}
       LITAI_EMBEDDING_API_BASE: ${LITAI_EMBEDDING_API_BASE:-https://api.siliconflow.cn/v1}
@@ -146,9 +168,13 @@ services:
       LITAI_WRITER_FALLBACK_BACKEND: ${LITAI_WRITER_FALLBACK_BACKEND:-rule}
       LITAI_WRITER_PROMPT_PATH: ${LITAI_WRITER_PROMPT_PATH:-prompts/paper_writer.yaml}
       LITAI_SETTINGS_ADMIN_TOKEN: ${LITAI_SETTINGS_ADMIN_TOKEN:-}
+      LITAI_OWNER_API_TOKEN: ${LITAI_OWNER_API_TOKEN:?Set LITAI_OWNER_API_TOKEN in .env}
+      LITAI_EXPORTS_ENABLED: ${LITAI_EXPORTS_ENABLED:-false}
       LITAI_BROWSE_ROOTS: ${LITAI_BROWSE_ROOTS:-/host/users,/data,/legacy}
+      LITAI_LOCAL_INGEST_ROOTS: ${LITAI_LOCAL_INGEST_ROOTS:-/host/users}
+      LITAI_SHARE_PUBLIC_BASE_URL: ${LITAI_SHARE_PUBLIC_BASE_URL:-http://localhost:8080}
       LITAI_MCP_ENABLED: ${LITAI_MCP_ENABLED:-true}
-      LITAI_MCP_ALLOW_UNAUTHENTICATED: ${LITAI_MCP_ALLOW_UNAUTHENTICATED:-true}
+      LITAI_MCP_ALLOW_UNAUTHENTICATED: "false"
       LITAI_MCP_SERVER_NAME: ${LITAI_MCP_SERVER_NAME:-Literature AI MCP}
       LITAI_MCP_API_KEYS: ${LITAI_MCP_API_KEYS:-}
       # --- Literature Discovery API Keys (findpapers engine) ---
@@ -166,7 +192,7 @@ services:
       - ./backend:/app
       - ./prompts:/prompts:ro
       - ./data:/data
-      - ./data/docling_cache:/root/.cache/docling
+      - ./data/docling_cache:/home/litai/.cache/docling
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
 
 volumes:

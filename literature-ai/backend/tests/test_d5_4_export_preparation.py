@@ -13,6 +13,7 @@ from app.db.session import get_db_session
 
 @pytest.fixture
 def setup_test_db(monkeypatch):
+    monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test_d5_4_export.db"
         db_url = f"sqlite:///{db_path}"

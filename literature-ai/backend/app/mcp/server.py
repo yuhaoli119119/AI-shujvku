@@ -35,6 +35,7 @@ from app.services.review_conflict_service import ReviewConflictAggregationServic
 from app.services.review_service import ReviewService
 from app.services.verification_session_service import VerificationSessionService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
+from app.security.exports import require_mcp_exports_enabled
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
 
@@ -367,7 +368,8 @@ def insert_word_citation(
     citation_style: str = "draft_author_year",
     user_note: str | None = None,
 ) -> dict[str, Any]:
-    require_mcp_capability("read_papers")
+    require_mcp_capability("export_data")
+    require_mcp_exports_enabled()
     input_path = Path(docx_path).expanduser()
     if not input_path.exists() or not input_path.is_file():
         raise ValueError(f"DOCX file not found: {docx_path}")
@@ -1318,6 +1320,7 @@ def recrop_figure(
             paper.pdf_path,
             category="pdf",
             settings=settings,
+            trusted_persisted_reference=True,
         )
         if not pdf_abs_path or not pdf_abs_path.exists():
             raise ValueError(f"PDF file not found: {paper.pdf_path}")
@@ -1521,6 +1524,7 @@ def create_figure_from_bbox(
             paper.pdf_path,
             category="pdf",
             settings=settings,
+            trusted_persisted_reference=True,
         )
         if not pdf_abs_path or not pdf_abs_path.exists():
             raise ValueError(f"PDF file not found: {paper.pdf_path}")
@@ -2024,7 +2028,8 @@ def export_ml_dataset(
     format: str = "json",
     limit: int = 1000,
 ) -> dict[str, Any]:
-    require_mcp_capability("read_papers")
+    require_mcp_capability("export_data")
+    require_mcp_exports_enabled()
     settings = get_settings()
     valid_targets = {"dft_results", "electrochemical_performance"}
     targets = [t for t in (target_types or ["dft_results"]) if t in valid_targets]
@@ -2198,17 +2203,19 @@ def scan_duplicate_dois() -> dict[str, Any]:
     name="create_share_token",
     description=(
         "Create a read-only share token that lets others view data via /api/share/{token}/... "
-        "without needing MCP access. Scope can be 'all' (all papers) or 'paper:{uuid}' (one paper). "
-        "Optionally set expires_at for time-limited access. Requires 'review_corrections' capability."
+        "without needing MCP access. Scope can be 'all', 'library:{name}', or 'paper:{uuid}'. "
+        "Optionally set expires_at for time-limited access. Requires the independent 'create_share_links' capability."
     ),
 )
 def create_share_token(
     scope: str = "all",
     expires_hours: int | None = None,
 ) -> dict[str, Any]:
-    auth = require_mcp_capability("review_corrections")
-    if scope != "all" and not scope.startswith("paper:"):
-        raise ValueError("Scope must be 'all' or 'paper:{uuid}'")
+    auth = require_mcp_capability("create_share_links")
+    if scope != "all" and not scope.startswith(("library:", "paper:")):
+        raise ValueError("Scope must be 'all', 'library:{name}', or 'paper:{uuid}'")
+    if scope.startswith("library:") and not scope.split(":", 1)[1].strip():
+        raise ValueError("Library scope requires a non-empty library name")
 
     import secrets
     token_str = secrets.token_urlsafe(32)
@@ -2216,6 +2223,10 @@ def create_share_token(
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         from datetime import timedelta
+        if scope.startswith("library:"):
+            library_name = scope.split(":", 1)[1].strip()
+            if session.scalar(select(Paper.id).where(Paper.library_name == library_name).limit(1)) is None:
+                raise ValueError("Library scope does not match an existing library")
         expires_at = None
         if expires_hours:
             expires_at = utcnow() + timedelta(hours=expires_hours)
@@ -2229,10 +2240,9 @@ def create_share_token(
         session.add(share)
         session.flush()
 
-        # Determine the base URL for share links
-        host = settings.host if hasattr(settings, "host") else "localhost"
-        port = settings.port if hasattr(settings, "port") else 8000
-        base_url = f"http://{host}:{port}"
+        # Use the dedicated share gateway when configured; never derive this
+        # from untrusted request Host headers.
+        base_url = (settings.share_public_base_url or "http://localhost:8000").rstrip("/")
 
         return {
             "token": token_str,

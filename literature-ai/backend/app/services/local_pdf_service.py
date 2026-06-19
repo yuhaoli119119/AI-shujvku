@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import AuditLog, Paper, ParseJob
 from app.services.paper_ingestion import PaperIngestionService
+from app.security.files import validate_local_ingest_directory
 
 
 class LocalPdfService:
@@ -87,6 +88,7 @@ class LocalPdfService:
                     copy_pdf=True,
                     external_metadata=None,
                     source_reference=item["path"],
+                    ingest_source="local_pdf",
                 )
                 job.status = "completed"
                 job.paper_id = paper.id
@@ -140,12 +142,7 @@ class LocalPdfService:
         }
 
     def _resolve_folder(self, folder_path: str) -> Path:
-        folder = Path(folder_path).expanduser().resolve()
-        if not folder.exists():
-            raise ValueError("Folder path does not exist")
-        if not folder.is_dir():
-            raise ValueError("Folder path is not a directory")
-        return folder
+        return validate_local_ingest_directory(Path(folder_path), self.settings)
 
     @staticmethod
     def _collect_pdf_paths(folder: Path, recursive: bool, limit: int) -> list[Path]:

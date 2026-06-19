@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,6 +24,7 @@ from app.db.models import (
     utcnow,
 )
 from app.db.session import get_db_session
+from app.utils.artifact_paths import resolve_persisted_artifact_path
 
 router = APIRouter(prefix="/share", tags=["Share"])
 
@@ -42,9 +43,45 @@ def verify_share_token(share_token: str, session: Session = Depends(get_db_sessi
     return token_record
 
 
-def _check_scope(token_record: ShareToken, paper_id: str):
-    if token_record.scope != "all" and token_record.scope != f"paper:{paper_id}":
-        raise HTTPException(status_code=403, detail="Token does not have access to this paper")
+def _library_scope_name(scope: str) -> str | None:
+    if not scope.startswith("library:"):
+        return None
+    library_name = scope.split(":", 1)[1].strip()
+    return library_name or None
+
+
+def _check_scope(token_record: ShareToken, paper_id: str, session: Session):
+    if token_record.scope == "all":
+        return
+    if token_record.scope == f"paper:{paper_id}":
+        return
+    library_name = _library_scope_name(token_record.scope)
+    if library_name:
+        accessible = session.scalar(
+            select(Paper.id)
+            .where(Paper.id == _paper_uuid(paper_id))
+            .where(Paper.library_name == library_name)
+            .limit(1)
+        )
+        if accessible:
+            return
+    raise HTTPException(status_code=403, detail="Token does not have access to this paper")
+
+
+def _page_limit(requested: int) -> int:
+    return min(requested, max(1, min(get_settings().share_max_page_size, 100)))
+
+
+def _artifact_basename(value: str | None) -> str:
+    parts = re.split(r"[/\\]+", str(value or "").strip())
+    return parts[-1] if parts else ""
+
+
+def _paper_uuid(paper_id: str) -> UUID:
+    try:
+        return UUID(paper_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid paper id") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -72,15 +109,29 @@ def _safe_filename(filename: str) -> str:
 # ---------------------------------------------------------------------------
 
 @router.get("/{share_token}/papers")
-def list_papers(share_token: str, session: Session = Depends(get_db_session)):
+def list_papers(
+    share_token: str,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+):
     token_record = verify_share_token(share_token, session)
     query = select(Paper)
-    if token_record.scope.startswith("paper:"):
+    if token_record.scope == "all":
+        pass
+    elif token_record.scope.startswith("paper:"):
         pid = token_record.scope.split(":", 1)[1]
-        query = query.where(Paper.id == UUID(pid))
+        query = query.where(Paper.id == _paper_uuid(pid))
+    elif library_name := _library_scope_name(token_record.scope):
+        query = query.where(Paper.library_name == library_name)
+    else:
+        raise HTTPException(status_code=403, detail="Invalid share token scope")
 
-    papers = session.scalars(query.order_by(Paper.created_at.desc()).limit(100)).all()
+    page_limit = _page_limit(limit)
+    papers = session.scalars(query.order_by(Paper.created_at.desc()).offset(offset).limit(page_limit)).all()
     return {
+        "limit": page_limit,
+        "offset": offset,
         "items": [
             {
                 "id": str(p.id),
@@ -102,8 +153,8 @@ def list_papers(share_token: str, session: Session = Depends(get_db_session)):
 @router.get("/{share_token}/papers/{paper_id}")
 def get_paper(share_token: str, paper_id: str, session: Session = Depends(get_db_session)):
     token_record = verify_share_token(share_token, session)
-    _check_scope(token_record, paper_id)
-    paper = session.get(Paper, UUID(paper_id))
+    _check_scope(token_record, paper_id, session)
+    paper = session.get(Paper, _paper_uuid(paper_id))
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
     return {
@@ -122,13 +173,21 @@ def get_paper(share_token: str, paper_id: str, session: Session = Depends(get_db
 # ---------------------------------------------------------------------------
 
 @router.get("/{share_token}/figures/{paper_id}")
-def list_figures(share_token: str, paper_id: str, session: Session = Depends(get_db_session)):
+def list_figures(
+    share_token: str,
+    paper_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+):
     token_record = verify_share_token(share_token, session)
-    _check_scope(token_record, paper_id)
+    _check_scope(token_record, paper_id, session)
     figures = session.scalars(
         select(PaperFigure)
-        .where(PaperFigure.paper_id == UUID(paper_id))
+        .where(PaperFigure.paper_id == _paper_uuid(paper_id))
         .order_by(PaperFigure.page, PaperFigure.figure_label)
+        .offset(offset)
+        .limit(_page_limit(limit))
     ).all()
     return {
         "items": [
@@ -140,7 +199,7 @@ def list_figures(share_token: str, paper_id: str, session: Session = Depends(get
                 "figure_role": f.figure_role,
                 "content_summary": f.content_summary,
                 "crop_status": f.crop_status,
-                "image_path": f.image_path,
+                "image_path": _artifact_basename(f.image_path),
             }
             for f in figures
         ]
@@ -159,27 +218,27 @@ def get_figure_image(
     session: Session = Depends(get_db_session),
 ):
     token_record = verify_share_token(share_token, session)
-    _check_scope(token_record, paper_id)
+    _check_scope(token_record, paper_id, session)
     safe_name = _safe_filename(filename)
 
-    settings = get_settings()
-    base_dir = settings.storage_paths["figures"] / paper_id
-    # Resolve to absolute and verify it stays under base_dir (symlink-safe)
-    file_path = (base_dir / safe_name).resolve()
-    if not str(file_path).startswith(str(base_dir.resolve())):
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    # Also verify this image actually belongs to a PaperFigure in this paper
-    fig_exists = session.scalar(
-        select(PaperFigure.id)
-        .where(PaperFigure.paper_id == UUID(paper_id))
-        .where(PaperFigure.image_path == f"{paper_id}/{safe_name}")
-        .limit(1)
+    image_paths = session.scalars(
+        select(PaperFigure.image_path)
+        .where(PaperFigure.paper_id == _paper_uuid(paper_id))
+        .limit(1000)
+    ).all()
+    stored_path = next(
+        (path for path in image_paths if _artifact_basename(path) == safe_name),
+        None,
     )
-    if not fig_exists:
+    if not stored_path:
         raise HTTPException(status_code=404, detail="Figure not found in database")
-
-    if not file_path.exists():
+    file_path = resolve_persisted_artifact_path(
+        stored_path,
+        category="figures",
+        settings=get_settings(),
+        must_exist=True,
+    )
+    if file_path is None or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Figure file not found on disk")
 
     media_type, _ = mimetypes.guess_type(str(file_path))
@@ -191,14 +250,21 @@ def get_figure_image(
 # ---------------------------------------------------------------------------
 
 @router.get("/{share_token}/notes/{paper_id}")
-def list_notes(share_token: str, paper_id: str, session: Session = Depends(get_db_session)):
+def list_notes(
+    share_token: str,
+    paper_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+):
     token_record = verify_share_token(share_token, session)
-    _check_scope(token_record, paper_id)
+    _check_scope(token_record, paper_id, session)
     notes = session.scalars(
         select(PaperNote)
-        .where(PaperNote.paper_id == UUID(paper_id))
+        .where(PaperNote.paper_id == _paper_uuid(paper_id))
         .order_by(PaperNote.created_at.desc())
-        .limit(200)
+        .offset(offset)
+        .limit(_page_limit(limit))
     ).all()
     return {
         "items": [
@@ -222,14 +288,21 @@ def list_notes(share_token: str, paper_id: str, session: Session = Depends(get_d
 # ---------------------------------------------------------------------------
 
 @router.get("/{share_token}/corrections/{paper_id}")
-def list_corrections(share_token: str, paper_id: str, session: Session = Depends(get_db_session)):
+def list_corrections(
+    share_token: str,
+    paper_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+):
     token_record = verify_share_token(share_token, session)
-    _check_scope(token_record, paper_id)
+    _check_scope(token_record, paper_id, session)
     corrections = session.scalars(
         select(PaperCorrection)
-        .where(PaperCorrection.paper_id == UUID(paper_id))
+        .where(PaperCorrection.paper_id == _paper_uuid(paper_id))
         .order_by(PaperCorrection.created_at.desc())
-        .limit(100)
+        .offset(offset)
+        .limit(_page_limit(limit))
     ).all()
     return {
         "items": [
@@ -252,12 +325,21 @@ def list_corrections(share_token: str, paper_id: str, session: Session = Depends
 # ---------------------------------------------------------------------------
 
 @router.get("/{share_token}/dft/{paper_id}")
-def get_dft_results(share_token: str, paper_id: str, session: Session = Depends(get_db_session)):
+def get_dft_results(
+    share_token: str,
+    paper_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+):
     token_record = verify_share_token(share_token, session)
-    _check_scope(token_record, paper_id)
+    _check_scope(token_record, paper_id, session)
     results = session.scalars(
         select(DFTResult)
-        .where(DFTResult.paper_id == UUID(paper_id))
+        .where(DFTResult.paper_id == _paper_uuid(paper_id))
+        .order_by(DFTResult.id)
+        .offset(offset)
+        .limit(_page_limit(limit))
     ).all()
     return {
         "items": [
@@ -285,14 +367,21 @@ def get_dft_results(share_token: str, paper_id: str, session: Session = Depends(
 # ---------------------------------------------------------------------------
 
 @router.get("/{share_token}/audit/{paper_id}")
-def get_audit_logs(share_token: str, paper_id: str, session: Session = Depends(get_db_session)):
+def get_audit_logs(
+    share_token: str,
+    paper_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+):
     token_record = verify_share_token(share_token, session)
-    _check_scope(token_record, paper_id)
+    _check_scope(token_record, paper_id, session)
     logs = session.scalars(
         select(AuditLog)
-        .where(AuditLog.paper_id == UUID(paper_id))
+        .where(AuditLog.paper_id == _paper_uuid(paper_id))
         .order_by(AuditLog.created_at.desc())
-        .limit(50)
+        .offset(offset)
+        .limit(_page_limit(limit))
     ).all()
     return {
         "items": [

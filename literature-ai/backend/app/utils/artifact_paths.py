@@ -141,12 +141,35 @@ def _search_roots(settings: Settings, category: str | None) -> list[Path]:
     return unique
 
 
+def _is_within_category_root(resolved: Path, settings: Settings, category: str | None) -> bool:
+    if not category or category not in settings.storage_paths:
+        return True
+    configured_root = settings.storage_paths[category].resolve()
+    if resolved == configured_root or resolved.is_relative_to(configured_root):
+        return True
+
+    # Historical host/container mirrors live below the repository roots.  They
+    # are accepted only when the resolved path still has storage/<category> as
+    # a real path segment.  A symlink that escapes either root fails this test.
+    for anchor in (BACKEND_ROOT.resolve(), WORKSPACE_ROOT.resolve()):
+        try:
+            relative = resolved.relative_to(anchor)
+        except ValueError:
+            continue
+        lowered = [part.lower() for part in relative.parts]
+        for index, part in enumerate(lowered[:-1]):
+            if part == "storage" and lowered[index + 1] == category.lower():
+                return True
+    return False
+
+
 def resolve_persisted_artifact_path(
     stored_path: str | None,
     *,
     category: str | None = None,
     settings: Settings | None = None,
     must_exist: bool = True,
+    trusted_persisted_reference: bool = False,
 ) -> Path | None:
     if not stored_path or not stored_path.strip():
         return None
@@ -196,16 +219,22 @@ def resolve_persisted_artifact_path(
         if resolved in seen:
             continue
         seen.add(resolved)
-        if resolved.exists():
+        if resolved.exists() and (
+            trusted_persisted_reference
+            or _is_within_category_root(resolved, runtime_settings, category)
+        ):
             return resolved
 
     if must_exist:
         return None
     fallback = Path(stripped)
     try:
-        return fallback.resolve()
+        resolved_fallback = fallback.resolve()
     except OSError:
-        return fallback
+        return None
+    if trusted_persisted_reference or _is_within_category_root(resolved_fallback, runtime_settings, category):
+        return resolved_fallback
+    return None
 
 
 def canonicalize_persisted_artifact_reference(
@@ -228,6 +257,7 @@ def canonicalize_persisted_artifact_reference(
             category=category,
             settings=runtime_settings,
             must_exist=False,
+            trusted_persisted_reference=True,
         )
     )
     if resolved is None:

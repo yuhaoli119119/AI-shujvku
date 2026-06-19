@@ -212,7 +212,7 @@ def test_active_database_info_ignores_temp_sqlite_when_configured_database_is_po
         config,
         "get_settings",
         lambda: Settings(
-            database_url="postgresql+psycopg://example:example@localhost:5432/example",
+            database_url="postgresql+psycopg://example:example@127.0.0.1:1/example?connect_timeout=1",
             storage_root=active_root / "storage",
         ),
     )

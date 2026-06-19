@@ -81,7 +81,7 @@ def test_force_configured_database_does_not_create_or_switch_sqlite(tmp_path, mo
     default_root = tmp_path / "default-library"
     monkeypatch.setattr(LibraryManager, "REGISTRY_PATH", registry_path)
     monkeypatch.setattr(LibraryManager, "DEFAULT_LIBRARY_ROOT", default_root)
-    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@127.0.0.1:1/test?connect_timeout=1")
     monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
     get_settings.cache_clear()
 

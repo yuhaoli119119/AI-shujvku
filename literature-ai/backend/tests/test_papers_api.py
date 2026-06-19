@@ -32,6 +32,8 @@ def setup_test_db(monkeypatch):
         # Keep API tests from writing uploads into the real active library.
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+        monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", tmpdir)
+        monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
         get_settings.cache_clear()
         
         # Setup tables
@@ -324,6 +326,14 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
+    assert data["prompt_schema_version"] == "ide_review_prompt_v3"
+    assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
+    assert "app.mcp.context.mcp_auth_context" in data["suggested_client_prompt"]
+    assert "A_text_readable 或 B_text_partial" in data["suggested_client_prompt"]
+    assert "section_level" in data["prompt_contract"]["templates"]["sections_writing"]
+    ai_search = next(item for item in data["http_endpoints"] if item["name"] == "ai_search")
+    assert "raw query" in ai_search["purpose"]
+    assert "LLM query rewriting is disabled" in ai_search["purpose"]
 
 
 def test_paper_detail_filters_caption_and_table_noise_from_sections(setup_test_db):

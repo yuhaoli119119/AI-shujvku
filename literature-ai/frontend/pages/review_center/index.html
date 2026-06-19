@@ -1210,6 +1210,20 @@
       }).filter(Boolean);
     }
 
+    function promptTargetRows() {
+      const selected = selectedPromptRows();
+      return selected.length ? selected : currentVisibleRows().slice(0, 25);
+    }
+
+    function resolveVisualPromptKind() {
+      const rows = promptTargetRows();
+      const hasFigures = rows.some(function (row) { return toCount(row.figure_count) > 0; });
+      const hasTables = rows.some(function (row) { return toCount(row.table_count) > 0; });
+      if (hasFigures && !hasTables) return "figure";
+      if (hasTables && !hasFigures) return "table";
+      return "figure_table";
+    }
+
     function togglePaperSelection(paperId, checked) {
       if (!paperId) return;
       if (checked) {
@@ -1348,7 +1362,7 @@
         '<button class="btn btn-ghost btn-sm" type="button" onclick="goToPage(' + totalPages + ')"' + (currentPage >= totalPages ? ' disabled' : '') + '>末页</button>';
     }
 
-    function idePromptTemplateV2(kind) {
+    function legacyIdePromptTemplateV2(kind) {
       const now = new Date();
       const pad = function (value) { return String(value).padStart(2, "0"); };
       const runTag = [
@@ -1372,7 +1386,7 @@
         "source_label 必须写成：" + sourceLabel + "。请把 <agent_name> 替换成你的实际模型或窗口名，例如 gemini、kimi、codex、claude。",
         "",
         "必须执行：",
-        "0. 先检查当前可用工具列表：应能看到 literature-ai/query_papers、get_paper、get_codex_context、get_codex_item、read_paper_page、import_analysis 等 MCP 工具；如果 IDE 会话里没有这些工具，不要立刻停，而是改用当前项目仓库里的后端 MCP 兜底路径（literature-ai/backend 的 app.mcp.context.mcp_auth_context + app.mcp.server）。只有 IDE 工具和项目内后端兜底都不可用时，才报告 blocked_by_missing_mcp_tool。不要自行写 mcp_config.json。",
+        "0. 先检查当前可用工具列表：应能看到 literature-ai/query_papers、get_paper、get_codex_context、get_codex_item、read_paper_page、import_analysis 等 MCP 工具；如果 IDE 会话里没有这些工具，不要立刻停，而是通过 literature-ai/backend 的 app.mcp.context.mcp_auth_context 建立明确身份，再受控调用 app.mcp.server 已公开的 MCP 工具。禁止借此直接调用 service/session/model 或数据库。只有两条 MCP 路径和相关正式 HTTP API 都不可用时，才报告 blocked_by_missing_mcp_tool。不要自行写 mcp_config.json。",
         "1. 每篇文献先准备材料：优先使用 MCP 的 prepare/get context 能力；如果工具提示材料已存在，可以继续；如果无法读取 codex-context 或 source_assets/artifact_status 不存在，先切到项目内后端 MCP 兜底再判断，只有两条路径都失败才报告阻塞。",
         "1a. 先判断本文文献类型与系统解析是否一致；若不一致，直接按 PDF 证据修正系统解析类型，再继续后续审核。",
         "2. 读取证据优先用当前 Literature AI MCP 工具：get_codex_context(paper_id)、get_codex_item(paper_id,item_type,item_id)、read_paper_page(paper_id,page_start,page_end)、import_analysis。若 IDE 会话没有暴露这些工具，就用项目内后端 MCP 兜底路径完成同样的调用，不要默认绕过 MCP 或改成只写文字总结。",
@@ -1423,16 +1437,49 @@
 
     async function copyIdePrompt(kind) {
       try {
-        await copyTextToClipboard(await buildIdePromptForCopy(kind));
-        const labels = { overall: "总体解析", dft: "DFT 核验", figure: "图表核验", table: "图表核验", sections_writing: "章节+写作卡核验" };
-        showToast("已复制 " + (labels[kind] || "IDE AI") + " 指令模板");
+        const resolvedKind = kind === "figure" ? resolveVisualPromptKind() : kind;
+        await copyTextToClipboard(await buildIdePromptForCopy(resolvedKind));
+        const labels = { overall: "总体解析", dft: "DFT 核验", figure: "Figure 核验", table: "Table 核验", figure_table: "Figure + Table 核验", sections_writing: "章节+写作卡核验" };
+        showToast("已复制 " + (labels[resolvedKind] || "IDE AI") + " 指令模板");
       } catch (error) {
         showToast("复制失败：" + error.message);
       }
     }
 
     async function buildIdePromptForCopy(kind) {
-      return idePromptTemplateV2(kind);
+      try {
+        const guide = await fetchJSON("/api/system/agent-guide");
+        const contract = guide && guide.prompt_contract ? guide.prompt_contract : {};
+        const templates = contract.templates && typeof contract.templates === "object" ? contract.templates : {};
+        const compositeTemplates = contract.composite_templates && typeof contract.composite_templates === "object" ? contract.composite_templates : {};
+        const template = templates[kind] || compositeTemplates[kind] || templates.overall;
+        if (!template) throw new Error("prompt contract does not include kind=" + kind);
+
+        const now = new Date();
+        const pad = function (value) { return String(value).padStart(2, "0"); };
+        const runTag = [
+          now.getFullYear(),
+          pad(now.getMonth() + 1),
+          pad(now.getDate()),
+          "_",
+          pad(now.getHours()),
+          pad(now.getMinutes()),
+          pad(now.getSeconds())
+        ].join("");
+        const sourceLabel = "<agent_name>_" + kind + "_" + runTag;
+        const targetToken = contract.target_list_token || "{{TARGET_LIST}}";
+        const sourceToken = contract.source_label_token || "{{SOURCE_LABEL}}";
+        return String(template)
+          .split(targetToken).join(currentPromptTargets())
+          .split(sourceToken).join(sourceLabel);
+      } catch (error) {
+        console.warn("canonical IDE prompt unavailable", error);
+        return [
+          "统一 IDE 审核提示词当前不可用。",
+          "请先使用当前会话已暴露的 literature-ai MCP 工具；若工具未注入，只能通过 app.mcp.context.mcp_auth_context 建立身份后，受控调用 app.mcp.server 已公开工具。",
+          "禁止直接调用 service/session/model 或数据库。无法取得统一提示词与受控证据入口时，请报告 blocked_by_prompt_contract_unavailable。"
+        ].join("\n");
+      }
     }
 
     function handlePromptCopySelect() {

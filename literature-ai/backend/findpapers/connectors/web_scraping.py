@@ -16,6 +16,7 @@ import json
 import logging
 import re
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 from curl_cffi.requests import Response as _CurlResponse
@@ -23,6 +24,8 @@ from curl_cffi.requests import Session as _CurlSession
 from curl_cffi.requests.errors import RequestsError as _CurlError
 from lxml import html
 from lxml.html import HtmlElement
+
+from app.security.urls import UnsafeOutboundURL, validate_public_http_url
 
 from findpapers.connectors.connector_base import ConnectorBase
 from findpapers.connectors.url_lookup_base import URLLookupConnectorBase
@@ -541,14 +544,25 @@ class WebScrapingConnector(ConnectorBase):
         _CurlError
             On network-level failures (DNS, connection refused, timeout, …).
         """
+        current = validate_public_http_url(url)
         with _CurlSession(impersonate="chrome") as session:
-            return session.get(  # type: ignore[no-any-return]
-                url,
-                proxies=self._get_proxies(),
-                verify=self._ssl_verify,
-                allow_redirects=True,
-                timeout=timeout,
-            )
+            for redirect_count in range(6):
+                response = session.get(
+                    current,
+                    proxies=self._get_proxies(),
+                    verify=self._ssl_verify,
+                    allow_redirects=False,
+                    timeout=timeout,
+                )
+                if response.status_code not in {301, 302, 303, 307, 308}:
+                    return response  # type: ignore[no-any-return]
+                if redirect_count >= 5:
+                    raise UnsafeOutboundURL("Too many outbound redirects")
+                location = response.headers.get("location")
+                if not location:
+                    return response  # type: ignore[no-any-return]
+                current = validate_public_http_url(urljoin(current, location))
+        raise UnsafeOutboundURL("Too many outbound redirects")
 
     def _try_api_fallback(
         self,

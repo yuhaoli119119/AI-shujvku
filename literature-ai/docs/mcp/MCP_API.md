@@ -13,6 +13,7 @@ Transport:
 Authentication:
 
 - `Authorization: Bearer <MCP_API_KEY>`
+- Required for every HTTP MCP client, including localhost and private networks. `LITAI_MCP_ALLOW_UNAUTHENTICATED` is retained only as a deprecated configuration field and does not open HTTP MCP.
 
 ## Runtime Configuration
 
@@ -40,6 +41,7 @@ If this root is wrong, MCP may still list papers from PostgreSQL, but artifact c
 
 ```env
 LITAI_MCP_ENABLED=true
+LITAI_MCP_ALLOW_UNAUTHENTICATED=false
 LITAI_MCP_SERVER_NAME=Literature AI MCP
 LITAI_MCP_API_KEYS=ide_ai|IDE AI|litmcp_ide_ai|read_papers,append_notes,propose_corrections,request_parse;admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections
 ```
@@ -68,6 +70,8 @@ If you want audit logs to distinguish tools or agents, create multiple keys with
 - `request_parse`: request local PDF scans, ingestion, or parsing.
 - `review_corrections`: approve or reject pending correction proposals; reserve this for an admin or human reviewer.
 - `review_dft`: optional narrower DFT review capability accepted by DFT verification tools.
+- `export_data`: permits Word/dataset exports only when `LITAI_EXPORTS_ENABLED=true`; `read_papers` no longer implies export.
+- `create_share_links`: permits `create_share_token`; this is independent from read, export, and review capabilities.
 
 ## Dynamic AI Review Flow
 

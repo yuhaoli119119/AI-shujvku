@@ -20,12 +20,12 @@ def build_figure_image_review(
     bbox_size = bbox_size_points(bbox)
     full_page_image_path = canonical_full_page_snapshot_reference(figure, settings=settings)
     full_page_asset_path = (
-        resolve_persisted_artifact_path(full_page_image_path, category="figures", settings=settings)
+        resolve_persisted_artifact_path(full_page_image_path, category="figures", settings=settings, trusted_persisted_reference=True)
         if check_asset_exists and full_page_image_path
         else None
     )
     asset_path = (
-        resolve_persisted_artifact_path(image_path, category="figures", settings=settings)
+        resolve_persisted_artifact_path(image_path, category="figures", settings=settings, trusted_persisted_reference=True)
         if check_asset_exists
         else None
     )
@@ -83,7 +83,7 @@ def canonical_full_page_snapshot_reference(figure: Any, *, settings: Settings) -
     page_no = _get(figure, "page")
     paper_id = _get(figure, "paper_id")
     resolved = (
-        resolve_persisted_artifact_path(raw, category="figures", settings=settings)
+        resolve_persisted_artifact_path(raw, category="figures", settings=settings, trusted_persisted_reference=True)
         if raw
         else None
     )

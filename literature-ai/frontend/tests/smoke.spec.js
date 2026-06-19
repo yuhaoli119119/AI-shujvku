@@ -1389,6 +1389,23 @@ async function mockApi(route) {
         url: '/mcp',
         common_tools: ['prepare-ai-context', 'codex-item', 'import_analysis'],
       },
+      prompt_schema_version: 'ide_review_prompt_v3',
+      prompt_contract: {
+        schema_version: 'ide_review_prompt_v3',
+        canonical_mcp_path: '/mcp',
+        target_list_token: '{{TARGET_LIST}}',
+        source_label_token: '{{SOURCE_LABEL}}',
+        templates: {
+          overall: '统一总体提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n受控调用 app.mcp.context.mcp_auth_context + app.mcp.server；禁止直接操作数据库。',
+          dft: '统一 DFT 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n单个 AI 不得最终确认 DFT。',
+          figure: '统一图表提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
+          table: '统一表格提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
+          sections_writing: '统一章节提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\nsection_level section_number parent_heading heading_path',
+        },
+        composite_templates: {
+          figure_table: '统一 Figure + Table 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n图像规则 + 表格规则',
+        },
+      },
       notes: ['Mock guide'],
     });
   }
@@ -2847,6 +2864,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 
+  test('business flow: paper detail DFT prompts include the canonical safety preamble', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.locator('.paper-row').first().click();
+
+    const prompt = await page.evaluate(() => canonicalIdePromptForSelectedPaper('dft'));
+
+    expect(prompt).toContain('统一 DFT 提示词');
+    expect(prompt).toContain('单个 AI 不得最终确认 DFT');
+    expect(prompt).toContain('paper_id=paper-1');
+    expect(prompt).not.toContain('{{TARGET_LIST}}');
+  });
+
   test('business flow: review tab separates IDE/MCP workflow from embedding settings', async ({ page }) => {
     await page.route(/\/api\/settings\/status$/, route => {
       return route.fulfill({
@@ -2888,6 +2917,50 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#mcpGuideBox')).toContainText('codex-item');
     await expect(page.locator('#tab-writing')).not.toContainText('text-embedding-3-small');
     await expect(page.locator('#progressBox')).toHaveCount(0);
+  });
+
+  test('business flow: review center builds prompts from the canonical backend contract', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+    await page.waitForTimeout(500);
+
+    const prompt = await page.evaluate(() => buildIdePromptForCopy('sections_writing'));
+
+    expect(prompt).toContain('统一章节提示词');
+    expect(prompt).toContain('section_level section_number parent_heading heading_path');
+    expect(prompt).toContain('source_label=<agent_name>_sections_writing_');
+    expect(prompt).not.toContain('{{TARGET_LIST}}');
+    expect(prompt).not.toContain('{{SOURCE_LABEL}}');
+  });
+
+  test('business flow: review center keeps one visual entry and resolves figure, table, or mixed prompts', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#promptCopySelect option')).toHaveCount(5);
+    await expect(page.locator('#promptCopySelect option[value="figure"]')).toHaveText('图表指令');
+    await expect(page.locator('#promptCopySelect option[value="table"]')).toHaveCount(0);
+
+    const kinds = await page.evaluate(() => {
+      const originalRows = state.rows;
+      const originalVisibleRows = currentVisibleRows;
+      selectedPaperIds.clear();
+      window.currentVisibleRows = () => [{ paper_id: 'figure-only', figure_count: 2, table_count: 0 }];
+      const figureKind = resolveVisualPromptKind();
+      window.currentVisibleRows = () => [{ paper_id: 'table-only', figure_count: 0, table_count: 2 }];
+      const tableKind = resolveVisualPromptKind();
+      window.currentVisibleRows = () => [
+        { paper_id: 'mixed', figure_count: 1, table_count: 1 },
+      ];
+      const mixedKind = resolveVisualPromptKind();
+      window.currentVisibleRows = originalVisibleRows;
+      state.rows = originalRows;
+      return { figureKind, tableKind, mixedKind };
+    });
+
+    expect(kinds).toEqual({ figureKind: 'figure', tableKind: 'table', mixedKind: 'figure_table' });
+    const mixedPrompt = await page.evaluate(() => buildIdePromptForCopy('figure_table'));
+    expect(mixedPrompt).toContain('统一 Figure + Table 提示词');
+    expect(mixedPrompt).toContain('source_label=<agent_name>_figure_table_');
   });
 
   test('business flow: delete current paper opens confirmation and clears selection', async ({ page }) => {

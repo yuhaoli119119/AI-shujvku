@@ -17,7 +17,7 @@ If the storage root is wrong, paper rows may still be visible through PostgreSQL
 
 ## Authorization Model
 
-MCP uses Bearer tokens configured in `LITAI_MCP_API_KEYS`.
+HTTP MCP always uses Bearer tokens configured in `LITAI_MCP_API_KEYS`. Loopback, Docker bridge, and private-network addresses never receive anonymous capabilities. Repository-native calls made under `app.mcp.context.mcp_auth_context` remain available as the in-process IDE fallback and do not pass through HTTP authentication.
 
 Each key has:
 
@@ -33,6 +33,8 @@ Capabilities are checked inside tool handlers:
 - `request_parse` for ingestion and parse requests.
 - `review_corrections` for approving or rejecting corrections.
 - `review_dft` as a narrower DFT review capability where accepted.
+- `export_data` for Word/dataset export operations; this is also subject to the global `LITAI_EXPORTS_ENABLED` policy, which defaults to `false`.
+- `create_share_links` for creating read-only share tokens; it is not implied by `read_papers` or review capabilities.
 
 Recommended IDE AI capability set:
 

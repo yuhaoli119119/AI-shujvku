@@ -35,6 +35,7 @@ def insertion_client(monkeypatch):
         db_url = f"sqlite:///{db_path}"
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
+        monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
         get_settings.cache_clear()
         engine = create_engine(db_url, future=True)
         Base.metadata.create_all(engine)

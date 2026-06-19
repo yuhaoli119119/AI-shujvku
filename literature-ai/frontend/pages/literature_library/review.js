@@ -44,12 +44,12 @@ function renderCandidatePayload(payload) {
 
 function renderInternalParseSummary(data) {
     return '<div class="section-card"><h3>网页端解析已停用</h3>' +
-        '<div class="subtle">请在 IDE 中优先使用 MCP 读取材料、核验证据，并通过 import_analysis 回写候选；如果当前会话没暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 直接读取和回写。</div>' +
+        '<div class="subtle">请在 IDE 中优先使用 MCP 读取材料、核验证据，并通过 import_analysis 回写候选；如果当前会话没暴露 MCP 工具，可使用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 受控调用同一套公开 MCP 工具。禁止直接操作 service、session、model 或数据库。</div>' +
     '</div>';
 }
 
 async function ensureInternalAIConfigured() {
-    const message = "网页端解析审阅已停用。请在 IDE 中优先执行 prepare-ai-context / codex-item / import_analysis；如果当前会话没挂上 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。";
+    const message = "网页端解析审阅已停用。请优先使用 IDE MCP；工具未注入时可通过项目内 mcp_auth_context + app.mcp.server 受控调用公开 MCP 工具，不能直接写数据库。";
     renderInternalAIConfigGuide(message, null);
     showToast(message, "info");
     return false;
@@ -80,7 +80,7 @@ async function loadAgentGuide() {
             const overallPrompt = guide.suggested_client_prompt || "";
             mcpGuide.innerHTML =
                 '<div class="section-card"><h3>IDE AI 审阅指南</h3>' +
-                '<div class="subtle">IDE AI 可以优先通过 MCP 读取文献、追加笔记、提出修正或触发解析；如果当前会话没有暴露 MCP 工具，也可以直接使用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` 与 `app.mcp.server` 作为后备路径。本区只展示入口，不会自动写入正式数据。</div>' +
+                '<div class="subtle">IDE AI 优先使用当前会话的 MCP 工具；工具未注入时，可通过仓库内 `app.mcp.context.mcp_auth_context` 与 `app.mcp.server` 受控调用同一套公开 MCP 工具。正式 HTTP API只补充其已覆盖的读取和操作，不能替代没有 HTTP 等价入口的 MCP 工具。本区只展示入口，不会自动写入正式数据。</div>' +
                 (overallPrompt ? '<div class="modal-actions" style="justify-content:flex-start;margin-top:10px;"><button class="btn primary small" onclick="copyOverallParseInstruction()">复制总体解析指令</button></div>' : '') +
                 (overallPrompt ? '<details style="margin-top:10px;"><summary>总体解析指令</summary><div id="overallParseInstruction" class="mono prewrap">' + esc(overallPrompt) + '</div></details>' : '') +
                 '<div class="readable-grid" style="margin-top:10px;">' +

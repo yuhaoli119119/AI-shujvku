@@ -4,6 +4,13 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.services.ide_prompt_service import (
+    CANONICAL_MCP_PATH,
+    PROMPT_SCHEMA_VERSION,
+    build_ide_review_prompt,
+    prompt_contract,
+)
+
 
 router = APIRouter()
 
@@ -149,7 +156,7 @@ async def get_agent_guide() -> dict:
             "mode": "codex_mcp_first",
             "description": "Connect through MCP first so Codex can query papers, read full parsed records, retrieve evidence, append notes, and propose corrections. Use batch ingestion only as an optional acquisition helper.",
             "method": "MCP",
-            "path": "/mcp",
+            "path": CANONICAL_MCP_PATH,
             "json_schema_hint": {
                 "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "review_figure", "get_review_coverage", "get_field_disputes", "scan_duplicate_dois"],
                 "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "import_analysis", "verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure"],
@@ -240,7 +247,7 @@ async def get_agent_guide() -> dict:
                 "name": "ai_search",
                 "method": "POST",
                 "path": "/api/papers/ai_search",
-                "purpose": "Optional discovery helper: rewrite query with LLM and return search results without downloading.",
+                "purpose": "Discovery helper that uses the raw query and returns search results without downloading; web-side LLM query rewriting is disabled.",
             },
             {
                 "name": "discovery_search",
@@ -256,9 +263,9 @@ async def get_agent_guide() -> dict:
             },
         ],
         "mcp": {
-            "url": "/mcp",
+            "url": CANONICAL_MCP_PATH,
             "transport": "streamable_http",
-            "auth": "Optional on trusted local/private networks; otherwise Authorization: Bearer <mcp_api_key>",
+            "auth": "HTTP MCP requires Authorization: Bearer <mcp_api_key>. The in-process fallback uses mcp_auth_context instead of HTTP authentication.",
             "recommended_when": "Use MCP as the primary Codex interface for interactive paper reading, evidence retrieval, note taking, imported analysis, comparison, and correction proposals.",
             "common_tools": [
                 "query_papers",
@@ -323,9 +330,9 @@ async def get_agent_guide() -> dict:
                 "Missing-page repair must not mark DFT rows verified, approve corrections, bind materials, or unlock CSV/ML export.",
             ],
         },
-        "suggested_client_prompt": (
+        "legacy_suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
-            "Then inspect the current IDE/project MCP tool list and use the already exposed literature-ai tools first. Do not rewrite mcp_config.json or invent a new MCP server unless the user explicitly asks for manual MCP setup. Only if the current project session truly does not expose literature-ai should you reconnect to /mcp/ (streamable_http; no key is required on trusted local/private networks unless the server explicitly asks for one). Prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, insert_word_citation for guarded DOCX citation copies, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections, export_ml_dataset to export verified data as JSON or CSV for machine learning. "
+            "Then inspect the current IDE/project MCP tool list and use the already exposed literature-ai tools first. Do not rewrite mcp_config.json or invent a new MCP server unless the user explicitly asks for manual MCP setup. Only if the current project session truly does not expose literature-ai should you reconnect to /mcp/ with a configured Bearer key. Prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, append_note, propose_correction, propose_dft_result_correction for field fixes, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, and approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections. Exports remain disabled unless the server export policy is explicitly enabled. "
             "Use read_paper_page to read a specific page when evidence is truncated or missing context. "
             "Inspect figures in the IDE workflow when stored captions or crops are insufficient. "
             "Use recrop_figure to recalculate and persist an image crop. You can use 'full_page', 'wider', or 'ai_bbox' strategies. "
@@ -343,4 +350,7 @@ async def get_agent_guide() -> dict:
             "Strict count and DFT safety update: never stop at a web UI display limit; compare the source PDF and context counts, and review all figure objects one by one. If a paper has 16 figures, all 16 must be checked, corrected, or explicitly marked reviewed. For DFT rows, verify material identity, property or energy type, value, unit, evidence text, source document type, and exact page/locator. Do not PASS or export DFT rows when material identity, review status, evidence text, or locator is missing; keep them as candidates behind the export safety gate. "
             "Use /api/intake/search for external candidate discovery, then approve and ingest candidates through the controlled intake endpoints. Do not use the legacy /api/papers/ai_workflow direct-ingest endpoint."
         ),
+        "prompt_schema_version": PROMPT_SCHEMA_VERSION,
+        "prompt_contract": prompt_contract(),
+        "suggested_client_prompt": build_ide_review_prompt("overall"),
     }

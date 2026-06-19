@@ -1035,6 +1035,7 @@ class PaperQueryService:
             category="figures",
             settings=settings,
             must_exist=True,
+            trusted_persisted_reference=True,
         )
         if resolved is None:
             figure_basename = f"{payload.figure_label}.png" if payload.figure_label else None

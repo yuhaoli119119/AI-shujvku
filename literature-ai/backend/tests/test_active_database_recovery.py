@@ -16,6 +16,9 @@ from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, 
 from app.db import session as db_session_module
 
 
+FAKE_POSTGRES_URL = "postgresql+psycopg://user:pass@127.0.0.1:1/test?connect_timeout=1"
+
+
 def _write_sqlite(path: Path, *, paper_count: int) -> None:
     engine = create_engine(f"sqlite:///{path}", future=True)
     Base.metadata.create_all(engine)
@@ -61,7 +64,7 @@ def test_activate_active_library_database_does_not_repair_or_switch_to_sqlite_ca
         encoding="utf-8",
     )
 
-    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_DATABASE_URL", FAKE_POSTGRES_URL)
     get_settings.cache_clear()
     monkeypatch.setattr(library_manager_module.LibraryManager, "REGISTRY_PATH", registry_path)
     monkeypatch.setattr(library_manager_module.LibraryManager, "DEFAULT_LIBRARY_ROOT", library_root)
@@ -117,7 +120,7 @@ def test_get_active_database_info_ignores_registered_active_sqlite_for_postgresq
         encoding="utf-8",
     )
 
-    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_DATABASE_URL", FAKE_POSTGRES_URL)
     get_settings.cache_clear()
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
     monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
@@ -186,7 +189,7 @@ def test_force_configured_database_bypasses_registered_active_library(tmp_path, 
 
 
 def test_switch_database_rejects_sqlite_when_configured_database_is_forced(tmp_path, monkeypatch):
-    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_DATABASE_URL", FAKE_POSTGRES_URL)
     monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
     get_settings.cache_clear()
 
@@ -227,7 +230,7 @@ def test_force_configured_postgresql_bypasses_sqlite_candidates(tmp_path, monkey
         encoding="utf-8",
     )
 
-    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@db.example/literature_ai")
+    monkeypatch.setenv("LITAI_DATABASE_URL", FAKE_POSTGRES_URL)
     monkeypatch.setenv("LITAI_STORAGE_ROOT", str(workspace_root / "storage"))
     monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
     get_settings.cache_clear()
@@ -285,7 +288,7 @@ def test_get_active_database_info_keeps_empty_non_default_active_library(tmp_pat
         encoding="utf-8",
     )
 
-    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_DATABASE_URL", FAKE_POSTGRES_URL)
     get_settings.cache_clear()
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
     monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)
@@ -332,7 +335,7 @@ def test_get_active_database_info_maps_container_path_to_registry_data_root(tmp_
         encoding="utf-8",
     )
 
-    monkeypatch.setenv("LITAI_DATABASE_URL", "postgresql+psycopg://user:pass@localhost/test")
+    monkeypatch.setenv("LITAI_DATABASE_URL", FAKE_POSTGRES_URL)
     get_settings.cache_clear()
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: registry_path.resolve())
     monkeypatch.setattr(active_database_module, "BACKEND_ROOT", backend_root)

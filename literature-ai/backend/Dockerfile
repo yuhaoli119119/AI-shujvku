@@ -27,4 +27,10 @@ COPY backend /app
 COPY frontend /frontend
 COPY prompts /prompts
 
+RUN useradd --create-home --uid 10001 litai \
+    && mkdir -p /home/litai/.cache/docling \
+    && chown -R litai:litai /app /frontend /prompts /home/litai
+
+USER litai
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

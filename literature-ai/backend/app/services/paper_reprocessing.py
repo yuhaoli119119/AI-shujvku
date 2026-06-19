@@ -40,7 +40,12 @@ class PaperReprocessingService:
         pdf_path = (
             None
             if raw_pdf_path is not None and raw_pdf_path.is_absolute() and not raw_pdf_path.exists()
-            else resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=self.settings)
+            else resolve_persisted_artifact_path(
+                paper.pdf_path,
+                category="pdf",
+                settings=self.settings,
+                trusted_persisted_reference=True,
+            )
         )
         if pdf_path is not None and pdf_path.exists():
             quality = PaperWorkbenchService.assess_pdf_path(pdf_path, self.settings)
@@ -345,19 +350,28 @@ class PaperReprocessingService:
             category="pdf",
             settings=self.settings,
             must_exist=False,
+            trusted_persisted_reference=True,
         ) or Path(paper.pdf_path or "")
-        tei_path = resolve_persisted_artifact_path(paper.tei_path, category="tei", settings=self.settings, must_exist=False)
+        tei_path = resolve_persisted_artifact_path(
+            paper.tei_path,
+            category="tei",
+            settings=self.settings,
+            must_exist=False,
+            trusted_persisted_reference=True,
+        )
         markdown_path = resolve_persisted_artifact_path(
             paper.markdown_path,
             category="markdown",
             settings=self.settings,
             must_exist=False,
+            trusted_persisted_reference=True,
         )
         docling_json_path = resolve_persisted_artifact_path(
             paper.docling_json_path,
             category="docling_json",
             settings=self.settings,
             must_exist=False,
+            trusted_persisted_reference=True,
         )
 
         return UnifiedPaperDocument(
@@ -411,7 +425,11 @@ class PaperReprocessingService:
 
     @staticmethod
     def _load_text(path_str: str | None, category: str | None = None) -> str:
-        path = resolve_persisted_artifact_path(path_str, category=category)
+        path = resolve_persisted_artifact_path(
+            path_str,
+            category=category,
+            trusted_persisted_reference=True,
+        )
         if path is None:
             return ""
         return path.read_text(encoding="utf-8")

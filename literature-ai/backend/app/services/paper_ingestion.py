@@ -21,6 +21,7 @@ from app.parsers.docling_parser import DoclingParser
 from app.parsers.grobid_parser import GrobidParseResult, GrobidParser
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.artifact_store import ArtifactStore
+from app.security.files import validate_local_ingest_pdf
 from app.services.pdf_image_extractor import PdfImageExtractor
 from app.services.embedding import EmbeddingUnavailableError, get_embedding_service
 from app.services.evidence_locator_service import EvidenceLocatorService
@@ -118,6 +119,8 @@ class PaperIngestionService:
         confirm_identity_mismatch: bool = False,
         ingest_source: str | None = None,
     ) -> Paper:
+        if ingest_source == "local_pdf":
+            source_path = validate_local_ingest_pdf(source_path, self.settings)
         if copy_pdf:
             stored_pdf = self.artifacts.save_pdf_copy(source_path, f"{uuid.uuid4()}_{original_filename}")
         else:
@@ -310,6 +313,7 @@ class PaperIngestionService:
             category="pdf",
             settings=self.settings,
             must_exist=False,
+            trusted_persisted_reference=True,
         ) or Path(paper.pdf_path or "")
         if not stored_pdf.exists():
             raise FileNotFoundError("Paper PDF is missing")

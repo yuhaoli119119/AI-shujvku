@@ -67,6 +67,12 @@
     const errorBox = document.getElementById('errorBox');
     const content = document.getElementById('content');
 
+    function escapeHtml(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[ch]);
+    }
+
     function showError(msg) {
       errorBox.textContent = msg;
       errorBox.style.display = 'block';
@@ -74,7 +80,7 @@
     }
 
     async function fetchApi(endpoint) {
-      const response = await fetch(`/api/share/${token}${endpoint}`);
+      const response = await fetch(`/api/share/${encodeURIComponent(token)}${endpoint}`);
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) throw new Error('Invalid, expired, or unauthorized share token.');
         throw new Error(`Server error: ${response.status}`);
@@ -103,33 +109,34 @@
       if (!papers || !papers.length) { content.innerHTML = '<p>No papers found.</p>'; return; }
       let html = '<h2>Accessible Papers</h2>';
       papers.forEach(p => {
+        const paperId = escapeHtml(p.id);
         let authors = 'Unknown';
         if (Array.isArray(p.authors)) authors = p.authors.map(a => a.name || a).join(', ');
         html += `
-          <div class="card" id="paper-${p.id}">
-            <h3 style="margin-top:0;color:var(--primary)">${p.title || 'Untitled'} <span class="muted">(${p.year || '?'})</span></h3>
-            <div class="muted">${authors}${p.journal ? ' — ' + p.journal : ''}</div>
-            <div class="tab-bar" id="tabs-${p.id}">
-              <div class="tab active" onclick="switchTab('${p.id}','figures')">🖼️ Figures</div>
-              <div class="tab" onclick="switchTab('${p.id}','notes')">📝 Notes</div>
-              <div class="tab" onclick="switchTab('${p.id}','dft')">⚛️ DFT</div>
-              <div class="tab" onclick="switchTab('${p.id}','corrections')">✏️ Corrections</div>
-              <div class="tab" onclick="switchTab('${p.id}','audit')">📋 Audit</div>
+          <div class="card" id="paper-${paperId}">
+            <h3 style="margin-top:0;color:var(--primary)">${escapeHtml(p.title || 'Untitled')} <span class="muted">(${escapeHtml(p.year || '?')})</span></h3>
+            <div class="muted">${escapeHtml(authors)}${p.journal ? ' — ' + escapeHtml(p.journal) : ''}</div>
+            <div class="tab-bar" id="tabs-${paperId}">
+              <div class="tab active" data-paper-id="${paperId}" data-tab="figures">🖼️ Figures</div>
+              <div class="tab" data-paper-id="${paperId}" data-tab="notes">📝 Notes</div>
+              <div class="tab" data-paper-id="${paperId}" data-tab="dft">⚛️ DFT</div>
+              <div class="tab" data-paper-id="${paperId}" data-tab="corrections">✏️ Corrections</div>
+              <div class="tab" data-paper-id="${paperId}" data-tab="audit">📋 Audit</div>
             </div>
-            <div id="section-${p.id}-figures" class="section active"><button class="btn" onclick="loadFigures('${p.id}')">Load Figures</button></div>
-            <div id="section-${p.id}-notes" class="section"><button class="btn" onclick="loadNotes('${p.id}')">Load Notes</button></div>
-            <div id="section-${p.id}-dft" class="section"><button class="btn" onclick="loadDft('${p.id}')">Load DFT Data</button></div>
-            <div id="section-${p.id}-corrections" class="section"><button class="btn" onclick="loadCorrections('${p.id}')">Load Corrections</button></div>
-            <div id="section-${p.id}-audit" class="section"><button class="btn" onclick="loadAudit('${p.id}')">Load Audit Log</button></div>
+            <div id="section-${paperId}-figures" class="section active"><button class="btn" data-paper-id="${paperId}" data-action="figures">Load Figures</button></div>
+            <div id="section-${paperId}-notes" class="section"><button class="btn" data-paper-id="${paperId}" data-action="notes">Load Notes</button></div>
+            <div id="section-${paperId}-dft" class="section"><button class="btn" data-paper-id="${paperId}" data-action="dft">Load DFT Data</button></div>
+            <div id="section-${paperId}-corrections" class="section"><button class="btn" data-paper-id="${paperId}" data-action="corrections">Load Corrections</button></div>
+            <div id="section-${paperId}-audit" class="section"><button class="btn" data-paper-id="${paperId}" data-action="audit">Load Audit Log</button></div>
           </div>`;
       });
       content.innerHTML = html;
     }
 
-    function switchTab(paperId, tabName) {
+    function switchTab(paperId, tabName, tabElement) {
       document.querySelectorAll(`#tabs-${paperId} .tab`).forEach(t => t.classList.remove('active'));
       document.querySelectorAll(`[id^="section-${paperId}-"]`).forEach(s => s.classList.remove('active'));
-      event.target.classList.add('active');
+      tabElement.classList.add('active');
       document.getElementById(`section-${paperId}-${tabName}`).classList.add('active');
     }
 
@@ -141,18 +148,18 @@
         if (!data.items || !data.items.length) { container.innerHTML = '<p class="muted">No figures found.</p>'; return; }
         let html = '<div class="figure-grid">';
         data.items.forEach(f => {
-          const imgSrc = f.image_path ? `/api/share/${token}/figures/${paperId}/${f.image_path.split('/').pop()}` : '';
+          const imgSrc = f.image_path ? `/api/share/${encodeURIComponent(token)}/figures/${encodeURIComponent(paperId)}/${encodeURIComponent(f.image_path.split('/').pop())}` : '';
           const label = f.figure_label || 'Figure';
-          const role = f.figure_role ? `<span class="badge">${f.figure_role}</span>` : '';
+          const role = f.figure_role ? `<span class="badge">${escapeHtml(f.figure_role)}</span>` : '';
           html += `<div class="figure-card">
-            ${imgSrc ? `<img src="${imgSrc}" alt="${label}" onclick="openLightbox('${imgSrc}')" loading="lazy">` : '<div style="height:200px;display:flex;align-items:center;justify-content:center;color:#999">No image</div>'}
-            <div class="caption"><strong>${label}</strong>${role} ${f.content_summary ? '<br>' + f.content_summary : ''}</div>
-            ${f.caption ? `<div class="meta">${f.caption}</div>` : ''}
+            ${imgSrc ? `<img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(label)}" data-lightbox-src="${escapeHtml(imgSrc)}" loading="lazy">` : '<div style="height:200px;display:flex;align-items:center;justify-content:center;color:#999">No image</div>'}
+            <div class="caption"><strong>${escapeHtml(label)}</strong>${role} ${f.content_summary ? '<br>' + escapeHtml(f.content_summary) : ''}</div>
+            ${f.caption ? `<div class="meta">${escapeHtml(f.caption)}</div>` : ''}
           </div>`;
         });
         html += '</div>';
         container.innerHTML = html;
-      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${escapeHtml(e.message)}</p>`; }
     }
 
     async function loadNotes(paperId) {
@@ -164,14 +171,14 @@
         let html = '';
         data.items.forEach(n => {
           html += `<div class="note-item">
-            <div class="note-source">${n.source}${n.field_name ? ' → ' + n.field_name : ''}${n.section_title ? ' [' + n.section_title + ']' : ''}</div>
-            <div class="note-content">${n.content}</div>
-            ${n.quoted_text ? '<div class="muted" style="margin-top:4px;font-style:italic">"' + n.quoted_text + '"</div>' : ''}
-            ${n.page ? '<div class="muted">p.' + n.page + '</div>' : ''}
+            <div class="note-source">${escapeHtml(n.source)}${n.field_name ? ' → ' + escapeHtml(n.field_name) : ''}${n.section_title ? ' [' + escapeHtml(n.section_title) + ']' : ''}</div>
+            <div class="note-content">${escapeHtml(n.content)}</div>
+            ${n.quoted_text ? '<div class="muted" style="margin-top:4px;font-style:italic">"' + escapeHtml(n.quoted_text) + '"</div>' : ''}
+            ${n.page ? '<div class="muted">p.' + escapeHtml(n.page) + '</div>' : ''}
           </div>`;
         });
         container.innerHTML = html;
-      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${escapeHtml(e.message)}</p>`; }
     }
 
     async function loadDft(paperId) {
@@ -184,14 +191,14 @@
         data.items.forEach(r => {
           const statusClass = r.candidate_status === 'verified' ? 'status-verified' : 'status-candidate';
           html += `<tr>
-            <td>${r.adsorbate || '?'}</td><td>${r.property_type || '?'}</td>
-            <td>${r.value != null ? r.value : '?'}</td><td>${r.unit || ''}</td>
-            <td>${r.reaction_step || '-'}</td><td class="${statusClass}">${r.candidate_status}</td>
+            <td>${escapeHtml(r.adsorbate || '?')}</td><td>${escapeHtml(r.property_type || '?')}</td>
+            <td>${escapeHtml(r.value != null ? r.value : '?')}</td><td>${escapeHtml(r.unit || '')}</td>
+            <td>${escapeHtml(r.reaction_step || '-')}</td><td class="${statusClass}">${escapeHtml(r.candidate_status)}</td>
           </tr>`;
         });
         html += '</tbody></table>';
         container.innerHTML = html;
-      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${escapeHtml(e.message)}</p>`; }
     }
 
     async function loadCorrections(paperId) {
@@ -203,13 +210,13 @@
         let html = '';
         data.items.forEach(c => {
           html += `<div class="note-item" style="border-left-color:${c.status === 'approved' ? '#2e7d32' : '#e65100'}">
-            <div class="note-source">${c.source} → ${c.field_name} <span class="badge">${c.status}</span></div>
-            <div class="note-content">Proposed: <code>${JSON.stringify(c.proposed_value)}</code></div>
-            ${c.review_comment ? '<div class="muted">' + c.review_comment + '</div>' : ''}
+            <div class="note-source">${escapeHtml(c.source)} → ${escapeHtml(c.field_name)} <span class="badge">${escapeHtml(c.status)}</span></div>
+            <div class="note-content">Proposed: <code>${escapeHtml(JSON.stringify(c.proposed_value))}</code></div>
+            ${c.review_comment ? '<div class="muted">' + escapeHtml(c.review_comment) + '</div>' : ''}
           </div>`;
         });
         container.innerHTML = html;
-      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${escapeHtml(e.message)}</p>`; }
     }
 
     async function loadAudit(paperId) {
@@ -221,11 +228,27 @@
         let html = '';
         data.items.forEach(l => {
           const time = l.created_at ? new Date(l.created_at).toLocaleString() : '?';
-          html += `<div class="audit-item"><strong>${l.action}</strong> by <em>${l.source}</em> <span class="muted">${time}</span></div>`;
+          html += `<div class="audit-item"><strong>${escapeHtml(l.action)}</strong> by <em>${escapeHtml(l.source)}</em> <span class="muted">${escapeHtml(time)}</span></div>`;
         });
         container.innerHTML = html;
-      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${e.message}</p>`; }
+      } catch (e) { container.innerHTML = `<p class="error" style="display:block">${escapeHtml(e.message)}</p>`; }
     }
+
+    content.addEventListener('click', event => {
+      const tab = event.target.closest('[data-tab][data-paper-id]');
+      if (tab) {
+        switchTab(tab.dataset.paperId, tab.dataset.tab, tab);
+        return;
+      }
+      const action = event.target.closest('[data-action][data-paper-id]');
+      if (action) {
+        const handlers = { figures: loadFigures, notes: loadNotes, dft: loadDft, corrections: loadCorrections, audit: loadAudit };
+        handlers[action.dataset.action]?.(action.dataset.paperId);
+        return;
+      }
+      const image = event.target.closest('[data-lightbox-src]');
+      if (image) openLightbox(image.dataset.lightboxSrc);
+    });
 
     loadData();
   </script>

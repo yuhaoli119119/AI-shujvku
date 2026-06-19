@@ -194,6 +194,7 @@ def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, sett
         category=category,
         settings=settings,
         must_exist=False,
+        trusted_persisted_reference=True,
     )
     if target is None:
         return None
@@ -795,7 +796,12 @@ def _resolve_paper_pdf_path(paper_id: UUID, session: Session) -> Path:
     if not paper.pdf_path:
         raise HTTPException(status_code=404, detail="PDF not uploaded or unavailable")
     settings = get_settings()
-    file_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
+    file_path = resolve_persisted_artifact_path(
+        paper.pdf_path,
+        category="pdf",
+        settings=settings,
+        trusted_persisted_reference=True,
+    )
     if file_path is None or not file_path.exists():
         raise HTTPException(status_code=404, detail="PDF file missing on disk")
     return file_path

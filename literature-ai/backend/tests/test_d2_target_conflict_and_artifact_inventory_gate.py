@@ -106,16 +106,16 @@ def test_build_report_summarizes_target_conflicts_and_unreferenced_inventory(mon
     monkeypatch.setattr(readiness, "default_library_root", lambda: proposed_root.resolve())
     monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [shadow_registry.resolve()])
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
-    monkeypatch.setattr(
-        gate,
-        "get_active_database_info",
-        lambda: {
-            "configured_db_path": str((current_root / "database.sqlite").resolve()),
-            "active_library_db_path": str((current_root / "database.sqlite").resolve()),
-            "effective_db_path": str((current_root / "database.sqlite").resolve()),
-            "effective_matches_active_library_db_path": True,
-        },
-    )
+    active_info = {
+        "configured_db_path": str((current_root / "database.sqlite").resolve()),
+        "active_library_db_path": str((current_root / "database.sqlite").resolve()),
+        "effective_db_path": str((current_root / "database.sqlite").resolve()),
+        "effective_matches_active_library_db_path": True,
+        "db_kind": "sqlite",
+        "recovered_from_candidate_scan": False,
+    }
+    monkeypatch.setattr(gate, "get_active_database_info", lambda: active_info)
+    monkeypatch.setattr(readiness, "get_active_database_info", lambda: active_info)
 
     report = gate.build_report()
 
@@ -165,17 +165,16 @@ def test_post_migration_target_active_files_are_expected_not_conflicts(monkeypat
     monkeypatch.setattr(readiness, "default_library_root", lambda: target_root.resolve())
     monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [])
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
-    monkeypatch.setattr(
-        gate,
-        "get_active_database_info",
-        lambda: {
-            "configured_db_path": None,
-            "active_library_db_path": str((target_root / "database.sqlite").resolve()),
-            "effective_db_path": str((target_root / "database.sqlite").resolve()),
-            "effective_matches_active_library_db_path": True,
-            "recovered_from_candidate_scan": False,
-        },
-    )
+    active_info = {
+        "configured_db_path": None,
+        "active_library_db_path": str((target_root / "database.sqlite").resolve()),
+        "effective_db_path": str((target_root / "database.sqlite").resolve()),
+        "effective_matches_active_library_db_path": True,
+        "db_kind": "sqlite",
+        "recovered_from_candidate_scan": False,
+    }
+    monkeypatch.setattr(gate, "get_active_database_info", lambda: active_info)
+    monkeypatch.setattr(readiness, "get_active_database_info", lambda: active_info)
 
     report = gate.build_report()
 

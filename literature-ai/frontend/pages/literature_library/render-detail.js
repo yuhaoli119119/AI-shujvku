@@ -2650,6 +2650,29 @@ function buildBlockedDftFallbackPrompt(row, index) {
     ].join("\n");
 }
 
+async function canonicalIdePromptForSelectedPaper(kind) {
+    const guide = await fetchJSON("/api/system/agent-guide");
+    const contract = guide && guide.prompt_contract ? guide.prompt_contract : {};
+    const templates = contract.templates && typeof contract.templates === "object" ? contract.templates : {};
+    const template = templates[kind] || templates.overall || guide.suggested_client_prompt || "";
+    if (!template) return "";
+
+    const paper = state.selectedPaper || {};
+    const paperId = paper.paper_id || paper.id || state.selectedPaperId || "-";
+    const humanRef = paper.paper_code || paperId;
+    const libraryName = paper.library_name ||
+        (typeof getCurrentLibraryName === "function" ? getCurrentLibraryName() : "") || "-";
+    const targetList = "- human_ref=" + humanRef + " | paper_id=" + paperId + " | library_name=" + libraryName;
+    const now = new Date();
+    const pad = function(value) { return String(value).padStart(2, "0"); };
+    const runTag = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + "_" +
+        pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+    const sourceLabel = "<agent_name>_" + kind + "_" + runTag;
+    return String(template)
+        .split(contract.target_list_token || "{{TARGET_LIST}}").join(targetList)
+        .split(contract.source_label_token || "{{SOURCE_LABEL}}").join(sourceLabel);
+}
+
 function buildBlockedDftBatchPrompt(rows) {
     const paper = state.selectedPaper || {};
     const title = paper.title_zh || paper.title || "Untitled paper";
@@ -2704,7 +2727,7 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         "任务：批量处理当前论文里所有“需处理 / 不可导出”的 DFT 候选；不要处理已可导出的记录。",
         "要求：先核对 PDF 证据，再逐条决定：该拒绝就拒绝；能补字段就补字段；发现漏提就新增 new_candidate。",
         "不要输出长解释；只输出一个可直接用于 import_analysis 的 JSON，顶层只保留 object_review_audits。",
-        "如果当前 IDE 没有暴露 MCP 工具，不要直接停下；请改用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 直接读取和回写，结果仍然按同一 JSON 输出。",
+        "如果当前 IDE 没有暴露 MCP 工具，不要直接停下；请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具。禁止直接调用 service/session/model 或数据库。",
         "",
         "决策规则：",
         "- 证据、材料身份、数值、单位、定位都能确认且无需改字段时，用 PASS。",
@@ -2769,7 +2792,10 @@ async function copyBlockedDftBatchPrompt() {
             showToast("当前这篇论文没有待补审的 DFT 候选。", "info");
             return;
         }
-        await navigator.clipboard.writeText(buildCompactBlockedDftBatchPrompt(rows));
+        const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
+        await navigator.clipboard.writeText(
+            [canonicalPrompt, buildCompactBlockedDftBatchPrompt(rows)].filter(Boolean).join("\n\n")
+        );
         showToast("已复制本篇 DFT 补审提示词，可直接发给 IDE AI / Codex。", "success");
     } catch (error) {
         showToast("DFT 补审提示词生成失败：" + error.message, "error");
@@ -2899,7 +2925,7 @@ function buildThirdAiDftAdjudicationPrompt(rows) {
     return [
         "任务：你是第三 AI 仲裁员，只处理下面 DFT 候选的冲突/不完整审核意见。",
         "必须读取原始 PDF 或 PDF 证据包；不要只复述前两个 AI 的意见。",
-        "如果当前 IDE 没有暴露 MCP 工具，请改用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 直接读取原始 PDF 证据与候选，再继续仲裁；不要停在 tool missing。",
+        "如果当前 IDE 没有暴露 MCP 工具，请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具读取证据；禁止直接操作 service/session/model 或数据库。",
         "如果缺证据页码或原文，请主动在 PDF 中定位；找不到就输出 NEEDS_HUMAN。",
         "单位标准：能量统一为 eV，meV 除以 1000；渗透率统一为 GPU，10^3 GPU 乘以 1000；原始表达写入 raw_value/raw_unit 或 evidence quoted_text。",
         "重复项必须明确 duplicate_of，并说明保留哪条、拒绝哪条。",
@@ -2929,7 +2955,10 @@ async function copyThirdAiDftAdjudicationPrompt() {
             showToast("当前没有需要第三 AI 仲裁的 DFT 候选。", "info");
             return;
         }
-        await navigator.clipboard.writeText(buildThirdAiDftAdjudicationPrompt(classified.thirdAi));
+        const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
+        await navigator.clipboard.writeText(
+            [canonicalPrompt, buildThirdAiDftAdjudicationPrompt(classified.thirdAi)].filter(Boolean).join("\n\n")
+        );
         showToast("DFT 冲突仲裁提示词已复制。", "success");
     } catch (error) {
         showToast("DFT 冲突仲裁提示词生成失败：" + error.message, "error");

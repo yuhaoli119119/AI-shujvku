@@ -47,6 +47,7 @@ def workbench_env(monkeypatch):
         storage_root = root / "storage"
         monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+        monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
         monkeypatch.setenv("LITAI_DOCLING_DO_OCR", "false")
         get_settings.cache_clear()
 

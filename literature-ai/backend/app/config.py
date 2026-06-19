@@ -96,9 +96,18 @@ class Settings(BaseSettings):
     writer_timeout_seconds: float = 30.0
     writer_fallback_backend: str = "rule"
     mcp_enabled: bool = True
-    mcp_allow_unauthenticated: bool = True
+    # HTTP MCP is key-gated.  In-process IDE integrations use mcp_auth_context
+    # and are intentionally independent from this transport setting.
+    mcp_allow_unauthenticated: bool = False
     mcp_api_keys: str = ""
     mcp_server_name: str = "Literature AI MCP"
+    owner_api_token: str | None = None
+    exports_enabled: bool = False
+    local_ingest_roots: str = "/host/users"
+    share_max_page_size: int = 50
+    share_rate_limit_per_minute: int = 120
+    share_max_concurrency: int = 8
+    share_public_base_url: str | None = None
     force_configured_database: bool = True
     enable_deprecated_db_endpoints: bool = False
     settings_admin_token: str | None = None

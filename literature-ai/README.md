@@ -11,6 +11,9 @@ The application does not treat any AI output as final truth by default.
 - Model names do not grant trust. All AI outputs remain candidates until they pass the required evidence, review, and confirmation gates.
 - PostgreSQL with pgvector is the active business database. SQLite is legacy/import/test infrastructure only.
 - MCP is the preferred controlled collaboration surface for IDE AI workers and other clients.
+- HTTP MCP always requires a configured Bearer key; private-network source addresses do not grant capabilities. Repository-native `mcp_auth_context` remains the in-process fallback.
+- Docker exposes a loopback-only Owner gateway on port 8000 and a separate LAN read-only share gateway on port 8080. PostgreSQL, Redis, MinIO, Grobid, and the backend service are not directly exposed to the LAN.
+- Bulk exports are disabled by default with `LITAI_EXPORTS_ENABLED=false`; export and share-link creation use independent MCP capabilities.
 - If the current IDE session does not expose MCP tools, the repository-native backend path in `backend/` may be used as the fallback execution route via `app.mcp.context.mcp_auth_context` and `app.mcp.server`.
 
 ## Main Components
@@ -34,6 +37,8 @@ The application does not treat any AI output as final truth by default.
 ## Quick Start
 
 ```bash
+cp .env.example .env
+# Replace every secret placeholder before starting.
 docker compose up --build
 curl http://localhost:8000/api/health
 ```

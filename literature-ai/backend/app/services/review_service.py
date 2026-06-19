@@ -516,7 +516,12 @@ class ReviewService:
         if not paper or not paper.pdf_path:
             raise ValueError("Paper PDF is missing; cannot recrop figure")
         settings = get_settings()
-        pdf_path = resolve_persisted_artifact_path(paper.pdf_path, category="pdf", settings=settings)
+        pdf_path = resolve_persisted_artifact_path(
+            paper.pdf_path,
+            category="pdf",
+            settings=settings,
+            trusted_persisted_reference=True,
+        )
         if pdf_path is None or not pdf_path.exists():
             raise ValueError("Paper PDF file is missing on disk; cannot recrop figure")
         if figure.page is None or int(figure.page) < 1:

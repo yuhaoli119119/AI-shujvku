@@ -745,7 +745,13 @@ def validate_extraction_preflight(
 
     pdf_reference = (paper.pdf_path or "").strip()
     pdf_path = (
-        resolve_persisted_artifact_path(pdf_reference, category="pdf", settings=settings, must_exist=True)
+        resolve_persisted_artifact_path(
+            pdf_reference,
+            category="pdf",
+            settings=settings,
+            must_exist=True,
+            trusted_persisted_reference=True,
+        )
         if pdf_reference
         else None
     )
@@ -878,9 +884,12 @@ def run_local_pdf_path_ingest_job(job_id: str, control_database_url: str | None 
         )
 
     try:
-        source_path = Path(str(payload.get("pdf_path") or ""))
-        if not source_path.exists():
-            raise FileNotFoundError(f"PDF path does not exist: {source_path}")
+        from app.security.files import validate_local_ingest_pdf
+
+        source_path = validate_local_ingest_pdf(
+            Path(str(payload.get("pdf_path") or "")),
+            runtime_settings,
+        )
 
         with session_scope(runtime_settings.database_url) as job_session:
             assert_job_not_cancelled(job_session, job_id)

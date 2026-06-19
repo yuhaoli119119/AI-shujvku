@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.db.models import Paper
 from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
+from app.security.files import UnsafeLocalPDF, validate_local_ingest_pdf
 from app.services.discovery_service import DiscoveryService
 from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
 from app.services.workflow_jobs import (
@@ -27,6 +28,13 @@ from app.services.workflow_jobs import (
 )
 
 router = APIRouter()
+
+
+def _validated_local_pdf(path: str, settings: Settings) -> Path:
+    try:
+        return validate_local_ingest_pdf(Path(path), settings)
+    except UnsafeLocalPDF as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _raise_already_exists(exc: PaperConflictError) -> None:
@@ -70,9 +78,7 @@ async def queue_ingest_from_path(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    source_path = Path(payload.pdf_path)
-    if not source_path.exists():
-        raise HTTPException(status_code=404, detail="PDF path does not exist")
+    source_path = _validated_local_pdf(payload.pdf_path, settings)
 
     target_library = normalize_library_name(payload.library_name)
     job_payload = {
@@ -115,9 +121,7 @@ async def ingest_from_path(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
-    source_path = Path(payload.pdf_path)
-    if not source_path.exists():
-        raise HTTPException(status_code=404, detail="PDF path does not exist")
+    source_path = _validated_local_pdf(payload.pdf_path, settings)
 
     external_meta = None
     if any([payload.title, payload.doi, payload.authors, payload.year, payload.journal, payload.abstract]):

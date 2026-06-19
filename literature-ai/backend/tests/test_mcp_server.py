@@ -73,6 +73,7 @@ def mcp_test_env(monkeypatch):
             "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections",
         )
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
+        monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", tmpdir)
         get_settings.cache_clear()
 
         engine = create_engine(db_url, future=True)
@@ -109,6 +110,15 @@ def _ide_auth() -> MCPAuthInfo:
         display_name="IDE AI",
         capabilities=frozenset({"read_papers", "append_notes", "propose_corrections", "request_parse"}),
         raw_key="litmcp_ide_ai",
+    )
+
+
+def _export_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="owner_export",
+        display_name="Owner Export",
+        capabilities=frozenset({"read_papers", "export_data"}),
+        raw_key="litmcp_owner_export",
     )
 
 
@@ -811,7 +821,9 @@ def test_mcp_get_paper_knowledge_returns_section_fallback_candidates(mcp_test_en
     assert payload["reliability_policy"]["knowledge_items_are_candidates"] is True
 
 
-def test_mcp_insert_word_citation_creates_guarded_docx_copy(mcp_test_env):
+def test_mcp_insert_word_citation_creates_guarded_docx_copy(mcp_test_env, monkeypatch):
+    monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
+    get_settings.cache_clear()
     docx_path = mcp_test_env["tmpdir"] / "draft.docx"
     document = Document()
     document.add_paragraph("Draft manuscript body.")
@@ -830,7 +842,7 @@ def test_mcp_insert_word_citation_creates_guarded_docx_copy(mcp_test_env):
         session.commit()
         paper_id = str(paper.id)
 
-    with mcp_auth_context(_auth()):
+    with mcp_auth_context(_export_auth()):
         payload = insert_word_citation(
             docx_path=str(docx_path),
             selected_paper_id=paper_id,
@@ -1209,6 +1221,8 @@ def test_http_correction_detail_returns_current_value_for_structured_targets(mcp
 async def test_scan_local_pdfs_and_ingest_pdf_batch(mcp_test_env, monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         folder = Path(tmpdir)
+        monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", str(folder))
+        get_settings.cache_clear()
         first_pdf = folder / "paper_a.pdf"
         second_pdf = folder / "paper_b.pdf"
         first_pdf.write_bytes(b"%PDF-1.4 first")
@@ -1224,7 +1238,15 @@ async def test_scan_local_pdfs_and_ingest_pdf_batch(mcp_test_env, monkeypatch):
             session.commit()
             existing_id = str(existing.id)
 
-        async def fake_ingest_pdf(self, source_path, original_filename, copy_pdf=True, external_metadata=None, source_reference=None):
+        async def fake_ingest_pdf(
+            self,
+            source_path,
+            original_filename,
+            copy_pdf=True,
+            external_metadata=None,
+            source_reference=None,
+            ingest_source=None,
+        ):
             paper = Paper(
                 title=f"Parsed {original_filename}",
                 pdf_path=f"stored_{original_filename}",

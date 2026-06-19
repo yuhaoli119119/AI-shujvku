@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from app.config import Settings
+from app.security.files import validate_pdf_file
 
 
 class ArtifactStore:
@@ -14,6 +15,7 @@ class ArtifactStore:
             path.mkdir(parents=True, exist_ok=True)
 
     def save_pdf_copy(self, source_path: Path, target_name: str) -> Path:
+        source_path = validate_pdf_file(source_path)
         destination = self.settings.storage_paths["pdf"] / target_name
         shutil.copy2(source_path, destination)
         return destination
@@ -22,6 +24,11 @@ class ArtifactStore:
         destination = self.settings.storage_paths["pdf"] / target_name
         with destination.open("wb") as handle:
             shutil.copyfileobj(upload.file, handle)
+        try:
+            validate_pdf_file(destination)
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
         return destination
 
     def write_text(self, category: str, target_name: str, content: str) -> Path:

@@ -111,6 +111,16 @@ def test_build_report_detects_conflicts_and_missing_files(monkeypatch, tmp_path)
     monkeypatch.setattr(readiness, "default_library_root", lambda: proposed_root.resolve())
     monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [shadow_registry.resolve()])
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
+    monkeypatch.setattr(
+        readiness,
+        "get_active_database_info",
+        lambda: {
+            "active_library_db_path": str((current_root / "database.sqlite").resolve()),
+            "effective_db_path": str((current_root / "database.sqlite").resolve()),
+            "db_kind": "sqlite",
+            "recovered_from_candidate_scan": False,
+        },
+    )
 
     report = readiness.build_report()
 
@@ -156,6 +166,16 @@ def test_build_report_is_cwd_stable(monkeypatch, tmp_path):
     monkeypatch.setattr(readiness, "default_library_root", lambda: proposed_root.resolve())
     monkeypatch.setattr(readiness, "shadow_registry_paths", lambda: [])
     monkeypatch.setattr(active_database_module, "canonical_registry_path", lambda: canonical_registry.resolve())
+    monkeypatch.setattr(
+        readiness,
+        "get_active_database_info",
+        lambda: {
+            "active_library_db_path": str((current_root / "database.sqlite").resolve()),
+            "effective_db_path": str((current_root / "database.sqlite").resolve()),
+            "db_kind": "sqlite",
+            "recovered_from_candidate_scan": False,
+        },
+    )
 
     monkeypatch.chdir(workspace_root)
     report_from_workspace = readiness.build_report()

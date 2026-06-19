@@ -886,6 +886,7 @@ class PaperWorkbenchService:
             paper.pdf_path,
             category="pdf",
             settings=self.settings,
+            trusted_persisted_reference=True,
         )
 
     def _workspace_root(self, paper_id: UUID) -> Path:
@@ -933,6 +934,7 @@ class PaperWorkbenchService:
             paper.markdown_path,
             category="markdown",
             settings=self.settings,
+            trusted_persisted_reference=True,
         )
         if markdown_path is not None and markdown_path.exists():
             target = markdown_dir / "source.md"
@@ -952,6 +954,7 @@ class PaperWorkbenchService:
             paper.docling_json_path,
             category="docling_json",
             settings=self.settings,
+            trusted_persisted_reference=True,
         )
         if docling_path is not None and docling_path.exists():
             target = extraction_dir / "docling.json"
@@ -1500,6 +1503,7 @@ class PaperWorkbenchService:
                 figure.image_path,
                 category="figures",
                 settings=self.settings,
+                trusted_persisted_reference=True,
             )
             if src is not None and src.exists():
                 safe_label = re.sub(r"[^A-Za-z0-9._-]+", "_", label).strip("._") or f"figure_{index}"

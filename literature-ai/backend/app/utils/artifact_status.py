@@ -81,7 +81,12 @@ def _resolve_artifact_for_status(raw_path: str | None, *, category: str, setting
         except OSError:
             continue
 
-    return resolve_persisted_artifact_path(raw, category=category, settings=settings)
+    return resolve_persisted_artifact_path(
+        raw,
+        category=category,
+        settings=settings,
+        trusted_persisted_reference=True,
+    )
 
 
 def _path_kind(raw_path: str | None, resolved_path: Path | None) -> str:

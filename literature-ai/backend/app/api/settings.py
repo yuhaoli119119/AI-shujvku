@@ -26,6 +26,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.security.owner import require_owner_request
+from app.services.ide_prompt_service import (
+    CANONICAL_MCP_PATH,
+    PROMPT_SCHEMA_VERSION,
+    build_ide_review_prompt,
+    prompt_contract,
+)
 
 router = APIRouter()
 
@@ -237,8 +244,14 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
         "embedding_api_key": "embedding_api_key",
         "embedding_model": "embedding_model",
         "embedding_dimension": "embedding_dimension",
-        "mcp_allow_unauthenticated": "mcp_allow_unauthenticated",
         "mcp_api_keys": "mcp_api_keys",
+        "owner_api_token": "owner_api_token",
+        "exports_enabled": "exports_enabled",
+        "local_ingest_roots": "local_ingest_roots",
+        "share_max_page_size": "share_max_page_size",
+        "share_rate_limit_per_minute": "share_rate_limit_per_minute",
+        "share_max_concurrency": "share_max_concurrency",
+        "share_public_base_url": "share_public_base_url",
     }
 
     for key, value in kv_pairs.items():
@@ -251,7 +264,14 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
             os.environ[env_key] = value
             # Patch the cached instance directly
             try:
-                object.__setattr__(settings, field_name, type(getattr(settings, field_name))(value))
+                current = getattr(settings, field_name)
+                if isinstance(current, bool):
+                    coerced = str(value).strip().lower() in {"1", "true", "yes", "on"}
+                elif isinstance(current, int):
+                    coerced = int(value)
+                else:
+                    coerced = value
+                object.__setattr__(settings, field_name, coerced)
             except (ValueError, TypeError):
                 object.__setattr__(settings, field_name, value)
         else:
@@ -274,8 +294,14 @@ _MANAGED_KEYS = [
     "embedding_api_key",
     "embedding_model",
     "embedding_dimension",
-    "mcp_allow_unauthenticated",
     "mcp_api_keys",
+    "owner_api_token",
+    "exports_enabled",
+    "local_ingest_roots",
+    "share_max_page_size",
+    "share_rate_limit_per_minute",
+    "share_max_concurrency",
+    "share_public_base_url",
 ]
 
 _DEPRECATED_WEB_AI_KEYS = {
@@ -404,26 +430,7 @@ def _advertised_base_url(
 
 
 def _enforce_settings_write_access(request: Request) -> None:
-    settings = __import__("app.config", fromlist=["get_settings"]).get_settings()
-    provided_token = request.headers.get("X-Settings-Token") or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    configured_token = (settings.settings_admin_token or "").strip()
-    client_host = (request.client.host if request.client else "") or ""
-
-    if configured_token:
-        if provided_token != configured_token:
-            raise HTTPException(status_code=403, detail="Invalid settings admin token")
-        return
-
-    if _is_local_request_host(client_host):
-        return
-
-    if _is_local_request_target(request):
-        return
-
-    raise HTTPException(
-        status_code=403,
-        detail="Settings writes from non-loopback clients require LITAI_SETTINGS_ADMIN_TOKEN.",
-    )
+    require_owner_request(request)
 
 
 @router.get("")
@@ -513,12 +520,12 @@ async def get_services_status() -> dict[str, Any]:
     # MCP status
     mcp_status = {
         "enabled": settings.mcp_enabled,
-        "allow_unauthenticated": settings.mcp_allow_unauthenticated,
+        "allow_unauthenticated": False,
         "has_keys": bool(persisted.get("mcp_api_keys") or settings.mcp_api_keys),
         "default_policy": (
             "disabled unless explicitly enabled for trusted local/dev use"
             if not settings.mcp_enabled
-            else ("open on trusted local/private networks" if settings.mcp_allow_unauthenticated else "bearer key required")
+            else "bearer key required"
         ),
     }
 
@@ -575,10 +582,10 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
     hostname = socket.gethostname()
     settings = get_settings()
     base_url = _advertised_base_url(request, fallback_host=local_ip, fallback_port=8000)
-    mcp_url = f"{base_url}/mcp/"
+    mcp_url = f"{base_url}{CANONICAL_MCP_PATH}"
 
     sample_key = "litmcp_your_key"
-    auth_required = not settings.mcp_allow_unauthenticated and bool(settings.mcp_api_keys)
+    auth_required = True
 
     server_config: dict[str, Any] = {
         "command": _mcp_runner_command(request),
@@ -589,11 +596,10 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             "--allow-http",
         ],
     }
-    if auth_required:
-        server_config["args"].extend(["--header", "Authorization:${LITAI_AUTH_HEADER}"])
-        server_config["env"] = {
-            "LITAI_AUTH_HEADER": f"Bearer {sample_key}",
-        }
+    server_config["args"].extend(["--header", "Authorization:${LITAI_AUTH_HEADER}"])
+    server_config["env"] = {
+        "LITAI_AUTH_HEADER": f"Bearer {sample_key}",
+    }
 
     cursor_config = {
         "mcpServers": {
@@ -602,8 +608,8 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
     }
 
     import json
-    auth_text = f"Bearer {sample_key}" if auth_required else "无需 Key / No key required on trusted local/private networks"
-    review_prompt = (
+    auth_text = f"Bearer {sample_key}"
+    legacy_review_prompt = (
         "You are an IDE AI reviewing papers inside the user's Literature AI project.\n"
         "Do not edit MCP config files unless the user explicitly asks you to configure MCP. First use the MCP tools already exposed by the current IDE/project session.\n"
         "Look for a project MCP server named literature-ai and tools such as query_papers, get_paper, get_codex_context, read_paper_page, import_analysis, recrop_figure, and create_figure_from_bbox.\n\n"
@@ -642,13 +648,16 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "cursor_config_json": json.dumps(cursor_config, indent=2, ensure_ascii=False),
         "vscode_config": cursor_config,  # Same format
         "vscode_config_json": json.dumps(cursor_config, indent=2, ensure_ascii=False),
-        "suggested_prompt": review_prompt,
+        "prompt_schema_version": PROMPT_SCHEMA_VERSION,
+        "prompt_contract": prompt_contract(),
+        "suggested_prompt": build_ide_review_prompt("overall"),
+        "legacy_english_suggested_prompt": legacy_review_prompt,
         "legacy_suggested_prompt": (
             f"请先使用你当前 IDE/项目会话已经暴露的 Literature AI MCP 工具，不要先改 mcp_config.json，也不要默认手工配置 MCP。\n"
             f"如果当前工具列表里已经有 literature-ai 相关工具，就直接开始；如果没有，再请用户重载/重启 IDE MCP 会话。\n"
             f"只有当用户明确要求手工配置 MCP 时，才使用下面的兜底信息：\n"
             f"服务地址：{mcp_url}\n"
-            f"认证方式：{'Bearer ' + sample_key if auth_required else '无需 Key（本机/内网直连）'}\n"
+            f"认证方式：Bearer {sample_key}\n"
             f"配置 JSON（仅在用户明确要求手工配置时使用）：\n"
             f"```json\n{json.dumps(cursor_config, indent=2, ensure_ascii=False)}\n```\n\n"
             f"连接成功后，你可以使用以下工具：\n"

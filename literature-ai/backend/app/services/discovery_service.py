@@ -13,6 +13,7 @@ import os
 
 import httpx
 
+from app.security.urls import get_public_url, validate_public_http_url
 from app.utils.text_cleaning import normalize_text_tree
 
 
@@ -132,10 +133,13 @@ class DiscoveryService:
         identifier: str,
         providers: list[str] | None = None,
     ) -> tuple[Any, dict[str, Any]]:
+        candidate_identifier = identifier.strip()
+        if "://" in candidate_identifier:
+            validate_public_http_url(candidate_identifier)
         active_providers = self._normalize_providers(providers, self.DEFAULT_DOWNLOAD_PROVIDERS)
         if "web_scraping" not in active_providers:
             active_providers.append("web_scraping")
-        paper = self.engine.get(identifier.strip(), databases=active_providers, timeout=15.0, verbose=False)
+        paper = self.engine.get(candidate_identifier, databases=active_providers, timeout=15.0, verbose=False)
         if paper is None:
             raise ValueError("No paper metadata found for the given identifier")
         return paper, self._serialize_paper(paper)
@@ -153,12 +157,16 @@ class DiscoveryService:
         url = (pdf_url or "").strip()
         if not url:
             raise ValueError("Missing direct PDF URL")
-        target_name = filename or f"{uuid.uuid4()}.pdf"
+        target_name = Path(filename or f"{uuid.uuid4()}.pdf").name
+        if not target_name.lower().endswith(".pdf"):
+            target_name += ".pdf"
         target_path = dest_dir / target_name
-        with httpx.Client(timeout=45.0, follow_redirects=True) as client:
-            response = client.get(url)
+        with httpx.Client(timeout=45.0, follow_redirects=False) as client:
+            response = get_public_url(client, url)
             response.raise_for_status()
             content = response.content
+        if len(content) > 30 * 1024 * 1024:
+            raise ValueError("Direct PDF exceeds the 30MB ingest limit")
         if not content.startswith(b"%PDF"):
             raise ValueError("Direct URL did not return a PDF file")
         target_path.write_bytes(content)
@@ -178,8 +186,9 @@ class DiscoveryService:
         else:
             type_filter = "type:article|review"
 
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
-            response = client.get(
+        with httpx.Client(timeout=12.0, follow_redirects=False) as client:
+            response = get_public_url(
+                client,
                 "https://api.openalex.org/works",
                 params={"search": query, "per-page": per_page, "filter": type_filter},
                 headers={"User-Agent": "LiteratureAI/1.0"},
@@ -247,8 +256,9 @@ class DiscoveryService:
     def _search_arxiv(self, query: str, limit: int, target_types: list[str] | None = None) -> list[dict[str, Any]]:
         arxiv_query = self._build_arxiv_query(query, target_types)
         max_results = min(max(limit, 1), 100)
-        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
-            response = client.get(
+        with httpx.Client(timeout=12.0, follow_redirects=False) as client:
+            response = get_public_url(
+                client,
                 "http://export.arxiv.org/api/query",
                 params={"search_query": arxiv_query, "start": 0, "max_results": max_results},
                 headers={"User-Agent": "LiteratureAI/1.0"},
