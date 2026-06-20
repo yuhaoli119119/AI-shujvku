@@ -271,7 +271,7 @@ class PaperQueryService:
             created_order,
         )
 
-    def get_paper_detail(self, paper_id: UUID) -> PaperDetailResponse | None:
+    def get_paper_detail(self, paper_id: UUID, *, compact: bool = False) -> PaperDetailResponse | None:
         paper = self.session.get(Paper, paper_id)
         if not paper:
             return None
@@ -325,65 +325,81 @@ class PaperQueryService:
             select(PaperRelationship).where(PaperRelationship.target_paper_id == paper_id)
         ).all()
 
-        references = self.session.scalars(
-            select(ReferenceEntry).where(ReferenceEntry.paper_id == paper_id).order_by(ReferenceEntry.reference_number.asc().nulls_last(), ReferenceEntry.created_at.asc())
-        ).all()
-        paper_notes = self.session.scalars(
-            select(PaperNote)
-            .where(PaperNote.paper_id == paper_id)
-            .where(PaperNote.source != "translation_preview")
-            .order_by(PaperNote.created_at.desc())
-            .limit(30)
-        ).all()
-        full_translation = self._latest_full_translation(paper_id)
-        figure_ids = {str(figure.id) for figure in figures}
-        table_ids = {str(table.id) for table in tables}
-        table_audits = self._object_review_audits_by_target(
-            paper_id,
-            table_ids,
-            target_types={"table", "tables", "paper_table", "paper_tables"},
-        )
-        table_corrections = self._table_corrections_by_target(paper_id, table_ids)
-        figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
-        figure_approved_corrections = self._figure_approved_corrections(paper_id, figure_ids)
-        figure_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
-            paper_ids={paper_id},
-            target_type="figure",
-            target_ids=figure_ids,
-        )
-        writing_card_ids = {str(card.id) for card in writing_cards}
-        writing_card_audits = self._object_review_audits_by_target(
-            paper_id,
-            writing_card_ids,
-            target_types={"writing_card", "writing_cards"},
-        )
-        writing_card_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
-            paper_ids={paper_id},
-            target_type="writing_cards",
-            target_ids=writing_card_ids,
-        )
-        mechanism_claim_ids = {str(claim.id) for claim in mechanism_claims}
-        mechanism_claim_audits = self._object_review_audits_by_target(
-            paper_id,
-            mechanism_claim_ids,
-            target_types={"mechanism_claim", "mechanism_claims"},
-        )
-        mechanism_claim_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
-            paper_ids={paper_id},
-            target_type="mechanism_claims",
-            target_ids=mechanism_claim_ids,
-        )
-        dft_result_ids = {str(item.id) for item in dft_results}
-        dft_result_audits = self._object_review_audits_by_target(
-            paper_id,
-            dft_result_ids,
-            target_types={"dft_result", "dft_results"},
-        )
-        dft_result_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
-            paper_ids={paper_id},
-            target_type="dft_results",
-            target_ids=dft_result_ids,
-        )
+        if compact:
+            references = []
+            paper_notes = []
+            full_translation = None
+            table_audits: dict[str, list[dict[str, Any]]] = {}
+            table_corrections: dict[str, list[dict[str, Any]]] = {}
+            figure_audits: dict[str, list[dict[str, Any]]] = {}
+            figure_approved_corrections: dict[str, list[dict[str, Any]]] = {}
+            figure_conflicts: dict[str, list[dict[str, Any]]] = {}
+            writing_card_audits: dict[str, list[dict[str, Any]]] = {}
+            writing_card_conflicts: dict[str, list[dict[str, Any]]] = {}
+            mechanism_claim_audits: dict[str, list[dict[str, Any]]] = {}
+            mechanism_claim_conflicts: dict[str, list[dict[str, Any]]] = {}
+            dft_result_audits: dict[str, list[dict[str, Any]]] = {}
+            dft_result_conflicts: dict[str, list[dict[str, Any]]] = {}
+        else:
+            references = self.session.scalars(
+                select(ReferenceEntry).where(ReferenceEntry.paper_id == paper_id).order_by(ReferenceEntry.reference_number.asc().nulls_last(), ReferenceEntry.created_at.asc())
+            ).all()
+            paper_notes = self.session.scalars(
+                select(PaperNote)
+                .where(PaperNote.paper_id == paper_id)
+                .where(PaperNote.source != "translation_preview")
+                .order_by(PaperNote.created_at.desc())
+                .limit(30)
+            ).all()
+            full_translation = self._latest_full_translation(paper_id)
+            figure_ids = {str(figure.id) for figure in figures}
+            table_ids = {str(table.id) for table in tables}
+            table_audits = self._object_review_audits_by_target(
+                paper_id,
+                table_ids,
+                target_types={"table", "tables", "paper_table", "paper_tables"},
+            )
+            table_corrections = self._table_corrections_by_target(paper_id, table_ids)
+            figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
+            figure_approved_corrections = self._figure_approved_corrections(paper_id, figure_ids)
+            figure_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+                paper_ids={paper_id},
+                target_type="figure",
+                target_ids=figure_ids,
+            )
+            writing_card_ids = {str(card.id) for card in writing_cards}
+            writing_card_audits = self._object_review_audits_by_target(
+                paper_id,
+                writing_card_ids,
+                target_types={"writing_card", "writing_cards"},
+            )
+            writing_card_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+                paper_ids={paper_id},
+                target_type="writing_cards",
+                target_ids=writing_card_ids,
+            )
+            mechanism_claim_ids = {str(claim.id) for claim in mechanism_claims}
+            mechanism_claim_audits = self._object_review_audits_by_target(
+                paper_id,
+                mechanism_claim_ids,
+                target_types={"mechanism_claim", "mechanism_claims"},
+            )
+            mechanism_claim_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+                paper_ids={paper_id},
+                target_type="mechanism_claims",
+                target_ids=mechanism_claim_ids,
+            )
+            dft_result_ids = {str(item.id) for item in dft_results}
+            dft_result_audits = self._object_review_audits_by_target(
+                paper_id,
+                dft_result_ids,
+                target_types={"dft_result", "dft_results"},
+            )
+            dft_result_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+                paper_ids={paper_id},
+                target_type="dft_results",
+                target_ids=dft_result_ids,
+            )
         catalyst_by_id = {str(item.id): item for item in catalyst_samples}
 
         base_counts = {
@@ -403,29 +419,38 @@ class PaperQueryService:
         for row in outgoing_relationships:
             relationship_summary[row.relationship_type] = relationship_summary.get(row.relationship_type, 0) + 1
         base = self._build_list_item_with_counts(paper, base_counts, relationship_summary, include_heavy=True)
-        related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {row.source_paper_id for row in incoming_relationships}
-        related_titles = {}
-        if related_paper_ids:
-            related_titles = {
-                item.id: item.title
-                for item in self.session.scalars(select(Paper).where(Paper.id.in_(list(related_paper_ids)))).all()
-            }
+        if compact:
+            outgoing_relationships = []
+            incoming_relationships = []
+            related_titles = {}
+        else:
+            related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {row.source_paper_id for row in incoming_relationships}
+            related_titles = {}
+            if related_paper_ids:
+                related_titles = {
+                    item.id: item.title
+                    for item in self.session.scalars(select(Paper).where(Paper.id.in_(list(related_paper_ids)))).all()
+                }
         base_payload = base.model_dump()
         base_payload["full_translation_zh"] = full_translation
-        review_status = self._paper_detail_review_status(
-            paper_id=paper_id,
-            paper=paper,
-            sections=sections,
-            figures=figures,
-            writing_cards=writing_cards,
-            dft_results=dft_results,
-            full_translation=full_translation,
-            figure_audits=figure_audits,
-            figure_conflicts=figure_conflicts,
-            writing_card_audits=writing_card_audits,
-            writing_card_conflicts=writing_card_conflicts,
-            dft_result_audits=dft_result_audits,
-            dft_result_conflicts=dft_result_conflicts,
+        review_status = (
+            {}
+            if compact
+            else self._paper_detail_review_status(
+                paper_id=paper_id,
+                paper=paper,
+                sections=sections,
+                figures=figures,
+                writing_cards=writing_cards,
+                dft_results=dft_results,
+                full_translation=full_translation,
+                figure_audits=figure_audits,
+                figure_conflicts=figure_conflicts,
+                writing_card_audits=writing_card_audits,
+                writing_card_conflicts=writing_card_conflicts,
+                dft_result_audits=dft_result_audits,
+                dft_result_conflicts=dft_result_conflicts,
+            )
         )
         return PaperDetailResponse(
             **base_payload,
@@ -487,11 +512,15 @@ class PaperQueryService:
             references=[ReferenceEntryResponse.model_validate(item) for item in references],
             figure_data_points_items=[FigureDataPointResponse.model_validate(item) for item in figure_data_points],
             artifact_status=build_paper_artifact_status(paper),
-            rag_quality=build_rag_quality_summary(
-                self.session,
-                figures=figures,
-                dft_results=dft_results,
-                writing_cards=writing_cards,
+            rag_quality=(
+                {}
+                if compact
+                else build_rag_quality_summary(
+                    self.session,
+                    figures=figures,
+                    dft_results=dft_results,
+                    writing_cards=writing_cards,
+                )
             ),
             **review_status,
         )

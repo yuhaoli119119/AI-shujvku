@@ -58,6 +58,7 @@ from app.mcp.server import (
     scan_local_pdfs,
     scan_duplicate_dois,
 )
+from app.services.paper_query import PaperQueryService
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
 
 
@@ -561,6 +562,48 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
         assert stored_candidate.candidate_type == "object_review_audit"
         assert stored_candidate.status == "candidate"
         assert stored_candidate.normalized_payload["writes_final_truth"] is False
+
+
+def test_mcp_codex_context_and_item_use_compact_detail_query(mcp_test_env, monkeypatch):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Compact Codex Context Paper", pdf_path="compact-context.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        section = PaperSection(
+            paper_id=paper.id,
+            section_title="Introduction",
+            section_type="introduction",
+            text="Compact detail should still include sections.",
+            page_start=1,
+            page_end=1,
+        )
+        figure = PaperFigure(
+            paper_id=paper.id,
+            page=1,
+            caption="Figure 1. Compact detail figure.",
+            image_path="figures/compact-context-figure.png",
+        )
+        session.add_all([section, figure])
+        session.commit()
+        paper_id = str(paper.id)
+        figure_id = str(figure.id)
+
+    original = PaperQueryService.get_paper_detail
+    compact_flags: list[bool] = []
+
+    def wrapped(self, paper_id, *args, **kwargs):
+        compact_flags.append(bool(kwargs.get("compact", False)))
+        return original(self, paper_id, *args, **kwargs)
+
+    monkeypatch.setattr(PaperQueryService, "get_paper_detail", wrapped)
+
+    with mcp_auth_context(_ide_auth()):
+        context = get_codex_context(paper_id=paper_id)
+        item = get_codex_item(paper_id=paper_id, item_type="figure", item_id=figure_id)
+
+    assert compact_flags == [True, True]
+    assert len(context["context"]["content"]["sections"]) == 1
+    assert item["context"]["item"]["caption"] == "Figure 1. Compact detail figure."
 
 
 def test_mcp_import_analysis_auto_applies_dual_ai_dft_reviews(mcp_test_env):

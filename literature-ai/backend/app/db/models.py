@@ -408,7 +408,7 @@ class PaperNote(Base):
     content: Mapped[str] = mapped_column(sa.Text)
     field_name: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
     page: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
-    section_title: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    section_title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     quoted_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
 

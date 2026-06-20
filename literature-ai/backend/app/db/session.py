@@ -84,6 +84,7 @@ def init_db(database_url: str, *, force: bool = False) -> None:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE papers DROP CONSTRAINT IF EXISTS papers_doi_key"))
             connection.execute(text("DROP INDEX IF EXISTS ix_papers_doi"))
+            connection.execute(text("ALTER TABLE paper_notes ALTER COLUMN section_title TYPE TEXT"))
             connection.execute(
                 text(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_library_doi "

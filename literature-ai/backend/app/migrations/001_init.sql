@@ -322,7 +322,7 @@ CREATE TABLE paper_notes (
 	content TEXT NOT NULL, 
 	field_name VARCHAR(128), 
 	page INTEGER, 
-	section_title VARCHAR(255), 
+	section_title TEXT, 
 	quoted_text TEXT, 
 	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 

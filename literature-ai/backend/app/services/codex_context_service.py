@@ -76,7 +76,7 @@ class CodexContextService:
         max_tables: int = 8,
         max_candidates: int = 20,
     ) -> CodexContextResponse | None:
-        detail = PaperQueryService(self.session).get_paper_detail(paper_id)
+        detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=True)
         if detail is None:
             return None
 
@@ -129,7 +129,7 @@ class CodexContextService:
             supported = ", ".join(sorted(set(self.item_type_aliases.values())))
             raise ValueError(f"Unsupported item type. Supported values: {supported}")
 
-        detail = PaperQueryService(self.session).get_paper_detail(paper_id)
+        detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=True)
         if detail is None:
             return None
         item = self._find_detail_item(detail, normalized_type, item_id)
