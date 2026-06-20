@@ -60,7 +60,9 @@ class PaperReprocessingService:
         self.session.add(paper)
         self.session.commit()
 
-        workspace_summary = self.workbench._prepare_paper_workspace_unlocked(paper.id, render_pages=True)
+        # External AI reads context through codex-context/codex-item/read_paper_page.
+        # Full page preview rendering is optional and noticeably slows this path down.
+        workspace_summary = self.workbench._prepare_paper_workspace_unlocked(paper.id, render_pages=False)
         self.session.refresh(paper)
         artifact_status = build_paper_artifact_status(paper, settings=self.settings)
 

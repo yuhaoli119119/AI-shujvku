@@ -176,6 +176,7 @@ def test_rerun_stage2_replaces_existing_outputs():
                 workspace_root = tmp_path / "by_id" / str(paper.id)
                 package_path = workspace_root / "extraction" / "ai_reading_package.json"
                 assert package_path.exists()
+                assert list((workspace_root / "pages").glob("*.png")) == []
                 package = json.loads(package_path.read_text(encoding="utf-8"))
                 source_documents = package["source_documents"]
                 assert source_documents[0]["source_document_type"] == "main_text"
