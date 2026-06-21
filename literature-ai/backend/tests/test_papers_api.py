@@ -151,6 +151,56 @@ def test_list_papers_api_supports_year_serial_sorting(setup_test_db):
     assert [item["title"] for item in payload] == ["2019-001", "2019-003", "2018-010"]
 
 
+def test_list_papers_api_supports_serial_number_sorting(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        session.add_all(
+            [
+                Paper(title="Serial 3", year=2023, serial_number=3, pdf_path="a.pdf", paper_code="B0003"),
+                Paper(title="Serial 1", year=2021, serial_number=1, pdf_path="b.pdf", paper_code="A0001"),
+                Paper(title="Serial 2", year=2022, serial_number=2, pdf_path="c.pdf", paper_code="C0002"),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/papers", params={"sort_by": "serial_number", "sort_order": "asc"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload] == ["Serial 1", "Serial 2", "Serial 3"]
+
+    response = client.get("/api/papers", params={"sort_by": "serial_number", "sort_order": "desc"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload] == ["Serial 3", "Serial 2", "Serial 1"]
+
+
+def test_list_papers_api_supports_paper_code_numeric_sorting(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        session.add_all(
+            [
+                Paper(title="Code 10", year=2023, serial_number=1, pdf_path="a.pdf", paper_code="B0010"),
+                Paper(title="Code 2", year=2021, serial_number=3, pdf_path="b.pdf", paper_code="A0002"),
+                Paper(title="Code 3", year=2022, serial_number=2, pdf_path="c.pdf", paper_code="C0003"),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/papers", params={"sort_by": "paper_code_numeric", "sort_order": "asc"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload] == ["Code 2", "Code 3", "Code 10"]
+
+    response = client.get("/api/papers", params={"sort_by": "paper_code_numeric", "sort_order": "desc"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload] == ["Code 10", "Code 3", "Code 2"]
+
+
 def test_paper_api_exposes_stable_paper_id_on_list_and_detail(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -303,6 +353,168 @@ def test_delete_paper_default_keeps_files(setup_test_db, tmp_path, monkeypatch):
     assert figure_file.exists()
 
 
+def test_direct_delete_figure_endpoint_removes_duplicate_row_and_file(setup_test_db, tmp_path, monkeypatch):
+    engine = setup_test_db
+    storage_root = tmp_path / "storage"
+    (storage_root / "figures").mkdir(parents=True)
+    figure_file = storage_root / "figures" / "figure-dup.png"
+    figure_file.write_text("fixture", encoding="utf-8")
+
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Direct Delete Figure", pdf_path="paper.pdf")
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            figure_label="fig_4a",
+            caption="Duplicate right-column fragment of Fig. 4.",
+            page=6,
+            crop_status="needs_recrop",
+            figure_role="experimental_evidence",
+            content_summary="Duplicate parser fragment.",
+            image_path="figure-dup.png",
+        )
+        session.add(figure)
+        session.flush()
+        pending = PaperCorrection(
+            paper_id=paper.id,
+            source="tester",
+            field_name="figures",
+            target_path=f"figures:{figure.id}:delete",
+            operation="delete",
+            proposed_value=None,
+            reason="old pending delete proposal",
+            evidence_payload={"page": 6, "quoted_text": "Duplicate right-column fragment of Fig. 4."},
+            status="pending",
+        )
+        session.add(pending)
+        session.commit()
+        paper_id = str(paper.id)
+        figure_id = str(figure.id)
+        pending_id = str(pending.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{paper_id}/figures/{figure_id}/delete",
+        json={
+            "confirm_direct_delete": True,
+            "reviewer": "literature_library_user",
+            "reason": "Duplicate parser fragment of Fig. 4 should be removed immediately.",
+            "evidence_payload": {"page": 6, "figure_label": "fig_4a", "quoted_text": "Duplicate right-column fragment of Fig. 4."},
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "deleted"
+    assert pending_id in payload["retired_correction_ids"]
+    assert len(payload["deleted_files"]) == 1
+    assert not figure_file.exists()
+
+    with Session() as session:
+        assert session.get(PaperFigure, UUID(figure_id)) is None
+        retired = session.get(PaperCorrection, UUID(pending_id))
+        assert retired is not None
+        assert retired.status == "rejected"
+        logs = session.scalars(select(AuditLog).where(AuditLog.action == "direct_delete_figure")).all()
+        assert len(logs) == 1
+        assert logs[0].target_id == figure_id
+
+
+def test_direct_delete_figure_endpoint_rejects_clean_figure(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Clean Figure", pdf_path="paper.pdf")
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            figure_label="fig_2",
+            caption="Figure 2. Full clean figure.",
+            page=4,
+            crop_status="recropped",
+            figure_role="experimental_evidence",
+            content_summary="Full figure crop.",
+        )
+        session.add(figure)
+        session.commit()
+        paper_id = str(paper.id)
+        figure_id = str(figure.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{paper_id}/figures/{figure_id}/delete",
+        json={
+            "confirm_direct_delete": True,
+            "reviewer": "literature_library_user",
+            "reason": "Try deleting a clean figure.",
+            "evidence_payload": {"page": 4, "figure_label": "fig_2", "quoted_text": "Figure 2. Full clean figure."},
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "direct_delete_not_allowed:figure_not_duplicate_or_noise"
+
+
+def test_direct_delete_figure_endpoint_allows_duplicate_figure_number_without_marker_text(setup_test_db, tmp_path, monkeypatch):
+    engine = setup_test_db
+    storage_root = tmp_path / "storage"
+    (storage_root / "figures").mkdir(parents=True)
+    dup_file = storage_root / "figures" / "figure-7-dup.png"
+    full_file = storage_root / "figures" / "figure-7-full.png"
+    dup_file.write_text("fixture", encoding="utf-8")
+    full_file.write_text("fixture", encoding="utf-8")
+
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
+    get_settings.cache_clear()
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Duplicate Number Figure", pdf_path="paper.pdf")
+        session.add(paper)
+        session.flush()
+        session.add(
+            PaperFigure(
+                paper_id=paper.id,
+                figure_label="Figure 7",
+                caption="Figure 7. Full panel crop.",
+                page=7,
+                crop_status="recropped",
+                figure_role="experimental_evidence",
+                content_summary="Full Figure 7 panel.",
+                image_path="figure-7-full.png",
+            )
+        )
+        duplicate = PaperFigure(
+            paper_id=paper.id,
+            figure_label="Figure 7",
+            caption="Figure 7. Fragment crop without duplicate marker text.",
+            page=7,
+            crop_status="candidate_crop",
+            figure_role="experimental_evidence",
+            content_summary=None,
+            image_path="figure-7-dup.png",
+        )
+        session.add(duplicate)
+        session.commit()
+        paper_id = str(paper.id)
+        duplicate_id = str(duplicate.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{paper_id}/figures/{duplicate_id}/delete",
+        json={
+            "confirm_direct_delete": True,
+            "reviewer": "literature_library_user",
+            "reason": "Same paper contains two Figure 7 objects; remove the fragment crop.",
+            "evidence_payload": {"page": 7, "figure_label": "Figure 7", "quoted_text": "Figure 7. Fragment crop without duplicate marker text."},
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert not dup_file.exists()
+
+
 def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     client = TestClient(app)
     response = client.get("/api/system/agent-guide")
@@ -326,10 +538,11 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
-    assert data["prompt_schema_version"] == "ide_review_prompt_v3"
+    assert data["prompt_schema_version"] == "ide_review_prompt_v4"
     assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
     assert "app.mcp.context.mcp_auth_context" in data["suggested_client_prompt"]
     assert "A_text_readable 或 B_text_partial" in data["suggested_client_prompt"]
+    assert "module_write_lock_required:notes" in data["suggested_client_prompt"]
     assert "section_level" in data["prompt_contract"]["templates"]["sections_writing"]
     ai_search = next(item for item in data["http_endpoints"] if item["name"] == "ai_search")
     assert "raw query" in ai_search["purpose"]
@@ -1046,6 +1259,158 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         audit = session.scalar(select(AuditLog).where(AuditLog.action == "reject_dft_result"))
         assert audit is not None
         assert audit.target_id == str(row_id)
+
+
+def test_reject_dft_result_requires_and_accepts_existing_review_versions(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Existing DFT review paper", year=2026, pdf_path="existing-review.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            adsorbate="*O",
+            property_type="adsorption_energy",
+            value=1.8,
+            unit="eV",
+            evidence_text="The oxygen adsorption energy is 1.8 eV.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value=1.8,
+                reviewed_value=1.8,
+                unit="eV",
+                evidence_text="The oxygen adsorption energy is 1.8 eV.",
+                reviewer_status="corrected",
+                reviewer="ai_1",
+                reviewer_note="Prior review",
+                write_version=1,
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+
+    missing_version = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/reject",
+        json={
+            "confirm_reject_candidate": True,
+            "reviewer": "codex_test",
+            "reviewer_note": "Should fail without expected version.",
+        },
+    )
+    assert missing_version.status_code == 409
+    assert missing_version.json()["detail"] == "write_conflict:extraction_review_version_required"
+
+    with_version = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/reject",
+        json={
+            "confirm_reject_candidate": True,
+            "reviewer": "codex_test",
+            "reviewer_note": "Now reject with the current review version.",
+            "expected_write_versions": {"value": 1},
+        },
+    )
+    assert with_version.status_code == 200
+    payload = with_version.json()
+    assert payload["dft_result_id"] == row_id
+    assert all(item["reviewer_status"] == "rejected" for item in payload["reviews"])
+
+
+def test_revoke_rejected_dft_result_returns_it_to_pending_queue(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Rejected DFT revoke paper", year=2026, pdf_path="revoke-rejected.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            adsorbate="*O",
+            property_type="adsorption_energy",
+            value=1.8,
+            unit="eV",
+            evidence_text="The oxygen adsorption energy is 1.8 eV.",
+            candidate_status="Rejected",
+        )
+        session.add(row)
+        session.flush()
+        session.add_all([
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value=1.8,
+                reviewed_value=None,
+                unit="eV",
+                evidence_text="The oxygen adsorption energy is 1.8 eV.",
+                reviewer_status="rejected",
+                reviewer="ai_1",
+                reviewer_note="Rejected candidate",
+                write_version=1,
+            ),
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="adsorbate",
+                original_value="*O",
+                reviewed_value=None,
+                unit=None,
+                evidence_text="The oxygen adsorption energy is 1.8 eV.",
+                reviewer_status="rejected",
+                reviewer="ai_1",
+                reviewer_note="Rejected candidate",
+                write_version=1,
+            ),
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="energy_type",
+                original_value="adsorption_energy",
+                reviewed_value=None,
+                unit=None,
+                evidence_text="The oxygen adsorption energy is 1.8 eV.",
+                reviewer_status="rejected",
+                reviewer="ai_1",
+                reviewer_note="Rejected candidate",
+                write_version=1,
+            ),
+        ])
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/revoke-review",
+        json={
+            "reviewer": "codex_test",
+            "reviewer_note": "Return this rejected row to pending for retesting.",
+            "field_names": [],
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dft_result_id"] == row_id
+    assert all(item["reviewer_status"] == "pending" for item in payload["reviews"])
+
+    with Session() as session:
+        updated = session.get(DFTResult, UUID(row_id))
+        assert updated is not None
+        assert updated.candidate_status == "system_candidate"
 
 
 def test_propose_dft_catalyst_binding_requires_anchor_and_valid_sample(setup_test_db):
@@ -2452,6 +2817,177 @@ def test_upload_pdf_with_existing_full_doi_returns_conflict(setup_test_db, monke
         papers = session.scalars(select(Paper).where(Paper.library_name == "ConflictLibrary")).all()
         assert len(papers) == 1
         assert papers[0].pdf_path == "existing.pdf"
+
+
+def test_queue_upload_job_merges_metadata_only_placeholder(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Queued Upload Merge",
+            "doi": "10.1000/queued-merge",
+            "year": 2024,
+            "journal": "Queued Journal",
+        },
+    )
+
+    with Session() as session:
+        placeholder = Paper(
+            library_name="QueuedLibrary",
+            doi="10.1000/queued-merge",
+            title="Queued Upload Merge",
+            year=2024,
+            journal="Queued Journal",
+            pdf_path="",
+            source_path="https://doi.org/10.1000/queued-merge",
+            oa_status="metadata_only",
+            serial_number=8,
+        )
+        session.add(placeholder)
+        session.commit()
+        session.refresh(placeholder)
+        placeholder_id = str(placeholder.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ingest/upload/jobs",
+        data={"library_name": "QueuedLibrary"},
+        files={"file": ("queued.pdf", io.BytesIO(b"%PDF-1.4 queued merge"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    poll = client.get(f"/api/jobs/{job_id}")
+    assert poll.status_code == 200
+    job = poll.json()
+    assert job["type"] == "local_pdf_path_ingest"
+    assert job["status"] == "completed"
+    assert job["result"]["paper_id"] == placeholder_id
+    assert job["result"]["status"] == "merged"
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(placeholder_id))
+        assert paper is not None
+        assert paper.oa_status == "uploaded"
+        assert paper.pdf_path.endswith(".pdf")
+
+
+def test_queue_upload_job_reports_already_exists_without_overwriting_pdf(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Queued Existing DOI Paper",
+            "doi": "10.1000/queued-existing",
+            "year": 2023,
+        },
+    )
+
+    with Session() as session:
+        existing = Paper(
+            library_name="QueuedConflictLibrary",
+            doi="10.1000/queued-existing",
+            title="Queued Existing DOI Paper",
+            year=2023,
+            pdf_path="existing.pdf",
+            oa_status="uploaded",
+            serial_number=2,
+        )
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        existing_id = str(existing.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ingest/upload/jobs",
+        data={"library_name": "QueuedConflictLibrary"},
+        files={"file": ("queued-existing.pdf", io.BytesIO(b"%PDF-1.4 queued existing"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    poll = client.get(f"/api/jobs/{job_id}")
+    assert poll.status_code == 200
+    job = poll.json()
+    assert job["status"] == "completed"
+    assert job["result"]["paper_id"] == existing_id
+    assert job["result"]["status"] == "already_exists"
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(existing_id))
+        assert paper is not None
+        assert paper.pdf_path == "existing.pdf"
+
+
+def test_reset_upload_keeps_paper_but_clears_pdf_and_derived_artifacts(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    settings = get_settings()
+    pdf_path = settings.storage_paths["pdf"] / "broken.pdf"
+    tei_path = settings.storage_paths["tei"] / "broken.tei.xml"
+    docling_path = settings.storage_paths["docling_json"] / "broken.docling.json"
+    markdown_path = settings.storage_paths["markdown"] / "broken.md"
+    figure_dir = settings.storage_paths["figures"] / "broken"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    figure_path = figure_dir / "fig1.png"
+
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    tei_path.parent.mkdir(parents=True, exist_ok=True)
+    docling_path.parent.mkdir(parents=True, exist_ok=True)
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4 broken")
+    tei_path.write_text("<tei/>", encoding="utf-8")
+    docling_path.write_text("{}", encoding="utf-8")
+    markdown_path.write_text("# broken", encoding="utf-8")
+    figure_path.write_bytes(b"png")
+
+    with Session() as session:
+        paper = Paper(
+            library_name="ResetLibrary",
+            title="Broken upload",
+            paper_code="U0040",
+            pdf_path="storage/pdf/broken.pdf",
+            tei_path="storage/tei/broken.tei.xml",
+            docling_json_path="storage/docling_json/broken.docling.json",
+            markdown_path="storage/markdown/broken.md",
+            oa_status="error",
+            workflow_status="parse_failed",
+        )
+        session.add(paper)
+        session.flush()
+        session.add(PaperSection(paper_id=paper.id, section_title="Body", section_type="body", text="old text"))
+        session.add(PaperFigure(paper_id=paper.id, caption="Fig", image_path="storage/figures/broken/fig1.png", page=1))
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    response = client.post(f"/api/papers/{paper_id}/reset-upload")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "reset_to_metadata_only"
+    assert payload["paper_code"] == "U0040"
+
+    with Session() as session:
+        paper = session.get(Paper, UUID(paper_id))
+        assert paper is not None
+        assert paper.paper_code == "U0040"
+        assert paper.pdf_path == ""
+        assert paper.tei_path == ""
+        assert paper.docling_json_path == ""
+        assert paper.markdown_path == ""
+        assert paper.oa_status == "metadata_only"
+        assert paper.workflow_status == "metadata_only"
+        assert session.scalar(select(PaperSection).where(PaperSection.paper_id == paper.id)) is None
+        assert session.scalar(select(PaperFigure).where(PaperFigure.paper_id == paper.id)) is None
+
+    assert not pdf_path.exists()
+    assert not tei_path.exists()
+    assert not docling_path.exists()
+    assert not markdown_path.exists()
+    assert not figure_path.exists()
 
 
 def test_low_confidence_title_does_not_auto_merge(setup_test_db, monkeypatch):

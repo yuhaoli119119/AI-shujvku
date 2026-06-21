@@ -42,8 +42,9 @@ class PaperListFilterParams(BaseModel):
     journal: str | None = None
     has_dft_results: bool | None = None
     has_writing_cards: bool | None = None
+    has_pdf: bool | None = None
     paper_type: str | None = None
-    sort_by: str = Field(default="year_serial", pattern="^(year_serial|created_at|title)$")
+    sort_by: str = Field(default="year_serial", pattern="^(year_serial|created_at|title|serial_number|paper_code|paper_code_numeric)$")
     sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
@@ -183,6 +184,11 @@ class PaperFigureResponse(BaseModel):
     figure_reliability_warnings: list[str] = Field(default_factory=list)
     approved_correction_count: int = 0
     approved_correction_fields: list[str] = Field(default_factory=list)
+    pending_correction_count: int = 0
+    pending_correction_fields: list[str] = Field(default_factory=list)
+    pending_delete_proposal_count: int = 0
+    direct_delete_eligible: bool = False
+    direct_delete_reason: str | None = None
     object_review_audit_count: int = 0
     object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
     latest_object_review_audit: dict[str, Any] | None = None
@@ -243,6 +249,8 @@ class DFTResultResponse(BaseModel):
     latest_object_review_audit: dict[str, Any] | None = None
     conflict_count: int = 0
     field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
+    affected_field_names: list[str] = Field(default_factory=list)
+    conflict_field_names: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -358,6 +366,9 @@ class PaperListItemResponse(BaseModel):
     title_zh: str | None = None
     year: int | None = None
     journal: str | None = None
+    impact_factor: float | None = None
+    impact_factor_source: str | None = None
+    impact_factor_year: int | None = None
     authors: list = Field(default_factory=list)
     abstract: str | None = None
     abstract_zh: str | None = None
@@ -466,6 +477,8 @@ class DFTResultVerifyRequest(BaseModel):
     reviewer: str | None = "codex_review"
     reviewer_note: str | None = None
     field_names: list[str] = Field(default_factory=list)
+    expected_write_versions: dict[str, int] = Field(default_factory=dict)
+    expected_write_version: int | None = None
 
 
 class DFTResultVerifyResponse(BaseModel):
@@ -482,6 +495,8 @@ class DFTResultRejectRequest(BaseModel):
     reviewer: str | None = "codex_review"
     reviewer_note: str | None = None
     field_names: list[str] = Field(default_factory=list)
+    expected_write_versions: dict[str, int] = Field(default_factory=dict)
+    expected_write_version: int | None = None
 
 
 class DFTResultRejectResponse(BaseModel):

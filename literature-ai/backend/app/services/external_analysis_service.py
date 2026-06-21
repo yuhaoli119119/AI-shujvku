@@ -513,6 +513,7 @@ class ExternalAnalysisService:
         *,
         reviewer: str = "ide_ai",
         write_lock_tokens: list[str] | None = None,
+        write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> MaterializationResult:
         """Materialize IDE AI outputs that are safe outside the DFT review lane.
 
@@ -533,7 +534,7 @@ class ExternalAnalysisService:
             paper_id=run.paper_id,
             module_names=required_modules,
             lock_tokens=write_lock_tokens,
-            locked_by=reviewer,
+            locked_by=write_lock_owner or reviewer,
         )
         result = MaterializationResult()
         review_service = ReviewService(self.session)
@@ -586,7 +587,12 @@ class ExternalAnalysisService:
                 self.session.add(correction)
                 self.session.flush()
                 try:
-                    review_service.approve_correction(correction.id, reviewer, write_lock_tokens=write_lock_tokens)
+                    review_service.approve_correction(
+                        correction.id,
+                        reviewer,
+                        write_lock_tokens=write_lock_tokens,
+                        write_lock_owner=write_lock_owner,
+                    )
                 except Exception as exc:
                     correction.status = "requires_resolution"
                     correction.reviewed_by = reviewer
@@ -684,7 +690,7 @@ class ExternalAnalysisService:
         field_name = str(payload.get("field_name") or "").strip()
         target_path = str(payload.get("target_path") or "").strip()
         operation = str(payload.get("operation") or "replace").strip().lower()
-        if operation not in {"replace", "create"}:
+        if operation not in {"replace", "create", "delete"}:
             return False
         denied_fields = {
             "dft_results",
@@ -714,6 +720,16 @@ class ExternalAnalysisService:
                 field_name in allowed_structured
                 and target_path == f"{field_name}:new:create"
                 and isinstance(payload.get("proposed_value"), dict)
+                and has_evidence_anchor(evidence_payload)
+            )
+        if operation == "delete":
+            parts = [part.strip() for part in target_path.split(":")]
+            return (
+                field_name == "figures"
+                and len(parts) == 3
+                and parts[0] == "figures"
+                and parts[1]
+                and parts[2] == "delete"
                 and has_evidence_anchor(evidence_payload)
             )
         if field_name in allowed_top_level and target_path in {field_name, ""}:

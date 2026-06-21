@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
-from app.db.models import Base, CatalystSample, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
+from app.db.models import AuditLog, Base, CatalystSample, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel, ExternalAnalysisService
@@ -427,6 +427,95 @@ def test_import_analysis_auto_creates_non_dft_structured_objects():
                 assert "| Functional | PBE |" in (table.markdown_content or "")
                 assert len(corrections) == 3
                 assert {row.status for row in corrections} == {"approved"}
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_import_analysis_auto_applies_figure_delete_correction():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_delete.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Delete duplicate figure", pdf_path="paper.pdf", authors=["Author A"])
+                session.add(paper)
+                session.flush()
+                figure = PaperFigure(
+                    paper_id=paper.id,
+                    figure_label="fig_4a",
+                    caption="Duplicate right-column fragment of Fig. 4.",
+                    page=6,
+                    crop_status="needs_recrop",
+                    figure_role="experimental_evidence",
+                    content_summary="Duplicate crop fragment.",
+                )
+                session.add(figure)
+                session.commit()
+                paper_id = paper.id
+                figure_id = figure.id
+
+            client = TestClient(app)
+            write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="codex")
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "codex_delete_test",
+                    "auto_apply_review_rules": True,
+                    "reviewer": "codex",
+                    "write_lock_token": write_lock_token,
+                    "raw_payload": {
+                        "correction_proposals": [
+                            {
+                                "field_name": "figures",
+                                "target_path": f"figures:{figure_id}:delete",
+                                "operation": "delete",
+                                "proposed_value": None,
+                                "reason": "Duplicate parser fragment of Fig. 4 should be removed after full-figure recrop.",
+                                "evidence_payload": {
+                                    "page": 6,
+                                    "figure_label": "fig_4a",
+                                    "quoted_text": "Duplicate right-column fragment of Fig. 4.",
+                                },
+                            }
+                        ]
+                    },
+                },
+            )
+
+            assert imported.status_code == 200, imported.text
+            statuses = {item["status"] for item in imported.json()["candidates"]}
+            assert statuses == {"ai_applied"}
+
+            with Session(engine) as session:
+                stored_figure = session.get(PaperFigure, figure_id)
+                corrections = session.scalars(select(PaperCorrection)).all()
+                delete_logs = session.scalars(
+                    select(AuditLog).where(AuditLog.action == "delete_structured_object")
+                ).all()
+
+                assert stored_figure is None
+                assert len(corrections) == 1
+                assert corrections[0].operation == "delete"
+                assert corrections[0].status == "approved"
+                assert len(delete_logs) == 1
+                assert delete_logs[0].target_type == "figures"
+                assert delete_logs[0].target_id == str(figure_id)
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -1791,6 +1880,175 @@ def test_external_analysis_auto_apply_review_rules_single_ai_applies_figures():
             assert len(corrections) == 1
             assert corrections[0].status == "approved"
             assert {candidate.status for candidate in candidates} == {"ai_applied"}
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_auto_apply_figure_summary_strips_caption_echo_prefix():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_figure_caption_echo.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Caption echo repair", pdf_path="dual-figure.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                figure = PaperFigure(
+                    paper_id=paper.id,
+                    caption="Fig. 2 | Structural characterization of HEASA-Pt2.3%, Pt1-NiCoMgBiSn.",
+                    content_summary="Old summary",
+                    figure_label="fig_2",
+                    figure_role="characterization",
+                    page=5,
+                    image_path="figures/fig2.png",
+                    key_elements=["HAADF-STEM", "EXAFS"],
+                )
+                session.add(figure)
+                session.commit()
+                paper_id = paper.id
+                figure_id = figure.id
+
+            client = TestClient(app)
+            write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="ide_ai")
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "ide-ai-caption-echo-fix",
+                    "auto_apply_review_rules": True,
+                    "reviewer": "ide_ai",
+                    "write_lock_token": write_lock_token,
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "paper_id": str(paper_id),
+                                "target_type": "figure",
+                                "target_id": str(figure_id),
+                                "field_name": "content_summary",
+                                "decision": "REVISE",
+                                "corrected_value": (
+                                    "Fig. 2 | Structural characterization of HEASA-Pt2.3%, Pt1-NiCoMgBiSn. "
+                                    "(a) HAADF-STEM image with EDS elemental maps for Pt, Ni, Co, Mg, Bi, and Sn. "
+                                    "(b-f) XANES/EXAFS comparisons and Pt-Pt coordination number chart."
+                                ),
+                                "confidence": 0.9,
+                                "reason": "The summary should describe the panels rather than repeat the caption.",
+                                "evidence_location": {"page": 5, "figure": "Fig. 2", "quoted_text": "a Aberration-corrected HAADF-STEM image"},
+                            }
+                        ]
+                    },
+                },
+            )
+            assert imported.status_code == 200
+
+            with Session(engine) as session:
+                stored_figure = session.get(PaperFigure, figure_id)
+
+            assert stored_figure is not None
+            assert stored_figure.content_summary == (
+                "(a) HAADF-STEM image with EDS elemental maps for Pt, Ni, Co, Mg, Bi, and Sn. "
+                "(b-f) XANES/EXAFS comparisons and Pt-Pt coordination number chart."
+            )
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_auto_apply_figure_key_elements_normalizes_stringified_dicts():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_figure_key_elements.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Figure key elements cleanup", pdf_path="figure.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                figure = PaperFigure(
+                    paper_id=paper.id,
+                    caption="Figure 2",
+                    content_summary="(a) STEM image and (b) EXAFS fitting.",
+                    figure_label="fig_2",
+                    figure_role="characterization",
+                    page=5,
+                    image_path="figures/fig2.png",
+                    key_elements=["old"],
+                )
+                session.add(figure)
+                session.commit()
+                paper_id = paper.id
+                figure_id = figure.id
+
+            client = TestClient(app)
+            write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="ide_ai")
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "ide-ai-key-elements-fix",
+                    "auto_apply_review_rules": True,
+                    "reviewer": "ide_ai",
+                    "write_lock_token": write_lock_token,
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "paper_id": str(paper_id),
+                                "target_type": "figure",
+                                "target_id": str(figure_id),
+                                "field_name": "key_elements",
+                                "decision": "REVISE",
+                                "corrected_value": [
+                                    "{'description': 'Panel (a): HAADF-STEM image with atomically dispersed Pt'}",
+                                    "{'description': 'Panel (b): EXAFS fitting and coordination-number comparison'}",
+                                ],
+                                "confidence": 0.89,
+                                "reason": "Normalize historical stringified dict entries into plain list items.",
+                                "evidence_location": {"page": 5, "figure": "Figure 2", "quoted_text": "EXAFS fitting"},
+                            }
+                        ]
+                    },
+                },
+            )
+            assert imported.status_code == 200
+
+            with Session(engine) as session:
+                stored_figure = session.get(PaperFigure, figure_id)
+
+            assert stored_figure is not None
+            assert stored_figure.key_elements == [
+                "Panel (a): HAADF-STEM image with atomically dispersed Pt",
+                "Panel (b): EXAFS fitting and coordination-number comparison",
+            ]
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

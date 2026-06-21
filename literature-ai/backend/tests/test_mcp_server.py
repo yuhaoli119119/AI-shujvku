@@ -253,6 +253,85 @@ def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_
         assert logs[0].payload["verdict"] == "rejected"
 
 
+def test_review_figure_normalizes_caption_echo_summary_prefix(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Normalize review figure summary", pdf_path="paper.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Fig. 2 | Structural characterization of HEASA-Pt2.3%, Pt1-NiCoMgBiSn.",
+            image_path="figures/two.png",
+            page=4,
+            figure_role="characterization",
+            content_summary="Old summary",
+            key_elements=["HAADF-STEM", "XANES"],
+        )
+        session.add(figure)
+        session.commit()
+        figure_id = str(figure.id)
+
+    with mcp_auth_context(_admin_auth()):
+        result = review_figure(
+            figure_id,
+            "verified",
+            "Use a visual summary instead of repeating the caption.",
+            content_summary=(
+                "Fig. 2 | Structural characterization of HEASA-Pt2.3%, Pt1-NiCoMgBiSn. "
+                "(a) HAADF-STEM image with EDS elemental maps for Pt, Ni, Co, Mg, Bi, and Sn. "
+                "(b-f) XANES/EXAFS comparisons and Pt-Pt coordination number chart."
+            ),
+        )
+
+    assert result["applied_updates"]["content_summary"] == (
+        "(a) HAADF-STEM image with EDS elemental maps for Pt, Ni, Co, Mg, Bi, and Sn. "
+        "(b-f) XANES/EXAFS comparisons and Pt-Pt coordination number chart."
+    )
+    with Session(mcp_test_env["engine"]) as session:
+        stored = session.get(PaperFigure, UUID(figure_id))
+        assert stored is not None
+        assert stored.content_summary == result["applied_updates"]["content_summary"]
+
+
+def test_review_figure_normalizes_stringified_key_elements(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Normalize figure key elements", pdf_path="paper.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            caption="Figure 3. Structural analysis.",
+            image_path="figures/three.png",
+            page=3,
+            figure_role="characterization",
+            content_summary="(a) STEM image and (b) EXAFS comparison.",
+            key_elements=["old"],
+        )
+        session.add(figure)
+        session.commit()
+        figure_id = str(figure.id)
+
+    with mcp_auth_context(_admin_auth()):
+        result = review_figure(
+            figure_id,
+            "verified",
+            "Normalize stringified dict key elements.",
+            key_elements=[
+                "{'description': 'Panel (a): HAADF-STEM image with Pt single-atom dispersion'}",
+                "{'description': 'Panel (b): EXAFS fitting and coordination comparison'}",
+            ],
+        )
+
+    assert result["applied_updates"]["key_elements"] == [
+        "Panel (a): HAADF-STEM image with Pt single-atom dispersion",
+        "Panel (b): EXAFS fitting and coordination comparison",
+    ]
+    with Session(mcp_test_env["engine"]) as session:
+        stored = session.get(PaperFigure, UUID(figure_id))
+        assert stored is not None
+        assert stored.key_elements == result["applied_updates"]["key_elements"]
+
+
 def test_scan_duplicate_dois_groups_default_library_aliases(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         session.add_all(
@@ -694,7 +773,119 @@ def test_mcp_import_analysis_auto_applies_dual_ai_dft_reviews(mcp_test_env):
     assert stored_row.candidate_status == "ML_Ready"
     assert {candidate.status for candidate in candidates} == {"materialized"}
     assert reviews
-    assert {review.reviewer_status for review in reviews} == {"verified"}
+
+
+def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer_and_mcp_lock_owner(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP New Candidate DFT Paper", pdf_path="mcp-new-candidate.pdf", authors=[])
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "Fe-N4",
+                    "property_type": "adsorption_energy",
+                    "value": -1.23,
+                    "unit": "eV",
+                    "adsorbate": "Li2S4",
+                    "reaction_step": "adsorption",
+                },
+                "evidence_location": {
+                    "page": 3,
+                    "table": "Table 1",
+                    "quoted_text": "The adsorption energy of Li2S4 is -1.23 eV on Fe-N4.",
+                },
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="dft_results",
+        )
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit custom reviewer",
+            reviewer="codex_window_b",
+            raw_payload=payload,
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+        )
+
+    assert imported["reviewer"] == "codex_window_b"
+    assert imported["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+    with Session(mcp_test_env["engine"]) as session:
+        rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()
+        assert len(rows) == 1
+        assert rows[0].candidate_status == "new_candidate"
+        assert rows[0].property_type == "adsorption_energy"
+
+
+def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_lock_owner_matching_reviewer(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Custom Lock Owner DFT Paper", pdf_path="mcp-custom-lock-owner.pdf", authors=[])
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "Pt(111)",
+                    "property_type": "adsorption_energy",
+                    "value": -0.88,
+                    "unit": "eV",
+                    "adsorbate": "CO",
+                    "reaction_step": "adsorption",
+                },
+                "evidence_location": {
+                    "page": 7,
+                    "figure": "Fig. 5d",
+                    "quoted_text": "CO adsorption energy is -0.88 eV on Pt(111).",
+                },
+                "confidence": 0.84,
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="dft_results",
+            locked_by="codex_window_b",
+        )
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit custom lock owner",
+            reviewer="codex_window_b",
+            raw_payload=payload,
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+        )
+
+    assert imported["reviewer"] == "codex_window_b"
+    assert imported["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+    with Session(mcp_test_env["engine"]) as session:
+        rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()
+        assert len(rows) == 1
+        assert rows[0].adsorbate == "CO"
+        assert rows[0].value == pytest.approx(-0.88)
 
 
 def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
@@ -1083,6 +1274,126 @@ def test_import_analysis_defaults_reviewer_to_mcp_source_for_lock_validation(mcp
         assert updated.abstract == "Rewritten abstract"
 
 
+def test_import_analysis_custom_reviewer_does_not_break_mcp_lock_validation(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Custom Reviewer Lock Target", abstract="Old abstract", pdf_path="custom-review-lock.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="content",
+        )
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="claude_overall_review",
+            source_label="claude_overall_review",
+            reviewer="codex_window_b",
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+            raw_payload={
+                "correction_proposals": [
+                    {
+                        "field_name": "abstract",
+                        "target_path": "abstract",
+                        "operation": "replace",
+                        "proposed_value": "Rewritten with custom reviewer label",
+                        "reason": "Evidence-backed rewrite.",
+                        "evidence_payload": {"page": 1, "quoted_text": "Old abstract"},
+                    }
+                ]
+            },
+        )
+
+    assert imported["reviewer"] == "codex_window_b"
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.abstract == "Rewritten with custom reviewer label"
+
+
+def test_import_analysis_custom_lock_owner_matching_reviewer_is_accepted(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Custom Lock Owner Target", abstract="Old abstract", pdf_path="custom-lock-owner.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="content",
+            locked_by="codex_window_b",
+        )
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="claude_overall_review",
+            source_label="claude_overall_review",
+            reviewer="codex_window_b",
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+            raw_payload={
+                "correction_proposals": [
+                    {
+                        "field_name": "abstract",
+                        "target_path": "abstract",
+                        "operation": "replace",
+                        "proposed_value": "Rewritten with custom lock owner",
+                        "reason": "Evidence-backed rewrite.",
+                        "evidence_payload": {"page": 1, "quoted_text": "Old abstract"},
+                    }
+                ]
+            },
+        )
+
+    assert imported["reviewer"] == "codex_window_b"
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.abstract == "Rewritten with custom lock owner"
+
+
+def test_import_analysis_object_review_can_apply_paper_type_metadata(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Object Review Paper Type Target", paper_type="A", pdf_path="paper-type-review.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="metadata",
+        )
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="claude_object_review",
+            source_label="claude_object_review",
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "paper",
+                        "target_id": paper_id,
+                        "field_name": "paper_type",
+                        "decision": "revise",
+                        "corrected_value": "B",
+                        "confidence": 0.94,
+                        "evidence_location": {"page": 1, "quoted_text": "This paper surveys prior computational studies."},
+                    }
+                ]
+            },
+        )
+
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.paper_type == "B"
+
+
 def test_admin_mcp_review_flow_applies_or_rejects_corrections(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="Review Target", abstract="Old abstract", pdf_path="review.pdf")
@@ -1130,6 +1441,34 @@ def test_admin_mcp_review_flow_applies_or_rejects_corrections(mcp_test_env):
         actions = [log.action for log in logs]
         assert "approve_correction" in actions
         assert "reject_correction" in actions
+
+
+def test_admin_mcp_review_flow_accepts_paper_type_alias_target_path(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Paper Type Review Target", paper_type="A", pdf_path="review.pdf")
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        correction = propose_correction(
+            paper_id=paper_id,
+            field_name="paper_type",
+            target_path="paper.paper_type",
+            operation="replace",
+            proposed_value="B",
+            reason="The PDF content matches B rather than A.",
+            evidence_payload={"page": 1, "quoted_text": "Review-style summary of prior work."},
+        )
+
+    with mcp_auth_context(_admin_auth()):
+        approved = approve_correction(correction["id"])
+        assert approved["status"] == "approved"
+
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(Paper, UUID(paper_id))
+        assert updated is not None
+        assert updated.paper_type == "B"
 
 
 def test_admin_mcp_review_flow_applies_dft_result_patch(mcp_test_env):

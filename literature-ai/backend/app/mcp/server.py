@@ -37,6 +37,7 @@ from app.services.verification_session_service import VerificationSessionService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 from app.security.exports import require_mcp_exports_enabled
 from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
 
 
@@ -1048,6 +1049,14 @@ def import_analysis(
     if not has_text and not has_payload:
         raise ValueError("import_analysis requires non-empty raw_text or raw_payload")
     effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
+    effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
+    effective_lock_owners = list(
+        dict.fromkeys(
+            item
+            for item in [effective_internal_reviewer, effective_reviewer]
+            if str(item or "").strip()
+        )
+    )
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         service = ExternalAnalysisService(session=session, settings=settings)
@@ -1062,13 +1071,15 @@ def import_analysis(
         if auto_apply_review_rules:
             non_dft_summary = service.auto_apply_non_dft_review_outputs(
                 run.id,
-                reviewer=effective_reviewer,
+                reviewer=effective_internal_reviewer,
                 write_lock_tokens=[write_lock_token] if write_lock_token else None,
+                write_lock_owner=effective_lock_owners,
             )
             dft_auto_apply_summary = VerificationSessionService(session, settings).apply_import_rules_for_paper(
                 paper_id=UUID(paper_id),
-                reviewer=effective_reviewer,
+                reviewer=effective_internal_reviewer,
                 write_lock_tokens=[write_lock_token] if write_lock_token else None,
+                write_lock_owner=effective_lock_owners,
             )
             auto_apply_summary = {
                 **(dft_auto_apply_summary or {}),
@@ -1562,8 +1573,8 @@ def create_figure_from_bbox(
             page=page,
             figure_label=(figure_label or "").strip() or None,
             figure_role=(figure_role or "").strip() or None,
-            content_summary=(content_summary or "").strip() or None,
-            key_elements=key_elements or None,
+            content_summary=normalize_figure_content_summary(content_summary, caption),
+            key_elements=normalize_figure_key_elements(key_elements)[0],
             crop_status="ai_created_crop",
             crop_source=f"create_figure_from_bbox:{strategy}:{auth.source_prefix}",
             crop_confidence=0.55 if strategy == "ai_bbox" else 0.35,
@@ -1657,10 +1668,10 @@ def review_figure(
             fig.figure_role = figure_role.strip() or None
             applied_updates["figure_role"] = fig.figure_role
         if content_summary is not None:
-            fig.content_summary = content_summary.strip() or None
+            fig.content_summary = normalize_figure_content_summary(content_summary, fig.caption)
             applied_updates["content_summary"] = fig.content_summary
         if key_elements is not None:
-            fig.key_elements = key_elements or None
+            fig.key_elements = normalize_figure_key_elements(key_elements)[0]
             applied_updates["key_elements"] = fig.key_elements
         if crop_status is not None:
             fig.crop_status = crop_status
@@ -1692,7 +1703,7 @@ def review_figure(
             content=f"[Figure Review] Verdict: {normalized_verdict}\nReasoning: {reasoning}\nApplied updates: {applied_updates}",
             field_name="figure_review",
             page=fig.page,
-            section_title=fig.caption,
+            section_title=fig.caption[:250] if fig.caption else None,
             quoted_text=normalized_verdict,
         )
         session.add(note)

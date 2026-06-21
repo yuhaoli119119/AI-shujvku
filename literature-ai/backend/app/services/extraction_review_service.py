@@ -359,17 +359,18 @@ class ExtractionReviewService:
                 from sqlalchemy.dialects.sqlite import insert as dialect_insert
             else:
                 from sqlalchemy.dialects.postgresql import insert as dialect_insert
-            result = self.session.execute(
+            inserted_id = self.session.scalar(
                 dialect_insert(ExtractionFieldReview)
                 .values(**values)
                 .on_conflict_do_nothing(
                     index_elements=["paper_id", "target_type", "target_id", "field_name"]
                 )
+                .returning(ExtractionFieldReview.id)
             )
             winner = self.session.scalar(select(ExtractionFieldReview).where(*identity_filter))
             if winner is None:
                 raise RuntimeError("extraction_review_upsert_failed")
-            winner._created_by_get_or_create = result.rowcount == 1
+            winner._created_by_get_or_create = inserted_id is not None
             return winner
         review = ExtractionFieldReview(**values)
         try:

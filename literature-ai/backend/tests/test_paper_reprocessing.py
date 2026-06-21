@@ -215,6 +215,7 @@ def test_classify_single_paper_fallback():
                     pdf_path="",
                     oa_status="metadata_only",
                     authors=[],
+                    paper_code="U0007",
                 )
                 session.add(paper)
                 session.commit()
@@ -233,6 +234,7 @@ def test_classify_single_paper_fallback():
                 db_paper = session.get(Paper, paper.id)
                 assert db_paper.paper_type == "A"
                 assert db_paper.classification_source == "rule_heuristic"
+                assert db_paper.paper_code == "A0007"
         finally:
             engine.dispose()
 

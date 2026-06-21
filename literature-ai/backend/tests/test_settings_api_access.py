@@ -151,9 +151,10 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert payload["mcp_url"].endswith("/mcp")
     assert payload["cursor_config"]["mcpServers"]["literature-ai"]["command"] == "npx.cmd"
     assert "--header" in payload["cursor_config"]["mcpServers"]["literature-ai"]["args"]
-    assert payload["prompt_schema_version"] == "ide_review_prompt_v3"
+    assert payload["prompt_schema_version"] == "ide_review_prompt_v4"
     assert "app.mcp.context.mcp_auth_context" in payload["suggested_prompt"]
     assert "禁止直接导入 service/session/model" in payload["suggested_prompt"]
+    assert "module_write_lock_required:notes" in payload["suggested_prompt"]
     get_settings.cache_clear()
 
 

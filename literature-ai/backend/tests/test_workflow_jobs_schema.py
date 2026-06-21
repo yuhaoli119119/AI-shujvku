@@ -1,8 +1,10 @@
 import asyncio
+import importlib
 import tempfile
 from datetime import datetime, timedelta
 from uuid import uuid4
 from pathlib import Path
+from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import inspect, select
@@ -20,12 +22,16 @@ from app.services import workflow_jobs as workflow_jobs_service
 from app.services.workflow_jobs import (
     JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
     JOB_TYPE_AGENT_ACTIVITY,
+    JOB_TYPE_LOCAL_PDF_PATH_INGEST,
     JobPreflightError,
+    WORKFLOW_QUEUE_DEFAULT,
+    WORKFLOW_QUEUE_PDF_INGEST,
     clone_job_for_retry_with_status,
     create_job_or_reuse_active,
     run_discovery_download_ingest_job,
     serialize_job,
     validate_extraction_preflight,
+    workflow_queue_for_job_type,
 )
 
 
@@ -43,6 +49,90 @@ def test_init_db_creates_workflow_jobs_table():
         engine.dispose()
         db_session._session_factories.pop(db_url, None)
         db_session._engines.pop(db_url, None)
+
+
+def test_workflow_queue_routes_pdf_ingest_to_dedicated_queue():
+    assert workflow_queue_for_job_type(JOB_TYPE_LOCAL_PDF_PATH_INGEST) == WORKFLOW_QUEUE_PDF_INGEST
+    assert workflow_queue_for_job_type(JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST) == WORKFLOW_QUEUE_PDF_INGEST
+    assert workflow_queue_for_job_type(JOB_TYPE_AGENT_ACTIVITY) == WORKFLOW_QUEUE_DEFAULT
+
+
+def test_init_db_backfills_paper_codes_after_migration_transaction(monkeypatch):
+    db_url = "postgresql+psycopg://test:test@db:5432/test"
+    db_session._initialized_urls.discard(db_url)
+    events: list[str] = []
+    state = {"migration_open": False}
+
+    class FakeConnection:
+        def execution_options(self, **_: object):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+    class FakeEngine:
+        def __init__(self):
+            self.dialect = type("Dialect", (), {"name": "postgresql"})()
+
+        def connect(self):
+            return FakeConnection()
+
+        @contextmanager
+        def begin(self):
+            assert state["migration_open"] is False
+            state["migration_open"] = True
+            events.append("begin_enter")
+            try:
+                yield FakeConnection()
+            finally:
+                events.append("begin_exit")
+                state["migration_open"] = False
+
+    class FakeInspector:
+        def get_table_names(self):
+            return ["papers"]
+
+        def get_columns(self, _table_name: str):
+            return []
+
+    class FakeSession:
+        def __init__(self, _engine):
+            assert state["migration_open"] is False
+            events.append("session_open")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            events.append("session_close")
+            return False
+
+        def commit(self):
+            events.append("session_commit")
+
+    fake_engine = FakeEngine()
+    monkeypatch.setattr(db_session, "get_engine", lambda _url: fake_engine)
+    monkeypatch.setattr(db_session.Base.metadata, "create_all", lambda _engine: events.append("create_all"))
+    monkeypatch.setattr(db_session, "inspect", lambda _engine: FakeInspector())
+    monkeypatch.setattr(db_session, "Session", FakeSession)
+    paper_codes = importlib.import_module("app.services.paper_codes")
+    monkeypatch.setattr(
+        paper_codes,
+        "ensure_paper_codes",
+        lambda _session, papers=None: events.append("ensure_paper_codes"),
+    )
+
+    db_session.init_db(db_url, force=True)
+
+    assert "ensure_paper_codes" in events
+    assert events.index("begin_exit") < events.index("session_open")
+    assert events.index("session_open") < events.index("ensure_paper_codes")
 
 
 def test_serialize_extraction_job_includes_readable_summary_and_failure_explanation():

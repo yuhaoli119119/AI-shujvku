@@ -32,11 +32,11 @@ function renderWorkspaceHeader(paper) {
         badgesEl.innerHTML =
             (displayCode ? '<span class="serial-chip" title="文献短号，仅用于人类沟通；API/MCP 仍使用 paper_id">' + esc(displayCode) + "</span>" : "") +
             paperStatusChip(paper) +
-            badge(counts.sections) +
-            badge(counts.figures) +
-            badge(counts.dft_results) +
-            badge(counts.mechanism_claims) +
-            badge(counts.writing_cards);
+            badge(counts.figures, "\u56fe\u7247\u6570\u91cf") +
+            badge(counts.dft_results, "DFT \u6570\u91cf") +
+            badge(counts.sections, "\u7ae0\u8282\u6570\u91cf") +
+            badge(counts.mechanism_claims, "\u673a\u7406\u58e0\u660e\u6570\u91cf") +
+            badge(counts.writing_cards, "\u5199\u4f5c\u5361\u7247\u6570\u91cf");
     }
     if (topicEl) topicEl.value = paper.title_zh || paper.title || "";
 }

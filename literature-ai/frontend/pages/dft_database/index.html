@@ -20,7 +20,8 @@
     .dashboard-panel {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
+      padding: 10px 12px !important;
     }
     .dashboard-header {
       display: flex;
@@ -57,8 +58,15 @@
       display: grid;
       gap: 12px;
     }
-    .dashboard-panel.collapsed .dashboard-body {
+    .dashboard-panel.collapsed .quality-topbar {
       display: none;
+    }
+    #exportSafetyPanel:not(.collapsed) #dashboardToggleBtnToolbar {
+      display: none;
+    }
+    #exportSafetyPanel.collapsed #dashboardToggleBtnToolbar {
+      display: inline-block;
+      margin-left: 8px;
     }
     .dashboard-toolbar {
       display: flex;
@@ -86,12 +94,12 @@
     .quality-topbar {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 10px;
       flex-wrap: wrap;
       background: linear-gradient(135deg, var(--color-surface-alt) 0%, var(--color-surface) 100%);
       border: 1px solid var(--color-border);
       border-radius: var(--radius);
-      padding: 14px 16px;
+      padding: 8px 12px;
       position: relative;
       overflow: hidden;
     }
@@ -107,30 +115,30 @@
     .quality-topbar .donut-wrap {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
       flex-shrink: 0;
       background: var(--color-surface);
       border: 1px solid var(--color-border);
       border-radius: var(--radius);
-      padding: 10px 14px;
+      padding: 6px 10px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
     .quality-topbar .donut-legend {
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 3px;
     }
     .quality-topbar .donut-legend .lg-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
+      gap: 8px;
       background: var(--color-surface-alt);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-sm);
-      padding: 5px 9px;
+      padding: 3px 6px;
       font-size: 11px;
-      min-width: 120px;
+      min-width: 100px;
       transition: transform 0.15s, box-shadow 0.15s;
     }
     .quality-topbar .donut-legend .lg-row:hover {
@@ -154,7 +162,7 @@
     /* Elegant divider */
     .quality-topbar .stat-divider {
       width: 1px;
-      height: 56px;
+      height: 40px;
       background: linear-gradient(180deg, transparent 0%, var(--color-border) 40%, var(--color-border) 60%, transparent 100%);
       flex-shrink: 0;
     }
@@ -170,10 +178,10 @@
     .reason-chip {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 4px;
       border: 1px solid var(--color-border);
       border-radius: var(--radius-pill);
-      padding: 5px 11px;
+      padding: 3px 8px;
       background: var(--color-surface);
       cursor: pointer;
       font-size: 11px;
@@ -224,9 +232,9 @@
       margin-left: auto;
     }
     .quality-topbar .actions-bar .btn {
-      height: 34px;
-      padding: 0 14px;
-      font-size: 12px;
+      height: 28px;
+      padding: 0 10px;
+      font-size: 11.5px;
       font-weight: 700;
       border-radius: var(--radius-sm);
       transition: all 0.2s;
@@ -277,15 +285,48 @@
     .completeness-row .quality-meta { font-size: 11.5px; line-height: 1.5; }
     .completeness-row a { font-size: 12px; font-weight: 700; }
     .table-container { width: 100%; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { padding: 9px 10px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.35; table-layout: fixed; }
+    th, td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); border-right: 1px solid var(--color-border); text-align: center !important; vertical-align: middle; overflow: hidden; }
+    th:last-child, td:last-child { border-right: none; }
     th { background: var(--color-surface-alt); color: var(--color-text-secondary); font-weight: 800; }
-    tr:hover td { background: var(--color-surface-alt); }
-    .confidence-badge { display: inline-flex; border-radius: var(--radius-pill); padding: 3px 8px; font-size: 11px; font-weight: 800; }
+    tr:hover td { background: var(--color-primary-bg) !important; }
+    .num-col { font-family: var(--font-mono); }
+    .val-unit { font-size: 11px; color: var(--color-text-muted); display: block; margin-top: 1px; font-weight: normal; }
+    .dft-table-muted { font-size: 11px; color: var(--color-text-muted); line-height: 1.3; margin-top: 2px; }
+    .paper-link-wrap { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+    .confidence-badge { display: inline-flex; border-radius: var(--radius-pill); padding: 2px 6px; font-size: 10.5px; font-weight: 800; }
     .confidence-badge.high { background: var(--color-success-bg); color: var(--color-success); }
     .confidence-badge.medium { background: var(--color-warning-bg); color: var(--color-warning); }
     .confidence-badge.low { background: var(--color-danger-bg); color: var(--color-danger); }
-    .evidence-link { border: 0; background: transparent; color: var(--color-primary); font-weight: 800; cursor: pointer; padding: 0; }
+    .evidence-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 22px;
+      padding: 0 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .evidence-link:hover {
+      border-color: var(--color-primary);
+      background: var(--color-primary-bg);
+      color: var(--color-primary);
+    }
+    /* Column widths */
+    #dftTable th:nth-child(1), #dftTable td:nth-child(1) { width: 18%; }
+    #dftTable th:nth-child(2), #dftTable td:nth-child(2) { width: 6%; }
+    #dftTable th:nth-child(3), #dftTable td:nth-child(3) { width: 12%; }
+    #dftTable th:nth-child(4), #dftTable td:nth-child(4) { width: 10%; }
+    #dftTable th:nth-child(5), #dftTable td:nth-child(5) { width: 22%; }
+    #dftTable th:nth-child(6), #dftTable td:nth-child(6) { width: 11%; }
+    #dftTable th:nth-child(7), #dftTable td:nth-child(7) { width: 8%; }
+    #dftTable th:nth-child(8), #dftTable td:nth-child(8) { width: 13%; }
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; overflow: auto; }
     .empty-state { text-align: left; color: var(--color-text-secondary); padding: 8px 12px; min-height: auto; border: 1px dashed var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); line-height: 1.45; }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); }
@@ -359,16 +400,7 @@
   <div id="topnav-mount"></div>
   <main class="shell">
     <section class="dashboard-panel" id="exportSafetyPanel">
-      <div class="dashboard-header">
-        <div class="dashboard-title-wrap">
-          <h2 class="dashboard-title">DFT 导出仪表盘</h2>
-          <span class="dashboard-title-tip" title="这里汇总当前文献库的筛选、导出安全状态和待处理原因；如果没有选择文献库，则汇总全部文献库。">ⓘ</span>
-        </div>
-        <div class="dashboard-header-actions">
-          <button class="btn btn-ghost btn-sm" type="button" onclick="loadExportSafetyOverview()">↻ 刷新概览</button>
-          <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtn">收起面板</button>
-        </div>
-      </div>
+      
       <div class="dashboard-body" id="dashboardBody">
         <div class="dashboard-toolbar">
           <div class="filter-grid">
@@ -377,18 +409,21 @@
             <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
             <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
             <div class="filter-field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
-            <div class="filter-field"><label for="validationStatus">核验状态</label><select id="validationStatus" onchange="queryDFT()"><option value="validated" selected>已审核可导出</option></select></div>
           </div>
           <div class="export-panel">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
-            <span id="exportSafetyStatus" class="export-status">等待导出。</span>
+            <span id="exportSafetyStatus" class="export-status"></span>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnToolbar">展开面板</button>
           </div>
         </div>
-        <div class="export-note">只导出人工已确认、证据完整、定位准确的记录；候选和需要处理的记录不会导出。</div>
         <div class="quality-topbar">
           <div id="qualityDonuts"><div class="empty-state">正在加载导出安全概览...</div></div>
           <div class="stat-divider"></div>
           <div class="reason-chips-bar" id="qualityReasonChips"></div>
+          <div class="actions-bar">
+            <button class="btn btn-ghost btn-sm" type="button" onclick="loadExportSafetyOverview()">↻ 刷新概览</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnBody">收起面板</button>
+          </div>
         </div>
       </div>
     </section>
@@ -431,7 +466,7 @@
       </div>
       <div class="evidence-modal-body">
         <div id="validationSummary" class="evidence-modal-status"></div>
-        <div id="evidenceDetail" class="mono">点击证据链接以查看原始证据文本及来源元数据。</div>
+        <div id="evidenceDetail" class="mono">点击证据以查看原始证据文本及来源元数据。</div>
       </div>
     </div>
   </div>
@@ -446,17 +481,21 @@
       if (!panel) return;
       panel.classList.toggle("collapsed");
       const isCollapsed = panel.classList.contains("collapsed");
-      const btn = document.getElementById("dashboardToggleBtn");
-      if (btn) btn.textContent = isCollapsed ? "展开面板" : "收起面板";
+      const btnToolbar = document.getElementById("dashboardToggleBtnToolbar");
+      const btnBody = document.getElementById("dashboardToggleBtnBody");
+      if (btnToolbar) btnToolbar.textContent = isCollapsed ? "展开面板" : "收起面板";
+      if (btnBody) btnBody.textContent = isCollapsed ? "展开面板" : "收起面板";
       localStorage.setItem(DFT_DASHBOARD_STORAGE_KEY, isCollapsed ? "1" : "0");
     }
     function initDashboardState() {
       const panel = document.getElementById("exportSafetyPanel");
       if (!panel) return;
-      const btn = document.getElementById("dashboardToggleBtn");
       const isCollapsed = localStorage.getItem(DFT_DASHBOARD_STORAGE_KEY) === "1";
       panel.classList.toggle("collapsed", isCollapsed);
-      if (btn) btn.textContent = isCollapsed ? "展开面板" : "收起面板";
+      const btnToolbar = document.getElementById("dashboardToggleBtnToolbar");
+      const btnBody = document.getElementById("dashboardToggleBtnBody");
+      if (btnToolbar) btnToolbar.textContent = isCollapsed ? "展开面板" : "收起面板";
+      if (btnBody) btnBody.textContent = isCollapsed ? "展开面板" : "收起面板";
     }
     function toggleCollapse(header) {
       const body = header.closest(".panel-actions")?.nextElementSibling || header.parentElement.nextElementSibling;
@@ -557,7 +596,6 @@
       }
       setSelectLabels("propertyType", propertyLabels);
       setSelectLabels("catalystType", catalystLabels);
-      setSelectLabels("validationStatus", validationLabels);
     }
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
     async function fetchJSON(url, options) {
@@ -645,9 +683,9 @@
     }
     function getTechDonutHTML(exportable, blocked) {
       const total = exportable + blocked;
-      const radius = 26;
+      const radius = 20;
       const circumference = 2 * Math.PI * radius;
-      const svgSize = 68;
+      const svgSize = 52;
       const cx = svgSize / 2;
       const cy = svgSize / 2;
       const greenPercent = total === 0 ? 0 : exportable / total;
@@ -657,7 +695,7 @@
       const redRotation = greenPercent * 360;
       return `
         <div class="donut-wrap">
-          <div style="position:relative; width:${svgSize}px; height:${svgSize}px; display:inline-flex; align-items:center; justify-content:center; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.08)); flex-shrink:0;">
+          <div style="position:relative; width:${svgSize}px; height:${svgSize}px; display:inline-flex; align-items:center; justify-content:center; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05)); flex-shrink:0;">
             <svg width="${svgSize}" height="${svgSize}" viewBox="0 0 ${svgSize} ${svgSize}" style="transform: rotate(-90deg);">
               <defs>
                 <linearGradient id="gradRedPremium" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -669,19 +707,19 @@
                   <stop offset="100%" stop-color="#389e0d" />
                 </linearGradient>
               </defs>
-              <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="var(--color-border)" stroke-width="5"></circle>
+              <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="var(--color-border)" stroke-width="4"></circle>
               ${total === 0 ? '' : `
-              <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="url(#gradGreenPremium)" stroke-width="5"
+              <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="url(#gradGreenPremium)" stroke-width="4"
                       stroke-dasharray="${circumference}" stroke-dashoffset="${greenOffset}"
                       style="transition: stroke-dashoffset 1s cubic-bezier(0.34, 1.56, 0.64, 1); stroke-linecap: round;"></circle>
-              <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="url(#gradRedPremium)" stroke-width="5"
+              <circle cx="${cx}" cy="${cy}" r="${radius}" fill="transparent" stroke="url(#gradRedPremium)" stroke-width="4"
                       stroke-dasharray="${circumference}" stroke-dashoffset="${redOffset}"
                       style="transform: rotate(${redRotation}deg); transform-origin: 50% 50%; transition: stroke-dashoffset 1s cubic-bezier(0.34, 1.56, 0.64, 1); stroke-linecap: round;"></circle>
               `}
             </svg>
             <div style="position:absolute; display:flex; flex-direction:column; align-items:center; pointer-events:none;">
-              <span style="font-size:7px; color:var(--color-text-muted); font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:-1px;">TOTAL</span>
-              <span style="font-size:18px; font-weight:900; color:var(--color-text); line-height:1; font-family:var(--font-mono, monospace);">${total}</span>
+              <span style="font-size:6px; color:var(--color-text-muted); font-weight:800; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:-2px;">TOTAL</span>
+              <span style="font-size:14px; font-weight:900; color:var(--color-text); line-height:1; font-family:var(--font-mono, monospace);">${total}</span>
             </div>
           </div>
           <div class="donut-legend">
@@ -1065,11 +1103,11 @@
           <td><strong>${esc(catName)}</strong></td>
           <td>${esc(item.adsorbate || "-")}</td>
           <td>${esc(item.property_type || "-")}</td>
-          <td><strong>${item.value != null ? Number(item.value).toFixed(4) : "-"}</strong> ${esc(item.unit || "")}</td>
-          <td>${esc(item.reaction_step || "-")}<div class="muted">${esc(item.source_section || "-")}</div></td>
-          <td><span style="display:inline-flex;color:${validationColor};font-weight:900;margin-bottom:4px;">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}">${Math.round(conf * 100)}%</span></td>
-          <td><button class="evidence-link" onclick="showEvidence(${idx})">证据链接</button></td>
-          <td><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}">${esc((item.title || "文献").slice(0, 42))}</a><div class="muted">${esc(item.doi || "无 DOI")}</div></td>
+          <td class="num-col"><strong>${item.value != null ? Number(item.value).toFixed(4) : "-"}</strong><span class="val-unit">${esc(item.unit || "")}</span></td>
+          <td>${esc(item.reaction_step || "-")}<div class="dft-table-muted">${esc(item.source_section || "-")}</div></td>
+          <td><span style="display:inline-flex;color:${validationColor};font-weight:900;margin-bottom:3px;font-size:11.5px;">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}">${Math.round(conf * 100)}%</span></td>
+          <td><button class="evidence-link" onclick="showEvidence(${idx})">证据</button></td>
+          <td><div class="paper-link-wrap"><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}" target="_blank" rel="noopener noreferrer" title="${esc(item.title || '文献')}">${esc(item.title || "文献")}</a></div><div class="dft-table-muted">${esc(item.doi || "无 DOI")}</div></td>
         </tr>`;
       }).join("");
     }

@@ -28,6 +28,8 @@ from app.db.models import (
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.evidence_anchors import first_evidence_anchor, has_evidence_anchor, has_material_correction_anchor
+from app.utils.figure_delete_policy import direct_delete_eligibility, normalized_figure_identity
+from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
 from app.services.catalyst_sample_identity import clean_sample_payload, resolve_sample_identity
 
 
@@ -165,6 +167,7 @@ class ReviewService:
             allowed_fields=frozenset({"section_title", "section_type", "text", "page_start", "page_end"}),
         ),
     }
+    STRUCTURED_DELETE_TARGETS = frozenset({"figures"})
     STRUCTURED_CREATE_TARGETS = frozenset(
         {
             "figures",
@@ -191,6 +194,7 @@ class ReviewService:
         correction_id: UUID,
         reviewer: str,
         write_lock_tokens: list[str] | None = None,
+        write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> PaperCorrection:
         correction = self._get_correction(correction_id)
         if correction.status != "pending":
@@ -199,6 +203,7 @@ class ReviewService:
             correction,
             reviewer=reviewer,
             write_lock_tokens=write_lock_tokens,
+            write_lock_owner=write_lock_owner,
         )
         if self._is_figure_recrop_correction(correction):
             return self._approve_figure_recrop_correction(correction_id, reviewer)
@@ -248,6 +253,129 @@ class ReviewService:
             "current_value": current_value,
             "target_exists": target_exists,
         }
+
+    def propose_figure_deletion(
+        self,
+        *,
+        paper_id: UUID,
+        figure_id: UUID,
+        reason: str,
+        reviewer: str,
+        evidence_payload: dict[str, Any] | list[Any] | None = None,
+    ) -> PaperCorrection:
+        if not str(reason or "").strip():
+            raise ValueError("A deletion reason is required.")
+        figure = self.session.get(PaperFigure, figure_id)
+        if figure is None or figure.paper_id != paper_id:
+            raise ValueError("Figure not found for this paper.")
+        payload = evidence_payload
+        if not payload:
+            payload = {
+                "page": figure.page,
+                "figure_label": figure.figure_label,
+                "quoted_text": figure.caption or figure.content_summary or f"Figure object {figure.id}",
+            }
+        if not has_evidence_anchor(payload):
+            raise ValueError("Figure deletion proposals require a PDF evidence anchor.")
+        correction = PaperCorrection(
+            paper_id=paper_id,
+            source=reviewer,
+            field_name="figures",
+            target_path=f"figures:{figure_id}:delete",
+            operation="delete",
+            proposed_value=None,
+            reason=str(reason).strip(),
+            evidence_payload=payload,
+            status="pending",
+        )
+        self.session.add(correction)
+        self.session.flush()
+        self.session.add(
+            AuditLog(
+                paper_id=paper_id,
+                action="propose_figure_deletion",
+                source=reviewer,
+                target_type="paper_correction",
+                target_id=str(correction.id),
+                payload={
+                    "figure_id": str(figure_id),
+                    "target_path": correction.target_path,
+                    "operation": "delete",
+                },
+            )
+        )
+        self.session.flush()
+        self.session.refresh(correction)
+        return correction
+
+    def direct_delete_figure(
+        self,
+        *,
+        paper_id: UUID,
+        figure_id: UUID,
+        reason: str,
+        reviewer: str,
+        evidence_payload: dict[str, Any] | list[Any] | None = None,
+    ) -> tuple[PaperCorrection, str | None, list[str]]:
+        if not str(reason or "").strip():
+            raise ValueError("A deletion reason is required.")
+        figure = self.session.get(PaperFigure, figure_id)
+        if figure is None or figure.paper_id != paper_id:
+            raise ValueError("Figure not found for this paper.")
+        duplicate_group_size = self._figure_duplicate_group_size(figure)
+        allowed, policy_reason = direct_delete_eligibility(figure, duplicate_group_size=duplicate_group_size)
+        if not allowed:
+            raise ValueError("direct_delete_not_allowed:figure_not_duplicate_or_noise")
+        payload = evidence_payload
+        if not payload:
+            payload = {
+                "page": figure.page,
+                "figure_label": figure.figure_label,
+                "quoted_text": figure.caption or figure.content_summary or f"Figure object {figure.id}",
+            }
+        if not has_evidence_anchor(payload):
+            raise ValueError("Figure deletion requires a PDF evidence anchor.")
+        image_path = figure.image_path
+        correction = PaperCorrection(
+            paper_id=paper_id,
+            source=reviewer,
+            field_name="figures",
+            target_path=f"figures:{figure_id}:delete",
+            operation="delete",
+            proposed_value=None,
+            reason=str(reason).strip(),
+            evidence_payload=payload,
+            status="approved",
+            reviewed_at=datetime.utcnow(),
+            reviewed_by=reviewer,
+        )
+        self.session.add(correction)
+        self.session.flush()
+        self._apply_structured_delete(correction)
+        retired_ids = self._retire_direct_delete_pending_figure_corrections(
+            paper_id=paper_id,
+            figure_id=figure_id,
+            reviewer=reviewer,
+            keep_correction_id=correction.id,
+        )
+        self.session.add(
+            AuditLog(
+                paper_id=paper_id,
+                action="direct_delete_figure",
+                source=reviewer,
+                target_type="figures",
+                target_id=str(figure_id),
+                payload={
+                    "reason": correction.reason,
+                    "policy_reason": policy_reason,
+                    "source_correction_id": str(correction.id),
+                    "retired_correction_ids": retired_ids,
+                },
+            )
+        )
+        self.session.flush()
+        self.session.refresh(correction)
+        return correction, image_path, retired_ids
 
     def reject_correction(self, correction_id: UUID, reviewer: str, reason: str | None = None) -> PaperCorrection:
         correction = self._get_correction(correction_id)
@@ -315,6 +443,9 @@ class ReviewService:
         if correction.operation == "recrop_figure" and correction.field_name == "figures":
             self._apply_figure_recrop_correction(correction)
             return
+        if correction.operation == "delete" and correction.field_name == "figures":
+            self._apply_structured_delete(correction)
+            return
         if correction.operation == "create" and correction.field_name == "catalyst_samples":
             self._apply_catalyst_sample_create(correction)
             return
@@ -324,7 +455,7 @@ class ReviewService:
         if correction.operation != "replace":
             raise ValueError("Only replace corrections and approved structured creation are supported in the current review flow")
 
-        if correction.target_path == correction.field_name and correction.field_name in self.ALLOWED_PAPER_FIELDS:
+        if self._is_top_level_paper_correction(correction):
             paper = self.session.get(Paper, correction.paper_id)
             if not paper:
                 raise ValueError("Paper not found")
@@ -635,17 +766,19 @@ class ReviewService:
         *,
         reviewer: str,
         write_lock_tokens: list[str] | None,
+        write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> None:
         if not self._requires_non_dft_module_lock(correction):
             return
         if not self._reviewer_requires_module_lock(reviewer):
             return
-        module = ModuleWriteLockService.module_from_field(correction.field_name, correction.target_path)
+        target_path = correction.field_name if self._is_top_level_paper_correction(correction) else correction.target_path
+        module = ModuleWriteLockService.module_from_field(correction.field_name, target_path)
         ModuleWriteLockService(self.session).require_write(
             paper_id=correction.paper_id,
             module_names=[module],
             lock_tokens=write_lock_tokens,
-            locked_by=reviewer,
+            locked_by=write_lock_owner or reviewer,
         )
 
     @classmethod
@@ -658,7 +791,7 @@ class ReviewService:
         return normalized.startswith(cls.DIRECT_AI_LOCK_PREFIXES)
 
     def _requires_non_dft_module_lock(self, correction: PaperCorrection) -> bool:
-        if correction.target_path == correction.field_name and correction.field_name in self.ALLOWED_PAPER_FIELDS:
+        if self._is_top_level_paper_correction(correction):
             return True
         return correction.field_name in {
             "figures",
@@ -675,6 +808,8 @@ class ReviewService:
         proposed_value = correction.proposed_value
         if spec.model is PaperFigure and attribute == "image_path":
             proposed_value = self._validated_relative_artifact_path(proposed_value)
+        if spec.model is PaperFigure and attribute == "key_elements":
+            proposed_value, _detail = normalize_figure_key_elements(proposed_value)
         if spec.model is CatalystSample and not has_material_correction_anchor(correction.evidence_payload):
             raise ValueError(
                 "Catalyst sample corrections require at least one PDF evidence anchor: "
@@ -711,7 +846,110 @@ class ReviewService:
             self.session.add(record)
             return
         setattr(record, attribute, proposed_value)
+        if isinstance(record, PaperFigure) and attribute in {"caption", "content_summary"}:
+            record.content_summary = normalize_figure_content_summary(record.content_summary, record.caption)
         self.session.add(record)
+
+    def _apply_structured_delete(self, correction: PaperCorrection) -> None:
+        collection, row_id_text, attribute = self._parse_structured_target_path(correction.target_path)
+        if correction.field_name != collection:
+            raise ValueError("Correction field_name must match structured target collection")
+        if attribute != "delete":
+            raise ValueError("Structured deletion target must use format <collection>:<row_id>:delete")
+        if collection not in self.STRUCTURED_DELETE_TARGETS:
+            raise ValueError(f"Structured deletion is not enabled for {collection}")
+        if not has_evidence_anchor(correction.evidence_payload):
+            raise ValueError("Structured deletion requires at least one PDF evidence anchor.")
+        spec = self.STRUCTURED_TARGETS.get(collection)
+        if spec is None:
+            raise ValueError("Unsupported structured deletion target")
+        record = self.session.get(spec.model, UUID(row_id_text))
+        if not record:
+            raise ValueError(f"{collection} row not found")
+        if getattr(record, "paper_id", None) != correction.paper_id:
+            raise ValueError(f"{collection} row does not belong to the target paper")
+        snapshot = self._structured_record_snapshot(record, collection)
+        self.session.delete(record)
+        correction.evidence_payload = {
+            **dict(correction.evidence_payload or {}),
+            "structured_delete": {
+                "collection": collection,
+                "target_id": row_id_text,
+                "snapshot": snapshot,
+            },
+        }
+        self.session.add(correction)
+        self.session.add(
+            AuditLog(
+                paper_id=correction.paper_id,
+                action="delete_structured_object",
+                source=correction.reviewed_by or correction.source,
+                target_type=collection,
+                target_id=row_id_text,
+                payload={
+                    "source_correction_id": str(correction.id),
+                    "target_path": correction.target_path,
+                    "snapshot": snapshot,
+                    "evidence_anchor": correction.evidence_payload,
+                },
+            )
+        )
+
+    def _retire_direct_delete_pending_figure_corrections(
+        self,
+        *,
+        paper_id: UUID,
+        figure_id: UUID,
+        reviewer: str,
+        keep_correction_id: UUID,
+    ) -> list[str]:
+        rows = self.session.scalars(
+            select(PaperCorrection)
+            .where(PaperCorrection.paper_id == paper_id)
+            .where(PaperCorrection.id != keep_correction_id)
+            .where(PaperCorrection.status.in_(["pending", "requires_resolution"]))
+            .where(PaperCorrection.target_path.like(f"figures:{figure_id}:%"))
+        ).all()
+        retired_ids: list[str] = []
+        for row in rows:
+            row.status = "rejected"
+            row.reviewed_by = reviewer
+            row.reviewed_at = datetime.utcnow()
+            payload = dict(row.evidence_payload or {}) if isinstance(row.evidence_payload, dict) else {}
+            payload["superseded_by_direct_delete"] = {
+                "figure_id": str(figure_id),
+                "reviewer": reviewer,
+            }
+            row.evidence_payload = payload
+            flag_modified(row, "evidence_payload")
+            retired_ids.append(str(row.id))
+            self.session.add(
+                AuditLog(
+                    paper_id=paper_id,
+                    action="retire_figure_correction_after_direct_delete",
+                    source=reviewer,
+                    target_type="paper_correction",
+                    target_id=str(row.id),
+                    payload={
+                        "figure_id": str(figure_id),
+                        "target_path": row.target_path,
+                    },
+                )
+            )
+        return retired_ids
+
+    def _figure_duplicate_group_size(self, figure: PaperFigure) -> int:
+        identity = normalized_figure_identity(figure)
+        if not identity:
+            return 1
+        rows = self.session.scalars(
+            select(PaperFigure).where(PaperFigure.paper_id == figure.paper_id)
+        ).all()
+        count = 0
+        for row in rows:
+            if normalized_figure_identity(row) == identity:
+                count += 1
+        return max(1, count)
 
     def _apply_structured_create(self, correction: PaperCorrection) -> None:
         collection, row_id_text, attribute = self._parse_structured_target_path(correction.target_path)
@@ -741,6 +979,17 @@ class ReviewService:
             for field in spec.allowed_fields
             if field in proposed and proposed.get(field) not in (None, "")
         }
+        if spec.model is PaperFigure:
+            cleaned["content_summary"] = normalize_figure_content_summary(
+                cleaned.get("content_summary"),
+                cleaned.get("caption"),
+            )
+            if "key_elements" in cleaned:
+                cleaned["key_elements"], _detail = normalize_figure_key_elements(cleaned.get("key_elements"))
+            if cleaned.get("content_summary") is None:
+                cleaned.pop("content_summary", None)
+            if cleaned.get("key_elements") is None:
+                cleaned.pop("key_elements", None)
         if not cleaned:
             raise ValueError("Structured creation proposed_value did not include any supported fields")
         self._validate_structured_create_payload(collection, cleaned)
@@ -955,11 +1204,14 @@ class ReviewService:
         self.session.add(locator)
 
     def _resolve_current_value(self, correction: PaperCorrection) -> Any:
+        if correction.operation == "delete" and correction.field_name in self.STRUCTURED_DELETE_TARGETS:
+            record, collection = self._resolve_structured_delete_target(correction)
+            return self._structured_record_snapshot(record, collection)
         if correction.operation == "create" and correction.field_name == "catalyst_samples":
             return None
         if correction.operation == "create" and correction.field_name in self.STRUCTURED_CREATE_TARGETS:
             return None
-        if correction.target_path == correction.field_name and correction.field_name in self.ALLOWED_PAPER_FIELDS:
+        if self._is_top_level_paper_correction(correction):
             paper = self.session.get(Paper, correction.paper_id)
             if not paper:
                 raise ValueError("Paper not found")
@@ -988,12 +1240,59 @@ class ReviewService:
             raise ValueError(f"{collection} row does not belong to the target paper")
         return record, spec, attribute
 
+    def _resolve_structured_delete_target(self, correction: PaperCorrection) -> tuple[Any, str]:
+        collection, row_id_text, attribute = self._parse_structured_target_path(correction.target_path)
+        if correction.field_name != collection:
+            raise ValueError("Correction field_name must match structured target collection")
+        if attribute != "delete":
+            raise ValueError("Structured deletion target must use format <collection>:<row_id>:delete")
+        if collection not in self.STRUCTURED_DELETE_TARGETS:
+            raise ValueError(f"Structured deletion is not enabled for {collection}")
+        spec = self.STRUCTURED_TARGETS.get(collection)
+        if spec is None:
+            raise ValueError("Unsupported structured deletion target")
+        record = self.session.get(spec.model, UUID(row_id_text))
+        if not record:
+            raise ValueError(f"{collection} row not found")
+        if getattr(record, "paper_id", None) != correction.paper_id:
+            raise ValueError(f"{collection} row does not belong to the target paper")
+        return record, collection
+
     @staticmethod
     def _parse_structured_target_path(target_path: str) -> tuple[str, str, str]:
         parts = [part.strip() for part in target_path.split(":")]
         if len(parts) != 3 or not all(parts):
             raise ValueError("Structured correction target path must use format <collection>:<row_id>:<field>")
         return parts[0], parts[1], parts[2]
+
+    @classmethod
+    def _is_top_level_paper_correction(cls, correction: PaperCorrection) -> bool:
+        if correction.field_name not in cls.ALLOWED_PAPER_FIELDS:
+            return False
+        target_path = str(correction.target_path or "").strip()
+        if not target_path:
+            return True
+        allowed_paths = {
+            correction.field_name,
+            f"paper.{correction.field_name}",
+            f"paper:{correction.field_name}",
+            f"paper:{correction.paper_id}:{correction.field_name}",
+        }
+        return target_path in allowed_paths
+
+    @staticmethod
+    def _structured_record_snapshot(record: Any, collection: str) -> dict[str, Any]:
+        if collection == "figures":
+            return {
+                "id": str(record.id),
+                "figure_label": getattr(record, "figure_label", None),
+                "page": getattr(record, "page", None),
+                "caption": getattr(record, "caption", None),
+                "figure_role": getattr(record, "figure_role", None),
+                "crop_status": getattr(record, "crop_status", None),
+                "image_path": getattr(record, "image_path", None),
+            }
+        return {"id": str(getattr(record, "id", ""))}
 
     def _get_correction(self, correction_id: UUID) -> PaperCorrection:
         correction = self.session.get(PaperCorrection, correction_id)

@@ -2,6 +2,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.config import Settings, get_settings
+from app.security.owner import require_owner_request
 
 
 def require_exports_enabled(settings: Settings | None = None) -> None:
@@ -24,8 +25,11 @@ def _is_export_path(path: str) -> bool:
 
 async def enforce_export_boundary(request: Request, call_next):
     if _is_export_path(request.url.path) and not get_settings().exports_enabled:
-        return JSONResponse(
-            {"detail": "Exports are disabled by server policy"},
-            status_code=403,
-        )
+        try:
+            require_owner_request(request)
+        except HTTPException:
+            return JSONResponse(
+                {"detail": "Exports are disabled by server policy"},
+                status_code=403,
+            )
     return await call_next(request)

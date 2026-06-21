@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    CatalystSample,
     DFTResult,
     ExternalAnalysisCandidate,
     ExtractionFieldReview,
@@ -21,15 +22,29 @@ from app.db.models import (
     WritingCard,
 )
 from app.services.review_target_resolver import canonical_target_type
+from app.utils.figure_summary import normalize_figure_key_elements
 
 
 DECISION_POSITIVE = {"PASS", "ACCEPT", "APPROVE", "APPROVED", "VERIFIED", "OK"}
 DECISION_NEGATIVE = {"REVISE", "FLAG", "INSUFFICIENT", "REJECT", "REJECTED", "NEEDS_FIX", "FIX", "BLOCK", "PROPOSED"}
 CORRECTION_STATUSES = {"pending", "rejected", "approved"}
+DFT_EXPLICIT_BLANK = "__explicit_blank__"
+DFT_CONFLICT_FIELD_MAP = {
+    "value_conflict": "value",
+    "unit_conflict": "unit",
+    "property_conflict": "property_type",
+    "material_conflict": "catalyst",
+    "structure_name_conflict": "structure_name",
+    "adsorbate_conflict": "adsorbate",
+    "reaction_step_conflict": "reaction_step",
+}
 
 
 class ReviewConflictAggregationService:
     """Read-only aggregation of multi-reviewer disagreements for extracted fields."""
+
+    VISUAL_TARGET_TYPES = {"figure", "figures", "table", "tables"}
+    DFT_TARGET_TYPES = {"dft_result", "dft_results", "dft_setting", "dft_settings", "catalyst_sample", "catalyst_samples"}
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -54,11 +69,13 @@ class ReviewConflictAggregationService:
         groups = self._group_opinions(opinions)
         rows = []
         for key, items in sorted(groups.items(), key=lambda item: item[0]):
-            enriched_items = [self._enrich_opinion(item) for item in items]
+            collapsed_items = self._collapse_adopted_opinions(items)
+            enriched_items = [self._enrich_opinion(item) for item in collapsed_items]
             conflict_types = self._conflict_types(enriched_items)
             if not conflict_types and not include_non_conflicts:
                 continue
             paper, target, target_value, field = key.split("|", 3)
+            affected_field_names = self._affected_field_names(target, field, conflict_types)
             target_summary = self._build_target_summary(target, target_value, enriched_items)
             anchor_summary = self._build_anchor_summary(enriched_items)
             rows.append(
@@ -71,6 +88,8 @@ class ReviewConflictAggregationService:
                     "source_count": len({self._norm(item.get("source")) for item in enriched_items if item.get("source")}),
                     "conflict": bool(conflict_types),
                     "conflict_types": conflict_types,
+                    "affected_field_names": affected_field_names,
+                    "conflict_field_names": affected_field_names,
                     "target_summary": target_summary,
                     "anchor_summary": anchor_summary,
                     "opinions": enriched_items,
@@ -104,6 +123,20 @@ class ReviewConflictAggregationService:
             counts[str(paper_id)] = self.list_conflicts(paper_id=paper_id, limit=1000)["conflict_count"]
         return counts
 
+    def count_conflicts_by_paper_and_module(self, paper_ids: set[UUID]) -> dict[str, dict[str, int]]:
+        if not paper_ids:
+            return {}
+        counts = {
+            str(paper_id): {"dft": 0, "visual": 0, "content": 0, "other": 0}
+            for paper_id in paper_ids
+        }
+        for paper_id in paper_ids:
+            payload = self.list_conflicts(paper_id=paper_id, limit=1000)
+            summary = counts[str(paper_id)]
+            for row in (payload.get("rows") or []):
+                summary[self._module_for_target_type(row.get("target_type"))] += 1
+        return counts
+
     def conflicts_by_target(
         self,
         *,
@@ -127,6 +160,241 @@ class ReviewConflictAggregationService:
             if row["paper_id"] in allowed_papers and row["target_id"] in allowed_targets:
                 by_target[row["target_id"]].append(row)
         return dict(by_target)
+
+    def _collapse_adopted_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(opinions) < 2:
+            return opinions
+        collapsed = list(opinions)
+        approved_corrections = [
+            item for item in collapsed
+            if str(item.get("source_type") or "") == "paper_correction"
+            and str(item.get("status") or "").strip().lower() == "approved"
+        ]
+        if approved_corrections:
+            adopted_source_ids: set[str] = set()
+            for correction in approved_corrections:
+                for opinion in collapsed:
+                    if opinion is correction:
+                        continue
+                    if str(opinion.get("source_type") or "") == "paper_correction":
+                        continue
+                    if self._approved_correction_adopts_opinion(correction, opinion):
+                        adopted_source_ids.add(str(opinion.get("source_id") or ""))
+            if adopted_source_ids:
+                collapsed = [
+                    item for item in collapsed
+                    if str(item.get("source_id") or "") not in adopted_source_ids
+                ]
+        collapsed = self._collapse_pending_corrections_absorbed_by_approved_corrections(collapsed)
+        collapsed = self._collapse_dft_target_state_adopted_opinions(collapsed)
+        return self._collapse_rejected_dft_replacement_adopted_opinions(collapsed)
+
+    def _collapse_pending_corrections_absorbed_by_approved_corrections(
+        self,
+        opinions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if len(opinions) < 2:
+            return opinions
+        approved_corrections = [
+            item for item in opinions
+            if str(item.get("source_type") or "") == "paper_correction"
+            and str(item.get("status") or "").strip().lower() == "approved"
+        ]
+        if not approved_corrections:
+            return opinions
+        adopted_source_ids: set[str] = set()
+        for correction in approved_corrections:
+            if not self._opinion_matches_current_target_state(correction):
+                continue
+            for opinion in opinions:
+                if opinion is correction:
+                    continue
+                if str(opinion.get("source_type") or "") != "paper_correction":
+                    continue
+                if str(opinion.get("status") or "").strip().lower() != "pending":
+                    continue
+                if not self._same_opinion_target(correction, opinion):
+                    continue
+                if not self._opinion_values_match(correction, opinion):
+                    continue
+                if not self._dft_scalar_correction_can_adopt_opinion(correction, opinion):
+                    continue
+                adopted_source_ids.add(str(opinion.get("source_id") or ""))
+        if not adopted_source_ids:
+            return opinions
+        return [
+            item for item in opinions
+            if str(item.get("source_id") or "") not in adopted_source_ids
+        ]
+
+    def _collapse_dft_target_state_adopted_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(opinions) < 2:
+            return opinions
+        first = opinions[0]
+        target_type = self._safe_canonical_target_type(str(first.get("target_type") or ""))
+        if target_type != "dft_results":
+            return opinions
+        target_id = str(first.get("target_id") or "").strip()
+        if not target_id or any(str(item.get("target_id") or "").strip() != target_id for item in opinions):
+            return opinions
+        target_row = self._load_target_row(target_type, target_id)
+        if not isinstance(target_row, DFTResult):
+            return opinions
+        has_finalized_review = any(
+            str(item.get("source_type") or "") == "extraction_field_review"
+            and self._decision_bucket(item.get("decision") or item.get("status")) == "positive"
+            for item in opinions
+        )
+        if not has_finalized_review:
+            return opinions
+        adopted_source_ids = {
+            str(item.get("source_id") or "")
+            for item in opinions
+            if str(item.get("source_type") or "") in {"external_audit_opinion", "object_review_audit"}
+            and self._dft_target_matches_opinion(target_row, item)
+        }
+        if not adopted_source_ids:
+            return opinions
+        return [
+            item for item in opinions
+            if str(item.get("source_id") or "") not in adopted_source_ids
+        ]
+
+    def _collapse_rejected_dft_replacement_adopted_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(opinions) < 2:
+            return opinions
+        first = opinions[0]
+        target_type = self._safe_canonical_target_type(str(first.get("target_type") or ""))
+        if target_type != "dft_results":
+            return opinions
+        target_id = str(first.get("target_id") or "").strip()
+        if not target_id or any(str(item.get("target_id") or "").strip() != target_id for item in opinions):
+            return opinions
+        target_row = self._load_target_row(target_type, target_id)
+        if not isinstance(target_row, DFTResult):
+            return opinions
+        if str(getattr(target_row, "candidate_status", "") or "").strip().lower() != "rejected":
+            return opinions
+        adopted_source_ids = {
+            str(item.get("source_id") or "")
+            for item in opinions
+            if str(item.get("source_type") or "") in {"external_audit_opinion", "object_review_audit"}
+            and self._dft_opinion_matches_replacement_row(opinion=item, target_row=target_row)
+        }
+        if not adopted_source_ids:
+            return opinions
+        return [
+            item for item in opinions
+            if str(item.get("source_id") or "") not in adopted_source_ids
+        ]
+
+    def _approved_correction_adopts_opinion(self, correction: dict[str, Any], opinion: dict[str, Any]) -> bool:
+        evidence = correction.get("evidence")
+        if not isinstance(evidence, dict):
+            return False
+        selected_source_ids = evidence.get("selected_source_ids")
+        selected = isinstance(selected_source_ids, list) and str(opinion.get("source_id") or "") in {str(value) for value in selected_source_ids}
+        if not selected:
+            review_source = str(evidence.get("review_source") or "").strip().lower()
+            review_source_label = str(evidence.get("review_source_label") or "").strip().lower()
+            review_decision = str(evidence.get("review_decision") or "").strip().upper()
+            if not review_source and not review_source_label and not review_decision:
+                return False
+            opinion_source = str(opinion.get("source") or "").strip().lower()
+            opinion_source_label = str(opinion.get("source_label") or "").strip().lower()
+            opinion_decision = str(opinion.get("decision") or "").strip().upper()
+            if review_source and review_source != opinion_source:
+                return False
+            if review_source_label and review_source_label != opinion_source_label:
+                return False
+            if review_decision and review_decision != opinion_decision:
+                return False
+        if not self._opinion_values_match(correction, opinion):
+            return False
+        if not self._dft_scalar_correction_can_adopt_opinion(correction, opinion):
+            return False
+        correction_created = correction.get("created_at")
+        opinion_created = opinion.get("created_at")
+        if correction_created and opinion_created and correction_created < opinion_created:
+            return False
+        return True
+
+    def _dft_opinion_matches_replacement_row(self, *, opinion: dict[str, Any], target_row: DFTResult) -> bool:
+        if not self._is_structured_dft_value_opinion(opinion):
+            return False
+        siblings = self.session.scalars(
+            select(DFTResult).where(
+                DFTResult.paper_id == target_row.paper_id,
+                DFTResult.id != target_row.id,
+            )
+        ).all()
+        for sibling in siblings:
+            candidate_status = str(getattr(sibling, "candidate_status", "") or "").strip().lower()
+            if candidate_status in {"rejected", "system_candidate", "needs_human_confirmation"}:
+                continue
+            if self._dft_target_matches_opinion(sibling, opinion):
+                return True
+            if self._dft_replacement_row_semantically_matches_opinion(sibling, opinion):
+                return True
+        return False
+
+    def _dft_replacement_row_semantically_matches_opinion(self, row: DFTResult, opinion: dict[str, Any]) -> bool:
+        if not self._dft_value_matches_row(opinion, target_row=row):
+            return False
+        if not self._dft_replacement_field_compatible(opinion, "property", row):
+            return False
+        if not self._dft_replacement_field_compatible(opinion, "adsorbate", row):
+            return False
+        if not self._dft_replacement_field_compatible(opinion, "reaction_step", row):
+            return False
+        return True
+
+    def _dft_replacement_field_compatible(self, opinion: dict[str, Any], field_name: str, row: DFTResult) -> bool:
+        present, opinion_value = self._dft_field_state(opinion, field_name, target_row=None)
+        if not present:
+            return True
+        row_value = self._dft_row_field_key(row, field_name)
+        if opinion_value == row_value:
+            return True
+        if field_name in {"adsorbate", "reaction_step"}:
+            return self._normalized_dft_text_overlap(opinion_value, row_value)
+        return False
+
+    @staticmethod
+    def _normalized_dft_text_overlap(left: str, right: str) -> bool:
+        def tokens(value: str) -> set[str]:
+            normalized = normalize(value)
+            return {
+                token
+                for token in normalized.replace("-", " ").split()
+                if len(token) >= 3
+            }
+
+        def normalize(value: str) -> str:
+            text = str(value or "").strip().lower()
+            text = text.replace("*", "")
+            text = " ".join(text.split())
+            return text
+
+        left_norm = normalize(left)
+        right_norm = normalize(right)
+        if not left_norm or not right_norm:
+            return False
+        if left_norm == right_norm or left_norm in right_norm or right_norm in left_norm:
+            return True
+        overlap = tokens(left_norm) & tokens(right_norm)
+        return len(overlap) >= 2
+
+    @classmethod
+    def _module_for_target_type(cls, target_type: Any) -> str:
+        normalized = str(target_type or "").strip().lower()
+        if normalized in cls.DFT_TARGET_TYPES:
+            return "dft"
+        if normalized in cls.VISUAL_TARGET_TYPES:
+            return "visual"
+        if normalized:
+            return "content"
+        return "other"
 
     def _collect_opinions(
         self,
@@ -470,9 +738,15 @@ class ReviewConflictAggregationService:
         if len(opinions) < 2:
             return []
         conflict_types: list[str] = []
-        value_keys = {self._value_key(item.get("value")) for item in opinions if not self._is_blank(item.get("value"))}
-        unit_keys = {self._norm(item.get("unit")) for item in opinions if not self._is_blank(item.get("unit"))}
-        decision_keys = {self._decision_bucket(item.get("decision") or item.get("status")) for item in opinions}
+        dft_target = self._dft_conflict_target(opinions)
+        if dft_target is not None:
+            value_keys = {item["value_key"] for item in dft_target if item["value_key"]}
+            unit_keys = {item["unit_key"] for item in dft_target if item["unit_key"]}
+            decision_keys = {item["decision_bucket"] for item in dft_target}
+        else:
+            value_keys = {self._value_key(self._comparison_value(item)) for item in opinions if not self._is_blank(self._comparison_value(item))}
+            unit_keys = {self._norm(item.get("unit")) for item in opinions if not self._is_blank(item.get("unit"))}
+            decision_keys = {self._decision_bucket(item.get("decision") or item.get("status")) for item in opinions}
         locator_keys = {self._locator_key(item.get("evidence")) for item in opinions if self._locator_key(item.get("evidence"))}
         mapping_keys = {
             "|".join([str(item.get("target_type") or ""), str(item.get("target_id") or ""), str(item.get("field_name") or "")])
@@ -501,9 +775,33 @@ class ReviewConflictAggregationService:
             conflict_types.append("locator_conflict")
         if len(mapping_keys) > 1:
             conflict_types.append("mapping_conflict")
+        if dft_target is not None:
+            for field_name, conflict_name in (
+                ("property", "property_conflict"),
+                ("material", "material_conflict"),
+                ("structure_name", "structure_name_conflict"),
+                ("adsorbate", "adsorbate_conflict"),
+                ("reaction_step", "reaction_step_conflict"),
+            ):
+                field_keys = {item[field_name] for item in dft_target if item[field_name]}
+                if len(field_keys) > 1:
+                    conflict_types.append(conflict_name)
         if len(identity_keys) > 1:
             conflict_types.append("identity_conflict")
         return conflict_types
+
+    def _affected_field_names(self, target_type: str, field_name: str, conflict_types: list[str]) -> list[str]:
+        canonical_target = self._safe_canonical_target_type(target_type)
+        if canonical_target != "dft_results":
+            return [field_name] if field_name else []
+        names: list[str] = []
+        for conflict_type in conflict_types:
+            mapped = DFT_CONFLICT_FIELD_MAP.get(str(conflict_type or "").strip())
+            if mapped and mapped not in names:
+                names.append(mapped)
+        if not names and field_name:
+            names.append(field_name)
+        return names
 
     def _enrich_opinion(self, opinion: dict[str, Any]) -> dict[str, Any]:
         item = dict(opinion)
@@ -652,6 +950,318 @@ class ReviewConflictAggregationService:
                 row = None
         self._target_cache[key] = row
         return row
+
+    def _dft_target_matches_opinion(self, row: DFTResult, opinion: dict[str, Any]) -> bool:
+        proposed = self._dft_structured_value_payload(opinion)
+        proposed_value = proposed.get("value") if isinstance(proposed, dict) else opinion.get("value")
+        if not self._numeric_values_match(getattr(row, "value", None), proposed_value):
+            return False
+
+        proposed_unit = self._dft_unit_value(opinion, target_row=row)
+        if proposed_unit and self._norm(getattr(row, "unit", None)) != proposed_unit:
+            return False
+
+        for field_name in ("property", "adsorbate", "reaction_step", "structure_name", "material"):
+            if not self._dft_field_matches_row(opinion, field_name, target_row=row):
+                return False
+        return True
+
+    def _opinion_matches_current_target_state(self, opinion: dict[str, Any]) -> bool:
+        target_type = self._safe_canonical_target_type(str(opinion.get("target_type") or ""))
+        target_id = str(opinion.get("target_id") or "").strip()
+        field_name = str(opinion.get("field_name") or "").strip().lower()
+        if not target_type or not target_id or not field_name:
+            return False
+        target_row = self._load_target_row(target_type, target_id)
+        if target_row is None:
+            return False
+        if target_type == "dft_results":
+            if field_name == "value":
+                return self._dft_value_matches_row(opinion, target_row=target_row)
+            if field_name == "unit":
+                return self._norm(getattr(target_row, "unit", None)) == self._norm(opinion.get("value"))
+            if field_name in {"property", "property_type"}:
+                return self._dft_row_field_key(target_row, "property") == self._dft_field_key_from_value(opinion.get("value"))
+            if field_name == "adsorbate":
+                return self._dft_row_field_key(target_row, "adsorbate") == self._dft_field_key_from_value(opinion.get("value"))
+            if field_name == "reaction_step":
+                return self._dft_row_field_key(target_row, "reaction_step") == self._dft_field_key_from_value(opinion.get("value"))
+            if field_name == "structure_name":
+                return self._dft_row_field_key(target_row, "structure_name") == self._dft_field_key_from_value(opinion.get("value"))
+        return self._value_key(getattr(target_row, field_name, None)) == self._value_key(self._comparison_value(opinion))
+
+    @staticmethod
+    def _same_opinion_target(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        return (
+            str(left.get("paper_id") or "") == str(right.get("paper_id") or "")
+            and str(left.get("target_type") or "") == str(right.get("target_type") or "")
+            and str(left.get("target_id") or "") == str(right.get("target_id") or "")
+            and str(left.get("field_name") or "") == str(right.get("field_name") or "")
+        )
+
+    def _opinion_values_match(self, left: dict[str, Any], right: dict[str, Any]) -> bool:
+        target_type = self._safe_canonical_target_type(str(left.get("target_type") or right.get("target_type") or ""))
+        field_name = str(left.get("field_name") or right.get("field_name") or "").strip().lower()
+        if target_type == "dft_results" and field_name == "value":
+            left_value = self._dft_numeric_value(left)
+            right_value = self._dft_numeric_value(right)
+            if self._is_blank(left_value) or self._is_blank(right_value):
+                return self._value_key(left.get("value")) == self._value_key(right.get("value"))
+            if not self._numeric_values_match(left_value, right_value):
+                return False
+            left_unit = self._dft_unit_value(left)
+            right_unit = self._dft_unit_value(right)
+            return self._dft_units_compatible(left_unit, right_unit)
+        return self._value_key(self._comparison_value(left)) == self._value_key(self._comparison_value(right))
+
+    def _comparison_value(self, opinion: dict[str, Any]) -> Any:
+        target_type = self._safe_canonical_target_type(str(opinion.get("target_type") or ""))
+        field_name = str(opinion.get("field_name") or "").strip().lower()
+        value = opinion.get("value")
+        if target_type == "figures" and field_name == "key_elements":
+            normalized, _detail = normalize_figure_key_elements(value)
+            return normalized
+        return value
+
+    def _dft_scalar_correction_can_adopt_opinion(self, correction: dict[str, Any], opinion: dict[str, Any]) -> bool:
+        target_type = self._safe_canonical_target_type(str(correction.get("target_type") or opinion.get("target_type") or ""))
+        field_name = str(correction.get("field_name") or opinion.get("field_name") or "").strip().lower()
+        if target_type != "dft_results" or field_name != "value":
+            return True
+        if not self._is_structured_dft_value_opinion(opinion):
+            return True
+        if not self._dft_opinion_has_non_value_fields(opinion):
+            return True
+        target_id = str(correction.get("target_id") or opinion.get("target_id") or "").strip()
+        target_row = self._load_target_row("dft_results", target_id) if target_id else None
+        if not isinstance(target_row, DFTResult):
+            return False
+        return self._dft_non_value_fields_match_row(opinion, target_row=target_row)
+
+    def _dft_conflict_target(self, opinions: list[dict[str, Any]]) -> list[dict[str, str]] | None:
+        first = opinions[0]
+        if self._safe_canonical_target_type(str(first.get("target_type") or "")) != "dft_results":
+            return None
+        if str(first.get("field_name") or "").strip().lower() != "value":
+            return None
+        target_id = str(first.get("target_id") or "").strip()
+        target_row = self._load_target_row("dft_results", target_id) if target_id else None
+        payloads: list[dict[str, str]] = []
+        for opinion in opinions:
+            value_key = self._dft_numeric_key(opinion)
+            unit_key = self._dft_unit_value(opinion, target_row=target_row)
+            payloads.append(
+                {
+                    "value_key": value_key,
+                    "unit_key": unit_key,
+                    "property": self._dft_field_value(opinion, "property", target_row=target_row),
+                    "material": self._dft_field_value(opinion, "material", target_row=target_row),
+                    "structure_name": self._dft_field_value(opinion, "structure_name", target_row=target_row),
+                    "adsorbate": self._dft_field_value(opinion, "adsorbate", target_row=target_row),
+                    "reaction_step": self._dft_field_value(opinion, "reaction_step", target_row=target_row),
+                    "decision_bucket": self._conflict_decision_bucket(opinion, target_row=target_row),
+                }
+            )
+        return payloads
+
+    def _conflict_decision_bucket(self, opinion: dict[str, Any], *, target_row: DFTResult | None) -> str:
+        normalized = str(opinion.get("decision") or opinion.get("status") or "").strip().upper()
+        if (
+            normalized == "PROPOSED"
+            and self._is_structured_dft_value_opinion(opinion)
+            and self._dft_value_matches_row(opinion, target_row=target_row)
+            and self._dft_opinion_has_non_value_fields(opinion)
+        ):
+            return "neutral"
+        return self._decision_bucket(normalized)
+
+    @staticmethod
+    def _structured_value_payload(value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
+    def _dft_structured_value_payload(self, opinion: dict[str, Any]) -> dict[str, Any]:
+        payload = self._structured_value_payload(opinion.get("value"))
+        if payload:
+            return payload
+        raw_payload = opinion.get("raw_payload") if isinstance(opinion.get("raw_payload"), dict) else {}
+        return self._structured_value_payload(raw_payload.get("corrected_value"))
+
+    def _is_structured_dft_value_opinion(self, opinion: dict[str, Any]) -> bool:
+        return bool(self._dft_structured_value_payload(opinion))
+
+    def _dft_numeric_value(self, opinion: dict[str, Any]) -> Any:
+        structured = self._dft_structured_value_payload(opinion)
+        if structured and "value" in structured:
+            return structured.get("value")
+        return opinion.get("value")
+
+    def _dft_numeric_key(self, opinion: dict[str, Any]) -> str:
+        value = self._dft_numeric_value(opinion)
+        if self._is_blank(value):
+            return ""
+        return self._value_key(value)
+
+    def _dft_unit_value(self, opinion: dict[str, Any], *, target_row: DFTResult | None = None) -> str:
+        structured = self._dft_structured_value_payload(opinion)
+        for candidate in (
+            structured.get("unit") if structured else None,
+            opinion.get("unit"),
+            (getattr(target_row, "unit", None) if target_row is not None else None),
+        ):
+            normalized = self._norm(candidate)
+            if normalized:
+                return normalized
+        return ""
+
+    def _dft_units_compatible(self, left: Any, right: Any) -> bool:
+        left_norm = self._norm(left)
+        right_norm = self._norm(right)
+        return not left_norm or not right_norm or left_norm == right_norm
+
+    def _dft_value_matches_row(self, opinion: dict[str, Any], *, target_row: DFTResult | None) -> bool:
+        if target_row is None:
+            return False
+        if not self._numeric_values_match(getattr(target_row, "value", None), self._dft_numeric_value(opinion)):
+            return False
+        return self._dft_units_compatible(self._dft_unit_value(opinion, target_row=None), getattr(target_row, "unit", None))
+
+    def _dft_opinion_has_non_value_fields(self, opinion: dict[str, Any]) -> bool:
+        for field_name in ("property", "material", "structure_name", "adsorbate", "reaction_step"):
+            if self._dft_field_is_present(opinion, field_name):
+                return True
+        return False
+
+    def _dft_field_value(
+        self,
+        opinion: dict[str, Any],
+        field_name: str,
+        *,
+        target_row: DFTResult | None,
+    ) -> str:
+        _, value = self._dft_field_state(opinion, field_name, target_row=target_row)
+        return value
+
+    def _dft_field_is_present(self, opinion: dict[str, Any], field_name: str) -> bool:
+        present, _ = self._dft_field_state(opinion, field_name, target_row=None)
+        return present
+
+    def _dft_field_matches_row(self, opinion: dict[str, Any], field_name: str, *, target_row: DFTResult) -> bool:
+        present, value = self._dft_field_state(opinion, field_name, target_row=None)
+        if not present:
+            return True
+        row_value = self._dft_row_field_key(target_row, field_name)
+        if field_name == "material" and not row_value:
+            return True
+        return value == row_value
+
+    def _dft_non_value_fields_match_row(self, opinion: dict[str, Any], *, target_row: DFTResult) -> bool:
+        return all(
+            self._dft_field_matches_row(opinion, field_name, target_row=target_row)
+            for field_name in ("property", "material", "structure_name", "adsorbate", "reaction_step")
+        )
+
+    def _dft_field_state(
+        self,
+        opinion: dict[str, Any],
+        field_name: str,
+        *,
+        target_row: DFTResult | None,
+    ) -> tuple[bool, str]:
+        structured = self._dft_structured_value_payload(opinion)
+        raw_payload = opinion.get("raw_payload") if isinstance(opinion.get("raw_payload"), dict) else {}
+        structured_keys, raw_keys = self._dft_field_keys(field_name)
+        present, value = self._dft_payload_field_state(structured, structured_keys, allow_blank=True)
+        if present:
+            return True, value
+        present, value = self._dft_payload_field_state(
+            raw_payload,
+            raw_keys,
+            allow_blank=not self._dft_has_nested_structured_payload(opinion),
+        )
+        if present:
+            return True, value
+        if target_row is None:
+            return False, ""
+        return False, self._dft_row_field_key(target_row, field_name)
+
+    @staticmethod
+    def _dft_field_keys(field_name: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        if field_name == "property":
+            return (("property", "property_type"), ("normalized_energy_type", "property_type"))
+        if field_name == "material":
+            return (
+                ("material_identity", "material", "normalized_material", "normalized_material_or_catalyst", "catalyst"),
+                ("normalized_material", "normalized_material_or_catalyst", "material", "catalyst", "material_identity"),
+            )
+        if field_name == "structure_name":
+            return (("structure_name",), ("structure_name",))
+        if field_name == "adsorbate":
+            return (("adsorbate",), ("adsorbate",))
+        if field_name == "reaction_step":
+            return (("reaction_step",), ("reaction_step",))
+        return ((), ())
+
+    def _dft_has_nested_structured_payload(self, opinion: dict[str, Any]) -> bool:
+        if isinstance(opinion.get("value"), dict):
+            return True
+        raw_payload = opinion.get("raw_payload") if isinstance(opinion.get("raw_payload"), dict) else {}
+        return isinstance(raw_payload.get("corrected_value"), dict)
+
+    @classmethod
+    def _dft_payload_field_state(
+        cls,
+        payload: dict[str, Any],
+        keys: tuple[str, ...],
+        *,
+        allow_blank: bool,
+    ) -> tuple[bool, str]:
+        if not isinstance(payload, dict):
+            return False, ""
+        for key in keys:
+            if key in payload:
+                value = cls._dft_field_key_from_value(payload.get(key))
+                if allow_blank or value != DFT_EXPLICIT_BLANK:
+                    return True, value
+        return False, ""
+
+    def _dft_row_field_key(self, row: DFTResult, field_name: str) -> str:
+        if field_name == "property":
+            return self._dft_field_key_from_value(getattr(row, "property_type", None))
+        if field_name == "material":
+            material_value = None
+            catalyst_sample_id = getattr(row, "catalyst_sample_id", None)
+            if catalyst_sample_id:
+                sample = self.session.get(CatalystSample, catalyst_sample_id)
+                material_value = sample.name if sample is not None else str(catalyst_sample_id)
+            return self._norm(material_value)
+        if field_name == "structure_name":
+            return self._dft_field_key_from_value(getattr(row, "structure_name", None))
+        if field_name == "adsorbate":
+            return self._dft_field_key_from_value(getattr(row, "adsorbate", None))
+        if field_name == "reaction_step":
+            return self._dft_field_key_from_value(getattr(row, "reaction_step", None))
+        return ""
+
+    @classmethod
+    def _dft_field_key_from_value(cls, value: Any) -> str:
+        if value is None:
+            return DFT_EXPLICIT_BLANK
+        if isinstance(value, str):
+            normalized = cls._norm(value)
+            return normalized if normalized else DFT_EXPLICIT_BLANK
+        if isinstance(value, (dict, list)):
+            return cls._value_key(value)
+        return cls._norm(value)
+
+    @staticmethod
+    def _numeric_values_match(left: Any, right: Any) -> bool:
+        try:
+            left_num = float(left)
+            right_num = float(right)
+        except (TypeError, ValueError):
+            return False
+        tolerance = max(1e-9, abs(left_num) * 1e-6, abs(right_num) * 1e-6)
+        return abs(left_num - right_num) <= tolerance
 
     @staticmethod
     def _extract_locator_payload(evidence: Any) -> dict[str, Any]:

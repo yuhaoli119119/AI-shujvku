@@ -1146,58 +1146,15 @@
             }
 
             const libraryName = state.currentLibrary || "";
-            showToast("正在上传并解析 PDF，请稍候。");
-            
-            async function uploadOrAttach(paperId = null, confirmIdentityMismatch = false) {
+            showToast("正在上传并创建后台解析任务。");
+
+            try {
                 const formData = new FormData();
                 formData.append("file", file);
                 formData.append("library_name", libraryName);
-                if (confirmIdentityMismatch) {
-                    formData.append("confirm_identity_mismatch", "true");
-                }
-                
-                const url = paperId ? `${API_BASE}/${encodeURIComponent(paperId)}/attach-pdf` : `${API_BASE}/ingest/upload`;
-                return await fetchJSON(url, { method: "POST", body: formData });
-            }
-
-            try {
-                let data;
-                try {
-                    data = await uploadOrAttach();
-                } catch (error) {
-                    if (error.status === 409 && error.detail) {
-                        if (error.detail.status === "already_exists" && error.detail.paper_id) {
-                            if (window.confirm(`该文献已被收录（${error.detail.title || '未知标题'}）。是否将当前 PDF 附加到已有记录中？`)) {
-                                showToast("正在附加 PDF...");
-                                try {
-                                    data = await uploadOrAttach(error.detail.paper_id);
-                                } catch (attachErr) {
-                                    if (attachErr.status === 409 && attachErr.detail && attachErr.detail.status === "needs_confirmation") {
-                                        if (window.confirm("标题或年份不完全匹配。是否强制合并？")) {
-                                            showToast("正在强制合并...");
-                                            data = await uploadOrAttach(attachErr.detail.target_paper_id || error.detail.paper_id, true);
-                                        } else {
-                                            throw new Error("已取消强制合并");
-                                        }
-                                    } else {
-                                        throw attachErr;
-                                    }
-                                }
-                            } else {
-                                throw new Error("已取消附加 PDF");
-                            }
-                        } else {
-                            throw error;
-                        }
-                    } else {
-                        throw error;
-                    }
-                }
-
-                if (data) {
-                    showToast(`PDF 已收录：${data.title ? data.title : file.name}`);
-                    await pollJobs();
-                }
+                const job = await fetchJSON(`${API_BASE}/ingest/upload/jobs`, { method: "POST", body: formData });
+                showToast(`后台任务已创建：${job && job.job_id ? job.job_id.slice(0, 8) : "queued"}`);
+                await pollJobs();
             } catch (error) {
                 const failureMsg = error.detail && error.detail.message ? error.detail.message : error.message;
                 showToast(`上传或解析失败：${failureMsg}`, "error");

@@ -131,6 +131,8 @@ def init_db(database_url: str, *, force: bool = False) -> None:
             )
             return False
 
+    should_backfill_paper_codes = False
+
     if "papers" in table_names:
         with engine.begin() as connection:
             execute_migration_step(
@@ -289,14 +291,7 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                     else "ALTER TABLE papers ADD COLUMN workspace_path TEXT"
                 ),
             )
-            try:
-                from app.services.paper_codes import ensure_paper_codes
-
-                with Session(engine) as backfill_session:
-                    ensure_paper_codes(backfill_session)
-                    backfill_session.commit()
-            except Exception:
-                logger.exception("Automatic database migration failed while backfilling papers.paper_code")
+            should_backfill_paper_codes = True
             execute_migration_step(
                 "paper_tables",
                 "prov",
@@ -737,6 +732,18 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                     else "ALTER TABLE extraction_field_reviews ADD COLUMN write_version INTEGER NOT NULL DEFAULT 1"
                 ),
             )
+
+    if should_backfill_paper_codes:
+        try:
+            from app.services.paper_codes import ensure_paper_codes
+
+            # Run paper_code repair after the schema migration transaction commits.
+            # Otherwise PostgreSQL can block on the outer DDL transaction's table locks.
+            with Session(engine) as backfill_session:
+                ensure_paper_codes(backfill_session)
+                backfill_session.commit()
+        except Exception:
+            logger.exception("Automatic database migration failed while backfilling papers.paper_code")
 
     # Mark this URL as initialized so subsequent init_db() calls can skip
     _initialized_urls.add(database_url)

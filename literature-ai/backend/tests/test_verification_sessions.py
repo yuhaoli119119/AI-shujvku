@@ -541,6 +541,242 @@ def test_materialized_new_candidate_can_settle_with_independent_value_pass(verif
         assert {review.reviewer_status for review in reviews} == {"verified"}
 
 
+def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Missing-row whole-pass follow-up", pdf_path="missing-row-whole-pass.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="free_energy",
+            adsorbate="*NO3",
+            value=-2.94,
+            unit="eV",
+            reaction_step="adsorption",
+            source_section="Page 8",
+            evidence_text="The adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.94 eV on bcc Pd-In(111).",
+            candidate_status="new_candidate",
+            evidence_payload={
+                "page": 8,
+                "quoted_text": "the adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.83 and 2.94 eV on fcc Pd-In(111) and bcc Pd-In(111)",
+                "material_identity": "bcc Pd-In(111)",
+                "source_document_type": "main",
+            },
+            extraction_protocol_version="ide_ai_new_candidate_v1",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=8,
+                evidence_text=row.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=0.95,
+            )
+        )
+        new_candidate_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-lane-new",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        whole_row_pass_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-lane-pass",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add_all([new_candidate_run, whole_row_pass_run])
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=new_candidate_run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material": "bcc Pd-In(111)",
+                        "property": "free_energy",
+                        "energy_type": "free_energy",
+                        "adsorbate": "*NO3",
+                        "reaction_step": "adsorption",
+                        "value": -2.94,
+                        "unit": "eV",
+                        "method": "DFT",
+                    },
+                    "normalized_material": "bcc Pd-In(111)",
+                    "normalized_energy_type": "free_energy",
+                    "confidence": 0.91,
+                    "evidence_location": {
+                        "page": 8,
+                        "quoted_text": "the adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.83 and 2.94 eV on fcc Pd-In(111) and bcc Pd-In(111)",
+                    },
+                },
+                status="materialized",
+                materialized_target_type="dft_results",
+                materialized_target_id=str(row.id),
+            )
+        )
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=whole_row_pass_run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": str(row.id),
+                    "field_name": "dft_results",
+                    "decision": "PASS",
+                    "normalized_material": "bcc Pd-In(111)",
+                    "normalized_energy_type": "free_energy",
+                    "confidence": 0.93,
+                    "evidence_location": {
+                        "page": 8,
+                        "quoted_text": "the adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.83 and 2.94 eV on fcc Pd-In(111) and bcc Pd-In(111)",
+                    },
+                },
+                status="candidate",
+            )
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    client = TestClient(app)
+    settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
+    assert settled.status_code == 200
+    payload = settled.json()
+    assert payload["auto_applied_count"] == 1
+    assert payload["need_third_ai_count"] == 0
+
+    with Session() as session:
+        reviews = session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(row_id),
+            )
+        ).all()
+        assert len(reviews) == 1
+        assert {review.reviewer_status for review in reviews} == {"verified"}
+
+
+def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Detail dedupe paper", pdf_path="detail-dedupe.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="free_energy",
+            adsorbate="*NO3",
+            value=-2.94,
+            unit="eV",
+            reaction_step="adsorption",
+            source_section="Page 8",
+            evidence_text="The adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.94 eV on bcc Pd-In(111).",
+            candidate_status="new_candidate",
+            evidence_payload={
+                "page": 8,
+                "quoted_text": "the adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.83 and 2.94 eV on fcc Pd-In(111) and bcc Pd-In(111)",
+                "material_identity": "bcc Pd-In(111)",
+                "source_document_type": "main",
+            },
+            extraction_protocol_version="ide_ai_new_candidate_v1",
+        )
+        session.add(row)
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-lane-new",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        session.add_all(
+            [
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "decision": "new_candidate",
+                        "corrected_value": {
+                            "material": "bcc Pd-In(111)",
+                            "property": "free_energy",
+                            "value": -2.94,
+                            "unit": "eV",
+                        },
+                        "confidence": 0.91,
+                        "evidence_location": {
+                            "page": 8,
+                            "quoted_text": "the adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.83 and 2.94 eV on fcc Pd-In(111) and bcc Pd-In(111)",
+                        },
+                    },
+                    status="materialized",
+                    materialized_target_type="dft_results",
+                    materialized_target_id=str(row.id),
+                ),
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "corrected_value": {
+                            "material": "bcc Pd-In(111)",
+                            "property": "free_energy",
+                            "value": -2.94,
+                            "unit": "eV",
+                        },
+                        "confidence": 0.91,
+                        "evidence_location": {
+                            "page": 8,
+                            "quoted_text": "the adsorption of NO3- gives *NO3- with a remarkable energy decrease up to 2.83 and 2.94 eV on fcc Pd-In(111) and bcc Pd-In(111)",
+                        },
+                    },
+                    status="materialized",
+                    materialized_target_type="dft_results",
+                    materialized_target_id=str(row.id),
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    client = TestClient(app)
+    detail = client.get(f"/api/papers/{paper_id}?mode=light")
+    assert detail.status_code == 200
+    items = detail.json()["dft_results_items"]
+    target = next(item for item in items if item["id"] == str(row_id))
+    assert target["object_review_audit_count"] == 1
+    assert [audit["decision"] for audit in target["object_review_audits"]] == ["new_candidate"]
+
+
 def test_field_level_proposal_can_settle_with_independent_value_pass(verification_env):
     Session = verification_env
     with Session() as session:

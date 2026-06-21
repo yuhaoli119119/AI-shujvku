@@ -3,6 +3,8 @@ function formatSerialNumber(value) {
     return "#" + String(value).padStart(3, "0");
 }
 
+const LIBRARY_FILTER_SESSION_KEY = "litai:literature-library:filters:v1";
+
 function paperStatusChip(paper) {
     if (!paper) return '<span class="status-chip none">状态未知</span>';
     // 1. duplicate_candidate
@@ -29,11 +31,12 @@ function paperStatusChip(paper) {
     return '<span class="status-chip none">状态未知</span>';
 }
 
-function badge(count) {
+function badge(count, title) {
     const safe = Number(count || 0);
+    const titleAttr = title ? ' title="' + String(title).replace(/"/g, '&quot;') + '"' : '';
     return safe > 0
-        ? '<span class="count-badge has">' + safe + "</span>"
-        : '<span class="count-badge zero">0</span>';
+        ? '<span class="count-badge has"' + titleAttr + '>' + safe + "</span>"
+        : '<span class="count-badge zero"' + titleAttr + '>0</span>';
 }
 
 function formatDate(value) {
@@ -99,12 +102,16 @@ function getFilters() {
     const filterPaperType = $("filterPaperType");
     const filterDFT = $("filterDFT");
     const filterWC = $("filterWC");
+    const filterPdf = $("filterPdf");
+    const filterSort = $("filterSort");
     const q = searchInput ? searchInput.value.trim() : "";
     const year = filterYear ? filterYear.value.trim() : "";
     const journal = filterJournal ? filterJournal.value.trim() : "";
     const paperType = filterPaperType ? filterPaperType.value : "";
     const dft = filterDFT ? filterDFT.value : "";
     const wc = filterWC ? filterWC.value : "";
+    const pdf = filterPdf ? filterPdf.value : "";
+    const sort = filterSort ? filterSort.value : "";
     if (libraryName) params.set("library_name", libraryName);
     if (q) params.set("q", q);
     if (year) params.set("year", year);
@@ -112,16 +119,136 @@ function getFilters() {
     if (paperType) params.set("paper_type", paperType);
     if (dft !== "") params.set("has_dft_results", dft);
     if (wc !== "") params.set("has_writing_cards", wc);
+    if (pdf !== "") params.set("has_pdf", pdf);
+    if (sort === "paper_code_asc") {
+        params.set("sort_by", "paper_code_numeric");
+        params.set("sort_order", "asc");
+    }
     return params;
+}
+
+function collectLibraryFilterState() {
+    return {
+        searchInput: $("searchInput") ? $("searchInput").value : "",
+        filterYear: $("filterYear") ? $("filterYear").value : "",
+        filterJournal: $("filterJournal") ? $("filterJournal").value : "",
+        filterPaperType: $("filterPaperType") ? $("filterPaperType").value : "",
+        filterDFT: $("filterDFT") ? $("filterDFT").value : "",
+        filterWC: $("filterWC") ? $("filterWC").value : "",
+        filterPdf: $("filterPdf") ? $("filterPdf").value : "",
+        filterSort: $("filterSort") ? $("filterSort").value : "",
+        pagination: {
+            page: Number(state.pagination && state.pagination.page || 1),
+            pageSize: Number(state.pagination && state.pagination.pageSize || PAGE_SIZE),
+        },
+    };
+}
+
+function saveLibraryFilterState() {
+    try {
+        window.sessionStorage.setItem(LIBRARY_FILTER_SESSION_KEY, JSON.stringify(collectLibraryFilterState()));
+    } catch (_) {
+        // sessionStorage can be unavailable in strict browser modes.
+    }
+}
+
+function restoreLibraryFilterState() {
+    try {
+        const raw = window.sessionStorage.getItem(LIBRARY_FILTER_SESSION_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (!saved || typeof saved !== "object") return;
+        [
+            "searchInput",
+            "filterYear",
+            "filterJournal",
+            "filterPaperType",
+            "filterDFT",
+            "filterWC",
+            "filterPdf",
+            "filterSort",
+        ].forEach(function(id) {
+            const el = $(id);
+            if (el && Object.prototype.hasOwnProperty.call(saved, id)) {
+                el.value = saved[id] == null ? "" : String(saved[id]);
+            }
+        });
+        ensureLibraryPaginationState();
+        const savedPage = Number(saved.pagination && saved.pagination.page);
+        const savedPageSize = Number(saved.pagination && saved.pagination.pageSize);
+        if (Number.isFinite(savedPage) && savedPage >= 1) {
+            state.pagination.page = savedPage;
+        }
+        if (Number.isFinite(savedPageSize) && savedPageSize > 0) {
+            state.pagination.pageSize = savedPageSize;
+        }
+        syncLibraryOffset();
+    } catch (_) {
+        // Ignore corrupted session state and continue with defaults.
+    }
+}
+
+function clearStoredLibraryFilterState() {
+    try {
+        window.sessionStorage.removeItem(LIBRARY_FILTER_SESSION_KEY);
+    } catch (_) {
+        // sessionStorage can be unavailable in strict browser modes.
+    }
 }
 
 function applyQueryParams() {
     const params = new URLSearchParams(window.location.search);
     const paperId = params.get("paper_id") || params.get("review_paper_id");
     const tab = params.get("tab");
+    const rawTargetType = params.get("target_type") || "";
+    const targetId = params.get("target_id") || "";
+    const fieldName = params.get("field_name") || "";
+    const pdfPage = Number(params.get("pdf_page") || 0);
+    const pdfLocatorStatus = params.get("pdf_locator_status") || "";
+    const pdfEvidenceText = params.get("pdf_evidence_text") || "";
     state.qualityReasonContext = params.get("quality_reason") || "";
     if (paperId) state.selectedPaperId = paperId;
     if (params.get("review_paper_id")) state.currentTab = "review";
+    if (paperId && rawTargetType && targetId) {
+        const typeMap = {
+            section: { itemType: "section", tab: "sections" },
+            sections: { itemType: "section", tab: "sections" },
+            dft_setting: { itemType: "dft_setting", tab: "dft" },
+            dft_settings: { itemType: "dft_setting", tab: "dft" },
+            catalyst_sample: { itemType: "catalyst_sample", tab: "dft" },
+            catalyst_samples: { itemType: "catalyst_sample", tab: "dft" },
+            dft_results: { itemType: "dft_result", tab: "dft" },
+            electrochemical_performance: { itemType: "electrochemical_performance", tab: "dft" },
+            writing_card: { itemType: "writing_card", tab: "writing" },
+            writing_cards: { itemType: "writing_card", tab: "writing" },
+            mechanism_claim: { itemType: "mechanism_claim", tab: "dft" },
+            mechanism_claims: { itemType: "mechanism_claim", tab: "dft" },
+            table: { itemType: "table", tab: "figures" },
+            tables: { itemType: "table", tab: "figures" },
+            figure: { itemType: "figure", tab: "figures" },
+            figures: { itemType: "figure", tab: "figures" },
+        };
+        const normalized = typeMap[rawTargetType];
+        if (normalized) {
+            state.pendingNavigationTarget = {
+                paperId: paperId,
+                rawTargetType: rawTargetType,
+                itemType: normalized.itemType,
+                tab: normalized.tab,
+                targetId: targetId,
+                fieldName: fieldName,
+            };
+        }
+    }
+    if (paperId && Number.isFinite(pdfPage) && pdfPage > 0) {
+        state.pendingPdfJump = {
+            paperId: paperId,
+            page: pdfPage,
+            locatorStatus: pdfLocatorStatus || "exact_page",
+            evidenceText: pdfEvidenceText,
+            opened: false,
+        };
+    }
     const tabMap = {
         detail: "summary",
         writer: "writing",
@@ -139,6 +266,8 @@ function applyQueryParams() {
     } else if (tab && tabMap[tab]) {
         state.hasExplicitTab = true;
         state.currentTab = tabMap[tab];
+    } else if (state.pendingNavigationTarget && state.pendingNavigationTarget.tab) {
+        state.currentTab = state.pendingNavigationTarget.tab;
     }
 }
 
@@ -226,7 +355,7 @@ function renderNoSelectionState() {
         emptyEl.innerHTML =
             '<div class="empty-state-card">' +
                 '<h2>选择一篇文献查看详情</h2>' +
-                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、章节、图表、候选 DFT 数据、写作卡和 IDE AI 回写结果。</p>' +
+                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、文字审核、图表、候选 DFT 数据、写作卡和 IDE AI 回写结果。</p>' +
             '</div>';
     }
     showEmptyWorkspace();
@@ -282,13 +411,27 @@ function updatePager() {
         '<button class="btn ghost small" type="button" onclick="goToLibraryPage(' + totalPages + ')"' + (currentPage >= totalPages ? ' disabled' : '') + '>末页</button>';
 }
 
+function setPaperListLoading(isLoading, message) {
+    const container = $("paperList");
+    const metaEl = $("paginationMeta");
+    if (container) {
+        container.style.opacity = isLoading ? "0.68" : "";
+        container.style.pointerEvents = isLoading ? "none" : "";
+        container.setAttribute("aria-busy", isLoading ? "true" : "false");
+    }
+    if (metaEl && isLoading && message) {
+        metaEl.textContent = message;
+    }
+}
+
 function goToLibraryPage(page) {
     ensureLibraryPaginationState();
     const totalPages = getLibraryTotalPages();
     const safePage = Math.max(1, Math.min(totalPages, Number(page || 1)));
     state.pagination.page = safePage;
     syncLibraryOffset();
-    fetchPapers();
+    saveLibraryFilterState();
+    fetchPapers({ preserveList: true, preserveDetail: true, loadingMessage: "正在切换分页..." });
 }
 
 function changeLibraryPage(delta) {
@@ -302,20 +445,29 @@ function setLibraryPageSize() {
     state.pagination.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : PAGE_SIZE;
     state.pagination.page = 1;
     syncLibraryOffset();
-    fetchPapers();
+    saveLibraryFilterState();
+    fetchPapers({ preserveList: true, preserveDetail: true, loadingMessage: "正在刷新列表..." });
 }
 
-async function fetchPapers() {
+async function fetchPapers(options) {
+    const opts = options || {};
+    const preserveList = opts.preserveList === true;
+    const preserveDetail = opts.preserveDetail === true;
+    const loadingMessage = opts.loadingMessage || "正在刷新列表...";
     const requestSeq = (state.paperListRequestSeq || 0) + 1;
     state.paperListRequestSeq = requestSeq;
     const requestLibrary = getCurrentLibraryName();
     try {
         ensureLibraryPaginationState();
         syncLibraryOffset();
-        renderPaperListSkeleton();
+        if (!preserveList || !state.papers.length) {
+            renderPaperListSkeleton();
+        } else {
+            setPaperListLoading(true, loadingMessage);
+        }
         const params = getFilters();
         const requestedOffset = state.currentOffset;
-        const data = await fetchJSON(API_BASE + "?" + params.toString());
+        const data = await fetchJSON(API_BASE + "/?" + params.toString());
         if (requestSeq !== state.paperListRequestSeq || requestLibrary !== getCurrentLibraryName()) {
             return;
         }
@@ -338,7 +490,7 @@ async function fetchPapers() {
             state.pagination.page = getLibraryTotalPages();
             syncLibraryOffset();
             if (state.currentOffset !== requestedOffset) {
-                return fetchPapers();
+                return fetchPapers(opts);
             }
         } else if (state.currentLibraryTotal === 0) {
             resetLibraryPagination();
@@ -353,9 +505,11 @@ async function fetchPapers() {
             });
             const selectedStableId = state.selectedPaper && (state.selectedPaper.paper_id || state.selectedPaper.id);
             if (selectedStableId && String(selectedStableId) === String(state.selectedPaperId)) {
-                renderWorkspaceHeader(state.selectedPaper);
-                renderDetail(state.selectedPaper, state.selectedPaperAudit || null);
-                showWorkspace();
+                if (!preserveDetail) {
+                    renderWorkspaceHeader(state.selectedPaper);
+                    renderDetail(state.selectedPaper, state.selectedPaperAudit || null);
+                    showWorkspace();
+                }
             } else {
                 try {
                     await loadPaperDetail(state.selectedPaperId);
@@ -374,7 +528,12 @@ async function fetchPapers() {
         } else {
             renderNoSelectionState();
         }
+        setPaperListLoading(false);
     } catch (error) {
+        if (requestSeq !== state.paperListRequestSeq || requestLibrary !== getCurrentLibraryName()) {
+            return;
+        }
+        setPaperListLoading(false);
         state.papers = [];
         const container = $("paperList");
         if (container) container.innerHTML = '<div class="list-empty error">文献列表加载失败：' + esc(error.message) + "</div>";
@@ -384,13 +543,31 @@ async function fetchPapers() {
 }
 
 function searchLocal() {
+    if (state.paperFilterTimer) {
+        clearTimeout(state.paperFilterTimer);
+        state.paperFilterTimer = 0;
+    }
     resetLibraryPagination();
-    fetchPapers();
+    saveLibraryFilterState();
+    fetchPapers({ preserveList: true, preserveDetail: true, loadingMessage: "正在筛选文献..." });
 }
 
-function refreshCurrentPage() {
-    fetchPapers();
-    loadLibraries();
+function scheduleFilterSearch(delayMs) {
+    if (state.paperFilterTimer) {
+        clearTimeout(state.paperFilterTimer);
+    }
+    state.paperFilterTimer = window.setTimeout(function() {
+        state.paperFilterTimer = 0;
+        searchLocal();
+    }, Math.max(0, Number(delayMs || 0)));
+}
+
+async function refreshCurrentPage() {
+    await loadLibraries();
+    await fetchPapers();
+    if (typeof initSSE === "function") {
+        initSSE();
+    }
 }
 
 function prevPage() {
@@ -402,10 +579,12 @@ function nextPage() {
 }
 
 function clearFilters() {
-    ["searchInput", "filterYear", "filterJournal", "filterPaperType", "filterDFT", "filterWC"].forEach(function(id) {
+    ["searchInput", "filterYear", "filterJournal", "filterPaperType", "filterDFT", "filterWC", "filterPdf", "filterSort"].forEach(function(id) {
         const el = $(id);
         if (el) el.value = "";
     });
+    resetLibraryPagination();
+    clearStoredLibraryFilterState();
     searchLocal();
 }
 
@@ -621,6 +800,36 @@ async function confirmDeleteCurrentPaper(event) {
         await fetchPapers();
     } catch (error) {
         showToast("删除失败：" + error.message, "error");
+    }
+}
+
+async function resetCurrentPaperUpload(event) {
+    if (event) event.stopPropagation();
+    closeDropdowns();
+    if (!state.selectedPaper || !state.selectedPaperId) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    const paperCode = state.selectedPaper.paper_code || "";
+    const title = state.selectedPaper.title || "未命名文献";
+    const label = paperCode ? (paperCode + " " + title) : title;
+    const confirmed = window.confirm(
+        "这会保留当前文献条目和短号，但移除现有 PDF 及解析产物，并把它恢复成可重新上传 PDF 的状态。\n\n确认处理：\n" + label
+    );
+    if (!confirmed) return;
+    try {
+        const result = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/reset-upload?delete_pdf=true&delete_derived=true",
+            { method: "POST" }
+        );
+        const deletedFileCount = Array.isArray(result.deleted_files) ? result.deleted_files.length : 0;
+        showToast(
+            "已保留文献条目并清空当前文件" + (deletedFileCount ? "，删除文件 " + deletedFileCount + " 个。" : "。"),
+            "success"
+        );
+        await refreshCurrentPage();
+    } catch (error) {
+        showToast("重置失败：" + error.message, "error");
     }
 }
 
@@ -900,6 +1109,7 @@ Object.assign(window, {
     openAggregateView: openAggregateView,
     openSelectedPdfEvidence: openSelectedPdfEvidence,
     openDeletePaperDialog: openDeletePaperDialog,
+    resetCurrentPaperUpload: resetCurrentPaperUpload,
     closeDeletePaperDialog: closeDeletePaperDialog,
     confirmDeleteCurrentPaper: confirmDeleteCurrentPaper,
     classifyUnknownTypes: classifyUnknownTypes,
@@ -952,13 +1162,14 @@ if (searchInput) {
     const el = $(id);
     if (el) el.addEventListener("keydown", function(event) { if (event.key === "Enter") searchLocal(); });
 });
-["filterPaperType", "filterDFT", "filterWC"].forEach(function(id) {
+["filterPaperType", "filterDFT", "filterWC", "filterPdf", "filterSort"].forEach(function(id) {
     const el = $(id);
-    if (el) el.addEventListener("change", searchLocal);
+    if (el) el.addEventListener("change", function() { scheduleFilterSearch(120); });
 });
 
 initLayoutState();
 applyQueryParams();
+restoreLibraryFilterState();
 initProtocolWarning();
 initSplitDrag();
 initActionMenus();

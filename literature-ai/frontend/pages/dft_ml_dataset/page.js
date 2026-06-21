@@ -3,12 +3,14 @@
     const LIBRARIES_URL = "/api/libraries";
     const DATASET_SCHEMA = "dft_results_ml_v2";
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
+    const EXPORTS_DISABLED_MESSAGE = "当前服务器策略已关闭导出接口；DFT ML 数据集页面暂不可用。如需恢复，请由 Owner 在设置中显式开启导出。";
     const state = {
         payload: null,
         filteredRecords: [],
         filteredLmRecords: [],
         libraries: [],
         expandedRecordIds: new Set(),
+        exportsPolicyDisabled: false,
         serverFilters: {
             library_name: "",
             year_min: "",
@@ -163,6 +165,35 @@
         panel.hidden = false;
         panel.textContent = message;
         panel.className = "status-panel " + (type || "info");
+    }
+
+    function isExportsDisabledError(error) {
+        return normalizeText(error && error.message) === "Exports are disabled by server policy";
+    }
+
+    function setExportsPolicyDisabled(disabled) {
+        state.exportsPolicyDisabled = !!disabled;
+        [
+            "refreshButton",
+            "applyServerFiltersButton",
+            "exportCsvButton",
+            "exportJsonButton",
+        ].forEach(id => {
+            const node = qs(id);
+            if (node) {
+                node.disabled = state.exportsPolicyDisabled;
+            }
+        });
+    }
+
+    function renderPolicyDisabledState() {
+        state.payload = null;
+        state.filteredRecords = [];
+        state.filteredLmRecords = [];
+        renderSummary();
+        renderTable();
+        qs("resultsMeta").textContent = "导出策略关闭中，当前页不加载 dft_results_ml_v2。";
+        setStatus(EXPORTS_DISABLED_MESSAGE, "policy");
     }
 
     function formatDateTime(value) {
@@ -782,11 +813,16 @@
     }
 
     async function refreshDataset() {
+        if (state.exportsPolicyDisabled) {
+            renderPolicyDisabledState();
+            return;
+        }
         readServerFiltersFromDom();
         renderLibraries();
         setStatus("正在实时读取 dft_results_ml_v2 导出数据...", "loading");
         try {
             const payload = await fetchJSON(buildDatasetUrl());
+            setExportsPolicyDisabled(false);
             validatePayload(payload);
             state.payload = payload;
             state.expandedRecordIds.clear();
@@ -799,6 +835,11 @@
                 "info"
             );
         } catch (error) {
+            if (isExportsDisabledError(error)) {
+                setExportsPolicyDisabled(true);
+                renderPolicyDisabledState();
+                return;
+            }
             state.payload = null;
             state.filteredRecords = [];
             state.filteredLmRecords = [];
@@ -831,12 +872,20 @@
     }
 
     function exportMlReadyCsv() {
+        if (state.exportsPolicyDisabled) {
+            showToast("当前服务器策略已关闭导出功能。", "error");
+            return;
+        }
         const csv = buildMlReadyCsv(state.filteredRecords);
         downloadText("dft_ml_ready_records.csv", csv, "text/csv;charset=utf-8");
         showToast("已导出当前筛选后的可训练 CSV。");
     }
 
     function exportV2Json() {
+        if (state.exportsPolicyDisabled) {
+            showToast("当前服务器策略已关闭导出功能。", "error");
+            return;
+        }
         if (!state.payload) {
             showToast("没有可导出的 payload。", "error");
             return;

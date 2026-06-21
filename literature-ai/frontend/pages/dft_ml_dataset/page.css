@@ -142,6 +142,12 @@ body {
     border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
 }
 
+.status-panel.policy {
+    color: var(--color-text-secondary);
+    background: color-mix(in srgb, var(--color-warning-bg) 58%, var(--color-surface) 42%);
+    border-color: color-mix(in srgb, var(--color-warning) 28%, var(--color-border) 72%);
+}
+
 .status-panel.info {
     color: var(--color-text-secondary);
 }

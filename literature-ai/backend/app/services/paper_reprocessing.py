@@ -13,6 +13,7 @@ from app.db.models import EvidenceSpan, Paper, PaperFigure, PaperSection, PaperT
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.module_write_lock_service import ModuleWriteLockService
+from app.services.paper_codes import ensure_paper_codes
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.artifact_paths import resolve_persisted_artifact_path
@@ -225,6 +226,7 @@ class PaperReprocessingService:
             paper.type_confidence = res["type_confidence"]
             paper.classification_source = res["classification_source"]
             self.session.add(paper)
+            ensure_paper_codes(self.session, [paper])
             self.session.commit()
             return res
             
@@ -238,6 +240,7 @@ class PaperReprocessingService:
             paper.type_confidence = res["type_confidence"]
             paper.classification_source = res["classification_source"]
             self.session.add(paper)
+            ensure_paper_codes(self.session, [paper])
             self.session.commit()
             return res
             
@@ -266,6 +269,7 @@ class PaperReprocessingService:
         paper.type_confidence = res["type_confidence"]
         paper.classification_source = res["classification_source"]
         self.session.add(paper)
+        ensure_paper_codes(self.session, [paper])
         self.session.commit()
         return res
 

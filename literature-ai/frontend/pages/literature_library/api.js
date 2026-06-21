@@ -18,6 +18,14 @@ function rememberCurrentLibraryName(name) {
     }
 }
 
+function getRememberedCurrentLibraryName() {
+    try {
+        return window.localStorage.getItem(CURRENT_LIBRARY_STORAGE_KEY) || "";
+    } catch (_) {
+        return "";
+    }
+}
+
 function showToast(message, type) {
     const existing = document.querySelector(".toast");
     if (existing) existing.remove();
@@ -254,6 +262,9 @@ async function loadLibraryRuntimeInfo() {
     if (!el) return;
     try {
         const info = await fetchJSON(SYSTEM_API + "/db-info");
+        if (!info || typeof info !== "object") {
+            throw new Error("未获取到数据库运行时信息");
+        }
         const activeDb = info.active_library_db_path || info.effective_db_path || "";
         const storageRoot = info.effective_storage_root || info.storage_root || "";
         const registryPath = "/data/library_registry.json";
@@ -286,14 +297,21 @@ async function loadLibraries() {
     try {
         const el = $("librarySelect");
         const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
-        const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "";
+        const rememberedLibrary = requestedLibrary ? "" : getRememberedCurrentLibraryName();
+        const isInitialLoad = !requestedLibrary && !(state.currentLibrary && state.currentLibrary.name) && (!el || !el.value);
+        const previousSelection = isInitialLoad ? "" : (el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "");
         const quickLibraries = normalizeLibraryListResponse(await fetchJSON(API_BASE + "/libraries"));
         const quickActive = (quickLibraries || []).find(function(item) { return item.is_active; });
+        const quickLargest = (quickLibraries || []).slice().sort(function(left, right) {
+            return Number(right.paper_count || 0) - Number(left.paper_count || 0);
+        })[0];
         const selectedName = requestedLibrary && (quickLibraries || []).some(function(item) { return item.name === requestedLibrary; })
             ? requestedLibrary
             : (previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
                 ? previousSelection
-                : ((quickActive && quickActive.name) || ((quickLibraries || [])[0] ? quickLibraries[0].name : "")));
+                : (rememberedLibrary && (quickLibraries || []).some(function(item) { return item.name === rememberedLibrary; })
+                    ? rememberedLibrary
+                    : ((quickActive && quickActive.name) || (quickLargest && quickLargest.name) || ((quickLibraries || [])[0] ? quickLibraries[0].name : ""))));
         if (el) {
             el.innerHTML = (quickLibraries || []).map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
@@ -308,43 +326,45 @@ async function loadLibraries() {
         const status = $("libStatus");
         if (status) status.textContent = selected ? (selected.name + " | " + selected.paper_count + " 篇文献") : "";
 
-        fetchJSON(LIB_API).then(function(rawLibraries) {
-            const libraries = normalizeLibraryListResponse(rawLibraries);
-            const fullEl = $("librarySelect");
-            const currentValue = fullEl ? fullEl.value : selectedName;
-            const active = (libraries || []).find(function(item) { return item.is_active; });
-            const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
-                ? requestedLibrary
-                : (currentValue || (active && active.name) || selectedName);
-            if (fullEl && libraries && libraries.length) {
-                fullEl.innerHTML = libraries.map(function(item) {
-                    const isSelected = item.name === keepName;
-                    return '<option value="' + esc(item.name) + '"' + (isSelected ? " selected" : "") + ">" +
-                        esc(item.name) + (item.is_active ? "（当前）" : "") +
-                    "</option>";
-                }).join("");
-            }
-            const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
-            if (selectedFull) {
-                state.currentLibrary = selectedFull;
-                rememberCurrentLibraryName(selectedFull.name || "");
-                state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
-                if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
-            }
-        }).catch(function(error) {
-            console.warn("full library metadata failed", error);
-        });
+        const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
+        const fullEl = $("librarySelect");
+        const active = (libraries || []).find(function(item) { return item.is_active; });
+        const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
+            ? requestedLibrary
+            : (previousSelection && (libraries || []).some(function(item) { return item.name === previousSelection; })
+                ? previousSelection
+                : (rememberedLibrary && (libraries || []).some(function(item) { return item.name === rememberedLibrary; })
+                    ? rememberedLibrary
+                    : ((active && active.name) || (fullEl ? fullEl.value : selectedName) || selectedName)));
+        if (fullEl && libraries && libraries.length) {
+            fullEl.innerHTML = libraries.map(function(item) {
+                const isSelected = item.name === keepName;
+                return '<option value="' + esc(item.name) + '"' + (isSelected ? " selected" : "") + ">" +
+                    esc(item.name) + (item.is_active ? "（当前）" : "") +
+                "</option>";
+            }).join("");
+        }
+        const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
+        if (selectedFull) {
+            state.currentLibrary = selectedFull;
+            rememberCurrentLibraryName(selectedFull.name || "");
+            state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
+            if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
+        }
     } catch (error) {
         console.error("loadLibraries failed", error);
         try {
             const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
             const el = $("librarySelect");
             const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
+            const rememberedLibrary = requestedLibrary ? "" : getRememberedCurrentLibraryName();
             if (el) {
                 const active = (libraries || []).find(function(item) { return item.is_active; });
                 const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
                     ? requestedLibrary
-                    : ((active && active.name) || "");
+                    : (rememberedLibrary && (libraries || []).some(function(item) { return item.name === rememberedLibrary; })
+                        ? rememberedLibrary
+                        : ((active && active.name) || ""));
                 el.innerHTML = libraries.map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.name === keepName ? " selected" : "") + ">" +
                     esc(item.name) + (item.is_active ? "（当前）" : "") +
@@ -352,7 +372,8 @@ async function loadLibraries() {
             }).join("");
         }
         const active = (libraries || []).find(function(item) { return item.is_active; });
-        const selected = requestedLibrary && (libraries || []).find(function(item) { return item.name === requestedLibrary; });
+        const selected = (requestedLibrary && (libraries || []).find(function(item) { return item.name === requestedLibrary; }))
+            || (rememberedLibrary && (libraries || []).find(function(item) { return item.name === rememberedLibrary; }));
         state.currentLibrary = selected || active || null;
         rememberCurrentLibraryName(state.currentLibrary ? state.currentLibrary.name : "");
         state.currentLibraryTotal = state.currentLibrary ? Number(state.currentLibrary.paper_count || 0) : 0;
@@ -373,16 +394,30 @@ async function loadWriterSettings() {
 
 async function activateLibraryByName(name) {
     if (!name) return;
+    const selector = $("librarySelect");
+    const previousLibraryName = (state.currentLibrary && state.currentLibrary.name) || "";
+    if (selector) selector.disabled = true;
     try {
-        rememberCurrentLibraryName(name);
-        await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
-        showToast("已切换到：" + name, "success");
+        const payload = await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
+        const activeLibraryName = (payload && payload.name) ? payload.name : name;
+        rememberCurrentLibraryName(activeLibraryName);
+        showToast("已切换到：" + activeLibraryName, "success");
         if (typeof resetLibraryPagination === "function") resetLibraryPagination();
         else state.currentOffset = 0;
-        await loadLibraries();
-        refreshCurrentPage();
+        await refreshCurrentPage();
     } catch (error) {
+        if (selector) {
+            selector.value = previousLibraryName;
+        }
+        rememberCurrentLibraryName(previousLibraryName);
+        try {
+            await loadLibraries();
+        } catch (_) {
+            // Keep the original activation error as the user-facing result.
+        }
         showToast("切库失败：" + error.message, "error");
+    } finally {
+        if (selector) selector.disabled = false;
     }
 }
 
@@ -613,11 +648,22 @@ async function fetchClaimEvidenceLocator(claimId) {
 loadLibraries = async function() {
     try {
         const el = $("librarySelect");
-        const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "";
+        const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
+        const rememberedLibrary = requestedLibrary ? "" : getRememberedCurrentLibraryName();
+        const isInitialLoad = !requestedLibrary && !(state.currentLibrary && state.currentLibrary.name) && (!el || !el.value);
+        const previousSelection = isInitialLoad ? "" : (el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "");
         const quickLibraries = normalizeLibraryListResponse(await fetchJSON(API_BASE + "/libraries"));
-        const selectedName = previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
-            ? previousSelection
-            : ((quickLibraries || [])[0] ? quickLibraries[0].name : "");
+        const quickActive = (quickLibraries || []).find(function(item) { return item.is_active; });
+        const quickLargest = (quickLibraries || []).slice().sort(function(left, right) {
+            return Number(right.paper_count || 0) - Number(left.paper_count || 0);
+        })[0];
+        const selectedName = requestedLibrary && (quickLibraries || []).some(function(item) { return item.name === requestedLibrary; })
+            ? requestedLibrary
+            : (previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
+                ? previousSelection
+                : (rememberedLibrary && (quickLibraries || []).some(function(item) { return item.name === rememberedLibrary; })
+                    ? rememberedLibrary
+                    : ((quickActive && quickActive.name) || (quickLargest && quickLargest.name) || ((quickLibraries || [])[0] ? quickLibraries[0].name : ""))));
         if (el) {
             el.innerHTML = (quickLibraries || []).map(function(item) {
                 return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
@@ -627,51 +673,66 @@ loadLibraries = async function() {
         }
         const selected = (quickLibraries || []).find(function(item) { return item.name === selectedName; });
         state.currentLibrary = selected || null;
+        rememberCurrentLibraryName(state.currentLibrary ? state.currentLibrary.name : "");
         state.currentLibraryTotal = selected ? Number(selected.paper_count || 0) : 0;
         const status = $("libStatus");
         if (status) status.textContent = selected ? (selected.name + " | " + selected.paper_count + " 篇文献") : "";
 
-        fetchJSON(LIB_API).then(function(rawLibraries) {
-            const libraries = normalizeLibraryListResponse(rawLibraries);
-            const fullEl = $("librarySelect");
-            const currentValue = fullEl ? fullEl.value : selectedName;
-            const active = (libraries || []).find(function(item) { return item.is_active; });
-            const keepName = currentValue || (active && active.name) || selectedName;
-            if (fullEl && libraries && libraries.length) {
-                fullEl.innerHTML = libraries.map(function(item) {
-                    const isSelected = item.name === keepName;
-                    return '<option value="' + esc(item.name) + '"' + (isSelected ? " selected" : "") + ">" +
-                        esc(item.name) + (item.is_active ? "（当前）" : "") +
-                    "</option>";
-                }).join("");
-            }
-            const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
-            if (selectedFull) {
-                state.currentLibrary = selectedFull;
-                state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
-                if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
-            }
-            loadLibraryRuntimeInfo();
-        }).catch(function(error) {
-            console.warn("full library metadata failed", error);
-        });
+        const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
+        const fullEl = $("librarySelect");
+        const active = (libraries || []).find(function(item) { return item.is_active; });
+        const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
+            ? requestedLibrary
+            : (previousSelection && (libraries || []).some(function(item) { return item.name === previousSelection; })
+                ? previousSelection
+                : (rememberedLibrary && (libraries || []).some(function(item) { return item.name === rememberedLibrary; })
+                    ? rememberedLibrary
+                    : ((active && active.name) || (fullEl ? fullEl.value : selectedName) || selectedName)));
+        if (fullEl && libraries && libraries.length) {
+            fullEl.innerHTML = libraries.map(function(item) {
+                const isSelected = item.name === keepName;
+                return '<option value="' + esc(item.name) + '"' + (isSelected ? " selected" : "") + ">" +
+                    esc(item.name) + (item.is_active ? "（当前）" : "") +
+                "</option>";
+            }).join("");
+        }
+        const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
+        if (selectedFull) {
+            state.currentLibrary = selectedFull;
+            rememberCurrentLibraryName(selectedFull.name || "");
+            state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
+            if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
+        }
+        loadLibraryRuntimeInfo();
     } catch (error) {
         console.error("loadLibraries failed", error);
         try {
             const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
             const el = $("librarySelect");
+            const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
+            const rememberedLibrary = requestedLibrary ? "" : getRememberedCurrentLibraryName();
             if (el) {
+                const active = (libraries || []).find(function(item) { return item.is_active; });
+                const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
+                    ? requestedLibrary
+                    : (rememberedLibrary && (libraries || []).some(function(item) { return item.name === rememberedLibrary; })
+                        ? rememberedLibrary
+                        : ((active && active.name) || ""));
                 el.innerHTML = libraries.map(function(item) {
-                    return '<option value="' + esc(item.name) + '"' + (item.is_active ? " selected" : "") + ">" +
+                    return '<option value="' + esc(item.name) + '"' + (item.name === keepName ? " selected" : "") + ">" +
                         esc(item.name) + (item.is_active ? "（当前）" : "") +
                     "</option>";
                 }).join("");
             }
             const active = (libraries || []).find(function(item) { return item.is_active; });
-            state.currentLibrary = active || null;
-            state.currentLibraryTotal = active ? Number(active.paper_count || 0) : 0;
+            const selected = (requestedLibrary && (libraries || []).find(function(item) { return item.name === requestedLibrary; }))
+                || (rememberedLibrary && (libraries || []).find(function(item) { return item.name === rememberedLibrary; }))
+                || active;
+            state.currentLibrary = selected || null;
+            rememberCurrentLibraryName(state.currentLibrary ? state.currentLibrary.name : "");
+            state.currentLibraryTotal = state.currentLibrary ? Number(state.currentLibrary.paper_count || 0) : 0;
             const status = $("libStatus");
-            if (status) status.textContent = active ? (active.root_path + " | " + active.paper_count + " 篇文献") : "";
+            if (status) status.textContent = state.currentLibrary ? ((state.currentLibrary.root_path || state.currentLibrary.name) + " | " + state.currentLibraryTotal + " 篇文献") : "";
             loadLibraryRuntimeInfo();
         } catch (fallbackError) {
             console.error("loadLibraries fallback failed", fallbackError);
@@ -680,12 +741,15 @@ loadLibraries = async function() {
 };
 
 if (typeof refreshCurrentPage !== "function") {
-    refreshCurrentPage = function() {
-        if (typeof fetchPapers === "function") {
-            fetchPapers();
-        }
+    refreshCurrentPage = async function() {
         if (typeof loadLibraries === "function") {
-            loadLibraries();
+            await loadLibraries();
+        }
+        if (typeof fetchPapers === "function") {
+            await fetchPapers();
+        }
+        if (typeof initSSE === "function") {
+            initSSE();
         }
     };
 }

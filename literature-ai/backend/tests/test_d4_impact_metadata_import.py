@@ -181,6 +181,27 @@ def test_impact_factor_min_and_max_filters_work_after_import(impact_client):
     assert _ids(response) == [str(seed["low_if"])]
 
 
+def test_main_paper_list_returns_imported_impact_metadata(impact_client):
+    client, _, seed = impact_client
+    response = client.post(
+        "/api/library/impact-metadata/import",
+        json={
+            "source": "user_imported",
+            "year": 2024,
+            "items": [{"journal": "Advanced Energy Materials", "impact_factor": 24.4}],
+        },
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/papers/", params={"limit": 20})
+    assert response.status_code == 200
+    papers = {item["paper_id"]: item for item in response.json()}
+    assert papers[str(seed["advanced_one"])]["impact_factor"] == 24.4
+    assert papers[str(seed["advanced_one"])]["impact_factor_year"] == 2024
+    assert papers[str(seed["advanced_one"])]["impact_factor_source"] == "user_imported"
+    assert papers[str(seed["missing_if"])]["impact_factor"] is None
+
+
 def test_year_and_source_fields_are_persisted(impact_client):
     client, Session, seed = impact_client
     response = client.post(

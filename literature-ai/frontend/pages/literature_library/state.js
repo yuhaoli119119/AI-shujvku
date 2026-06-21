@@ -29,7 +29,11 @@ const state = {
     knowledgeContextLoadingFor: null,
     paperDetailCache: {},
     fullDetailLoadingFor: null,
+    pendingNavigationTarget: null,
+    pendingPdfJump: null,
 };
+
+window.state = state;
 
 function $(id) { return document.getElementById(id); }
 

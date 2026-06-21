@@ -63,6 +63,39 @@ def test_import_desktop_project_detects_shared_storage(isolated_manager, monkeyp
     assert calls[-1][1].endswith(str(Path("papers")))
 
 
+def test_activate_library_tolerates_read_only_access_metadata_updates(isolated_manager, monkeypatch, tmp_path):
+    root = tmp_path / "desktop-project"
+    (root / "papers" / "pdf").mkdir(parents=True)
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "project_config.json").write_text(
+        json.dumps({"project_name": "桌面项目"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    imported = isolated_manager.import_library(str(root))
+    calls: list[tuple[str, str]] = []
+
+    def fake_switch_database(database_url: str, storage_root: str | None = None) -> None:
+        calls.append((database_url, storage_root or ""))
+
+    def raise_meta_permission(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(root / "library.json"))
+
+    def raise_config_permission(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(root / "config" / "project_config.json"))
+
+    monkeypatch.setattr("app.db.session.switch_database", fake_switch_database)
+    monkeypatch.setattr(LibraryManager, "_write_library_meta", raise_meta_permission)
+    monkeypatch.setattr(LibraryManager, "_ensure_shared_project_config", raise_config_permission)
+
+    activated = isolated_manager.activate_library(imported.name)
+
+    assert activated.name == "桌面项目"
+    assert activated.is_active is True
+    assert calls
+    assert calls[-1][1].endswith(str(Path("papers")))
+
+
 def test_default_library_stays_on_legacy_storage(isolated_manager, monkeypatch):
     calls: list[tuple[str, str]] = []
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter
-import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -13,6 +12,7 @@ from app.rag.eligibility import (
     writing_card_is_rag_eligible,
     _figure_has_safe_review,
 )
+from app.utils.figure_summary import figure_summary_echoes_caption, flatten_figure_key_elements
 from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
 
 
@@ -116,7 +116,7 @@ def _figure_block_reasons(session: Session, figure: PaperFigure) -> list[str]:
         reasons.append("missing_figure_role")
     if not str(figure.content_summary or "").strip():
         reasons.append("missing_content_summary")
-    elif _figure_summary_echoes_caption(figure.content_summary, figure.caption):
+    elif figure_summary_echoes_caption(figure.content_summary, figure.caption):
         reasons.append("caption_echo_summary")
     key_elements = _normalize_figure_key_elements(figure.key_elements)
     if not key_elements:
@@ -183,78 +183,7 @@ def _figure_has_latest_precise_recrop(figure: PaperFigure) -> bool:
 
 
 def _normalize_figure_key_elements(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item or "").strip()]
-    if isinstance(value, dict):
-        return _flatten_figure_key_element_value(value)
-    text = str(value).strip()
-    return [text] if text else []
-
-
-def _flatten_figure_key_element_value(value: Any) -> list[str]:
-    items: list[str] = []
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            if key in {"crop_issues", "visual_quality"}:
-                continue
-            if isinstance(nested, (dict, list)):
-                items.extend(_flatten_figure_key_element_value(nested))
-            elif nested is not None:
-                text = str(nested).strip()
-                if text and len(text) <= 120:
-                    items.append(text)
-    elif isinstance(value, list):
-        for nested in value:
-            items.extend(_flatten_figure_key_element_value(nested))
-    elif value is not None:
-        text = str(value).strip()
-        if text and len(text) <= 120:
-            items.append(text)
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in items:
-        key = item.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append(item)
-        if len(normalized) >= 16:
-            break
-    return normalized
-
-
-def _figure_summary_echoes_caption(summary: str | None, caption: str | None) -> bool:
-    summary_tokens = _meaningful_text_tokens(summary)
-    caption_tokens = _meaningful_text_tokens(caption)
-    if len(summary_tokens) < 8 or len(caption_tokens) < 8:
-        return False
-    summary_text = " ".join(summary_tokens)
-    caption_text = " ".join(caption_tokens)
-    if summary_text == caption_text:
-        return True
-    if summary_text.startswith(caption_text) or caption_text.startswith(summary_text):
-        return True
-    if len(summary_tokens) < max(10, int(len(caption_tokens) * 0.55)):
-        return False
-    summary_unique = set(summary_tokens)
-    caption_unique = set(caption_tokens)
-    extra_unique = summary_unique - caption_unique
-    if len(summary_tokens) >= len(caption_tokens) * 2 and len(extra_unique) >= 6:
-        return False
-    overlap = len(summary_unique & caption_unique)
-    return overlap / max(1, min(len(summary_unique), len(caption_unique))) >= 0.88
-
-
-def _meaningful_text_tokens(value: str | None) -> list[str]:
-    return [
-        token
-        for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
-        if token not in {"fig", "figure"}
-    ]
-
-
+    return flatten_figure_key_elements(value)
 def _dft_minimum_field_reasons(row: DFTResult) -> list[str]:
     reasons: list[str] = []
     property_type = str(row.property_type or "").strip()

@@ -78,6 +78,11 @@ MODULE_ALIASES = {
     "doi": "metadata",
     "year": "metadata",
     "journal": "metadata",
+    "oa_status": "metadata",
+    "license": "metadata",
+    "paper_type": "metadata",
+    "type_confidence": "metadata",
+    "classification_source": "metadata",
 }
 
 SCOPE_MEMBERS = {
@@ -230,7 +235,7 @@ class ModuleWriteLockService:
         paper_id: UUID,
         module_names: list[str] | set[str],
         lock_tokens: list[str] | set[str] | None,
-        locked_by: str | None = None,
+        locked_by: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> ModuleWriteLockCheck:
         required = sorted({self.normalize_module_name(item) for item in module_names if str(item or "").strip()})
         if not required:
@@ -248,8 +253,17 @@ class ModuleWriteLockService:
                 ModuleWriteLock.expires_at > now,
             )
         ).all()
-        if locked_by:
-            locks = [lock for lock in locks if lock.locked_by == locked_by]
+        allowed_owners = {
+            str(item or "").strip()
+            for item in (
+                locked_by
+                if isinstance(locked_by, (list, set, tuple))
+                else [locked_by]
+            )
+            if str(item or "").strip()
+        }
+        if allowed_owners:
+            locks = [lock for lock in locks if lock.locked_by in allowed_owners]
         covered = sorted({module for module in required if any(self._covers(lock.module_name, module) for lock in locks)})
         missing = sorted(set(required) - set(covered))
         return ModuleWriteLockCheck(
@@ -266,7 +280,7 @@ class ModuleWriteLockService:
         paper_id: UUID,
         module_names: list[str] | set[str],
         lock_tokens: list[str] | set[str] | None,
-        locked_by: str | None = None,
+        locked_by: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> ModuleWriteLockCheck:
         check = self.validate_write(
             paper_id=paper_id,

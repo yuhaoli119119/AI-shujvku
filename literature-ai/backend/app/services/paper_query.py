@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import Integer, String, and_, cast, func, or_, select
 from sqlalchemy.orm import Session, load_only
 
 from app.db.models import (
@@ -20,6 +20,7 @@ from app.db.models import (
     MechanismClaim,
     Paper,
     PaperCorrection,
+    PaperImpactMetadata,
     PaperRelationship,
     PaperFigure,
     PaperNote,
@@ -51,6 +52,8 @@ from app.services.paper_codes import ensure_paper_codes
 from app.config import get_settings
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
+from app.utils.figure_summary import normalize_figure_key_elements
+from app.utils.figure_delete_policy import direct_delete_eligibility, normalized_figure_identity
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.evidence_anchors import first_evidence_anchor
 from app.utils.figure_reliability import build_figure_image_review
@@ -163,13 +166,27 @@ class PaperQueryService:
             )
             query = query.where(dft_sub.is_(filters.has_dft_results))
         if filters.has_writing_cards is not None:
-            wc_sub = (
-                select(WritingCard.paper_id)
-                .where(WritingCard.paper_id == Paper.id)
-                .correlate(Paper)
-                .exists()
+            candidate_paper_ids = {
+                paper_id
+                for paper_id in self.session.scalars(
+                    query.with_only_columns(Paper.id).order_by(None)
+                ).all()
+            }
+            reviewed_writing_card_paper_ids = self._reviewed_writing_card_paper_ids(candidate_paper_ids)
+            if filters.has_writing_cards:
+                if not reviewed_writing_card_paper_ids:
+                    query = query.where(Paper.id.is_(None))
+                else:
+                    query = query.where(Paper.id.in_(reviewed_writing_card_paper_ids))
+            elif reviewed_writing_card_paper_ids:
+                query = query.where(Paper.id.not_in(reviewed_writing_card_paper_ids))
+        if filters.has_pdf is not None:
+            pdf_available_clause = and_(
+                Paper.pdf_path.is_not(None),
+                func.trim(Paper.pdf_path) != "",
+                func.coalesce(func.lower(Paper.oa_status), "").not_in(["metadata_only", "needs_upload"]),
             )
-            query = query.where(wc_sub.is_(filters.has_writing_cards))
+            query = query.where(pdf_available_clause if filters.has_pdf else ~pdf_available_clause)
 
         query = query.order_by(*self._list_ordering(filters))
         query = query.offset(filters.offset).limit(filters.limit)
@@ -229,11 +246,19 @@ class PaperQueryService:
             summary = relationship_summary_map[row.source_paper_id]
             summary[row.relationship_type] = summary.get(row.relationship_type, 0) + 1
 
+        impact_metadata_map = {
+            row.paper_id: row
+            for row in self.session.scalars(
+                select(PaperImpactMetadata).where(PaperImpactMetadata.paper_id.in_(paper_ids))
+            ).all()
+        }
+
         return [
             self._build_list_item_with_counts(
                 paper, 
                 {**counts_map[paper.id], "comprehensive_analysis": 1 if paper.comprehensive_analysis else 0},
                 relationship_summary_map.get(paper.id, {}),
+                impact_metadata=impact_metadata_map.get(paper.id),
             ) for paper in papers
         ]
 
@@ -245,6 +270,8 @@ class PaperQueryService:
 
         title_order = Paper.title.desc() if descending else Paper.title.asc()
         created_order = Paper.created_at.desc() if descending else Paper.created_at.asc()
+        paper_code_numeric = cast(func.nullif(func.substr(Paper.paper_code, 2), ""), Integer)
+        paper_code_text_order = Paper.paper_code.desc() if descending else Paper.paper_code.asc()
 
         if sort_by == "created_at":
             return (created_order, title_order)
@@ -257,6 +284,28 @@ class PaperQueryService:
                 Paper.year.desc() if descending else Paper.year.asc(),
                 Paper.serial_number.is_(None).asc(),
                 Paper.serial_number.desc() if descending else Paper.serial_number.asc(),
+            )
+
+        if sort_by == "serial_number":
+            serial_order = Paper.serial_number.desc() if descending else Paper.serial_number.asc()
+            return (
+                Paper.serial_number.is_(None).asc(),
+                serial_order,
+                Paper.title.is_(None).asc(),
+                title_order,
+                created_order,
+            )
+
+        if sort_by in {"paper_code", "paper_code_numeric"}:
+            numeric_order = paper_code_numeric.desc() if descending else paper_code_numeric.asc()
+            return (
+                paper_code_numeric.is_(None).asc(),
+                numeric_order,
+                Paper.paper_code.is_(None).asc(),
+                paper_code_text_order,
+                Paper.title.is_(None).asc(),
+                title_order,
+                created_order,
             )
 
         year_order = Paper.year.desc() if descending else Paper.year.asc()
@@ -333,6 +382,7 @@ class PaperQueryService:
             table_corrections: dict[str, list[dict[str, Any]]] = {}
             figure_audits: dict[str, list[dict[str, Any]]] = {}
             figure_approved_corrections: dict[str, list[dict[str, Any]]] = {}
+            figure_pending_corrections: dict[str, list[dict[str, Any]]] = {}
             figure_conflicts: dict[str, list[dict[str, Any]]] = {}
             writing_card_audits: dict[str, list[dict[str, Any]]] = {}
             writing_card_conflicts: dict[str, list[dict[str, Any]]] = {}
@@ -362,6 +412,7 @@ class PaperQueryService:
             table_corrections = self._table_corrections_by_target(paper_id, table_ids)
             figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
             figure_approved_corrections = self._figure_approved_corrections(paper_id, figure_ids)
+            figure_pending_corrections = self._figure_pending_corrections(paper_id, figure_ids)
             figure_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
                 paper_ids={paper_id},
                 target_type="figure",
@@ -418,7 +469,13 @@ class PaperQueryService:
         relationship_summary = {}
         for row in outgoing_relationships:
             relationship_summary[row.relationship_type] = relationship_summary.get(row.relationship_type, 0) + 1
-        base = self._build_list_item_with_counts(paper, base_counts, relationship_summary, include_heavy=True)
+        base = self._build_list_item_with_counts(
+            paper,
+            base_counts,
+            relationship_summary,
+            impact_metadata=self.session.get(PaperImpactMetadata, paper.id),
+            include_heavy=True,
+        )
         if compact:
             outgoing_relationships = []
             incoming_relationships = []
@@ -467,8 +524,10 @@ class PaperQueryService:
                 self._serialize_figure(
                     item,
                     approved_corrections=figure_approved_corrections.get(str(item.id), []),
+                    pending_corrections=figure_pending_corrections.get(str(item.id), []),
                     object_review_audits=figure_audits.get(str(item.id), []),
                     field_conflicts=figure_conflicts.get(str(item.id), []),
+                    duplicate_group_size=self._figure_duplicate_group_size(figures, item),
                 )
                 for item in figures
             ],
@@ -599,6 +658,82 @@ class PaperQueryService:
         if any(conflicts_by_card.get(str(card.id)) for card in writing_cards):
             return "raw_only"
         return self._collection_review_status(paper_id, "writing_cards", True)
+
+    def _reviewed_writing_card_paper_ids(self, paper_ids: set[UUID]) -> set[UUID]:
+        if not paper_ids:
+            return set()
+
+        writing_card_rows = self.session.execute(
+            select(WritingCard.id, WritingCard.paper_id).where(WritingCard.paper_id.in_(paper_ids))
+        ).all()
+        if not writing_card_rows:
+            return set()
+
+        candidate_paper_ids = {paper_id for _, paper_id in writing_card_rows}
+        reviewed_paper_ids: set[UUID] = set()
+        expected_fields = {"writing_cards", "writing_card"}
+
+        notes = self.session.scalars(
+            select(PaperNote).where(PaperNote.paper_id.in_(candidate_paper_ids))
+        ).all()
+        for note in notes:
+            field = str(note.field_name or "").strip().lower()
+            if not self._review_field_matches(field, expected_fields):
+                continue
+            source = str(note.source or "").lower()
+            content = str(note.content or "").lower()
+            if source == "ide_ai" or "[ai_reviewed]" in content:
+                reviewed_paper_ids.add(note.paper_id)
+
+        corrections = self.session.scalars(
+            select(PaperCorrection)
+            .where(PaperCorrection.paper_id.in_(candidate_paper_ids))
+            .where(PaperCorrection.status == "approved")
+        ).all()
+        for correction in corrections:
+            source = str(correction.source or "").lower()
+            reviewer = str(correction.reviewed_by or "").lower()
+            if source != "ide_ai" and "ide" not in reviewer:
+                continue
+            field = str(correction.field_name or "").strip().lower()
+            target = str(correction.target_path or "").strip().lower()
+            if self._review_field_matches(field, expected_fields) or self._review_field_matches(target, expected_fields):
+                reviewed_paper_ids.add(correction.paper_id)
+
+        applied_candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.paper_id.in_(candidate_paper_ids))
+            .where(ExternalAnalysisCandidate.status.in_(["ai_applied", "ai_reviewed", "materialized"]))
+        ).all()
+        for candidate in applied_candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            field = str(payload.get("field_name") or "").strip().lower()
+            target = str(payload.get("target_path") or "").strip().lower()
+            if self._review_field_matches(field, expected_fields) or self._review_field_matches(target, expected_fields):
+                reviewed_paper_ids.add(candidate.paper_id)
+
+        audit_candidates = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            .where(ExternalAnalysisCandidate.paper_id.in_(candidate_paper_ids))
+            .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
+        ).all()
+        for candidate, run in audit_candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = str(payload.get("target_type") or "").strip().lower()
+            if target_type not in expected_fields:
+                continue
+            source = str(run.source or "").lower()
+            source_label = str(run.source_label or "").lower()
+            decision = str(payload.get("decision") or "").strip().lower()
+            verification = str(payload.get("verification_status") or "").strip().lower()
+            if ("ide_ai" in source or "ide" in source_label or "[ai_reviewed]" in json.dumps(payload, ensure_ascii=False).lower()) and (
+                decision in {"approve", "approved", "accept", "verified", "revise", "update"}
+                or verification in {"verified", "ai_verified", "reviewed"}
+            ):
+                reviewed_paper_ids.add(candidate.paper_id)
+
+        return reviewed_paper_ids
 
     def _figures_review_status(
         self,
@@ -897,13 +1032,18 @@ class PaperQueryService:
         for audit in audits:
             decision = str(audit.get("decision") or "").strip().upper()
             status = str(audit.get("status") or "").strip().lower()
-            if decision == "PASS" and status in finalized_statuses:
+            if PaperQueryService._is_positive_review_decision(decision) and status in finalized_statuses:
                 has_finalized_positive = True
             if decision in negative_decisions and status in finalized_statuses:
                 return "rejected"
         if has_finalized_positive:
             return "verified"
         return "review_candidate"
+
+    @staticmethod
+    def _is_positive_review_decision(decision: Any) -> bool:
+        normalized = str(decision or "").strip().upper()
+        return normalized in {"PASS", "APPROVE", "APPROVED", "ACCEPT", "ACCEPTED", "VERIFIED", "OK"}
 
     def _table_corrections_by_target(
         self,
@@ -967,8 +1107,10 @@ class PaperQueryService:
         item: PaperFigure,
         *,
         approved_corrections: list[dict[str, Any]] | None = None,
+        pending_corrections: list[dict[str, Any]] | None = None,
         object_review_audits: list[dict[str, Any]] | None = None,
         field_conflicts: list[dict[str, Any]] | None = None,
+        duplicate_group_size: int = 1,
     ) -> PaperFigureResponse:
         payload = PaperFigureResponse.model_validate(item)
         canonical_image_path = cls._canonical_figure_image_path(payload, paper_id=item.paper_id)
@@ -985,8 +1127,33 @@ class PaperQueryService:
                 if str(correction.get("field_name") or "").strip()
             }
         )
+        pending = pending_corrections or []
+        pending_fields = sorted(
+            {
+                str(correction.get("field_name") or "").strip()
+                for correction in pending
+                if str(correction.get("field_name") or "").strip()
+            }
+        )
+        pending_delete_count = sum(
+            1 for correction in pending
+            if str(correction.get("field_name") or "").strip().lower() == "delete"
+        )
         audits = object_review_audits or []
         conflicts = field_conflicts or []
+        direct_delete_allowed, direct_delete_reason = direct_delete_eligibility(
+            {
+                "caption": payload.caption,
+                "content_summary": payload.content_summary,
+                "figure_label": payload.figure_label,
+                "figure_role": payload.figure_role,
+                "crop_status": payload.crop_status,
+                "flags": image_review.get("flags") if isinstance(image_review, dict) else [],
+                "figure_reliability_warnings": figure_reliability.get("warnings") if isinstance(figure_reliability, dict) else [],
+                "key_elements": key_elements or [],
+            },
+            duplicate_group_size=duplicate_group_size,
+        )
         return payload.model_copy(
             update={
                 "caption": cls._clean_pdf_text(payload.caption),
@@ -1001,6 +1168,11 @@ class PaperQueryService:
                 "figure_reliability_warnings": figure_reliability["warnings"],
                 "approved_correction_count": len(corrections),
                 "approved_correction_fields": correction_fields,
+                "pending_correction_count": len(pending),
+                "pending_correction_fields": pending_fields,
+                "pending_delete_proposal_count": pending_delete_count,
+                "direct_delete_eligible": direct_delete_allowed,
+                "direct_delete_reason": direct_delete_reason,
                 "object_review_audit_count": len(audits),
                 "object_review_audits": audits[:5],
                 "latest_object_review_audit": audits[0] if audits else None,
@@ -1011,48 +1183,7 @@ class PaperQueryService:
 
     @classmethod
     def _normalize_figure_key_elements(cls, value: Any) -> tuple[list[str] | None, dict[str, Any] | None]:
-        if value is None:
-            return None, None
-        if isinstance(value, list):
-            normalized = [str(item).strip() for item in value if str(item or "").strip()]
-            return normalized or None, None
-        if isinstance(value, dict):
-            flattened = cls._flatten_figure_key_element_value(value)
-            return flattened or None, value
-        text = str(value).strip()
-        return ([text] if text else None), None
-
-    @classmethod
-    def _flatten_figure_key_element_value(cls, value: Any) -> list[str]:
-        items: list[str] = []
-        if isinstance(value, dict):
-            for key, nested in value.items():
-                if key in {"crop_issues", "visual_quality"}:
-                    continue
-                if isinstance(nested, (dict, list)):
-                    items.extend(cls._flatten_figure_key_element_value(nested))
-                elif nested is not None:
-                    text = str(nested).strip()
-                    if text and len(text) <= 120:
-                        items.append(text)
-        elif isinstance(value, list):
-            for nested in value:
-                items.extend(cls._flatten_figure_key_element_value(nested))
-        elif value is not None:
-            text = str(value).strip()
-            if text and len(text) <= 120:
-                items.append(text)
-        seen: set[str] = set()
-        normalized: list[str] = []
-        for item in items:
-            key = item.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized.append(item)
-            if len(normalized) >= 16:
-                break
-        return normalized
+        return normalize_figure_key_elements(value)
 
     @staticmethod
     def _canonical_figure_image_path(payload: PaperFigureResponse, *, paper_id: UUID | None = None) -> str | None:
@@ -1106,6 +1237,7 @@ class PaperQueryService:
         if not target_ids:
             return {}
         audits_by_target: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
+        deduped_by_target: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {target_id: {} for target_id in target_ids}
         normalized_target_types = {target_type.strip().lower() for target_type in target_types}
         candidates = self.session.scalars(
             select(ExternalAnalysisCandidate)
@@ -1116,6 +1248,7 @@ class PaperQueryService:
         for candidate in candidates:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_type = str(payload.get("target_type") or "").strip().lower()
+            decision = str(payload.get("decision") or "").strip().lower()
             target_id = str(
                 payload.get("target_id")
                 or payload.get("figure_id")
@@ -1124,11 +1257,27 @@ class PaperQueryService:
                 or payload.get("record_id")
                 or ""
             )
+            if (
+                target_type == "dft_results"
+                and (target_id.lower() == "new" or decision == "new_candidate")
+                and str(candidate.materialized_target_type or "").strip().lower() == "dft_results"
+                and str(candidate.materialized_target_id or "").strip()
+            ):
+                target_id = str(candidate.materialized_target_id).strip()
             if target_id not in target_ids or target_type not in normalized_target_types:
                 continue
-            if len(audits_by_target.setdefault(target_id, [])) >= 5:
-                continue
-            audits_by_target[target_id].append(self._object_review_audit_payload(candidate, payload))
+            audit_payload = self._object_review_audit_payload(candidate, payload)
+            dedupe_key = self._object_review_audit_dedupe_key(target_type, audit_payload)
+            target_bucket = deduped_by_target.setdefault(target_id, {})
+            existing = target_bucket.get(dedupe_key)
+            if existing is None or self._object_review_audit_payload_rank(audit_payload) > self._object_review_audit_payload_rank(existing):
+                target_bucket[dedupe_key] = audit_payload
+        for target_id, deduped in deduped_by_target.items():
+            audits_by_target[target_id] = sorted(
+                deduped.values(),
+                key=lambda item: str(item.get("created_at") or ""),
+                reverse=True,
+            )[:5]
         return audits_by_target
 
     @staticmethod
@@ -1164,6 +1313,31 @@ class PaperQueryService:
             "corrected_value": payload.get("corrected_value"),
             "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
         }
+
+    @staticmethod
+    def _object_review_audit_dedupe_key(target_type: str, payload: dict[str, Any]) -> tuple[Any, ...]:
+        field_name = str(payload.get("field_name") or "").strip()
+        decision = str(payload.get("decision") or "").strip().lower()
+        if target_type == "dft_results" and decision == "new_candidate" and field_name in {"", "dft_results"}:
+            field_name = "dft_results"
+        evidence = payload.get("evidence_location")
+        corrected = payload.get("corrected_value")
+        return (
+            str(payload.get("source_label") or payload.get("source") or "").strip().lower(),
+            decision,
+            field_name,
+            json.dumps(corrected, sort_keys=True, ensure_ascii=False, default=str),
+            json.dumps(evidence, sort_keys=True, ensure_ascii=False, default=str),
+        )
+
+    @staticmethod
+    def _object_review_audit_payload_rank(payload: dict[str, Any]) -> tuple[int, int]:
+        field_name = str(payload.get("field_name") or "").strip()
+        corrected = payload.get("corrected_value")
+        return (
+            1 if field_name else 0,
+            1 if corrected not in (None, "", [], {}) else 0,
+        )
 
     @staticmethod
     def _figure_image_review_payload(payload: PaperFigureResponse, paper_id: UUID | None = None) -> dict[str, Any]:
@@ -1204,6 +1378,39 @@ class PaperQueryService:
             )
         return corrections_by_figure
 
+    def _figure_pending_corrections(
+        self,
+        paper_id: UUID,
+        figure_ids: set[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not figure_ids:
+            return {}
+        corrections_by_figure: dict[str, list[dict[str, Any]]] = {figure_id: [] for figure_id in figure_ids}
+        corrections = self.session.scalars(
+            select(PaperCorrection)
+            .where(PaperCorrection.paper_id == paper_id)
+            .where(PaperCorrection.status.in_(["pending", "requires_resolution"]))
+            .order_by(PaperCorrection.created_at.desc())
+        ).all()
+        for correction in corrections:
+            target_type, target_id, target_field = self._parse_correction_target_path(correction.target_path)
+            if target_type not in {"figure", "figures", "paper_figure", "paper_figures"}:
+                continue
+            if target_id not in figure_ids:
+                continue
+            field_name = target_field or correction.field_name
+            corrections_by_figure.setdefault(target_id, []).append(
+                {
+                    "correction_id": str(correction.id),
+                    "field_name": str(field_name or "").strip(),
+                    "source": correction.source,
+                    "reviewed_by": correction.reviewed_by,
+                    "status": correction.status,
+                    "created_at": correction.created_at.isoformat() if correction.created_at else None,
+                }
+            )
+        return corrections_by_figure
+
     @staticmethod
     def _parse_correction_target_path(target_path: str | None) -> tuple[str, str, str | None]:
         parts = [part.strip() for part in str(target_path or "").split(":")]
@@ -1238,6 +1445,7 @@ class PaperQueryService:
         payload = DFTResultResponse.model_validate(item)
         audits = object_review_audits or []
         conflicts = field_conflicts or []
+        conflict_field_names = cls._aggregate_conflict_field_names(conflicts)
         linked_catalyst = (
             catalyst_by_id.get(str(item.catalyst_sample_id))
             if catalyst_by_id and item.catalyst_sample_id is not None
@@ -1279,8 +1487,37 @@ class PaperQueryService:
                 "latest_object_review_audit": audits[0] if audits else None,
                 "conflict_count": len(conflicts),
                 "field_conflicts": conflicts[:5],
+                "affected_field_names": conflict_field_names,
+                "conflict_field_names": conflict_field_names,
             }
         )
+
+    @staticmethod
+    def _figure_duplicate_group_size(figures: list[PaperFigure], item: PaperFigure) -> int:
+        identity = normalized_figure_identity(item)
+        if not identity:
+            return 1
+        count = 0
+        for figure in figures:
+            if normalized_figure_identity(figure) == identity:
+                count += 1
+        return max(1, count)
+
+    @staticmethod
+    def _aggregate_conflict_field_names(conflicts: list[dict[str, Any]]) -> list[str]:
+        names: list[str] = []
+        for conflict in conflicts or []:
+            candidates = conflict.get("affected_field_names") or conflict.get("conflict_field_names") or []
+            if isinstance(candidates, list) and candidates:
+                for candidate in candidates:
+                    value = str(candidate or "").strip()
+                    if value and value not in names:
+                        names.append(value)
+                continue
+            fallback = str(conflict.get("field_name") or "").strip()
+            if fallback and fallback not in names:
+                names.append(fallback)
+        return names
 
     @staticmethod
     def _clean_pdf_text(value: str | None) -> str | None:
@@ -1335,6 +1572,7 @@ class PaperQueryService:
         counts: dict[str, int],
         relationship_summary: dict[str, int] | None = None,
         *,
+        impact_metadata: PaperImpactMetadata | None = None,
         include_heavy: bool = False,
     ) -> PaperListItemResponse:
         c = PaperCountsResponse(**counts)
@@ -1353,6 +1591,9 @@ class PaperQueryService:
             title_zh=localized.get("title_zh"),
             year=paper.year,
             journal=paper.journal,
+            impact_factor=impact_metadata.impact_factor if impact_metadata else None,
+            impact_factor_source=impact_metadata.impact_factor_source if impact_metadata else None,
+            impact_factor_year=impact_metadata.impact_factor_year if impact_metadata else None,
             authors=paper.authors or [],
             abstract=paper.abstract if include_heavy else self._clip_list_text(paper.abstract, 700),
             abstract_zh=localized.get("abstract_zh") if include_heavy else self._clip_list_text(localized.get("abstract_zh"), 420),

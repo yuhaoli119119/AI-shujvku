@@ -18,6 +18,7 @@ from app.services.embedding import (
 )
 from app.rag.eligibility import is_rag_eligible, section_is_retrieval_candidate, writing_card_rag_review_status
 from app.rag.cards import build_dft_card, build_evidence_card, build_figure_card, build_writing_card, paper_code_for
+from app.utils.figure_summary import flatten_figure_key_elements
 from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
 
 
@@ -651,7 +652,7 @@ class Retriever:
                         row.figure_role,
                         row.content_summary,
                         row.caption,
-                        " ".join(str(item) for item in (row.key_elements or [])),
+                        " ".join(flatten_figure_key_elements(row.key_elements)),
                     ],
                 )
             )
@@ -679,7 +680,7 @@ class Retriever:
                     "image_path": row.image_path,
                     "asset_url": f"/api/papers/assets/{row.image_path}" if row.image_path else None,
                     "content_summary": row.content_summary,
-                    "key_elements": row.key_elements or [],
+                    "key_elements": flatten_figure_key_elements(row.key_elements),
                     "evidence_locator": {
                         "page": row.page,
                         "figure": row.figure_label or caption,

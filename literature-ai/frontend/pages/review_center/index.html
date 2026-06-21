@@ -594,6 +594,94 @@
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 14px;
     }
+    .detail-stack {
+      display: grid;
+      gap: 16px;
+    }
+    .detail-hero {
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      background:
+        linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(15, 118, 110, 0.02)),
+        var(--color-surface-alt);
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+    }
+    .detail-hero-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .detail-hero-title {
+      font-size: 16px;
+      font-weight: 900;
+      color: var(--color-text);
+      line-height: 1.4;
+    }
+    .detail-hero-copy {
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--color-text-secondary);
+    }
+    .detail-section-card {
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      background: var(--color-surface-alt);
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+    .detail-section-head {
+      display: grid;
+      gap: 4px;
+    }
+    .detail-section-title {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--color-text);
+    }
+    .detail-section-tip {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--color-text-secondary);
+    }
+    .detail-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+    }
+    .detail-kpi {
+      border: 1px solid var(--color-border);
+      border-radius: 14px;
+      background: var(--color-surface);
+      padding: 12px;
+      display: grid;
+      gap: 4px;
+    }
+    .detail-kpi-label {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .detail-kpi-value {
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--color-text);
+      line-height: 1.2;
+    }
+    .detail-kpi-note {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--color-text-secondary);
+    }
+    .detail-columns {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
     .detail-block {
       display: grid;
       gap: 4px;
@@ -630,15 +718,154 @@
       display: grid;
       gap: 12px;
     }
+    .conflict-workbench {
+      display: grid;
+      gap: 14px;
+    }
+    .conflict-status-panel {
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: linear-gradient(135deg, #f8fafc 0%, #eef7f6 100%);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .conflict-status-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .conflict-status-copy {
+      min-width: 0;
+    }
+    .conflict-status-actions {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .conflict-status-title {
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.45;
+      color: var(--color-text);
+    }
+    .conflict-status-note {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.5;
+    }
     .conflict-summary-bar {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin-bottom: 14px;
+    }
+    .conflict-workbench-grid {
+      display: grid;
+      grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .conflict-workbench-grid.is-list-collapsed {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .conflict-workbench-grid.is-list-collapsed .conflict-list-panel {
+      display: none;
+    }
+    .conflict-list-panel,
+    .conflict-detail-panel {
+      min-width: 0;
+    }
+    .conflict-list-panel {
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: var(--color-surface);
+      overflow: hidden;
+      position: sticky;
+      top: 0;
+    }
+    .conflict-panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 12px 10px;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-alt);
+    }
+    .conflict-panel-copy {
+      min-width: 0;
+    }
+    .conflict-panel-title {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--color-text);
+    }
+    .conflict-panel-note {
+      margin-top: 3px;
+      color: var(--color-text-secondary);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .conflict-list {
+      max-height: min(58vh, 620px);
+      overflow: auto;
+      display: grid;
+      gap: 0;
+    }
+    .conflict-list-item {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--color-border);
+      background: transparent;
+      padding: 12px;
+      text-align: left;
+      cursor: pointer;
+      display: grid;
+      gap: 8px;
+      color: var(--color-text);
+    }
+    .conflict-list-item:hover {
+      background: rgba(13, 116, 111, 0.06);
+    }
+    .conflict-list-item.is-active {
+      background: #eef7f6;
+      box-shadow: inset 3px 0 0 var(--color-primary);
+    }
+    .conflict-list-title {
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .conflict-list-meta {
+      color: var(--color-text-secondary);
+      font-size: 11px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .conflict-list-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .conflict-detail-panel {
+      display: grid;
+      gap: 12px;
+    }
+    .conflict-detail-empty {
+      border: 1px dashed var(--color-border);
+      border-radius: 8px;
+      padding: 18px;
+      color: var(--color-text-secondary);
+      background: var(--color-surface-alt);
+      font-size: 13px;
+      line-height: 1.5;
     }
     .conflict-card {
       border: 1px solid var(--color-border);
-      border-radius: 14px;
+      border-radius: 8px;
       background: var(--color-surface-alt);
       overflow: hidden;
     }
@@ -692,7 +919,7 @@
     .conflict-body {
       display: grid;
       gap: 14px;
-      padding: 0 14px 14px;
+      padding: 14px;
     }
     .conflict-object-grid {
       display: grid;
@@ -700,7 +927,7 @@
       gap: 10px;
       padding: 12px;
       border: 1px solid var(--color-border);
-      border-radius: 12px;
+      border-radius: 8px;
       background: var(--color-surface);
     }
     .conflict-object-item {
@@ -726,25 +953,28 @@
       gap: 6px;
     }
     .compare-table-wrap {
-      overflow-x: auto;
+      overflow-x: clip;
       border: 1px solid var(--color-border);
-      border-radius: 12px;
+      border-radius: 8px;
       background: var(--color-surface);
     }
     .compare-table {
       width: 100%;
-      min-width: 1300px;
+      min-width: 0;
       border-collapse: separate;
       border-spacing: 0;
       table-layout: fixed;
-      font-size: 12px;
+      font-size: 11px;
     }
     .compare-table th,
     .compare-table td {
-      padding: 10px 12px;
+      padding: 8px 9px;
       border-bottom: 1px solid var(--color-border);
       vertical-align: top;
       text-align: left;
+      line-height: 1.4;
+      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     .compare-table th {
       position: static;
@@ -755,16 +985,13 @@
     .compare-table tr:last-child td {
       border-bottom: 0;
     }
-    .compare-col-source { width: 14%; }
-    .compare-col-role { width: 17%; }
+    .compare-col-source { width: 24%; }
     .compare-col-decision { width: 10%; }
-    .compare-col-value { width: 13%; }
-    .compare-col-confidence { width: 8%; }
-    .compare-col-locator { width: 12%; }
-    .compare-col-reason { width: 14%; }
-    .compare-col-action { width: 12%; }
+    .compare-col-value { width: 14%; }
+    .compare-col-reason { width: 36%; }
+    .compare-col-action { width: 16%; }
     .opinion-source {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 800;
       color: var(--color-text);
       line-height: 1.45;
@@ -773,7 +1000,7 @@
     .opinion-submeta {
       margin-top: 4px;
       color: var(--color-text-secondary);
-      font-size: 11px;
+      font-size: 10px;
       line-height: 1.4;
       word-break: break-word;
     }
@@ -826,7 +1053,9 @@
       gap: 6px;
     }
     .opinion-action-stack .btn {
-      white-space: nowrap;
+      width: 100%;
+      white-space: normal;
+      line-height: 1.35;
     }
     .conflict-footer-note {
       margin-top: 14px;
@@ -836,7 +1065,7 @@
     }
     .conflict-layout {
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       gap: 16px;
       align-items: start;
     }
@@ -845,20 +1074,20 @@
       min-width: 0;
     }
     .evidence-preview-shell {
-      order: -1;
+      min-width: 0;
     }
     .evidence-preview-card {
       border: 1px solid #d7e2ef;
-      border-radius: 16px;
+      border-radius: 8px;
       background: #fbfdff;
-      padding: 14px;
+      padding: 12px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
       position: static;
     }
     .evidence-preview-card.is-placeholder {
-      min-height: 220px;
+      min-height: 120px;
       justify-content: center;
     }
     .evidence-preview-title {
@@ -867,9 +1096,28 @@
       color: var(--color-text);
     }
     .evidence-preview-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .evidence-preview-meta .detail-block {
+      flex: 1 1 150px;
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid #d7e2ef;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .evidence-preview-meta .detail-block.is-wide {
+      flex-basis: 100%;
+    }
+    .evidence-preview-section {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
+      gap: 6px;
+      padding: 10px 12px;
+      border: 1px solid #d7e2ef;
+      border-radius: 8px;
+      background: #fff;
     }
     .evidence-excerpt {
       white-space: pre-wrap;
@@ -941,6 +1189,10 @@
       .conflict-card-right {
         justify-content: flex-start;
       }
+      .conflict-status-head,
+      .conflict-panel-head {
+        display: grid;
+      }
       .conflict-object-grid {
         grid-template-columns: 1fr 1fr;
       }
@@ -948,7 +1200,7 @@
         position: static;
       }
       .evidence-preview-meta {
-        grid-template-columns: 1fr;
+        display: grid;
       }
     }
   </style>
@@ -960,7 +1212,6 @@
       <section class="stats" id="stats"></section>
       <div class="page-actions">
         <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()" title="刷新审核中心">↻ 刷新</button>
-        <button class="btn btn-tinted" type="button" onclick="batchAutoAdvanceFiltered()">批量 AI 自动推进当前筛选</button>
         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
           <option value="">材料操作</option>
           <option value="prepare_filtered">AI 重建</option>
@@ -972,7 +1223,7 @@
           <option value="overall">总体指令</option>
           <option value="dft">DFT 指令</option>
           <option value="figure">图表指令</option>
-          <option value="sections_writing">章节+写作卡指令</option>
+          <option value="text_review">文字审核指令</option>
         </select>
       </div>
     </div>
@@ -986,11 +1237,9 @@
           </select>
           <select id="statusFilter" onchange="handleFilterChange()">
             <option value="">全部流程状态</option>
-            <option value="group:needs_action">需要我处理</option>
-            <option value="group:needs_attention">需要关注</option>
-            <option value="group:ai_processing">AI 处理中</option>
-            <option value="group:approved">已审核通过</option>
-            <option value="group:deprecated">历史旧状态</option>
+          </select>
+          <select id="workflowStatusFilter" onchange="handleFilterChange()">
+            <option value="">具体流程状态</option>
           </select>
           <select id="qualityFilter" onchange="handleFilterChange()">
             <option value="">全部 PDF 质量</option>
@@ -1003,7 +1252,8 @@
           <select id="sortFilter" onchange="handleSortChange()">
             <option value="recent">最近入库优先</option>
             <option value="year_desc">年份新到旧</option>
-            <option value="conflicts_desc">冲突优先</option>
+            <option value="paper_code_asc">短号顺序</option>
+            <option value="conflicts_desc">冲突优先（DFT/图表/内容）</option>
             <option value="suspected_missing_desc">疑似漏提优先</option>
           </select>
           <input id="searchBox" type="search" placeholder="搜索标题 / DOI / 期刊 / 年份 / 短 ID" oninput="handleSearchInput()">
@@ -1072,11 +1322,14 @@
       }
     };
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
+    const REVIEW_CENTER_FILTER_SESSION_KEY = "litai:review-center:filters:v1";
     const REVIEW_CENTER_FETCH_LIMITS = [5000, 500];
     const selectedPaperIds = new Set();
     const conflictState = {
       activeRow: null,
       groups: [],
+      activeGroupIndex: 0,
+      listCollapsed: false,
       activeOpinionKey: null,
       evidenceCache: {},
       requestToken: 0
@@ -1092,6 +1345,63 @@
     function getValue(id) {
       const el = document.getElementById(id);
       return el ? el.value.trim() : "";
+    }
+
+    function collectReviewCenterFilterState() {
+      return {
+        libraryFilter: getValue("libraryFilter"),
+        statusFilter: getValue("statusFilter"),
+        workflowStatusFilter: getValue("workflowStatusFilter"),
+        qualityFilter: getValue("qualityFilter"),
+        sortFilter: getValue("sortFilter"),
+        searchBox: getValue("searchBox"),
+        pagination: {
+          page: Number(state.pagination && state.pagination.page || 1),
+          pageSize: Number(state.pagination && state.pagination.pageSize || 25),
+        },
+      };
+    }
+
+    function saveReviewCenterFilterState() {
+      try {
+        window.sessionStorage.setItem(REVIEW_CENTER_FILTER_SESSION_KEY, JSON.stringify(collectReviewCenterFilterState()));
+      } catch (_) {
+        // sessionStorage can be unavailable in strict browser modes.
+      }
+    }
+
+    function restoreReviewCenterFilterState() {
+      try {
+        const raw = window.sessionStorage.getItem(REVIEW_CENTER_FILTER_SESSION_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (!saved || typeof saved !== "object") return;
+        state.restoredReviewCenterFilters = saved;
+        ["libraryFilter", "statusFilter", "workflowStatusFilter", "qualityFilter", "sortFilter", "searchBox"].forEach(function(id) {
+          const el = document.getElementById(id);
+          if (el && Object.prototype.hasOwnProperty.call(saved, id)) {
+            el.value = saved[id] == null ? "" : String(saved[id]);
+          }
+        });
+        const savedPage = Number(saved.pagination && saved.pagination.page);
+        const savedPageSize = Number(saved.pagination && saved.pagination.pageSize);
+        if (Number.isFinite(savedPage) && savedPage >= 1) {
+          state.pagination.page = savedPage;
+        }
+        if (Number.isFinite(savedPageSize) && savedPageSize > 0) {
+          state.pagination.pageSize = savedPageSize;
+        }
+      } catch (_) {
+        // Ignore corrupted session state and continue with defaults.
+      }
+    }
+
+    function clearReviewCenterFilterState() {
+      try {
+        window.sessionStorage.removeItem(REVIEW_CENTER_FILTER_SESSION_KEY);
+      } catch (_) {
+        // sessionStorage can be unavailable in strict browser modes.
+      }
     }
 
     function getStoredLibraryName() {
@@ -1133,6 +1443,7 @@
     function setReviewLibraryFilter() {
       rememberLibraryName(getValue("libraryFilter"));
       state.pagination.page = 1;
+      saveReviewCenterFilterState();
       loadReviewCenter();
     }
 
@@ -1268,16 +1579,19 @@
 
     function handleFilterChange() {
       state.pagination.page = 1;
+      saveReviewCenterFilterState();
       renderRows();
     }
 
     function handleSortChange() {
       state.pagination.page = 1;
+      saveReviewCenterFilterState();
       renderRows();
     }
 
     function handleSearchInput() {
       state.pagination.page = 1;
+      saveReviewCenterFilterState();
       renderRows();
     }
 
@@ -1303,6 +1617,7 @@
 
     function goToPage(page) {
       state.pagination.page = Number(page || 1);
+      saveReviewCenterFilterState();
       renderRows();
     }
 
@@ -1315,6 +1630,7 @@
       const nextSize = Number(select && select.value ? select.value : state.pagination.pageSize);
       state.pagination.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : 25;
       state.pagination.page = 1;
+      saveReviewCenterFilterState();
       renderRows();
     }
 
@@ -1425,11 +1741,11 @@
       }
 
       if (kind === "figure") {
-        return commonWithHardening + "\n\n本次任务模块：图表专项核验\n目标：逐图逐表核验并直接修正。能改就改，缺失就新增，不要只写报告。\n\n开始前必须读取 codex-context.context.source_assets.pdf_path，记录原 PDF 文件名。先按 PDF 原文核对本篇论文实际 figure 数量、编号连续性、是否存在子图，再和系统现有 figure objects/crop 列表逐一对照；不允许只审核当前已有 crop。\n\n每幅图必须检查：\n- 数量与覆盖是否准确：整篇论文是否有漏掉的整张图、漏掉的子图、编号断裂、错绑到别的 figure。\n- 裁剪是否过大：是否混入大块空白、正文、页眉页脚、相邻图片。\n- 裁剪是否过小：是否裁掉 panel、坐标轴、图例、标签、标题、结构示意、反应箭头、颜色条。\n- 裁剪是否准确：是否真的是该 figure/subfigure，而不是错页、错图、混入多张无关图。\n- caption、page、figure_label 是否和 PDF 原页一致。\n- content_summary 必须写这张图实际展示了什么，不能复述图注，不能只写“shows Figure 2”这类空话。\n- key_elements 必须写具体元素，如材料、结构、曲线、峰、坐标轴、图例、反应步骤、子图编号。\n\n禁止：\n- 不要照抄或轻微改写 caption 当成 content_summary。\n- 不要批量给泛化结论，每幅图都要给出具体分析。\n- 不要只审现有 figure uuid 列表后就宣布完成，必须明确确认是否存在漏图/漏子图。\n- 不要根据图像臆读精确数值；数值结论只接受正文、表格或图内明确可读文字。\n\n可直接修正字段：\n- figures:<figure_uuid>:caption/image_path/page/figure_label/figure_role/role_confidence/content_summary/key_elements/prov/crop_status/crop_confidence/crop_source\n- figures:new:create 可新增缺失图片对象；create_figure_from_bbox 可直接从 PDF 裁图并创建图片对象\n- tables:<table_uuid>:caption/page/markdown_content/extraction_source/prov\n- tables:new:create 可新增缺失表格对象\n\n回写规则：\n- 裁剪过大、过小、不准、caption/page/label/role/summary/key_elements 错误：写 replace correction_proposals；涉及图片重裁时直接调用 recrop_figure。\n- 缺失整张图/子图/表，或 PDF 数量多于系统现有对象：写 create correction_proposals；若可裁图，直接调用 create_figure_from_bbox 创建对象和 image_path。\n- 图片文件缺失但对象存在：优先 recrop_figure；bbox 不确定时先用 full_page，再明确标记 needs_recrop。\n- 只有删除重复对象、整体重排序这类暂不能自动执行的问题，才写 [AI_REVIEWED][NEEDS_PIPELINE_FIX] note。\n\nraw_payload 示例：\n{\n  \"correction_proposals\": [\n    {\"field_name\":\"figures\", \"target_path\":\"figures:<figure_uuid>:content_summary\", \"operation\":\"replace\", \"proposed_value\":\"Three-panel band structure and DOS comparison under tensile strain; panel (a) shows pristine ribbon, panels (b-c) show strained cases with narrowed gap.\", \"reason\":\"old summary repeated the caption and missed the actual visual comparison\", \"evidence_payload\":{\"page\":4,\"quoted_text\":\"Fig. 2 ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"figures\", \"target_path\":\"figures:<figure_uuid>:key_elements\", \"operation\":\"replace\", \"proposed_value\":[\"three subpanels\",\"band structure curves\",\"DOS peaks near Fermi level\",\"strain labels\",\"energy axis\"], \"reason\":\"existing key_elements were generic placeholders\", \"evidence_payload\":{\"page\":4,\"quoted_text\":\"Fig. 2 ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}\n  ]\n}";
+        return commonWithHardening + "\n\n本次任务模块：图表专项核验\n目标：逐图逐表核验并直接修正。能改就改，缺失就新增，不要只写报告。\n\n开始前必须读取 codex-context.context.source_assets.pdf_path，记录原 PDF 文件名。先按 PDF 原文核对本篇论文实际 figure 数量、编号连续性、是否存在子图，再和系统现有 figure objects/crop 列表逐一对照；不允许只审核当前已有 crop。\n\n每幅图必须检查：\n- 数量与覆盖是否准确：整篇论文是否有漏掉的整张图、漏掉的子图、编号断裂、错绑到别的 figure。\n- 裁剪是否过大：是否混入大块空白、正文、页眉页脚、相邻图片。\n- 裁剪是否过小：是否裁掉 panel、坐标轴、图例、标签、标题、结构示意、反应箭头、颜色条。\n- 裁剪是否准确：是否真的是该 figure/subfigure，而不是错页、错图、混入多张无关图。\n- caption、page、figure_label 是否和 PDF 原页一致。\n- content_summary 必须写这张图实际展示了什么，不能复述图注，不能只写“shows Figure 2”这类空话。\n- key_elements 必须写具体元素，如材料、结构、曲线、峰、坐标轴、图例、反应步骤、子图编号。\n- 图表审核完成后，必须顺带判断该文献当前系统 paper_type 是否与原 PDF 内容相符；若不相符，不要只写 note，直接通过受控写回把 paper_type 改成正确值，并附上页码与 quoted_text 证据。\n\n禁止：\n- 不要照抄或轻微改写 caption 当成 content_summary。\n- 不要批量给泛化结论，每幅图都要给出具体分析。\n- 不要只审现有 figure uuid 列表后就宣布完成，必须明确确认是否存在漏图/漏子图。\n- 不要根据图像臆读精确数值；数值结论只接受正文、表格或图内明确可读文字。\n\n可直接修正字段：\n- figures:<figure_uuid>:caption/image_path/page/figure_label/figure_role/role_confidence/content_summary/key_elements/prov/crop_status/crop_confidence/crop_source\n- figures:new:create 可新增缺失图片对象；create_figure_from_bbox 可直接从 PDF 裁图并创建图片对象\n- tables:<table_uuid>:caption/page/markdown_content/extraction_source/prov\n- tables:new:create 可新增缺失表格对象\n- paper_type：图表审核结束后若发现文献类型与 PDF 不一致，直接按元数据字段修正\n\n回写规则：\n- 裁剪过大、过小、不准、caption/page/label/role/summary/key_elements 错误：写 replace correction_proposals；涉及图片重裁时直接调用 recrop_figure。\n- 缺失整张图/子图/表，或 PDF 数量多于系统现有对象：写 create correction_proposals；若可裁图，直接调用 create_figure_from_bbox 创建对象和 image_path。\n- 图片文件缺失但对象存在：优先 recrop_figure；bbox 不确定时先用 full_page，再明确标记 needs_recrop。\n- 重复、污染、解析碎片类图片对象：不要只写 note；直接走图片删除入口，立即删除该 figure object，并在 reason 里明确 duplicate / parser fragment / noise 依据。\n- 如果图表审核后确认文献类型与系统解析不对应，直接写 paper_type 修正，不要停留在 review note。\n- 只有整体重排序、merge 这类当前仍不能自动执行的问题，才写 [AI_REVIEWED][NEEDS_PIPELINE_FIX] note。\n\nraw_payload 示例：\n{\n  \"correction_proposals\": [\n    {\"field_name\":\"figures\", \"target_path\":\"figures:<figure_uuid>:content_summary\", \"operation\":\"replace\", \"proposed_value\":\"Three-panel band structure and DOS comparison under tensile strain; panel (a) shows pristine ribbon, panels (b-c) show strained cases with narrowed gap.\", \"reason\":\"old summary repeated the caption and missed the actual visual comparison\", \"evidence_payload\":{\"page\":4,\"quoted_text\":\"Fig. 2 ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"figures\", \"target_path\":\"figures:<figure_uuid>:key_elements\", \"operation\":\"replace\", \"proposed_value\":[\"three subpanels\",\"band structure curves\",\"DOS peaks near Fermi level\",\"strain labels\",\"energy axis\"], \"reason\":\"existing key_elements were generic placeholders\", \"evidence_payload\":{\"page\":4,\"quoted_text\":\"Fig. 2 ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"figures\", \"target_path\":\"figures:<figure_uuid>:delete\", \"operation\":\"delete\", \"proposed_value\":null, \"reason\":\"Duplicate parser fragment or polluted figure object that should be removed\", \"evidence_payload\":{\"page\":4,\"figure\":\"Fig. 2\", \"quoted_text\":\"duplicate right-column fragment\", \"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"paper_type\", \"target_path\":\"paper_type\", \"operation\":\"replace\", \"proposed_value\":\"B\", \"reason\":\"After figure/table review, the PDF content matches paper type B rather than the current system classification\", \"evidence_payload\":{\"page\":1,\"quoted_text\":\"Review-style summary and figure/table coverage indicate type B\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}\n  ]\n}";
       }
 
-      if (kind === "sections_writing") {
-        return commonWithHardening + "\n\n本次任务模块：章节 + 写作卡专项审核\n目标：只把经过 IDE AI 核对、带 PDF 页码和原文证据的 sections / writing_cards 写回系统。parser 章节和规则抽取写作卡都只是候选，不等于可信知识；未审核前不要在前端当正文展示、不要作为正式写作卡入库、不要进入 RAG/写作检索。\n\n开始前必须读取 codex-context.context.source_assets.pdf_path，记录原 PDF 文件名；然后用 read_paper_page 按页核对章节边界、标题、正文片段、摘要和写作逻辑。不要只根据页面候选列表或 parser 输出判断。\n\n可直接修正字段：\n- abstract：若详情页摘要缺失或错误，可直接 replace 到 target_path=abstract\n- sections:<section_uuid>:section_title/section_type/text/page_start/page_end；sections:new:create 可新增缺失章节\n- writing_cards:<writing_card_uuid>:paper_type/research_gap/proposed_solution/core_hypothesis/evidence_chain/section_strategy/figure_logic/abstract_logic/introduction_logic/discussion_logic；writing_cards:new:create 可新增审核后的写作卡\n\n回写规则：\n- 详情页摘要缺失或错误：写 replace correction_proposals，field_name='abstract'，target_path='abstract'，proposed_value 为核对后的摘要原文。\n- 章节字段错误：写 replace correction_proposals，target_path=sections:<uuid>:<field>。\n- 章节缺失：写 create correction_proposals，proposed_value 必须包含 section_title、section_type、text、page_start、page_end，evidence_payload 必须含 page、quoted_text、source_pdf。\n- 写作卡只能基于已核对的 PDF 证据创建或替换；evidence_chain 每条证据必须包含 text、page/source、reviewer_status='verified'、target_resolution_status='active'，并尽量包含 locator_status='exact_page'。\n- 如果只是确认已有摘要/章节/写作卡无误，也必须写 [AI_REVIEWED] review_notes 或通过 correction_proposals/auto_apply_review_rules=true 让系统留下 ai_reviewed/ai_applied 证据；否则仍视为未审核。\n- 不要触碰 DFT 终审；发现章节或写作卡里涉及 DFT 数值，只能标注给 DFT 专项复核，不能在本任务里让 DFT 入库或解锁导出。\n\nraw_payload 示例：\n{\n  \"review_notes\": [\n    {\"content\":\"[AI_REVIEWED] abstract, sections and writing_cards checked against source PDF; parser-only content remains blocked until reviewed\", \"field_name\":\"sections\", \"page\":2, \"quoted_text\":\"Results and discussion...\", \"section_title\":\"source_pdf=<source_assets.pdf_path 文件名>\"}\n  ],\n  \"correction_proposals\": [\n    {\"field_name\":\"abstract\", \"target_path\":\"abstract\", \"operation\":\"replace\", \"proposed_value\":\"Reviewed abstract text...\", \"reason\":\"detail page abstract was missing or inaccurate\", \"evidence_payload\":{\"page\":1,\"quoted_text\":\"Abstract ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"sections\", \"target_path\":\"sections:new:create\", \"operation\":\"create\", \"proposed_value\":{\"section_title\":\"Results and discussion\", \"section_type\":\"results\", \"text\":\"Reviewed section text...\", \"page_start\":4, \"page_end\":7}, \"reason\":\"PDF contains a logical results section missing from parser output\", \"evidence_payload\":{\"page\":4,\"quoted_text\":\"Results and discussion...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"writing_cards\", \"target_path\":\"writing_cards:new:create\", \"operation\":\"create\", \"proposed_value\":{\"paper_type\":\"A_dft\", \"research_gap\":\"Reviewed research gap...\", \"proposed_solution\":\"Reviewed proposed solution...\", \"core_hypothesis\":\"Reviewed core hypothesis...\", \"evidence_chain\":[{\"text\":\"Quoted evidence from source PDF\", \"page\":5, \"source\":\"Results\", \"reviewer_status\":\"verified\", \"target_resolution_status\":\"active\", \"locator_status\":\"exact_page\"}], \"section_strategy\":{\"introduction\":\"Use reviewed gap and solution\", \"discussion\":\"Use reviewed mechanism and performance evidence\"}, \"figure_logic\":[{\"fig_id\":\"Figure 2\", \"purpose\":\"supports reviewed mechanism claim\", \"supports_claim\":\"Reviewed claim\"}], \"abstract_logic\":\"Reviewed abstract logic\", \"introduction_logic\":\"Reviewed introduction logic\", \"discussion_logic\":\"Reviewed discussion logic\"}, \"reason\":\"writing card was created only after PDF evidence review\", \"evidence_payload\":{\"page\":5,\"quoted_text\":\"Quoted evidence from source PDF\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}\n  ]\n}";
+      if (kind === "text_review" || kind === "sections_writing") {
+        return commonWithHardening + "\n\n本次任务模块：文字审核\n目标：只把经过 IDE AI 核对、带 PDF 页码和原文证据的 abstract / sections / writing_cards / mechanism_claims 写回系统。parser 章节、规则抽取写作卡和机理声明都只是候选，不等于可信知识；未审核前不要把它们当作正式正文、正式写作卡或可靠机理证据。\n\n开始前必须读取 codex-context.context.source_assets.pdf_path，记录原 PDF 文件名；然后用 read_paper_page 按页核对摘要、章节边界、标题、正文片段、写作逻辑和机理原文。不要只根据页面候选列表或 parser 输出判断。\n\n可直接修正字段：\n- abstract：若详情页摘要缺失或错误，可直接 replace 到 target_path=abstract\n- sections:<section_uuid>:section_title/section_type/text/page_start/page_end/section_level/section_number/parent_heading/heading_path；sections:new:create 可新增缺失章节\n- writing_cards:<writing_card_uuid>:paper_type/research_gap/proposed_solution/core_hypothesis/evidence_chain/section_strategy/figure_logic/abstract_logic/introduction_logic/discussion_logic；writing_cards:new:create 可新增审核后的写作卡\n- mechanism_claims:<claim_uuid>:claim_type/claim_text/key_species/mechanism_direction/evidence_types/evidence_text；mechanism_claims:new:create 可新增审核后的机理声明\n\n回写规则：\n- 详情页摘要缺失或错误：写 replace correction_proposals，field_name='abstract'，target_path='abstract'，proposed_value 为核对后的摘要原文。\n- 章节字段错误：写 replace correction_proposals，target_path=sections:<uuid>:<field>。\n- 章节缺失：写 create correction_proposals，proposed_value 必须包含 section_title、section_type、text、page_start、page_end，层级字段能确认时也一并补齐；evidence_payload 必须含 page、quoted_text、source_pdf。\n- 写作卡只能基于已核对的 PDF 证据创建或替换；evidence_chain 每条证据必须包含 text、page/source、reviewer_status='verified'、target_resolution_status='active'，并尽量包含 locator_status='exact_page'。\n- 机理声明必须核对 claim_text 是否忠实对应原文，claim_type / mechanism_direction / key_species 是否准确；缺失时可 create，错误时可 replace。必须提供 page、quoted_text、source_pdf，不能只写概括性总结。\n- 如果只是确认已有摘要/章节/写作卡/机理声明无误，也必须写 [AI_REVIEWED] review_notes 或通过 correction_proposals/auto_apply_review_rules=true 让系统留下 ai_reviewed/ai_applied 证据；否则仍视为未审核。\n- 不要触碰 DFT 终审；发现文字内容里涉及 DFT 数值，只能标注给 DFT 专项复核，不能在本任务里让 DFT 入库或解锁导出。\n\nraw_payload 示例：\n{\n  \"review_notes\": [\n    {\"content\":\"[AI_REVIEWED] abstract, sections, writing_cards and mechanism_claims checked against source PDF; parser-only content remains blocked until reviewed\", \"field_name\":\"sections\", \"page\":2, \"quoted_text\":\"Results and discussion...\", \"section_title\":\"source_pdf=<source_assets.pdf_path 文件名>\"}\n  ],\n  \"correction_proposals\": [\n    {\"field_name\":\"abstract\", \"target_path\":\"abstract\", \"operation\":\"replace\", \"proposed_value\":\"Reviewed abstract text...\", \"reason\":\"detail page abstract was missing or inaccurate\", \"evidence_payload\":{\"page\":1,\"quoted_text\":\"Abstract ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"sections\", \"target_path\":\"sections:new:create\", \"operation\":\"create\", \"proposed_value\":{\"section_title\":\"Results and discussion\", \"section_type\":\"results\", \"text\":\"Reviewed section text...\", \"page_start\":4, \"page_end\":7}, \"reason\":\"PDF contains a logical results section missing from parser output\", \"evidence_payload\":{\"page\":4,\"quoted_text\":\"Results and discussion...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"writing_cards\", \"target_path\":\"writing_cards:new:create\", \"operation\":\"create\", \"proposed_value\":{\"paper_type\":\"A_dft\", \"research_gap\":\"Reviewed research gap...\", \"proposed_solution\":\"Reviewed proposed solution...\", \"core_hypothesis\":\"Reviewed core hypothesis...\", \"evidence_chain\":[{\"text\":\"Quoted evidence from source PDF\", \"page\":5, \"source\":\"Results\", \"reviewer_status\":\"verified\", \"target_resolution_status\":\"active\", \"locator_status\":\"exact_page\"}], \"section_strategy\":{\"introduction\":\"Use reviewed gap and solution\", \"discussion\":\"Use reviewed mechanism and performance evidence\"}, \"figure_logic\":[{\"fig_id\":\"Figure 2\", \"purpose\":\"supports reviewed mechanism claim\", \"supports_claim\":\"Reviewed claim\"}], \"abstract_logic\":\"Reviewed abstract logic\", \"introduction_logic\":\"Reviewed introduction logic\", \"discussion_logic\":\"Reviewed discussion logic\"}, \"reason\":\"writing card was created only after PDF evidence review\", \"evidence_payload\":{\"page\":5,\"quoted_text\":\"Quoted evidence from source PDF\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"mechanism_claims\", \"target_path\":\"mechanism_claims:new:create\", \"operation\":\"create\", \"proposed_value\":{\"claim_type\":\"lips_conversion\", \"claim_text\":\"Reviewed mechanism claim text...\", \"key_species\":[\"Li2S4\",\"Li2S\"], \"mechanism_direction\":\"promotes_conversion\", \"evidence_types\":[\"main_text\"], \"evidence_text\":\"Quoted mechanism evidence from source PDF\"}, \"reason\":\"parser missed a mechanism claim supported by the source PDF\", \"evidence_payload\":{\"page\":6,\"quoted_text\":\"Quoted mechanism evidence from source PDF\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}\n  ]\n}";
       }
 
       return commonWithHardening + "\n\n本次任务模块：表格/章节专项核验\n目标：核验 tables/sections，发现非 DFT 问题必须直接修正或新增，减少用户人工排错。\n\n开始前必须读取 codex-context.context.source_assets.pdf_path，记录原 PDF 文件名。凡是表格缺失、章节缺失、列错位、页码不一致、单位异常、疑似 DFT 误映射，都必须用原 PDF 文件名 + read_paper_page 页码证据核对。\n\n可直接修正字段：\n- tables:<table_uuid>:caption/page/markdown_content/extraction_source/prov；tables:new:create 可新增缺失表格\n- sections:<section_uuid>:section_title/section_type/text/page_start/page_end；sections:new:create 可新增缺失章节\n\n回写规则：\n- 表格 caption/page/markdown_content 或章节字段错误：写 replace correction_proposals。\n- 表格/章节缺失：写 create correction_proposals，proposed_value 写完整对象，evidence_payload 必须含 page、quoted_text、source_pdf。\n- 若某张表已逐项核对且无需字段修改，也要写 raw_payload.object_review_audits，target_type='tables'、target_id=<table_uuid>、decision='PASS'，给系统留下表格审核状态；不要只在聊天里口头说明“已核对”。\n- 只有重复对象删除、整体重排这类暂不自动执行的问题，才写 [AI_REVIEWED][NEEDS_PIPELINE_FIX] note。\n- 遇到 Diameter/Distance/Length/Voltage 等列，不要误判为 band_gap 或 adsorption_energy；若发现 DFT 候选来自错误表格列，只写 review_notes 指向 DFT 专项，不要在表格任务里确认 DFT 入库。\n\nraw_payload 示例：\n{\n  \"object_review_audits\": [\n    {\"paper_id\":\"<paper_id>\", \"target_type\":\"tables\", \"target_id\":\"<table_uuid>\", \"field_name\":\"table_review\", \"decision\":\"PASS\", \"confidence\":0.9, \"reason\":\"Table text and page match the source PDF; no structural correction needed\", \"evidence_location\":{\"page\":8,\"quoted_text\":\"Table 2 ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}\n  ],\n  \"correction_proposals\": [\n    {\"field_name\":\"tables\", \"target_path\":\"tables:<table_uuid>:caption\", \"operation\":\"replace\", \"proposed_value\":\"Table 1. Correct caption...\", \"reason\":\"caption from source PDF page\", \"evidence_payload\":{\"page\":3,\"quoted_text\":\"Table 1. Correct caption...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"field_name\":\"sections\", \"target_path\":\"sections:new:create\", \"operation\":\"create\", \"proposed_value\":{\"section_title\":\"Results and discussion\", \"section_type\":\"results\", \"text\":\"section text...\", \"page_start\":4, \"page_end\":7}, \"reason\":\"parser missed logical results section\", \"evidence_payload\":{\"page\":4,\"quoted_text\":\"Results and discussion...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}\n  ]\n}";
@@ -1439,7 +1755,7 @@
       try {
         const resolvedKind = kind === "figure" ? resolveVisualPromptKind() : kind;
         await copyTextToClipboard(await buildIdePromptForCopy(resolvedKind));
-        const labels = { overall: "总体解析", dft: "DFT 核验", figure: "Figure 核验", table: "Table 核验", figure_table: "Figure + Table 核验", sections_writing: "章节+写作卡核验" };
+        const labels = { overall: "总体解析", dft: "DFT 核验", figure: "Figure 核验", table: "Table 核验", figure_table: "Figure + Table 核验", text_review: "文字审核", sections_writing: "文字审核" };
         showToast("已复制 " + (labels[resolvedKind] || "IDE AI") + " 指令模板");
       } catch (error) {
         showToast("复制失败：" + error.message);
@@ -1570,7 +1886,8 @@
         B_text_partial: { label: "B 部分可读", tip: "只有部分页面或部分区域文字可直接读取，后续要谨慎核对。" },
         C_scan_clear: { label: "C 扫描清晰", tip: "扫描版较清晰，适合 OCR 辅助处理。" },
         D_scan_unclear: { label: "D 扫描不清", tip: "扫描质量较差，自动解析容易出错。" },
-        Broken: { label: "文件异常", tip: "PDF 可能损坏或无法稳定读取。" }
+        Broken: { label: "文件异常", tip: "PDF 可能损坏或无法稳定读取。" },
+        Good: { label: "PDF 可用", tip: "当前 PDF 可以正常打开并继续核对。" }
       };
       return mapping[status] || { label: status || "未知", tip: "尚未获得明确的 PDF 质量判断。" };
     }
@@ -1609,7 +1926,7 @@
         return { tab: "figures", note: "当前没有 DFT 候选，先核对图表和图注。" };
       }
       if (evidenceCount > 0) {
-        return { tab: "sections", note: "当前只有正文证据定位，跳到正文继续检查。" };
+        return { tab: "sections", note: "当前主要是文字证据定位，跳到文字审核继续检查。" };
       }
       return { tab: "summary", note: "当前没有更多候选材料，先看摘要和基础信息。" };
     }
@@ -1617,41 +1934,140 @@
     function renderStats() {
       const qualityCounts = state.metadata.quality_counts || {};
       const rows = state.rows || [];
+      const activeConflictCount = rows.reduce(function (sum, row) {
+        return sum
+          + Number(row.dft_review_conflict_count || 0)
+          + Number(row.visual_review_conflict_count || 0)
+          + Number(row.content_review_conflict_count || 0);
+      }, 0);
       const items = [
-        ["文献", rows.length, "docs"],
-        ["人工", rows.filter(function (row) { return row.needs_human_confirmation; }).length, "human"],
-        ["A/B", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0), "quality"],
+        ["文献", rows.length, "docs", ""],
+        ["人工", rows.filter(function (row) { return row.needs_human_confirmation; }).length, "human", ""],
+        ["A/B", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0), "quality", ""],
         ["DFT", rows.filter(function (row) {
           return row.has_active_dft_candidates !== undefined ? row.has_active_dft_candidates : row.has_dft_candidates;
-        }).length, "dft"],
-        ["冲突", rows.reduce(function (sum, row) { return sum + Number(row.review_conflict_count || 0); }, 0), "conflict"]
+        }).length, "dft", ""],
+        ["未收口冲突", activeConflictCount, "conflict", "汇总当前还没处理完的 DFT、图表和内容冲突；历史已处理冲突会在文献行里按模块以灰色提示显示。"]
       ];
       document.getElementById("stats").innerHTML = items.map(function (item) {
-        return '<div class="stat"><div class="stat-icon stat-icon-' + esc(item[2]) + '" aria-hidden="true"></div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
+        return '<div class="stat"' + (item[3] ? ' title="' + esc(item[3]) + '"' : '') + '><div class="stat-icon stat-icon-' + esc(item[2]) + '" aria-hidden="true"></div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
       }).join("");
     }
 
     const STATUS_GROUPS = {
       "group:needs_action": ["Needs_Human_Confirmation", "Evidence_Insufficient", "Gemini_Flagged"],
       "group:needs_attention": ["Suspected_Missing", "Rejected"],
-      "group:ai_processing": ["Imported", "Quality_Checked", "Unparsed", "Initial_Parsed", "AI_Rescanned"],
+      "group:ai_processing": ["Imported", "Quality_Checked", "Parsed_Material_Ready", "Unparsed", "Initial_Parsed", "AI_Rescanned"],
       "group:approved": ["Human_Complete", "DB_Ready", "Human_Confirmed", "ML_Ready", "Citation_Ready", "Gemini_Verified", "Gemini_Revised"],
       "group:deprecated": ["Codex_Candidate"]
     };
 
+    const STATUS_FILTER_GROUP_OPTIONS = [
+      { value: "group:needs_action", label: "需要我处理" },
+      { value: "group:needs_attention", label: "需要关注" },
+      { value: "group:ai_processing", label: "AI 处理中" },
+      { value: "group:approved", label: "已审核通过" },
+      { value: "group:deprecated", label: "历史旧状态" }
+    ];
+
+    const WORKFLOW_STATUS_ORDER = [
+      "Imported",
+      "Quality_Checked",
+      "Parsed_Material_Ready",
+      "Unparsed",
+      "Initial_Parsed",
+      "Suspected_Missing",
+      "AI_Rescanned",
+      "Human_Complete",
+      "DB_Ready",
+      "Codex_Candidate",
+      "Gemini_Verified",
+      "Gemini_Revised",
+      "Gemini_Flagged",
+      "Evidence_Insufficient",
+      "Needs_Human_Confirmation",
+      "Human_Confirmed",
+      "Rejected",
+      "ML_Ready",
+      "Citation_Ready"
+    ];
+
+    function rowMatchesGroupFilter(row, status) {
+      if (!status) return true;
+      const workflow = String(row && row.workflow_status || "").trim();
+      if (STATUS_GROUPS[status]) {
+        return STATUS_GROUPS[status].includes(workflow);
+      }
+      if (status === "Needs_Human_Confirmation") {
+        return !!(row && row.needs_human_confirmation) || workflow === "Needs_Human_Confirmation";
+      }
+      return workflow === status;
+    }
+
+    function renderStatusFilterOptions() {
+      const groupSelect = document.getElementById("statusFilter");
+      const workflowSelect = document.getElementById("workflowStatusFilter");
+      if (!groupSelect || !workflowSelect) return;
+      const restored = state.restoredReviewCenterFilters && typeof state.restoredReviewCenterFilters === "object"
+        ? state.restoredReviewCenterFilters
+        : null;
+      const currentGroup = groupSelect.value || (restored && restored.statusFilter) || "";
+      const currentWorkflow = workflowSelect.value || (restored && restored.workflowStatusFilter) || "";
+      const rows = Array.isArray(state.rows) ? state.rows : [];
+      const workflowCounts = {};
+      rows.forEach(function (row) {
+        const workflow = String(row && row.workflow_status || "").trim();
+        if (!workflow) return;
+        workflowCounts[workflow] = Number(workflowCounts[workflow] || 0) + 1;
+      });
+      const presentStatuses = Object.keys(workflowCounts);
+      const orderedStatuses = WORKFLOW_STATUS_ORDER.filter(function (status) {
+        return Object.prototype.hasOwnProperty.call(workflowCounts, status);
+      }).concat(
+        presentStatuses.filter(function (status) {
+          return !WORKFLOW_STATUS_ORDER.includes(status);
+        }).sort()
+      );
+
+      const groupHtml = ['<option value="">全部流程状态</option>'];
+      STATUS_FILTER_GROUP_OPTIONS.forEach(function (item) {
+        const count = rows.filter(function (row) { return rowMatchesGroupFilter(row, item.value); }).length;
+        groupHtml.push('<option value="' + esc(item.value) + '">' + esc(item.label + " (" + count + ")") + '</option>');
+      });
+      groupSelect.innerHTML = groupHtml.join("");
+      if (currentGroup && STATUS_GROUPS[currentGroup]) {
+        groupSelect.value = currentGroup;
+      } else {
+        groupSelect.value = "";
+      }
+
+      const workflowHtml = ['<option value="">具体流程状态</option>'];
+      orderedStatuses.forEach(function (status) {
+        const meta = workflowMeta(status);
+        workflowHtml.push('<option value="' + esc(status) + '">' + esc(meta.label + " (" + workflowCounts[status] + ")") + '</option>');
+      });
+      workflowSelect.innerHTML = workflowHtml.join("");
+      if (currentWorkflow && Object.prototype.hasOwnProperty.call(workflowCounts, currentWorkflow)) {
+        workflowSelect.value = currentWorkflow;
+      } else {
+        workflowSelect.value = "";
+      }
+      if (restored) {
+        state.restoredReviewCenterFilters = Object.assign({}, restored, {
+          statusFilter: groupSelect.value || "",
+          workflowStatusFilter: workflowSelect.value || "",
+        });
+      }
+    }
+
     function filteredRows() {
       const status = getValue("statusFilter");
+      const workflowStatus = getValue("workflowStatusFilter");
       const quality = getValue("qualityFilter");
       const q = getValue("searchBox").toLowerCase();
       return state.rows.filter(function (row) {
-        if (status) {
-          if (status === "Needs_Human_Confirmation" && !row.needs_human_confirmation) return false;
-          if (STATUS_GROUPS[status]) {
-            if (!STATUS_GROUPS[status].includes(row.workflow_status)) return false;
-          } else if (status !== "Needs_Human_Confirmation" && row.workflow_status !== status) {
-            return false;
-          }
-        }
+        if (!rowMatchesGroupFilter(row, status)) return false;
+        if (workflowStatus && String(row && row.workflow_status || "").trim() !== workflowStatus) return false;
         if (quality && row.pdf_quality_status !== quality) return false;
         if (!q) return true;
         const haystack = [
@@ -1694,6 +2110,22 @@
     function sortedRows(rows) {
       const items = Array.isArray(rows) ? rows.slice() : [];
       const sortBy = getValue("sortFilter") || "recent";
+      const serialValue = function (row) {
+        const match = String(row && row.paper_code || "").trim().toUpperCase().match(/^[A-Z](\d+)$/);
+        if (match) return Number(match[1]);
+        const serial = Number(row && row.serial_number);
+        if (Number.isFinite(serial) && serial > 0) return serial;
+        return Number.MAX_SAFE_INTEGER;
+      };
+      if (sortBy === "paper_code_asc") {
+        return items.sort(function (left, right) {
+          const serialDiff = serialValue(left) - serialValue(right);
+          if (serialDiff) return serialDiff;
+          const codeDiff = String(left.paper_code || "").localeCompare(String(right.paper_code || ""));
+          if (codeDiff) return codeDiff;
+          return String(left.paper_id || "").localeCompare(String(right.paper_id || ""));
+        });
+      }
       if (sortBy === "year_desc") {
         return items.sort(function (left, right) {
           const leftYear = Number(left.year || 0);
@@ -1704,7 +2136,13 @@
       }
       if (sortBy === "conflicts_desc") {
         return items.sort(function (left, right) {
-          const keys = ["review_conflict_count", "locator_issue_count", "figure_issue_count"];
+          const keys = [
+            "dft_review_conflict_count",
+            "visual_review_conflict_count",
+            "content_review_conflict_count",
+            "locator_issue_count",
+            "figure_issue_count"
+          ];
           for (const key of keys) {
             const diff = toCount(right[key]) - toCount(left[key]);
             if (diff) return diff;
@@ -1764,25 +2202,42 @@
       return mapping[action] || action || "-";
     }
 
-    function buildReviewTargetHref(row, item) {
-      const tabByTarget = {
-        dft_results: "dft",
-        writing_cards: "writing",
-        mechanism_claims: "mechanism",
-        figure: "figures",
+      function buildReviewTargetHref(row, item) {
+        const tabByTarget = {
+          section: "sections",
+          sections: "sections",
+          dft_setting: "dft",
+          dft_settings: "dft",
+          catalyst_sample: "dft",
+          catalyst_samples: "dft",
+          dft_results: "dft",
+          electrochemical_performance: "dft",
+          writing_card: "sections",
+          writing_cards: "sections",
+          mechanism_claim: "sections",
+          mechanism_claims: "sections",
+          figure: "figures",
         figures: "figures",
-        table: "tables",
-        tables: "tables",
-      };
-      const tab = tabByTarget[item.target_type] || "review";
-      const params = new URLSearchParams({
-        paper_id: row.paper_id,
-        tab: tab,
-        target_type: item.target_type || "",
-        target_id: item.target_id || "",
-      });
-      return "../literature_library/index.html?" + params.toString();
-    }
+        table: "figures",
+        tables: "figures",
+        };
+        const tab = tabByTarget[item.target_type] || "review";
+        const bestPdfLocator = bestDeepLinkPdfLocator(item);
+        const params = new URLSearchParams();
+        const libraryName = (row && row.library_name) || getValue("libraryFilter") || getQueryLibraryName() || getStoredLibraryName() || "";
+        params.set("paper_id", row.paper_id);
+        params.set("tab", tab);
+        if (libraryName && libraryName !== "全部文献库") params.set("library_name", libraryName);
+        if (item && item.target_type) params.set("target_type", item.target_type);
+        if (item && item.target_id) params.set("target_id", item.target_id);
+        if (item && item.field_name) params.set("field_name", item.field_name);
+        if (bestPdfLocator) {
+          params.set("pdf_page", String(bestPdfLocator.page));
+          params.set("pdf_locator_status", bestPdfLocator.locator_status || "exact_page");
+          if (bestPdfLocator.evidence_text) params.set("pdf_evidence_text", clipText(bestPdfLocator.evidence_text, 240));
+        }
+        return "../literature_library/index.html?" + params.toString();
+      }
 
     function canGenerateCorrectionDraft(item) {
       return item && item.target_type === "dft_results" && ["value", "unit"].includes(item.field_name);
@@ -1820,25 +2275,25 @@
 
     function locatorIssueLabel(code) {
       const mapping = {
-        text_only_locator: "text-only",
-        missing_bbox: "missing bbox",
-        missing_page: "missing page",
-        missing_locator: "missing locator",
-        approximate_locator: "approximate locator",
-        unresolved_locator: "unresolved locator"
+        text_only_locator: "只有文本定位",
+        missing_bbox: "缺少框选坐标",
+        missing_page: "缺少页码",
+        missing_locator: "缺少定位信息",
+        approximate_locator: "定位不够精确",
+        unresolved_locator: "定位仍未解决"
       };
       return mapping[code] || code;
     }
 
     function figureIssueLabel(code) {
       const mapping = {
-        missing_full_page_snapshot: "missing full-page snapshot",
-        small_crop: "small crop",
-        missing_bbox: "missing bbox",
-        extreme_aspect_ratio: "extreme aspect ratio",
-        caption_only: "caption only",
-        missing_image: "missing image",
-        missing_page: "missing page"
+        missing_full_page_snapshot: "缺少整页快照",
+        small_crop: "裁图过小",
+        missing_bbox: "缺少框选坐标",
+        extreme_aspect_ratio: "裁图比例异常",
+        caption_only: "只有图注，没有图像",
+        missing_image: "缺少图像文件",
+        missing_page: "缺少页码"
       };
       return mapping[code] || code;
     }
@@ -1906,6 +2361,13 @@
         pdf.blockers.length ? "blockers: " + pdf.blockers.join(", ") : null
       ].filter(Boolean).join("\n");
       return '<span class="chip compact ' + display.chipClass + '" title="' + esc(title) + '">' + display.label + '</span>';
+    }
+
+    function workflowChipClass(status) {
+      if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected", "Suspected_Missing", "Unparsed"].includes(status)) return "bad";
+      if (["Initial_Parsed", "AI_Rescanned", "Parsed_Material_Ready", "Quality_Checked", "Imported", "Gemini_Revised", "Gemini_Verified", "Codex_Candidate"].includes(status)) return "warn";
+      if (["Human_Complete", "DB_Ready", "Human_Confirmed", "ML_Ready", "Citation_Ready"].includes(status)) return "ok";
+      return "subtle";
     }
 
     function compactManualReviewProgress(row) {
@@ -1997,6 +2459,97 @@
       return '<div class="detail-block"><div class="detail-label">' + esc(label) + '</div>' + content + '</div>';
     }
 
+    function candidateStatusLabel(status) {
+      const mapping = {
+        system_candidate: "系统候选",
+        new_candidate: "新增候选",
+        Rejected: "已拒绝",
+        human_reviewed_needs_evidence: "人工看过但证据仍不足",
+        Needs_Human_Confirmation: "待人工确认",
+        ML_Ready: "已审核可用",
+        Gemini_Verified: "AI 已核验",
+        Gemini_Revised: "AI 已修订",
+        Gemini_Flagged: "AI 标红",
+      };
+      return mapping[status] || workflowMeta(status).label || status || "未知";
+    }
+
+    function reviewDecisionLabel(status) {
+      const mapping = {
+        PASS: "通过",
+        REJECT: "拒绝",
+        REVIEW: "需复核",
+        PROPOSED: "提出修正",
+        ACCEPT: "接受",
+        REVISE: "需修改",
+        FLAG: "高风险",
+        WARN: "需警惕",
+        new_candidate: "新增候选",
+        review: "待复核",
+      };
+      return mapping[status] || status || "未标记";
+    }
+
+    function verificationStatusLabel(status) {
+      const mapping = {
+        verified: "已核实",
+        unverified: "未核实",
+        pending: "待确认",
+        active: "有效",
+        applied: "已应用",
+        ai_reviewed: "AI 已查看",
+      };
+      return mapping[status] || status || "未标记";
+    }
+
+    function cropStatusLabel(status) {
+      const mapping = {
+        candidate_crop: "候选裁图",
+        verified_crop: "裁图已核对",
+        needs_recrop: "需要重裁",
+        caption_only: "只有图注",
+        rejected: "已舍弃",
+      };
+      return mapping[status] || status || "未知";
+    }
+
+    function explainDetailNextStep(row, extraction, pdfDisplay, conflictCount, activeDftCount, suspectedMissing) {
+      if (!pdfDisplay.pdf.hasPdf) {
+        return {
+          title: "这篇文献当前没有可用 PDF，先补 PDF 或确认它是否只保留元数据。",
+          body: "没有 PDF 时，后续很多定位、证据核对和 DFT 审核都无法可靠完成。"
+        };
+      }
+      if (conflictCount > 0) {
+        return {
+          title: "这篇文献存在未收口冲突，先看“冲突详情”，不要直接凭候选数下结论。",
+          body: "这些冲突可能来自 DFT、图表或内容模块；应先对照原文证据，再决定是否接受 AI 裁定或人工确认。"
+        };
+      }
+      if (suspectedMissing > 0) {
+        return {
+          title: "系统怀疑有漏提，建议优先通读原文或表格，确认是否还有漏掉的 DFT 行。",
+          body: "这类文献常见问题不是“字段错”，而是“候选不全”，所以先查覆盖率比先改字段更重要。"
+        };
+      }
+      if (activeDftCount > 0) {
+        return {
+          title: "这篇文献还有待审 DFT 候选，下一步应去 DFT 详情页核对字段和定位。",
+          body: extraction.tip || "先核对材料、数值、单位和页码定位，再决定是否确认或拒绝候选。"
+        };
+      }
+      if (row.needs_human_confirmation) {
+        return {
+          title: "系统已经把这篇文献留给人工拍板，确认前请先看证据是否完整。",
+          body: "如果证据、定位和候选都能闭环，再做人工确认；否则先补材料或标记问题。"
+        };
+      }
+      return {
+        title: "这篇文献当前没有明显的待收口 DFT 冲突，可以按材料类型继续抽查证据。",
+        body: getInspectTarget(row).note || "优先进入详情页查看 DFT、图表或正文证据。"
+      };
+    }
+
     function compactInfoList(items, emptyText) {
       const lines = (items || []).filter(Boolean);
       if (!lines.length) {
@@ -2023,6 +2576,7 @@
       document.getElementById("infoModalBody").innerHTML = "";
       conflictState.activeRow = null;
       conflictState.groups = [];
+      conflictState.activeGroupIndex = 0;
       conflictState.activeOpinionKey = null;
       conflictState.evidenceCache = {};
       conflictState.requestToken = 0;
@@ -2033,52 +2587,119 @@
       const workflow = workflowMeta(row.workflow_status);
       const quality = qualityMeta(row.pdf_quality_status);
       const qualityReasonText = qualityReasonLabel(row.quality_reason);
+      const extraction = compactExtractionMeta(row);
       const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
       const detectedSignals = hasOwnValue(dftAudit.detected_signal_count) ? toCount(dftAudit.detected_signal_count) : 0;
       const parsedCount = hasOwnValue(dftAudit.parsed_dft_count) ? toCount(dftAudit.parsed_dft_count) : 0;
       const suspectedMissing = hasOwnValue(row.suspected_missing_dft_count)
         ? toCount(row.suspected_missing_dft_count)
         : toCount(dftAudit.suspected_missing_count);
+      const conflictCount = toCount(row.review_conflict_count);
+      const totalConflictCount = toCount(row.review_conflict_total_count);
+      const dftConflictCount = toCount(row.dft_review_conflict_count);
+      const dftConflictTotalCount = toCount(row.dft_review_conflict_total_count);
+      const visualConflictCount = toCount(row.visual_review_conflict_count);
+      const visualConflictTotalCount = toCount(row.visual_review_conflict_total_count);
+      const contentConflictCount = toCount(row.content_review_conflict_count);
+      const contentConflictTotalCount = toCount(row.content_review_conflict_total_count);
+      const activeDftCount = hasOwnValue(row.active_dft_candidate_count)
+        ? toCount(row.active_dft_candidate_count)
+        : (row.has_active_dft_candidates !== undefined
+          ? (row.has_active_dft_candidates ? toCount(row.dft_candidate_count) : 0)
+          : (row.has_dft_candidates ? toCount(row.dft_candidate_count) : 0));
       const latestAudit = (row.external_audit_opinions || [])[0] || null;
       const latestAuditText = latestAudit
         ? [
-            latestAudit.source_label || latestAudit.source || "external audit",
-            latestAudit.verdict || latestAudit.recommended_action || "review",
-            latestAudit.verification_status || "unverified"
-          ].filter(Boolean).join(" / ")
-        : "暂无外部审核";
+            latestAudit.source_label || latestAudit.source || "外部审核",
+            reviewDecisionLabel(latestAudit.verdict || latestAudit.recommended_action || "review"),
+            verificationStatusLabel(latestAudit.verification_status || "unverified")
+          ].filter(Boolean).join(" | ")
+        : "暂无外部审核记录。";
       const objectAuditLines = (row.object_review_audits || []).slice(0, 5).map(function (audit) {
+        const targetLabel = formatTargetType(audit.target_type || "");
+        const fieldLabel = audit.field_name ? ("字段 " + audit.field_name) : "";
         return [
-          audit.source_label || audit.source || audit.agent_role || audit.model_name || "object_review_audit",
-          audit.target_type,
-          audit.field_name,
-          audit.decision || audit.recommended_action || "review",
-          audit.verification_status || "unverified"
-        ].filter(Boolean).join(" / ");
+          audit.source_label || audit.source || audit.agent_role || audit.model_name || "对象审核",
+          [targetLabel, fieldLabel].filter(Boolean).join(" / "),
+          reviewDecisionLabel(audit.decision || audit.recommended_action || "review"),
+          verificationStatusLabel(audit.verification_status || "unverified")
+        ].filter(Boolean).join(" | ");
       });
       const noteLines = (row.latest_paper_notes || []).slice(0, 5).map(function (note) {
         const text = String(note.content || "").replace(/\s+/g, " ").trim();
         return [
-          note.source || "paper_note",
+          note.source || "AI 笔记",
           note.field_name,
           note.page ? ("p." + note.page) : "",
           text.length > 120 ? (text.slice(0, 120) + "...") : text
-        ].filter(Boolean).join(" / ");
+        ].filter(Boolean).join(" | ");
       });
-      const candidateSummaryLines = compactSummarizeCounts(row.dft_candidate_status_counts || {}, null);
-      const cropSummaryLines = compactSummarizeCounts(row.figure_crop_status_counts || {}, null);
-      const pdfStatusHtml = !pdfDisplay.pdf.hasPdf
-        ? '<div class="detail-value">无 PDF | 当前文献没有可用 PDF 文件。</div>'
-        : '<div class="detail-value">' + esc(quality.label) + ' | ' + esc(qualityReasonText) + '</div><div class="detail-value muted">' + esc(workflow.label) + ' | ' + esc(workflow.tip) + '</div>';
-      const html = '<div class="detail-grid">' +
-        compactDetailSection("PDF 状态", pdfStatusHtml) +
-        compactDetailSection("Figure 风险", compactIssueList(row.top_figure_issues, (row.figure_reliability || {}).issue_counts || row.figure_issue_counts || {}, figureIssueLabel, "No figure reliability warnings.")) +
-        compactDetailSection("Locator 风险", compactIssueList(row.top_locator_issues, (row.locator_reliability || {}).issue_counts || row.locator_issue_counts || {}, locatorIssueLabel, "No locator reliability warnings.")) +
-        compactDetailSection("外部审核", '<div class="detail-value">外部审核：' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>') +
-        compactDetailSection("对象审核", '<div class="detail-value">对象审核：' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "暂无对象级 AI 审核。")) +
-        compactDetailSection("AI 笔记", '<div class="detail-value">AI 笔记：' + esc(toCount(row.paper_note_count)) + '</div>' + compactInfoList(noteLines, "暂无 IDE AI 回写笔记。")) +
-        compactDetailSection("候选状态", '<div class="detail-value">' + esc(candidateSummaryLines.length ? candidateSummaryLines.join(", ") : "无候选") + '</div>') +
-        compactDetailSection("提取概览", '<div class="detail-value">线索 ' + esc(detectedSignals) + ' | 已解析 ' + esc(parsedCount) + ' | 疑似漏提 ' + esc(suspectedMissing) + '</div><div class="detail-value muted">图表 ' + esc(toCount(row.figure_count) + toCount(row.table_count)) + ' | 证据定位 ' + esc(toCount(row.evidence_count)) + ' | figure crop ' + esc(cropSummaryLines.length ? cropSummaryLines.join(", ") : "none") + '</div>') +
+      const candidateSummaryLines = compactSummarizeCounts(row.dft_candidate_status_counts || {}, candidateStatusLabel);
+      const cropSummaryLines = compactSummarizeCounts(row.figure_crop_status_counts || {}, cropStatusLabel);
+      const nextStep = explainDetailNextStep(row, extraction, pdfDisplay, conflictCount, activeDftCount, suspectedMissing);
+      const pdfSummary = !pdfDisplay.pdf.hasPdf
+        ? "当前没有可用 PDF 文件。"
+        : [quality.label, qualityReasonText].filter(Boolean).join(" | ");
+      const html = '<div class="detail-stack">' +
+        '<section class="detail-hero">' +
+          '<div class="detail-hero-chips">' +
+            '<span class="chip compact ' + esc(pdfDisplay.chipClass) + '">' + esc(pdfDisplay.label) + '</span>' +
+            '<span class="chip compact ' + esc(workflowChipClass(row.workflow_status)) + '">' + esc("流程：" + workflow.label) + '</span>' +
+            '<span class="chip compact ' + esc(extraction.className || "subtle") + '">' + esc("DFT：" + extraction.label) + '</span>' +
+          '</div>' +
+          '<div class="detail-hero-title">' + esc(nextStep.title) + '</div>' +
+          '<div class="detail-hero-copy">' + esc(nextStep.body) + '</div>' +
+        '</section>' +
+        '<section class="detail-section-card">' +
+          '<div class="detail-section-head">' +
+            '<div class="detail-section-title">当前状态</div>' +
+            '<div class="detail-section-tip">先看这三个判断：文件能不能用、流程走到哪一步、DFT 现在是待审、漏提还是已经收口。</div>' +
+          '</div>' +
+          '<div class="detail-columns">' +
+            compactDetailSection("PDF 状态", '<div class="detail-value">' + esc(pdfSummary) + '</div>') +
+            compactDetailSection("流程状态", '<div class="detail-value">' + esc(workflow.label) + '</div><div class="detail-value muted">' + esc(workflow.tip) + '</div>') +
+            compactDetailSection("DFT 状态", '<div class="detail-value">' + esc(extraction.label) + '</div><div class="detail-value muted">' + esc(extraction.tip) + '</div>') +
+          '</div>' +
+        '</section>' +
+        '<section class="detail-section-card">' +
+          '<div class="detail-section-head">' +
+            '<div class="detail-section-title">处理重点</div>' +
+            '<div class="detail-section-tip">这些数字告诉你这篇文献当前最值得先看哪里。</div>' +
+          '</div>' +
+          '<div class="detail-kpi-grid">' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">待处理 DFT</div><div class="detail-kpi-value">' + esc(activeDftCount) + '</div><div class="detail-kpi-note">仍在候选队列里、还没收口的 DFT 项。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">DFT 冲突</div><div class="detail-kpi-value">' + esc(dftConflictCount) + '</div><div class="detail-kpi-note">当前还没处理完的 DFT 冲突项。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">图表/内容冲突</div><div class="detail-kpi-value">' + esc(visualConflictCount + contentConflictCount) + '</div><div class="detail-kpi-note">当前还没处理完的图表或内容冲突项。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">疑似漏提</div><div class="detail-kpi-value">' + esc(suspectedMissing) + '</div><div class="detail-kpi-note">系统怀疑原文里还有没被提取出来的 DFT 线索。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">证据定位</div><div class="detail-kpi-value">' + esc(toCount(row.evidence_count)) + '</div><div class="detail-kpi-note">目前能用于核对的定位/证据条数。</div></div>' +
+          '</div>' +
+          '<div class="detail-columns">' +
+            compactDetailSection("候选状态", '<div class="detail-value">' + esc(candidateSummaryLines.length ? candidateSummaryLines.join("，") : "当前没有 DFT 候选。") + '</div>') +
+            compactDetailSection("材料概览", '<div class="detail-value">线索 ' + esc(detectedSignals) + ' | 已解析 ' + esc(parsedCount) + ' | 图表 ' + esc(toCount(row.figure_count) + toCount(row.table_count)) + '</div><div class="detail-value muted">裁图状态：' + esc(cropSummaryLines.length ? cropSummaryLines.join("，") : "当前没有裁图记录。") + (historyConflictSummaryText(row) && conflictCount === 0 ? " | " + esc(historyConflictSummaryText(row)) : "") + '</div>') +
+            compactDetailSection("冲突分布", '<div class="detail-value">DFT ' + esc(dftConflictCount) + ' | 图表 ' + esc(visualConflictCount) + ' | 内容 ' + esc(contentConflictCount) + '</div><div class="detail-value muted">历史总数：DFT ' + esc(dftConflictTotalCount) + ' | 图表 ' + esc(visualConflictTotalCount) + ' | 内容 ' + esc(contentConflictTotalCount) + '</div>') +
+          '</div>' +
+        '</section>' +
+        '<section class="detail-section-card">' +
+          '<div class="detail-section-head">' +
+            '<div class="detail-section-title">风险提醒</div>' +
+            '<div class="detail-section-tip">这里只列会影响你判断可靠性的风险；如果为空，表示当前没有明显的图表或定位告警。</div>' +
+          '</div>' +
+          '<div class="detail-columns">' +
+            compactDetailSection("图表风险", compactIssueList(row.top_figure_issues, (row.figure_reliability || {}).issue_counts || row.figure_issue_counts || {}, figureIssueLabel, "当前没有明显的图表风险。")) +
+            compactDetailSection("证据定位风险", compactIssueList(row.top_locator_issues, (row.locator_reliability || {}).issue_counts || row.locator_issue_counts || {}, locatorIssueLabel, "当前没有明显的定位风险。")) +
+          '</div>' +
+        '</section>' +
+        '<section class="detail-section-card">' +
+          '<div class="detail-section-head">' +
+            '<div class="detail-section-title">审核痕迹</div>' +
+            '<div class="detail-section-tip">这里不是最终结论，而是“谁看过、留下了什么意见、目前是否已经核实”的留痕。</div>' +
+          '</div>' +
+          '<div class="detail-columns">' +
+            compactDetailSection("外部审核", '<div class="detail-value">外部审核：' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>') +
+            compactDetailSection("对象审核", '<div class="detail-value">对象审核：' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "暂无对象级 AI 审核记录。")) +
+            compactDetailSection("AI 笔记", '<div class="detail-value">AI 笔记：' + esc(toCount(row.paper_note_count)) + '</div>' + compactInfoList(noteLines, "暂无 IDE AI 回写笔记。")) +
+          '</div>' +
+        '</section>' +
       '</div>';
       return {
         title: row.title || "文献详情",
@@ -2087,16 +2708,50 @@
       };
     }
 
-    function formatTargetType(targetType) {
-      const mapping = {
-        dft_results: "DFT 字段",
-        writing_card: "写作卡",
-        mechanism_claim: "机制主张",
-        figure: "图片",
-        table: "表格"
-      };
-      return mapping[targetType] || targetType || "冲突对象";
+    function renderConflictChip(activeCount, totalCount, activeLabel, historyLabel, titleActive, titleHistory) {
+      const active = toCount(activeCount);
+      const total = toCount(totalCount);
+      if (active > 0) {
+        return '<span class="chip compact bad" data-action="open-conflicts" title="' + esc(titleActive) + '">' + esc(activeLabel + " " + active) + '</span>';
+      }
+      if (total > 0) {
+        return '<span class="chip compact subtle" title="' + esc(titleHistory) + '">' + esc(historyLabel + " " + total) + '</span>';
+      }
+      return "";
     }
+
+    function historyConflictSummaryText(row) {
+      const parts = [];
+      const dft = toCount(row.dft_review_conflict_total_count);
+      const visual = toCount(row.visual_review_conflict_total_count);
+      const content = toCount(row.content_review_conflict_total_count);
+      if (dft > 0) parts.push("DFT " + dft);
+      if (visual > 0) parts.push("图表 " + visual);
+      if (content > 0) parts.push("内容 " + content);
+      return parts.length ? ("历史已处理冲突：" + parts.join(" | ")) : "";
+    }
+
+      function formatTargetType(targetType) {
+        const mapping = {
+          section: "章节",
+          sections: "章节",
+          dft_setting: "DFT 设置",
+          dft_settings: "DFT 设置",
+          catalyst_sample: "催化剂样本",
+          catalyst_samples: "催化剂样本",
+          dft_results: "DFT 字段",
+          electrochemical_performance: "电化学性能",
+          writing_card: "写作卡",
+          writing_cards: "写作卡",
+          mechanism_claim: "机理声明",
+          mechanism_claims: "机理声明",
+          figure: "图片",
+          figures: "图片",
+          table: "表格",
+          tables: "表格"
+        };
+        return mapping[targetType] || targetType || "冲突对象";
+      }
 
     function formatConflictType(type) {
       const mapping = {
@@ -2312,11 +2967,46 @@
     }
 
     function canUseCodexItem(row, item) {
-      if (!row || !item) return false;
-      if (!UUID_RE.test(String(row.paper_id || ""))) return false;
-      if (!UUID_RE.test(String(item.target_id || ""))) return false;
-      return ["dft_results", "writing_card", "writing_cards", "mechanism_claim", "mechanism_claims", "figure", "figures", "table", "tables"].includes(item.target_type);
-    }
+        if (!row || !item) return false;
+        if (!UUID_RE.test(String(row.paper_id || ""))) return false;
+        if (!UUID_RE.test(String(item.target_id || ""))) return false;
+        return [
+          "section",
+          "sections",
+          "dft_setting",
+          "dft_settings",
+          "catalyst_sample",
+          "catalyst_samples",
+          "dft_results",
+          "electrochemical_performance",
+          "writing_card",
+          "writing_cards",
+          "mechanism_claim",
+          "mechanism_claims",
+          "figure",
+          "figures",
+          "table",
+          "tables"
+        ].includes(item.target_type);
+      }
+
+      function bestDeepLinkPdfLocator(item) {
+        const opinions = item && Array.isArray(item.opinions) ? item.opinions : [];
+        for (let i = 0; i < opinions.length; i += 1) {
+          const evidence = opinionEvidencePayload(opinions[i]);
+          const locator = locatorPayloadFromEvidence(evidence);
+          const page = hasOwnValue(locator.page) ? Number(locator.page) : null;
+          const status = String(locator.locator_status || "").trim().toLowerCase();
+          if (Number.isFinite(page) && page > 0 && reliableLocatorStatus(status)) {
+            return {
+              page: page,
+              locator_status: status,
+              evidence_text: evidence.evidence_text || locator.evidence_text || ""
+            };
+          }
+        }
+        return null;
+      }
 
     function canPreviewEvidence(row, item, opinion) {
       if (canUseCodexItem(row, item)) return true;
@@ -2342,84 +3032,31 @@
       if (!payload) return buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段");
       if (payload.loading) return buildEvidencePreviewPlaceholder("正在读取原文片段...");
       const nearbyLines = Array.isArray(payload.nearbyContext) ? payload.nearbyContext.filter(Boolean) : [];
-      return '<div class="evidence-preview-card">' +
-        '<div class="evidence-preview-title">璇佹嵁棰勮</div>' +
-        '<div class="evidence-preview-meta">' +
-          '<div class="detail-block"><div class="detail-label">对象类型</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">来源对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Field</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Review source</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Page</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Locator</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">能量类型</div><div class="detail-value">' + esc(payload.energyType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">材料</div><div class="detail-value">' + esc(payload.material || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">结构</div><div class="detail-value">' + esc(payload.structureName || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">吸附物</div><div class="detail-value">' + esc(payload.adsorbate || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">反应步骤</div><div class="detail-value">' + esc(payload.reactionStep || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">证据锚点</div><div class="detail-value">' + esc(payload.anchorText || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">来源类型</div><div class="detail-value">' + esc(payload.sourceType || "未知") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">Source label</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
-        '</div>' +
-        '<div class="detail-block"><div class="detail-label">Quoted text</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "褰撳墠娌℃湁鍙睍绀虹殑鍘熸枃鐗囨") + '</div></div>' +
-        '<div class="detail-block"><div class="detail-label">Nearby context</div>' +
-          (nearbyLines.length
-            ? '<ul class="detail-list">' + nearbyLines.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join("") + '</ul>'
-            : '<div class="detail-value muted">褰撳墠娌℃湁棰濆涓婁笅鏂囥€?/div>') +
-        '</div>' +
-        (payload.note ? '<div class="detail-value muted">' + esc(payload.note) + '</div>' : '') +
-      '</div>';
+      const materialStructure = [payload.material, payload.structureName].filter(Boolean).join(" | ");
+      const adsorbateReaction = [payload.adsorbate, payload.reactionStep].filter(Boolean).join(" | ");
+      const metaBlocks = [
+        { label: "来源对象", value: payload.objectLabel || "-", wide: true },
+        { label: "审核来源", value: payload.reviewSource || "-" },
+        { label: "字段", value: payload.fieldName || "-" },
+        { label: "页码", value: hasOwnValue(payload.page) ? payload.page : "-" },
+        { label: "定位", value: payload.locatorStatus || "missing_locator" },
+        { label: "来源标签", value: payload.sourceLabel || "-" },
+        { label: "对象类型", value: payload.targetType || "-", wide: true },
+      ];
+      if (payload.energyType) metaBlocks.push({ label: "能量类型", value: payload.energyType });
+      if (materialStructure) metaBlocks.push({ label: "材料 / 结构", value: materialStructure, wide: true });
+      if (adsorbateReaction) metaBlocks.push({ label: "吸附物 / 步骤", value: adsorbateReaction, wide: true });
+      if (payload.anchorText && payload.anchorText !== "-") metaBlocks.push({ label: "证据锚点", value: payload.anchorText, wide: true });
+      if (payload.sourceType && payload.sourceType !== "未知") metaBlocks.push({ label: "来源类型", value: payload.sourceType });
       return '<div class="evidence-preview-card">' +
         '<div class="evidence-preview-title">证据预览</div>' +
         '<div class="evidence-preview-meta">' +
-          '<div class="detail-block"><div class="detail-label">来源对象</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">字段</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">来源</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">页码</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">定位</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">来源类型</div><div class="detail-value">' + esc(payload.sourceType || "未知") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">source label</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
+          metaBlocks.map(function (item) {
+            return '<div class="detail-block' + (item.wide ? ' is-wide' : '') + '"><div class="detail-label">' + esc(item.label) + '</div><div class="detail-value">' + esc(item.value || "-") + '</div></div>';
+          }).join("") +
         '</div>' +
-        '<div class="detail-block"><div class="detail-label">原文片段</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "当前没有可展示的原文片段") + '</div></div>' +
-        '<div class="detail-block"><div class="detail-label">上下文</div>' +
-          (nearbyLines.length
-            ? '<ul class="detail-list">' + nearbyLines.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join("") + '</ul>'
-            : '<div class="detail-value muted">当前没有额外上下文。</div>') +
-        '</div>' +
-        (payload.note ? '<div class="detail-value muted">' + esc(payload.note) + '</div>' : '') +
-      '</div>';
-    }
-
-    function buildEvidencePreviewPlaceholder(message) {
-      return '<div class="evidence-preview-card is-placeholder">' +
-        '<div class="evidence-preview-title">证据预览</div>' +
-        '<div class="detail-value muted">' + esc(message || "请选择一条意见查看原文片段") + '</div>' +
-      '</div>';
-    }
-
-    function buildEvidencePreviewPanel(payload) {
-      if (!payload) return buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段");
-      if (payload.loading) return buildEvidencePreviewPlaceholder("正在读取原文片段...");
-      const nearbyLines = Array.isArray(payload.nearbyContext) ? payload.nearbyContext.filter(Boolean) : [];
-      return '<div class="evidence-preview-card">' +
-        '<div class="evidence-preview-title">证据预览</div>' +
-        '<div class="evidence-preview-meta">' +
-          '<div class="detail-block"><div class="detail-label">对象类型</div><div class="detail-value">' + esc(payload.targetType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">来源对象</div><div class="detail-value">' + esc(payload.objectLabel || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">字段</div><div class="detail-value">' + esc(payload.fieldName || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">审核来源</div><div class="detail-value">' + esc(payload.reviewSource || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">页码</div><div class="detail-value">' + esc(hasOwnValue(payload.page) ? payload.page : "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">定位</div><div class="detail-value">' + esc(payload.locatorStatus || "missing_locator") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">能量类型</div><div class="detail-value">' + esc(payload.energyType || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">材料</div><div class="detail-value">' + esc(payload.material || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">结构</div><div class="detail-value">' + esc(payload.structureName || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">吸附物</div><div class="detail-value">' + esc(payload.adsorbate || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">反应步骤</div><div class="detail-value">' + esc(payload.reactionStep || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">证据锚点</div><div class="detail-value">' + esc(payload.anchorText || "-") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">来源类型</div><div class="detail-value">' + esc(payload.sourceType || "未知") + '</div></div>' +
-          '<div class="detail-block"><div class="detail-label">来源标签</div><div class="detail-value">' + esc(payload.sourceLabel || "-") + '</div></div>' +
-        '</div>' +
-        '<div class="detail-block"><div class="detail-label">原文片段</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "当前没有可展示的原文片段") + '</div></div>' +
-        '<div class="detail-block"><div class="detail-label">附近上下文</div>' +
+        '<div class="evidence-preview-section"><div class="detail-label">原文片段</div><div class="detail-value evidence-excerpt">' + esc(payload.excerpt || "当前没有可展示的原文片段") + '</div></div>' +
+        '<div class="evidence-preview-section"><div class="detail-label">附近上下文</div>' +
           (nearbyLines.length
             ? '<ul class="detail-list">' + nearbyLines.map(function (line) { return '<li>' + esc(line) + '</li>'; }).join("") + '</ul>'
             : '<div class="detail-value muted">当前没有更多上下文。</div>') +
@@ -2557,6 +3194,111 @@
       };
     }
 
+    function buildConflictStatusPanel(summary, adjudicationSummary) {
+      const manualCount = toCount(adjudicationSummary.manual);
+      const suggestCount = toCount(adjudicationSummary.suggest);
+      const autoCount = toCount(adjudicationSummary.auto);
+      const mainCount = manualCount || suggestCount || summary.conflictObjects;
+      const title = mainCount
+        ? ("当前还有 " + mainCount + " 个需要关注的冲突，其中 " + toCount(summary.highPriority) + " 个高优先级。")
+        : "当前没有需要处理的冲突。";
+      return '<section class="conflict-status-panel">' +
+        '<div class="conflict-status-head">' +
+          '<div class="conflict-status-copy">' +
+            '<div class="conflict-status-title">' + esc(title) + '</div>' +
+            '<div class="conflict-status-note">先处理“必须人工”和“高优先级”，证据不稳的条目再回原文页核对。</div>' +
+          '</div>' +
+          '<div class="conflict-status-actions">' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-action="toggle-conflict-list">' + esc(conflictState.listCollapsed ? "显示冲突列表" : "隐藏冲突列表") + '</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="conflict-summary-bar">' +
+          '<span class="chip bad">必须人工 ' + esc(manualCount) + '</span>' +
+          '<span class="chip warn">建议裁定 ' + esc(suggestCount) + '</span>' +
+          '<span class="chip good">自动推进 ' + esc(autoCount) + '</span>' +
+          '<span class="chip bad">高优先级 ' + esc(toCount(summary.highPriority)) + '</span>' +
+          '<span class="chip low">定位偏弱 ' + esc(toCount(summary.weakLocator)) + '</span>' +
+          '<span class="chip subtle">冲突对象 ' + esc(toCount(summary.conflictObjects)) + '</span>' +
+          '<span class="chip subtle">意见来源 ' + esc(toCount(summary.opinionSources)) + '</span>' +
+        '</div>' +
+      '</section>';
+    }
+
+    function buildConflictListItem(item, index) {
+      const adjudication = item.adjudication || {};
+      const severity = groupSeverity(item);
+      const severityClass = severity === "high" ? "bad" : (severity === "medium" ? "warn" : "low");
+      const firstType = (item.conflict_types || [])[0] || "conflict";
+      return '<button class="conflict-list-item' + (index === conflictState.activeGroupIndex ? ' is-active' : '') + '" type="button" data-action="select-conflict" data-group-index="' + esc(index) + '">' +
+        '<div class="conflict-list-title">' + esc(targetSummaryLabel(item)) + '</div>' +
+        '<div class="conflict-list-meta">' + esc(formatTargetType(item.target_type) + " / " + (item.field_name || "field")) + '</div>' +
+        '<div class="conflict-list-chips">' +
+          '<span class="chip ' + esc(severityClass) + '">' + esc(formatConflictType(firstType)) + '</span>' +
+          '<span class="chip ' + esc(adjudicationClass(adjudication.adjudication_mode)) + '">' + esc(adjudicationLabel(adjudication.adjudication_mode)) + '</span>' +
+          '<span class="chip subtle">来源 ' + esc(toCount(item.reviewer_count)) + '</span>' +
+        '</div>' +
+        '</button>';
+    }
+
+    function setConflictListCollapsed(collapsed) {
+      conflictState.listCollapsed = Boolean(collapsed);
+      const grid = document.querySelector("#infoModalBody .conflict-workbench-grid");
+      if (grid) grid.classList.toggle("is-list-collapsed", conflictState.listCollapsed);
+      Array.from(document.querySelectorAll('#infoModalBody [data-action="toggle-conflict-list"]')).forEach(function (button) {
+        button.textContent = conflictState.listCollapsed ? "显示冲突列表" : "隐藏冲突列表";
+      });
+    }
+
+    function renderSelectedConflict(index) {
+      const nextIndex = Number(index);
+      if (!Number.isFinite(nextIndex) || !conflictState.groups[nextIndex]) return;
+      conflictState.activeGroupIndex = nextIndex;
+      conflictState.activeOpinionKey = null;
+      conflictState.requestToken += 1;
+      Array.from(document.querySelectorAll("#infoModalBody .conflict-list-item")).forEach(function (node) {
+        node.classList.toggle("is-active", Number(node.getAttribute("data-group-index")) === nextIndex);
+      });
+      const panel = document.getElementById("selectedConflictPanel");
+      if (panel) panel.innerHTML = buildConflictGroupCard(conflictState.groups[nextIndex], conflictState.activeRow, nextIndex);
+      renderEvidencePreview(null);
+      previewFirstEvidenceForConflict(nextIndex);
+    }
+
+    function previewFirstEvidenceForConflict(groupIndex) {
+      const item = conflictState.groups[groupIndex];
+      const row = conflictState.activeRow;
+      const opinions = item && Array.isArray(item.opinions) ? item.opinions : [];
+      if (!item || !row || !opinions.length) return;
+      const opinionIndex = opinions.findIndex(function (opinion) {
+        return canPreviewEvidence(row, item, opinion);
+      });
+      if (opinionIndex < 0) return;
+      const opinion = opinions[opinionIndex];
+      const opinionKey = extractOpinionEvidenceKey(item, opinion, groupIndex, opinionIndex);
+      conflictState.activeOpinionKey = opinionKey;
+      const requestToken = conflictState.requestToken + 1;
+      conflictState.requestToken = requestToken;
+      renderEvidencePreview({ loading: true });
+      loadOpinionEvidence(row, item, opinion, opinionKey).then(function (payload) {
+        if (conflictState.requestToken !== requestToken) return;
+        conflictState.activeOpinionKey = opinionKey;
+        renderEvidencePreview(payload);
+      }).catch(function (error) {
+        if (conflictState.requestToken !== requestToken) return;
+        renderEvidencePreview({
+          targetType: formatTargetType(item.target_type),
+          fieldName: item.field_name || "-",
+          reviewSource: reviewSourceLabel(opinion),
+          locatorStatus: "missing_locator",
+          sourceType: formatEvidenceSourceType(item.target_type),
+          sourceLabel: deriveEvidenceSourceLabel(opinionEvidencePayload(opinion), item, opinion),
+          excerpt: "",
+          nearbyContext: [],
+          note: "加载原文片段失败：" + error.message
+        });
+      });
+    }
+
     function confidenceLabel(value) {
       if (!hasOwnValue(value) || value === "") return "未知";
       const num = Number(value);
@@ -2691,14 +3433,14 @@
       const showExpand = reason.length > 96;
       const opinionKey = extractOpinionEvidenceKey(item, opinion, cardIndex, opinionIndex);
       const identityText = opinionIdentitySummary(opinion);
+      const sourceMetaLines = [opinionSourceMeta(opinion), roleModelLabel(opinion)].filter(function (part) {
+        return part && part !== "-";
+      });
       return '<tr data-opinion-key="' + esc(opinionKey) + '" class="' + (opinionIndex > 2 ? 'compare-extra' : '') + '"' + (opinionIndex > 2 ? ' hidden' : '') + '>' +
-        '<td><div class="opinion-source">' + esc(reviewSourceLabel(opinion)) + '</div><div class="opinion-submeta">' + esc(opinionSourceMeta(opinion) || "审核记录") + '</div></td>' +
-        '<td>' + esc(roleModelLabel(opinion)) + '</td>' +
+        '<td><div class="opinion-source">' + esc(reviewSourceLabel(opinion)) + '</div><div class="opinion-submeta">' + esc(sourceMetaLines.length ? sourceMetaLines.join(" | ") : "审核记录") + '</div></td>' +
         '<td><div class="opinion-action">' + '<span class="chip">' + esc(opinionDecisionLabel(opinion)) + '</span>' + adjudicationRoleBadge(opinion) + '</div></td>' +
-        '<td><div>' + esc(formatOpinionValue(opinion)) + '</div>' + (identityText ? '<div class="opinion-submeta">' + esc(identityText) + '</div>' : '') + '</td>' +
-        '<td>' + esc(confidenceLabel(opinion.confidence)) + '</td>' +
-        '<td>' + esc(formatLocatorSummary(opinion)) + '</td>' +
-        '<td><div class="reason-block"><div id="' + esc(reasonId) + '" class="reason-text' + (showExpand ? ' truncated' : '') + '">' + esc(reason) + '</div>' +
+        '<td><div>' + esc(formatOpinionValue(opinion)) + '</div><div class="opinion-submeta">置信度 ' + esc(confidenceLabel(opinion.confidence)) + '</div>' + (identityText ? '<div class="opinion-submeta">' + esc(identityText) + '</div>' : '') + '</td>' +
+        '<td><div class="opinion-submeta" style="margin-top:0;">' + esc(formatLocatorSummary(opinion)) + '</div><div class="reason-block"><div id="' + esc(reasonId) + '" class="reason-text' + (showExpand ? ' truncated' : '') + '">' + esc(reason) + '</div>' +
         (showExpand ? '<button class="expand-link" type="button" data-action="toggle-reason" data-target="' + esc(reasonId) + '">展开理由</button>' : '') +
         '</div></td>' +
         '<td><div class="opinion-action-stack">' + buildEvidenceAction(opinion, item, row, cardIndex, opinionIndex) + buildPdfAction(opinion, row) + buildAdoptOpinionAction(item, opinion, cardIndex, opinionIndex) + '</div></td>' +
@@ -2715,8 +3457,8 @@
       const blockedReasons = Array.isArray(adjudication.blocked_reasons) ? adjudication.blocked_reasons : [];
       const summary = itemTargetSummary(item);
       const anchor = itemAnchorSummary(item);
-      return '<details class="conflict-card is-' + esc(severity) + '"' + (index === 0 ? ' open' : '') + '>' +
-        '<summary class="conflict-card-head">' +
+      return '<section class="conflict-card is-' + esc(severity) + '">' +
+        '<div class="conflict-card-head">' +
         '<div class="conflict-card-left">' +
         '<div class="conflict-title">' + esc(targetSummaryLabel(item)) + '</div>' +
         '<div class="conflict-meta">' + esc(formatTargetType(item.target_type)) + ' / ' + esc(item.field_name || "field") + '</div>' +
@@ -2729,45 +3471,39 @@
         '<span class="chip">审核来源 ' + esc(toCount(item.reviewer_count)) + '</span>' +
         buildPdfButton(row, bestPage, "当前定位不足，不能可靠跳页") +
         '</div>' +
-        '</summary>' +
+        '</div>' +
         '<div class="conflict-body">' +
         '<div class="conflict-object-grid">' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">对象类型</div><div class="conflict-object-value">' + esc(formatTargetType(item.target_type)) + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">字段</div><div class="conflict-object-value">' + esc(item.field_name || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">target_id</div><div class="conflict-object-value mono">' + esc(item.target_id || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">对象</div><div class="conflict-object-value">' + esc(targetSummaryLabel(item)) + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">能量类型</div><div class="conflict-object-value">' + esc(summary.property_type || summary.normalized_energy_type || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">材料</div><div class="conflict-object-value">' + esc(summary.normalized_material || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">结构</div><div class="conflict-object-value">' + esc(summary.structure_name || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">吸附物</div><div class="conflict-object-value">' + esc(summary.adsorbate || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">反应步骤</div><div class="conflict-object-value">' + esc(summary.reaction_step || "-") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">证据锚点</div><div class="conflict-object-value">' + esc(anchorSummaryText(anchor)) + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">冲突类型</div><div class="conflict-chip-row">' + (item.conflict_types || []).map(function (type) {
-          return '<span class="chip ' + esc(conflictSeverityClass(type)) + '" title="' + esc(type) + '">' + esc(formatConflictType(type)) + '</span>';
-        }).join("") + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">审核来源数</div><div class="conflict-object-value">' + esc(toCount(item.reviewer_count)) + '</div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">AI 裁定模式</div><div class="conflict-object-value"><span class="chip ' + esc(adjudicationClass(adjudication.adjudication_mode)) + '">' + esc(adjudicationLabel(adjudication.adjudication_mode)) + '</span></div></div>' +
-        '<div class="conflict-object-item"><div class="conflict-object-label">建议动作</div><div class="conflict-object-value">' + esc(adjudicationActionLabel(adjudication.recommended_action)) + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">争议字段</div><div class="conflict-object-value">' + esc(formatTargetType(item.target_type) + " / " + (item.field_name || "-")) + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">对象</div><div class="conflict-object-value">' + esc(targetSummaryLabel(item)) + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">证据锚点</div><div class="conflict-object-value">' + esc(anchorSummaryText(anchor)) + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">建议动作</div><div class="conflict-object-value">' + esc(adjudicationActionLabel(adjudication.recommended_action)) + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">能量类型</div><div class="conflict-object-value">' + esc(summary.property_type || summary.normalized_energy_type || "-") + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">材料 / 结构</div><div class="conflict-object-value">' + esc(joinDisplayParts([summary.normalized_material, summary.structure_name]) || "-") + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">吸附物 / 步骤</div><div class="conflict-object-value">' + esc(joinDisplayParts([summary.adsorbate, summary.reaction_step]) || "-") + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">冲突类型</div><div class="conflict-chip-row">' + (item.conflict_types || []).map(function (type) {
+            return '<span class="chip ' + esc(conflictSeverityClass(type)) + '" title="' + esc(type) + '">' + esc(formatConflictType(type)) + '</span>';
+          }).join("") + '</div></div>' +
         '</div>' +
-        '<div class="muted" style="margin-bottom:10px;">' + esc(adjudication.reason_summary || "暂无 AI 裁定摘要。") + '</div>' +
-        (blockedReasons.length ? '<div class="muted" style="margin-bottom:10px;">阻断原因：' + esc(blockedReasons.join(", ")) + '</div>' : '') +
+        '<section class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("选择下方意见后查看原文片段、页码和定位状态。") + '</div></section>' +
+        '<div class="conflict-object-grid">' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">AI 裁定</div><div class="conflict-object-value"><span class="chip ' + esc(adjudicationClass(adjudication.adjudication_mode)) + '">' + esc(adjudicationLabel(adjudication.adjudication_mode)) + '</span></div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">裁定理由</div><div class="conflict-object-value">' + esc(adjudication.reason_summary || "暂无 AI 裁定摘要。") + '</div></div>' +
+          (blockedReasons.length ? '<div class="conflict-object-item"><div class="conflict-object-label">阻断原因</div><div class="conflict-object-value">' + esc(blockedReasons.join(", ")) + '</div></div>' : '') +
+        '</div>' +
         '<div class="conflict-card-actions">' + buildConflictActionButtons(item, row, index) + '</div>' +
-        '<div class="detail-value muted" style="margin-top:2px;">在下方点“查看原文”，证据会显示在本页上方，便于逐条对照。</div>' +
         '<div class="compare-table-wrap"><table class="compare-table"><thead><tr>' +
         '<th class="compare-col-source">来源</th>' +
-        '<th class="compare-col-role">角色/模型</th>' +
         '<th class="compare-col-decision">结论</th>' +
-        '<th class="compare-col-value">数值</th>' +
-        '<th class="compare-col-confidence">置信度</th>' +
-        '<th class="compare-col-locator">定位</th>' +
-        '<th class="compare-col-reason">理由</th>' +
+        '<th class="compare-col-value">数值 / 置信度</th>' +
+        '<th class="compare-col-reason">定位 / 理由</th>' +
         '<th class="compare-col-action">操作</th>' +
         '</tr></thead><tbody id="' + esc(extraId) + '">' + opinions.map(function (opinion, opinionIndex) {
           return buildOpinionCompareRow(item, opinion, row, index, opinionIndex);
         }).join("") + '</tbody></table></div>' +
         (extraCount > 0 ? '<div class="conflict-card-actions"><button class="expand-link" type="button" data-action="toggle-opinions" data-target="' + esc(extraId) + '">展开全部意见（+' + esc(extraCount) + '）</button></div>' : '') +
         '</div>' +
-      '</details>';
+      '</section>';
     }
 
     async function openRowConflictModalLegacy(row) {
@@ -2814,44 +3550,6 @@
     }
 
     async function openRowConflictModalV2(row) {
-      modalContent("冲突详情", [row.title || "", "正在读取只读聚合"].filter(Boolean).join(" | "), '<div class="detail-value muted">加载中...</div>');
-      try {
-        const params = new URLSearchParams({
-          paper_id: row.paper_id,
-          include_non_conflicts: "false",
-          limit: "200"
-        });
-        const payload = await fetchJSON("/api/workbench/review-conflicts?" + params.toString());
-        const conflictRows = Array.isArray(payload.rows) ? payload.rows : [];
-        const summary = buildConflictSummary(conflictRows);
-        const adjudicationSummary = payload.adjudication_summary || {};
-        conflictState.activeRow = row;
-        conflictState.groups = conflictRows;
-        conflictState.activeOpinionKey = null;
-        conflictState.evidenceCache = {};
-        const html = conflictRows.length
-          ? '<div class="conflict-summary-bar">' +
-              '<span class="chip">冲突对象 ' + esc(summary.conflictObjects) + '</span>' +
-              '<span class="chip">意见来源 ' + esc(summary.opinionSources) + '</span>' +
-              '<span class="chip bad">高优先级 ' + esc(summary.highPriority) + '</span>' +
-              '<span class="chip low">定位薄弱 ' + esc(summary.weakLocator) + '</span>' +
-              '<span class="chip good">自动推进 ' + esc(toCount(adjudicationSummary.auto)) + '</span>' +
-              '<span class="chip warn">建议裁定 ' + esc(toCount(adjudicationSummary.suggest)) + '</span>' +
-              '<span class="chip bad">必须人工 ' + esc(toCount(adjudicationSummary.manual)) + '</span>' +
-              '<span class="chip">接受 AI 裁定</span>' +
-            '</div>' +
-            '<div class="conflict-layout"><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div><div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
-              return buildConflictGroupCard(item, row, index);
-            }).join("") + '</div></div><div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div></div>' +
-            '<div class="conflict-footer-note">所有执行动作都会走既有 verify / reject / correction 安全链路，并保留审计记录。</div>'
-          : '<div class="detail-value muted">当前没有可展示的字段冲突明细。</div>';
-        modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), html);
-      } catch (error) {
-        modalContent("冲突详情", row.title || "", '<div class="error" style="margin:0;">加载冲突失败：' + esc(error.message) + '</div>');
-      }
-    }
-
-    async function openRowConflictModalV2(row) {
       modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), '<div class="detail-value muted">加载中...</div>');
       try {
         const params = new URLSearchParams({
@@ -2865,28 +3563,30 @@
         const adjudicationSummary = payload.adjudication_summary || {};
         conflictState.activeRow = row;
         conflictState.groups = conflictRows;
+        conflictState.activeGroupIndex = 0;
         conflictState.activeOpinionKey = null;
         conflictState.evidenceCache = {};
+        conflictState.requestToken = 0;
         const html = conflictRows.length
-          ? '<div class="conflict-summary-bar">' +
-              '<span class="chip">冲突对象 ' + esc(summary.conflictObjects) + '</span>' +
-              '<span class="chip">意见来源 ' + esc(summary.opinionSources) + '</span>' +
-              '<span class="chip bad">高优先级 ' + esc(summary.highPriority) + '</span>' +
-              '<span class="chip low">定位偏弱 ' + esc(summary.weakLocator) + '</span>' +
-              '<span class="chip good">自动推进 ' + esc(toCount(adjudicationSummary.auto)) + '</span>' +
-              '<span class="chip warn">建议裁定 ' + esc(toCount(adjudicationSummary.suggest)) + '</span>' +
-              '<span class="chip bad">必须人工 ' + esc(toCount(adjudicationSummary.manual)) + '</span>' +
-              '<span class="chip">接受 AI 裁定</span>' +
-            '</div>' +
-            '<div class="conflict-layout">' +
-              '<div class="evidence-preview-shell"><div id="conflictEvidencePanel">' + buildEvidencePreviewPlaceholder("请选择一条意见查看原文片段") + '</div></div>' +
-              '<div class="conflict-main"><div class="conflict-stack">' + conflictRows.map(function (item, index) {
-                return buildConflictGroupCard(item, row, index);
-              }).join("") + '</div></div>' +
+          ? '<div class="conflict-workbench">' +
+            buildConflictStatusPanel(summary, adjudicationSummary) +
+            '<div class="conflict-workbench-grid' + (conflictState.listCollapsed ? ' is-list-collapsed' : '') + '">' +
+              '<aside class="conflict-list-panel">' +
+                '<div class="conflict-panel-head">' +
+                  '<div class="conflict-panel-copy"><div class="conflict-panel-title">冲突列表</div>' +
+                  '<div class="conflict-panel-note">选择一条后，在右侧核对证据和裁定。</div></div>' +
+                '</div>' +
+                '<div class="conflict-list">' + conflictRows.map(function (item, index) {
+                  return buildConflictListItem(item, index);
+                }).join("") + '</div>' +
+              '</aside>' +
+              '<section class="conflict-detail-panel" id="selectedConflictPanel">' + buildConflictGroupCard(conflictRows[0], row, 0) + '</section>' +
             '</div>' +
             '<div class="conflict-footer-note">所有执行动作都会走既有 verify / reject / correction 安全链路，并保留审计记录。</div>'
+            + '</div>'
           : '<div class="detail-value muted">当前没有可展示的字段冲突明细。</div>';
         modalContent("冲突详情", [row.title || "", "只读聚合，不自动合并"].filter(Boolean).join(" | "), html);
+        if (conflictRows.length) previewFirstEvidenceForConflict(0);
       } catch (error) {
         modalContent("冲突详情", row.title || "", '<div class="error" style="margin:0;">加载冲突失败：' + esc(error.message) + '</div>');
       }
@@ -2899,7 +3599,12 @@
       const targetId = actionNode.getAttribute("data-target");
       if (!action) return;
       event.preventDefault();
-      if (action === "toggle-opinions") {
+      if (action === "select-conflict") {
+        const groupIndex = Number(actionNode.getAttribute("data-group-index"));
+        renderSelectedConflict(groupIndex);
+      } else if (action === "toggle-conflict-list") {
+        setConflictListCollapsed(!conflictState.listCollapsed);
+      } else if (action === "toggle-opinions") {
         if (!targetId) return;
         const tbody = document.getElementById(targetId);
         if (!tbody) return;
@@ -3026,7 +3731,12 @@
         const extraction = compactExtractionMeta(row);
         const progress = compactManualReviewProgress(row);
         const suspectedMissing = extraction.suspectedMissing;
-        const conflictCount = toCount(row.review_conflict_count);
+        const dftConflictCount = toCount(row.dft_review_conflict_count);
+        const dftConflictTotalCount = toCount(row.dft_review_conflict_total_count);
+        const visualConflictCount = toCount(row.visual_review_conflict_count);
+        const visualConflictTotalCount = toCount(row.visual_review_conflict_total_count);
+        const contentConflictCount = toCount(row.content_review_conflict_count);
+        const contentConflictTotalCount = toCount(row.content_review_conflict_total_count);
         const dftBadgeLabel = extraction.label;
         const dftBadgeClass = extraction.className || (row.dft_completeness_status === "DB_Ready" ? "ok" : "warn");
         const dftBadgeTitle = extraction.tip || "当前 DFT 提取状态摘要。";
@@ -3075,6 +3785,22 @@
                 compactModuleProgressChip("图表", progress.figures, progress.figures ? "图表部分已标记完成。" : "图表部分尚未标记完成。") +
                 compactModuleProgressChip("DFT", progress.dft, progress.dft ? "DFT 部分已标记完成。" : "DFT 部分尚未标记完成。") +
                 compactModuleProgressChip("内容解析", progress.content, progress.content ? "内容解析部分已标记完成。" : "内容解析部分尚未标记完成。") +
+                renderConflictChip(
+                  visualConflictCount,
+                  visualConflictTotalCount,
+                  "图表冲突",
+                  "图表已处理冲突",
+                  "当前图表审核仍有未收口冲突。",
+                  "这篇文献历史上出现过图表冲突，但当前已处理完。"
+                ) +
+                renderConflictChip(
+                  contentConflictCount,
+                  contentConflictTotalCount,
+                  "内容冲突",
+                  "内容已处理冲突",
+                  "当前内容审核仍有未收口冲突。",
+                  "这篇文献历史上出现过内容冲突，但当前已处理完。"
+                ) +
               '</div>' +
             '</div>' +
             '</td>' +
@@ -3083,9 +3809,14 @@
               '<div class="audit-topline">' +
                 '<div class="audit-topline-left">' +
                   '<span class="chip compact ' + dftBadgeClass + '" title="' + esc(dftBadgeTitle) + '">' + esc(dftBadgeLabel) + '</span>' +
-                  (conflictCount > 0
-                    ? '<span class="chip compact bad" title="当前 DFT 审计存在冲突，点击查看只读冲突聚合详情。" data-action="open-conflicts">冲突 ' + esc(conflictCount) + '</span>'
-                    : '') +
+                  renderConflictChip(
+                    dftConflictCount,
+                    dftConflictTotalCount,
+                    "冲突",
+                    "已处理冲突",
+                    "当前 DFT 审计仍有未收口冲突，点击查看只读冲突聚合详情。",
+                    "这篇文献历史上出现过 DFT 冲突，但当前未收口冲突已处理完。"
+                  ) +
                 '</div>' +
                 '<button class="btn btn-ghost btn-sm btn-chip" type="button" data-action="open-details">查看详情</button>' +
               '</div>' +
@@ -3139,6 +3870,7 @@
           if (!availableIds.has(String(paperId))) selectedPaperIds.delete(paperId);
         });
         state.metadata = data.metadata || {};
+        renderStatusFilterOptions();
         ensureValidPage(state.rows.length);
         renderRows();
       } catch (error) {
@@ -3334,6 +4066,7 @@
     }
 
     document.addEventListener("DOMContentLoaded", function () {
+      restoreReviewCenterFilterState();
       TopNav.init({ currentPage: "review-center", mountId: "topnav-mount" });
       document.getElementById("rows").addEventListener("click", handleRowAction);
       document.getElementById("tableWrap").addEventListener("scroll", syncExternalTableHead, { passive: true });

@@ -30,7 +30,7 @@ from app.schemas.api import (
     PaperTranslationPreviewRequest,
     PaperTranslationPreviewResponse,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class RelationshipCreateRequest(BaseModel):
     target_paper_id: UUID
@@ -45,6 +45,23 @@ class RelationshipCreateResponse(BaseModel):
 class DFTImportedOpinionApplyRequest(BaseModel):
     opinion: dict[str, Any]
     reviewer: str | None = None
+    expected_row_state: dict[str, Any] | None = None
+    expected_write_versions: dict[str, int] = Field(default_factory=dict)
+
+
+class FigureDeleteProposalRequest(BaseModel):
+    confirm_delete_proposal: bool
+    reason: str
+    reviewer: str | None = None
+    evidence_payload: dict[str, Any] | list[Any] | None = None
+
+
+class FigureDirectDeleteRequest(BaseModel):
+    confirm_direct_delete: bool
+    reason: str
+    reviewer: str | None = None
+    evidence_payload: dict[str, Any] | list[Any] | None = None
+    delete_image_file: bool = True
 
 
 class ManualReviewProgressRequest(BaseModel):
@@ -62,6 +79,7 @@ from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.pdf_image_extractor import PdfImageExtractor
+from app.services.review_service import ReviewService
 from app.services.verification_session_service import VerificationSessionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 
@@ -226,6 +244,78 @@ async def get_paper(
     return detail
 
 
+@router.post("/{paper_id}/figures/{figure_id}/delete-proposal")
+async def propose_figure_delete(
+    paper_id: UUID,
+    figure_id: UUID,
+    payload: FigureDeleteProposalRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    if not payload.confirm_delete_proposal:
+        raise HTTPException(status_code=400, detail="Explicit figure deletion proposal confirmation is required.")
+    try:
+        correction = ReviewService(session).propose_figure_deletion(
+            paper_id=paper_id,
+            figure_id=figure_id,
+            reason=payload.reason,
+            reviewer=payload.reviewer or "literature_library_user",
+            evidence_payload=payload.evidence_payload,
+        )
+        session.commit()
+        return {
+            "status": correction.status,
+            "correction_id": str(correction.id),
+            "paper_id": str(correction.paper_id),
+            "target_path": correction.target_path,
+            "operation": correction.operation,
+        }
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/figures/{figure_id}/delete")
+async def direct_delete_figure(
+    paper_id: UUID,
+    figure_id: UUID,
+    payload: FigureDirectDeleteRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    if not payload.confirm_direct_delete:
+        raise HTTPException(status_code=400, detail="Explicit direct figure deletion confirmation is required.")
+    settings = get_settings()
+    try:
+        correction, image_path, retired_ids = ReviewService(session).direct_delete_figure(
+            paper_id=paper_id,
+            figure_id=figure_id,
+            reason=payload.reason,
+            reviewer=payload.reviewer or "literature_library_user",
+            evidence_payload=payload.evidence_payload,
+        )
+        session.commit()
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == "Figure not found for this paper.":
+            raise HTTPException(status_code=404, detail=detail) from exc
+        if detail.startswith("direct_delete_not_allowed:"):
+            raise HTTPException(status_code=409, detail=detail) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
+
+    deleted_files: list[str] = []
+    if payload.delete_image_file:
+        deleted = _safe_unlink(settings.storage_paths["figures"], image_path, category="figures", settings=settings)
+        if deleted:
+            deleted_files.append(deleted)
+    return {
+        "status": "deleted",
+        "paper_id": str(paper_id),
+        "figure_id": str(figure_id),
+        "correction_id": str(correction.id),
+        "retired_correction_ids": retired_ids,
+        "deleted_files": deleted_files,
+    }
+
+
 @router.post("/{paper_id}/settle-ai-dft-reviews")
 async def settle_ai_dft_reviews(
     paper_id: UUID,
@@ -383,11 +473,14 @@ async def verify_dft_result(
             reviewer=payload.reviewer,
             reviewer_note=payload.reviewer_note,
             field_names=payload.field_names,
+            expected_write_versions=payload.expected_write_versions,
+            expected_write_version=payload.expected_write_version,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return DFTResultVerifyResponse.model_validate(result)
 
 
@@ -406,11 +499,14 @@ async def reject_dft_result(
             reviewer=payload.reviewer,
             reviewer_note=payload.reviewer_note,
             field_names=payload.field_names,
+            expected_write_versions=payload.expected_write_versions,
+            expected_write_version=payload.expected_write_version,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return DFTResultRejectResponse.model_validate(result)
 
 
@@ -452,13 +548,16 @@ async def apply_imported_dft_opinion(
             result_id=result_id,
             opinion=payload.opinion,
             reviewer=payload.reviewer,
+            expected_row_state=payload.expected_row_state,
+            expected_write_versions=payload.expected_write_versions,
         )
     except LookupError as exc:
         session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         session.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/{paper_id}/dft-results/{result_id}/revoke-review", response_model=DFTResultVerifyResponse)
@@ -606,6 +705,71 @@ async def delete_paper(
     return {
         "status": "deleted",
         "paper_id": str(paper_id),
+        "delete_pdf": delete_pdf,
+        "delete_derived": delete_derived,
+        "deleted_files": deleted_files,
+    }
+
+
+@router.post("/{paper_id}/reset-upload")
+async def reset_paper_upload(
+    paper_id: UUID,
+    delete_pdf: bool = True,
+    delete_derived: bool = True,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    settings = get_settings()
+    files_to_delete: list[tuple[Path, str | None]] = []
+    if delete_pdf:
+        files_to_delete.append((settings.storage_paths["pdf"], paper.pdf_path))
+    if delete_derived:
+        files_to_delete.extend(
+            [
+                (settings.storage_paths["tei"], paper.tei_path),
+                (settings.storage_paths["docling_json"], paper.docling_json_path),
+                (settings.storage_paths["markdown"], paper.markdown_path),
+            ]
+        )
+        figure_paths = session.scalars(select(PaperFigure.image_path).where(PaperFigure.paper_id == paper_id)).all()
+        files_to_delete.extend((settings.storage_paths["figures"], path) for path in figure_paths)
+
+    ingestion = PaperIngestionService(session=session, settings=settings)
+    ingestion._clear_document_entities(paper.id)
+    ingestion.extraction_pipeline._delete_existing_stage2(paper.id)
+
+    # Keep the paper row reusable for metadata-only re-attach flows while
+    # satisfying the non-null pdf_path constraint in the current schema.
+    paper.pdf_path = ""
+    paper.tei_path = ""
+    paper.docling_json_path = ""
+    paper.markdown_path = ""
+    paper.comprehensive_analysis = None
+    paper.oa_status = "metadata_only"
+    paper.workflow_status = "metadata_only"
+    if hasattr(paper, "pdf_quality_status"):
+        paper.pdf_quality_status = None
+    if hasattr(paper, "pdf_quality_score"):
+        paper.pdf_quality_score = None
+    if hasattr(paper, "pdf_quality_report"):
+        paper.pdf_quality_report = None
+    session.add(paper)
+    session.commit()
+
+    deleted_files = []
+    for base_dir, stored_path in files_to_delete:
+        category = base_dir.name
+        deleted = _safe_unlink(base_dir, stored_path, category=category, settings=settings)
+        if deleted:
+            deleted_files.append(deleted)
+
+    return {
+        "status": "reset_to_metadata_only",
+        "paper_id": str(paper_id),
+        "paper_code": getattr(paper, "paper_code", None),
         "delete_pdf": delete_pdf,
         "delete_derived": delete_derived,
         "deleted_files": deleted_files,

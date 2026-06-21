@@ -408,7 +408,9 @@ class PaperWorkbenchService:
         reliability_auditor = None if summary_only else ArtifactReliabilityAuditService(self.session, self.settings)
         conflict_service = ReviewConflictAggregationService(self.session)
         conflict_total_counts = conflict_service.count_conflicts_by_paper(paper_ids)
+        conflict_total_counts_by_module = conflict_service.count_conflicts_by_paper_and_module(paper_ids)
         conflict_counts = ReviewAdjudicationService(self.session).count_actionable_conflicts_by_paper(paper_ids)
+        conflict_counts_by_module = ReviewAdjudicationService(self.session).count_actionable_conflicts_by_paper_and_module(paper_ids)
         dft_rows_by_paper: dict[UUID, list[DFTResult]] = {paper_id: [] for paper_id in paper_ids}
         for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id.in_(paper_ids))).all() if paper_ids else []:
             dft_rows_by_paper.setdefault(row.paper_id, []).append(row)
@@ -676,6 +678,12 @@ class PaperWorkbenchService:
                     "latest_paper_notes": latest_notes,
                     "review_conflict_count": conflict_counts.get(str(paper.id), 0),
                     "review_conflict_total_count": conflict_total_counts.get(str(paper.id), 0),
+                    "dft_review_conflict_count": (conflict_counts_by_module.get(str(paper.id)) or {}).get("dft", 0),
+                    "dft_review_conflict_total_count": (conflict_total_counts_by_module.get(str(paper.id)) or {}).get("dft", 0),
+                    "visual_review_conflict_count": (conflict_counts_by_module.get(str(paper.id)) or {}).get("visual", 0),
+                    "visual_review_conflict_total_count": (conflict_total_counts_by_module.get(str(paper.id)) or {}).get("visual", 0),
+                    "content_review_conflict_count": (conflict_counts_by_module.get(str(paper.id)) or {}).get("content", 0),
+                    "content_review_conflict_total_count": (conflict_total_counts_by_module.get(str(paper.id)) or {}).get("content", 0),
                     "workspace_path": paper.workspace_path,
                     "detail_url": f"../literature_library/index.html?paper_id={paper.id}&tab=review",
                     "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
@@ -773,6 +781,28 @@ class PaperWorkbenchService:
     @staticmethod
     def _sort_review_center_rows(rows: list[dict[str, Any]], *, sort_by: str) -> list[dict[str, Any]]:
         normalized_sort = str(sort_by or "recent").strip().lower()
+        def serial_value(row: dict[str, Any]) -> int:
+            raw_code = str(row.get("paper_code") or "").strip().upper()
+            match = re.match(r"^[A-Z](\d+)$", raw_code)
+            if match:
+                return int(match.group(1))
+            raw_serial = row.get("serial_number")
+            if raw_serial is not None:
+                try:
+                    return int(raw_serial)
+                except (TypeError, ValueError):
+                    pass
+            return 10**12
+
+        if normalized_sort == "paper_code_asc":
+            return sorted(
+                rows,
+                key=lambda row: (
+                    serial_value(row),
+                    str(row.get("paper_code") or ""),
+                    str(row.get("paper_id") or ""),
+                ),
+            )
         if normalized_sort == "year_desc":
             return sorted(
                 rows,

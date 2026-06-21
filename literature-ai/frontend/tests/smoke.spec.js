@@ -40,6 +40,7 @@ const PAPERS = [
     year: 2025,
     journal: 'Journal of Testing',
     paper_type: 'research',
+    library_name: 'Default Library',
     pdf_path: 'test.pdf',
     serial_number: 1,
     counts: {
@@ -57,6 +58,7 @@ const PAPER_DETAIL = {
   doi: '10.1000/primary-doi 10.2000/reference-doi',
   year: 2025,
   journal: 'Journal of Testing',
+   library_name: 'Default Library',
   pdf_path: 'test.pdf',
   abstract: 'Synthetic paper detail payload used by Playwright smoke tests.',
   sections: [
@@ -105,10 +107,10 @@ const PAPER_DETAIL = {
     field_conflicts: [{ field_name: 'crop_status', conflict_types: ['decision_conflict'], opinions: [] }],
   }],
   tables: [],
-  dft_settings_items: [{ code: 'PBE', kpoints: '3x3x1' }],
-  catalyst_samples_items: [{ name: 'Pt(111)' }],
+  dft_settings_items: [{ id: 'setting-1', code: 'PBE', kpoints: '3x3x1' }],
+  catalyst_samples_items: [{ id: 'catalyst-1', name: 'Pt(111)', catalyst_type: 'surface', support: 'Pt support' }],
   dft_results_items: [{ id: 'dft-1', property_type: 'adsorption_energy', value: -1.23, unit: 'eV', evidence_text: 'The adsorption energy is -1.23 eV.' }],
-  electrochemical_performance_items: [{ metric: 'onset_potential', value: 0.71, unit: 'V' }],
+  electrochemical_performance_items: [{ id: 'electro-1', metric: 'onset_potential', value: 0.71, unit: 'V' }],
   mechanism_claims_items: [{
     id: 'mechanism-claim-1',
     claim_type: 'adsorption_mechanism',
@@ -569,7 +571,7 @@ async function mockApi(route) {
     return jsonResponse(route, { ok: true });
   }
 
-  if (pathname === '/api/papers' && method === 'GET') {
+  if ((pathname === '/api/papers' || pathname === '/api/papers/') && method === 'GET') {
     return jsonResponse(route, PAPERS);
   }
 
@@ -1771,6 +1773,41 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
   }
 
+  test('literature library renders backend impact factor and ignores local cache', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('impactFactors', JSON.stringify({ 'Journal of Testing': 999 }));
+    });
+    await page.route(/\/api\/papers\/?\?.*/, route => jsonResponse(route, [{
+      ...PAPERS[0],
+      impact_factor: 24.4,
+      impact_factor_year: 2024,
+      impact_factor_source: 'user_imported',
+    }]));
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    const impactCell = page.locator('.paper-row').first().locator('td').nth(3);
+    await expect(impactCell).toContainText('24.4');
+    await expect(impactCell).not.toContainText('IF:');
+    await expect(impactCell).not.toContainText('999');
+    await expect(impactCell.locator('[title="user_imported · 2024"]')).toBeVisible();
+  });
+
+  test('literature library labels arXiv as preprint rather than journal', async ({ page }) => {
+    await page.route(/\/api\/papers\/?\?.*/, route => jsonResponse(route, [{
+      ...PAPERS[0],
+      journal: 'arXiv',
+      doi: '10.48550/arxiv.2603.24827',
+      impact_factor: null,
+      impact_factor_year: null,
+      impact_factor_source: null,
+    }]));
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    const metaLine = page.locator('.paper-row').first().locator('.paper-meta').first();
+    await expect(metaLine).toContainText('预印本: arXiv');
+    await expect(metaLine).not.toContainText('期刊: arXiv');
+  });
+
   test('business flow: Ingestion page is localized and renders calendar jobs safely', async ({ page }) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).toISOString();
@@ -2442,12 +2479,17 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(overlay).toBeVisible();
     await expect(page.locator('#infoModalTitle')).toHaveText('Test Paper for Smoke Validation');
     await expect(page.locator('#infoModalSubtitle')).toContainText('Journal of Testing | 2025');
+    await expect(overlay).toContainText('当前状态');
+    await expect(overlay).toContainText('处理重点');
+    await expect(overlay).toContainText('风险提醒');
+    await expect(overlay).toContainText('审核痕迹');
+    await expect(overlay).toContainText('待处理 DFT');
     await expect(overlay).toContainText('外部审核：1');
     await expect(overlay).toContainText('对象审核：1');
-    await expect(overlay).toContainText('Figure 风险');
-    await expect(overlay).toContainText('Locator 风险');
-    await expect(overlay).toContainText('system_candidate');
-    await expect(overlay).toContainText('unverified');
+    await expect(overlay).toContainText('图表风险');
+    await expect(overlay).toContainText('证据定位风险');
+    await expect(overlay).toContainText('系统候选');
+    await expect(overlay).toContainText('未核实');
     await page.locator('#infoOverlay .modal-close').click();
     await expect(page.locator('#infoOverlay')).not.toHaveClass(/open/);
 
@@ -2461,7 +2503,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await missingRow.locator('[data-action="open-details"]').click();
     const missingDetailOverlay = page.locator('#infoOverlay.open');
     await expect(missingDetailOverlay).toBeVisible();
-    await expect(missingDetailOverlay).toContainText('无 PDF | 当前文献没有可用 PDF 文件。');
+    await expect(missingDetailOverlay).toContainText('当前没有可用 PDF');
     await expect(missingDetailOverlay).not.toContainText('文件异常');
     await page.locator('#infoOverlay .modal-close').click();
 
@@ -2712,10 +2754,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: literature library exposes DFT safety and Codex item actions', async ({ page }) => {
-    let verifyPayload = null;
-    await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1\/verify$/, async route => {
-      verifyPayload = JSON.parse(route.request().postData() || '{}');
-      return jsonResponse(route, {
+      let verifyPayload = null;
+      await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1\/verify$/, async route => {
+        verifyPayload = JSON.parse(route.request().postData() || '{}');
+        return jsonResponse(route, {
         paper_id: 'paper-1',
         dft_result_id: 'dft-1',
         field_names: ['value'],
@@ -2753,14 +2795,726 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
     expect(verifyPayload.reviewer).toBe('literature_library_dft');
 
-    await page.click('button[data-tab="figures"]');
-    await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
+      await page.click('button[data-tab="figures"]');
+      await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
+    });
+
+    test('business flow: literature library normalizes DFT AI opinion labels for confirmed, adopted, and pending-object-review states', async ({ page }) => {
+      const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+      detail.counts = Object.assign({}, detail.counts, { dft_results: 3 });
+      detail.dft_results_items = [
+        {
+          id: 'dft-confirmed',
+          property_type: 'd_band_center',
+          value: -3.03,
+          unit: 'eV',
+          candidate_status: 'ML_Ready',
+          evidence_payload: { source: 'system_rules' },
+          object_review_audit_count: 1,
+          object_review_audits: [
+            {
+              candidate_id: 'audit-confirmed',
+              candidate_type: 'object_review_audit',
+              status: 'candidate',
+              target_type: 'dft_result',
+              target_id: 'dft-confirmed',
+              field_name: 'd_band_center_value',
+              source: 'mcp',
+              source_label: 'reasonix_dft',
+              decision: 'confirmed',
+              verification_status: 'unverified',
+            },
+          ],
+        },
+        {
+          id: 'dft-adopted',
+          property_type: 'charge_transfer',
+          value: 0.36,
+          unit: 'e',
+          candidate_status: 'ML_Ready',
+          evidence_payload: { source: 'system_rules' },
+          object_review_audit_count: 1,
+          object_review_audits: [
+            {
+              candidate_id: 'audit-adopted',
+              candidate_type: 'object_review_audit',
+              status: 'candidate',
+              target_type: 'dft_result',
+              target_id: 'dft-adopted',
+              field_name: 'charge_transfer_value',
+              source: 'mcp',
+              source_label: 'reasonix_dft',
+              decision: 'confirmed_with_corrections',
+              corrected_value: 0.36,
+              verification_status: 'unverified',
+            },
+          ],
+        },
+        {
+          id: 'dft-pending-object-review',
+          property_type: 'free_energy',
+          value: -2.83,
+          unit: 'eV',
+          candidate_status: 'new_candidate',
+          extraction_protocol_version: 'ide_ai_new_candidate_v1',
+          evidence_payload: {
+            source: 'gemini_dft_review',
+            source_label: 'gemini_dft_review',
+            import_policy: 'new_candidate_unverified_dft_result',
+          },
+          object_review_audit_count: 0,
+          object_review_audits: [],
+        },
+      ];
+
+      await page.route(new RegExp(`/api/papers/paper-1(?:\\?.*)?$`), route => jsonResponse(route, detail));
+      await page.route(new RegExp(`/api/papers/paper-1/codex-context(?:\\?.*)?$`), route => jsonResponse(route, {
+        paper_id: 'paper-1',
+        title: detail.title,
+        schema_version: 'codex_context_v1',
+        context: {
+          dft_export_readiness: {
+            safety_gate: 'safe_verified_with_required_evidence',
+            total_candidates: 3,
+            active_candidates: 3,
+            eligible_count: 2,
+            blocked_count: 1,
+            blocked_reasons: { missing_review: 1 },
+            items: [
+              {
+                record_id: 'dft-confirmed',
+                is_exportable: true,
+                eligible: true,
+                blocked_reasons: [],
+                review_status: 'verified',
+                review_gate_status: 'safe_verified',
+                provenance_level: 'exact_pdf_page',
+                locator_status: 'exact_page',
+              },
+              {
+                record_id: 'dft-adopted',
+                is_exportable: true,
+                eligible: true,
+                blocked_reasons: [],
+                review_status: 'verified',
+                review_gate_status: 'safe_verified',
+                provenance_level: 'exact_pdf_page',
+                locator_status: 'exact_page',
+              },
+              {
+                record_id: 'dft-pending-object-review',
+                is_exportable: false,
+                eligible: false,
+                blocked_reasons: ['missing_review'],
+                review_status: 'missing',
+                review_gate_status: 'blocked',
+                provenance_level: 'exact_pdf_page',
+                locator_status: 'exact_page',
+              },
+            ],
+          },
+        },
+        markdown: '# Test Paper for Smoke Validation',
+        token_budget_hint: {},
+      }));
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft&library_name=${encodeURIComponent('Default Library')}`);
+      await page.waitForTimeout(700);
+      await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
+
+      const cards = page.locator('#dftContent details.readable-card');
+    await expect(cards.filter({ hasText: 'd_band_center' }).first()).toContainText('AI 确认字段');
+    await expect(cards.filter({ hasText: 'charge_transfer' }).first()).toContainText('已采纳 AI 修正');
+    await expect(cards.filter({ hasText: 'free_energy' }).first()).toContainText('待对象审核');
+    await expect(page.locator('#dftContent')).not.toContainText('AI 意见待判定');
+    await expect(page.locator('#dftContent')).not.toContainText('无 AI 意见');
   });
 
+  test('business flow: literature library keeps filter state during the current session until cleared', async ({ page }) => {
+    await page.route('**/api/**', mockApi);
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.evaluate(() => window.sessionStorage.removeItem('litai:literature-library:filters:v1'));
+    await page.reload();
+    await page.waitForSelector('.paper-row');
+
+    await page.fill('#searchInput', 'Fe-N4');
+    await page.fill('#filterYear', '2025');
+    await page.fill('#filterJournal', 'Journal of Testing');
+    await page.selectOption('#filterPaperType', 'A');
+    await page.selectOption('#filterDFT', 'true');
+    await page.selectOption('#filterWC', 'true');
+    await page.selectOption('#filterPdf', 'true');
+    await page.selectOption('#filterSort', 'paper_code_asc');
+
+    await page.evaluate(() => window.searchLocal());
+    await page.reload();
+    await page.waitForSelector('.paper-row');
+
+    await expect(page.locator('#searchInput')).toHaveValue('Fe-N4');
+    await expect(page.locator('#filterYear')).toHaveValue('2025');
+    await expect(page.locator('#filterJournal')).toHaveValue('Journal of Testing');
+    await expect(page.locator('#filterPaperType')).toHaveValue('A');
+    await expect(page.locator('#filterDFT')).toHaveValue('true');
+    await expect(page.locator('#filterWC')).toHaveValue('true');
+    await expect(page.locator('#filterPdf')).toHaveValue('true');
+    await expect(page.locator('#filterSort')).toHaveValue('paper_code_asc');
+
+    await page.evaluate(() => window.clearFilters());
+    await page.reload();
+    await page.waitForSelector('.paper-row');
+
+    await expect(page.locator('#searchInput')).toHaveValue('');
+    await expect(page.locator('#filterYear')).toHaveValue('');
+    await expect(page.locator('#filterJournal')).toHaveValue('');
+    await expect(page.locator('#filterPaperType')).toHaveValue('');
+    await expect(page.locator('#filterDFT')).toHaveValue('');
+    await expect(page.locator('#filterWC')).toHaveValue('');
+    await expect(page.locator('#filterPdf')).toHaveValue('');
+    await expect(page.locator('#filterSort')).toHaveValue('');
+  });
+
+  test('business flow: literature library does not label unresolved whole-row DFT fixes as adopted', async ({ page }) => {
+      const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+      detail.counts = Object.assign({}, detail.counts, { dft_results: 1 });
+      detail.dft_results_items = [
+        {
+          id: 'dft-pending-whole-row',
+          property_type: 'binding_energy',
+          adsorbate: 'H2',
+          value: -3.2,
+          unit: 'eV',
+          candidate_status: 'ML_Ready',
+          conflict_count: 1,
+          field_conflicts: [
+            {
+              field_name: 'value',
+              conflict_types: ['adsorbate_conflict'],
+              affected_field_names: ['adsorbate'],
+            },
+          ],
+          object_review_audit_count: 1,
+          object_review_audits: [
+            {
+              candidate_id: 'audit-pending-whole-row',
+              candidate_type: 'object_review_audit',
+              status: 'candidate',
+              target_type: 'dft_result',
+              target_id: 'dft-pending-whole-row',
+              field_name: 'dft_results',
+              source: 'mcp',
+              source_label: 'reasonix_dft',
+              decision: 'confirmed_with_corrections',
+              corrected_value: {
+                value: -3.2,
+                unit: 'eV',
+                property_type: 'binding_energy',
+                adsorbate: null,
+              },
+              verification_status: 'unverified',
+              evidence_location: { page: 5, quoted_text: 'Binding energy is -3.2 eV.' },
+            },
+          ],
+        },
+      ];
+
+      await page.route(new RegExp(`/api/papers/paper-1(?:\\?.*)?$`), route => jsonResponse(route, detail));
+      await page.route(new RegExp(`/api/papers/paper-1/codex-context(?:\\?.*)?$`), route => jsonResponse(route, {
+        paper_id: 'paper-1',
+        title: detail.title,
+        schema_version: 'codex_context_v1',
+        context: {
+          dft_export_readiness: {
+            safety_gate: 'safe_verified_with_required_evidence',
+            total_candidates: 1,
+            active_candidates: 1,
+            eligible_count: 1,
+            blocked_count: 0,
+            blocked_reasons: {},
+            items: [
+              {
+                record_id: 'dft-pending-whole-row',
+                is_exportable: true,
+                eligible: true,
+                blocked_reasons: [],
+                review_status: 'verified',
+                review_gate_status: 'safe_verified',
+                provenance_level: 'exact_pdf_page',
+                locator_status: 'exact_page',
+              },
+            ],
+          },
+        },
+        markdown: '# Test Paper for Smoke Validation',
+        token_budget_hint: {},
+      }));
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft&library_name=${encodeURIComponent('Default Library')}`);
+      await page.waitForTimeout(700);
+
+      const card = page.locator('#dftContent details.readable-card').filter({ hasText: 'binding_energy' }).first();
+      await expect(card).toContainText('AI 已提修正');
+      await expect(card).not.toContainText('已采纳 AI 修正');
+      await expect(card).toContainText('Conflicts 1');
+    });
+
+    test('business flow: literature library deep-links to the requested review object', async ({ page }) => {
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}&paper_id=paper-1&tab=dft&target_type=dft_results&target_id=dft-1&field_name=value`);
+      await page.waitForTimeout(700);
+
+      await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
+      await expect(page.locator('#workspaceBody')).toContainText('Test Paper for Smoke Validation');
+
+      const targetCard = page.locator('#dftContent details.readable-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
+      await expect(targetCard).toBeVisible();
+      await expect(targetCard).toHaveAttribute('open', '');
+      await expect(targetCard).toContainText('adsorption_energy');
+      await expect(targetCard).toContainText('-1.23');
+    });
+
+    test('business flow: literature library deep-links can auto-open PDF evidence for exact pages', async ({ page }) => {
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}&paper_id=paper-1&tab=dft&target_type=dft_results&target_id=dft-1&field_name=value&pdf_page=5&pdf_locator_status=exact_page&pdf_evidence_text=${encodeURIComponent('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.')}`);
+      await page.waitForTimeout(900);
+
+      const targetCard = page.locator('#dftContent details.readable-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
+      await expect(targetCard).toHaveAttribute('open', '');
+
+      const overlay = page.locator('#pdfViewerOverlay');
+      await expect(overlay).toBeVisible();
+      await expect(page.locator('#pdfViewerPageIndicator')).toContainText('5');
+      await expect(page.locator('#pdfViewerEvidencePanel')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.');
+
+      const iframeSrc = await page.locator('#pdfViewerIframe').getAttribute('src');
+      expect(iframeSrc).toContain('/api/papers/paper-1/pdf');
+      expect(iframeSrc).toContain('page=5');
+
+      await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
+      await expect(overlay).not.toBeVisible();
+    });
+
+    test('business flow: literature library deep-links to writing cards and catalyst samples', async ({ page }) => {
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}&paper_id=paper-1&tab=writing&target_type=writing_card&target_id=writing-card-1&field_name=core_hypothesis`);
+      await page.waitForTimeout(700);
+
+      await expect(page.locator('button[data-tab="writing"].active')).toBeVisible();
+      const writingCard = page.locator('#writingContent details.writing-card-compact[data-codex-item-type="writing_card"][data-target-id="writing-card-1"]').first();
+      await expect(writingCard).toBeVisible();
+      await expect(writingCard).toHaveAttribute('open', '');
+      await expect(writingCard).toContainText('Defect sites alter adsorption and charge redistribution.');
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}&paper_id=paper-1&tab=dft&target_type=catalyst_samples&target_id=catalyst-1&field_name=name`);
+      await page.waitForTimeout(700);
+
+      await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
+      const catalystCard = page.locator('#dftContent details.readable-card[data-codex-item-type="catalyst_sample"][data-target-id="catalyst-1"]').first();
+      await expect(catalystCard).toBeVisible();
+      await expect(catalystCard).toHaveAttribute('open', '');
+      await expect(catalystCard).toContainText('Pt(111)');
+    });
+
+    test('business flow: literature library refresh preserves the requested library selection', async ({ page }) => {
+      const requestedLibrary = '双原子催化剂';
+      const otherLibrary = '默认文献库';
+      const requestedPapers = [{
+        id: 'paper-dual-1',
+        title: 'Dual Atom Requested Paper',
+        year: 2026,
+        journal: 'Dual Atom Journal',
+        paper_type: 'research',
+        library_name: requestedLibrary,
+        counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+      }];
+      const otherPapers = [{
+        id: 'paper-default-1',
+        title: 'Default Library Paper',
+        year: 2025,
+        journal: 'Default Journal',
+        paper_type: 'research',
+        library_name: otherLibrary,
+        counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+      }];
+      const requestedLibraries = [];
+
+      await page.route(/\/api\/papers\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: requestedLibrary, paper_count: requestedPapers.length, is_active: false },
+          { name: otherLibrary, paper_count: otherPapers.length, is_active: true },
+        ]);
+      });
+      await page.route(/\/api\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: otherLibrary, paper_count: otherPapers.length, is_active: true, root_path: '/libraries/default' },
+          { name: requestedLibrary, paper_count: requestedPapers.length, is_active: false, root_path: '/libraries/dual-atom' },
+        ]);
+      });
+      await page.route(/\/api\/papers(\?.*)?$/, route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || url.pathname !== '/api/papers') {
+          return route.fallback();
+        }
+        const libraryName = url.searchParams.get('library_name') || '';
+        requestedLibraries.push(libraryName);
+        if (libraryName === requestedLibrary) {
+          return jsonResponse(route, requestedPapers);
+        }
+        if (libraryName === otherLibrary) {
+          return jsonResponse(route, otherPapers);
+        }
+        return jsonResponse(route, []);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent(requestedLibrary)}`);
+      await page.waitForTimeout(900);
+
+      await expect(page.locator('#librarySelect')).toHaveValue(requestedLibrary);
+      await expect(page.locator('#paperList')).toContainText('Dual Atom Requested Paper');
+      await expect(page.locator('#paperList')).not.toContainText('Default Library Paper');
+      await expect(page.locator('#paperList')).not.toContainText('文献列表加载失败');
+
+      await page.evaluate(() => refreshCurrentPage());
+      await page.waitForTimeout(500);
+
+      await expect(page.locator('#librarySelect')).toHaveValue(requestedLibrary);
+      await expect(page.locator('#paperList')).toContainText('Dual Atom Requested Paper');
+      await expect(page.locator('#paperList')).not.toContainText('Default Library Paper');
+      await expect(page.locator('#paperList')).not.toContainText('文献列表加载失败');
+      expect(requestedLibraries.length).toBeGreaterThan(0);
+      expect(requestedLibraries.every(name => name === requestedLibrary)).toBe(true);
+    });
+
+    test('business flow: literature library reverts selection when activation fails', async ({ page }) => {
+      const activeLibrary = '默认文献库';
+      const targetLibrary = '双原子催化剂';
+
+      await page.route(/\/api\/papers\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: activeLibrary, paper_count: 1, is_active: true },
+          { name: targetLibrary, paper_count: 3, is_active: false },
+        ]);
+      });
+      await page.route(/\/api\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: activeLibrary, paper_count: 1, is_active: true, root_path: '/libraries/default' },
+          { name: targetLibrary, paper_count: 3, is_active: false, root_path: '/libraries/dual-atom' },
+        ]);
+      });
+      await page.route(/\/api\/libraries\/[^/]+\/activate$/, route => {
+        return jsonResponse(route, { detail: '激活文献库失败：mock db switch failed' }, 500);
+      });
+      await page.route(/\/api\/papers(\?.*)?$/, route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || url.pathname !== '/api/papers') {
+          return route.fallback();
+        }
+        return jsonResponse(route, [{
+          id: 'paper-default-1',
+          title: 'Default Library Paper',
+          year: 2025,
+          journal: 'Default Journal',
+          paper_type: 'research',
+          library_name: activeLibrary,
+          counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+        }]);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(700);
+
+      await expect(page.locator('#librarySelect')).toHaveValue(activeLibrary);
+      await page.locator('#librarySelect').selectOption(targetLibrary);
+      await page.waitForTimeout(700);
+
+      await expect(page.locator('#librarySelect')).toHaveValue(activeLibrary);
+      await expect(page.locator('#paperList')).toContainText('Default Library Paper');
+      await expect(page.locator('.toast.error')).toContainText('切库失败：激活文献库失败：mock db switch failed');
+    });
+
+    test('business flow: literature library initial load honors active library even when quick list lacks active flags', async ({ page }) => {
+      const defaultLibrary = '默认文献库';
+      const activeLibrary = '双原子催化剂';
+
+      await page.route(/\/api\/papers\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: defaultLibrary, paper_count: 0 },
+          { name: activeLibrary, paper_count: 53 },
+        ]);
+      });
+      await page.route(/\/api\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: defaultLibrary, paper_count: 0, is_active: false, root_path: '/libraries/default' },
+          { name: activeLibrary, paper_count: 53, is_active: true, root_path: '/libraries/dual-atom' },
+        ]);
+      });
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || !['/api/papers', '/api/papers/'].includes(url.pathname)) {
+          return route.fallback();
+        }
+        return jsonResponse(route, [{
+          id: 'paper-dual-atom-1',
+          title: 'Dual Atom Active Paper',
+          year: 2025,
+          journal: 'JACS',
+          paper_type: 'A',
+          library_name: activeLibrary,
+          counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+        }]);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(900);
+
+      await expect(page.locator('#librarySelect')).toHaveValue(activeLibrary);
+      await expect(page.locator('#paperList')).not.toContainText('文献列表加载失败');
+      await expect.poll(async () => page.evaluate(() => ({
+        currentLibrary: state.currentLibrary && state.currentLibrary.name,
+        currentLibraryTotal: state.currentLibraryTotal,
+      }))).toEqual({
+        currentLibrary: activeLibrary,
+        currentLibraryTotal: 53,
+      });
+    });
+
+    test('business flow: literature library short-code sort triggers numeric paper-code request', async ({ page }) => {
+      const activeLibrary = '双原子催化剂';
+      const seenSorts = [];
+
+      await page.route(/\/api\/papers\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: activeLibrary, paper_count: 2 },
+        ]);
+      });
+      await page.route(/\/api\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: activeLibrary, paper_count: 2, is_active: true, root_path: '/libraries/dual-atom' },
+        ]);
+      });
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || !['/api/papers', '/api/papers/'].includes(url.pathname)) {
+          return route.fallback();
+        }
+        seenSorts.push({
+          sortBy: url.searchParams.get('sort_by') || '',
+          sortOrder: url.searchParams.get('sort_order') || '',
+        });
+        return jsonResponse(route, [
+          {
+            id: 'paper-1',
+            title: 'Paper One',
+            year: 2025,
+            journal: 'JACS',
+            paper_type: 'A',
+            library_name: activeLibrary,
+            paper_code: 'A0002',
+            counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+          },
+          {
+            id: 'paper-2',
+            title: 'Paper Two',
+            year: 2024,
+            journal: 'Nature',
+            paper_type: 'B',
+            library_name: activeLibrary,
+            paper_code: 'B0010',
+            counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+          },
+        ]);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(700);
+      await page.locator('#filterSort').selectOption('paper_code_asc');
+      await page.waitForTimeout(700);
+
+      await expect(page.locator('#paperList')).toContainText('Paper One');
+      expect(seenSorts.some(item => item.sortBy === 'paper_code_numeric' && item.sortOrder === 'asc')).toBe(true);
+    });
+
+    test('business flow: stale literature list failures do not overwrite the latest successful result', async ({ page }) => {
+      const activeLibrary = '石墨炔';
+      let papersRequestCount = 0;
+
+      await page.route(/\/api\/papers\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: activeLibrary, paper_count: 1, is_active: true },
+        ]);
+      });
+      await page.route(/\/api\/libraries$/, route => {
+        return jsonResponse(route, [
+          { name: activeLibrary, paper_count: 1, is_active: true, root_path: '/libraries/graphdiyne' },
+        ]);
+      });
+      await page.route(/\/api\/papers(\?.*)?$/, async route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || url.pathname !== '/api/papers') {
+          return route.fallback();
+        }
+        papersRequestCount += 1;
+        if (papersRequestCount === 1) {
+          await new Promise(resolve => setTimeout(resolve, 350));
+          return jsonResponse(route, { detail: 'stale fetch failure' }, 500);
+        }
+        return jsonResponse(route, [{
+          id: 'paper-graph-1',
+          title: 'Graphdiyne Stable Result',
+          year: 2026,
+          journal: 'Graphdiyne Journal',
+          paper_type: 'research',
+          library_name: activeLibrary,
+          counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+        }]);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(50);
+      await page.evaluate(() => refreshCurrentPage());
+      await page.waitForTimeout(900);
+
+      expect(papersRequestCount).toBeGreaterThanOrEqual(2);
+      await expect(page.locator('#librarySelect')).toHaveValue(activeLibrary);
+      await expect(page.locator('#paperList')).toContainText('Graphdiyne Stable Result');
+      await expect(page.locator('#paperList')).not.toContainText('文献列表加载失败');
+      await expect(page.locator('.toast.error')).toHaveCount(0);
+    });
+
+    test('business flow: literature library DFT detail cards show real conflict field summaries', async ({ page }) => {
+      const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+      detail.counts = Object.assign({}, detail.counts, { dft_results: 4 });
+      detail.dft_results_items = [
+        {
+          id: '1b6ddc19-aac3-4c96-999d-e8d060597378',
+          property_type: 'binding_energy',
+          adsorbate: null,
+          reaction_step: null,
+          value: -12.2,
+          unit: 'eV',
+          candidate_status: 'system_candidate',
+          evidence_text: 'HOO transition-barrier evidence.',
+          conflict_count: 1,
+          affected_field_names: ['adsorbate', 'reaction_step'],
+          conflict_field_names: ['adsorbate', 'reaction_step'],
+          field_conflicts: [{
+            field_name: 'value',
+            conflict_types: ['adsorbate_conflict', 'reaction_step_conflict'],
+            affected_field_names: ['adsorbate', 'reaction_step'],
+            conflict_field_names: ['adsorbate', 'reaction_step'],
+            opinions: [],
+          }],
+        },
+        {
+          id: '54a15c22-73b2-4fa4-9774-d22d4660ca4b',
+          property_type: 'binding_energy',
+          adsorbate: 'H2',
+          reaction_step: 'DFT',
+          value: -12.2,
+          unit: 'eV',
+          candidate_status: 'system_candidate',
+          evidence_text: 'H2 binding energy evidence.',
+          conflict_count: 1,
+          affected_field_names: ['adsorbate'],
+          conflict_field_names: ['adsorbate'],
+          field_conflicts: [{
+            field_name: 'value',
+            conflict_types: ['adsorbate_conflict'],
+            affected_field_names: ['adsorbate'],
+            conflict_field_names: ['adsorbate'],
+            opinions: [],
+          }],
+        },
+        {
+          id: '861fb7e4-0d8e-4f3b-9f4e-41661bc10c5c',
+          property_type: 'binding_energy',
+          adsorbate: 'Co atom',
+          reaction_step: 'SAC-to-DAC stability comparison',
+          value: -10.5,
+          unit: 'eV',
+          candidate_status: 'ML_Ready',
+          evidence_text: 'Co atom binding energy evidence.',
+          conflict_count: 1,
+          affected_field_names: ['adsorbate'],
+          conflict_field_names: ['adsorbate'],
+          field_conflicts: [{
+            field_name: 'value',
+            conflict_types: ['adsorbate_conflict'],
+            affected_field_names: ['adsorbate'],
+            conflict_field_names: ['adsorbate'],
+            opinions: [],
+          }],
+        },
+        {
+          id: 'ac0af689-ed0d-42f9-8b92-6bf7429ef289',
+          property_type: 'adsorption_energy',
+          adsorbate: 'CO',
+          reaction_step: 'adsorption',
+          value: -3.2,
+          unit: 'eV',
+          candidate_status: 'system_candidate',
+          evidence_text: 'CO adsorption energy evidence.',
+          conflict_count: 1,
+          affected_field_names: ['property_type', 'adsorbate'],
+          conflict_field_names: ['property_type', 'adsorbate'],
+          field_conflicts: [{
+            field_name: 'value',
+            conflict_types: ['property_conflict', 'adsorbate_conflict'],
+            affected_field_names: ['property_type', 'adsorbate'],
+            conflict_field_names: ['property_type', 'adsorbate'],
+            opinions: [],
+          }],
+        },
+      ];
+
+      await page.route(new RegExp(`/api/papers/paper-1(?:\\?.*)?$`), route => jsonResponse(route, detail));
+      await page.route(new RegExp(`/api/papers/paper-1/codex-context(?:\\?.*)?$`), route => jsonResponse(route, {
+        paper_id: 'paper-1',
+        title: detail.title,
+        schema_version: 'codex_context_v1',
+        context: {
+          dft_export_readiness: {
+            safety_gate: 'safe_verified_with_required_evidence',
+            total_candidates: 4,
+            active_candidates: 4,
+            eligible_count: 1,
+            blocked_count: 3,
+            blocked_reasons: { review_conflict: 3 },
+            items: detail.dft_results_items.map(item => ({
+              record_id: item.id,
+              is_exportable: item.id === '861fb7e4-0d8e-4f3b-9f4e-41661bc10c5c',
+              eligible: item.id === '861fb7e4-0d8e-4f3b-9f4e-41661bc10c5c',
+              blocked_reasons: item.id === '861fb7e4-0d8e-4f3b-9f4e-41661bc10c5c' ? [] : ['review_conflict'],
+              review_status: item.id === '861fb7e4-0d8e-4f3b-9f4e-41661bc10c5c' ? 'verified' : 'review_conflict',
+              review_gate_status: item.id === '861fb7e4-0d8e-4f3b-9f4e-41661bc10c5c' ? 'safe_verified' : 'blocked',
+              provenance_level: 'exact_pdf_page',
+              locator_status: 'exact_page',
+            })),
+          },
+        },
+      }));
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft`);
+      await page.waitForTimeout(700);
+      await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
+
+      const expectations = [
+        ['1b6ddc19-aac3-4c96-999d-e8d060597378', 'Conflict fields: adsorbate, reaction_step'],
+        ['54a15c22-73b2-4fa4-9774-d22d4660ca4b', 'Conflict fields: adsorbate'],
+        ['861fb7e4-0d8e-4f3b-9f4e-41661bc10c5c', 'Conflict fields: adsorbate'],
+        ['ac0af689-ed0d-42f9-8b92-6bf7429ef289', 'Conflict fields: property_type, adsorbate'],
+      ];
+
+      for (const [targetId, expectedText] of expectations) {
+        const detailCard = page.locator(`#dftContent details.readable-card[data-target-id="${targetId}"]`);
+        await expect(detailCard).toHaveCount(1);
+        await detailCard.locator('summary').click();
+        await expect(detailCard).toContainText('Conflicts 1');
+        await expect(detailCard).toContainText(expectedText);
+        await expect(detailCard).not.toContainText(/Conflict fields:\s*value\b/);
+      }
+    });
+
   test('business flow: literature library figures tab shows read-only figure review summaries', async ({ page }) => {
-    const unsafeWrites = [];
-    await page.route(/\/api\/papers\/paper-1\/dft-results\/.*\/(verify|reject)$|\/api\/external-analysis\/runs\/.*\/materialize$|\/api\/papers\/paper-1\/corrections/, async route => {
-      unsafeWrites.push({ method: route.request().method(), url: route.request().url() });
+      const unsafeWrites = [];
+      await page.route(/\/api\/papers\/paper-1\/dft-results\/.*\/(verify|reject)$|\/api\/external-analysis\/runs\/.*\/materialize$|\/api\/papers\/paper-1\/corrections/, async route => {
+        unsafeWrites.push({ method: route.request().method(), url: route.request().url() });
       return jsonResponse(route, { error: 'unexpected write' }, 500);
     });
 
@@ -2793,6 +3547,114 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.locator('#figuresContent summary button').first().click();
     await expect.poll(() => unsafeWrites.length).toBe(0);
+  });
+
+  test('business flow: literature library figure cards can directly delete polluted duplicates', async ({ page }) => {
+    const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+    detail.figures = [
+      {
+        id: 'figure-dup-1',
+        figure_label: 'fig_4a',
+        caption: 'Duplicate right-column fragment of Fig. 4.',
+        page: 6,
+        figure_role: 'experimental_evidence',
+        crop_status: 'needs_recrop',
+        content_summary: 'Duplicate parser fragment.',
+        key_elements: ['duplicate crop'],
+        flags: [],
+        direct_delete_eligible: true,
+        image_review: { review_required: true, crop_status: 'needs_recrop' },
+      }
+    ];
+    let deletePayload = null;
+    await page.route(new RegExp(`/api/papers/paper-1(?:\\?.*)?$`), route => jsonResponse(route, detail));
+    await page.route(/\/api\/papers\/paper-1\/figures\/figure-dup-1\/delete$/, async route => {
+      deletePayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        status: 'deleted',
+        correction_id: 'corr-delete-1',
+        paper_id: 'paper-1',
+        figure_id: 'figure-dup-1',
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=figures`);
+    await page.waitForTimeout(700);
+    await page.evaluate(() => {
+      window.prompt = () => 'Duplicate parser fragment of Fig. 4; submit delete proposal.';
+    });
+
+    const figureCard = page.locator('#figuresContent details.figure-card').first();
+    await expect(figureCard).toBeVisible();
+    await expect(figureCard.locator('summary')).toContainText('直接删除');
+    await figureCard.locator('button:has-text("直接删除")').click();
+    await expect.poll(() => deletePayload).not.toBeNull();
+    expect(deletePayload).toMatchObject({
+      confirm_direct_delete: true,
+      reviewer: 'literature_library_user',
+      reason: 'Duplicate parser fragment of Fig. 4; submit delete proposal.',
+    });
+    expect(deletePayload.evidence_payload.page).toBe(6);
+    expect(deletePayload.evidence_payload.figure_label).toBe('fig_4a');
+    await expect(page.locator('#figuresContent details.figure-card')).toHaveCount(0);
+  });
+
+  test('business flow: literature library normal figures do not expose direct delete', async ({ page }) => {
+    const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+    detail.figures = [
+      {
+        id: 'figure-clean-1',
+        figure_label: 'fig_2',
+        caption: 'Figure 2. Clean figure still needs a curator delete option when the user identifies a duplicate object.',
+        page: 4,
+        figure_role: 'experimental_evidence',
+        crop_status: 'recropped',
+        content_summary: 'Full figure crop.',
+        key_elements: ['full figure'],
+        flags: [],
+        direct_delete_eligible: false,
+        image_review: { review_required: false, crop_status: 'recropped' },
+      }
+    ];
+    await page.route(new RegExp(`/api/papers/paper-1(?:\\?.*)?$`), route => jsonResponse(route, detail));
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=figures`);
+    await page.waitForTimeout(700);
+
+    const figureCard = page.locator('#figuresContent details.figure-card').first();
+    await expect(figureCard).toBeVisible();
+    await expect(figureCard.locator('summary')).not.toContainText('直接删除');
+    await expect(figureCard.locator('button:has-text("直接删除")')).toHaveCount(0);
+  });
+
+  test('business flow: literature library duplicate figures still expose direct delete even with legacy pending proposals', async ({ page }) => {
+    const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+    detail.figures = [
+      {
+        id: 'figure-pending-delete-1',
+        figure_label: 'fig_3',
+        caption: 'Duplicate parser fragment of Fig. 3.',
+        page: 6,
+        figure_role: 'experimental_evidence',
+        crop_status: 'needs_recrop',
+        content_summary: 'Duplicate parser fragment.',
+        key_elements: ['duplicate crop'],
+        flags: [],
+        pending_delete_proposal_count: 1,
+        pending_correction_count: 1,
+        pending_correction_fields: ['delete'],
+        direct_delete_eligible: true,
+        image_review: { review_required: true, crop_status: 'needs_recrop' },
+      }
+    ];
+    await page.route(new RegExp(`/api/papers/paper-1(?:\\?.*)?$`), route => jsonResponse(route, detail));
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=figures`);
+    await page.waitForTimeout(700);
+
+    const figureCard = page.locator('#figuresContent details.figure-card').first();
+    await expect(figureCard.locator('summary')).toContainText('直接删除');
+    await expect(figureCard).toContainText('Legacy delete proposals still pending (1)');
   });
 
   test('business flow: literature library writing cards show read-only audit summaries', async ({ page }) => {

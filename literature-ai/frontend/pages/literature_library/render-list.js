@@ -80,6 +80,22 @@ function renderPaperList() {
         return mapping[status] || status || "";
     }
 
+    function isArxivPreprint(paper) {
+        const journal = String(paper && paper.journal || "").trim().toLowerCase();
+        const doi = String(paper && paper.doi || "").trim().toLowerCase();
+        return journal === "arxiv" || doi.startsWith("10.48550/arxiv.");
+    }
+
+    function renderVenueMeta(paper) {
+        if (isArxivPreprint(paper)) {
+            return "预印本: arXiv";
+        }
+        if (paper && paper.journal) {
+            return "期刊: " + paper.journal;
+        }
+        return "期刊: 未知";
+    }
+
     const tbodyHtml = state.papers.map(function(paper, idx) {
         const stablePaperId = paper.paper_id || paper.id;
         const active = stablePaperId === state.selectedPaperId ? " active" : "";
@@ -87,7 +103,7 @@ function renderPaperList() {
         const originalTitle = paper.title_zh && paper.title ? '<div class="paper-original-title" style="margin-top:2px;" title="' + esc(paper.title) + '">' + esc(paper.title) + '</div>' : '';
         const pdfSizeStr = paper.pdf_size ? ' | ' + formatFileSize(paper.pdf_size) : '';
         const displayCode = paper.paper_code || "";
-        const metaLine = esc(paper.journal || "未知期刊") + (paper.doi ? ' | DOI: ' + esc(paper.doi) : '') + pdfSizeStr;
+        const metaLine = esc(renderVenueMeta(paper)) + (paper.doi ? ' | DOI: ' + esc(paper.doi) : '') + pdfSizeStr;
 
         const hasPdf = paperHasPdf(paper);
         const shouldHideNoPdfWorkflowChip = !hasPdf;
@@ -162,16 +178,14 @@ function renderPaperList() {
     '</table>';
 }
 
-window.impactFactorCache = JSON.parse(localStorage.getItem('impactFactors') || '{}');
-
 function renderImpactFactor(paper) {
-    const journal = (paper.journal || "未知期刊").trim();
-    if (!journal || journal === "未知期刊") {
-        return '<span style="color:var(--color-text-tertiary);font-size:12px;">-</span>';
-    }
-    const cached = window.impactFactorCache[journal];
-    if (cached) {
-        return '<span class="status-chip full" style="background:#fdf4ff;color:#86198f;border-color:#f5d0fe;font-weight:700;">IF: ' + cached + '</span>';
+    const impactFactor = Number(paper && paper.impact_factor);
+    if (paper && paper.impact_factor !== null && paper.impact_factor !== undefined && Number.isFinite(impactFactor)) {
+        const metadata = [paper.impact_factor_source, paper.impact_factor_year].filter(function(value) {
+            return value !== null && value !== undefined && String(value).trim() !== "";
+        }).join(" · ");
+        const title = metadata ? ' title="' + esc(metadata) + '"' : "";
+        return '<span' + title + ' style="color:var(--color-text-primary);font-size:13px;font-weight:600;">' + esc(String(paper.impact_factor)) + '</span>';
     }
     return '<span style="color:var(--color-text-tertiary);font-size:12px;">-</span>';
 }

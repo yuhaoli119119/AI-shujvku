@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from app.config import get_settings
 from app.db.models import (
     AuditLog,
     Base,
+    CatalystSample,
     DFTResult,
     EvidenceLocator,
     ExternalAnalysisCandidate,
@@ -30,6 +32,7 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.main import app
+from app.services.dft_review_service import DFTResultReviewService
 from app.services.gemini_audit_service import GeminiAuditService
 from app.services.paper_query import PaperQueryService
 from app.services.paper_workbench_service import PaperWorkbenchService
@@ -502,6 +505,133 @@ def test_paper_detail_exposes_mechanism_claim_object_review_summary_read_only(wo
         assert stored_claim.claim_text == "Defect sites strengthen polysulfide adsorption through charge redistribution."
         assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
         assert session.query(PaperCorrection).count() == 0
+
+
+def test_paper_detail_exposes_dft_conflict_affected_field_names(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT paper detail conflicts", pdf_path="dft-paper-detail.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="CO",
+            reaction_step="adsorption",
+            value=-3.2,
+            unit="eV",
+            evidence_text="Adsorption energy is -3.2 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-3.2",
+                reviewed_value="-3.2",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="verified_scalar",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -3.2,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+                "reaction_step": "transition state",
+            },
+            confidence=0.86,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_detail_conflict",
+        )
+        session.commit()
+
+        detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+    assert detail is not None
+    dft_payload = detail.dft_results_items[0]
+    assert dft_payload.conflict_count == 1
+    assert set(dft_payload.affected_field_names) >= {"property_type", "adsorbate", "reaction_step"}
+    assert set(dft_payload.conflict_field_names) >= {"property_type", "adsorbate", "reaction_step"}
+    assert set(dft_payload.field_conflicts[0]["affected_field_names"]) >= {"property_type", "adsorbate", "reaction_step"}
+    assert dft_payload.field_conflicts[0]["field_name"] == "value"
+
+
+def test_paper_detail_dft_conflict_state_stays_pending_when_whole_row_fix_is_not_fully_absorbed(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT detail pending whole-row fix", pdf_path="dft-detail-pending.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate="H2",
+            reaction_step="DFT",
+            value=-3.2,
+            unit="eV",
+            evidence_text="Adsorption energy is -3.2 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-3.2",
+                reviewed_value="-3.2",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="verified_scalar",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -3.2,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+            },
+            confidence=0.86,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_detail_pending",
+            extra_payload={"adsorbate": None},
+        )
+        session.commit()
+
+        detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+    assert detail is not None
+    dft_payload = detail.dft_results_items[0]
+    assert dft_payload.candidate_status == "ML_Ready"
+    assert dft_payload.conflict_count == 1
+    assert "adsorbate" in dft_payload.affected_field_names
+    assert "adsorbate_conflict" in dft_payload.field_conflicts[0]["conflict_types"]
 
 
 def test_gemini_audit_flags_candidate_without_human_confirmation(workbench_env):
@@ -1114,6 +1244,890 @@ def test_review_center_suppresses_conflicts_when_current_value_already_matches_f
     assert row_payload["review_conflict_count"] == 0
 
 
+def test_review_conflicts_ignore_adopted_figure_revision_opinions(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Adopted figure revision paper", pdf_path="figure-adopted.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            figure_label="fig_1",
+            caption="Figure 1. Catalyst structure and spectra.",
+            page=5,
+            content_summary="Old summary",
+            image_path="figures/figure1.png",
+            crop_status="candidate_crop",
+            figure_role="structure",
+        )
+        session.add(figure)
+        session.flush()
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="figures",
+            target_id=figure.id,
+            field_name="content_summary",
+            decision="REVISE",
+            corrected_value="Updated summary from reviewed figure evidence.",
+            confidence=0.93,
+            locator_status="exact_page",
+            evidence_text="Figure 1",
+            source="codex_figure_review",
+        )
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="gpt-5-codex",
+                field_name="figures",
+                target_path=f"figures:{figure.id}:content_summary",
+                operation="replace",
+                proposed_value="Updated summary from reviewed figure evidence.",
+                reason="Manual adjudication adopted this figure-review opinion.",
+                evidence_payload={
+                    "page": 5,
+                    "figure": "Figure 1",
+                    "quoted_text": "Figure 1",
+                    "review_source": "codex_figure_review",
+                    "review_source_label": "codex_figure_review",
+                    "review_decision": "REVISE",
+                },
+                status="approved",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    conflicts = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}")
+    assert conflicts.status_code == 200
+    assert conflicts.json()["conflict_count"] == 0
+
+    center = client.get("/api/workbench/review-center?limit=50")
+    assert center.status_code == 200
+    row_payload = next(item for item in center.json()["rows"] if item["paper_id"] == paper_id)
+    assert row_payload["visual_review_conflict_count"] == 0
+    assert row_payload["visual_review_conflict_total_count"] == 0
+    assert row_payload["review_conflict_count"] == 0
+    assert row_payload["review_conflict_total_count"] == 0
+
+
+def test_review_conflicts_ignore_dft_object_audit_already_absorbed_by_final_row(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Absorbed DFT opinion paper", pdf_path="absorbed-dft.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="d_band_center",
+            adsorbate=None,
+            reaction_step="d-band center",
+            source_section="Page 1",
+            value=-2.85,
+            unit="eV",
+            evidence_text="slight downshift of d-band center was observed for ISAA In-Pdene (-3.03 eV) relative to that of Pdene (-2.85 eV).",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-2.85",
+                reviewed_value="-2.85",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="gemini_finalized",
+                reviewer_note="Verified Pdene d-band center against page 1.",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -2.85,
+                "unit": "eV",
+                "material": "Pdene",
+                "property": "d_band_center",
+                "adsorbate": None,
+            },
+            confidence=0.92,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_review",
+            extra_payload={"reaction_step": None, "adsorbate": None},
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    conflicts = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}")
+    assert conflicts.status_code == 200
+    assert conflicts.json()["conflict_count"] == 0
+
+    center = client.get("/api/workbench/review-center?limit=50")
+    assert center.status_code == 200
+    row_payload = next(item for item in center.json()["rows"] if item["paper_id"] == paper_id)
+    assert row_payload["dft_review_conflict_count"] == 0
+    assert row_payload["review_conflict_count"] == 0
+
+
+def test_review_conflicts_dft_same_numeric_whole_row_dict_reports_real_field_conflict(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT semantic conflict paper", pdf_path="dft-semantic.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate="H2",
+            reaction_step="DFT",
+            value=-12.2,
+            unit="eV",
+            evidence_text="Adsorption energy is -12.2 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-12.2",
+                reviewed_value="-12.2",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="verified_scalar",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -12.2,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+            },
+            confidence=0.87,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_semantic",
+            extra_payload={"reaction_step": None, "adsorbate": None},
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id, include_non_conflicts=True)
+
+    assert payload["conflict_count"] == 1
+    conflict = payload["rows"][0]
+    assert conflict["field_name"] == "value"
+    assert "adsorbate_conflict" in conflict["conflict_types"]
+    assert "reaction_step_conflict" not in conflict["conflict_types"]
+    assert "value_conflict" not in conflict["conflict_types"]
+    assert "decision_conflict" not in conflict["conflict_types"]
+
+
+def test_review_conflicts_approved_scalar_correction_does_not_adopt_whole_row_dict_with_extra_blank_field_change(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT adopted scalar correction", pdf_path="dft-adopted-scalar.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate="Co atom",
+            reaction_step="SAC-to-DAC stability comparison",
+            value=-10.5,
+            unit="eV",
+            evidence_text="Adsorption energy is -10.5 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-10.5",
+                reviewed_value="-10.5",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="verified_scalar",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -10.5,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+            },
+            confidence=0.91,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_adopted",
+            extra_payload={"reaction_step": None, "adsorbate": None},
+        )
+        session.flush()
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="gpt-5-codex",
+                field_name="dft_results",
+                target_path=f"dft_results:{row.id}:value",
+                operation="replace",
+                proposed_value=-10.5,
+                reason="Approved scalar correction already adopted the opinion.",
+                evidence_payload={
+                    "page": 5,
+                    "review_source": "codex_dft_adopted",
+                    "review_source_label": "codex_dft_adopted",
+                    "review_decision": "PROPOSED",
+                    "unit": "eV",
+                },
+                status="approved",
+            )
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id, include_non_conflicts=True)
+
+    assert payload["conflict_count"] == 1
+    conflict = payload["rows"][0]
+    assert "adsorbate_conflict" in conflict["conflict_types"]
+    assert "reaction_step_conflict" not in conflict["conflict_types"]
+    assert "value_conflict" not in conflict["conflict_types"]
+    assert "decision_conflict" not in conflict["conflict_types"]
+
+
+def test_review_conflicts_fully_absorbed_whole_row_dft_opinion_is_not_reported(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT absorbed whole-row opinion", pdf_path="dft-absorbed.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate=None,
+            reaction_step="DFT",
+            value=-10.5,
+            unit="eV",
+            evidence_text="Adsorption energy is -10.5 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-10.5",
+                reviewed_value="-10.5",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="verified_scalar",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -10.5,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+                "reaction_step": "DFT",
+            },
+            confidence=0.91,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_absorbed",
+            extra_payload={"reaction_step": "DFT", "adsorbate": None},
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id, include_non_conflicts=False)
+
+    assert payload["conflict_count"] == 0
+    assert payload["rows"] == []
+
+
+def test_review_conflicts_ignore_pending_duplicate_dft_unit_correction_after_approved_apply(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT duplicate unit correction", pdf_path="dft-duplicate-unit.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="bader_charge",
+            adsorbate=None,
+            reaction_step=None,
+            value=-0.3,
+            unit="e",
+            evidence_text="Bader charge is -0.3 e.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="antigravity_dft_20260621_145940",
+                field_name="dft_results",
+                target_path=f"dft_results:{row.id}:unit",
+                operation="replace",
+                proposed_value="e",
+                reason="Approved correction already applied the DFT unit.",
+                status="approved",
+            )
+        )
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="local_ide",
+                field_name="dft_results",
+                target_path=f"dft_results:{row.id}:unit",
+                operation="replace",
+                proposed_value="e",
+                reason="Older pending duplicate should not remain a conflict.",
+                status="pending",
+            )
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id, include_non_conflicts=False)
+
+    assert payload["conflict_count"] == 0
+    assert payload["rows"] == []
+
+
+def test_review_conflicts_rejected_original_row_is_not_reported_when_matching_replacement_row_exists(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT rejected original replaced", pdf_path="dft-replaced.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        rejected_row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="CO",
+            reaction_step=None,
+            value=10.5,
+            unit="eV",
+            evidence_text="Misparsed legacy row.",
+            candidate_status="Rejected",
+        )
+        replacement_row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate=None,
+            reaction_step="SAC-to-DAC stability comparison",
+            value=-10.5,
+            unit="eV",
+            evidence_text="Correct replacement row.",
+            candidate_status="ML_Ready",
+        )
+        session.add_all([rejected_row, replacement_row])
+        session.flush()
+        session.add_all(
+            [
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(rejected_row.id),
+                    field_name="adsorbate",
+                    original_value="CO",
+                    reviewed_value=None,
+                    evidence_text=rejected_row.evidence_text,
+                    reviewer_status="rejected",
+                    reviewer="reject_legacy",
+                ),
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(rejected_row.id),
+                    field_name="value",
+                    original_value=10.5,
+                    reviewed_value=None,
+                    unit="eV",
+                    evidence_text=rejected_row.evidence_text,
+                    reviewer_status="rejected",
+                    reviewer="reject_legacy",
+                ),
+            ]
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=rejected_row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -10.5,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+                "reaction_step": "SAC-to-DAC stability comparison",
+            },
+            confidence=0.92,
+            locator_status="exact_page",
+            evidence_text="Correct replacement row.",
+            source="codex_dft_replacement",
+            extra_payload={"adsorbate": None, "reaction_step": "SAC-to-DAC stability comparison"},
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id, include_non_conflicts=False)
+
+    assert payload["conflict_count"] == 0
+    assert payload["rows"] == []
+
+
+def test_review_conflicts_rejected_original_row_is_not_reported_when_replacement_is_semantically_compatible(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT rejected original semantically replaced", pdf_path="dft-semantic-replaced.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        rejected_row = DFTResult(
+            paper_id=paper.id,
+            property_type="reaction_barrier",
+            adsorbate=None,
+            reaction_step=None,
+            value=0.75,
+            unit="eV",
+            evidence_text="Legacy row missing object identity.",
+            candidate_status="Rejected",
+        )
+        replacement_row = DFTResult(
+            paper_id=paper.id,
+            property_type="reaction_barrier",
+            adsorbate="HOO*",
+            reaction_step="HOO* transition from the initial molecular state to the final dissociated state",
+            value=0.75,
+            unit="eV",
+            evidence_text="Correct replacement row.",
+            candidate_status="ML_Ready",
+        )
+        session.add_all([rejected_row, replacement_row])
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(rejected_row.id),
+                field_name="value",
+                original_value=0.75,
+                reviewed_value=None,
+                unit="eV",
+                evidence_text=rejected_row.evidence_text,
+                reviewer_status="rejected",
+                reviewer="reject_legacy",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=rejected_row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": 0.75,
+                "unit": "eV",
+                "property": "reaction_barrier",
+                "adsorbate": "HOO",
+                "reaction_step": "HOO* transition barrier",
+            },
+            confidence=0.94,
+            locator_status="exact_page",
+            evidence_text="Correct replacement row.",
+            source="codex_dft_semantic_replacement",
+            extra_payload={"adsorbate": "HOO", "reaction_step": "HOO* transition barrier"},
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id, include_non_conflicts=False)
+
+    assert payload["conflict_count"] == 0
+    assert payload["rows"] == []
+
+
+def test_review_conflicts_dft_explicit_reaction_step_difference_still_produces_reaction_step_conflict(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT reaction-step disagreement", pdf_path="dft-reaction-step.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate=None,
+            reaction_step="DFT",
+            value=-12.2,
+            unit="eV",
+            evidence_text="Binding energy is -12.2 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-12.2",
+                reviewed_value="-12.2",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="verified_scalar",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -12.2,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+                "reaction_step": "HOO* transition barrier",
+            },
+            confidence=0.87,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_reaction_step",
+            extra_payload={"reaction_step": None},
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id, include_non_conflicts=True)
+
+    assert payload["conflict_count"] == 1
+    conflict_types = payload["rows"][0]["conflict_types"]
+    assert "reaction_step_conflict" in conflict_types
+    assert "value_conflict" not in conflict_types
+
+
+def test_review_conflicts_dft_numeric_disagreement_still_produces_value_conflict(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT numeric disagreement", pdf_path="dft-numeric-disagreement.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            reaction_step="adsorption",
+            value=-10.5,
+            unit="eV",
+            evidence_text="Adsorption energy evidence.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-10.5,
+            confidence=0.8,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="gemini_same_value",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={"value": -10.8, "unit": "eV", "adsorbate": "Li2S4"},
+            confidence=0.84,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_new_value",
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id)
+
+    assert payload["conflict_count"] == 1
+    assert "value_conflict" in payload["rows"][0]["conflict_types"]
+
+
+def test_review_conflicts_dft_opposite_review_decisions_still_produce_decision_conflict(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT decision disagreement", pdf_path="dft-decision-disagreement.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            reaction_step="adsorption",
+            value=-1.5,
+            unit="eV",
+            evidence_text="Adsorption energy evidence.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PASS",
+            corrected_value=-1.5,
+            confidence=0.8,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="gemini_accept",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="REJECT",
+            corrected_value=-1.5,
+            confidence=0.79,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="glm_reject",
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id)
+
+    assert payload["conflict_count"] == 1
+    conflict_types = payload["rows"][0]["conflict_types"]
+    assert "decision_conflict" in conflict_types
+    assert "value_conflict" not in conflict_types
+
+
+def test_review_conflicts_non_dft_behavior_does_not_regress(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Non DFT conflict regression", pdf_path="non-dft-conflict.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            figure_label="Figure 1",
+            caption="Figure 1",
+            page=3,
+            crop_status="candidate_crop",
+            image_path="figures/figure-1.png",
+        )
+        session.add(figure)
+        session.flush()
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="figures",
+            target_id=figure.id,
+            field_name="crop_status",
+            decision="PASS",
+            corrected_value="usable_crop",
+            confidence=0.73,
+            locator_status="exact_page",
+            evidence_text="Figure 1 crop is usable.",
+            source="figure_accept",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="figures",
+            target_id=figure.id,
+            field_name="crop_status",
+            decision="REVISE",
+            corrected_value="needs_manual_crop_check",
+            confidence=0.75,
+            locator_status="exact_page",
+            evidence_text="Figure 1 crop needs manual review.",
+            source="figure_revise",
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id)
+
+    assert payload["conflict_count"] == 1
+    conflict_types = payload["rows"][0]["conflict_types"]
+    assert "value_conflict" in conflict_types
+    assert "decision_conflict" in conflict_types
+
+
+def test_review_conflicts_figure_key_elements_structural_shape_equivalence_does_not_conflict(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Figure key elements equivalence", pdf_path="figure-key-elements.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        figure = PaperFigure(
+            paper_id=paper.id,
+            figure_label="fig_2",
+            caption="Fig. 2",
+            page=4,
+            crop_status="recropped",
+            image_path="figures/figure-2.png",
+            figure_role="characterization",
+            content_summary="(a) STEM image and (b) EXAFS comparison.",
+        )
+        session.add(figure)
+        session.flush()
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="local_ide",
+                field_name="figures",
+                target_path=f"figures:{figure.id}:key_elements",
+                operation="replace",
+                proposed_value=[
+                    {"description": "Panel (a): HAADF-STEM image with Pt dispersion"},
+                    {"description": "Panel (b): EXAFS fitting and shell assignment"},
+                ],
+                reason="Original approved shape used dict entries.",
+                evidence_payload={"page": 4, "figure": "Fig. 2", "quoted_text": "HAADF-STEM image"},
+                status="approved",
+                reviewed_by="local_ide",
+            )
+        )
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="ide_ai",
+                field_name="figures",
+                target_path=f"figures:{figure.id}:key_elements",
+                operation="replace",
+                proposed_value=[
+                    "Panel (a): HAADF-STEM image with Pt dispersion",
+                    "Panel (b): EXAFS fitting and shell assignment",
+                ],
+                reason="Canonical plain-string cleanup.",
+                evidence_payload={"page": 4, "figure": "Fig. 2", "quoted_text": "EXAFS fitting"},
+                status="approved",
+                reviewed_by="ide_ai",
+            )
+        )
+        session.commit()
+        payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id)
+
+    assert payload["conflict_count"] == 0
+
+
+def test_review_adjudication_uses_real_dft_field_names_for_whole_row_conflicts(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="DFT adjudication field mapping", pdf_path="dft-adjudication-fields.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate="Co atom",
+            reaction_step="SAC-to-DAC stability comparison",
+            value=-10.5,
+            unit="eV",
+            evidence_text="Binding energy is -10.5 eV.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value="-10.5",
+                reviewed_value="-10.5",
+                unit="eV",
+                evidence_text=row.evidence_text,
+                reviewer_status="verified",
+                reviewer="verified_scalar",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="PROPOSED",
+            corrected_value={
+                "value": -10.5,
+                "unit": "eV",
+                "property": "binding_energy",
+                "adsorbate": None,
+            },
+            confidence=0.9,
+            locator_status="exact_page",
+            evidence_text=row.evidence_text,
+            source="codex_dft_field_mapping",
+            extra_payload={"reaction_step": None, "adsorbate": None},
+        )
+        session.commit()
+        payload = ReviewAdjudicationService(session).list_with_adjudication(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            include_non_conflicts=True,
+        )
+
+    conflict_row = payload["rows"][0]
+    assert conflict_row["affected_field_names"] == ["adsorbate"]
+    assert "reaction_step_conflict" not in conflict_row["conflict_types"]
+    recommended_payload = conflict_row["adjudication"]["recommended_payload"]
+    assert recommended_payload["affected_field_names"] == ["adsorbate"]
+    if "field_names" in recommended_payload:
+        assert recommended_payload["field_names"] != ["value"]
+        assert "adsorbate" in recommended_payload["field_names"]
+
+
 def test_review_center_suppresses_duplicate_system_candidate_when_finalized_row_exists(workbench_env):
     _, _, Session = workbench_env
     with Session() as session:
@@ -1182,6 +2196,7 @@ def _seed_object_review_audit(
     locator_status: str,
     evidence_text: str,
     source: str,
+    extra_payload: dict | None = None,
 ):
     run = session.query(ExternalAnalysisRun).filter(ExternalAnalysisRun.paper_id == paper_id).first()
     if run is None:
@@ -1220,6 +2235,7 @@ def _seed_object_review_audit(
                 },
                 "evidence_location": {"page": 5, "locator_status": locator_status},
                 "verification_status": "unverified",
+                **(extra_payload or {}),
             },
         )
     )
@@ -1496,6 +2512,236 @@ def test_review_conflicts_api_accepts_ai_adjudication_without_bypassing_audit(wo
         assert correction.proposed_value == -1.35
         assert session.scalar(select(AuditLog).where(AuditLog.action == "propose_dft_result_correction")) is not None
         assert session.scalar(select(AuditLog).where(AuditLog.action == "accept_ai_adjudication")) is not None
+
+
+def test_apply_imported_whole_row_dft_opinion_applies_explicit_null_adsorbate(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Imported whole-row null", pdf_path="imported-null.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate="H2",
+            reaction_step="DFT",
+            value=-1.25,
+            unit="eV",
+            evidence_text="Binding energy is -1.25 eV.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    with Session() as session:
+        result = DFTResultReviewService(session).apply_imported_opinion(
+            paper_id=paper_id,
+            result_id=row_id,
+            reviewer="imported_ai_test",
+            opinion={
+                "decision": "PROPOSED",
+                "source": "imported_ai",
+                "source_label": "imported_ai",
+                "corrected_value": {
+                    "property_type": "binding_energy",
+                    "adsorbate": None,
+                    "reaction_step": "DFT",
+                    "value": -1.25,
+                    "unit": "eV",
+                },
+                "evidence_location": {
+                    "page": 5,
+                    "quoted_text": "Binding energy is -1.25 eV.",
+                    "locator_status": "exact_page",
+                },
+            },
+        )
+        session.commit()
+        stored = session.get(DFTResult, row_id)
+        review = session.scalar(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(row_id),
+                ExtractionFieldReview.field_name == "adsorbate",
+            )
+        )
+
+    assert result["action"] == "verify"
+    assert stored is not None
+    assert stored.adsorbate is None
+    assert review is not None
+    assert review.reviewer_status == "verified"
+
+
+def test_apply_imported_whole_row_dft_opinion_repairs_verified_field_with_expected_versions(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Imported whole-row repair", pdf_path="imported-repair.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="Fe-based DAC structures")
+        session.add(sample)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=sample.id,
+            property_type="binding_energy",
+            adsorbate="H2",
+            reaction_step="DFT",
+            value=-1.25,
+            unit="eV",
+            evidence_text="Binding energy is -1.25 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        session.add_all(
+            [
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="adsorbate",
+                    original_value="H2",
+                    reviewed_value="H2",
+                    evidence_text=row.evidence_text,
+                    reviewer_status="verified",
+                    reviewer="verified_scalar",
+                ),
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="value",
+                    original_value="-1.25",
+                    reviewed_value="-1.25",
+                    unit="eV",
+                    evidence_text=row.evidence_text,
+                    reviewer_status="verified",
+                    reviewer="verified_scalar",
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    with Session() as session:
+        review_versions = {
+            review.field_name: review.write_version
+            for review in session.scalars(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper_id,
+                    ExtractionFieldReview.target_type == "dft_results",
+                    ExtractionFieldReview.target_id == str(row_id),
+                )
+            ).all()
+        }
+        result = DFTResultReviewService(session).apply_imported_opinion(
+            paper_id=paper_id,
+            result_id=row_id,
+            reviewer="imported_ai_test",
+            expected_row_state={
+                "candidate_status": "ML_Ready",
+                "property_type": "binding_energy",
+                "adsorbate": "H2",
+                "reaction_step": "DFT",
+                "value": -1.25,
+                "unit": "eV",
+            },
+            expected_write_versions={"adsorbate": review_versions["adsorbate"]},
+            opinion={
+                "decision": "PROPOSED",
+                "source": "imported_ai",
+                "source_label": "imported_ai",
+                "corrected_value": {
+                    "property_type": "binding_energy",
+                    "material": "Fe-based DAC structures",
+                    "adsorbate": None,
+                    "reaction_step": "DFT",
+                    "value": -1.25,
+                    "unit": "eV",
+                },
+                "evidence_location": {
+                    "page": 5,
+                    "quoted_text": "Binding energy is -1.25 eV.",
+                    "locator_status": "exact_page",
+                },
+            },
+        )
+        stored = session.get(DFTResult, row_id)
+        adsorbate_review = session.scalar(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(row_id),
+                ExtractionFieldReview.field_name == "adsorbate",
+            )
+        )
+
+    assert result["action"] == "verify"
+    assert stored is not None
+    assert stored.adsorbate is None
+    assert adsorbate_review is not None
+    assert adsorbate_review.reviewed_value is None
+    assert adsorbate_review.write_version == review_versions["adsorbate"] + 1
+
+
+def test_apply_imported_whole_row_dft_opinion_rejects_stale_expected_row_state_via_api(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Imported stale row state", pdf_path="imported-stale.pdf", workflow_status="Parsed_Material_Ready")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            adsorbate="H2",
+            reaction_step="DFT",
+            value=-1.25,
+            unit="eV",
+            evidence_text="Binding energy is -1.25 eV.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{paper_id}/dft-results/{row_id}/apply-imported-opinion",
+        json={
+            "reviewer": "imported_ai_test",
+            "expected_row_state": {
+                "candidate_status": "ML_Ready",
+                "adsorbate": "WRONG_EXPECTED_VALUE",
+                "value": -1.25,
+            },
+            "opinion": {
+                "decision": "PROPOSED",
+                "source": "imported_ai",
+                "source_label": "imported_ai",
+                "corrected_value": {
+                    "property_type": "binding_energy",
+                    "adsorbate": None,
+                    "reaction_step": "DFT",
+                    "value": -1.25,
+                    "unit": "eV",
+                },
+                "evidence_location": {
+                    "page": 5,
+                    "quoted_text": "Binding energy is -1.25 eV.",
+                    "locator_status": "exact_page",
+                },
+            },
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "write_conflict:dft_result_state_stale"
 
 
 def test_review_conflicts_auto_advance_batch_records_audit(workbench_env):
@@ -1794,6 +3040,16 @@ def test_review_center_sorting_and_batch_stage2_endpoints(workbench_env, monkeyp
     recent_sorted = client.get("/api/workbench/review-center?limit=10&sort_by=recent")
     assert recent_sorted.status_code == 200
     assert any(row["paper_id"] == newest_id and row["paper_short_id"] for row in recent_sorted.json()["rows"])
+
+    serial_sorted = client.get("/api/workbench/review-center?limit=10&sort_by=paper_code_asc")
+    assert serial_sorted.status_code == 200
+    code_numbers = []
+    for row in serial_sorted.json()["rows"]:
+        code = str(row.get("paper_code") or "").strip().upper()
+        match = re.match(r"^[A-Z](\d+)$", code)
+        if match:
+            code_numbers.append(int(match.group(1)))
+    assert code_numbers == sorted(code_numbers)
 
     def fake_rerun_stage2(self, paper_id):
         return {"dft_results": 1, "mechanism_claims": 0, "writing_cards": 0}

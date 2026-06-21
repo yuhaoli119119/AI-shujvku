@@ -62,6 +62,31 @@ def share_client(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
+@pytest.fixture
+def export_clients(tmp_path, monkeypatch):
+    db_url = f"sqlite:///{tmp_path / 'export-security.db'}"
+    monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
+    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "owner-secret")
+    monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "false")
+    get_settings.cache_clear()
+    engine = create_engine(db_url, future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, future=True)
+
+    def override_session():
+        with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_session
+    yield {
+        "local": TestClient(app),
+        "remote": TestClient(app, client=("192.168.1.20", 50000)),
+    }
+    app.dependency_overrides.clear()
+    engine.dispose()
+    get_settings.cache_clear()
+
+
 def test_asset_endpoint_rejects_absolute_traversal_and_symlink_escape(tmp_path, monkeypatch):
     storage = tmp_path / "storage"
     figure = storage / "figures" / "paper-1" / "safe.png"
@@ -172,21 +197,28 @@ def test_http_mcp_requires_key_even_for_loopback_or_private_network(monkeypatch)
     get_settings.cache_clear()
 
 
-def test_exports_default_off_and_mcp_capabilities_are_independent(monkeypatch):
+def test_exports_default_off_blocks_remote_non_owner_but_not_owner_http_access(monkeypatch, export_clients):
+    remote = export_clients["remote"]
+    local = export_clients["local"]
+    response = remote.get("/api/papers/export/dft-dataset")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Exports are disabled by server policy"
+
+    owner_response = remote.get(
+        "/api/papers/export/dft-dataset",
+        headers={"X-LitAI-Owner-Token": "owner-secret"},
+    )
+    assert owner_response.status_code == 200
+    assert owner_response.json()["metadata"]["schema_version"] == "dft_results_ml_v2"
+
+    local_response = local.get("/api/papers/export/dft-dataset")
+    assert local_response.status_code == 200
+    assert local_response.json()["metadata"]["schema_version"] == "dft_results_ml_v2"
+
+
+def test_exports_default_off_still_disables_mcp_export_capabilities(monkeypatch):
     monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "false")
     get_settings.cache_clear()
-    client = TestClient(app)
-    for method, path in (
-        ("get", "/api/papers/export/csv"),
-        ("get", "/api/papers/export/dft-dataset"),
-        ("post", "/api/writing/export"),
-        ("post", "/api/writing/word/insert-citation"),
-        ("get", "/api/writing/word/exports/test.docx"),
-    ):
-        response = getattr(client, method)(path)
-        assert response.status_code == 403
-        assert response.json()["detail"] == "Exports are disabled by server policy"
-
     reader = MCPAuthInfo("reader", "Reader", frozenset({"read_papers"}), "key")
     with mcp_auth_context(reader):
         with pytest.raises(PermissionError, match="export_data"):

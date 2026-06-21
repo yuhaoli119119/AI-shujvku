@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AuditLog, DFTResult, Paper, WorkflowJob
 from app.services.dft_review_service import DFTResultReviewService
-from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.services.review_conflict_service import DFT_CONFLICT_FIELD_MAP, ReviewConflictAggregationService
 from app.utils.active_database import get_registered_active_library_info
 from app.utils.library_names import normalize_library_name
 
@@ -20,11 +20,14 @@ class ReviewAdjudicationService:
 
     AUTO_TARGET_TYPES = {"dft_results"}
     DIRECT_REVIEW_TARGET_TYPES = {"writing_cards", "mechanism_claims", "figure", "figures", "table", "tables"}
+    VISUAL_TARGET_TYPES = {"figure", "figures", "table", "tables"}
+    DFT_TARGET_TYPES = {"dft_result", "dft_results", "dft_setting", "dft_settings", "catalyst_sample", "catalyst_samples"}
     EXACT_LOCATOR_STATUSES = {"exact_page", "exact_bbox"}
     RELIABLE_LOCATOR_STATUSES = {"exact_page", "exact_bbox", "candidate"}
     HIGH_CONFIDENCE = 0.82
     MEDIUM_CONFIDENCE = 0.65
     AUTO_CONFLICT_DOMINANT_RATIO = 0.85
+    SUPPORTED_DFT_ACTION_FIELDS = {"value", "unit", "property_type", "adsorbate", "reaction_step", "catalyst"}
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -67,6 +70,33 @@ class ReviewAdjudicationService:
             payload = self.list_with_adjudication(paper_id=paper_id, limit=1000)
             counts[str(paper_id)] = sum(1 for row in (payload.get("rows") or []) if self.is_actionable_conflict(row))
         return counts
+
+    def count_actionable_conflicts_by_paper_and_module(self, paper_ids: set[UUID]) -> dict[str, dict[str, int]]:
+        if not paper_ids:
+            return {}
+        counts = {
+            str(paper_id): {"dft": 0, "visual": 0, "content": 0, "other": 0}
+            for paper_id in paper_ids
+        }
+        for paper_id in paper_ids:
+            payload = self.list_with_adjudication(paper_id=paper_id, limit=1000)
+            summary = counts[str(paper_id)]
+            for row in (payload.get("rows") or []):
+                if not self.is_actionable_conflict(row):
+                    continue
+                summary[self._module_for_target_type(row.get("target_type"))] += 1
+        return counts
+
+    @classmethod
+    def _module_for_target_type(cls, target_type: Any) -> str:
+        normalized = str(target_type or "").strip().lower()
+        if normalized in cls.DFT_TARGET_TYPES:
+            return "dft"
+        if normalized in cls.VISUAL_TARGET_TYPES:
+            return "visual"
+        if normalized:
+            return "content"
+        return "other"
 
     def evaluate_row(self, row: dict[str, Any]) -> dict[str, Any]:
         opinions = list(row.get("opinions") or [])
@@ -443,16 +473,21 @@ class ReviewAdjudicationService:
         metrics: dict[str, Any],
     ) -> tuple[str, dict[str, Any]]:
         field_name = str(row.get("field_name") or "value")
+        affected_field_names = self._dft_affected_field_names(row, fallback_field_name=field_name)
+        action_field_names = self._dft_action_field_names(affected_field_names, fallback_field_name=field_name)
         evidence_payload = self._build_evidence_payload(best, row)
         decision_bucket = self._decision_bucket(best.get("decision") or best.get("status"))
         dominant_value = metrics.get("dominant_value")
-        same_as_current = self._same_value(dominant_value, getattr(dft_row, field_name, None) if hasattr(dft_row, field_name) else dft_row.value)
+        current_value = getattr(dft_row, field_name, None) if hasattr(dft_row, field_name) else dft_row.value
+        same_as_current = self._same_value(dominant_value, current_value)
 
         if decision_bucket == "negative" and metrics["negative_count"] >= metrics["positive_count"] and metrics["exact_locator_count"] > 0:
             return (
                 "reject",
                 {
-                    "field_names": [field_name],
+                    "field_names": action_field_names,
+                    "affected_field_names": affected_field_names,
+                    "conflict_field_names": affected_field_names,
                     "reason": "AI adjudication rejected the candidate because negative evidence dominates with a reliable locator.",
                     "evidence_payload": evidence_payload,
                 },
@@ -464,6 +499,8 @@ class ReviewAdjudicationService:
                 {
                     "field_name": field_name,
                     "proposed_value": dominant_value,
+                    "affected_field_names": affected_field_names,
+                    "conflict_field_names": affected_field_names,
                     "reason": "AI adjudication found a stronger evidence-backed value and prepared a correction draft instead of silently mutating final truth.",
                     "evidence_payload": evidence_payload,
                 },
@@ -472,7 +509,9 @@ class ReviewAdjudicationService:
         return (
             "verify",
             {
-                "field_names": [field_name],
+                "field_names": action_field_names,
+                "affected_field_names": affected_field_names,
+                "conflict_field_names": affected_field_names,
                 "reason": "AI adjudication found the current candidate consistent with the strongest evidence-backed opinion.",
                 "evidence_payload": evidence_payload,
             },
@@ -528,7 +567,7 @@ class ReviewAdjudicationService:
                 negative_count += 1
             if self._evidence_text(opinion):
                 evidence_text_count += 1
-            value_key = self._value_key(opinion.get("value"))
+            value_key = self._opinion_metric_value_key(opinion)
             if value_key:
                 value_groups[value_key].append(opinion)
         dominant_group = max(value_groups.values(), key=len) if value_groups else []
@@ -543,7 +582,7 @@ class ReviewAdjudicationService:
             "positive_count": positive_count,
             "negative_count": negative_count,
             "has_evidence_text": evidence_text_count > 0,
-            "dominant_value": dominant_opinion.get("value") if dominant_opinion else None,
+            "dominant_value": self._opinion_metric_value(dominant_opinion) if dominant_opinion else None,
             "dominant_ratio": round((len(dominant_group) / len(opinions)), 4) if opinions else 0.0,
             "locator_status_counts": dict(sorted(Counter(locator_statuses).items())),
         }
@@ -635,6 +674,10 @@ class ReviewAdjudicationService:
     def _build_evidence_payload(self, opinion: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
         evidence = opinion.get("evidence") if isinstance(opinion.get("evidence"), dict) else {}
         locator = evidence.get("locator") if isinstance(evidence.get("locator"), dict) else {}
+        affected_field_names = self._dft_affected_field_names(
+            row,
+            fallback_field_name=str(row.get("field_name") or "value"),
+        )
         return {
             "source_label": opinion.get("source_label") or opinion.get("source"),
             "agent_role": opinion.get("agent_role"),
@@ -644,9 +687,59 @@ class ReviewAdjudicationService:
             "target_type": row.get("target_type"),
             "target_id": row.get("target_id"),
             "field_name": row.get("field_name"),
+            "affected_field_names": affected_field_names,
+            "conflict_field_names": affected_field_names,
             "evidence_text": self._evidence_text(opinion),
             "locator": locator,
         }
+
+    def _dft_affected_field_names(self, row: dict[str, Any], *, fallback_field_name: str) -> list[str]:
+        values = row.get("affected_field_names") or row.get("conflict_field_names") or []
+        names: list[str] = []
+        if isinstance(values, list):
+            for value in values:
+                name = str(value or "").strip()
+                if name and name not in names:
+                    names.append(name)
+        if names:
+            return names
+        if str(row.get("target_type") or "").strip().lower() not in self.DFT_TARGET_TYPES:
+            return [fallback_field_name] if fallback_field_name else []
+        for conflict_type in row.get("conflict_types") or []:
+            mapped = DFT_CONFLICT_FIELD_MAP.get(str(conflict_type or "").strip())
+            if mapped and mapped not in names:
+                names.append(mapped)
+        if not names and fallback_field_name:
+            names.append(fallback_field_name)
+        return names
+
+    def _dft_action_field_names(self, affected_field_names: list[str], *, fallback_field_name: str) -> list[str]:
+        names = [name for name in affected_field_names if name in self.SUPPORTED_DFT_ACTION_FIELDS]
+        if names:
+            return names
+        if fallback_field_name in self.SUPPORTED_DFT_ACTION_FIELDS:
+            return [fallback_field_name]
+        return ["value"]
+
+    @classmethod
+    def _opinion_metric_value(cls, opinion: dict[str, Any] | None) -> Any:
+        if not isinstance(opinion, dict):
+            return None
+        target_type = str(opinion.get("target_type") or "").strip().lower()
+        field_name = str(opinion.get("field_name") or "").strip().lower()
+        if target_type in cls.DFT_TARGET_TYPES and field_name == "value":
+            value = opinion.get("value")
+            if isinstance(value, dict) and "value" in value:
+                return value.get("value")
+            raw_payload = opinion.get("raw_payload") if isinstance(opinion.get("raw_payload"), dict) else {}
+            corrected_value = raw_payload.get("corrected_value")
+            if isinstance(corrected_value, dict) and "value" in corrected_value:
+                return corrected_value.get("value")
+        return opinion.get("value")
+
+    @classmethod
+    def _opinion_metric_value_key(cls, opinion: dict[str, Any]) -> str:
+        return cls._value_key(cls._opinion_metric_value(opinion))
 
     @staticmethod
     def _locator_status(opinion: dict[str, Any]) -> str:

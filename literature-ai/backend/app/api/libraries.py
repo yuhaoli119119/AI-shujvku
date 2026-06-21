@@ -207,8 +207,17 @@ async def activate_library(name: str) -> LibraryInfoResponse:
         lib = mgr.activate_library(name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    active_db_info = activate_active_library_database()
-    configured_counts = _configured_database_library_counts([str(lib.name)])
+    except PermissionError as exc:
+        raise HTTPException(status_code=500, detail=f"激活文献库失败：{exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"激活文献库失败：{exc}") from exc
+    try:
+        active_db_info = activate_active_library_database()
+        configured_counts = _configured_database_library_counts([str(lib.name)])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"激活文献库失败：{exc}") from exc
     return _effective_active_library_response(
         lib,
         active_db_info=active_db_info,

@@ -179,6 +179,185 @@ def test_table_review_status_recognizes_legacy_codex_item_corrections():
         engine.dispose()
 
 
+def test_table_review_status_treats_approved_style_object_audit_as_verified():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'table_review_positive_audit.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Table Positive Audit Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            table = PaperTable(
+                paper_id=paper.id,
+                caption="Table 1",
+                markdown_content="| col |\n| --- |\n| value |",
+                page=4,
+                extraction_source="docling",
+            )
+            session.add(table)
+            session.flush()
+            run = ExternalAnalysisRun(
+                paper_id=paper.id,
+                source="ide_ai",
+                source_label="ide_table_review",
+            )
+            session.add(run)
+            session.flush()
+            candidate = ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                status="ai_reviewed",
+                normalized_payload={
+                    "paper_id": str(paper.id),
+                    "target_type": "tables",
+                    "target_id": str(table.id),
+                    "field_name": "table_review",
+                    "decision": "approve",
+                    "verification_status": "unverified",
+                    "evidence_location": {"page": 4, "table": "Table 1", "quoted_text": "Table 1. caption"},
+                },
+                evidence_payload={"page": 4, "table": "Table 1", "quoted_text": "Table 1. caption"},
+            )
+            session.add(candidate)
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+            assert detail is not None
+            assert detail.tables[0].object_review_audit_count == 1
+            assert detail.tables[0].table_review_status == "verified"
+
+        engine.dispose()
+
+
+def test_figure_detail_exposes_pending_delete_proposal_count():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_pending_delete.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Figure Pending Delete Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            figure = PaperFigure(
+                paper_id=paper.id,
+                figure_label="fig_3",
+                caption="Duplicate parser fragment",
+                image_path="figures/dup.png",
+                page=6,
+                crop_status="needs_recrop",
+            )
+            session.add(figure)
+            session.flush()
+            session.add(
+                PaperCorrection(
+                    paper_id=paper.id,
+                    source="literature_library_user",
+                    field_name="figures",
+                    target_path=f"figures:{figure.id}:delete",
+                    operation="delete",
+                    proposed_value=None,
+                    reason="Duplicate fragment should be removed.",
+                    status="pending",
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+            assert detail is not None
+            assert detail.figures[0].pending_correction_count == 1
+            assert detail.figures[0].pending_delete_proposal_count == 1
+            assert detail.figures[0].pending_correction_fields == ["delete"]
+            assert detail.figures[0].direct_delete_eligible is True
+            assert detail.figures[0].direct_delete_reason is not None
+
+        engine.dispose()
+
+
+def test_figure_detail_hides_direct_delete_for_clean_figure():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_clean_delete_gate.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Clean Figure Gate Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            session.add(
+                PaperFigure(
+                    paper_id=paper.id,
+                    figure_label="fig_2",
+                    caption="Figure 2. Full clean figure.",
+                    image_path="figures/clean.png",
+                    page=4,
+                    crop_status="recropped",
+                    figure_role="experimental_evidence",
+                    content_summary="Full figure crop.",
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+            assert detail is not None
+            assert detail.figures[0].direct_delete_eligible is False
+            assert detail.figures[0].direct_delete_reason is None
+
+        engine.dispose()
+
+
+def test_figure_detail_marks_duplicate_figure_number_as_direct_delete_eligible():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_duplicate_delete_gate.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Duplicate Figure Gate Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            session.add_all(
+                [
+                    PaperFigure(
+                        paper_id=paper.id,
+                        figure_label="Figure 7",
+                        caption="Figure 7. Full panel crop.",
+                        image_path="figures/fig7-full.png",
+                        page=7,
+                        crop_status="recropped",
+                        figure_role="experimental_evidence",
+                        content_summary="Full Figure 7 panel.",
+                    ),
+                    PaperFigure(
+                        paper_id=paper.id,
+                        figure_label="Figure 7",
+                        caption="Figure 7. Fragment crop without duplicate keyword.",
+                        image_path="figures/fig7-fragment.png",
+                        page=7,
+                        crop_status="candidate_crop",
+                        figure_role="experimental_evidence",
+                        content_summary=None,
+                    ),
+                ]
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+            assert detail is not None
+            assert len(detail.figures) == 2
+            assert all(item.direct_delete_eligible is True for item in detail.figures)
+            assert all(str(item.direct_delete_reason).startswith("duplicate_group_") for item in detail.figures)
+
+        engine.dispose()
+
+
 def test_detail_review_status_recognizes_legacy_ai_materialized_records():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(f"sqlite:///{Path(tmpdir) / 'legacy_ai.db'}", future=True)
@@ -403,6 +582,44 @@ def test_detail_payload_exposes_figure_approved_correction_fields():
         engine.dispose()
 
 
+def test_detail_payload_normalizes_stringified_figure_key_elements():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_key_elements_cleanup.db'}", future=True)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Figure key elements detail", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            session.add(
+                PaperFigure(
+                    paper_id=paper.id,
+                    caption="Figure 2",
+                    image_path="figures/figure_2.png",
+                    page=2,
+                    figure_label="fig_2",
+                    figure_role="characterization",
+                    key_elements=[
+                        "{'description': 'Panel (a): HAADF-STEM image with Pt dispersion'}",
+                        "{'description': 'Panel (b): EXAFS fitting and shell assignment'}",
+                    ],
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail is not None
+            assert detail.figures[0].key_elements == [
+                "Panel (a): HAADF-STEM image with Pt dispersion",
+                "Panel (b): EXAFS fitting and shell assignment",
+            ]
+
+        engine.dispose()
+
+
 def test_cached_pdf_size_uses_direct_storage_candidates(tmp_path):
     _cached_pdf_size_for_storage.cache_clear()
     storage_root = tmp_path / "storage"
@@ -416,7 +633,7 @@ def test_cached_pdf_size_uses_direct_storage_candidates(tmp_path):
 
 
 def test_list_papers_with_filters():
-    """Verify year/journal/has_dft_results/has_writing_cards/limit/offset filtering."""
+    """Verify year/journal/has_dft_results/reviewed_writing_cards/has_pdf/limit/offset filtering."""
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(f"sqlite:///{Path(tmpdir) / 'filter.db'}", future=True)
         with engine.begin() as connection:
@@ -424,29 +641,55 @@ def test_list_papers_with_filters():
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
-            # Paper A: 2024, Nature Catalysis, has DFT results + writing cards
+            # Paper A: 2024, Nature Catalysis, has DFT results + reviewed writing cards
             pa = Paper(title="Paper A", year=2024, journal="Nature Catalysis", pdf_path="a.pdf", authors=["A"])
             session.add(pa)
             session.flush()
             session.add(DFTResult(paper_id=pa.id, property_type="adsorption_energy", value=-1.0))
             session.add(WritingCard(paper_id=pa.id, paper_type="mixed"))
+            session.add(
+                PaperCorrection(
+                    paper_id=pa.id,
+                    source="ide_ai",
+                    field_name="writing_cards",
+                    target_path="writing_cards",
+                    operation="replace",
+                    proposed_value={"status": "reviewed"},
+                    reason="IDE AI approved writing card.",
+                    status="approved",
+                    reviewed_by="ide_ai",
+                )
+            )
 
             # Paper B: 2023, JACS, no DFT, no writing cards
             pb = Paper(title="Paper B", year=2023, journal="JACS", pdf_path="b.pdf", authors=["B"])
             session.add(pb)
             session.flush()
 
-            # Paper C: 2024, Angewandte, has DFT only
-            pc = Paper(title="Paper C", year=2024, journal="Angewandte Chemie", pdf_path="c.pdf", authors=["C"])
+            # Paper C: 2024, Angewandte, has DFT only, but metadata-only so should count as "无 PDF"
+            pc = Paper(
+                title="Paper C",
+                year=2024,
+                journal="Angewandte Chemie",
+                pdf_path="c.pdf",
+                oa_status="metadata_only",
+                authors=["C"],
+            )
             session.add(pc)
             session.flush()
             session.add(DFTResult(paper_id=pc.id, property_type="barrier", value=0.8))
 
+            # Paper D: has raw writing cards but no AI review, and empty pdf_path so it should still count as "无可用写作卡" + "无 PDF"
+            pd = Paper(title="Paper D", year=2022, journal="Chem", pdf_path="", authors=["D"])
+            session.add(pd)
+            session.flush()
+            session.add(WritingCard(paper_id=pd.id, paper_type="mixed", research_gap="Raw extracted card only"))
+
             session.commit()
             service = PaperQueryService(session)
 
-            # No filter -> all 3
-            assert len(service.list_papers()) == 3
+            # No filter -> all 4
+            assert len(service.list_papers()) == 4
 
             # Filter by year
             result = service.list_papers(PaperListFilterParams(year=2024))
@@ -480,9 +723,21 @@ def test_list_papers_with_filters():
 
             # Filter has_writing_cards=False
             result = service.list_papers(PaperListFilterParams(has_writing_cards=False))
+            assert len(result) == 3
+            titles = {p.title for p in result}
+            assert titles == {"Paper B", "Paper C", "Paper D"}
+
+            # Filter has_pdf=True
+            result = service.list_papers(PaperListFilterParams(has_pdf=True))
             assert len(result) == 2
             titles = {p.title for p in result}
-            assert titles == {"Paper B", "Paper C"}
+            assert titles == {"Paper A", "Paper B"}
+
+            # Filter has_pdf=False
+            result = service.list_papers(PaperListFilterParams(has_pdf=False))
+            assert len(result) == 2
+            titles = {p.title for p in result}
+            assert titles == {"Paper C", "Paper D"}
 
             # Pagination: limit=1 offset=0
             result = service.list_papers(PaperListFilterParams(limit=1, offset=0))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from typing import Any
 
@@ -14,6 +14,7 @@ from app.db.models import Paper
 from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
 from app.security.files import UnsafeLocalPDF, validate_local_ingest_pdf
+from app.services.artifact_store import ArtifactStore
 from app.services.discovery_service import DiscoveryService
 from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
 from app.services.workflow_jobs import (
@@ -35,6 +36,19 @@ def _validated_local_pdf(path: str, settings: Settings) -> Path:
         return validate_local_ingest_pdf(Path(path), settings)
     except UnsafeLocalPDF as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_upload_request(file: UploadFile) -> None:
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
+    if file.size and file.size > 30 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 30MB.")
+
+
+async def _stage_uploaded_pdf(file: UploadFile, settings: Settings) -> Path:
+    store = ArtifactStore(settings)
+    suffix_name = Path(file.filename or "upload.pdf").name
+    return await store.save_upload(file, f"{uuid4()}_{suffix_name}")
 
 
 def _raise_already_exists(exc: PaperConflictError) -> None:
@@ -196,10 +210,7 @@ async def ingest_upload(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
-    if file.size and file.size > 30 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File too large. Maximum size is 30MB.")
+    _validate_upload_request(file)
 
     external_metadata = None
     if identifier:
@@ -246,6 +257,61 @@ async def ingest_upload(
         raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
         
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
+
+
+@router.post("/ingest/upload/jobs")
+async def queue_ingest_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    identifier: str | None = Form(default=None, description="Optional DOI or identifier to fetch metadata"),
+    library_name: str | None = Form(default=None, description="Target literature library"),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    _validate_upload_request(file)
+
+    external_metadata = None
+    if identifier:
+        try:
+            svc = DiscoveryService()
+            _, external_metadata = await run_in_threadpool(svc.fetch_metadata, identifier)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
+
+    staged_pdf = await _stage_uploaded_pdf(file, settings)
+    target_library = normalize_library_name(library_name)
+    job_payload = {
+        "pdf_path": str(staged_pdf.resolve()),
+        "library_name": target_library,
+        "original_filename": file.filename,
+        "trusted_staged_upload": True,
+    }
+    if external_metadata:
+        job_payload.update(external_metadata)
+
+    job = create_job(
+        session=session,
+        job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
+        library_name=target_library,
+        payload=job_payload,
+        runtime_context=build_job_runtime_context(settings),
+        progress={
+            "phase": "queued",
+            "message": "Uploaded PDF is queued for background parsing.",
+            "source_path": str(staged_pdf.resolve()),
+        },
+    )
+
+    db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else settings.database_url
+    dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
+    if dispatch_mode != "celery":
+        session.refresh(job)
+
+    data = serialize_job(job)
+    data["dispatch_mode"] = dispatch_mode
+    return data
 
 
 @router.post("/{paper_id}/attach-pdf", response_model=IngestResponse)

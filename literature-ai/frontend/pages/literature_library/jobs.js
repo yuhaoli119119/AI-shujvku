@@ -670,30 +670,17 @@ async function uploadPDF(input) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("library_name", getCurrentLibraryName());
-    showProgress("正在上传并解析：" + file.name);
+    showProgress("正在上传并加入后台队列：" + file.name);
     try {
-        const data = await fetchJSON(API_BASE + "/ingest/upload", {
+        const job = await fetchJSON(API_BASE + "/ingest/upload/jobs", {
             method: "POST",
             body: formData
         });
-        if (data.status === "merged") {
-            showToast("已成功与现有元数据文献合并：" + (data.title || file.name), "success");
-            state.selectedPaperId = data.paper_id;
-            refreshCurrentPage();
-        } else {
-            showToast("已上传并收录：" + (data.title || file.name), "success");
-            if (typeof resetLibraryPagination === "function") resetLibraryPagination();
-            else state.currentOffset = 0;
-            refreshCurrentPage();
-        }
+        showToast("上传成功，已进入后台解析队列。", "success");
+        renderQueuedIngestJob(job);
+        pollWorkflowIngestJob(job.job_id);
     } catch (error) {
-        const detail = error.detail;
-        if (detail && detail.status === "already_exists") {
-            showToast("上传失败：该文献已存在", "error");
-            showAlreadyExistsPrompt(detail.paper_id, detail.title || "已存在文献");
-        } else {
-            showToast("上传失败：" + error.message, "error");
-        }
+        showToast("上传失败：" + error.message, "error");
     } finally {
         input.value = "";
         hideProgress();
@@ -1006,7 +993,7 @@ async function loadMetadataOnlyPapers() {
         const libraryName = getCurrentLibraryName();
         if (libraryName) params.set("library_name", libraryName);
         
-        const papers = await fetchJSON(API_BASE + "?" + params.toString());
+        const papers = await fetchJSON(API_BASE + "/?" + params.toString());
         const metaOnly = (papers || []).filter(function(p) { return p.oa_status === "metadata_only"; });
         
         if (metaOnly.length === 0) {

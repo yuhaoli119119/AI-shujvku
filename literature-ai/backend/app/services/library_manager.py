@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,8 @@ REGISTRY_VERSION = 2
 
 LEGACY_STORAGE_SUBDIRS = ("pdf", "tei", "docling_json", "figures", "tables", "markdown")
 SHARED_STORAGE_SUBDIRS = ("pdf", "text", "tei", "docling_json", "figures", "tables", "markdown")
+
+logger = logging.getLogger(__name__)
 
 
 class LibraryInfo(BaseModel):
@@ -177,9 +180,9 @@ class LibraryManager:
             meta=meta,
         )
         updated_meta["last_accessed"] = datetime.utcnow().isoformat()
-        self._write_library_meta(root, updated_meta)
+        self._best_effort_write_library_meta(root, updated_meta)
         if storage_mode == SHARED_STORAGE_MODE:
-            self._ensure_shared_project_config(root, normalized_name)
+            self._best_effort_ensure_shared_project_config(root, normalized_name)
 
         return LibraryInfo(
             name=normalized_name,
@@ -579,6 +582,14 @@ class LibraryManager:
     def _write_library_meta(self, root: Path, payload: dict[str, Any]) -> None:
         self._meta_path(root).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _best_effort_write_library_meta(self, root: Path, payload: dict[str, Any]) -> None:
+        try:
+            self._write_library_meta(root, payload)
+        except PermissionError:
+            logger.warning("skip updating library metadata for read-only root: %s", root)
+        except OSError as exc:
+            logger.warning("skip updating library metadata for %s: %s", root, exc)
+
     @staticmethod
     def _load_project_config(root: Path) -> dict[str, Any]:
         config_path = root / "config" / "project_config.json"
@@ -651,6 +662,20 @@ class LibraryManager:
         payload.setdefault("created_at", now_iso)
         payload["last_opened"] = now_iso
         config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @classmethod
+    def _best_effort_ensure_shared_project_config(
+        cls,
+        root: Path,
+        project_name: str,
+        project_config: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            cls._ensure_shared_project_config(root, project_name, project_config)
+        except PermissionError:
+            logger.warning("skip updating shared project config for read-only root: %s", root)
+        except OSError as exc:
+            logger.warning("skip updating shared project config for %s: %s", root, exc)
 
     @staticmethod
     def _count_papers(root: Path) -> int:

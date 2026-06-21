@@ -294,8 +294,10 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('冲突详情');
     await expect(overlay).toContainText('只读聚合，不自动合并');
+    await expect(overlay).toContainText('当前还有 1 个需要关注的冲突');
+    await expect(overlay).toContainText('冲突列表');
     await expect(overlay).toContainText('证据预览');
-    await expect(overlay).toContainText('请选择一条意见查看原文片段');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
     await expect(overlay).toContainText('自动推进 0');
     await expect(overlay).toContainText('建议裁定 1');
     await expect(overlay).toContainText('必须人工 1');
@@ -303,12 +305,27 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(overlay).toContainText('生成修正草案');
     await expect(overlay).toContainText('跳到对象审核');
 
-    const openDetails = overlay.locator('details.conflict-card');
-    await expect(openDetails.nth(0)).toHaveAttribute('open', '');
-    await expect(openDetails.nth(1)).not.toHaveAttribute('open', '');
-    await expect(openDetails.nth(1)).not.toContainText('接受 AI 裁定');
+    const conflictItems = overlay.locator('.conflict-list-item');
+    await expect(conflictItems).toHaveCount(2);
+    await expect(conflictItems.nth(0)).toHaveClass(/is-active/);
+    const selectedPanel = overlay.locator('#selectedConflictPanel');
+    await expect(selectedPanel).toContainText('dft-paper-2-1');
+    await conflictItems.nth(1).click();
+    await expect(conflictItems.nth(1)).toHaveClass(/is-active/);
+    await expect(selectedPanel).toContainText('Writing-card conflicts should stay in object review.');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('Defect sites alter adsorption and charge redistribution');
+    await expect(selectedPanel).not.toContainText('接受 AI 裁定');
+    await conflictItems.nth(0).click();
+    await expect(conflictItems.nth(0)).toHaveClass(/is-active/);
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
+    await overlay.getByRole('button', { name: '隐藏冲突列表' }).click();
+    await expect(overlay.locator('.conflict-list-panel')).toBeHidden();
+    await expect(overlay.getByRole('button', { name: '显示冲突列表' })).toBeVisible();
+    await expect.poll(async () => {
+      return overlay.locator('.compare-table-wrap').evaluate(node => node.scrollWidth <= node.clientWidth + 1);
+    }).toBe(true);
 
-    const firstTableRows = openDetails.nth(0).locator('tbody tr');
+    const firstTableRows = selectedPanel.locator('tbody tr');
     await expect(firstTableRows).toHaveCount(4);
     await expect(firstTableRows.filter({ hasText: 'Claude lab review' })).toBeHidden();
 
@@ -354,21 +371,329 @@ test.describe('Review Center Conflict Modal', () => {
       },
     });
 
+    const jumpLink = overlay.getByRole('link', { name: '跳到对象审核' }).first();
+    const jumpHref = await jumpLink.getAttribute('href');
+    const jumpUrl = new URL(jumpHref, `${BASE_URL}/pages/review_center/index.html`);
+    expect(jumpUrl.pathname).toBe('/pages/literature_library/index.html');
+    expect(jumpUrl.searchParams.get('paper_id')).toBe('paper-2');
+    expect(jumpUrl.searchParams.get('tab')).toBe('dft');
+    expect(jumpUrl.searchParams.get('target_type')).toBe('dft_results');
+    expect(jumpUrl.searchParams.get('target_id')).toBe('dft-paper-2-1');
+    expect(jumpUrl.searchParams.get('field_name')).toBe('value');
+    expect(jumpUrl.searchParams.get('pdf_page')).toBe('5');
+    expect(jumpUrl.searchParams.get('pdf_locator_status')).toBe('exact_page');
+    expect(jumpUrl.searchParams.get('pdf_evidence_text')).toContain('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
+
     await overlay.getByRole('button', { name: '关闭' }).first().click();
     await expect(overlay).toBeHidden();
-    page.once('dialog', dialog => dialog.accept());
-    await page.getByRole('button', { name: '批量 AI 自动推进当前筛选' }).click();
-    await expect(page.locator('#toast')).toContainText('eligible 1');
-    await expect(page.locator('#toast')).toContainText('executed 1');
-    await expect(page.locator('#toast')).toContainText('skipped 0');
-    expect(writeCalls).toContainEqual({
-      method: 'POST',
-      pathname: '/api/workbench/review-conflicts/auto-advance',
-      body: {
-        paper_ids: ['paper-1', 'paper-2'],
-        reviewer: 'review_center',
-        limit: 200,
-      },
+    await expect(page.getByRole('button', { name: '批量 AI 自动推进当前筛选' })).toHaveCount(0);
+  });
+
+  test('status filter includes real workflow statuses and matches Parsed_Material_Ready exactly', async ({ page }) => {
+    await page.route('**/api/**', async route => {
+      const url = new URL(route.request().url());
+      const pathname = url.pathname;
+
+      if (pathname === '/api/workbench/review-center') {
+        return jsonResponse(route, {
+          metadata: {
+            returned: 3,
+            quality_counts: { A_text_readable: 3 },
+          },
+          rows: [
+            {
+              paper_id: 'paper-ready',
+              title: 'Prepared Materials Paper',
+              year: 2025,
+              journal: 'Journal A',
+              workflow_status: 'Parsed_Material_Ready',
+              pdf_quality_status: 'A_text_readable',
+              pdf_artifact_status: { pdf_exists: true, pdf_path_kind: 'stored', pdf_file_size: 100, blocking_errors: [] },
+              has_dft_candidates: false,
+              dft_candidate_count: 0,
+              dft_candidate_status_counts: {},
+              dft_audit: { status_label: 'Ready', detected_signal_count: 0, parsed_dft_count: 0, suspected_missing_count: 0 },
+              dft_completeness_status: 'Initial_Parsed',
+              dft_completeness_label: 'Initial_Parsed',
+              suspected_missing_dft_count: 0,
+              figure_count: 0,
+              figure_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              figure_issue_count: 0,
+              figure_issue_counts: {},
+              top_figure_issues: [],
+              table_count: 0,
+              evidence_count: 0,
+              locator_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              locator_issue_count: 0,
+              locator_issue_counts: {},
+              top_locator_issues: [],
+              external_audit_count: 0,
+              external_audit_opinions: [],
+              object_review_audit_count: 0,
+              object_review_audits: [],
+              review_conflict_count: 0,
+            },
+            {
+              paper_id: 'paper-human',
+              title: 'Needs Human Paper',
+              year: 2024,
+              journal: 'Journal B',
+              workflow_status: 'Needs_Human_Confirmation',
+              needs_human_confirmation: true,
+              pdf_quality_status: 'A_text_readable',
+              pdf_artifact_status: { pdf_exists: true, pdf_path_kind: 'stored', pdf_file_size: 101, blocking_errors: [] },
+              has_dft_candidates: true,
+              dft_candidate_count: 1,
+              dft_candidate_status_counts: { system_candidate: 1 },
+              dft_audit: { status_label: 'Ready', detected_signal_count: 1, parsed_dft_count: 1, suspected_missing_count: 0 },
+              dft_completeness_status: 'Initial_Parsed',
+              dft_completeness_label: 'Initial_Parsed',
+              suspected_missing_dft_count: 0,
+              figure_count: 0,
+              figure_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              figure_issue_count: 0,
+              figure_issue_counts: {},
+              top_figure_issues: [],
+              table_count: 0,
+              evidence_count: 0,
+              locator_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              locator_issue_count: 0,
+              locator_issue_counts: {},
+              top_locator_issues: [],
+              external_audit_count: 0,
+              external_audit_opinions: [],
+              object_review_audit_count: 0,
+              object_review_audits: [],
+              review_conflict_count: 0,
+            },
+            {
+              paper_id: 'paper-ready-ml',
+              title: 'Ready ML Paper',
+              year: 2023,
+              journal: 'Journal C',
+              workflow_status: 'ML_Ready',
+              pdf_quality_status: 'A_text_readable',
+              pdf_artifact_status: { pdf_exists: true, pdf_path_kind: 'stored', pdf_file_size: 102, blocking_errors: [] },
+              has_dft_candidates: true,
+              dft_candidate_count: 1,
+              dft_candidate_status_counts: { ML_Ready: 1 },
+              dft_audit: { status_label: 'Ready', detected_signal_count: 1, parsed_dft_count: 1, suspected_missing_count: 0 },
+              dft_completeness_status: 'DB_Ready',
+              dft_completeness_label: 'DB_Ready',
+              suspected_missing_dft_count: 0,
+              figure_count: 0,
+              figure_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              figure_issue_count: 0,
+              figure_issue_counts: {},
+              top_figure_issues: [],
+              table_count: 0,
+              evidence_count: 0,
+              locator_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              locator_issue_count: 0,
+              locator_issue_counts: {},
+              top_locator_issues: [],
+              external_audit_count: 0,
+              external_audit_opinions: [],
+              object_review_audit_count: 0,
+              object_review_audits: [],
+              review_conflict_count: 0,
+            },
+          ],
+        });
+      }
+
+      if (pathname === '/api/libraries') {
+        return jsonResponse(route, []);
+      }
+
+      if (pathname === '/api/system/agent-guide') {
+        return jsonResponse(route, {
+          version: 'test',
+          review_prompts: { templates: {}, composite_templates: {} },
+        });
+      }
+
+      if (pathname === '/api/workbench/review-conflicts') {
+        return jsonResponse(route, { rows: [], adjudication_summary: { auto: 0, suggest: 0, manual: 0 } });
+      }
+
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     });
+
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+
+    await expect(page.locator('#statusFilter option[value="group:ai_processing"]')).toContainText('AI 处理中 (1)');
+    await expect(page.locator('#workflowStatusFilter option[value="Parsed_Material_Ready"]')).toContainText('材料已就绪 (1)');
+    await expect(page.locator('#workflowStatusFilter option[value="Needs_Human_Confirmation"]')).toContainText('待人工确认 (1)');
+    await expect(page.locator('#statusFilter option[value="Parsed_Material_Ready"]')).toHaveCount(0);
+
+    await page.selectOption('#workflowStatusFilter', 'Parsed_Material_Ready');
+    await expect(page.locator('#queueMeta')).toContainText('当前筛选 1 篇');
+    await expect(page.locator('#rows tr')).toHaveCount(1);
+    await expect(page.locator('#rows')).toContainText('Prepared Materials Paper');
+    await expect(page.locator('#rows')).not.toContainText('Needs Human Paper');
+    await expect(page.locator('#rows')).not.toContainText('Ready ML Paper');
+  });
+
+  test('keeps review center filter state during the current session', async ({ page }) => {
+    await page.route('**/api/**', async route => {
+      const url = new URL(route.request().url());
+      const pathname = url.pathname;
+
+      if (pathname === '/api/workbench/review-center') {
+        return jsonResponse(route, {
+          metadata: {
+            returned: 2,
+            quality_counts: { A_text_readable: 1, B_text_partial: 1 },
+          },
+          rows: [
+            {
+              paper_id: 'paper-session-1',
+              title: 'Session Filter Paper A',
+              year: 2025,
+              journal: 'Session Journal',
+              library_name: 'Default Library',
+              workflow_status: 'Parsed_Material_Ready',
+              pdf_quality_status: 'A_text_readable',
+              pdf_exists: true,
+              pdf_url: '/api/papers/paper-session-1/pdf',
+              review_conflict_count: 0,
+              review_conflict_total_count: 0,
+            },
+            {
+              paper_id: 'paper-session-2',
+              title: 'Session Filter Paper B',
+              year: 2024,
+              journal: 'Another Journal',
+              library_name: 'Archive Library',
+              workflow_status: 'Needs_Human_Confirmation',
+              pdf_quality_status: 'B_text_partial',
+              pdf_exists: true,
+              pdf_url: '/api/papers/paper-session-2/pdf',
+              review_conflict_count: 1,
+              review_conflict_total_count: 1,
+            },
+          ],
+        });
+      }
+
+      if (pathname === '/api/libraries') {
+        return jsonResponse(route, [
+          { name: 'Default Library', is_active: true },
+          { name: 'Archive Library', is_active: false },
+        ]);
+      }
+
+      if (pathname === '/api/system/agent-guide') {
+        return jsonResponse(route, {
+          version: 'test',
+          review_prompts: { templates: {}, composite_templates: {} },
+        });
+      }
+
+      if (pathname === '/api/workbench/review-conflicts') {
+        return jsonResponse(route, { rows: [], adjudication_summary: { auto: 0, suggest: 0, manual: 0 } });
+      }
+
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+    await page.evaluate(() => window.sessionStorage.removeItem('litai:review-center:filters:v1'));
+    await page.reload();
+
+    await page.selectOption('#libraryFilter', 'Archive Library');
+    await page.selectOption('#statusFilter', 'group:needs_action');
+    await page.selectOption('#workflowStatusFilter', 'Needs_Human_Confirmation');
+    await page.selectOption('#qualityFilter', 'B_text_partial');
+    await page.selectOption('#sortFilter', 'year_desc');
+    await page.fill('#searchBox', 'Session Filter Paper B');
+    await page.reload();
+
+    await expect(page.locator('#libraryFilter')).toHaveValue('Archive Library');
+    await expect(page.locator('#statusFilter')).toHaveValue('group:needs_action');
+    await expect(page.locator('#workflowStatusFilter')).toHaveValue('Needs_Human_Confirmation');
+    await expect(page.locator('#qualityFilter')).toHaveValue('B_text_partial');
+    await expect(page.locator('#sortFilter')).toHaveValue('year_desc');
+    await expect(page.locator('#searchBox')).toHaveValue('Session Filter Paper B');
+  });
+
+  test('shows resolved conflict history as a subtle badge instead of an active red conflict badge', async ({ page }) => {
+    await page.route('**/api/**', async route => {
+      const url = new URL(route.request().url());
+      const pathname = url.pathname;
+
+      if (pathname === '/api/workbench/review-center') {
+        return jsonResponse(route, {
+          metadata: {
+            returned: 1,
+            quality_counts: { A_text_readable: 1 },
+          },
+          rows: [
+            {
+              paper_id: 'paper-resolved',
+              title: 'Resolved Conflict Paper',
+              year: 2025,
+              journal: 'Journal D',
+              workflow_status: 'Parsed_Material_Ready',
+              pdf_quality_status: 'A_text_readable',
+              pdf_artifact_status: { pdf_exists: true, pdf_path_kind: 'stored', pdf_file_size: 120, blocking_errors: [] },
+              has_dft_candidates: true,
+              has_active_dft_candidates: false,
+              active_dft_candidate_count: 0,
+              dft_candidate_count: 1,
+              dft_candidate_status_counts: { ML_Ready: 1 },
+              dft_audit: { status_label: 'Ready', detected_signal_count: 1, parsed_dft_count: 1, suspected_missing_count: 0 },
+              dft_completeness_status: 'DB_Ready',
+              dft_completeness_label: 'DB_Ready',
+              suspected_missing_dft_count: 0,
+              figure_count: 0,
+              figure_crop_status_counts: {},
+              figure_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              figure_issue_count: 0,
+              figure_issue_counts: {},
+              top_figure_issues: [],
+              table_count: 0,
+              evidence_count: 1,
+              locator_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+              locator_issue_count: 0,
+              locator_issue_counts: {},
+              top_locator_issues: [],
+              external_audit_count: 0,
+              external_audit_opinions: [],
+              object_review_audit_count: 0,
+              object_review_audits: [],
+              paper_note_count: 0,
+              latest_paper_notes: [],
+              review_conflict_count: 0,
+              review_conflict_total_count: 2,
+            },
+          ],
+        });
+      }
+
+      if (pathname === '/api/libraries') {
+        return jsonResponse(route, []);
+      }
+
+      if (pathname === '/api/system/agent-guide') {
+        return jsonResponse(route, {
+          version: 'test',
+          review_prompts: { templates: {}, composite_templates: {} },
+        });
+      }
+
+      if (pathname === '/api/workbench/review-conflicts') {
+        return jsonResponse(route, { rows: [], adjudication_summary: { auto: 0, suggest: 0, manual: 0 } });
+      }
+
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+
+    await expect(page.locator('#stats .stat').filter({ hasText: '未收口冲突' })).toContainText('0');
+    await expect(page.locator('#rows .chip.subtle[title*="历史上出现过冲突"]')).toContainText('已处理冲突 2');
+    await expect(page.locator('#rows [data-action="open-conflicts"]')).toHaveCount(0);
   });
 });

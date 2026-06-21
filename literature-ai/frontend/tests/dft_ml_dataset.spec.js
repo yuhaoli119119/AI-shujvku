@@ -610,4 +610,29 @@ test.describe('DFT ML-ready dataset page', () => {
     expect(result.csv).not.toContain('record-basis-blocked');
     expect(result.csv).not.toContain('PBE0,CP2K');
   });
+
+  test('shows policy-disabled state instead of a generic load failure when exports are disabled', async ({ page }) => {
+    await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+    await page.route(/\/api\/libraries$/, route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([ACTIVE_LIBRARY, ALT_LIBRARY]),
+    }));
+    await page.route(/\/api\/papers\/export\/dft-dataset.*/, route => route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'Exports are disabled by server policy' }),
+    }));
+
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+
+    await expect(page.locator('#statusPanel')).toContainText('当前服务器策略已关闭导出接口');
+    await expect(page.locator('#statusPanel')).toHaveClass(/policy/);
+    await expect(page.locator('#resultsMeta')).toContainText('导出策略关闭中');
+    await expect(page.locator('#refreshButton')).toBeDisabled();
+    await expect(page.locator('#applyServerFiltersButton')).toBeDisabled();
+    await expect(page.locator('#exportCsvButton')).toBeDisabled();
+    await expect(page.locator('#exportJsonButton')).toBeDisabled();
+    await expect(page.locator('#toastContainer')).not.toContainText('读取失败：Exports are disabled by server policy');
+  });
 });

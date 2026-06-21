@@ -26,7 +26,7 @@ from app.schemas.api import (
 )
 from app.services.discovery_service import DiscoveryService
 from app.services.paper_identity import PaperIdentityService
-from app.services.paper_ingestion import PaperIngestionService
+from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.library_names import (
@@ -45,6 +45,8 @@ JOB_TYPE_EXTRACTION = "extraction"
 JOB_TYPE_AGENT_ACTIVITY = "agent_activity"
 JOB_TYPE_LOCAL_PDF_PATH_INGEST = "local_pdf_path_ingest"
 JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST = "discovery_download_ingest"
+WORKFLOW_QUEUE_DEFAULT = "workflow_default"
+WORKFLOW_QUEUE_PDF_INGEST = "workflow_pdf_ingest"
 JOB_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
 ACTIVE_JOB_STATUSES = {"queued", "running"}
 STALE_WORKFLOW_JOB_MINUTES = 45
@@ -720,6 +722,12 @@ def _find_existing_paper(
     return None
 
 
+def workflow_queue_for_job_type(job_type: str) -> str:
+    if job_type in {JOB_TYPE_LOCAL_PDF_PATH_INGEST, JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST}:
+        return WORKFLOW_QUEUE_PDF_INGEST
+    return WORKFLOW_QUEUE_DEFAULT
+
+
 def _candidate_lookup_key(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -884,31 +892,49 @@ def run_local_pdf_path_ingest_job(job_id: str, control_database_url: str | None 
         )
 
     try:
-        from app.security.files import validate_local_ingest_pdf
+        from app.security.files import validate_local_ingest_pdf, validate_pdf_file
 
-        source_path = validate_local_ingest_pdf(
-            Path(str(payload.get("pdf_path") or "")),
-            runtime_settings,
+        source_path_raw = Path(str(payload.get("pdf_path") or ""))
+        trusted_staged_upload = bool(payload.get("trusted_staged_upload"))
+        source_path = (
+            validate_pdf_file(source_path_raw)
+            if trusted_staged_upload
+            else validate_local_ingest_pdf(source_path_raw, runtime_settings)
         )
 
         with session_scope(runtime_settings.database_url) as job_session:
             assert_job_not_cancelled(job_session, job_id)
             ingestion = PaperIngestionService(session=job_session, settings=runtime_settings)
-            paper = asyncio.run(
-                ingestion.ingest_pdf(
-                    source_path=source_path,
-                    original_filename=source_path.name,
-                    external_metadata=_external_metadata_from_ingest_payload(payload),
-                    source_reference=str(source_path.resolve()),
-                    library_name=normalize_library_name(payload.get("library_name") or job_library_name),
-                    ingest_source="local_pdf",
+            original_filename = str(payload.get("original_filename") or source_path.name)
+            try:
+                paper = asyncio.run(
+                    ingestion.ingest_pdf(
+                        source_path=source_path,
+                        original_filename=original_filename,
+                        copy_pdf=not trusted_staged_upload,
+                        external_metadata=_external_metadata_from_ingest_payload(payload),
+                        source_reference=None if trusted_staged_upload else str(source_path.resolve()),
+                        library_name=normalize_library_name(payload.get("library_name") or job_library_name),
+                        attach_to_paper_id=UUID(str(payload["attach_to_paper_id"])) if payload.get("attach_to_paper_id") else None,
+                        confirm_identity_mismatch=bool(payload.get("confirm_identity_mismatch")),
+                        ingest_source="uploaded" if trusted_staged_upload else "local_pdf",
+                    )
                 )
-            )
-            result = {
-                "paper_id": str(paper.id),
-                "title": paper.title,
-                "status": getattr(paper, "_ingest_status", "completed"),
-            }
+                result = {
+                    "paper_id": str(paper.id),
+                    "title": paper.title,
+                    "status": getattr(paper, "_ingest_status", "completed"),
+                }
+            except PaperConflictError as exc:
+                result = {
+                    "paper_id": str(exc.paper.id),
+                    "title": exc.paper.title,
+                    "status": "already_exists",
+                }
+            except PaperIdentityMismatchError as exc:
+                raise ValueError(
+                    f"{exc.status}: target={exc.target_paper.id} incoming_title={exc.incoming.get('title') or ''}"
+                ) from exc
             assert_job_not_cancelled(job_session, job_id)
 
         with session_scope(control_db_url) as control_session:
@@ -1578,9 +1604,12 @@ def dispatch_job(
     from app.workers.tasks import run_workflow_job_task
 
     try:
+        with session_scope(control_database_url or get_settings().database_url) as dispatch_session:
+            job = get_job_or_raise(dispatch_session, job_id)
+            target_queue = workflow_queue_for_job_type(job.type)
         with Connection(get_settings().celery_broker_url, connect_timeout=1) as connection:
             connection.ensure_connection(max_retries=0)
-        run_workflow_job_task.delay(job_id, control_database_url)
+        run_workflow_job_task.apply_async(args=[job_id, control_database_url], queue=target_queue)
         return "celery"
     except Exception as exc:
         logger.warning("Celery dispatch failed for job %s, falling back to in-process background task: %s", job_id, exc)

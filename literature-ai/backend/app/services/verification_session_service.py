@@ -270,6 +270,7 @@ class VerificationSessionService:
         paper_id: UUID,
         reviewer: str,
         write_lock_tokens: list[str] | None = None,
+        write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         required_modules = self._required_direct_write_modules_for_paper(paper_id)
         try:
@@ -277,12 +278,17 @@ class VerificationSessionService:
                 paper_id=paper_id,
                 module_names=required_modules,
                 lock_tokens=write_lock_tokens,
-                locked_by=reviewer,
+                locked_by=write_lock_owner or reviewer,
             )
         except ValueError as exc:
             raise
         new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
-        low_risk_summary = self._auto_materialize_single_ai_candidates(paper_id=paper_id, reviewer=reviewer)
+        low_risk_summary = self._auto_materialize_single_ai_candidates(
+            paper_id=paper_id,
+            reviewer=reviewer,
+            write_lock_tokens=write_lock_tokens,
+            write_lock_owner=write_lock_owner,
+        )
         dft_settlement_summary = self.settle_ai_dft_reviews_for_paper(
             paper_id=paper_id,
             reviewer=reviewer,
@@ -438,7 +444,7 @@ class VerificationSessionService:
         skipped: list[dict[str, Any]] = []
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            target_type = self._normalize_object_review_target_type(payload.get("target_type"))
             decision = str(payload.get("decision") or "").strip().lower()
             target_id = str(payload.get("target_id") or "").strip().lower()
             if target_type != "dft_results" or (decision != "new_candidate" and target_id != "new"):
@@ -756,7 +762,7 @@ class VerificationSessionService:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             if candidate.candidate_type != "object_review_audit":
                 continue
-            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            target_type = self._normalize_object_review_target_type(payload.get("target_type"))
             if target_type == "dft_results":
                 decision = str(payload.get("decision") or "").strip().lower()
                 target_id = str(payload.get("target_id") or "").strip().lower()
@@ -764,7 +770,10 @@ class VerificationSessionService:
                     modules.add("dft_results")
                 continue
             try:
-                modules.add(ModuleWriteLockService.module_from_field(target_type))
+                if target_type == "paper":
+                    modules.add(ModuleWriteLockService.module_from_field(payload.get("field_name")))
+                else:
+                    modules.add(ModuleWriteLockService.module_from_field(target_type))
             except ValueError:
                 continue
         return sorted(modules)
@@ -1063,7 +1072,14 @@ class VerificationSessionService:
             "materialized_note_ids": materialized_note_ids,
         }
 
-    def _auto_materialize_single_ai_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
+    def _auto_materialize_single_ai_candidates(
+        self,
+        *,
+        paper_id: UUID,
+        reviewer: str,
+        write_lock_tokens: list[str] | None = None,
+        write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         candidates = self.session.scalars(
             select(ExternalAnalysisCandidate)
             .where(
@@ -1093,7 +1109,12 @@ class VerificationSessionService:
             )
             approved_status = None
             if candidate.candidate_type == "correction" and candidate.materialized_target_id:
-                approved = ReviewService(self.session).approve_correction(UUID(str(candidate.materialized_target_id)), reviewer=reviewer)
+                approved = ReviewService(self.session).approve_correction(
+                    UUID(str(candidate.materialized_target_id)),
+                    reviewer=reviewer,
+                    write_lock_tokens=write_lock_tokens,
+                    write_lock_owner=write_lock_owner,
+                )
                 approved_status = approved.status
             materialized.append(
                 {
@@ -1135,7 +1156,7 @@ class VerificationSessionService:
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            target_type = self._normalize_object_review_target_type(payload.get("target_type"))
             if include_target_types is not None and target_type not in include_target_types:
                 continue
             if exclude_target_types is not None and target_type in exclude_target_types:
@@ -1347,7 +1368,7 @@ class VerificationSessionService:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            target_type = canonical_target_type(str(payload.get("target_type") or "").strip().lower())
+            target_type = self._normalize_object_review_target_type(payload.get("target_type"))
             target_id = str(payload.get("target_id") or "").strip()
             decision = str(payload.get("decision") or "").strip().lower()
             if (
@@ -1484,7 +1505,7 @@ class VerificationSessionService:
             return row_ref
 
         whole_row = self._latest_dft_whole_row_proposal(anchored)
-        supporting_pass = self._supporting_value_pass_for_row(row, anchored, whole_row)
+        supporting_pass = self._supporting_pass_for_row(row, anchored, whole_row)
         if whole_row and not supporting_pass:
             row_ref["reason"] = "awaiting_matching_second_ai"
             row_ref["status"] = "need_third_ai"
@@ -1766,7 +1787,7 @@ class VerificationSessionService:
         proposals.sort(key=lambda item: (str(item.get("source_identity") or ""), item.get("confidence") or 0), reverse=True)
         return proposals[0]
 
-    def _supporting_value_pass_for_row(
+    def _supporting_pass_for_row(
         self,
         row: DFTResult,
         audits: list[dict[str, Any]],
@@ -1779,11 +1800,19 @@ class VerificationSessionService:
         for audit in audits:
             if str(audit.get("decision") or "").strip().upper() != "PASS":
                 continue
-            if str(audit.get("field_name") or "").strip() != "value":
-                continue
             if str(audit.get("source_identity") or "") == proposal_source:
                 continue
-            if not self._same_normalized_dft_value(proposed_target, self._normalized_dft_audit_target(row, audit)):
+            field_name = str(audit.get("field_name") or "").strip()
+            if field_name == "value":
+                if not self._same_normalized_dft_value(proposed_target, self._normalized_dft_audit_target(row, audit)):
+                    continue
+            elif field_name == "dft_results":
+                if not self._same_normalized_dft_value(
+                    proposed_target,
+                    self._normalized_dft_audit_target(row, audit),
+                ):
+                    continue
+            else:
                 continue
             return audit
         return None
@@ -1926,8 +1955,19 @@ class VerificationSessionService:
     @staticmethod
     def _normalized_dft_audit_target(row: DFTResult, audit: dict[str, Any]) -> dict[str, Any]:
         corrected = audit.get("corrected_value")
-        value = corrected.get("value") if isinstance(corrected, dict) else corrected
-        unit = corrected.get("unit") if isinstance(corrected, dict) else row.unit
+        field_name = str(audit.get("field_name") or "").strip()
+        if isinstance(corrected, dict):
+            value = corrected.get("value")
+            unit = corrected.get("unit")
+        elif corrected not in (None, ""):
+            value = corrected
+            unit = row.unit
+        elif field_name in {"value", "dft_results"}:
+            value = row.value
+            unit = row.unit
+        else:
+            value = None
+            unit = row.unit
         try:
             numeric = float(value) if value is not None else None
         except (TypeError, ValueError):
@@ -2218,6 +2258,38 @@ class VerificationSessionService:
         write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
         target_collection = self._correction_collection_name(target_type)
+        if target_collection == "paper":
+            correction = PaperCorrection(
+                paper_id=paper_id,
+                source=reviewer,
+                field_name=field_name,
+                target_path=field_name,
+                operation="replace",
+                proposed_value=proposed_value,
+                reason=self._materialization_note(
+                    dual_ai_consensus=dual_ai_consensus,
+                    adjudicated_by_third_ai=adjudicated_by_third_ai,
+                ),
+                evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
+                status="pending",
+            )
+            self.session.add(correction)
+            self.session.flush()
+            approved = ReviewService(self.session).approve_correction(
+                correction.id,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+            self.session.flush()
+            return {
+                "action": "approve_correction",
+                "target_type": "paper",
+                "target_id": str(paper_id),
+                "correction_id": str(approved.id),
+                "field_name": field_name,
+                "proposed_value": proposed_value,
+                "result": {"status": approved.status, "reviewed_by": approved.reviewed_by},
+            }
         is_sample_create = (
             target_collection == "catalyst_samples"
             and str(target_id).strip().lower() in {"new", "create"}
@@ -2301,11 +2373,20 @@ class VerificationSessionService:
     @staticmethod
     def _correction_collection_name(target_type: str) -> str:
         lowered = str(target_type or "").strip().lower()
+        if lowered == "paper":
+            return "paper"
         if lowered in {"figure", "figures"}:
             return "figures"
         if lowered in {"table", "tables"}:
             return "tables"
         return lowered
+
+    @staticmethod
+    def _normalize_object_review_target_type(value: Any) -> str:
+        lowered = str(value or "").strip().lower()
+        if lowered == "paper":
+            return "paper"
+        return canonical_target_type(lowered)
 
     @staticmethod
     def _materialized_target_ref(result: dict[str, Any]) -> tuple[str | None, str | None]:
