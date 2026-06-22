@@ -10,6 +10,9 @@ from app.utils.project_paths import BACKEND_ROOT, PROJECT_ROOT
 logger = logging.getLogger(__name__)
 _reported_storage_root_conflicts: set[tuple[str, str, str]] = set()
 
+DATABASE_V1_EMBEDDING_MODEL = "BAAI/bge-m3"
+DATABASE_V1_EMBEDDING_DIMENSION = 1024
+
 
 def _looks_explicit_absolute_path(value: str | Path) -> bool:
     text = str(value).strip()
@@ -85,8 +88,8 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai_compatible"
     embedding_api_base: str | None = "https://api.siliconflow.cn/v1"
     embedding_api_key: str | None = None
-    embedding_model: str = "BAAI/bge-m3"
-    embedding_dimension: int = 1024
+    embedding_model: str = DATABASE_V1_EMBEDDING_MODEL
+    embedding_dimension: int = DATABASE_V1_EMBEDDING_DIMENSION
     use_minio: bool = False
     writer_backend: str = "rule"
     writer_prompt_path: Path = Field(default=Path("prompts/paper_writer.yaml"))
@@ -131,6 +134,20 @@ class Settings(BaseSettings):
         normalized_root = _resolve_storage_root(self.storage_root)
         object.__setattr__(self, "storage_root", normalized_root)
         _warn_if_shadow_storage_roots_exist(normalized_root)
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_database_v1_embedding_contract(self) -> "Settings":
+        if self.embedding_model != DATABASE_V1_EMBEDDING_MODEL:
+            raise RuntimeError(
+                f"Database v1 requires embedding_model={DATABASE_V1_EMBEDDING_MODEL!r}; "
+                f"got {self.embedding_model!r}"
+            )
+        if self.embedding_dimension != DATABASE_V1_EMBEDDING_DIMENSION:
+            raise RuntimeError(
+                f"Database v1 requires embedding_dimension={DATABASE_V1_EMBEDDING_DIMENSION}; "
+                f"got {self.embedding_dimension}"
+            )
         return self
 
     @property

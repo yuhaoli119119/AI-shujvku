@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.config import get_settings
+from app.config import DATABASE_V1_EMBEDDING_DIMENSION, DATABASE_V1_EMBEDDING_MODEL, get_settings
 from app.security.owner import require_owner_request
 from app.services.ide_prompt_service import (
     CANONICAL_MCP_PATH,
@@ -240,8 +240,6 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
         "embedding_provider": "embedding_provider",
         "embedding_api_base": "embedding_api_base",
         "embedding_api_key": "embedding_api_key",
-        "embedding_model": "embedding_model",
-        "embedding_dimension": "embedding_dimension",
         "mcp_api_keys": "mcp_api_keys",
         "owner_api_token": "owner_api_token",
         "exports_enabled": "exports_enabled",
@@ -275,6 +273,9 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
         else:
             os.environ.pop(env_key, None)
 
+    object.__setattr__(settings, "embedding_model", DATABASE_V1_EMBEDDING_MODEL)
+    object.__setattr__(settings, "embedding_dimension", DATABASE_V1_EMBEDDING_DIMENSION)
+
 
 def sync_writer_settings_from_session(session, settings) -> dict[str, str]:
     """Compatibility no-op: deprecated web-side writer settings stay disabled."""
@@ -307,6 +308,11 @@ _DEPRECATED_WEB_AI_KEYS = {
     "writer_model",
     "writer_api_base",
     "writer_api_key",
+}
+
+_FIXED_EMBEDDING_SETTINGS = {
+    "embedding_model": DATABASE_V1_EMBEDDING_MODEL,
+    "embedding_dimension": str(DATABASE_V1_EMBEDDING_DIMENSION),
 }
 
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
@@ -442,7 +448,10 @@ async def get_settings_api() -> dict[str, Any]:
     result = {}
     for key in _MANAGED_KEYS:
         # Prefer persisted value, fall back to Settings default
-        raw_value = persisted.get(key) or str(getattr(settings, key, "") or "")
+        if key in _FIXED_EMBEDDING_SETTINGS:
+            raw_value = _FIXED_EMBEDDING_SETTINGS[key]
+        else:
+            raw_value = persisted.get(key) or str(getattr(settings, key, "") or "")
         if _is_sensitive(key):
             result[key] = _mask_value(raw_value)
         else:
@@ -466,6 +475,15 @@ async def update_settings_api(request: SettingsUpdateRequest, raw_request: Reque
             raise HTTPException(status_code=400, detail=f"Unknown setting key: {item.key}")
         # If the value looks like a masked value (contains ****), skip it
         if item.value and "****" in item.value:
+            continue
+        if item.key in _FIXED_EMBEDDING_SETTINGS:
+            expected_value = _FIXED_EMBEDDING_SETTINGS[item.key]
+            if item.value not in (None, "", expected_value):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{item.key} is fixed to {expected_value} for database v1",
+                )
+            kv_pairs[item.key] = None
             continue
         kv_pairs[item.key] = item.value
 
@@ -500,7 +518,7 @@ async def get_services_status() -> dict[str, Any]:
     emb_provider = persisted.get("embedding_provider") or settings.embedding_provider
     emb_api_base = persisted.get("embedding_api_base") or settings.embedding_api_base
     emb_api_key = persisted.get("embedding_api_key") or settings.embedding_api_key
-    emb_model = persisted.get("embedding_model") or settings.embedding_model
+    emb_model = settings.embedding_model
 
     embedding_status = {
         "provider": emb_provider,
