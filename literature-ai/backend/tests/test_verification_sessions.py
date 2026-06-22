@@ -1130,6 +1130,117 @@ def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env
     assert [audit["decision"] for audit in target["object_review_audits"]] == ["new_candidate"]
 
 
+def test_dft_review_queue_includes_materialized_new_candidate_audits(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Queue materialized new candidate paper", pdf_path="queue-new-dft.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="*H",
+            value=0.02,
+            unit="eV",
+            reaction_step="hydrogen adsorption",
+            source_section="Table 1",
+            evidence_text="Delta G H* = 0.02 eV.",
+            candidate_status="new_candidate",
+            evidence_payload={
+                "page": 6,
+                "quoted_text": "Delta G H* = 0.02 eV.",
+                "material_identity": "CuMn@N6Gr",
+            },
+            extraction_protocol_version="ide_ai_new_candidate_v1",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=6,
+                evidence_text="Delta G H* = 0.02 eV.",
+                locator_status="exact_page",
+                locator_confidence=0.95,
+            )
+        )
+        new_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-new-source",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        reject_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ai-reject-source",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add_all([new_run, reject_run])
+        session.flush()
+        session.add_all(
+            [
+                ExternalAnalysisCandidate(
+                    run_id=new_run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "corrected_value": {
+                            "material": "CuMn@N6Gr",
+                            "property": "gibbs_free_energy_change",
+                            "adsorbate": "*H",
+                            "value": 0.02,
+                            "unit": "eV",
+                        },
+                        "evidence_location": {"page": 6, "quoted_text": "Delta G H* = 0.02 eV."},
+                    },
+                    status="materialized",
+                    materialized_target_type="dft_results",
+                    materialized_target_id=str(row.id),
+                ),
+                ExternalAnalysisCandidate(
+                    run_id=reject_run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": str(row.id),
+                        "field_name": "dft_results",
+                        "decision": "REJECT",
+                        "reason": "This row duplicates a better normalized Gibbs free-energy record.",
+                        "evidence_location": {"page": 6, "quoted_text": "Delta G H* = 0.02 eV."},
+                    },
+                    status="candidate",
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    client = TestClient(app)
+    queue = client.get(f"/api/papers/export/dft-review-queue?paper_id={paper_id}&limit=10&status=needs_review")
+    assert queue.status_code == 200
+    rows = queue.json()["rows"]
+    target = next(item for item in rows if item["record_id"] == str(row_id))
+    decisions = {audit["decision"] for audit in target["object_review_audits"]}
+    sources = {audit["source_label"] for audit in target["object_review_audits"]}
+    assert {"new_candidate", "REJECT"} <= decisions
+    assert {"ai-new-source", "ai-reject-source"} <= sources
+
+
 def test_field_level_proposal_can_settle_with_independent_value_pass(verification_env):
     Session = verification_env
     with Session() as session:

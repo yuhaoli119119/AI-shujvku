@@ -2830,6 +2830,29 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
     expect(missingReviewLabels.oneAi).toBe('仅有一个 AI 意见，等待第二 AI');
     expect(missingReviewLabels.twoAi).toBe('双 AI 一致，待系统写回');
+    const dftConflictClassification = await page.evaluate(() => {
+      const rejectAudit = {
+        source_label: 'ai-reject',
+        decision: 'REJECT',
+        field_name: 'dft_results',
+        evidence_location: { page: 5, quoted_text: 'reject evidence' },
+      };
+      const reviseAudit = {
+        source_label: 'ai-revise',
+        decision: 'REVISE',
+        field_name: 'dft_results',
+        corrected_value: { value: 0.04, unit: 'eV', material_identity: 'CuMn@N6Gr' },
+        evidence_location: { page: 5, quoted_text: 'revise evidence' },
+      };
+      return classifyDftAutomationRows([{
+        value: 0.04,
+        unit: 'eV',
+        blocked_reasons: ['missing_material_identity', 'missing_review', 'unsafe_locator'],
+        object_review_audits: [rejectAudit, reviseAudit],
+      }]);
+    });
+    expect(dftConflictClassification.conflicts).toHaveLength(1);
+    expect(dftConflictClassification.newReview).toHaveLength(0);
     await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(5);
     const dftCandidateCard = page.locator('#dftContent details.readable-card').filter({ hasText: 'adsorption_energy' }).first();
     await dftCandidateCard.locator('summary').click();

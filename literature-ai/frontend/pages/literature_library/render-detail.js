@@ -1177,21 +1177,21 @@ function classifyDftAutomationRows(rows) {
         const independent = Object.keys(bySource).map(function(source) { return bySource[source]; });
         const repairReasons = new Set(["missing_material_identity", "missing_evidence", "missing_evidence_text", "unsafe_locator"]);
         const blockedReasons = Array.isArray(row.blocked_reasons) ? row.blocked_reasons : [];
-        if (independent.length < 2 || blockedReasons.some(function(reason) { return repairReasons.has(reason); })) {
-            result.newReview.push(row);
-            return;
-        }
         const hasReject = independent.some(function(audit) { return isNegativeDftDecision(audit && audit.decision); });
         const hasPositive = independent.some(function(audit) {
             const decision = dftOpinionDecision(audit);
             return ["PASS", "PROPOSED", "REVISE", "NEW_CANDIDATE"].includes(decision);
         });
-        if (dftIsAutoRejectDuplicate(row)) {
-            result.consensus.push(row);
-            return;
-        }
         if (hasReject && hasPositive) {
             result.conflicts.push(row);
+            return;
+        }
+        if (independent.length < 2 || blockedReasons.some(function(reason) { return repairReasons.has(reason); })) {
+            result.newReview.push(row);
+            return;
+        }
+        if (dftIsAutoRejectDuplicate(row)) {
+            result.consensus.push(row);
             return;
         }
         if (hasReject && !hasPositive) {

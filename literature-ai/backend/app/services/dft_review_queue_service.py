@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -9,7 +10,15 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import CatalystSample, DFTResult, DFTSetting, EvidenceLocator, ExternalAnalysisCandidate, Paper
+from app.db.models import (
+    CatalystSample,
+    DFTResult,
+    DFTSetting,
+    EvidenceLocator,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
+    Paper,
+)
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -472,21 +481,44 @@ class DFTReviewQueueService:
         if not paper_ids or not target_ids:
             return {}
         audits_by_target: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
-        candidates = self.session.scalars(
-            select(ExternalAnalysisCandidate)
+        deduped_by_target: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {target_id: {} for target_id in target_ids}
+        rows = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
             .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
             .order_by(ExternalAnalysisCandidate.created_at.desc())
         ).all()
-        for candidate in candidates:
-            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            target_type = str(payload.get("target_type") or "")
+        for candidate, run in rows:
+            payload = dict(candidate.normalized_payload) if isinstance(candidate.normalized_payload, dict) else {}
+            if not payload.get("source"):
+                payload["source"] = run.source
+            if not payload.get("source_label"):
+                payload["source_label"] = run.source_label
+            target_type = str(payload.get("target_type") or "").strip()
             target_id = str(payload.get("target_id") or payload.get("dft_result_id") or payload.get("record_id") or "")
+            decision = str(payload.get("decision") or "").strip().lower()
+            if (
+                target_type.strip().lower() in {"dft_results", "dft_result"}
+                and (target_id.strip().lower() == "new" or decision == "new_candidate")
+                and str(candidate.materialized_target_type or "").strip().lower() == "dft_results"
+                and str(candidate.materialized_target_id or "").strip()
+            ):
+                target_id = str(candidate.materialized_target_id).strip()
             if target_id not in target_ids or target_type not in DFT_TARGET_TYPES:
                 continue
-            if len(audits_by_target.setdefault(target_id, [])) >= 5:
-                continue
-            audits_by_target[target_id].append(self._object_review_audit_payload(candidate, payload))
+            audit_payload = self._object_review_audit_payload(candidate, payload)
+            dedupe_key = self._object_review_audit_dedupe_key(audit_payload)
+            target_bucket = deduped_by_target.setdefault(target_id, {})
+            existing = target_bucket.get(dedupe_key)
+            if existing is None or self._object_review_audit_payload_rank(audit_payload) > self._object_review_audit_payload_rank(existing):
+                target_bucket[dedupe_key] = audit_payload
+        for target_id, deduped in deduped_by_target.items():
+            audits_by_target[target_id] = sorted(
+                deduped.values(),
+                key=lambda item: str(item.get("created_at") or ""),
+                reverse=True,
+            )[:5]
         return audits_by_target
 
     @staticmethod
@@ -516,6 +548,29 @@ class DFTReviewQueueService:
             "corrected_value": payload.get("corrected_value"),
             "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
         }
+
+    @staticmethod
+    def _object_review_audit_dedupe_key(payload: dict[str, Any]) -> tuple[Any, ...]:
+        field_name = str(payload.get("field_name") or "").strip()
+        decision = str(payload.get("decision") or "").strip().lower()
+        if decision == "new_candidate" and field_name in {"", "dft_results"}:
+            field_name = "dft_results"
+        return (
+            str(payload.get("source_label") or payload.get("source") or "").strip().lower(),
+            decision,
+            field_name,
+            json.dumps(payload.get("corrected_value"), sort_keys=True, ensure_ascii=False, default=str),
+            json.dumps(payload.get("evidence_location"), sort_keys=True, ensure_ascii=False, default=str),
+        )
+
+    @staticmethod
+    def _object_review_audit_payload_rank(payload: dict[str, Any]) -> tuple[int, int]:
+        field_name = str(payload.get("field_name") or "").strip()
+        corrected = payload.get("corrected_value")
+        return (
+            1 if field_name else 0,
+            1 if corrected not in (None, "", [], {}) else 0,
+        )
 
     @staticmethod
     def _locator_to_payload(locator: EvidenceLocator) -> dict[str, Any]:
