@@ -570,6 +570,27 @@ async function refreshCurrentPage() {
     }
 }
 
+async function refreshLibraryData(options) {
+    const opts = options || {};
+    if (opts.reloadLibraries === true) {
+        await loadLibraries();
+    }
+    await fetchPapers({
+        preserveList: true,
+        preserveDetail: opts.preserveDetail !== false,
+        loadingMessage: opts.loadingMessage || "正在同步数据库更新..."
+    });
+    if (opts.reinitSSE === true && typeof initSSE === "function") {
+        initSSE();
+    }
+    if (opts.refreshSelectedDetail === true && state.selectedPaperId && typeof refreshSelectedPaperDetail === "function") {
+        await refreshSelectedPaperDetail({
+            reason: opts.reason || "database_sync",
+            mode: opts.detailMode
+        });
+    }
+}
+
 function prevPage() {
     changeLibraryPage(-1);
 }
@@ -1123,6 +1144,7 @@ Object.assign(window, {
     fetchPapers: fetchPapers,
     searchLocal: searchLocal,
     refreshCurrentPage: refreshCurrentPage,
+    refreshLibraryData: refreshLibraryData,
     resetLibraryPagination: resetLibraryPagination,
     goToLibraryPage: goToLibraryPage,
     changeLibraryPage: changeLibraryPage,

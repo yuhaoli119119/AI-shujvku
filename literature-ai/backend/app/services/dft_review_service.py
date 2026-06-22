@@ -69,6 +69,7 @@ class DFTResultReviewService:
         expected_write_versions: dict[str, int] | None = None,
         expected_write_version: int | None = None,
         evidence_payload: dict[str, Any] | list[Any] | None = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         if not confirm_reviewed_against_pdf:
             raise ValueError("Explicit PDF/evidence review confirmation is required.")
@@ -94,6 +95,7 @@ class DFTResultReviewService:
                     reviewer=reviewer or "codex_review",
                     reviewer_note=reviewer_note or "Verified through the DFT candidate review workflow.",
                 ),
+                commit=commit,
             )
             if self._has_anchor(evidence_payload):
                 self._attach_imported_evidence_payload(
@@ -109,11 +111,31 @@ class DFTResultReviewService:
             reviews = []
             for field_name in selected_fields:
                 field_snapshot = snapshot[field_name]
-                review = self.review_service._get_or_create_review(
+                existing_review = self.review_service._find_review(
                     paper_id,
                     "dft_results",
                     str(result_id),
                     field_name,
+                )
+                expected_version = (expected_write_versions or {}).get(field_name)
+                if expected_version is None and len(selected_fields) == 1:
+                    expected_version = expected_write_version
+                if existing_review is not None:
+                    self.review_service._guard_expected_write_version(
+                        existing_review,
+                        expected_version,
+                        created=False,
+                    )
+                review = existing_review or self.review_service._get_or_create_review(
+                    paper_id,
+                    "dft_results",
+                    str(result_id),
+                    field_name,
+                )
+                self.review_service._guard_expected_write_version(
+                    review,
+                    expected_version,
+                    created=existing_review is None and getattr(review, "_created_by_get_or_create", False),
                 )
                 review.original_value = field_snapshot["value"]
                 review.reviewed_value = field_snapshot["value"]
@@ -165,7 +187,10 @@ class DFTResultReviewService:
                 "blocked_reasons": list(gate.reasons),
             },
         )
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         self.session.refresh(audit)
         return {
             "paper_id": str(paper_id),
@@ -216,6 +241,7 @@ class DFTResultReviewService:
         field_names: list[str] | None = None,
         expected_write_versions: dict[str, int] | None = None,
         expected_write_version: int | None = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         if not confirm_reject_candidate:
             raise ValueError("Explicit DFT candidate rejection confirmation is required.")
@@ -252,6 +278,7 @@ class DFTResultReviewService:
                 )
                 for field_name in selected_fields
             ],
+            commit=commit,
         )
         row.candidate_status = "Rejected"
         self.session.add(row)
@@ -279,7 +306,10 @@ class DFTResultReviewService:
                 "blocked_reasons": list(gate.reasons),
             },
         )
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         self.session.refresh(audit)
         return {
             "paper_id": str(paper_id),

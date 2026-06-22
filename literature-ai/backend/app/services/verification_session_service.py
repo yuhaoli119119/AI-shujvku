@@ -2501,6 +2501,11 @@ class VerificationSessionService:
             confirm_reject_candidate=True,
             reviewer=reviewer,
             reviewer_note="Rejected after AI verification conflict adjudication.",
+            expected_write_versions=self._current_dft_review_versions(
+                paper_id=paper_id,
+                target_id=target_id,
+            ),
+            commit=False,
         )
         return {"action": "reject", "target_type": target_type, "target_id": target_id, "result": result}
 
@@ -2545,7 +2550,13 @@ class VerificationSessionService:
                 reviewer=reviewer,
                 reviewer_note=note,
                 field_names=["value"],
+                expected_write_versions=self._current_dft_review_versions(
+                    paper_id=paper_id,
+                    target_id=target_id,
+                    field_names=["value"],
+                ),
                 evidence_payload=evidence_payload,
+                commit=False,
             )
             return {"action": "verify", "target_type": "dft_results", "target_id": target_id, "result": result}
         return self._apply_structured_correction(
@@ -2560,6 +2571,26 @@ class VerificationSessionService:
             adjudicated_by_third_ai=adjudicated_by_third_ai,
             write_lock_tokens=write_lock_tokens,
         )
+
+    def _current_dft_review_versions(
+        self,
+        *,
+        paper_id: UUID,
+        target_id: str,
+        field_names: list[str] | None = None,
+    ) -> dict[str, int]:
+        stmt = select(ExtractionFieldReview).where(
+            ExtractionFieldReview.paper_id == paper_id,
+            ExtractionFieldReview.target_type == "dft_results",
+            ExtractionFieldReview.target_id == str(target_id),
+        )
+        if field_names:
+            stmt = stmt.where(ExtractionFieldReview.field_name.in_(field_names))
+        reviews = self.session.scalars(stmt).all()
+        return {
+            str(review.field_name): int(review.write_version or 1)
+            for review in reviews
+        }
 
     def _apply_structured_correction(
         self,

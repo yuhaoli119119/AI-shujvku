@@ -2798,9 +2798,61 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('.paper-row');
     await page.click('button[data-tab="dft"]');
 
-    await expect(page.locator('#dftContent')).toContainText('候选 DFT 入库安全状态');
+    await expect(page.locator('#dftContent')).toContainText('DFT 数据状态');
+    await expect(page.locator('#dftContent [data-role="dft-status-panel"]')).toHaveCount(1);
+    await expect(page.locator('#dftContent')).not.toContainText('DFT 进度');
     await expect(page.locator('#dftContent')).toContainText('可导出 0');
-    await expect(page.locator('#dftContent')).toContainText('双AI一致，待系统写回');
+    await expect(page.locator('#dftContent')).toContainText('尚未完成审核');
+    const dftActions = page.locator('#dftContent [data-role="dft-readiness-actions"]');
+    await expect(dftActions).toHaveCount(1);
+    await expect(dftActions.locator('button:has-text("生成下一轮 AI 审核任务")')).toBeVisible();
+    await expect(dftActions.locator('button:has-text("重新检查写回")')).toBeVisible();
+    await expect(dftActions.locator('button:has-text("打开审核中心")')).toBeVisible();
+    await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
+    const missingReviewLabels = await page.evaluate(() => {
+      const base = {
+        value: 0.04,
+        unit: 'eV',
+        blocked_reasons: ['missing_review'],
+      };
+      const first = {
+        source_label: 'ai-1',
+        decision: 'PASS',
+        field_name: 'value',
+        corrected_value: 0.04,
+        evidence_location: { page: 5, quoted_text: '0.04 eV' },
+      };
+      const second = { ...first, source_label: 'ai-2' };
+      return {
+        oneAi: dftBlockedReasonText(['missing_review'], { ...base, object_review_audits: [first] }),
+        twoAi: dftBlockedReasonText(['missing_review'], { ...base, object_review_audits: [first, second] }),
+      };
+    });
+    expect(missingReviewLabels.oneAi).toBe('仅有一个 AI 意见，等待第二 AI');
+    expect(missingReviewLabels.twoAi).toBe('双 AI 一致，待系统写回');
+    const dftConflictClassification = await page.evaluate(() => {
+      const rejectAudit = {
+        source_label: 'ai-reject',
+        decision: 'REJECT',
+        field_name: 'dft_results',
+        evidence_location: { page: 5, quoted_text: 'reject evidence' },
+      };
+      const reviseAudit = {
+        source_label: 'ai-revise',
+        decision: 'REVISE',
+        field_name: 'dft_results',
+        corrected_value: { value: 0.04, unit: 'eV', material_identity: 'CuMn@N6Gr' },
+        evidence_location: { page: 5, quoted_text: 'revise evidence' },
+      };
+      return classifyDftAutomationRows([{
+        value: 0.04,
+        unit: 'eV',
+        blocked_reasons: ['missing_material_identity', 'missing_review', 'unsafe_locator'],
+        object_review_audits: [rejectAudit, reviseAudit],
+      }]);
+    });
+    expect(dftConflictClassification.conflicts).toHaveLength(1);
+    expect(dftConflictClassification.newReview).toHaveLength(0);
     await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(5);
     const dftCandidateCard = page.locator('#dftContent details.readable-card').filter({ hasText: 'adsorption_energy' }).first();
     await dftCandidateCard.locator('summary').click();
@@ -2814,6 +2866,59 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.click('button[data-tab="figures"]');
       await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
+    });
+
+    test('business flow: single DFT action settles and copies the next AI review task', async ({ page }) => {
+      let settleCalls = 0;
+      await page.addInitScript(() => {
+        window.__copiedDftReviewTask = '';
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: async text => {
+              window.__copiedDftReviewTask = String(text || '');
+            },
+          },
+        });
+      });
+      await page.route(/\/api\/papers\/paper-1\/settle-ai-dft-reviews$/, async route => {
+        settleCalls += 1;
+        return jsonResponse(route, {
+          paper_id: 'paper-1',
+          auto_applied_count: 0,
+          exportable_count: 0,
+          waiting_second_ai_count: 1,
+          need_third_ai_count: 0,
+          need_repair_count: 0,
+          blocked_reason_counts: { missing_review: 1 },
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft`);
+      const nextAction = page.locator('#dftContent [data-role="dft-next-action"]');
+      await expect(nextAction).toBeVisible();
+      await nextAction.click();
+
+      await expect.poll(() => settleCalls).toBe(1);
+      await expect.poll(() => page.evaluate(() => window.__copiedDftReviewTask)).toContain('统一 DFT 提示词');
+      await expect.poll(() => page.evaluate(() => window.__copiedDftReviewTask)).toContain('新数据审核候选清单');
+    });
+
+    test('business flow: literature library renders common markdown table variants', async ({ page }) => {
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+
+      const rendered = await page.evaluate(() => ({
+        noOuterPipes: renderPipeTable('Name | Value\n--- | ---\nPET | 96%'),
+        wideTable: renderPipeTable('| A | B | C | D | E | F | G |\n|---|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 | 7 |'),
+        surroundingText: renderPipeTable('Table note\n| Name | Value |\n| --- | --- |\n| PET | stable |\nSource note'),
+      }));
+
+      expect(rendered.noOuterPipes).toContain('<table class="md-table">');
+      expect(rendered.noOuterPipes).toContain('<td>96%</td>');
+      expect(rendered.wideTable).toContain('<th>G</th>');
+      expect(rendered.wideTable).toContain('md-table-scroll');
+      expect(rendered.surroundingText).toContain('Table note');
+      expect(rendered.surroundingText).toContain('Source note');
     });
 
     test('business flow: literature library normalizes DFT AI opinion labels for confirmed, adopted, and pending-object-review states', async ({ page }) => {
@@ -2938,6 +3043,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft&library_name=${encodeURIComponent('Default Library')}`);
       await page.waitForTimeout(700);
       await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
+      await expect(page.locator('#dftContent [data-role="dft-readiness-actions"]')).toHaveCount(1);
+      await expect(page.locator('#dftContent button:has-text("生成下一轮 AI 审核任务")')).toBeVisible();
+      await expect(page.locator('#dftContent button:has-text("重新检查写回")')).toBeVisible();
+      await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
+      await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
 
       const cards = page.locator('#dftContent details.readable-card');
     await expect(cards.filter({ hasText: 'd_band_center' }).first()).toContainText('AI 确认字段');
@@ -3196,6 +3306,108 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('#paperList')).not.toContainText('文献列表加载失败');
       expect(requestedLibraries.length).toBeGreaterThan(0);
       expect(requestedLibraries.every(name => name === requestedLibrary)).toBe(true);
+    });
+
+    test('business flow: literature library syncs completed ingest jobs without full page refresh', async ({ page }) => {
+      let listRequests = 0;
+      let detailRequests = 0;
+      let libraryReloads = 0;
+
+      await page.route(/\/api\/jobs\/job-refresh$/, route => jsonResponse(route, {
+        job_id: 'job-refresh',
+        type: 'ingest_upload',
+        status: 'completed',
+        progress: { phase: 'completed', paper_id: 'paper-1' },
+        result: { paper_id: 'paper-1', title: PAPER_DETAIL.title, status: 'completed' },
+        summary: { phase: 'completed', success_count: 1, failure_count: 0 },
+        error: null,
+        library_name: 'Default Library',
+      }));
+
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
+          return route.fallback();
+        }
+        listRequests += 1;
+        return jsonResponse(route, PAPERS);
+      });
+      await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => {
+        detailRequests += 1;
+        return jsonResponse(route, PAPER_DETAIL);
+      });
+      await page.route(/\/api\/papers\/libraries$/, route => {
+        libraryReloads += 1;
+        return jsonResponse(route, LIBRARIES);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-row');
+      await expect(page.locator('#paperTitle')).toContainText('Test Paper for Smoke Validation');
+
+      await page.evaluate(() => {
+        window.__initSSECalls = 0;
+        const originalInitSSE = window.initSSE;
+        window.initSSE = function() {
+          window.__initSSECalls += 1;
+          return originalInitSSE.apply(this, arguments);
+        };
+      });
+      listRequests = 0;
+      detailRequests = 0;
+      libraryReloads = 0;
+
+      await page.evaluate(() => pollWorkflowIngestJob('job-refresh'));
+      await expect(page.locator('#paperTitle')).toContainText('Test Paper for Smoke Validation');
+      await expect(page.locator('#acquisitionResult')).toContainText('后台收录任务');
+
+      expect(listRequests).toBe(1);
+      expect(detailRequests).toBe(1);
+      expect(libraryReloads).toBe(0);
+      await expect.poll(() => page.evaluate(() => window.__initSSECalls)).toBe(0);
+    });
+
+    test('business flow: literature library refreshes only the selected paper detail', async ({ page }) => {
+      let listRequests = 0;
+      let detailRequests = 0;
+      let libraryReloads = 0;
+
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
+          return route.fallback();
+        }
+        listRequests += 1;
+        return jsonResponse(route, PAPERS);
+      });
+      await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => {
+        detailRequests += 1;
+        return jsonResponse(route, {
+          ...PAPER_DETAIL,
+          title: detailRequests > 1 ? 'Refreshed Paper Detail' : PAPER_DETAIL.title,
+        });
+      });
+      await page.route(/\/api\/papers\/libraries$/, route => {
+        libraryReloads += 1;
+        return jsonResponse(route, LIBRARIES);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.click('.paper-row');
+      await expect(page.locator('#paperTitle')).toContainText('Test Paper for Smoke Validation');
+      listRequests = 0;
+      detailRequests = 1;
+      libraryReloads = 0;
+
+      await page.click('#refreshPaperDetailBtn');
+
+      await expect(page.locator('#paperTitle')).toContainText('Refreshed Paper Detail');
+      await expect(page.locator('#refreshPaperDetailBtn')).toHaveText('刷新详情');
+      await expect(page.locator('#refreshPaperDetailBtn')).toBeEnabled();
+      expect(detailRequests).toBe(2);
+      expect(listRequests).toBe(0);
+      expect(libraryReloads).toBe(0);
     });
 
     test('business flow: literature library reverts selection when activation fails', async ({ page }) => {
@@ -3564,6 +3776,91 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.locator('#figuresContent summary button').first().click();
     await expect.poll(() => unsafeWrites.length).toBe(0);
+  });
+
+  test('business flow: literature library figures tab keeps page order and missing-image placeholders stable', async ({ page }) => {
+    const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+    detail.figures = [
+      {
+        id: 'figure-page-8',
+        figure_label: 'Figure 30',
+        caption: 'Figure 30. Late-page figure.',
+        page: 8,
+        image_path: 'figures/figure-page-8.png',
+        asset_url: '/api/papers/assets/figures/figure-page-8.png',
+        figure_role: 'plot',
+        crop_status: 'recropped',
+        content_summary: 'Late-page figure with a valid crop.',
+        key_elements: ['axis', 'legend'],
+        flags: [],
+        image_review: { review_required: false, crop_status: 'recropped' },
+      },
+      {
+        id: 'figure-page-2',
+        figure_label: 'Figure 10',
+        caption: 'Figure 10. Earlier-page figure.',
+        page: 2,
+        image_path: 'figures/figure-page-2.png',
+        asset_url: '/api/papers/assets/figures/figure-page-2.png',
+        figure_role: 'structure',
+        crop_status: 'recropped',
+        content_summary: 'Earlier-page figure with a valid crop.',
+        key_elements: ['panel', 'structure'],
+        flags: [],
+        image_review: { review_required: false, crop_status: 'recropped' },
+      },
+      {
+        id: 'figure-page-5',
+        figure_label: 'Figure 20',
+        caption: 'Figure 20. Middle-page figure without an image path.',
+        page: 5,
+        image_path: null,
+        asset_url: null,
+        figure_role: 'microscopy',
+        crop_status: 'needs_review',
+        content_summary: 'Middle-page figure is recorded, but its crop is missing.',
+        key_elements: ['scale bar', 'micrograph'],
+        flags: ['missing_image_path'],
+        image_review: { review_required: true, crop_status: 'needs_review' },
+      },
+    ];
+    detail.rag_quality = {
+      figures: {
+        total: 3,
+        eligible: 2,
+        blocked: 1,
+        blocked_reasons: {
+          missing_image: 1,
+          missing_content_summary: 1,
+        },
+        blocked_items: [
+          {
+            source_id: 'figure-page-5',
+            figure_label: 'Figure 20',
+            page: 5,
+            caption: 'Figure 20. Middle-page figure without an image path.',
+            reasons: ['missing_image', 'missing_content_summary'],
+          },
+        ],
+      },
+      dft_results: { total: 0, eligible: 0, blocked: 0, blocked_reasons: {} },
+      writing_cards: { total: 0, eligible: 0, blocked: 0, blocked_reasons: {} },
+      eligible_total: 2,
+      blocked_total: 1,
+    };
+    await page.route(new RegExp(`/api/papers/paper-1(?:\\?.*)?$`), route => jsonResponse(route, detail));
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=figures`);
+    await page.waitForTimeout(700);
+
+    const cards = page.locator('#figuresContent details.figure-card');
+    await expect(cards).toHaveCount(3);
+    await expect(cards.nth(0)).toContainText(/PDF 页码\s*2/);
+    await expect(cards.nth(1)).toContainText(/PDF 页码\s*5/);
+    await expect(cards.nth(2)).toContainText(/PDF 页码\s*8/);
+    await expect(cards.nth(1)).toContainText('当前没有可展示的裁图');
+    await expect(cards.nth(1)).toContainText('RAG 不合格');
+    await expect(page.locator('#figuresContent .figure-missing-image')).toHaveCount(1);
   });
 
   test('business flow: literature library figure cards can directly delete polluted duplicates', async ({ page }) => {

@@ -1099,24 +1099,34 @@ class PaperQueryService:
 
     @classmethod
     def _figure_display_sort_key(cls, item: PaperFigure) -> tuple[int, int, str]:
-        fig_num = cls._extract_figure_number(item.figure_label) or cls._extract_figure_number(item.caption)
+        fig_num, sub_rank = cls._extract_figure_sort_parts(item.figure_label)
+        if fig_num is None:
+            fig_num, sub_rank = cls._extract_figure_sort_parts(item.caption)
         return (
-            fig_num if fig_num is not None else 999999,
             item.page if item.page is not None else 999999,
+            fig_num if fig_num is not None else 999999,
+            sub_rank if sub_rank is not None else 999999,
             str(item.id),
         )
 
     @staticmethod
-    def _extract_figure_number(value: str | None) -> int | None:
+    def _extract_figure_sort_parts(value: str | None) -> tuple[int | None, int | None]:
         if not value:
-            return None
-        match = re.search(r"(?:fig(?:ure)?|scheme)[_\s.\-]*(\d+)", str(value), flags=re.IGNORECASE)
+            return None, None
+        match = re.search(
+            r"(?:fig(?:ure)?|scheme)[_\s.\-]*(\d+)(?:\s*[\(\[]?\s*([a-z])\s*[\)\]]?)?",
+            str(value),
+            flags=re.IGNORECASE,
+        )
         if not match:
-            return None
+            return None, None
         try:
-            return int(match.group(1))
+            fig_num = int(match.group(1))
         except ValueError:
-            return None
+            return None, None
+        sub_label = (match.group(2) or "").strip().lower()
+        sub_rank = ord(sub_label[0]) - 96 if sub_label else None
+        return fig_num, sub_rank
 
     @classmethod
     def _serialize_figure(

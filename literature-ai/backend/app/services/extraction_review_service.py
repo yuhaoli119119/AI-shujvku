@@ -175,7 +175,13 @@ class ExtractionReviewService:
             items=prepared,
         )
 
-    def save_reviews(self, paper_id: UUID, items: list[ExtractionFieldReviewSaveItem]) -> list[ExtractionFieldReviewResponse]:
+    def save_reviews(
+        self,
+        paper_id: UUID,
+        items: list[ExtractionFieldReviewSaveItem],
+        *,
+        commit: bool = True,
+    ) -> list[ExtractionFieldReviewResponse]:
         prepared: list[tuple[ExtractionFieldReviewSaveItem, str, Any, dict[str, Any], ExtractionFieldReview | None]] = []
         for item in items:
             canonical_type = self.canonical_target_type(item.target_type)
@@ -229,10 +235,19 @@ class ExtractionReviewService:
             self.session.add(review)
             self._flush_review_write()
             saved.append(self._serialize(review))
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         return saved
 
-    def mark_verified(self, paper_id: UUID, payload: ExtractionReviewMarkVerifiedRequest) -> list[ExtractionFieldReviewResponse]:
+    def mark_verified(
+        self,
+        paper_id: UUID,
+        payload: ExtractionReviewMarkVerifiedRequest,
+        *,
+        commit: bool = True,
+    ) -> list[ExtractionFieldReviewResponse]:
         canonical_type = self.canonical_target_type(payload.target_type)
         target = self.get_target_or_raise(paper_id, canonical_type, payload.target_id)
         snapshot = self.get_target_field_snapshot(canonical_type, target)
@@ -312,7 +327,10 @@ class ExtractionReviewService:
             self.session.add(review)
             self._flush_review_write()
             saved.append(self._serialize(review))
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         return saved
 
     def reviews_by_target(self, paper_id: UUID) -> dict[tuple[str, str, str], ExtractionFieldReviewResponse]:

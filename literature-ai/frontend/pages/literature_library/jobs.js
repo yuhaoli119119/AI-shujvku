@@ -165,7 +165,7 @@ async function pollAIWorkflowJob(jobId) {
             showToast("AI 工作流完成，文献列表已刷新。", "success");
             if (typeof resetLibraryPagination === "function") resetLibraryPagination();
             else state.currentOffset = 0;
-            refreshCurrentPage();
+            refreshLibraryData({ preserveDetail: true, loadingMessage: "正在同步 AI 工作流结果..." });
         } else if (job.status === "failed") {
             showToast("AI 工作流失败：" + (job.error || ""), "error");
         }
@@ -225,7 +225,12 @@ async function pollWorkflowIngestJob(jobId, context) {
             }
             if (typeof resetLibraryPagination === "function") resetLibraryPagination();
             else state.currentOffset = 0;
-            refreshCurrentPage();
+            refreshLibraryData({
+                preserveDetail: true,
+                refreshSelectedDetail: true,
+                loadingMessage: "正在同步后台解析结果...",
+                reason: "ingest_job_completed"
+            });
         } else if (job.status === "failed") {
             showToast("后台收录失败：" + (job.error || ""), "error");
         }
@@ -707,7 +712,7 @@ async function rerunExtraction() {
                 '<div class="section-card"><h3>最近一次 IDE AI 材料刷新结果</h3><div class="subtle">状态：' + esc(data.status || data.job_status || "已提交") + (data.external_ai_ready ? " | IDE AI 可继续接手" : " | 仍需补齐材料或人工检查") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
             );
         }
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "prepare_ai_context" });
     } catch (error) {
         showToast("刷新 AI 解析材料失败：" + error.message, "error");
     }
@@ -726,7 +731,7 @@ async function reparseSelectedPaper() {
                 '<div class="section-card"><h3>最近一次重新解析结果</h3><div class="subtle">状态：' + esc(data.status || "completed") + (data.workflow_status ? " | workflow=" + esc(data.workflow_status) : "") + (data.workspace_path ? " | workspace=" + esc(data.workspace_path) : "") + "</div></div>"
             );
         }
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "reparse_completed", mode: "full" });
     } catch (error) {
         showToast("重新解析失败：" + error.message, "error");
     }

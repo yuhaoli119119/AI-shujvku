@@ -45,29 +45,73 @@ function esc(value) {
 
 function renderPipeTable(md) {
     if (!md || typeof md !== "string") return "";
-    var lines = md.trim().split("\n");
-    if (lines.length < 3) return '<pre class="mono">' + esc(md) + '</pre>';
-    var allPipe = true;
-    for (var i = 0; i < Math.min(lines.length, 3); i++) {
-        var t = lines[i].trim();
-        if (!(t.indexOf("|") === 0 && t.lastIndexOf("|") === t.length - 1)) { allPipe = false; break; }
+    var lines = md.replace(/\r\n?/g, "\n").split("\n");
+
+    function splitRow(line) {
+        var value = line.trim();
+        if (value.charAt(0) === "|") value = value.slice(1);
+        if (value.charAt(value.length - 1) === "|" && value.charAt(value.length - 2) !== "\\") value = value.slice(0, -1);
+        var cells = [];
+        var cell = "";
+        for (var i = 0; i < value.length; i++) {
+            if (value.charAt(i) === "\\" && value.charAt(i + 1) === "|") {
+                cell += "|";
+                i += 1;
+            } else if (value.charAt(i) === "|") {
+                cells.push(cell.trim());
+                cell = "";
+            } else {
+                cell += value.charAt(i);
+            }
+        }
+        cells.push(cell.trim());
+        return cells;
     }
-    if (!allPipe) return '<pre class="mono">' + esc(md) + '</pre>';
-    var colCount = lines[0].split("|").slice(1, -1).length;
-    if (colCount > 6) return '<pre class="mono">' + esc(md) + '</pre>';
-    var html = '<table class="md-table"><thead><tr>';
-    var headers = lines[0].split("|").slice(1, -1);
+
+    function isSeparator(line) {
+        if (line.indexOf("|") < 0) return false;
+        var cells = splitRow(line);
+        return cells.length >= 2 && cells.every(function(cell) {
+            return /^:?-{3,}:?$/.test(cell.replace(/\s/g, ""));
+        });
+    }
+
+    var separatorIndex = -1;
+    for (var lineIndex = 1; lineIndex < lines.length; lineIndex++) {
+        if (lines[lineIndex - 1].indexOf("|") >= 0 && isSeparator(lines[lineIndex])) {
+            separatorIndex = lineIndex;
+            break;
+        }
+    }
+    if (separatorIndex < 0) return '<pre class="mono">' + esc(md) + '</pre>';
+
+    var headers = splitRow(lines[separatorIndex - 1]);
+    var colCount = headers.length;
+    var rowLines = [];
+    var tableEnd = separatorIndex;
+    for (var rowIndex = separatorIndex + 1; rowIndex < lines.length; rowIndex++) {
+        var rowLine = lines[rowIndex].trim();
+        if (!rowLine || rowLine.indexOf("|") < 0) break;
+        rowLines.push(rowLine);
+        tableEnd = rowIndex;
+    }
+
+    var before = lines.slice(0, separatorIndex - 1).join("\n").trim();
+    var after = lines.slice(tableEnd + 1).join("\n").trim();
+    var html = before ? '<div class="md-table-note">' + esc(before) + '</div>' : '';
+    html += '<div class="md-table-scroll"><table class="md-table"><thead><tr>';
     headers.forEach(function(h) { html += '<th>' + esc(h.trim()) + '</th>'; });
     html += '</tr></thead><tbody>';
-    for (var j = 1; j < lines.length; j++) {
-        var line = lines[j].trim();
-        if (/^\|[\s\-:]+\|/.test(line)) continue;
+    rowLines.forEach(function(line) {
         html += '<tr>';
-        var cells = line.split("|").slice(1, -1);
-        cells.forEach(function(c) { html += '<td>' + esc(c.trim()) + '</td>'; });
+        var cells = splitRow(line);
+        for (var cellIndex = 0; cellIndex < colCount; cellIndex++) {
+            html += '<td>' + esc(cells[cellIndex] || '') + '</td>';
+        }
         html += '</tr>';
-    }
-    html += '</tbody></table>';
+    });
+    html += '</tbody></table></div>';
+    if (after) html += '<div class="md-table-note">' + esc(after) + '</div>';
     return html;
 }
 
