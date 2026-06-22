@@ -6,7 +6,7 @@ cd /d "%~dp0"
 set "APP_URL=http://localhost:8000/pages/literature_library/index.html"
 set "HEALTH_URL=http://localhost:8000/api/health"
 
-echo [1/4] Checking Docker Desktop...
+echo [1/5] Checking Docker Desktop...
 docker info >nul 2>nul
 if errorlevel 1 (
   echo.
@@ -17,7 +17,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/4] Starting Literature AI services...
+echo [2/5] Checking local configuration...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\ensure-local-env.ps1" -EnvPath "%~dp0.env" -TemplatePath "%~dp0.env.example"
+if errorlevel 1 (
+  echo.
+  echo Failed to initialize .env. Review the message above, then try again.
+  echo.
+  pause
+  exit /b 1
+)
+
+echo [3/5] Starting Literature AI services...
 docker compose up -d
 if errorlevel 1 (
   echo.
@@ -28,7 +38,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/4] Waiting for backend health check...
+echo [4/5] Waiting for backend health check...
 set "READY=0"
 for /l %%i in (1,1,90) do (
   powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri '%HEALTH_URL%' -TimeoutSec 2; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>nul
@@ -54,7 +64,7 @@ if not "%READY%"=="1" (
   exit /b 1
 )
 
-echo [4/4] Opening Literature AI...
+echo [5/5] Opening Literature AI...
 start "" "%APP_URL%"
 
 echo.
