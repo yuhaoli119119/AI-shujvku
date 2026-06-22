@@ -7,12 +7,21 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.api.settings import sync_writer_settings_from_session
 from app.config import Settings, get_settings
-from app.db.models import AuditLog, Base, Paper, PaperFigure, WorkflowJob
+from app.db.models import (
+    AuditLog,
+    Base,
+    DFTResult,
+    ExternalAnalysisCandidate,
+    ExtractionFieldReview,
+    Paper,
+    PaperFigure,
+    WorkflowJob,
+)
 from app.db.session import get_db_session
 from app.schemas.api import (
     CodexContextResponse,
@@ -68,6 +77,12 @@ class ManualReviewProgressRequest(BaseModel):
     module: str
     completed: bool
     reviewer: str | None = None
+
+
+class DFTAIReviewResetRequest(BaseModel):
+    confirm_reset_dft_ai_reviews: bool
+    reviewer: str | None = None
+    keep_dft_candidates: bool = True
 
 from app.services.codex_context_service import CodexContextService
 from app.services.dft_review_service import DFTResultReviewService
@@ -344,6 +359,95 @@ async def settle_ai_dft_reviews(
         analysis["manual_review_progress"] = progress
         paper.comprehensive_analysis = analysis
         session.add(paper)
+    session.commit()
+    return summary
+
+
+@router.post("/{paper_id}/dft-ai-reviews/reset")
+async def reset_dft_ai_reviews(
+    paper_id: UUID,
+    payload: DFTAIReviewResetRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    if not payload.confirm_reset_dft_ai_reviews:
+        raise HTTPException(status_code=400, detail="Explicit DFT AI review reset confirmation is required.")
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    dft_result_ids = [
+        str(row_id)
+        for row_id in session.scalars(
+            select(DFTResult.id).where(DFTResult.paper_id == paper_id)
+        ).all()
+    ]
+
+    deleted_field_reviews = 0
+    if dft_result_ids:
+        result = session.execute(
+            delete(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id.in_(dft_result_ids),
+            )
+        )
+        deleted_field_reviews = int(result.rowcount or 0)
+
+    object_review_rows = session.scalars(
+        select(ExternalAnalysisCandidate).where(
+            ExternalAnalysisCandidate.paper_id == paper_id,
+            ExternalAnalysisCandidate.candidate_type.in_(("object_review_audit", "external_audit_opinion")),
+        )
+    ).all()
+    dft_object_review_ids = []
+    for candidate in object_review_rows:
+        normalized = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+        target_type = str(normalized.get("target_type") or "").strip().lower()
+        materialized_type = str(candidate.materialized_target_type or "").strip().lower()
+        target_id = str(normalized.get("target_id") or "").strip()
+        if (
+            target_type in {"dft_results", "dft_result"}
+            or materialized_type == "dft_results"
+            or target_id in dft_result_ids
+        ):
+            dft_object_review_ids.append(candidate.id)
+
+    deleted_object_review_candidates = 0
+    if dft_object_review_ids:
+        result = session.execute(
+            delete(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.id.in_(dft_object_review_ids)
+            )
+        )
+        deleted_object_review_candidates = int(result.rowcount or 0)
+
+    reset_dft_results = 0
+    if dft_result_ids:
+        result = session.execute(
+            update(DFTResult)
+            .where(DFTResult.paper_id == paper_id)
+            .values(candidate_status="system_candidate")
+        )
+        reset_dft_results = int(result.rowcount or 0)
+
+    reviewer = str(payload.reviewer or "literature_library_dft").strip() or "literature_library_dft"
+    summary = {
+        "paper_id": str(paper_id),
+        "deleted_object_review_candidates": deleted_object_review_candidates,
+        "deleted_field_reviews": deleted_field_reviews,
+        "reset_dft_results": reset_dft_results,
+        "kept_dft_candidates": bool(payload.keep_dft_candidates),
+    }
+    session.add(
+        AuditLog(
+            paper_id=paper_id,
+            action="reset_dft_ai_reviews",
+            source=reviewer,
+            target_type="paper",
+            target_id=str(paper_id),
+            payload=summary,
+        )
+    )
     session.commit()
     return summary
 

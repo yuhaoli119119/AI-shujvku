@@ -273,7 +273,7 @@ async function materializeRun(runId) {
         });
         showToast("AI 回写已处理。", "success");
         await loadExternalRuns();
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "external_run_materialized" });
     } catch (error) {
         showToast("处理 AI 回写失败：" + error.message, "error");
     }
@@ -327,7 +327,7 @@ async function materializeCandidateIds(runId, candidateIds) {
         });
         showToast("AI 回写已处理。", "success");
         await loadExternalRuns();
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "external_candidates_materialized" });
     } catch (error) {
         showToast("处理 AI 回写失败：" + error.message, "error");
     }

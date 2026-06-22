@@ -558,7 +558,7 @@ function renderReadableFields(item, keys) {
         const rawValue = item ? item[key] : null;
         const value = readableValue(rawValue);
         if (value && value !== "-") {
-            if (key === "markdown_content" && typeof rawValue === "string" && rawValue.trim().indexOf("|") === 0) {
+            if (key === "markdown_content" && typeof rawValue === "string") {
                 fields.push('<div class="readable-field field-' + esc(key) + '"><div class="k">' + esc(readableFieldLabel(key)) + '</div><div class="v">' + renderPipeTable(rawValue) + '</div></div>');
             } else {
                 fields.push('<div class="readable-field field-' + esc(key) + '"><div class="k">' + esc(readableFieldLabel(key)) + '</div><div class="v">' + esc(value) + '</div></div>');
@@ -589,7 +589,7 @@ const DFT_BLOCK_REASON_LABELS = {
 };
 DFT_BLOCK_REASON_LABELS.missing_material_identity = "缺少材料/结构绑定";
 
-DFT_BLOCK_REASON_LABELS.missing_review = "双AI一致，待系统写回";
+DFT_BLOCK_REASON_LABELS.missing_review = "尚未完成审核";
 DFT_BLOCK_REASON_LABELS.unsafe_review = "审核状态不安全";
 DFT_BLOCK_REASON_LABELS.missing_evidence = "缺证据引用/定位";
 DFT_BLOCK_REASON_LABELS.missing_evidence_text = "缺证据原文";
@@ -707,8 +707,22 @@ function figureIssuesFromFlags(flags) {
     return issues;
 }
 
-function dftBlockedReasonText(reasons) {
+function dftMissingReviewLabel(item) {
+    if (!item) return DFT_BLOCK_REASON_LABELS.missing_review;
+    const audits = (Array.isArray(item.object_review_audits) ? item.object_review_audits : [])
+        .filter(dftOpinionHasAnchor);
+    const sources = new Set(audits.map(dftOpinionSource));
+    if (sources.size === 0) return "尚无 AI 对象审核";
+    if (sources.size === 1) return "仅有一个 AI 意见，等待第二 AI";
+    const classified = classifyDftAutomationRows([item]);
+    if (classified.consensus.length) return "双 AI 一致，待系统写回";
+    if (classified.conflicts.length) return "多 AI 意见有冲突，待裁决";
+    return "多 AI 审核尚未形成可写回结论";
+}
+
+function dftBlockedReasonText(reasons, item) {
     return (Array.isArray(reasons) ? reasons : []).map(function(reason) {
+        if (reason === "missing_review") return dftMissingReviewLabel(item);
         return DFT_BLOCK_REASON_LABELS[reason] || reason;
     }).join("、");
 }
@@ -762,9 +776,15 @@ function renderDftEvidenceSource(item) {
 
 function renderDftItemSafety(item) {
     const safety = item && item.export_safety;
-    if (!safety) return "";
+    if (!safety) {
+        return '<div class="figure-warning" style="margin-top:12px;">' +
+            '<strong>安全状态待加载</strong>' +
+            '<div>这条 DFT 记录暂未拿到导出安全门详情；仍可人工拒绝，接受入库时后端会重新校验。</div>' +
+            renderDftDecisionActions(item, false) +
+        '</div>';
+    }
     const exportable = safety.is_exportable === true || safety.eligible === true;
-    const reasons = dftBlockedReasonText(safety.blocked_reasons);
+    const reasons = dftBlockedReasonText(safety.blocked_reasons, item);
     return '<div class="figure-warning" style="margin-top:12px;">' +
         '<strong>' + (exportable ? "已审核可导出" : "候选不可进入正式数据库") + '</strong>' +
         '<div>' + (exportable
@@ -889,7 +909,7 @@ function dftItemStatusMeta(item) {
         };
     }
     const blockedReasons = Array.isArray(safety.blocked_reasons) ? safety.blocked_reasons : [];
-    const reasons = dftBlockedReasonText(blockedReasons);
+    const reasons = dftBlockedReasonText(blockedReasons, item);
     return {
         label: exportable ? "可导出" : "需处理",
         className: exportable ? "parsed" : "meta",
@@ -1197,34 +1217,29 @@ function classifyDftAutomationRows(rows) {
     return result;
 }
 
-async function refreshDftAutomationSummaryBadges(container) {
-    if (!container || !state.selectedPaperId) return;
+async function refreshDftAutomationSummaryBadges(container, paperId, renderSeq) {
+    const targetPaperId = paperId || state.selectedPaperId;
+    if (!container || !targetPaperId) return;
     try {
-        const rows = await fetchSelectedDftReviewRows(200);
+        const rows = await fetchSelectedDftReviewRows(200, targetPaperId);
+        if (
+            state.selectedPaperId !== targetPaperId ||
+            (renderSeq && state.dftReadinessRenderSeq !== renderSeq) ||
+            !container.isConnected
+        ) {
+            return;
+        }
         const classified = classifyDftAutomationRows(rows);
         const setText = function(role, value) {
             const el = container.querySelector('[data-role="' + role + '"]');
             if (el) el.textContent = value;
         };
-        setText("dft-new-review-count", "新数据审核 " + classified.newReview.length);
-        setText("dft-conflict-count", "冲突裁决 " + classified.conflicts.length);
-    } catch (_) {
-        const pending = container.querySelector('[data-role="dft-new-review-count"]');
-        if (pending) pending.textContent = "新数据审核 ?";
-    }
-}
-
-async function refreshReadableDftAutomationSummaryBadges(container) {
-    if (!container || !state.selectedPaperId) return;
-    try {
-        const rows = await fetchSelectedDftReviewRows(200);
-        const classified = classifyDftAutomationRows(rows);
-        const setText = function(role, value) {
-            const el = container.querySelector('[data-role="' + role + '"]');
-            if (el) el.textContent = value;
-        };
-        setText("dft-new-review-count", "新数据审核 " + classified.newReview.length);
-        setText("dft-conflict-count", "冲突裁决 " + classified.conflicts.length);
+        setText("dft-new-review-count", "第二 AI / 补证据 " + classified.newReview.length);
+        setText("dft-conflict-count", "第三 AI 裁决 " + classified.conflicts.length);
+        setText(
+            "dft-next-action",
+            "生成下一轮 AI 审核任务（" + (classified.newReview.length + classified.conflicts.length) + "）"
+        );
     } catch (_) {
         const pending = container.querySelector('[data-role="dft-new-review-count"]');
         if (pending) pending.textContent = "新数据审核 ?";
@@ -1249,7 +1264,7 @@ async function settleAiDftReviews() {
             "；需补字段 " + Number(summary && summary.need_repair_count || 0),
             "success"
         );
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "settle_ai_dft_reviews", mode: "full" });
     } catch (error) {
         showToast("结算现有 AI 审核失败：" + error.message, "error");
     }
@@ -1290,25 +1305,71 @@ function dftResultsWithSafety(detail) {
 }
 
 function renderDftExportReadiness(detail) {
-    const readiness = detail.codex_context && detail.codex_context.dft_export_readiness;
-    if (!readiness) return "";
-    const rejectedCount = Number(readiness.rejected_count || 0);
-    const blockedCount = Number(readiness.blocked_count || 0);
+    const readiness = detail && detail.codex_context && detail.codex_context.dft_export_readiness;
+    const fallbackTotal = Array.isArray(detail && detail.dft_results_items) ? detail.dft_results_items.length : 0;
+    const hasReadiness = !!readiness;
+    const readinessData = readiness || {};
+    const rejectedCount = Number(readinessData.rejected_count || 0);
+    const blockedCount = Number(readinessData.blocked_count || 0);
     const pendingCount = Math.max(0, blockedCount);
-    const reasons = Object.keys(readiness.blocked_reasons || {}).map(function(reason) {
-        return (DFT_BLOCK_REASON_LABELS[reason] || reason) + " " + readiness.blocked_reasons[reason] + " 条";
+    const completionControls = hasReadiness && pendingCount === 0
+        ? renderManualReviewCompletionControls(detail, "dft")
+        : '<span class="status-chip subtle">未完成</span>';
+    const reasons = Object.keys(readinessData.blocked_reasons || {}).map(function(reason) {
+        return (DFT_BLOCK_REASON_LABELS[reason] || reason) + " " + readinessData.blocked_reasons[reason] + " 条";
     }).join("、");
-    return '<div class="section-card figure-audit-note">' +
-        '<h3>候选 DFT 入库安全状态</h3>' +
+    return '<div class="section-card figure-audit-note" data-role="dft-status-panel" data-paper-id="' + escAttr(detail && (detail.paper_id || detail.id) || "") + '">' +
+        '<h3>DFT 数据状态</h3>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;">' +
-            '<span class="status-chip parsed">可导出 ' + Number(readiness.eligible_count || 0) + '</span>' +
-            '<span class="status-chip meta">待完成 ' + pendingCount + '</span>' +
-            (rejectedCount ? '<span class="status-chip muted">\u5df2\u62d2\u7edd ' + rejectedCount + '</span>' : '') +
-            '<span class="status-chip">候选总数 ' + Number(readiness.total_candidates || 0) + '</span>' +
+            completionControls +
+            (hasReadiness
+                ? '<span class="status-chip parsed">可导出 ' + Number(readiness.eligible_count || 0) + '</span>' +
+                  '<span class="status-chip meta">待完成 ' + pendingCount + '</span>' +
+                  (rejectedCount ? '<span class="status-chip muted">\u5df2\u62d2\u7edd ' + rejectedCount + '</span>' : '') +
+                  '<span class="status-chip">候选总数 ' + Number(readiness.total_candidates || 0) + '</span>'
+                : '<span class="status-chip meta">安全状态加载中</span>' +
+                  '<span class="status-chip">候选总数 ' + fallbackTotal + '</span>') +
         '</div>' +
-        '<div class="subtle">这里展示的是候选证据状态。只有通过 PDF 证据定位、AI 协议抽取/复核、去重和人工确认的数据，才会进入 DFT 数据库、导出和机器学习数据集。已拒绝视为流程完成，但不会导出。</div>' +
+        '<div class="subtle">处理方式：点击“生成下一轮 AI 审核任务”，交给一位尚未审核这些记录的 AI；AI 回写后再点一次。系统会先自动写回一致项，只把缺第二意见、缺证据或真正冲突的记录放进下一轮。审核全部收口后才允许标记完成。</div>' +
         (reasons ? '<div class="subtle" style="margin-top:6px;">当前阻断：' + esc(reasons) + '</div>' : '') +
     '</div>';
+}
+
+async function resetDftAiReviewsForPaper() {
+    if (!state.selectedPaperId) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    const ok = window.confirm(
+        "确认清除当前文献的 DFT AI 审核记录并重新核验吗？\n\n" +
+        "这会删除 DFT AI 审核/冲突意见，把 DFT 候选退回待审核；不会删除候选 DFT 数据本身。"
+    );
+    if (!ok) return;
+    try {
+        showToast("正在清除当前文献的 DFT AI 审核状态...", "info");
+        const summary = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/dft-ai-reviews/reset",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    confirm_reset_dft_ai_reviews: true,
+                    reviewer: "literature_library_dft",
+                    keep_dft_candidates: true
+                })
+            }
+        );
+        showToast(
+            "已清除 DFT AI 审核：" +
+            "对象意见 " + Number(summary && summary.deleted_object_review_candidates || 0) +
+            " 条，字段审核 " + Number(summary && summary.deleted_field_reviews || 0) +
+            " 条；候选退回 " + Number(summary && summary.reset_dft_results || 0) + " 条。",
+            "success"
+        );
+        await refreshSelectedPaperDetail({ reason: "reset_dft_ai_reviews", mode: "full" });
+    } catch (error) {
+        showToast("清除 DFT AI 审核失败：" + error.message, "error");
+    }
 }
 
 function writingCardReviewMeta(item) {
@@ -1980,6 +2041,14 @@ function renderManualReviewCompletionCard(detail, module, title, message) {
     '</div>';
 }
 
+function renderManualReviewCompletionControls(detail, module) {
+    const status = isManualReviewCompleted(detail, module);
+    return '<span class="status-chip ' + (status ? 'ok' : 'subtle') + '">' + esc(status ? '已完成' : '未完成') + '</span>' +
+        '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
+            esc(status ? '取消已完成' : '标记已完成') +
+        '</button>';
+}
+
 async function setManualReviewProgress(module, completed) {
     if (!state.selectedPaperId) {
         showToast("请先选择一篇文献。", "error");
@@ -2209,23 +2278,47 @@ function renderDetail(detail, audit) {
     if (activeTab === "figures" && detail.figures && detail.figures.length) {
         function extractFigureNumber(caption) {
             if (!caption) return null;
-            var m = String(caption).match(/(?:Figure|Fig\.?|Scheme)\s*\.?\s*(\d+)/i);
-            return m ? parseInt(m[1], 10) : null;
+            var m = String(caption).match(/(?:Figure|Fig\.?|Scheme)\s*\.?\s*(\d+)(?:\s*[\(\[]?\s*([a-z])\s*[\)\]]?)?/i);
+            if (!m) return null;
+            var num = parseInt(m[1], 10);
+            return Number.isFinite(num) ? num : null;
+        }
+
+        function extractFigureSortParts(text) {
+            if (!text) return { number: null, subRank: null };
+            var m = String(text).match(/(?:Figure|Fig\.?|Scheme)\s*\.?\s*(\d+)(?:\s*[\(\[]?\s*([a-z])\s*[\)\]]?)?/i);
+            if (!m) return { number: null, subRank: null };
+            var num = parseInt(m[1], 10);
+            if (!Number.isFinite(num)) return { number: null, subRank: null };
+            var sub = m[2] ? m[2].toLowerCase().charCodeAt(0) - 96 : null;
+            return {
+                number: num,
+                subRank: Number.isFinite(sub) ? sub : null
+            };
         }
 
         function figureSortNumber(item) {
             return extractFigureNumber(item.figure_label) || extractFigureNumber(item.caption);
         }
 
+        function figureSortParts(item) {
+            var labelParts = extractFigureSortParts(item.figure_label);
+            if (labelParts.number !== null) return labelParts;
+            return extractFigureSortParts(item.caption);
+        }
+
         function compareFigureItems(a, b) {
-            var aNum = figureSortNumber(a);
-            var bNum = figureSortNumber(b);
-            if (aNum !== null && bNum !== null && aNum !== bNum) return aNum - bNum;
-            if (aNum !== null && bNum === null) return -1;
-            if (aNum === null && bNum !== null) return 1;
             var aPage = Number(a.page || 999999);
             var bPage = Number(b.page || 999999);
             if (aPage !== bPage) return aPage - bPage;
+            var aParts = figureSortParts(a);
+            var bParts = figureSortParts(b);
+            if (aParts.number !== null && bParts.number !== null && aParts.number !== bParts.number) return aParts.number - bParts.number;
+            if (aParts.number !== null && bParts.number === null) return -1;
+            if (aParts.number === null && bParts.number !== null) return 1;
+            if (aParts.subRank !== null && bParts.subRank !== null && aParts.subRank !== bParts.subRank) return aParts.subRank - bParts.subRank;
+            if (aParts.subRank !== null && bParts.subRank === null) return -1;
+            if (aParts.subRank === null && bParts.subRank !== null) return 1;
             return String(a.id || "").localeCompare(String(b.id || ""));
         }
 
@@ -2301,6 +2394,15 @@ function renderDetail(detail, audit) {
                     '</button>' +
                     '<figcaption><span class="figure-image-actions"><button type="button" class="btn ghost small" onclick="event.stopPropagation(); openFigureLightbox(' + lightboxPayload + ')">点击查看大图</button>' + openPageAction + '</span><span class="subtle figure-image-label">' + esc(item.figure_label || ("figure " + (index + 1))) + '</span></figcaption>' +
                 '</figure>';
+            } else if (!item.image_path) {
+                var missingPageLink = item.page
+                    ? '<a class="btn ghost small" style="text-decoration:none;" target="_blank" href="/api/papers/' + escAttr(detail.id) + '/pdf#page=' + Number(item.page || 1) + '&toolbar=0">打开 PDF 原页</a>'
+                    : "";
+                imgHtml = '<div class="figure-warning figure-missing-image">' +
+                    '<strong>当前没有可展示的裁图。</strong>' +
+                    '<div>这张图的结构化记录已保留，但 image_path 为空，页面只能显示文字信息和证据入口。后续补图后会自动恢复为图片卡片。</div>' +
+                    (missingPageLink ? '<div style="margin-top:8px;">' + missingPageLink + '</div>' : '') +
+                '</div>';
             } else if (noisyFigure) {
                 var pageLink = item.page
                     ? '<a class="btn ghost small" style="text-decoration:none;" target="_blank" href="/api/papers/' + escAttr(detail.id) + '/pdf#page=' + Number(item.page || 1) + '&toolbar=0">打开 PDF 原页</a>'
@@ -2479,13 +2581,13 @@ function renderDetail(detail, audit) {
     }
     if (dftEl && activeTab === "dft") {
         dftEl.innerHTML =
-            renderManualReviewCompletionCard(detail, "dft", "DFT 进度", "当本篇 DFT 审核已经收口时标记完成。已拒绝也算流程完成，但不会导出。一致意见会在生成下一份审核包前自动写回。") +
             renderDftExportReadiness(detail) +
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
             renderJSONCards("催化剂样本", detail.catalyst_samples_items || []) +
             renderJSONCards("候选 DFT 数据", dftResultsWithSafety(detail)) +
             renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
             renderJSONCards("机理声明", detail.mechanism_claims_items || []);
+        decorateDftReadinessPanel(detail);
     }
     if (writingEl && activeTab === "writing") {
         const writingItems = detail.writing_cards_items || [];
@@ -2731,6 +2833,58 @@ function rerenderSelectedDetail(paperId) {
     }
 }
 
+async function refreshSelectedPaperDetail(options) {
+    if (!state.selectedPaperId) return null;
+    const opts = options || {};
+    const paperId = state.selectedPaperId;
+    const mode = opts.mode || (state.selectedPaper && state.selectedPaper._detailMode) || detailModeForTab(state.currentTab);
+    const refreshToken = Date.now() + ":refresh:" + paperId + ":" + (opts.reason || "detail");
+    state.detailRefreshToken = refreshToken;
+    const detail = await fetchJSON(
+        API_BASE + "/" + encodeURIComponent(paperId) + "?mode=" + encodeURIComponent(mode)
+    );
+    if (state.detailRefreshToken !== refreshToken || state.selectedPaperId !== paperId) {
+        return null;
+    }
+    detail._detailMode = mode;
+    state.selectedPaper = detail;
+    cachePaperDetail(detail);
+    renderWorkspaceHeader(detail);
+    renderDetail(detail, state.selectedPaperAudit || null);
+    if (state.currentTab === "dft") {
+        decorateDftReadinessPanel(detail);
+    }
+    showWorkspace();
+    return detail;
+}
+
+async function refreshSelectedPaperDetailFromHeader() {
+    if (!state.selectedPaperId) {
+        showToast("请先选择一篇文献", "error");
+        return;
+    }
+    const button = document.getElementById("refreshPaperDetailBtn");
+    if (button && button.disabled) return;
+    const previousLabel = button ? button.textContent : "刷新详情";
+    if (button) {
+        button.disabled = true;
+        button.textContent = "刷新中…";
+    }
+    try {
+        const detail = await refreshSelectedPaperDetail({ reason: "header_manual_refresh" });
+        if (detail) {
+            showToast("当前文献详情已刷新", "success");
+        }
+    } catch (error) {
+        showToast("详情刷新失败：" + error.message, "error");
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = previousLabel;
+        }
+    }
+}
+
 function loadPaperDetailEnrichment(paperId, loadToken) {
     fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit")
         .then(function(audit) {
@@ -2894,8 +3048,9 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         paper.codex_context.source_assets.pdf_path
     ) || "<source_pdf>";
     const header = [
-        "任务：审核下面这些新发现或缺少独立第二意见的 DFT 候选；不要处理清单以外的记录。",
+        "任务：审核下面这些已列出的 DFT 候选；不要把清单内候选重新当成新数据提交。",
         "要求：先核对 PDF 证据，再逐条给出完整意见。审核来源名称不固定，但必须与每条记录 existing_review_sources 中的来源不同。",
+        "强制规则：清单内每条候选都必须使用该行给出的 target_id；禁止对清单内候选输出 target_id='new' 或 decision='new_candidate'。",
         "不要输出长解释；只输出一个可直接用于 import_analysis 的 JSON，顶层只保留 object_review_audits。",
         "如果当前 IDE 没有暴露 MCP 工具，不要直接停下；请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具。禁止直接调用 service/session/model 或数据库。",
         "",
@@ -2904,8 +3059,9 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         "- 候选明显错误、重复、无证据支持时，用 REJECT。",
         "- 候选基本正确但字段需要修正/补全时，用 PROPOSED，并填写完整 corrected_value。",
         "- 无法从 PDF 确认时，用 NEEDS_HUMAN，不要硬判。",
-        "- 发现漏提 DFT 行时，用 decision='new_candidate'、target_id='new'、field_name='dft_results'。",
-        "- 发现漏提 DFT 行后，不要只停在 candidate-only JSON；实际调用 import_analysis 时应使用 auto_apply_review_rules=true，让 new_candidate 自动进入未验证 DFT 候选队列。",
+        "- 清单内候选只允许 PASS / REJECT / PROPOSED / NEEDS_HUMAN，不能用 new_candidate。",
+        "- 只有发现清单外确实漏提的额外 DFT 行时，才可在处理完清单后追加 decision='new_candidate'、target_id='new'、field_name='dft_results'。",
+        "- 追加漏提行后，不要只停在 candidate-only JSON；实际调用 import_analysis 时应使用 auto_apply_review_rules=true，让 new_candidate 自动进入未验证 DFT 候选队列。",
         "- 缺 material identity、缺证据原文、缺准确页码定位时，不要 PASS。",
         "- 单位标准：能量统一为 eV，meV 除以 1000；渗透率统一为 GPU，10^3 GPU 乘以 1000；原始表达写入 raw_value/raw_unit 或 evidence_location.quoted_text。",
         "",
@@ -2915,9 +3071,9 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         "    {",
         '      "paper_id": "' + paperId + '",',
         '      "target_type": "dft_results",',
-        '      "target_id": "<现有候选ID或new>",',
+        '      "target_id": "<必须填写候选清单中该行的 target_id；清单外漏提项才允许 new>",',
         '      "field_name": "<例如 value / unit / catalyst_sample_id / dft_results>",',
-        '      "decision": "PASS | REJECT | PROPOSED | NEEDS_HUMAN | new_candidate",',
+        '      "decision": "PASS | REJECT | PROPOSED | NEEDS_HUMAN；清单外漏提项才允许 new_candidate",',
         '      "corrected_value": {"property": "<标准性质>", "adsorbate": "<标准吸附物>", "material": "<标准材料/结构>", "method": "<方法/条件>", "value": 0.0, "unit": "eV/GPU/%", "raw_value": "<原文数值>", "raw_unit": "<原文单位>"},',
         '      "confidence": 0.0,',
         '      "reason": "<简短理由>",',
@@ -2977,15 +3133,17 @@ async function copyNewDftReviewPrompt() {
     }
 }
 
-function dftQueueUrlForSelectedPaper(limit) {
+function dftQueueUrlForSelectedPaper(limit, paperId) {
+    const targetPaperId = paperId || state.selectedPaperId;
     return "/api/papers/export/dft-review-queue?paper_id=" +
-        encodeURIComponent(state.selectedPaperId) +
+        encodeURIComponent(targetPaperId) +
         "&status=needs_review&limit=" + encodeURIComponent(limit || 200);
 }
 
-async function fetchSelectedDftReviewRows(limit) {
-    if (!state.selectedPaperId) return [];
-    const queue = await fetchJSON(dftQueueUrlForSelectedPaper(limit || 200));
+async function fetchSelectedDftReviewRows(limit, paperId) {
+    const targetPaperId = paperId || state.selectedPaperId;
+    if (!targetPaperId) return [];
+    const queue = await fetchJSON(dftQueueUrlForSelectedPaper(limit || 200, targetPaperId));
     return Array.isArray(queue && queue.rows) ? queue.rows.filter(function(row) {
         return row && row.is_exportable !== true;
     }) : [];
@@ -3059,7 +3217,7 @@ async function autoProcessLowRiskDftRows() {
             rejected += 1;
         }
         showToast("低风险处理完成：采纳 " + applied + " 条，拒绝 " + rejected + " 条。", "success");
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "auto_process_dft", mode: "full" });
     } catch (error) {
         showToast("低风险自动处理失败：" + error.message, "error");
     }
@@ -3146,13 +3304,51 @@ async function copyThirdAiDftAdjudicationPrompt() {
     }
 }
 
+async function copyNextDftAiReviewPrompt() {
+    if (!state.selectedPaperId) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    try {
+        showToast("正在自动写回一致项并生成下一轮 AI 审核任务...", "info");
+        await settleDftConsensusBeforePrompt();
+        const rows = await fetchSelectedDftReviewRows(200);
+        const classified = classifyDftAutomationRows(rows);
+        if (!classified.newReview.length && !classified.conflicts.length) {
+            await refreshSelectedPaperDetail({ reason: "dft_workflow_complete", mode: "full" });
+            showToast("当前 DFT 审核已经收口，没有下一轮任务。", "success");
+            return;
+        }
+        const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
+        const promptParts = [canonicalPrompt];
+        if (classified.newReview.length) {
+            promptParts.push(buildCompactBlockedDftBatchPrompt(classified.newReview));
+        }
+        if (classified.conflicts.length) {
+            promptParts.push(buildThirdAiDftAdjudicationPrompt(classified.conflicts));
+        }
+        await navigator.clipboard.writeText(promptParts.filter(Boolean).join("\n\n"));
+        await refreshSelectedPaperDetail({ reason: "dft_next_ai_prompt", mode: "full" });
+        showToast(
+            "下一轮任务已复制：第二 AI / 补证据 " + classified.newReview.length +
+            " 条，第三 AI 裁决 " + classified.conflicts.length + " 条。",
+            "success"
+        );
+    } catch (error) {
+        showToast("下一轮 DFT 审核任务生成失败：" + error.message, "error");
+    }
+}
+
 function decorateDftReadinessPanel(detail) {
     const panel = $("dftContent");
     if (!panel) return;
-    const card = panel.querySelector(".figure-audit-note");
+    const card = panel.querySelector('[data-role="dft-status-panel"]');
     if (!card || card.querySelector('[data-role="dft-readiness-actions"]')) return;
     const readiness = detail && detail.codex_context && detail.codex_context.dft_export_readiness;
+    const paperId = String(detail && (detail.paper_id || detail.id) || state.selectedPaperId || "");
     const blockedCount = Number(readiness && readiness.blocked_count || 0);
+    const renderSeq = (state.dftReadinessRenderSeq || 0) + 1;
+    state.dftReadinessRenderSeq = renderSeq;
     const actions = document.createElement("div");
     actions.setAttribute("data-role", "dft-readiness-actions");
     actions.style.display = "flex";
@@ -3162,12 +3358,14 @@ function decorateDftReadinessPanel(detail) {
     actions.innerHTML =
         (blockedCount
             ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">' +
-                '<span class="status-chip meta" data-role="dft-new-review-count">新数据审核 ...</span>' +
-                '<span class="status-chip failed" data-role="dft-conflict-count">冲突裁决 ...</span>' +
+                '<span class="status-chip meta" data-role="dft-new-review-count">第二 AI / 补证据 ...</span>' +
+                '<span class="status-chip failed" data-role="dft-conflict-count">第三 AI 裁决 ...</span>' +
               '</div>' +
-              '<button class="btn primary small" type="button" onclick="copyThirdAiDftAdjudicationPrompt()">冲突裁决</button>' +
-              '<button class="btn primary small" type="button" onclick="copyNewDftReviewPrompt()">新数据审核</button>'
-            : "");
+              '<button class="btn primary small" data-role="dft-next-action" type="button" onclick="copyNextDftAiReviewPrompt()">生成下一轮 AI 审核任务</button>'
+            : "") +
+        '<button class="btn ghost small" type="button" onclick="settleAiDftReviews()">重新检查写回</button>' +
+        '<button class="btn ghost small" type="button" onclick="resetDftAiReviewsForPaper()">清除 AI 审核重来</button>' +
+        '<button class="btn ghost small" type="button" onclick="openSelectedReviewCenter()">打开审核中心</button>';
     const firstSubtle = card.querySelector(".subtle");
     if (firstSubtle && firstSubtle.parentNode === card) {
         card.insertBefore(actions, firstSubtle);
@@ -3175,8 +3373,7 @@ function decorateDftReadinessPanel(detail) {
         card.appendChild(actions);
     }
     if (blockedCount) {
-        refreshDftAutomationSummaryBadges(actions);
-        refreshReadableDftAutomationSummaryBadges(actions);
+        refreshDftAutomationSummaryBadges(actions, paperId, renderSeq);
     }
 }
 
@@ -3479,7 +3676,7 @@ async function verifyDftResult(itemId) {
                 : "DFT 核验已记录，但仍有安全门阻断项。",
             safety && safety.is_exportable ? "success" : "info"
         );
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "verify_dft_result", mode: "full" });
     } catch (error) {
         showToast("DFT 核验失败：" + error.message, "error");
     }
@@ -3541,7 +3738,7 @@ async function acceptDftResult(itemId) {
                 : "已应用接受结果，但这条 DFT 还有阻断项。",
             safety && safety.is_exportable ? "success" : "info"
         );
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "accept_dft_result", mode: "full" });
     } catch (error) {
         showToast("接受入库失败：" + error.message, "error");
     }
@@ -3570,7 +3767,7 @@ async function rejectDftResult(itemId) {
             }
         );
         showToast("这条 DFT 已拒绝。", "success");
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "reject_dft_result", mode: "full" });
     } catch (error) {
         showToast("拒绝失败：" + error.message, "error");
     }
@@ -3601,7 +3798,7 @@ async function revokeDftResult(itemId) {
             }
         );
         showToast("这条 DFT 已退回待处理。", "success");
-        await loadPaperDetail(state.selectedPaperId);
+        await refreshSelectedPaperDetail({ reason: "revoke_dft_result", mode: "full" });
     } catch (error) {
         showToast("取消入库失败：" + error.message, "error");
     }
@@ -3658,7 +3855,11 @@ async function recropPaperFigures(paperId) {
             { method: "POST" }
         );
         showToast("图片重裁完成：" + (data.extracted_count || 0) + " / " + (data.figure_count || 0), "success");
-        await loadPaperDetail(paperId);
+        if (state.selectedPaperId === paperId) {
+            await refreshSelectedPaperDetail({ reason: "recrop_figures", mode: "full" });
+        } else {
+            await loadPaperDetail(paperId);
+        }
     } catch (error) {
         showToast("图片重裁失败：" + error.message, "error");
     }
@@ -3682,7 +3883,11 @@ async function promptAddRelationship(paperId) {
             })
         });
         showToast("关联创建成功", "success");
-        await loadPaperDetail(paperId);
+        if (state.selectedPaperId === paperId) {
+            await refreshSelectedPaperDetail({ reason: "relationship_created", mode: "full" });
+        } else {
+            await loadPaperDetail(paperId);
+        }
     } catch (e) {
         showToast("创建失败: " + e.message, "error");
     }

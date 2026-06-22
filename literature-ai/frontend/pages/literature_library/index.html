@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
-    <link rel="stylesheet" href="./page.css?v=20260622-figure-actions1">
+    <link rel="stylesheet" href="./page.css?v=20260622-figure-stability1">
     <script src="../../shared/topnav.js?v=20260606-ui3"></script>
     <script>ThemeManager.init();</script>
 </head>
@@ -122,6 +122,7 @@
                             </div>
                             <div class="paper-actionbar">
                                 <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
+                                <button id="refreshPaperDetailBtn" class="btn ghost small" type="button" title="仅刷新当前文献详情" onclick="refreshSelectedPaperDetailFromHeader()">刷新详情</button>
                                 <button class="btn ghost small" onclick="openSelectedReviewCenter()">审核中心</button>
                                 <button class="btn ghost small" onclick="reparseSelectedPaper()">重新解析</button>
                                 <button class="btn ghost small" onclick="rerunExtraction()">刷新 IDE AI 材料</button>
@@ -389,10 +390,10 @@
         </div>
     </div>
 
-    <script src="./state.js?v=20260606-ui3" defer></script>
+    <script src="./state.js?v=20260622-figure-stability1" defer></script>
     <script src="./api.js?v=20260619-pdf-fix2" defer></script>
     <script src="./render-list.js?v=20260619-pdf-fix2" defer></script>
-    <script src="./render-detail.js?v=20260622-figure-actions1" defer></script>
+    <script src="./render-detail.js?v=20260623-dft-reset1" defer></script>
     <script src="./jobs.js?v=20260603-zhfix1" defer></script>
     <script src="./writer.js?v=20260531-aiuxfix" defer></script>
     <script src="./review.js?v=20260614-review-ui1" defer></script>

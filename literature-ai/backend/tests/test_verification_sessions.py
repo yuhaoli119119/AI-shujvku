@@ -27,6 +27,7 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.main import app
+from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 
 
@@ -446,6 +447,22 @@ def test_settle_ai_dft_reviews_endpoint_is_idempotent(verification_env):
                 locator_confidence=0.95,
             )
         )
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value=row.value,
+                reviewed_value=row.value,
+                unit=row.unit,
+                evidence_text=row.evidence_text,
+                reviewer_status="pending",
+                reviewer="earlier_review_pass",
+                target_resolution_status="active",
+                last_resolved_target_id=str(row.id),
+            )
+        )
         for source_label in ("ai-1", "ai-2"):
             run = ExternalAnalysisRun(
                 paper_id=paper.id,
@@ -492,6 +509,179 @@ def test_settle_ai_dft_reviews_endpoint_is_idempotent(verification_env):
         reviews = session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == UUID(paper_id))).all()
         assert len(reviews) == 1
         assert {review.reviewer_status for review in reviews} == {"verified"}
+
+
+def test_reset_dft_ai_reviews_clears_audits_and_returns_rows_to_pending(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Reset DFT reviews paper", pdf_path="reset-dft.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="gibbs_free_energy_change",
+            adsorbate="*H",
+            value=-0.09,
+            unit="eV",
+            evidence_text="Delta G H* is -0.09 eV.",
+            candidate_status="Rejected",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value=row.value,
+                reviewed_value=None,
+                unit=row.unit,
+                evidence_text=row.evidence_text,
+                reviewer_status="rejected",
+                reviewer="old_ai_review",
+                target_resolution_status="active",
+                last_resolved_target_id=str(row.id),
+            )
+        )
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="old_dft_ai",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": str(row.id),
+                    "field_name": "dft_results",
+                    "decision": "REJECT",
+                    "evidence_location": {"page": 5, "quoted_text": "-0.09 eV"},
+                },
+                materialized_target_type="dft_results",
+                materialized_target_id=str(row.id),
+                status="materialized",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{paper_id}/dft-ai-reviews/reset",
+        json={
+            "confirm_reset_dft_ai_reviews": True,
+            "reviewer": "test_runner",
+            "keep_dft_candidates": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["deleted_object_review_candidates"] == 1
+    assert payload["deleted_field_reviews"] == 1
+    assert payload["reset_dft_results"] == 1
+
+    with Session() as session:
+        row = session.get(DFTResult, UUID(row_id))
+        assert row is not None
+        assert row.candidate_status == "system_candidate"
+        assert session.scalars(
+            select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == UUID(paper_id))
+        ).all() == []
+        assert session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == UUID(paper_id))
+        ).all() == []
+
+
+def test_dft_verify_can_defer_commit_to_outer_settlement(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Outer transaction paper", pdf_path="outer-transaction.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="*H",
+            value=0.04,
+            unit="eV",
+            evidence_text="The adsorption energy is 0.04 eV.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value=row.value,
+                reviewed_value=row.value,
+                unit=row.unit,
+                evidence_text=row.evidence_text,
+                reviewer_status="pending",
+                reviewer="earlier_review_pass",
+                target_resolution_status="active",
+                last_resolved_target_id=str(row.id),
+            )
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    with Session() as session:
+        with pytest.raises(ValueError, match="write_conflict:extraction_review_version_required"):
+            DFTResultReviewService(session).verify_result(
+                paper_id=paper_id,
+                result_id=row_id,
+                confirm_reviewed_against_pdf=True,
+                reviewer="missing_version",
+                field_names=["value"],
+                evidence_payload={"page": 5, "quoted_text": "0.04 eV"},
+                commit=False,
+            )
+        session.rollback()
+
+    with Session() as session:
+        result = DFTResultReviewService(session).verify_result(
+            paper_id=paper_id,
+            result_id=row_id,
+            confirm_reviewed_against_pdf=True,
+            reviewer="outer_settlement",
+            field_names=["value"],
+            expected_write_versions={"value": 1},
+            evidence_payload={"page": 5, "quoted_text": "0.04 eV"},
+            commit=False,
+        )
+        assert result["reviews"][0]["reviewer_status"] == "verified"
+        assert session.scalar(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_id == str(row_id),
+            )
+        ) is not None
+        session.rollback()
+
+    with Session() as session:
+        persisted_review = session.scalar(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_id == str(row_id),
+            )
+        )
+        assert persisted_review is not None
+        assert persisted_review.reviewer_status == "pending"
 
 
 def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
