@@ -693,6 +693,19 @@ async function mockApi(route) {
             after_text: 'This result indicates stronger polysulfide anchoring.',
           },
         },
+        {
+          paper_id: 'paper-2',
+          title: 'Verified Legacy Record Without Extraction Confidence',
+          adsorbate: 'O*',
+          property_type: 'adsorption_energy',
+          value: -0.8,
+          unit: 'eV',
+          confidence: null,
+          evidence_text: 'The reviewed adsorption energy is -0.8 eV.',
+          source_section: 'Results',
+          validation_status: 'validated',
+          is_exportable: true,
+        },
       ],
       stats: {
         count: 1,
@@ -1754,6 +1767,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await expect(page.locator('#tab-review')).toBeVisible();
         } else if (pageInfo.name === 'DFT Database') {
           await expect(page.locator('button[onclick="exportCSV()"]')).toBeVisible();
+          await expect(page.locator('.confidence-badge.unknown')).toHaveText('未记录');
+          await expect(page.locator('.confidence-badge.unknown')).not.toHaveText('0%');
         } else if (pageInfo.name === 'AI Writing Studio') {
           await expect(page.locator('button[onclick="generateAcademicDraft()"]')).toBeVisible();
         } else if (pageInfo.name === 'Extraction Review Workbench') {

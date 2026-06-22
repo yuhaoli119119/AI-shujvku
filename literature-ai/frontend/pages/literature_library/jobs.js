@@ -210,6 +210,10 @@ async function pollWorkflowIngestJob(jobId) {
             if (result.status === "already_exists") {
                 showToast("文献已在库中：" + (result.title || ""), "info");
                 if (result.paper_id) showAlreadyExistsPrompt(result.paper_id, result.title || "已存在的文献");
+            } else if (result.status === "needs_confirmation") {
+                showToast("PDF 已解析，但系统需要你重新选择同一文件并确认绑定。", "info");
+            } else if (result.status === "identity_mismatch") {
+                showToast("目标条目与上传 PDF 身份冲突，请检查后再重新上传。", "error");
             } else if (result.status === "metadata_only") {
                 showToast("已按元数据收录：" + (result.title || ""), "info");
             } else {
@@ -906,18 +910,20 @@ async function attachPDFToPaperFile(paperId, file, confirmIdentityMismatch) {
     showProgress("正在上传并关联 PDF：" + file.name);
     let keepProgress = false;
     try {
-        const data = await fetchJSON(API_BASE + "/" + paperId + "/attach-pdf", {
+        const data = await fetchJSON(API_BASE + "/" + paperId + "/attach-pdf/jobs", {
             method: "POST",
             body: formData
         });
+        const jobId = data && data.job_id ? String(data.job_id).slice(0, 8) : "queued";
         if (confirmIdentityMismatch) {
-            showToast("PDF 已经经人工确认绑定到当前文献条目。", "success");
+            showToast("确认绑定任务已进入后台队列：" + jobId, "success");
         } else {
-            showToast("PDF 关联成功：" + (data.title || file.name), "success");
+            showToast("PDF 关联任务已进入后台队列：" + jobId, "success");
         }
+        renderQueuedIngestJob(data);
+        pollWorkflowIngestJob(data.job_id);
         state.selectedPaperId = paperId;
         closeAddLiteraturePanel();
-        refreshCurrentPage();
     } catch (error) {
         const detail = error.detail;
         if (detail && typeof detail === "object") {

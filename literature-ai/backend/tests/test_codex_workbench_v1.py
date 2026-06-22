@@ -325,9 +325,9 @@ def test_paper_detail_exposes_figure_object_review_summary_read_only(workbench_e
         assert figure_payload.latest_object_review_audit["source"] == "codex_figure_audit"
         assert figure_payload.latest_object_review_audit["decision"] == "REVISE"
         assert figure_payload.latest_object_review_audit["verification_status"] == "unverified"
-        assert figure_payload.conflict_count == 1
-        assert figure_payload.field_conflicts[0]["field_name"] == "crop_status"
-        assert conflict_payload["conflict_count"] == 1
+        assert figure_payload.conflict_count == 0
+        assert figure_payload.field_conflicts == []
+        assert conflict_payload["conflict_count"] == 0
         assert stored_figure.crop_status == "candidate_crop"
         assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
 
@@ -415,9 +415,9 @@ def test_paper_detail_exposes_writing_card_object_review_summary_read_only(workb
         assert card_payload.latest_object_review_audit["source"] == "glm_writing_audit"
         assert card_payload.latest_object_review_audit["decision"] == "FLAG"
         assert card_payload.latest_object_review_audit["verification_status"] == "unverified"
-        assert card_payload.conflict_count == 1
-        assert card_payload.field_conflicts[0]["field_name"] == "core_hypothesis"
-        assert conflict_payload["conflict_count"] == 1
+        assert card_payload.conflict_count == 0
+        assert card_payload.field_conflicts == []
+        assert conflict_payload["conflict_count"] == 0
         assert stored_card.core_hypothesis == "Polar sites anchor polysulfides."
         assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
         assert session.query(PaperCorrection).count() == 0
@@ -499,9 +499,9 @@ def test_paper_detail_exposes_mechanism_claim_object_review_summary_read_only(wo
         assert claim_payload.latest_object_review_audit["source"] == "glm_mechanism_audit"
         assert claim_payload.latest_object_review_audit["decision"] == "FLAG"
         assert claim_payload.latest_object_review_audit["verification_status"] == "unverified"
-        assert claim_payload.conflict_count == 1
-        assert claim_payload.field_conflicts[0]["field_name"] == "claim_text"
-        assert conflict_payload["conflict_count"] == 1
+        assert claim_payload.conflict_count == 0
+        assert claim_payload.field_conflicts == []
+        assert conflict_payload["conflict_count"] == 0
         assert stored_claim.claim_text == "Defect sites strengthen polysulfide adsorption through charge redistribution."
         assert session.get(Paper, paper_id).workflow_status == "Parsed_Material_Ready"
         assert session.query(PaperCorrection).count() == 0

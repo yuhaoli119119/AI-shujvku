@@ -19,6 +19,37 @@ node_modules/
 # Local agent and test-run artifacts
 .reasonix/
 literature-ai/test-results/
+literature-ai/backend/scratch/**
+!literature-ai/backend/scratch/
+!literature-ai/backend/scratch/.gitkeep
+
+# Root-level ad-hoc analysis previews and temp outputs
+/_*.png
+/_*.jpg
+/_*.jpeg
+/_*.webp
+/_*.gif
+/_*.bmp
+/_*.svg
+/tmp_*
+/tmp*.json
+/tmp*.js
+/page*_analysis.txt
+/page*_blocks.txt
+/page*_blocks.json
+/page*.json
+/paper_detail.json
+/figs_analysis.json
+/reasonix.toml
+/[ab][0-9][0-9][0-9][0-9]_*.json
+/C*temp_page*_analysis.txt
+literature-ai/ctx.json
+literature-ai/paper.json
+test-results/
+outputs/node_modules/
+outputs/tmp/**
+!outputs/tmp/
+!outputs/tmp/.gitkeep
 
 # Local databases and run metadata
 *.sqlite

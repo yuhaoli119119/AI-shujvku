@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # NOTE: This project uses PostgreSQL (with pgvector extension) as its database.
 # All models use PostgreSQL-native types: UUID, JSONB, vector(N).
-# Do NOT assume SQLite compatibility — there is no SQLite database in this project.
+# SQLite compatibility is intentionally unsupported.
 
 import json
 import os
@@ -58,7 +58,7 @@ class VectorType(sa.types.UserDefinedType):
 
 
 def json_type():
-    return JSONB().with_variant(sa.JSON(), "sqlite")
+    return JSONB()
 
 
 EMBEDDING_DIMENSION = int(os.getenv("LITAI_EMBEDDING_DIMENSION", "1024"))
@@ -494,7 +494,6 @@ class VerificationSessionPaperClaim(Base):
             "paper_id",
             unique=True,
             postgresql_where=sa.text("status = 'active'"),
-            sqlite_where=sa.text("status = 'active'"),
         ),
     )
 
@@ -536,7 +535,6 @@ class ModuleWriteLock(Base):
             "module_name",
             unique=True,
             postgresql_where=sa.text("status = 'active'"),
-            sqlite_where=sa.text("status = 'active'"),
         ),
     )
 

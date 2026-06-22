@@ -76,7 +76,7 @@ class CodexContextService:
         max_tables: int = 8,
         max_candidates: int = 20,
     ) -> CodexContextResponse | None:
-        detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=True)
+        detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=False)
         if detail is None:
             return None
 
@@ -129,7 +129,7 @@ class CodexContextService:
             supported = ", ".join(sorted(set(self.item_type_aliases.values())))
             raise ValueError(f"Unsupported item type. Supported values: {supported}")
 
-        detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=True)
+        detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=False)
         if detail is None:
             return None
         item = self._find_detail_item(detail, normalized_type, item_id)
@@ -691,7 +691,7 @@ class CodexContextService:
             "- Write conclusions back through import_analysis as structured review/correction candidates. After import, read back the target item or review coverage before claiming success.",
             "- auto_apply_review_rules=false is candidate-only. It may record an unverified audit, but it does not mean PASS/completed/applied and must not be described as a finished review.",
             "- For missing DFT rows that should enter the system candidate queue, use object_review_audits with decision=new_candidate, a structured corrected_value, and auto_apply_review_rules=true. This materializes an unverified DFTResult candidate; it does not mark the row final or exportable.",
-            "- Directly applying non-DFT fixes or [AI_REVIEWED] status requires acquire_module_write_lock plus auto_apply_review_rules=true and a valid write_lock_token.",
+            "- Directly applying non-DFT fixes or [AI_REVIEWED] status uses import_analysis(auto_apply_review_rules=true); non-DFT AI writes are last-writer-wins and do not require module write locks.",
             "- When submitting object_review_audits with decision=approve_correction, evidence_location MUST contain structured anchor keys (page, table, figure, quoted_text, etc.) or the auto-apply will skip with missing_evidence_anchor. A plain string (even a descriptive one like \"PDF page 13, Table 5\") is treated as quoted_text and works, but a structured dict like {\"page\": 13, \"table\": \"Table 5\", \"quoted_text\": \"...\"} is preferred for reliable page/section-level evidence tracing.",
             "- Figure image creation/recropping is direct-tool-only: use recrop_figure or create_figure_from_bbox through MCP/API, never import_analysis bbox/crop payloads.",
             "",

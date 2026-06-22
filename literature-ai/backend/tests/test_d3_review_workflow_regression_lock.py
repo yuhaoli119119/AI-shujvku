@@ -187,11 +187,12 @@ def test_external_ai_materialize_never_creates_verified_review_even_with_verifie
 
             assert result.created_notes == 1
             assert result.created_corrections == 1
+            assert result.auto_applied_corrections == 1
             assert result.created_relationships == 1
             assert session.query(ExtractionFieldReview).filter_by(reviewer_status="verified").count() == 0
             assert session.query(PaperNote).count() == 1
             correction = session.query(PaperCorrection).one()
-            assert correction.status == "pending"
+            assert correction.status == "approved"
             assert session.query(PaperRelationship).count() == 1
     finally:
         engine.dispose()

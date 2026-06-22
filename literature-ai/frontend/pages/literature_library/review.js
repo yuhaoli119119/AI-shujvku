@@ -186,8 +186,8 @@ async function loadExternalRuns() {
                         '<div class="subtle" style="margin-top:8px;">用途：这里显示 IDE AI 通过 import_analysis 回写的结果。阅读笔记用于快速理解论文；修正/关联建议用于补全或纠错。DFT 数据仍按审核中心的多 AI 冲突流程处理。</div>' +
                         (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
                         '<div class="candidate-toolbar" style="margin-top:12px;">' +
-                            '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量生成审核记录</button>' +
-                            '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中生成审核记录</button>' +
+                            '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量应用/记录</button>' +
+                            '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中应用/记录</button>' +
                             '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开审阅项（' + (run.candidates || []).length + "）</button>" +
                             '<button class="btn ghost small" onclick="deleteExternalRun(\'' + run.id + '\')">删除记录</button>' +
                         "</div>" +
@@ -217,17 +217,17 @@ function renderCandidates(runId, candidates) {
             ? '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;margin:0;"><input type="checkbox" class="candidate-select" data-run-id="' + escAttr(runId) + '" value="' + escAttr(candidateId) + '">选择</label>'
             : '<span class="muted" style="font-size:12px;">已处理</span>';
         var singleAction = isPending && candidateId
-            ? '<button class="btn ghost small" onclick="materializeCandidate(\'' + escAttr(runId) + '\', \'' + escAttr(candidateId) + '\')">生成审核记录</button>'
+            ? '<button class="btn ghost small" onclick="materializeCandidate(\'' + escAttr(runId) + '\', \'' + escAttr(candidateId) + '\')">应用/记录</button>'
             : "";
         var candidateLabel = "";
         if (item.candidate_type === "correction") {
-            candidateLabel = '<span style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 建议 / 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 建议 / 待应用</span>';
         } else if (item.candidate_type === "note") {
-            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 笔记建议 / 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 笔记建议 / 待记录</span>';
         } else if (item.candidate_type === "relationship") {
-            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 关联建议 / 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 关联建议 / 待记录</span>';
         } else {
-            candidateLabel = '<span style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">候选建议 / 待生成记录</span>';
+            candidateLabel = '<span style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">候选建议 / 待记录</span>';
         }
         return (
             '<div class="candidate-card">' +
@@ -258,23 +258,23 @@ async function materializeRun(runId) {
         return;
     }
     var ok = confirm(
-        "将处理 " + pendingCount + " 个 IDE AI 回写项，生成审核记录。\n\n" +
-        "这不是人工 verified，只是把 IDE AI 草稿转成系统可追踪的审核记录；DFT 数据仍按审核中心流程处理。\n\n" +
+        "将处理 " + pendingCount + " 个 IDE AI 回写项。\n\n" +
+        "非 DFT 修正会直接应用，后续 AI 可再次覆盖；DFT 数据仍按审核中心流程处理。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
-    showProgress("正在生成审核记录...");
+    showProgress("正在应用/记录 AI 回写...");
     try {
         await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/materialize", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ explicit_all: true, created_by: "web_user" })
         });
-        showToast("已生成可追踪审核记录。", "success");
+        showToast("AI 回写已处理。", "success");
         await loadExternalRuns();
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
-        showToast("生成审核记录失败：" + error.message, "error");
+        showToast("处理 AI 回写失败：" + error.message, "error");
     }
     hideProgress();
 }
@@ -311,23 +311,23 @@ async function materializeSelectedCandidates(runId) {
 async function materializeCandidateIds(runId, candidateIds) {
     if (!candidateIds.length) return;
     var ok = confirm(
-        "将处理 " + candidateIds.length + " 个 IDE AI 回写项，生成审核记录。\n\n" +
-        "这不是人工 verified，只是把 IDE AI 草稿转成系统可追踪的审核记录；DFT 数据仍按审核中心流程处理。\n\n" +
+        "将处理 " + candidateIds.length + " 个 IDE AI 回写项。\n\n" +
+        "非 DFT 修正会直接应用，后续 AI 可再次覆盖；DFT 数据仍按审核中心流程处理。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
-    showProgress("正在生成审核记录...");
+    showProgress("正在应用/记录 AI 回写...");
     try {
         await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/materialize", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ candidate_ids: candidateIds, created_by: "web_user" })
         });
-        showToast("已生成可追踪审核记录。", "success");
+        showToast("AI 回写已处理。", "success");
         await loadExternalRuns();
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
-        showToast("生成审核记录失败：" + error.message, "error");
+        showToast("处理 AI 回写失败：" + error.message, "error");
     }
     hideProgress();
 }

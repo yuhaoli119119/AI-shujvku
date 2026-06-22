@@ -28,6 +28,7 @@ from app.utils.figure_summary import normalize_figure_key_elements
 DECISION_POSITIVE = {"PASS", "ACCEPT", "APPROVE", "APPROVED", "VERIFIED", "OK"}
 DECISION_NEGATIVE = {"REVISE", "FLAG", "INSUFFICIENT", "REJECT", "REJECTED", "NEEDS_FIX", "FIX", "BLOCK", "PROPOSED"}
 CORRECTION_STATUSES = {"pending", "rejected", "approved"}
+ACTIVE_EXTERNAL_AUDIT_STATUSES = {"candidate", "pending", "requires_resolution"}
 DFT_EXPLICIT_BLANK = "__explicit_blank__"
 DFT_CONFLICT_FIELD_MAP = {
     "value_conflict": "value",
@@ -58,18 +59,36 @@ class ReviewConflictAggregationService:
         target_id: str | None = None,
         field_name: str | None = None,
         include_non_conflicts: bool = False,
+        active_only: bool = False,
         limit: int = 200,
     ) -> dict[str, Any]:
+        if target_type and not self._is_dft_target_type(target_type):
+            return self._empty_payload(
+                paper_id=paper_id,
+                target_type=target_type,
+                target_id=target_id,
+                field_name=field_name,
+                include_non_conflicts=include_non_conflicts,
+                active_only=active_only,
+            )
         opinions = self._collect_opinions(
             paper_id=paper_id,
             target_type=target_type,
             target_id=target_id,
             field_name=field_name,
         )
+        opinions = [
+            item for item in opinions
+            if self._is_dft_target_type(item.get("target_type"))
+        ]
+        if active_only:
+            opinions = self._active_opinions(opinions)
         groups = self._group_opinions(opinions)
         rows = []
         for key, items in sorted(groups.items(), key=lambda item: item[0]):
             collapsed_items = self._collapse_adopted_opinions(items)
+            if active_only:
+                collapsed_items = self._collapse_active_dft_adjudication(collapsed_items)
             enriched_items = [self._enrich_opinion(item) for item in collapsed_items]
             conflict_types = self._conflict_types(enriched_items)
             if not conflict_types and not include_non_conflicts:
@@ -84,7 +103,7 @@ class ReviewConflictAggregationService:
                     "target_type": target,
                     "target_id": target_value,
                     "field_name": field,
-                    "reviewer_count": len(items),
+                    "reviewer_count": len(enriched_items),
                     "source_count": len({self._norm(item.get("source")) for item in enriched_items if item.get("source")}),
                     "conflict": bool(conflict_types),
                     "conflict_types": conflict_types,
@@ -109,10 +128,37 @@ class ReviewConflictAggregationService:
                 "target_id": str(target_id) if target_id else None,
                 "field_name": field_name,
                 "include_non_conflicts": include_non_conflicts,
+                "active_only": active_only,
             },
             "conflict_count": len(rows),
             "conflict_type_counts": dict(sorted(conflict_type_counts.items())),
             "rows": rows,
+        }
+
+    def _empty_payload(
+        self,
+        *,
+        paper_id: UUID | None,
+        target_type: str | None,
+        target_id: str | None,
+        field_name: str | None,
+        include_non_conflicts: bool,
+        active_only: bool,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": "review_conflicts_v2",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "filters": {
+                "paper_id": str(paper_id) if paper_id else None,
+                "target_type": self._safe_canonical_target_type(target_type) if target_type else None,
+                "target_id": str(target_id) if target_id else None,
+                "field_name": field_name,
+                "include_non_conflicts": include_non_conflicts,
+                "active_only": active_only,
+            },
+            "conflict_count": 0,
+            "conflict_type_counts": {},
+            "rows": [],
         }
 
     def count_conflicts_by_paper(self, paper_ids: set[UUID]) -> dict[str, int]:
@@ -162,9 +208,9 @@ class ReviewConflictAggregationService:
         return dict(by_target)
 
     def _collapse_adopted_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if len(opinions) < 2:
-            return opinions
-        collapsed = list(opinions)
+        collapsed = self._collapse_repeated_source_opinions(opinions)
+        if len(collapsed) < 2:
+            return collapsed
         approved_corrections = [
             item for item in collapsed
             if str(item.get("source_type") or "") == "paper_correction"
@@ -188,6 +234,59 @@ class ReviewConflictAggregationService:
         collapsed = self._collapse_pending_corrections_absorbed_by_approved_corrections(collapsed)
         collapsed = self._collapse_dft_target_state_adopted_opinions(collapsed)
         return self._collapse_rejected_dft_replacement_adopted_opinions(collapsed)
+
+    def _active_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            item
+            for item in opinions
+            if str(item.get("source_type") or "") not in {"external_audit_opinion", "object_review_audit"}
+            or str(item.get("status") or "").strip().lower() in ACTIVE_EXTERNAL_AUDIT_STATUSES
+        ]
+
+    def _collapse_repeated_source_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        latest_by_source: dict[str, dict[str, Any]] = {}
+        for item in opinions:
+            source_identity = next(
+                (
+                    self._norm(value)
+                    for value in (
+                        item.get("source_label"),
+                        item.get("source"),
+                        item.get("reviewer"),
+                        item.get("model_name"),
+                    )
+                    if self._norm(value)
+                ),
+                str(item.get("source_id") or id(item)),
+            )
+            current = latest_by_source.get(source_identity)
+            if current is None or self._opinion_recency_key(item) >= self._opinion_recency_key(current):
+                latest_by_source[source_identity] = item
+        return list(latest_by_source.values())
+
+    def _collapse_active_dft_adjudication(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not opinions:
+            return opinions
+        target_type = self._safe_canonical_target_type(str(opinions[0].get("target_type") or ""))
+        if target_type != "dft_results":
+            return opinions
+        adjudications = [
+            item
+            for item in opinions
+            if str((item.get("raw_payload") or {}).get("adjudication_role") or item.get("adjudication_role") or "").strip().lower()
+            == "third_ai"
+        ]
+        if not adjudications:
+            return opinions
+        return [max(adjudications, key=self._opinion_recency_key)]
+
+    @staticmethod
+    def _opinion_recency_key(opinion: dict[str, Any]) -> tuple[str, float, str]:
+        return (
+            str(opinion.get("created_at") or ""),
+            float(opinion.get("confidence") or 0),
+            str(opinion.get("source_id") or ""),
+        )
 
     def _collapse_pending_corrections_absorbed_by_approved_corrections(
         self,
@@ -295,20 +394,33 @@ class ReviewConflictAggregationService:
         selected_source_ids = evidence.get("selected_source_ids")
         selected = isinstance(selected_source_ids, list) and str(opinion.get("source_id") or "") in {str(value) for value in selected_source_ids}
         if not selected:
+            fallback_settled = (
+                self._same_opinion_target(correction, opinion)
+                and self._opinion_matches_current_target_state(correction)
+                and self._opinion_matches_current_target_state(opinion)
+            )
             review_source = str(evidence.get("review_source") or "").strip().lower()
             review_source_label = str(evidence.get("review_source_label") or "").strip().lower()
             review_decision = str(evidence.get("review_decision") or "").strip().upper()
             if not review_source and not review_source_label and not review_decision:
-                return False
-            opinion_source = str(opinion.get("source") or "").strip().lower()
-            opinion_source_label = str(opinion.get("source_label") or "").strip().lower()
-            opinion_decision = str(opinion.get("decision") or "").strip().upper()
-            if review_source and review_source != opinion_source:
-                return False
-            if review_source_label and review_source_label != opinion_source_label:
-                return False
-            if review_decision and review_decision != opinion_decision:
-                return False
+                # Older approved corrections do not always persist the adopted
+                # source metadata. If the approved value already matches both
+                # the current target state and the opinion, treat it as settled.
+                if not fallback_settled:
+                    return False
+            else:
+                opinion_source = str(opinion.get("source") or "").strip().lower()
+                opinion_source_label = str(opinion.get("source_label") or "").strip().lower()
+                opinion_decision = str(opinion.get("decision") or "").strip().upper()
+                metadata_matches = True
+                if review_source and review_source != opinion_source:
+                    metadata_matches = False
+                if review_source_label and review_source_label != opinion_source_label:
+                    metadata_matches = False
+                if review_decision and review_decision != opinion_decision:
+                    metadata_matches = False
+                if not metadata_matches and not fallback_settled:
+                    return False
         if not self._opinion_values_match(correction, opinion):
             return False
         if not self._dft_scalar_correction_can_adopt_opinion(correction, opinion):
@@ -395,6 +507,14 @@ class ReviewConflictAggregationService:
         if normalized:
             return "content"
         return "other"
+
+    @classmethod
+    def _is_dft_target_type(cls, target_type: Any) -> bool:
+        try:
+            normalized = canonical_target_type(str(target_type or ""))
+        except ValueError:
+            normalized = str(target_type or "").strip().lower()
+        return normalized in cls.DFT_TARGET_TYPES
 
     def _collect_opinions(
         self,
@@ -527,7 +647,10 @@ class ReviewConflictAggregationService:
                         agent_role=item.get("agent_role") or payload.get("agent_role"),
                         model_name=item.get("model_name") or payload.get("model_name"),
                         decision=item.get("decision") or item.get("verdict") or payload.get("verdict"),
-                        status=item.get("status") or payload.get("status") or row.status,
+                        # The persisted candidate lifecycle is authoritative. Raw
+                        # payloads often retain their original "candidate" value
+                        # after the opinion has already been materialized.
+                        status=row.status or item.get("status") or payload.get("status"),
                         confidence=item.get("confidence", row.confidence),
                         value=item.get("corrected_value", item.get("proposed_value", item.get("value"))),
                         unit=item.get("unit"),
@@ -771,7 +894,8 @@ class ReviewConflictAggregationService:
             conflict_types.append("unit_conflict")
         if len({key for key in decision_keys if key != "neutral"}) > 1:
             conflict_types.append("decision_conflict")
-        if len(locator_keys) > 1:
+        is_dft_target = self._safe_canonical_target_type(str(opinions[0].get("target_type") or "")) == "dft_results"
+        if not is_dft_target and len(locator_keys) > 1:
             conflict_types.append("locator_conflict")
         if len(mapping_keys) > 1:
             conflict_types.append("mapping_conflict")
@@ -1042,7 +1166,7 @@ class ReviewConflictAggregationService:
         first = opinions[0]
         if self._safe_canonical_target_type(str(first.get("target_type") or "")) != "dft_results":
             return None
-        if str(first.get("field_name") or "").strip().lower() != "value":
+        if str(first.get("field_name") or "").strip().lower() not in {"value", "dft_results"}:
             return None
         target_id = str(first.get("target_id") or "").strip()
         target_row = self._load_target_row("dft_results", target_id) if target_id else None
@@ -1054,15 +1178,19 @@ class ReviewConflictAggregationService:
                 {
                     "value_key": value_key,
                     "unit_key": unit_key,
-                    "property": self._dft_field_value(opinion, "property", target_row=target_row),
-                    "material": self._dft_field_value(opinion, "material", target_row=target_row),
-                    "structure_name": self._dft_field_value(opinion, "structure_name", target_row=target_row),
-                    "adsorbate": self._dft_field_value(opinion, "adsorbate", target_row=target_row),
-                    "reaction_step": self._dft_field_value(opinion, "reaction_step", target_row=target_row),
+                    "property": self._dft_explicit_field_value(opinion, "property"),
+                    "material": self._dft_explicit_field_value(opinion, "material"),
+                    "structure_name": self._dft_explicit_field_value(opinion, "structure_name"),
+                    "adsorbate": self._dft_explicit_field_value(opinion, "adsorbate"),
+                    "reaction_step": self._dft_explicit_field_value(opinion, "reaction_step"),
                     "decision_bucket": self._conflict_decision_bucket(opinion, target_row=target_row),
                 }
             )
         return payloads
+
+    def _dft_explicit_field_value(self, opinion: dict[str, Any], field_name: str) -> str:
+        present, value = self._dft_field_state(opinion, field_name, target_row=None)
+        return value if present else ""
 
     def _conflict_decision_bucket(self, opinion: dict[str, Any], *, target_row: DFTResult | None) -> str:
         normalized = str(opinion.get("decision") or opinion.get("status") or "").strip().upper()

@@ -19,6 +19,7 @@ from app.db.models import DFTSetting as DS
 from app.db.models import Paper as P
 from app.normalizers.chemistry_normalizer import ChemistryNormalizer, canonicalize_adsorbate, get_property_taxonomy
 from app.normalizers.unit_normalizer import UnitNormalizer
+from app.services.catalyst_sample_identity import resolve_sample_identity
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
 
@@ -52,6 +53,16 @@ def _optional_int_filter(value: Any) -> int | None:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float_filter(value: Any) -> float | None:
+    value = _fastapi_default(value)
+    if value is None:
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -107,26 +118,34 @@ def _dft_rows_statement(
     *,
     property_type: str | None,
     adsorbate: str | None,
+    catalyst_type: str | None,
     year_min: int | None,
     year_max: int | None,
     library_name: str | None,
+    min_confidence: float | None = None,
 ):
     property_type = _optional_text_filter(property_type)
     adsorbate = _optional_text_filter(adsorbate)
+    catalyst_type = _optional_text_filter(catalyst_type)
     year_min = _optional_int_filter(year_min)
     year_max = _optional_int_filter(year_max)
     library_name = _optional_text_filter(library_name)
+    min_confidence = _optional_float_filter(min_confidence)
     stmt = select(DR, P).join(P, DR.paper_id == P.id).order_by(P.year.desc().nulls_last(), P.title)
     if property_type:
         stmt = stmt.where(DR.property_type.ilike(f"%{property_type}%"))
     if adsorbate:
         stmt = stmt.where(DR.adsorbate.ilike(f"%{adsorbate}%"))
+    if min_confidence is not None:
+        stmt = stmt.where(DR.confidence >= min_confidence)
     if year_min:
         stmt = stmt.where(P.year >= year_min)
     if year_max:
         stmt = stmt.where(P.year <= year_max)
     if library_name is not None:
         stmt = stmt.where(build_library_name_clause(P.library_name, library_name))
+    if catalyst_type:
+        stmt = stmt.join(CS, DR.catalyst_sample_id == CS.id).where(CS.catalyst_type.ilike(catalyst_type))
     return stmt
 
 
@@ -260,8 +279,9 @@ def _extract_evidence_context(payload: Any) -> dict[str, Any]:
 
 
 def _material_identity_key(row: DR, catalyst: CS | None, evidence_context: dict[str, Any]) -> str:
-    if row.catalyst_sample_id:
-        return f"catalyst_sample:{row.catalyst_sample_id}"
+    catalyst_id = row.catalyst_sample_id or (catalyst.id if catalyst is not None else None)
+    if catalyst_id:
+        return f"catalyst_sample:{catalyst_id}"
     material_identity = _first_non_blank(
         evidence_context.get("material_identity"),
         evidence_context.get("material"),
@@ -385,6 +405,32 @@ def _build_instance_context(
         "instance_key": instance_key,
         "components": components,
     }
+
+
+def _effective_export_catalyst(
+    session: Session,
+    *,
+    row: DR,
+    paper_catalysts: list[CS],
+    catalyst_by_id: dict[str, CS],
+    evidence_context: dict[str, Any],
+) -> tuple[CS | None, str]:
+    if row.catalyst_sample_id:
+        bound = catalyst_by_id.get(str(row.catalyst_sample_id))
+        return bound, "explicit_bound" if bound is not None else "explicit_missing"
+
+    proposed_value = {
+        "name": evidence_context.get("material_identity") or evidence_context.get("material"),
+        "structure_name": evidence_context.get("structure_name"),
+    }
+    resolution = resolve_sample_identity(session, paper_id=row.paper_id, proposed_value=proposed_value)
+    if resolution.status == "reuse" and resolution.sample is not None:
+        return resolution.sample, "auto_bound"
+
+    if len(paper_catalysts) == 1:
+        return paper_catalysts[0], "single_candidate_fallback"
+
+    return None, "unbound"
 
 
 def _normalize_numeric_target(
@@ -724,9 +770,11 @@ def build_dft_ml_dataset(
     *,
     property_type: str | None = None,
     adsorbate: str | None = None,
+    catalyst_type: str | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
     library_name: str | None = None,
+    min_confidence: float | None = None,
     paper_id: UUID | None = None,
     limit: int | None = None,
 ) -> dict:
@@ -743,9 +791,11 @@ def build_dft_ml_dataset(
     stmt = _dft_rows_statement(
         property_type=property_type,
         adsorbate=adsorbate,
+        catalyst_type=catalyst_type,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
+        min_confidence=min_confidence,
     )
     if paper_id is not None:
         stmt = stmt.where(DR.paper_id == paper_id)
@@ -795,7 +845,7 @@ def build_dft_ml_dataset(
 
     for dr, paper, gate in eligible_rows:
         paper_id_str = str(paper.id)
-        direct_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
+        paper_catalysts = catalysts_by_paper.get(paper_id_str, [])
         paper_settings = settings_by_paper.get(paper_id_str, [])
         normalized_property_type = _normalized_property_type(dr.property_type)
         taxonomy = get_property_taxonomy(dr.property_type)
@@ -818,14 +868,21 @@ def build_dft_ml_dataset(
             canonical_adsorbate=canonical_adsorbate,
         )
         evidence_context = _extract_evidence_context(dr.evidence_payload)
+        effective_catalyst, catalyst_binding_source = _effective_export_catalyst(
+            session,
+            row=dr,
+            paper_catalysts=paper_catalysts,
+            catalyst_by_id=catalyst_by_id,
+            evidence_context=evidence_context,
+        )
 
         common_payload = {
             "record_id": str(dr.id),
             "paper": _paper_payload(paper),
-            "catalyst": _catalyst_payload(direct_catalyst),
+            "catalyst": _catalyst_payload(effective_catalyst),
             "catalyst_candidates": [
                 payload
-                for payload in (_catalyst_payload(catalyst) for catalyst in catalysts_by_paper.get(paper_id_str, []))
+                for payload in (_catalyst_payload(catalyst) for catalyst in paper_catalysts)
                 if payload is not None
             ],
             "dft_settings": [_dft_setting_payload(setting) for setting in paper_settings],
@@ -847,6 +904,7 @@ def build_dft_ml_dataset(
                 "gate_reasons": list(gate.reasons),
                 "safety_gate": "safe_verified_with_required_evidence",
                 "evidence_payload": dr.evidence_payload,
+                "catalyst_binding_source": catalyst_binding_source,
             },
         }
         target_payload = {
@@ -870,7 +928,7 @@ def build_dft_ml_dataset(
         }
         instance_context = _build_instance_context(
             row=dr,
-            catalyst=direct_catalyst,
+            catalyst=effective_catalyst,
             target_payload=target_payload,
             evidence_context=evidence_context,
             linked_dft_setting=setting_link["linked_dft_setting"],
@@ -957,9 +1015,11 @@ def build_dft_ml_dataset(
             "filters": {
                 "property_type": property_type,
                 "adsorbate": adsorbate,
+                "catalyst_type": catalyst_type,
                 "year_min": year_min,
                 "year_max": year_max,
                 "library_name": normalize_library_name(library_name) if library_name is not None else None,
+                "min_confidence": min_confidence,
                 "paper_id": str(paper_id) if paper_id else None,
             },
             "safety_gate": "safe_verified_with_required_evidence",
@@ -984,9 +1044,11 @@ def build_dft_csv_rows(
     *,
     property_type: str | None = None,
     adsorbate: str | None = None,
+    catalyst_type: str | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
     library_name: str | None = None,
+    min_confidence: float | None = None,
     paper_id: UUID | None = None,
 ) -> tuple[str, dict]:
     """Build DFT CSV export as a UTF-8 encoded string, plus gate summary.
@@ -1001,9 +1063,11 @@ def build_dft_csv_rows(
     stmt = _dft_rows_statement(
         property_type=property_type,
         adsorbate=adsorbate,
+        catalyst_type=catalyst_type,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
+        min_confidence=min_confidence,
     )
     if paper_id is not None:
         stmt = stmt.where(DR.paper_id == paper_id)

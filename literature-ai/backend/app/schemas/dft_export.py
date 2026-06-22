@@ -143,6 +143,7 @@ class DFTProvenancePayloadV2(BaseModel):
     gate_reasons: list[str] = Field(default_factory=list)
     safety_gate: Literal["safe_verified_with_required_evidence"]
     evidence_payload: dict[str, Any] | None = None
+    catalyst_binding_source: str | None = None
 
 
 class DFTNumericRecordV2(BaseModel):

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -333,15 +333,8 @@ class ModuleWriteLockService:
         bind = self.session.get_bind()
         if bind is None:
             return
-        if bind.dialect.name == "sqlite":
-            # SQLite has no row/advisory locks.  A no-op write makes conflict
-            # checking and insertion part of one serialized DB write
-            # transaction. SQLite serializes writers globally by design; the
-            # production PostgreSQL path below remains strictly per-paper.
-            self.session.execute(update(Paper).where(Paper.id == paper_id).values(id=paper_id))
-            return
         if bind.dialect.name != "postgresql":
-            return
+            raise ModuleWriteLockError("module_write_lock_unsupported_database", bind.dialect.name)
         # Transaction-scoped and keyed by paper: failures/rollbacks release it
         # automatically, while unrelated papers remain fully concurrent.
         key = int.from_bytes(paper_id.bytes[:8], byteorder="big", signed=True)

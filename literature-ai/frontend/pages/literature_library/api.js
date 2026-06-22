@@ -133,7 +133,7 @@ const UI_LABELS = {
     candidate_status: {
         pending: "待确认",
         requires_resolution: "需人工处理",
-        materialized: "已生成审核记录",
+        materialized: "已记录",
         ai_reviewed: "AI 已审核",
         ai_applied: "AI 已修改入库",
         skipped: "已跳过",
@@ -265,10 +265,11 @@ async function loadLibraryRuntimeInfo() {
         if (!info || typeof info !== "object") {
             throw new Error("未获取到数据库运行时信息");
         }
+        const activeRootFromApi = info.active_library_root || "";
         const activeDb = info.active_library_db_path || info.effective_db_path || "";
         const storageRoot = info.effective_storage_root || info.storage_root || "";
         const registryPath = "/data/library_registry.json";
-        let activeRoot = activeDb ? activeDb.replace(/\\/g, "/").replace(/\/database\.sqlite$/i, "") : "";
+        let activeRoot = activeRootFromApi ? activeRootFromApi.replace(/\\/g, "/") : "";
         if (info.dialect === "postgresql" && !activeRoot) {
             activeRoot = storageRoot ? storageRoot.replace(/\\/g, "/").replace(/\/storage$/i, "") : "";
         }

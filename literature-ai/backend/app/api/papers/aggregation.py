@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample as CS
@@ -22,6 +22,7 @@ from app.db.models import Paper as P
 from app.db.session import get_db_session
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_export_service import (
+    _extract_evidence_context,
     _dft_quality_row_payload,
     _dft_rows_statement,
     _optional_int_filter,
@@ -46,18 +47,22 @@ logger = logging.getLogger(__name__)
 async def export_dft_results_csv(
     property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
+    catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
+    min_confidence: float | None = Query(default=None, ge=0.0, le=1.0),
     session: Session = Depends(get_db_session),
 ):
     csv_text, gate_summary = build_dft_csv_rows(
         session,
         property_type=property_type,
         adsorbate=adsorbate,
+        catalyst_type=catalyst_type,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
+        min_confidence=min_confidence,
     )
     csv_bytes = csv_text.encode("utf-8-sig")
     return StreamingResponse(
@@ -79,18 +84,22 @@ async def export_dft_results_csv(
 async def export_dft_dataset(
     property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
+    catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
+    min_confidence: float | None = Query(default=None, ge=0.0, le=1.0),
     session: Session = Depends(get_db_session),
 ):
     return build_dft_ml_dataset(
         session,
         property_type=property_type,
         adsorbate=adsorbate,
+        catalyst_type=catalyst_type,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
+        min_confidence=min_confidence,
     )
 
 
@@ -116,9 +125,11 @@ async def dft_dataset_quality(
         _dft_rows_statement(
             property_type=property_type,
             adsorbate=adsorbate,
+            catalyst_type=None,
             year_min=year_min,
             year_max=year_max,
             library_name=library_name,
+            min_confidence=None,
         )
     ).all()
     gate_results = []
@@ -256,35 +267,39 @@ async def compare_dft_results(
     library_name: str | None = Query(default=None, description="Filter by literature library"),
     min_confidence: float = Query(default=0.3, ge=0.0, le=1.0),
     status: str = Query(default="all", description="exportable, needs_review, or all"),
+    compact: bool = Query(default=False, description="Return a lighter payload optimized for list/table rendering"),
+    offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
 ):
     normalized_status = (status or "all").strip().lower()
-    # Export eligibility is computed after loading candidate rows, so a small SQL
-    # LIMIT can hide valid exportable records that appear later in value order.
-    fetch_limit = limit if normalized_status in {"all", "any", ""} else 2500
-    stmt = (
+    base_stmt = (
         select(DR, P)
         .join(P, DR.paper_id == P.id)
-        .where(DR.confidence >= min_confidence)
-        .order_by(DR.value.asc().nulls_last())
-        .limit(fetch_limit)
+        .order_by(DR.value.asc().nulls_last(), DR.id.asc())
     )
+    if normalized_status in {"exportable", "eligible", "validated"}:
+        # A verified export gate is authoritative even for legacy rows whose
+        # optional extraction-confidence value was never populated.
+        base_stmt = base_stmt.where(or_(DR.confidence >= min_confidence, DR.confidence.is_(None)))
+    else:
+        base_stmt = base_stmt.where(DR.confidence >= min_confidence)
     if property_type:
-        stmt = stmt.where(DR.property_type.ilike(f"%{property_type}%"))
+        base_stmt = base_stmt.where(DR.property_type.ilike(f"%{property_type}%"))
     if adsorbate:
-        stmt = stmt.where(DR.adsorbate.ilike(f"%{adsorbate}%"))
+        base_stmt = base_stmt.where(DR.adsorbate.ilike(f"%{adsorbate}%"))
     if year_min:
-        stmt = stmt.where(P.year >= year_min)
+        base_stmt = base_stmt.where(P.year >= year_min)
     if year_max:
-        stmt = stmt.where(P.year <= year_max)
+        base_stmt = base_stmt.where(P.year <= year_max)
     if library_name is not None:
-        stmt = stmt.where(build_library_name_clause(P.library_name, library_name))
+        base_stmt = base_stmt.where(build_library_name_clause(P.library_name, library_name))
 
-    rows = session.execute(stmt).all()
-    catalyst_by_id: dict[str, dict[str, Any]] = {}
-    if rows:
-        cat_rows = session.scalars(select(CS).where(CS.paper_id.in_([row[1].id for row in rows]))).all()
+    def _catalyst_map(chunk_rows: list[tuple[Any, Any]]) -> dict[str, dict[str, Any]]:
+        catalyst_by_id: dict[str, dict[str, Any]] = {}
+        if not chunk_rows:
+            return catalyst_by_id
+        cat_rows = session.scalars(select(CS).where(CS.paper_id.in_([row[1].id for row in chunk_rows]))).all()
         for cat in cat_rows:
             catalyst_by_id[str(cat.id)] = {
                 "id": str(cat.id),
@@ -294,69 +309,132 @@ async def compare_dft_results(
                 "coordination": cat.coordination,
                 "support": cat.support,
             }
+        return catalyst_by_id
 
-    items = []
-    gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
-
-    for dr, paper in rows:
+    def _row_payload(dr: Any, paper: Any, catalysts: list[dict[str, Any]], gate: Any) -> dict[str, Any]:
         pid = str(paper.id)
-        linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
-        catalysts = [linked_catalyst] if linked_catalyst else []
-        if catalyst_type:
-            catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
-            if not catalysts:
-                continue
-        gate = gate_by_id[str(dr.id)]
-        if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
-            continue
-        if normalized_status in {"needs_review", "candidate", "blocked"} and gate.eligible:
-            continue
         display_value, display_unit = normalize_dft_display_value(dr.value, dr.unit)
-        items.append(
-            {
-                "paper_id": pid,
-                "title": paper.title,
-                "doi": paper.doi,
-                "journal": paper.journal,
-                "year": paper.year,
-                "property_type": dr.property_type,
-                "adsorbate": dr.adsorbate,
-                "value": display_value,
-                "unit": display_unit,
-                "raw_value": dr.value,
-                "raw_unit": dr.unit,
-                "reaction_step": dr.reaction_step,
-                "confidence": dr.confidence,
-                "candidate_status": dr.candidate_status or "system_candidate",
-                "evidence_text": dr.evidence_text,
-                "evidence_payload": dr.evidence_payload,
-                "source_section": dr.source_section,
-                "source_figure": dr.source_figure,
-                "catalysts": catalysts,
-                "is_exportable": gate.eligible,
-                "validation_status": "validated" if gate.eligible else "needs_review",
-                "blocked_reasons": list(gate.reasons),
-                "review_status": gate.review_status,
-                "review_gate_status": gate.review_gate_status,
-                "provenance_level": gate.provenance_level,
-                "locator_status": gate.locator_status,
-            }
-        )
-        if len(items) >= limit:
-            break
-
-    property_types = {item["property_type"] for item in items if item.get("property_type")}
-    units = {item["unit"] for item in items if item.get("unit")}
-    numeric_values = [item["value"] for item in items if item["value"] is not None]
-    stats = {"count": len(items)}
-    if numeric_values and len(property_types) <= 1 and len(units) <= 1:
-        stats = {
-            "count": len(numeric_values),
-            "min": round(min(numeric_values), 4),
-            "max": round(max(numeric_values), 4),
-            "mean": round(sum(numeric_values) / len(numeric_values), 4),
-            "unit": items[0]["unit"] if items else None,
+        item = {
+            "record_id": str(dr.id),
+            "paper_id": pid,
+            "title": paper.title,
+            "doi": paper.doi,
+            "property_type": dr.property_type,
+            "adsorbate": dr.adsorbate,
+            "value": display_value,
+            "unit": display_unit,
+            "reaction_step": dr.reaction_step,
+            "confidence": dr.confidence,
+            "candidate_status": dr.candidate_status or "system_candidate",
+            "evidence_text": dr.evidence_text,
+            "source_section": dr.source_section,
+            "source_figure": dr.source_figure,
+            "catalysts": catalysts,
+            "is_exportable": gate.eligible,
+            "validation_status": "validated" if gate.eligible else "needs_review",
+            "blocked_reasons": list(gate.reasons),
+            "review_status": gate.review_status,
+            "review_gate_status": gate.review_gate_status,
+            "provenance_level": gate.provenance_level,
+            "locator_status": gate.locator_status,
         }
+        evidence_context = _extract_evidence_context(dr.evidence_payload)
+        item["display_catalyst_name"] = (
+            (catalysts[0].get("name") if catalysts else None)
+            or evidence_context.get("material_identity")
+            or evidence_context.get("material")
+            or evidence_context.get("structure_name")
+            or "-"
+        )
+        item["material_binding_status"] = "bound" if dr.catalyst_sample_id else "derived_from_evidence"
+        if not compact:
+            item.update(
+                {
+                    "journal": paper.journal,
+                    "year": paper.year,
+                    "raw_value": dr.value,
+                    "raw_unit": dr.unit,
+                    "evidence_payload": dr.evidence_payload,
+                }
+            )
+        return item
+
+    filtered_items: list[dict[str, Any]] = []
+    total: int | None = None
+    has_more = False
+    stats = {"count": 0}
+
+    if compact:
+        chunk_size = min(300, max(120, limit * 4))
+        scanned = 0
+        filtered_total = 0
+        page_end = offset + limit
+        items = []
+
+        while True:
+            chunk_rows = session.execute(base_stmt.offset(scanned).limit(chunk_size)).all()
+            if not chunk_rows:
+                break
+            catalyst_by_id = _catalyst_map(chunk_rows)
+            gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in chunk_rows], target_type="dft_results")
+
+            for dr, paper in chunk_rows:
+                linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
+                catalysts = [linked_catalyst] if linked_catalyst else []
+                if catalyst_type:
+                    catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
+                    if not catalysts:
+                        continue
+                gate = gate_by_id[str(dr.id)]
+                if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
+                    continue
+                if normalized_status in {"needs_review", "candidate", "blocked"} and gate.eligible:
+                    continue
+                if filtered_total >= offset and filtered_total < page_end:
+                    items.append(_row_payload(dr, paper, catalysts, gate))
+                filtered_total += 1
+
+            scanned += len(chunk_rows)
+            if len(chunk_rows) < chunk_size:
+                break
+
+        total = filtered_total
+        has_more = total > page_end
+        stats = {"count": total}
+    else:
+        fetch_limit = 2500
+        rows = session.execute(base_stmt.limit(fetch_limit)).all()
+        catalyst_by_id = _catalyst_map(rows)
+        gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
+
+        for dr, paper in rows:
+            linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
+            catalysts = [linked_catalyst] if linked_catalyst else []
+            if catalyst_type:
+                catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
+                if not catalysts:
+                    continue
+            gate = gate_by_id[str(dr.id)]
+            if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
+                continue
+            if normalized_status in {"needs_review", "candidate", "blocked"} and gate.eligible:
+                continue
+            filtered_items.append(_row_payload(dr, paper, catalysts, gate))
+
+        total = len(filtered_items)
+        items = filtered_items[offset : offset + limit]
+        property_types = {item["property_type"] for item in filtered_items if item.get("property_type")}
+        units = {item["unit"] for item in filtered_items if item.get("unit")}
+        numeric_values = [item["value"] for item in filtered_items if item["value"] is not None]
+        stats = {"count": total}
+        if numeric_values and len(property_types) <= 1 and len(units) <= 1:
+            stats = {
+                "count": len(numeric_values),
+                "min": round(min(numeric_values), 4),
+                "max": round(max(numeric_values), 4),
+                "mean": round(sum(numeric_values) / len(numeric_values), 4),
+                "unit": filtered_items[0]["unit"] if filtered_items else None,
+            }
 
     return {
         "query": {
@@ -365,9 +443,13 @@ async def compare_dft_results(
             "catalyst_type": catalyst_type,
             "library_name": normalize_library_name(library_name) if library_name is not None else None,
             "status": status,
+            "compact": compact,
+            "offset": offset,
+            "limit": limit,
         },
         "stats": stats,
-        "total": len(items),
+        "total": total,
+        "has_more": has_more,
         "items": items,
     }
 

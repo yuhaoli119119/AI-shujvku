@@ -354,11 +354,9 @@ class ExtractionReviewService:
             "last_resolved_target_id": target_id,
         }
         dialect = self.session.get_bind().dialect.name
-        if dialect in {"sqlite", "postgresql"}:
-            if dialect == "sqlite":
-                from sqlalchemy.dialects.sqlite import insert as dialect_insert
-            else:
-                from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+
             inserted_id = self.session.scalar(
                 dialect_insert(ExtractionFieldReview)
                 .values(**values)

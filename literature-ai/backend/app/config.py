@@ -120,6 +120,7 @@ class Settings(BaseSettings):
     auto_run_stage2_extraction: bool = True
     auto_enrich_ingested_metadata: bool = True
     metadata_enrichment_timeout_seconds: float = 5.0
+    workflow_fallback_max_workers: int = 2
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from app.db.models import EvidenceLocator, ExtractionFieldReview, Paper
 from app.services.evidence_locator_service import EvidenceLocatorService
@@ -293,33 +293,7 @@ def apply_locator_repair_plan_to_sqlite(
     confirmed_approval: bool = False,
     dry_run: bool = True,
 ) -> LocatorRepairWriteResult:
-    disabled_plan = load_json_file(disabled_plan_path)
-    proposal_manifest = load_json_file(proposal_manifest_path)
-    items = approved_items_from_plan(
-        disabled_plan=disabled_plan,
-        proposal_manifest=proposal_manifest,
-        approved_review_ids=approved_review_ids,
-    )
-    engine = create_engine(f"sqlite:///{Path(db_path).resolve().as_posix()}", future=True)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
-    try:
-        with SessionLocal() as session:
-            service = ControlledLocatorRepairWriteService(session)
-            result = service.apply(
-                items,
-                approved_review_ids=approved_review_ids,
-                allow_active_db_write=allow_active_db_write,
-                confirmed_approval=confirmed_approval,
-                dry_run=dry_run,
-            )
-            _write_snapshot(rollback_snapshot_path, result.rollback_snapshot, db_path=db_path)
-            if dry_run:
-                session.rollback()
-            else:
-                session.commit()
-            return result
-    finally:
-        engine.dispose()
+    raise LocatorRepairWriteError("SQLite locator repair writes have been removed. Use PostgreSQL session services.")
 
 
 def _warning_reason(item: dict[str, Any]) -> str:

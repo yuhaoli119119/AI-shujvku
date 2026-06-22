@@ -1,0 +1,3674 @@
+[
+  {
+    "id": "91df5769-9d47-4b42-a0be-6e3dbeb59542",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "adsorption_energy",
+    "value": -1.05,
+    "unit": "eV",
+    "reaction_step": null,
+    "source_section": "Results and discussion",
+    "source_figure": null,
+    "evidence_text": "2 due to the perturbation of *CO 2 binding on M 2 site. In other words, there exists the synergistic effect of M-M atoms and C 2 N substrate on O = C = O bond activation. For M 2 @C 2 N studied, the adsorption strength is increased in the order of FeFe (-1.05 eV) > F eCo (-0.97 eV) > FeCu (-0.85 eV) > FeNi (-0.77 eV) > CuCo (-0.55 eV) > CuNi (-0.43 eV) > CuCu (-0.31 eV), which is correlated well w...",
+    "confidence": 0.94,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": null,
+      "table": null,
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": "Results and discussion",
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "2 due to the perturbation of *CO 2 binding on M 2 site. In other words, there exists the synergistic effect of M-M atoms and C 2 N substrate on O = C = O bond activation. For M 2 @C 2 N studied, the adsorption strength is increased in the order of FeFe (-1.05 eV) > F eCo (-0.97 eV) > FeCu (-0.85 eV) > FeNi (-0.77 eV) > CuCo (-0.55 eV) > CuNi (-0.43 eV) > CuCu (-0.31 eV), which is correlated well w...",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "excerpt": "2 due to the perturbation of *CO 2 binding on M 2 site. In other words, there exists the synergistic effect of M-M atoms and C 2 N substrate on O = C = O bond activation. For M 2 @C 2 N studied, the adsorption strength is increased in the order of FeFe (-1.05 eV) > F eCo (-0.97 eV) > FeCu (-0.85 eV) > FeNi (-0.77 eV) > CuCo (-0.55 eV) > CuNi (-0.43 eV) > CuCu (-0.31 eV), which is correlated well w...",
+          "section": "Results and discussion",
+          "confidence": 0.94,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:97f261dca5b010c7540c314f",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "section": "Results and discussion",
+          "confidence": 0.94,
+          "evidence_text": "2 due to the perturbation of *CO 2 binding on M 2 site. In other words, there exists the synergistic effect of M-M atoms and C 2 N substrate on O = C = O bond activation. For M 2 @C 2 N studied, the adsorption strength is increased in the order of FeFe (-1.05 eV) > F eCo (-0.97 eV) > FeCu (-0.85 eV) > FeNi (-0.77 eV) > CuCo (-0.55 eV) > CuNi (-0.43 eV) > CuCu (-0.31 eV), which is correlated well w...",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "4d3be4e0-c173-47a9-9ab4-609a9d78d2b7",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "reaction_barrier",
+    "value": 42.0,
+    "unit": "eV",
+    "reaction_step": null,
+    "source_section": "CO 2 RR toward C 1 products",
+    "source_figure": null,
+    "evidence_text": "C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even become the P...",
+    "confidence": 0.94,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": null,
+      "table": null,
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": "CO 2 RR toward C 1 products",
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even become the P...",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "excerpt": "C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even become the P...",
+          "section": "CO 2 RR toward C 1 products",
+          "confidence": 0.94,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:d60a5c5c4bbc36d4856310d7",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "section": "CO 2 RR toward C 1 products",
+          "confidence": 0.94,
+          "evidence_text": "C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even become the P...",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "ed5922a1-c097-442a-b43d-e87043150935",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "reaction_barrier",
+    "value": 0.63,
+    "unit": "eV",
+    "reaction_step": null,
+    "source_section": "CO 2 RR toward C 2 products",
+    "source_figure": null,
+    "evidence_text": "O + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 products (...",
+    "confidence": 0.94,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": null,
+      "table": null,
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": "CO 2 RR toward C 2 products",
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "O + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 products (...",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "excerpt": "O + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 products (...",
+          "section": "CO 2 RR toward C 2 products",
+          "confidence": 0.94,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:6b1996357ab215293012c9d7",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "section": "CO 2 RR toward C 2 products",
+          "confidence": 0.94,
+          "evidence_text": "O + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 products (...",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "157c2cf0-ba91-4c4d-981a-5dd8cb1db86c",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "reaction_barrier",
+    "value": 2.0,
+    "unit": "eV",
+    "reaction_step": null,
+    "source_section": "CO 2 RR toward C 1 products",
+    "source_figure": null,
+    "evidence_text": "ucts by C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even beco...",
+    "confidence": 0.94,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": null,
+      "table": null,
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": "CO 2 RR toward C 1 products",
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "ucts by C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even beco...",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "excerpt": "ucts by C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even beco...",
+          "section": "CO 2 RR toward C 1 products",
+          "confidence": 0.94,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:283cba217534e867e25ca4ad",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "section": "CO 2 RR toward C 1 products",
+          "confidence": 0.94,
+          "evidence_text": "ucts by C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even beco...",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "467fadf7-11df-4f80-8d27-3627076a0a5c",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "reaction_barrier",
+    "value": 3.0,
+    "unit": "eV",
+    "reaction_step": null,
+    "source_section": "CO 2 RR toward C 2 products",
+    "source_figure": null,
+    "evidence_text": "CO ? *CO + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 pro...",
+    "confidence": 0.94,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": null,
+      "table": null,
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": "CO 2 RR toward C 2 products",
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO ? *CO + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 pro...",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "excerpt": "CO ? *CO + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 pro...",
+          "section": "CO 2 RR toward C 2 products",
+          "confidence": 0.94,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:4e7c352c7a5feeb8b30ecdde",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": null,
+          "table": null,
+          "figure": null,
+          "section": "CO 2 RR toward C 2 products",
+          "confidence": 0.94,
+          "evidence_text": "CO ? *CO + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 pro...",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "cf91cef7-b517-45c6-9477-0e2e03140055",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeFe",
+    "property_type": "bader_charge",
+    "value": 0.68,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeFe | 0.68 | | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:217c899ccfee5385c7d3485c",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "b22f9829-ccb2-4a33-bf50-3adc0e055b63",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeFe",
+    "property_type": "bader_charge",
+    "value": 0.76,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.76; row: FeFe | 0.68 | | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.76; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.76; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:b891105aa410a48f26fa11ed",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.76; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "ab74c05e-3b98-4f1d-9c6c-cb6535ab22b6",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeFe",
+    "property_type": "bader_charge",
+    "value": 0.89,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.89; row: FeFe | 0.68 | | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.89; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.89; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:abac737acbb7e4c3b9416c0d",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.89; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "86e9b043-6ebd-468d-846c-01c64e587ddb",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCo",
+    "property_type": "bader_charge",
+    "value": 0.68,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:ad56311a88f46babff738897",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "0d3e1f08-f8b1-4bfe-a545-7ca0dc1332fe",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCo",
+    "property_type": "bader_charge",
+    "value": 0.56,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:fb6041a96c3b7b69540db923",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "0dff3de3-6bf3-4692-9cd5-a98a9416f284",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCo",
+    "property_type": "bader_charge",
+    "value": 0.9,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.90; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.90; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.90; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:d4c4ab1d3a454ce0e7f0cbed",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.90; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "748700a1-6125-4172-8e90-376309030bc7",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCo",
+    "property_type": "bader_charge",
+    "value": 0.68,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:891fd55c6a8c93408f7ca4b6",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "0db00cb5-868b-45c7-a5a9-1d0a630a3e35",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeNi",
+    "property_type": "bader_charge",
+    "value": 0.71,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:c80e2083ebd159a3a02cfd95",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "ea98cb68-6311-4ead-b678-da804a963fbc",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeNi",
+    "property_type": "bader_charge",
+    "value": 0.5,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:259f35b8c83c00605b2ab961",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "b69bb551-2893-4044-883e-a1e698873c7e",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeNi",
+    "property_type": "bader_charge",
+    "value": 0.82,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.82; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.82; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.82; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:066449c380b4397eb527f276",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.82; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "034951b4-0c7a-4450-8b32-0dfa1f437dbf",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeNi",
+    "property_type": "bader_charge",
+    "value": 0.67,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.67; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.67; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.67; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:97c9bffd48a00d258a1dbbc8",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.67; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "b59aa27c-84a5-4b29-a576-688a7705b354",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCu",
+    "property_type": "bader_charge",
+    "value": 0.71,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:40e9a119b594d8e8ec756f92",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "ff0eaf91-1977-462b-aad5-7e9ea028e49d",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCu",
+    "property_type": "bader_charge",
+    "value": 0.5,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:3c7089d4e42b9f7e0bf24c88",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "6383dbc0-4158-403f-b44a-2db1c9c5a840",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCu",
+    "property_type": "bader_charge",
+    "value": 0.84,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.84; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.84; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.84; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:c99b70e53f9d22f1133bfee7",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.84; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "9c84bc8f-b79a-49b7-ba35-88e633e07f60",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "FeCu",
+    "property_type": "bader_charge",
+    "value": 0.66,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.66; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.66; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.66; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:2f44f63e4076db4585817d5f",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.66; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "9a43b761-b309-48e3-8ef3-d7dff7c22068",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuCo",
+    "property_type": "bader_charge",
+    "value": 0.6,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.60; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.60; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.60; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:4f012ef51c3e8189f3944da1",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.60; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "7d2494a1-f251-4fe8-a622-0d82779ff405",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuCo",
+    "property_type": "bader_charge",
+    "value": 0.59,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.59; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.59; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.59; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:d639e83ae583f8eee05b4e7e",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.59; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "6c8f459b-aabd-4316-ac73-a231b49e2a2b",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuCo",
+    "property_type": "bader_charge",
+    "value": 0.71,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.71; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.71; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.71; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:497cae758b972bd0682ca8a7",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.71; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "1a4691fb-e13e-4747-9173-e16874e83dd6",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuCo",
+    "property_type": "bader_charge",
+    "value": 0.74,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:2644010a7d62b49b823624db",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "5aaeee26-2d1e-4d3c-987c-95ea1e61ceb0",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuNi",
+    "property_type": "bader_charge",
+    "value": 0.58,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.58; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.58; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.58; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:724de1694afc1ffb744d0678",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.58; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "a33b7453-7b11-4400-8ed5-2138f9ea254f",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuNi",
+    "property_type": "bader_charge",
+    "value": 0.56,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:daf4da659b6c46c82b34cbb0",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "976c20e1-fdac-494a-a55b-f064dc07154a",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuNi",
+    "property_type": "bader_charge",
+    "value": 0.72,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.72; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.72; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.72; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:fd76780797a8200b5cebecf4",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.72; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "ba828cef-3b6d-44ca-9126-07b7b50cc86b",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuNi",
+    "property_type": "bader_charge",
+    "value": 0.63,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.63; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.63; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.63; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:4e618bd6173f41c907a729ef",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.63; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "3348c274-0a14-43bc-9c39-87aac2d5b13d",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuCu",
+    "property_type": "bader_charge",
+    "value": 0.57,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.57; row: CuCu | 0.57 | | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "M 2 N 4 Bader charge (e /C0 ): 0.57; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "M 2 N 4 Bader charge (e /C0 ): 0.57; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:3a222b99846e4dac553e24df",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.57; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "da707ac9-5511-423b-bfcd-8f726d953ff0",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuCu",
+    "property_type": "bader_charge",
+    "value": 0.74,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCu | 0.57 | | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:686a26f09b54c66d3948224f",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "fdb9d934-6c9a-44a2-b202-a3b2aa027bb2",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CuCu",
+    "property_type": "bader_charge",
+    "value": 0.64,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.64; row: CuCu | 0.57 | | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+    "confidence": 0.89,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 3,
+      "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.64; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "excerpt": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.64; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+          "section": null,
+          "confidence": 0.89,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:cbce78f23bba731473983fb9",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 3,
+          "table": "Table 1 DFT-calculated binding energy (BE) a of M2N4, Bader charge (e /C0 ) b , ",
+          "figure": null,
+          "section": null,
+          "confidence": 0.89,
+          "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.64; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "ca121dac-ca4c-478a-9075-9eeba50261b2",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.92,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.92 *; row: FeFe | *CO ? *CHO | -0.92 * | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.92 *; row: FeFe | *CO ? *CHO | -0.92 * | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.92 *; row: FeFe | *CO ? *CHO | -0.92 * | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 2
+      },
+      "dedupe_signature": "dft:c843a1043a2f7b4f06bdd92f",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.92 *; row: FeFe | *CO ? *CHO | -0.92 * | 2 | 4",
+          "parser_source": "system_rules"
+        },
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.92; row: CuNi | *CO ? *CHO | -0.92 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "d59890cf-5469-4172-aeb0-b60877586d53",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.76,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.76; row: | *CO+*CO ? *CO+*COH | -0.76 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.76; row:  | *CO+*CO ? *CO+*COH | -0.76 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.76; row:  | *CO+*CO ? *CO+*COH | -0.76 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:e66a2eda50b6c819a073c20a",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.76; row:  | *CO+*CO ? *CO+*COH | -0.76 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "42c7ee56-4ab7-420b-be5a-508e7ff768ec",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.7,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.70; row: FeCo | *CO ? *CHO | -0.70 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.70; row: FeCo | *CO ? *CHO | -0.70 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.70; row: FeCo | *CO ? *CHO | -0.70 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 2
+      },
+      "dedupe_signature": "dft:d98602d10a204a00fcb85c88",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.70; row: FeCo | *CO ? *CHO | -0.70 | 2 | 4",
+          "parser_source": "system_rules"
+        },
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.70; row: CuCo | *CO ? *CHO | -0.70 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "2f7551ec-560a-401e-aa59-783dda4060a1",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.63,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.63; row: | *CO+*CO ? *CO+*COH | -0.63 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.63; row:  | *CO+*CO ? *CO+*COH | -0.63 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.63; row:  | *CO+*CO ? *CO+*COH | -0.63 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:4fb7ac60ed4063ffac1385dc",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.63; row:  | *CO+*CO ? *CO+*COH | -0.63 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "a0d57699-4a4f-48ac-884e-89e87bcd66f7",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.93,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.93; row: FeNi | *CO ? *CHO | -0.93 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.93; row: FeNi | *CO ? *CHO | -0.93 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.93; row: FeNi | *CO ? *CHO | -0.93 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:607176334694cc59778b23ac",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.93; row: FeNi | *CO ? *CHO | -0.93 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "02965e5d-ee93-4d57-b7c5-089f255cae90",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.88,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.88; row: | *CO+*CO ? *CO+*COH | -0.88 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.88; row:  | *CO+*CO ? *CO+*COH | -0.88 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.88; row:  | *CO+*CO ? *CO+*COH | -0.88 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:d6b78061205697ca87700316",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.88; row:  | *CO+*CO ? *CO+*COH | -0.88 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "e7c4ea79-c50c-4703-ac71-340aea2e7f0a",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -1.07,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -1.07; row: FeCu | *CO ? *CHO | -1.07 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -1.07; row: FeCu | *CO ? *CHO | -1.07 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -1.07; row: FeCu | *CO ? *CHO | -1.07 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:d8793531746faf7ab5009c28",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -1.07; row: FeCu | *CO ? *CHO | -1.07 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "a611c4f6-d643-481b-b539-4ab54b83a25b",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.95,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.95; row: | *CO+*CO ? *CO+*COH | -0.95 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.95; row:  | *CO+*CO ? *CO+*COH | -0.95 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.95; row:  | *CO+*CO ? *CO+*COH | -0.95 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:e38a73d5e2630fcaff19b307",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.95; row:  | *CO+*CO ? *CO+*COH | -0.95 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "c1715a7e-5981-4f31-b483-f1acd44c383b",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.83,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.83; row: | *CO+*CO ? *CO+*COH | -0.83 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.83; row:  | *CO+*CO ? *CO+*COH | -0.83 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.83; row:  | *CO+*CO ? *CO+*COH | -0.83 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:307d0ef4c5841637e51f135c",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.83; row:  | *CO+*CO ? *CO+*COH | -0.83 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "0e1a5cc1-1397-4f38-bf6b-b03c3479ddf9",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -0.79,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -0.79; row: | *CO+*COH ? *COCOH | -0.79 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -0.79; row:  | *CO+*COH ? *COCOH | -0.79 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -0.79; row:  | *CO+*COH ? *COCOH | -0.79 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:5fcf97620cc2387ee9dfd97d",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -0.79; row:  | *CO+*COH ? *COCOH | -0.79 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "a7da57c0-0aa7-4aa6-b145-438f7e1ad64f",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -1.36,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -1.36; row: | *CO+*CO ? *CO+*COH | -1.36 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -1.36; row:  | *CO+*CO ? *CO+*COH | -1.36 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -1.36; row:  | *CO+*CO ? *CO+*COH | -1.36 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:340cebe900eb1c1cf6e48a37",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -1.36; row:  | *CO+*CO ? *CO+*COH | -1.36 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "fa29c5ec-aa49-41cd-b7ee-9935aaa456fa",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -1.16,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -1.16; row: CuCu | *CO ? *CHO | -1.16 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -1.16; row: CuCu | *CO ? *CHO | -1.16 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -1.16; row: CuCu | *CO ? *CHO | -1.16 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:c07375d675c1d699bb318d8e",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -1.16; row: CuCu | *CO ? *CHO | -1.16 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  },
+  {
+    "id": "63b3a143-2bc1-40d5-a90b-f20daa390b92",
+    "catalyst_sample_id": null,
+    "material_binding_status": "unbound",
+    "bound_catalyst_sample": null,
+    "binding_evidence_anchor": null,
+    "adsorbate": "CO",
+    "property_type": "limiting_potential",
+    "value": -1.2,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "source_section": null,
+    "source_figure": null,
+    "evidence_text": "U L (V): -1.20; row: | *CO+*CO ? *CO+*COH | -1.20 | 2 | 4",
+    "confidence": 0.79,
+    "candidate_status": "system_candidate",
+    "evidence_payload": {
+      "page": 6,
+      "table": "Table 3",
+      "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
+      "section": null,
+      "protocol": {
+        "key": "dft_ai_protocol",
+        "path": "prompts/dft_ai_protocol.yaml",
+        "sha256": "20b1e7af5dffe04b52fedaffd12a4a2153b8fe8f083fe6d96d847cf2a1b4df65",
+        "version": "system_candidate_dft_v1_2",
+        "available": true
+      },
+      "quoted_text": "U L (V): -1.20; row:  | *CO+*CO ? *CO+*COH | -1.20 | 2 | 4",
+      "field_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "excerpt": "U L (V): -1.20; row:  | *CO+*CO ? *CO+*COH | -1.20 | 2 | 4",
+          "section": null,
+          "confidence": 0.79,
+          "field_name": "value",
+          "source_type": "extraction"
+        }
+      ],
+      "schema_version": "codex_workbench_v1",
+      "source_locator": null,
+      "duplicate_merge": {
+        "merged": true,
+        "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+        "source_count": 1
+      },
+      "dedupe_signature": "dft:b816d5a63cfdc1d91f6b2de9",
+      "evidence_sources": [
+        {
+          "bbox": null,
+          "page": 6,
+          "table": "Table 3",
+          "figure": null,
+          "section": null,
+          "confidence": 0.79,
+          "evidence_text": "U L (V): -1.20; row:  | *CO+*CO ? *CO+*COH | -1.20 | 2 | 4",
+          "parser_source": "system_rules"
+        }
+      ],
+      "ai_protocol_policy": "System rule extraction only creates system_candidate records. Final DFT/ML data must pass PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, and human or second-AI confirmation.",
+      "supporting_evidence": [],
+      "source_document_type": "main_text",
+      "source_document_label": "Main PDF",
+      "system_extractor_protocol": {
+        "key": "dft_results",
+        "path": "prompts/dft_results.yaml",
+        "sha256": "6e0dd5c60470fdda169fc526f1041723730d847762a543bfbf7cba7e04247907",
+        "version": "0.3",
+        "available": true
+      }
+    },
+    "extraction_protocol_version": "system_candidate_dft_v1",
+    "object_review_audit_count": 0,
+    "object_review_audits": [],
+    "latest_object_review_audit": null,
+    "conflict_count": 0,
+    "field_conflicts": [],
+    "affected_field_names": [],
+    "conflict_field_names": []
+  }
+]

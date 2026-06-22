@@ -110,8 +110,6 @@ class LibraryManager:
 
         now_iso = datetime.utcnow().isoformat()
         self.init_library_structure(root, storage_mode=SHARED_STORAGE_MODE)
-        if not self._force_configured_database():
-            self.init_library_db(root)
         self._write_library_meta(
             root=root,
             payload=self._build_library_meta(
@@ -157,16 +155,6 @@ class LibraryManager:
         meta = self._load_library_meta(root)
         storage_mode = self._resolve_storage_mode(root, meta)
         self.init_library_structure(root, storage_mode=storage_mode)
-        if not self._force_configured_database():
-            db_path = root / "database.sqlite"
-            if not db_path.exists():
-                self.init_library_db(root)
-            from app.db.session import switch_database
-
-            switch_database(
-                f"sqlite:///{db_path.as_posix()}",
-                storage_root=str(self._storage_root_for_mode(root, storage_mode)),
-            )
 
         registry["active_library"] = normalized_name
         self._write_registry(registry)
@@ -225,16 +213,6 @@ class LibraryManager:
                 default_meta = self._load_library_meta(default_root)
                 default_mode = self._resolve_storage_mode(default_root, default_meta)
                 self.init_library_structure(default_root, storage_mode=default_mode)
-                if not self._force_configured_database():
-                    db_path = default_root / "database.sqlite"
-                    if not db_path.exists():
-                        self.init_library_db(default_root)
-                    from app.db.session import switch_database
-
-                    switch_database(
-                        f"sqlite:///{db_path.as_posix()}",
-                        storage_root=str(self._storage_root_for_mode(default_root, default_mode)),
-                    )
 
         self._write_registry(registry)
         return info
@@ -249,7 +227,7 @@ class LibraryManager:
         if not self._looks_like_existing_library_root(root):
             raise ValueError(
                 "Selected path is not an existing library root. "
-                "Please choose a folder that already contains database.sqlite, library.json, config/project_config.json, storage/, or papers/."
+                "Please choose a folder that already contains library.json, config/project_config.json, storage/, or papers/."
             )
 
         meta = self._load_library_meta(root)
@@ -319,13 +297,6 @@ class LibraryManager:
             for extra_dir in ("exports", "logs", "config"):
                 (root / extra_dir).mkdir(parents=True, exist_ok=True)
 
-    @staticmethod
-    def init_library_db(root: Path) -> None:
-        db_path = root / "database.sqlite"
-        from app.db.session import init_db
-
-        init_db(f"sqlite:///{db_path.as_posix()}")
-
     def _ensure_registry(self) -> None:
         registry_path = self.registry_path()
         registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -364,8 +335,6 @@ class LibraryManager:
         assert default_entry is not None
         default_root = Path(default_entry["root_path"]).resolve()
         self.init_library_structure(default_root, storage_mode=LEGACY_STORAGE_MODE)
-        if not self._force_configured_database() and not (default_root / "database.sqlite").exists():
-            self.init_library_db(default_root)
         default_meta = self._build_library_meta(
             name=DEFAULT_LIBRARY_NAME,
             description=str(default_entry.get("description") or DEFAULT_LIBRARY_NAME),
@@ -392,7 +361,6 @@ class LibraryManager:
     @staticmethod
     def _looks_like_existing_library_root(root: Path) -> bool:
         markers = (
-            root / "database.sqlite",
             root / "library.json",
             root / "config" / "project_config.json",
             root / LEGACY_STORAGE_MODE,
@@ -679,19 +647,7 @@ class LibraryManager:
 
     @staticmethod
     def _count_papers(root: Path) -> int:
-        db_path = root / "database.sqlite"
-        if not db_path.exists():
-            return 0
-        try:
-            from sqlalchemy import create_engine, text
-
-            engine = create_engine(f"sqlite:///{db_path.as_posix()}", future=True)
-            with engine.connect() as connection:
-                count = connection.execute(text("SELECT COUNT(*) FROM papers")).scalar()
-            engine.dispose()
-            return int(count or 0)
-        except Exception:
-            return 0
+        return 0
 
     @staticmethod
     def _validate_path_safety(path: Path) -> None:

@@ -10,7 +10,6 @@ from app.services.impact_metadata_import_service import (
     parse_impact_metadata_json,
 )
 from app.utils.active_database import get_active_database_info
-from app.utils.project_paths import default_library_root
 
 router = APIRouter()
 
@@ -64,12 +63,4 @@ async def import_impact_metadata(
 
 
 def _is_workspace_default_database(db_path: object) -> bool:
-    if not isinstance(db_path, str) or not db_path:
-        return False
-    expected = (default_library_root() / "database.sqlite").resolve()
-    try:
-        from pathlib import Path
-
-        return Path(db_path).resolve() == expected
-    except OSError:
-        return False
+    return False

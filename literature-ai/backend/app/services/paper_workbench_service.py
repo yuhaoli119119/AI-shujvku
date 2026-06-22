@@ -392,11 +392,17 @@ class PaperWorkbenchService:
         sort_by: str = "recent",
         library_name: str | None = None,
         summary_only: bool = False,
+        paper_ids: list[UUID] | None = None,
     ) -> dict[str, Any]:
         paper_stmt = select(Paper)
         normalized_library = normalize_library_name(library_name) if library_name is not None else None
         if normalized_library:
             paper_stmt = paper_stmt.where(build_library_name_clause(Paper.library_name, normalized_library))
+        requested_paper_ids = [paper_id for paper_id in (paper_ids or []) if paper_id is not None]
+        if requested_paper_ids:
+            paper_stmt = paper_stmt.where(Paper.id.in_(requested_paper_ids))
+        if summary_only and sort_by == "recent" and limit > 0 and not requested_paper_ids:
+            paper_stmt = paper_stmt.order_by(Paper.created_at.desc()).limit(limit)
         papers = self.session.scalars(paper_stmt).all()
         if ensure_paper_codes(self.session, papers):
             self.session.commit()
@@ -412,11 +418,58 @@ class PaperWorkbenchService:
         conflict_counts = ReviewAdjudicationService(self.session).count_actionable_conflicts_by_paper(paper_ids)
         conflict_counts_by_module = ReviewAdjudicationService(self.session).count_actionable_conflicts_by_paper_and_module(paper_ids)
         dft_rows_by_paper: dict[UUID, list[DFTResult]] = {paper_id: [] for paper_id in paper_ids}
-        for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id.in_(paper_ids))).all() if paper_ids else []:
-            dft_rows_by_paper.setdefault(row.paper_id, []).append(row)
+        dft_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        dft_candidate_status_counts_by_paper: dict[UUID, dict[str, int]] = {paper_id: {} for paper_id in paper_ids}
+        active_dft_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        if summary_only:
+            dft_count_rows = (
+                self.session.execute(
+                    select(
+                        DFTResult.paper_id,
+                        DFTResult.candidate_status,
+                        func.count(DFTResult.id),
+                    )
+                    .where(DFTResult.paper_id.in_(paper_ids))
+                    .group_by(DFTResult.paper_id, DFTResult.candidate_status)
+                ).all()
+                if paper_ids
+                else []
+            )
+            for paper_id, candidate_status, count in dft_count_rows:
+                normalized_status = str(candidate_status or "system_candidate")
+                count_int = int(count or 0)
+                dft_count_by_paper[paper_id] = dft_count_by_paper.get(paper_id, 0) + count_int
+                dft_candidate_status_counts_by_paper.setdefault(paper_id, {})[normalized_status] = count_int
+                if self._is_active_dft_candidate(normalized_status):
+                    active_dft_count_by_paper[paper_id] = active_dft_count_by_paper.get(paper_id, 0) + count_int
+        else:
+            for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id.in_(paper_ids))).all() if paper_ids else []:
+                dft_rows_by_paper.setdefault(row.paper_id, []).append(row)
         figure_rows_by_paper: dict[UUID, list[PaperFigure]] = {paper_id: [] for paper_id in paper_ids}
-        for figure in self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(paper_ids))).all() if paper_ids else []:
-            figure_rows_by_paper.setdefault(figure.paper_id, []).append(figure)
+        figure_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        figure_crop_status_counts_by_paper: dict[UUID, dict[str, int]] = {paper_id: {} for paper_id in paper_ids}
+        if summary_only:
+            figure_count_rows = (
+                self.session.execute(
+                    select(
+                        PaperFigure.paper_id,
+                        PaperFigure.crop_status,
+                        func.count(PaperFigure.id),
+                    )
+                    .where(PaperFigure.paper_id.in_(paper_ids))
+                    .group_by(PaperFigure.paper_id, PaperFigure.crop_status)
+                ).all()
+                if paper_ids
+                else []
+            )
+            for paper_id, crop_status, count in figure_count_rows:
+                normalized_status = str(crop_status or "unknown")
+                count_int = int(count or 0)
+                figure_count_by_paper[paper_id] = figure_count_by_paper.get(paper_id, 0) + count_int
+                figure_crop_status_counts_by_paper.setdefault(paper_id, {})[normalized_status] = count_int
+        else:
+            for figure in self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(paper_ids))).all() if paper_ids else []:
+                figure_rows_by_paper.setdefault(figure.paper_id, []).append(figure)
         table_counts = {
             paper_id: count
             for paper_id, count in (
@@ -442,29 +495,73 @@ class PaperWorkbenchService:
             )
         }
         candidates_by_paper: dict[UUID, list[ExternalAnalysisCandidate]] = {paper_id: [] for paper_id in paper_ids}
-        candidate_types = {"external_audit_opinion", "object_review_audit"}
-        for candidate in (
-            self.session.scalars(
-                select(ExternalAnalysisCandidate)
-                .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
-                .where(ExternalAnalysisCandidate.candidate_type.in_(candidate_types))
-                .order_by(ExternalAnalysisCandidate.created_at.desc())
-            ).all()
-            if paper_ids
-            else []
-        ):
-            candidates_by_paper.setdefault(candidate.paper_id, []).append(candidate)
+        external_audit_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        object_review_audit_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        if summary_only:
+            candidate_count_rows = (
+                self.session.execute(
+                    select(
+                        ExternalAnalysisCandidate.paper_id,
+                        ExternalAnalysisCandidate.candidate_type,
+                        func.count(ExternalAnalysisCandidate.id),
+                    )
+                    .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
+                    .where(
+                        ExternalAnalysisCandidate.candidate_type.in_(
+                            ("external_audit_opinion", "object_review_audit")
+                        )
+                    )
+                    .group_by(
+                        ExternalAnalysisCandidate.paper_id,
+                        ExternalAnalysisCandidate.candidate_type,
+                    )
+                ).all()
+                if paper_ids
+                else []
+            )
+            for paper_id, candidate_type, count in candidate_count_rows:
+                if candidate_type == "external_audit_opinion":
+                    external_audit_count_by_paper[paper_id] = int(count or 0)
+                elif candidate_type == "object_review_audit":
+                    object_review_audit_count_by_paper[paper_id] = int(count or 0)
+        else:
+            candidate_types = {"external_audit_opinion", "object_review_audit"}
+            for candidate in (
+                self.session.scalars(
+                    select(ExternalAnalysisCandidate)
+                    .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
+                    .where(ExternalAnalysisCandidate.candidate_type.in_(candidate_types))
+                    .order_by(ExternalAnalysisCandidate.created_at.desc())
+                ).all()
+                if paper_ids
+                else []
+            ):
+                candidates_by_paper.setdefault(candidate.paper_id, []).append(candidate)
         notes_by_paper: dict[UUID, list[PaperNote]] = {paper_id: [] for paper_id in paper_ids}
-        for note in (
-            self.session.scalars(
-                select(PaperNote)
-                .where(PaperNote.paper_id.in_(paper_ids))
-                .order_by(PaperNote.created_at.desc())
-            ).all()
-            if paper_ids
-            else []
-        ):
-            notes_by_paper.setdefault(note.paper_id, []).append(note)
+        paper_note_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        if summary_only:
+            note_count_rows = (
+                self.session.execute(
+                    select(PaperNote.paper_id, func.count(PaperNote.id))
+                    .where(PaperNote.paper_id.in_(paper_ids))
+                    .group_by(PaperNote.paper_id)
+                ).all()
+                if paper_ids
+                else []
+            )
+            for paper_id, count in note_count_rows:
+                paper_note_count_by_paper[paper_id] = int(count or 0)
+        else:
+            for note in (
+                self.session.scalars(
+                    select(PaperNote)
+                    .where(PaperNote.paper_id.in_(paper_ids))
+                    .order_by(PaperNote.created_at.desc())
+                ).all()
+                if paper_ids
+                else []
+            ):
+                notes_by_paper.setdefault(note.paper_id, []).append(note)
         locator_reliability_by_paper = (
             {} if summary_only or reliability_auditor is None else reliability_auditor.paper_locator_reliability_summaries(paper_ids)
         )
@@ -498,10 +595,14 @@ class PaperWorkbenchService:
             status_counts[paper.workflow_status or "Imported"] += 1
             quality_counts[paper.pdf_quality_status or "unknown"] += 1
             dft_rows = dft_rows_by_paper.get(paper.id, [])
-            dft_count = len(dft_rows)
-            active_dft_count = self._count_active_dft_candidates(dft_rows)
+            dft_count = dft_count_by_paper.get(paper.id, len(dft_rows))
+            active_dft_count = (
+                active_dft_count_by_paper.get(paper.id, 0)
+                if summary_only
+                else self._count_active_dft_candidates(dft_rows)
+            )
             figures = figure_rows_by_paper.get(paper.id, [])
-            figure_count = len(figures)
+            figure_count = figure_count_by_paper.get(paper.id, len(figures))
             table_count = table_counts.get(paper.id, 0)
             evidence_count = evidence_counts.get(paper.id, 0)
             paper_candidates = candidates_by_paper.get(paper.id, [])
@@ -576,19 +677,42 @@ class PaperWorkbenchService:
                 }
                 for note in (notes_by_paper.get(paper.id) or [])[:3]
             ]
+            external_audit_count = (
+                external_audit_count_by_paper.get(paper.id, 0)
+                if summary_only
+                else len(external_audit_candidates)
+            )
+            object_review_audit_count = (
+                object_review_audit_count_by_paper.get(paper.id, 0)
+                if summary_only
+                else len(object_review_candidates)
+            )
+            paper_note_count = (
+                paper_note_count_by_paper.get(paper.id, 0)
+                if summary_only
+                else len(notes_by_paper.get(paper.id) or [])
+            )
             quality_report = paper.pdf_quality_report if isinstance(paper.pdf_quality_report, dict) else {}
             needs_human_confirmation = workflow_needs_human_confirmation(paper.workflow_status, quality_report)
-            figure_crop_status_counts = dict(
-                Counter(
-                    self._figure_crop_payload(figure)["crop_status"]
-                    for figure in figures
+            figure_crop_status_counts = (
+                figure_crop_status_counts_by_paper.get(paper.id, {})
+                if summary_only
+                else dict(
+                    Counter(
+                        self._figure_crop_payload(figure)["crop_status"]
+                        for figure in figures
+                    )
                 )
             )
             unreliable_figure_count = sum(
                 figure_crop_status_counts.get(status, 0)
                 for status in ("needs_recrop", "caption_only", "needs_review")
             )
-            dft_candidate_status_counts = dict(Counter(row.candidate_status or "system_candidate" for row in dft_rows))
+            dft_candidate_status_counts = (
+                dft_candidate_status_counts_by_paper.get(paper.id, {})
+                if summary_only
+                else dict(Counter(row.candidate_status or "system_candidate" for row in dft_rows))
+            )
             exportable_count = exportable_counts.get(paper.id, 0)
             blocked_count = blocked_counts.get(paper.id, 0)
             dft_audit = dft_audits.get(str(paper.id)) or self._lightweight_dft_audit(
@@ -668,13 +792,13 @@ class PaperWorkbenchService:
                     "locator_issue_count": locator_reliability["issue_count"],
                     "locator_issue_counts": locator_reliability["issue_counts"],
                     "top_locator_issues": locator_reliability["top_issues"],
-                    "external_audit_count": len(external_audit_candidates),
+                    "external_audit_count": external_audit_count,
                     "external_audit_source_counts": dict(sorted(external_audit_source_counts.items())),
                     "external_audit_opinions": external_audit_opinions,
-                    "object_review_audit_count": len(object_review_candidates),
+                    "object_review_audit_count": object_review_audit_count,
                     "object_review_audit_source_counts": dict(sorted(object_review_source_counts.items())),
                     "object_review_audits": object_review_audits,
-                    "paper_note_count": len(notes_by_paper.get(paper.id) or []),
+                    "paper_note_count": paper_note_count,
                     "latest_paper_notes": latest_notes,
                     "review_conflict_count": conflict_counts.get(str(paper.id), 0),
                     "review_conflict_total_count": conflict_total_counts.get(str(paper.id), 0),

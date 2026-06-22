@@ -1,0 +1,128 @@
+[
+  {
+    "journal": "Advanced Functional Materials",
+    "domain_focus": "materials/electrocatalysis",
+    "why_add": "missing-paper target; likely recurring venue",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Nano Energy",
+    "domain_focus": "energy materials",
+    "why_add": "high overlap with electrocatalysis and energy conversion",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Advanced Science",
+    "domain_focus": "broad materials",
+    "why_add": "common outlet for catalysis and materials mechanisms",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Small",
+    "domain_focus": "nanomaterials",
+    "why_add": "frequent nano electrocatalysis venue",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Small Methods",
+    "domain_focus": "methods/materials",
+    "why_add": "common for catalyst design workflows",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Materials Horizons",
+    "domain_focus": "materials chemistry",
+    "why_add": "high-relevance materials discovery venue",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "ACS Materials Letters",
+    "domain_focus": "materials",
+    "why_add": "newer materials-focused ACS venue",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Materials Today Energy",
+    "domain_focus": "energy materials",
+    "why_add": "relevant to electrocatalysis and storage",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Materials Today Physics",
+    "domain_focus": "materials physics",
+    "why_add": "useful for theory-heavy materials papers",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Chemistry of Materials",
+    "domain_focus": "materials chemistry",
+    "why_add": "core materials venue absent from current library list",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Carbon",
+    "domain_focus": "carbon materials",
+    "why_add": "high relevance to graphene/graphdiyne corpus",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Journal of Physical Chemistry C",
+    "domain_focus": "surface/materials chemistry",
+    "why_add": "common DFT and catalysis venue",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Applied Catalysis B: Environment and Energy",
+    "domain_focus": "applied catalysis",
+    "why_add": "strong relevance for catalytic performance papers",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "ACS Sustainable Chemistry & Engineering",
+    "domain_focus": "sustainable materials",
+    "why_add": "often overlaps with catalytic reduction topics",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Energy Storage Materials",
+    "domain_focus": "energy materials",
+    "why_add": "adjacent venue for electrochemical materials work",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "2D Materials",
+    "domain_focus": "2D materials",
+    "why_add": "useful for graphene/graphdiyne-related studies",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "Materials Today Nano",
+    "domain_focus": "nanomaterials",
+    "why_add": "adjacent nano/materials review venue",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  },
+  {
+    "journal": "InfoMat",
+    "domain_focus": "materials informatics",
+    "why_add": "fits computational materials discovery workflows",
+    "candidate_source": "model_knowledge_candidate",
+    "already_in_current_db": "no"
+  }
+]

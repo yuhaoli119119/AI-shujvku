@@ -1708,7 +1708,7 @@
         "2. 读取证据优先用当前 Literature AI MCP 工具：get_codex_context(paper_id)、get_codex_item(paper_id,item_type,item_id)、read_paper_page(paper_id,page_start,page_end)、import_analysis。若 IDE 会话没有暴露这些工具，就用项目内后端 MCP 兜底路径完成同样的调用，不要默认绕过 MCP 或改成只写文字总结。",
         "3. 禁止直接 import 后端 service/session/model，禁止直接写数据库，禁止用脚本绕过 MCP/API 权限。禁止下载 PDF 到本地后用 pdftotext/pdf2txt/自写脚本替代 read_paper_page；如果 read_paper_page 或证据入口不可用，必须停止并报告 blocked_by_evidence_api_unavailable。",
         "4. 每篇目标文献最终必须至少有一次 import_analysis 回写，用于元数据、章节、表格、figure 元信息等非图像字段；优先走当前 IDE 暴露的 MCP 工具，缺失时走项目内后端 MCP 兜底路径。参数固定包含 source='ide_ai'、source_label='" + sourceLabel + "'、reviewer='<agent_name>'。",
-        "4-apply. 如果本次要直接应用非 DFT 修正、创建对象或写 [AI_REVIEWED] 状态，必须先获取对应模块写锁，然后使用 auto_apply_review_rules=true 和 write_lock_token。遇到 module_write_lock_required 时必须去获取锁，不要改成 auto_apply_review_rules=false 来宣称完成。",
+        "4-apply. 如果本次要直接应用非 DFT 修正、创建对象或写 [AI_REVIEWED] 状态，直接使用 auto_apply_review_rules=true；非 DFT AI 写入允许后写覆盖先写，不需要模块写锁。",
         "4-candidate. 如果只是提交 object_review_audits / paper-level audit candidate，通常可以使用 auto_apply_review_rules=false；这只表示候选意见已导入，状态仍是 unverified/candidate，不等于审核完成、通过或已应用。",
         "4-candidate-dft-new. 但如果本次 DFT 审核发现 parser 漏项，并且你要把漏掉的 DFT 行稳定补进系统候选队列，必须写 decision='new_candidate' + 结构化 corrected_value，并使用 auto_apply_review_rules=true。这样系统会自动把它 materialize 成未验证的 DFTResult candidate；这仍不是最终通过，也不会直接解锁导出。",
         "4a. 图像操作是强例外：recrop_figure 和 create_figure_from_bbox 必须 direct MCP tool 调用，绝不能把 recrop、bbox、补图、裁图请求伪装成 import_analysis 或 correction_proposals。",
@@ -1935,10 +1935,7 @@
       const qualityCounts = state.metadata.quality_counts || {};
       const rows = state.rows || [];
       const activeConflictCount = rows.reduce(function (sum, row) {
-        return sum
-          + Number(row.dft_review_conflict_count || 0)
-          + Number(row.visual_review_conflict_count || 0)
-          + Number(row.content_review_conflict_count || 0);
+        return sum + Number(row.dft_review_conflict_count || 0);
       }, 0);
       const items = [
         ["文献", rows.length, "docs", ""],
@@ -1947,7 +1944,7 @@
         ["DFT", rows.filter(function (row) {
           return row.has_active_dft_candidates !== undefined ? row.has_active_dft_candidates : row.has_dft_candidates;
         }).length, "dft", ""],
-        ["未收口冲突", activeConflictCount, "conflict", "汇总当前还没处理完的 DFT、图表和内容冲突；历史已处理冲突会在文献行里按模块以灰色提示显示。"]
+        ["DFT 冲突", activeConflictCount, "conflict", "只汇总当前还没处理完的 DFT 冲突；图表和内容允许 AI 直接覆盖，不再进入冲突队列。"]
       ];
       document.getElementById("stats").innerHTML = items.map(function (item) {
         return '<div class="stat"' + (item[3] ? ' title="' + esc(item[3]) + '"' : '') + '><div class="stat-icon stat-icon-' + esc(item[2]) + '" aria-hidden="true"></div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
@@ -2138,8 +2135,6 @@
         return items.sort(function (left, right) {
           const keys = [
             "dft_review_conflict_count",
-            "visual_review_conflict_count",
-            "content_review_conflict_count",
             "locator_issue_count",
             "figure_issue_count"
           ];
@@ -2598,10 +2593,6 @@
       const totalConflictCount = toCount(row.review_conflict_total_count);
       const dftConflictCount = toCount(row.dft_review_conflict_count);
       const dftConflictTotalCount = toCount(row.dft_review_conflict_total_count);
-      const visualConflictCount = toCount(row.visual_review_conflict_count);
-      const visualConflictTotalCount = toCount(row.visual_review_conflict_total_count);
-      const contentConflictCount = toCount(row.content_review_conflict_count);
-      const contentConflictTotalCount = toCount(row.content_review_conflict_total_count);
       const activeDftCount = hasOwnValue(row.active_dft_candidate_count)
         ? toCount(row.active_dft_candidate_count)
         : (row.has_active_dft_candidates !== undefined
@@ -2669,14 +2660,14 @@
           '<div class="detail-kpi-grid">' +
             '<div class="detail-kpi"><div class="detail-kpi-label">待处理 DFT</div><div class="detail-kpi-value">' + esc(activeDftCount) + '</div><div class="detail-kpi-note">仍在候选队列里、还没收口的 DFT 项。</div></div>' +
             '<div class="detail-kpi"><div class="detail-kpi-label">DFT 冲突</div><div class="detail-kpi-value">' + esc(dftConflictCount) + '</div><div class="detail-kpi-note">当前还没处理完的 DFT 冲突项。</div></div>' +
-            '<div class="detail-kpi"><div class="detail-kpi-label">图表/内容冲突</div><div class="detail-kpi-value">' + esc(visualConflictCount + contentConflictCount) + '</div><div class="detail-kpi-note">当前还没处理完的图表或内容冲突项。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">AI 可覆盖项</div><div class="detail-kpi-value">' + esc(toCount(row.object_review_audit_count)) + '</div><div class="detail-kpi-note">图表和内容类 AI 回写不再进入冲突队列，可由后续 AI 继续覆盖。</div></div>' +
             '<div class="detail-kpi"><div class="detail-kpi-label">疑似漏提</div><div class="detail-kpi-value">' + esc(suspectedMissing) + '</div><div class="detail-kpi-note">系统怀疑原文里还有没被提取出来的 DFT 线索。</div></div>' +
             '<div class="detail-kpi"><div class="detail-kpi-label">证据定位</div><div class="detail-kpi-value">' + esc(toCount(row.evidence_count)) + '</div><div class="detail-kpi-note">目前能用于核对的定位/证据条数。</div></div>' +
           '</div>' +
           '<div class="detail-columns">' +
             compactDetailSection("候选状态", '<div class="detail-value">' + esc(candidateSummaryLines.length ? candidateSummaryLines.join("，") : "当前没有 DFT 候选。") + '</div>') +
             compactDetailSection("材料概览", '<div class="detail-value">线索 ' + esc(detectedSignals) + ' | 已解析 ' + esc(parsedCount) + ' | 图表 ' + esc(toCount(row.figure_count) + toCount(row.table_count)) + '</div><div class="detail-value muted">裁图状态：' + esc(cropSummaryLines.length ? cropSummaryLines.join("，") : "当前没有裁图记录。") + (historyConflictSummaryText(row) && conflictCount === 0 ? " | " + esc(historyConflictSummaryText(row)) : "") + '</div>') +
-            compactDetailSection("冲突分布", '<div class="detail-value">DFT ' + esc(dftConflictCount) + ' | 图表 ' + esc(visualConflictCount) + ' | 内容 ' + esc(contentConflictCount) + '</div><div class="detail-value muted">历史总数：DFT ' + esc(dftConflictTotalCount) + ' | 图表 ' + esc(visualConflictTotalCount) + ' | 内容 ' + esc(contentConflictTotalCount) + '</div>') +
+            compactDetailSection("冲突分布", '<div class="detail-value">DFT ' + esc(dftConflictCount) + '</div><div class="detail-value muted">历史总数：DFT ' + esc(dftConflictTotalCount) + '；非 DFT 不进入冲突统计。</div>') +
           '</div>' +
         '</section>' +
         '<section class="detail-section-card">' +
@@ -2723,11 +2714,7 @@
     function historyConflictSummaryText(row) {
       const parts = [];
       const dft = toCount(row.dft_review_conflict_total_count);
-      const visual = toCount(row.visual_review_conflict_total_count);
-      const content = toCount(row.content_review_conflict_total_count);
       if (dft > 0) parts.push("DFT " + dft);
-      if (visual > 0) parts.push("图表 " + visual);
-      if (content > 0) parts.push("内容 " + content);
       return parts.length ? ("历史已处理冲突：" + parts.join(" | ")) : "";
     }
 
@@ -3733,10 +3720,6 @@
         const suspectedMissing = extraction.suspectedMissing;
         const dftConflictCount = toCount(row.dft_review_conflict_count);
         const dftConflictTotalCount = toCount(row.dft_review_conflict_total_count);
-        const visualConflictCount = toCount(row.visual_review_conflict_count);
-        const visualConflictTotalCount = toCount(row.visual_review_conflict_total_count);
-        const contentConflictCount = toCount(row.content_review_conflict_count);
-        const contentConflictTotalCount = toCount(row.content_review_conflict_total_count);
         const dftBadgeLabel = extraction.label;
         const dftBadgeClass = extraction.className || (row.dft_completeness_status === "DB_Ready" ? "ok" : "warn");
         const dftBadgeTitle = extraction.tip || "当前 DFT 提取状态摘要。";
@@ -3785,22 +3768,6 @@
                 compactModuleProgressChip("图表", progress.figures, progress.figures ? "图表部分已标记完成。" : "图表部分尚未标记完成。") +
                 compactModuleProgressChip("DFT", progress.dft, progress.dft ? "DFT 部分已标记完成。" : "DFT 部分尚未标记完成。") +
                 compactModuleProgressChip("内容解析", progress.content, progress.content ? "内容解析部分已标记完成。" : "内容解析部分尚未标记完成。") +
-                renderConflictChip(
-                  visualConflictCount,
-                  visualConflictTotalCount,
-                  "图表冲突",
-                  "图表已处理冲突",
-                  "当前图表审核仍有未收口冲突。",
-                  "这篇文献历史上出现过图表冲突，但当前已处理完。"
-                ) +
-                renderConflictChip(
-                  contentConflictCount,
-                  contentConflictTotalCount,
-                  "内容冲突",
-                  "内容已处理冲突",
-                  "当前内容审核仍有未收口冲突。",
-                  "这篇文献历史上出现过内容冲突，但当前已处理完。"
-                ) +
               '</div>' +
             '</div>' +
             '</td>' +

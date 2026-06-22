@@ -791,17 +791,10 @@ class ReviewService:
         return normalized.startswith(cls.DIRECT_AI_LOCK_PREFIXES)
 
     def _requires_non_dft_module_lock(self, correction: PaperCorrection) -> bool:
-        if self._is_top_level_paper_correction(correction):
-            return True
-        return correction.field_name in {
-            "figures",
-            "tables",
-            "sections",
-            "writing_cards",
-            "mechanism_claims",
-            "electrochemical_performance",
-            "catalyst_samples",
-        }
+        # Non-DFT AI writes are intentionally last-writer-wins. DFT review/export
+        # gates remain separate, but figures, tables, text, notes, and metadata
+        # must not create module lock conflicts between AI passes.
+        return False
 
     def _apply_structured_correction(self, correction: PaperCorrection) -> None:
         record, spec, attribute = self._resolve_structured_target(correction)

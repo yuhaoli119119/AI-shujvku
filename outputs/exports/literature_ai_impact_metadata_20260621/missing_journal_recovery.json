@@ -1,0 +1,83 @@
+[
+  {
+    "title": "Aligned d-orbital energy level of dual-atom sites catalysts for oxygen reduction reaction in anion exchange membrane fuel cells",
+    "doi": "10.1038/s41467-025-63322-4",
+    "resolved_journal": "Nature Communications",
+    "confidence": "verified_external",
+    "evidence": "DOI/article page",
+    "source_url": "https://www.nature.com/articles/s41467-025-63322-4",
+    "note": "Missing journal in local DB; article page confirms Nature Communications."
+  },
+  {
+    "title": "Synergistic effects of single atoms and nanoparticles: Emerging opportunities for electrocatalysis",
+    "doi": "10.26599/NR.2025.94907441",
+    "resolved_journal": "Nano Research",
+    "confidence": "verified_external",
+    "evidence": "DOI/article page",
+    "source_url": "https://www.sciopen.com/article/10.26599/NR.2025.94907441",
+    "note": "SciOpen result shows Nano Research, 2025."
+  },
+  {
+    "title": "Raman and IR spectra of graphdiyne nanoribbons",
+    "doi": "10.1103/PhysRevMaterials.4.014001",
+    "resolved_journal": "Physical Review Materials",
+    "confidence": "verified_external",
+    "evidence": "DOI/article page",
+    "source_url": "https://link.aps.org/doi/10.1103/PhysRevMaterials.4.014001",
+    "note": "Resolved from DOI embedded in filename and APS landing page."
+  },
+  {
+    "title": "Fundamentals of Electrochemical CO2 Reduction on Single-Metal-Atom Catalysts",
+    "doi": "10.1021/acscatal.0c02643",
+    "resolved_journal": "ACS Catalysis",
+    "confidence": "verified_external",
+    "evidence": "publisher DOI page",
+    "source_url": "https://pubs.acs.org/doi/10.1021/acscatal.0c02643",
+    "note": "Publisher DOI page confirms ACS Catalysis."
+  },
+  {
+    "title": "High-throughput screening of heterogeneous transition metal dualatom catalysts by synergistic effect for nitrate reduction to ammonia",
+    "doi": "",
+    "resolved_journal": "Advanced Functional Materials",
+    "confidence": "verified_external",
+    "evidence": "publisher DOI page",
+    "source_url": "https://advanced.onlinelibrary.wiley.com/doi/abs/10.1002/adfm.202301493",
+    "note": "Title match on Wiley page shows Advanced Functional Materials."
+  },
+  {
+    "title": "Carbon mono and dioxide hydrogenation over pure and metal oxide decorated graphene oxide substrates: insight from DFT",
+    "doi": "10.4236/graphene.2013.23016",
+    "resolved_journal": "Graphene",
+    "confidence": "verified_external",
+    "evidence": "journal article page",
+    "source_url": "https://www.scirp.org/journal/paperinformation?paperid=34767",
+    "note": "SCIRP article page shows journal Graphene."
+  },
+  {
+    "title": "BORON-DOPED GRAPHENE AS ACTIVE ELECTROCATALYST FOR OXYGEN REDUCTION REACTION AT A FUEL-CELL CATHODE",
+    "doi": "10.1016/j.jcat.2014.07.024",
+    "resolved_journal": "Journal of Catalysis",
+    "confidence": "verified_external",
+    "evidence": "arXiv journal reference",
+    "source_url": "https://arxiv.org/abs/1607.08180",
+    "note": "arXiv record lists journal reference Journal of Catalysis 318 (2014) 203-210."
+  },
+  {
+    "title": "[Warning] Failed to read PDF text with pypdf: Stream has ended unexpectedly",
+    "doi": "",
+    "resolved_journal": "",
+    "confidence": "unresolved",
+    "evidence": "local markdown unusable",
+    "source_url": "",
+    "note": "PDF and derived markdown both failed; needs manual PDF inspection or re-download."
+  },
+  {
+    "title": "[Warning] Failed to read PDF text with pypdf: Stream has ended unexpectedly",
+    "doi": "",
+    "resolved_journal": "",
+    "confidence": "unresolved",
+    "evidence": "local markdown unusable",
+    "source_url": "",
+    "note": "PDF and derived markdown both failed; needs manual PDF inspection or re-download."
+  }
+]

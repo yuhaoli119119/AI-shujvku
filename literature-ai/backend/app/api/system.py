@@ -1,6 +1,4 @@
 import shutil
-from pathlib import Path
-
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
@@ -20,13 +18,10 @@ class SwitchDbPayload(BaseModel):
 
 
 def _ensure_deprecated_db_endpoints_enabled() -> None:
-    from app.config import get_settings
-
-    if not bool(getattr(get_settings(), "enable_deprecated_db_endpoints", False)):
-        raise HTTPException(
-            status_code=410,
-            detail="Deprecated database endpoints are disabled. Use the libraries API.",
-        )
+    raise HTTPException(
+        status_code=410,
+        detail="Deprecated SQLite database endpoints have been removed. Use PostgreSQL and the libraries API.",
+    )
 
 
 @router.get("/db-info")
@@ -83,60 +78,13 @@ async def get_db_info() -> dict:
 @router.post("/switch-db", deprecated=True)
 async def switch_db(payload: SwitchDbPayload) -> dict:
     """已废弃。请改用 POST /api/libraries/{name}/activate 切换库。"""
-    from app.config import get_settings
-
     _ensure_deprecated_db_endpoints_enabled()
-    if bool(getattr(get_settings(), "force_configured_database", False)):
-        raise HTTPException(
-            status_code=400,
-            detail="Runtime SQLite switching is disabled because LITAI_FORCE_CONFIGURED_DATABASE=true.",
-        )
-    url = payload.database_url.strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="database_url is required")
-    if not url.startswith("sqlite:///"):
-        raise HTTPException(
-            status_code=400,
-            detail="For safety, only sqlite:/// URLs are supported",
-        )
-    from app.db.session import switch_database
-
-    switch_database(url)
-    return {"status": "ok", "database_url": url, "warning": "此 API 已废弃，请改用 POST /api/libraries/{name}/activate"}
 
 
 @router.post("/upload-db", deprecated=True)
 async def upload_db(file: UploadFile = File(...)) -> dict:
     """已废弃。请改用 POST /api/libraries 或 POST /api/libraries/import 管理库。"""
-    from app.config import get_settings
-
     _ensure_deprecated_db_endpoints_enabled()
-    if bool(getattr(get_settings(), "force_configured_database", False)):
-        raise HTTPException(
-            status_code=400,
-            detail="Runtime SQLite upload/switch is disabled because LITAI_FORCE_CONFIGURED_DATABASE=true.",
-        )
-    safe_filename = Path(file.filename or "").name
-    if not safe_filename or safe_filename != file.filename or not safe_filename.lower().endswith((".sqlite", ".db", ".sqlite3")):
-        raise HTTPException(status_code=400, detail="只允许 SQLite 文件 (.sqlite, .db, .sqlite3)")
-
-    upload_dir = Path("data/uploaded_dbs")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    dest_path = upload_dir / safe_filename
-    with open(dest_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    database_url = f"sqlite:///{dest_path.resolve().as_posix()}"
-    from app.db.session import switch_database
-
-    switch_database(database_url)
-    return {
-        "status": "ok",
-        "database_url": database_url,
-        "filename": safe_filename,
-        "warning": "此 API 已废弃，请改用 POST /api/libraries 或 POST /api/libraries/import",
-    }
 
 
 @router.get("/agent-guide")
@@ -344,7 +292,7 @@ async def get_agent_guide() -> dict:
             "Use scan_duplicate_dois to find papers that share the same DOI, which may indicate duplicates in the system. "
             "Use create_share_token to generate a read-only share link for others to view papers, figures, DFT data, and audit logs without MCP access. "
             "IMPORTANT: The primary workflow does not depend on a backend-owned LLM. Even if auto_run_stage2_extraction is disabled, or backend writer/internal parser settings are missing, the system can still prepare AI-readable materials. In that mode, YOU (the AI) should first read the prepared workspace, codex context, item context, and evidence package, then continue analysis through MCP/import_analysis, notes, corrections, and review-safe candidate flows. The paper can remain in a material-ready state while waiting for IDE-AI follow-up. "
-            "Overall parse review instruction: do not only write a report. For non-DFT text metadata, tables, sections, and writing cards, directly write fixes back through import_analysis(auto_apply_review_rules=true) under a valid write lock. If the payload writes review_notes, relationships, or multiple non-DFT modules, prefer all_non_dft instead of a narrow module lock to avoid module_write_lock_required:notes. Figure image creation/recropping is the exception: never use import_analysis for image files or bbox crop requests; call recrop_figure/create_figure_from_bbox directly. DFT data must not be directly final-approved by one AI; write object_review_audits or correction candidates only and keep the existing multi-AI conflict/consensus workflow. "
+            "Overall parse review instruction: do not only write a report. For non-DFT text metadata, tables, sections, and writing cards, directly write fixes back through import_analysis(auto_apply_review_rules=true); later AI writes may overwrite earlier AI writes. Figure image creation/recropping is the exception: never use import_analysis for image files or bbox crop requests; call recrop_figure/create_figure_from_bbox directly. DFT data must not be directly final-approved by one AI; write object_review_audits or correction candidates only and keep the existing multi-AI conflict/consensus workflow. "
             "IMPORTANT evidence_location format for auto-apply: object_review_audits.evidence_location and correction_proposals.evidence_payload should be structured dicts with at least one anchor key such as page, table, figure, quoted_text, section, bbox, or evidence_text. A plain string like \"PDF page 13, Table 5\" is accepted as quoted_text, but the preferred form is {\"page\": 13, \"table\": \"Table 5\", \"quoted_text\": \"...\"}. Structured keys enable reliable page-level evidence tracing; use the dict form whenever the exact page/figure/table is known. "
             "Figure review must cover every figure object, not only figures that already look correct. For each scientific figure, write or correct figure_role, content_summary, key_elements, page, caption, and crop_status/crop_quality; mark non-scientific images as figure_role='noise' or crop_status='noisy'. key_elements must be concrete visual/scientific elements such as materials, structures, curves, axes, orbitals, reaction steps, or panels; never use placeholders like verified_figure, ai_verified, reviewed, or ok. Check continuous figure numbering, compare the paper's actual figure/subfigure count in the PDF against current parsed figure objects, confirm whether any figures are missing entirely, and check caption agreement with the PDF page, image_path readability, crop alignment, and whether create_figure_from_bbox, recrop_figure, review_figure, or another MCP/API tool is needed to create missing figures or repair bad crops. A figure without image_path, page, caption, figure_role, and content_summary is not RAG-ready; missing or placeholder key_elements must be corrected or clearly flagged as an analysis gap. Abstract/section review must check whether the abstract is missing, whether sections are crude Page 1/Page 2 splits, and whether normalized section_title and section_type should be created. Generate source_label dynamically, for example <agent_name>_overall_<YYYYMMDD_HHMMSS>; never use a fixed date. Do not overwrite English evidence fields with Chinese translation. Put Chinese only in *_zh derived fields where available, or in writing cards/review notes. "
             "Strict count and DFT safety update: never stop at a web UI display limit; compare the source PDF and context counts, and review all figure objects one by one. If a paper has 16 figures, all 16 must be checked, corrected, or explicitly marked reviewed. For DFT rows, verify material identity, property or energy type, value, unit, evidence text, source document type, and exact page/locator. Do not PASS or export DFT rows when material identity, review status, evidence text, or locator is missing; keep them as candidates behind the export safety gate. "

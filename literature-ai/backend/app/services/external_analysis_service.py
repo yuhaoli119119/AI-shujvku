@@ -399,6 +399,7 @@ class ExternalAnalysisService:
         candidates = self.session.scalars(stmt.order_by(ExternalAnalysisCandidate.created_at.asc())).all()
 
         result = MaterializationResult()
+        review_service = ReviewService(self.session)
         for candidate in candidates:
             if candidate.status not in {"pending", "requires_resolution"}:
                 result.skipped_candidates += 1
@@ -441,6 +442,19 @@ class ExternalAnalysisService:
                     self.session.add(candidate)
                     result.skipped_candidates += 1
                     continue
+                evidence_payload = self._external_candidate_evidence_payload(
+                    run,
+                    payload.get("evidence_payload"),
+                )
+                auto_apply_non_dft = self._is_auto_applicable_non_dft_correction(payload)
+                if auto_apply_non_dft:
+                    evidence_payload.update(
+                        {
+                            "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
+                            "writes_final_truth": True,
+                            "requires_human_confirmation": False,
+                        }
+                    )
                 correction = PaperCorrection(
                     paper_id=candidate.paper_id,
                     source=run.source,
@@ -449,15 +463,17 @@ class ExternalAnalysisService:
                     operation=payload.get("operation", "replace"),
                     proposed_value=payload.get("proposed_value"),
                     reason=payload.get("reason", ""),
-                    evidence_payload=self._external_candidate_evidence_payload(
-                        run,
-                        payload.get("evidence_payload"),
-                    ),
+                    evidence_payload=evidence_payload,
                     status="pending",
                 )
                 self.session.add(correction)
                 self.session.flush()
-                candidate.status = "materialized"
+                if auto_apply_non_dft:
+                    review_service.approve_correction(correction.id, created_by)
+                    candidate.status = "ai_applied"
+                    result.auto_applied_corrections += 1
+                else:
+                    candidate.status = "materialized"
                 candidate.materialized_target_type = "paper_correction"
                 candidate.materialized_target_id = str(correction.id)
                 result.created_corrections += 1
@@ -496,11 +512,12 @@ class ExternalAnalysisService:
                     "created_notes": result.created_notes,
                     "created_corrections": result.created_corrections,
                     "created_relationships": result.created_relationships,
+                    "auto_applied_corrections": result.auto_applied_corrections,
                     "skipped_candidates": result.skipped_candidates,
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
-                    "writes_final_truth": False,
-                    "requires_human_confirmation": True,
+                    "writes_final_truth": result.auto_applied_corrections > 0,
+                    "requires_human_confirmation": result.created_corrections > result.auto_applied_corrections,
                 },
             )
         )
@@ -529,13 +546,6 @@ class ExternalAnalysisService:
             .where(ExternalAnalysisCandidate.run_id == run.id)
             .order_by(ExternalAnalysisCandidate.created_at.asc())
         ).all()
-        required_modules = self._required_auto_apply_modules(candidates)
-        lock_check = ModuleWriteLockService(self.session).require_write(
-            paper_id=run.paper_id,
-            module_names=required_modules,
-            lock_tokens=write_lock_tokens,
-            locked_by=write_lock_owner or reviewer,
-        )
         result = MaterializationResult()
         review_service = ReviewService(self.session)
 
@@ -655,9 +665,10 @@ class ExternalAnalysisService:
                     "requires_human_confirmation": False,
                     "dft_outputs_excluded": True,
                     "write_lock": {
-                        "required_modules": lock_check.required_modules,
-                        "covered_modules": lock_check.covered_modules,
-                        "lock_ids": lock_check.lock_ids,
+                        "required_modules": [],
+                        "covered_modules": [],
+                        "lock_ids": [],
+                        "policy": "not_required_for_non_dft_ai_overwrite",
                     },
                 },
             )

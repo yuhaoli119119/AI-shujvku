@@ -58,6 +58,7 @@ def _dft(
         property_type="adsorption_energy",
         value=-1.23,
         unit="eV",
+        confidence=0.9,
         evidence_text=evidence_text,
     )
     session.add(row)
@@ -498,6 +499,16 @@ def test_dft_ml_dataset_v2_aggregates_descriptors_and_special_barrier_taxonomy(t
             paper = _paper(session)
             catalyst = _catalyst(session, paper)
             session.add(
+                CatalystSample(
+                    paper_id=paper.id,
+                    name="Ni-N-C",
+                    catalyst_type="single_atom",
+                    metal_centers=["Ni"],
+                    coordination="Ni-N4",
+                    support="carbon",
+                )
+            )
+            session.add(
                 DFTSetting(
                     paper_id=paper.id,
                     software="VASP",
@@ -528,7 +539,7 @@ def test_dft_ml_dataset_v2_aggregates_descriptors_and_special_barrier_taxonomy(t
                 _evidence_ref(session, paper, row, page=2)
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
 
             adsorption = next(r for r in payload["records"] if r["record_id"] == str(target_row.id))
             descriptor = next(r for r in payload["records"] if r["record_id"] == str(descriptor_row.id))
@@ -562,7 +573,7 @@ def test_dft_ml_dataset_v2_marks_multiple_paper_settings_as_ambiguous(tmp_path):
             )
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
             record = payload["records"][0]
 
             assert record["setting_link_status"] == "ambiguous"
@@ -595,7 +606,7 @@ def test_dft_ml_dataset_v2_normalizes_descriptor_energy_and_flags_basis_specific
                 _evidence_ref(session, paper, row, page=4)
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
             descriptor = next(r for r in payload["records"] if r["record_id"] == str(descriptor_row.id))
             basis = next(r for r in payload["records"] if r["record_id"] == str(basis_row.id))
 
@@ -622,7 +633,7 @@ def test_dft_ml_dataset_v2_routes_non_numeric_claims_to_lm_records(tmp_path):
             _evidence_ref(session, paper, row, page=5)
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
 
             assert payload["records"] == []
             assert len(payload["lm_records"]) == 1
@@ -662,7 +673,7 @@ def test_dft_ml_dataset_v2_does_not_share_generic_descriptor_across_adsorbates(t
                 _evidence_ref(session, paper, row, page=6)
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
             li2s4_record = next(r for r in payload["records"] if r["record_id"] == str(li2s4_row.id))
             li2s6_record = next(r for r in payload["records"] if r["record_id"] == str(li2s6_row.id))
 
@@ -698,7 +709,7 @@ def test_dft_ml_dataset_v2_instance_key_includes_surface_site_and_coverage_conte
             session.add(DFTSetting(paper_id=paper.id, software="VASP", functional="PBE"))
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
             record = payload["records"][0]
             context = record["sample_context"]["instance_components"]
 
@@ -733,7 +744,7 @@ def test_dft_ml_dataset_v2_keeps_legacy_dft_settings_but_recommends_linked_setti
             )
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
             record = payload["records"][0]
 
             assert len(record["dft_settings"]) == 1
@@ -777,6 +788,7 @@ def test_dft_ml_dataset_v2_contract_fields_exist_for_all_numeric_records(tmp_pat
             target_row = _dft(session, paper)
             target_row.catalyst_sample_id = catalyst.id
             target_row.adsorbate = "Li2S4"
+            target_row.confidence = 0.9
 
             descriptor_row = _dft(session, paper)
             descriptor_row.catalyst_sample_id = catalyst.id
@@ -785,6 +797,7 @@ def test_dft_ml_dataset_v2_contract_fields_exist_for_all_numeric_records(tmp_pat
             descriptor_row.unit = "eV"
             descriptor_row.adsorbate = None
             descriptor_row.evidence_payload = {"target_property_type": "adsorption_energy"}
+            descriptor_row.confidence = 0.9
 
             blocked_norm_row = _dft(session, paper)
             blocked_norm_row.catalyst_sample_id = catalyst.id
@@ -792,13 +805,14 @@ def test_dft_ml_dataset_v2_contract_fields_exist_for_all_numeric_records(tmp_pat
             blocked_norm_row.value = -8.19
             blocked_norm_row.unit = "eV/atom"
             blocked_norm_row.adsorbate = "alpha-GDY"
+            blocked_norm_row.confidence = 0.9
 
             for row in (target_row, descriptor_row, blocked_norm_row):
                 _safe_review(session, paper, row)
                 _evidence_ref(session, paper, row, page=9)
             session.commit()
 
-            payload = asyncio.run(export_dft_dataset(session=session))
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
 
             assert payload["metadata"]["schema_version"] == "dft_results_ml_v2"
             assert payload["metadata"]["ml_setting_field"] == "linked_dft_setting"
@@ -817,6 +831,78 @@ def test_dft_ml_dataset_v2_contract_fields_exist_for_all_numeric_records(tmp_pat
                 assert record["sample_context"]["instance_key"]
                 if target["normalized_value"] is None or target["normalized_unit"] in {None, ""}:
                     assert record["ml_blockers"]
+    finally:
+        engine.dispose()
+
+
+def test_dft_ml_dataset_auto_binds_unbound_row_from_evidence_identity(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            catalyst = _catalyst(session, paper)
+            session.add(
+                CatalystSample(
+                    paper_id=paper.id,
+                    name="Ni-N-C",
+                    catalyst_type="single_atom",
+                    metal_centers=["Ni"],
+                    coordination="Ni-N4",
+                    support="carbon",
+                )
+            )
+            session.add(
+                DFTSetting(
+                    paper_id=paper.id,
+                    software="VASP",
+                    functional="PBE",
+                    raw_json={"scope": "paper"},
+                )
+            )
+            row = _dft(session, paper, with_catalyst=False)
+            row.evidence_payload = {"material_identity": "Fe-N-C", "structure_name": "Fe-N-C"}
+            row.confidence = 0.9
+            _safe_review(session, paper, row)
+            _evidence_ref(session, paper, row, page=4)
+            session.commit()
+
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
+            record = payload["records"][0]
+
+            assert record["catalyst"]["name"] == "Fe-N-C"
+            assert record["provenance"]["catalyst_binding_source"] == "auto_bound"
+            assert record["sample_context"]["material_scope_key"].startswith("material=catalyst_sample_")
+    finally:
+        engine.dispose()
+
+
+def test_dft_ml_dataset_single_candidate_fallback_binds_unbound_row(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            catalyst = _catalyst(session, paper)
+            catalyst.name = "Only Catalyst"
+            session.add(
+                DFTSetting(
+                    paper_id=paper.id,
+                    software="VASP",
+                    functional="PBE",
+                    raw_json={"scope": "paper"},
+                )
+            )
+            row = _dft(session, paper, with_catalyst=False)
+            row.evidence_payload = {"material_identity": "Unclear alias"}
+            row.confidence = 0.9
+            _safe_review(session, paper, row)
+            _evidence_ref(session, paper, row, page=4)
+            session.commit()
+
+            payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
+            record = payload["records"][0]
+
+            assert record["catalyst"]["name"] == "Only Catalyst"
+            assert record["provenance"]["catalyst_binding_source"] == "single_candidate_fallback"
     finally:
         engine.dispose()
 

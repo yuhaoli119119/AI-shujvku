@@ -236,7 +236,7 @@ async def get_paper(
     mode: str = Query("full", pattern="^(light|full)$"),
     session: Session = Depends(get_db_session),
 ) -> PaperDetailResponse:
-    detail = PaperQueryService(session).get_paper_detail(paper_id)
+    detail = PaperQueryService(session).get_paper_detail(paper_id, compact=(mode == "light"))
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
     if mode == "light":

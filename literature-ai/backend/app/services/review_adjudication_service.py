@@ -230,6 +230,7 @@ class ReviewAdjudicationService:
             target_id=target_id,
             field_name=field_name,
             include_non_conflicts=include_non_conflicts,
+            active_only=True,
             limit=limit,
         )
         rows = self.enrich_rows(payload.get("rows") or [])

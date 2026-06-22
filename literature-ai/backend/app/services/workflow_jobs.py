@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Lock
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -39,6 +41,9 @@ from app.utils.library_names import (
 
 
 logger = logging.getLogger(__name__)
+_fallback_executor_lock = Lock()
+_fallback_executor: ThreadPoolExecutor | None = None
+_fallback_executor_workers = 0
 JOB_TYPE_AI_WORKFLOW = "ai_workflow"
 JOB_TYPE_CLASSIFY_BATCH = "classify_batch"
 JOB_TYPE_EXTRACTION = "extraction"
@@ -932,9 +937,24 @@ def run_local_pdf_path_ingest_job(job_id: str, control_database_url: str | None 
                     "status": "already_exists",
                 }
             except PaperIdentityMismatchError as exc:
-                raise ValueError(
-                    f"{exc.status}: target={exc.target_paper.id} incoming_title={exc.incoming.get('title') or ''}"
-                ) from exc
+                result = {
+                    "paper_id": str(exc.target_paper.id),
+                    "title": exc.target_paper.title,
+                    "status": exc.status,
+                    "target_paper_id": str(exc.target_paper.id),
+                    "target": {
+                        "title": exc.target_paper.title,
+                        "doi": exc.target_paper.doi,
+                        "year": exc.target_paper.year,
+                    },
+                    "incoming": {
+                        "title": exc.incoming.get("title"),
+                        "doi": exc.incoming.get("doi"),
+                        "year": exc.incoming.get("year"),
+                    },
+                    "match_score": exc.match_report.get("score", 0.0),
+                    "match_reason": exc.match_report.get("reason", ""),
+                }
             assert_job_not_cancelled(job_session, job_id)
 
         with session_scope(control_db_url) as control_session:
@@ -1612,11 +1632,27 @@ def dispatch_job(
         run_workflow_job_task.apply_async(args=[job_id, control_database_url], queue=target_queue)
         return "celery"
     except Exception as exc:
-        logger.warning("Celery dispatch failed for job %s, falling back to in-process background task: %s", job_id, exc)
-        if background_tasks is None:
-            raise
-        background_tasks.add_task(run_workflow_job_by_id, job_id, control_database_url)
-        return "background_tasks"
+        logger.warning("Celery dispatch failed for job %s, falling back to local workflow executor: %s", job_id, exc)
+        executor = _get_fallback_executor()
+        executor.submit(run_workflow_job_by_id, job_id, control_database_url)
+        return "threadpool"
+
+
+def _get_fallback_executor() -> ThreadPoolExecutor:
+    global _fallback_executor, _fallback_executor_workers
+
+    desired_workers = max(1, int(get_settings().workflow_fallback_max_workers))
+    with _fallback_executor_lock:
+        if _fallback_executor is not None and _fallback_executor_workers == desired_workers:
+            return _fallback_executor
+        if _fallback_executor is not None:
+            _fallback_executor.shutdown(wait=False, cancel_futures=False)
+        _fallback_executor = ThreadPoolExecutor(
+            max_workers=desired_workers,
+            thread_name_prefix="litai-workflow",
+        )
+        _fallback_executor_workers = desired_workers
+        return _fallback_executor
 
 
 def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None) -> None:

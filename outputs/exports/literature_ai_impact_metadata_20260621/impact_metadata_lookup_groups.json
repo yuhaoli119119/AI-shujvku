@@ -1,0 +1,226 @@
+[
+  {
+    "lookup_journal": "Nature Communications",
+    "import_row_count": 2,
+    "total_papers": 12,
+    "import_journals": "Nature Communications Nat Commun | Nature Communications",
+    "copy_hint": "Same IF should be copied to all listed import_journals.",
+    "match_statuses": "alias_or_suffix_variant | exact_string"
+  },
+  {
+    "lookup_journal": "Angewandte Chemie International Edition",
+    "import_row_count": 1,
+    "total_papers": 4,
+    "import_journals": "Angewandte Chemie International Edition",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Journal of Materials Chemistry A",
+    "import_row_count": 2,
+    "total_papers": 4,
+    "import_journals": "Journal of Materials Chemistry A | Journal of Materials Chemistry A J. Mater. Chem. A",
+    "copy_hint": "Same IF should be copied to all listed import_journals.",
+    "match_statuses": "exact_string | alias_or_suffix_variant"
+  },
+  {
+    "lookup_journal": "arXiv",
+    "import_row_count": 1,
+    "total_papers": 2,
+    "import_journals": "arXiv",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Chemical Science",
+    "import_row_count": 2,
+    "total_papers": 2,
+    "import_journals": "Chemical Science | Chemical Science Chem. Sci.",
+    "copy_hint": "Same IF should be copied to all listed import_journals.",
+    "match_statuses": "exact_string | alias_or_suffix_variant"
+  },
+  {
+    "lookup_journal": "Energy & Environmental Science",
+    "import_row_count": 1,
+    "total_papers": 2,
+    "import_journals": "Energy & Environmental Science",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Scientific Reports",
+    "import_row_count": 1,
+    "total_papers": 2,
+    "import_journals": "Scientific Reports",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "ACS Applied Materials & Interfaces",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "ACS Applied Materials &amp; Interfaces",
+    "copy_hint": "",
+    "match_statuses": "html_entity_variant"
+  },
+  {
+    "lookup_journal": "ACS Catalysis",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "ACS Catalysis",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Advanced Energy Materials",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Advanced Energy Materials",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "AIChE Journal",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "AIChE Journal",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Applied Surface Science",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Applied Surface Science",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Catalysts",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Catalysts Catalysts",
+    "copy_hint": "",
+    "match_statuses": "alias_or_suffix_variant"
+  },
+  {
+    "lookup_journal": "ChemCatChem",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "ChemCatChem",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Chemical Engineering Journal",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Chemical Engineering Journal",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Electrochemical Energy Reviews",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Electrochemical Energy Reviews",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Industrial & Engineering Chemistry Research",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Industrial &amp; Engineering Chemistry Research",
+    "copy_hint": "",
+    "match_statuses": "html_entity_variant"
+  },
+  {
+    "lookup_journal": "Industrial Chemistry & Materials",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Industrial Chemistry & Materials Ind. Chem. Mater.",
+    "copy_hint": "",
+    "match_statuses": "alias_or_suffix_variant"
+  },
+  {
+    "lookup_journal": "Interdisciplinary materials",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Interdisciplinary materials",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Journal of Energy Chemistry",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Journal of Energy Chemistry",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Journal of the American Chemical Society",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Journal of the American Chemical Society",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Molecules",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Molecules",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Nano Research Energy",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Nano Research Energy",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Nano Select",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Nano Select",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "npj Materials Sustainability",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "npj Materials Sustainability",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "npj Quantum Materials npj Quantum",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "npj Quantum Materials npj Quantum Mater.",
+    "copy_hint": "",
+    "match_statuses": "alias_or_suffix_variant"
+  },
+  {
+    "lookup_journal": "Physical Chemistry Chemical Physics",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Physical Chemistry Chemical Physics",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  },
+  {
+    "lookup_journal": "Topics in Catalysis",
+    "import_row_count": 1,
+    "total_papers": 1,
+    "import_journals": "Topics in Catalysis",
+    "copy_hint": "",
+    "match_statuses": "exact_string"
+  }
+]

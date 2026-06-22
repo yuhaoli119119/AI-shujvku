@@ -388,6 +388,21 @@ class PaperListItemResponse(BaseModel):
     pdf_quality_status: str | None = None
     pdf_quality_score: float | None = None
     pdf_quality_report: dict[str, Any] | None = None
+    pdf_artifact_status: dict[str, Any] | None = None
+    pdf_exists: bool = False
+    pdf_file_size: int | None = None
+    pdf_path_kind: str | None = None
+    has_parsed_content: bool = False
+    manual_review_progress: dict[str, Any] = Field(default_factory=dict)
+    needs_human_confirmation: bool = False
+    has_active_dft_candidates: bool = False
+    active_dft_candidate_count: int = 0
+    dft_review_conflict_count: int = 0
+    dft_review_conflict_total_count: int = 0
+    visual_review_conflict_count: int = 0
+    visual_review_conflict_total_count: int = 0
+    content_review_conflict_count: int = 0
+    content_review_conflict_total_count: int = 0
     workspace_path: str | None = None
     created_at: datetime
     counts: PaperCountsResponse = Field(default_factory=PaperCountsResponse)

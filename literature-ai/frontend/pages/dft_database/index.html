@@ -15,8 +15,17 @@
     html, body { height: 100%; margin: 0; }
     body { min-height: 100vh; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); display: flex; flex-direction: column; }
     .shell { max-width: var(--page-shell-max-width); width: 100%; margin: 0 auto; padding: 0 18px 8px; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-    .scroll-area { flex: 1; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+    .scroll-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
     .panel-card, .data-panel, .dashboard-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-card); margin-bottom: 16px; }
+    .data-panel {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding-bottom: 0;
+      margin-bottom: 0;
+      overflow: hidden;
+    }
     .dashboard-panel {
       display: flex;
       flex-direction: column;
@@ -87,6 +96,91 @@
     .stat-box .lbl { color: var(--color-text-secondary); font-size: 12px; }
     .stat-box .val { font-size: 22px; font-weight: 800; margin-top: 4px; }
     .panel-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .sidebar-pagination {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-height: 36px;
+      margin: 6px -16px 0;
+      padding: 6px 16px;
+      border-top: 1px solid var(--color-border);
+      border-radius: 0 0 var(--radius) var(--radius);
+      background: var(--color-surface);
+    }
+    .pagination-meta {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      line-height: 1;
+    }
+    .pagination-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .pagination-pages {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .page-size-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .page-size-box select {
+      height: 28px;
+      min-width: 72px;
+      padding: 0 8px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .btn.ghost { background: var(--color-surface-alt); color: var(--color-text-secondary); }
+    .btn.small { height: 28px; padding: 0 10px; border-radius: var(--radius-sm); font-size: 12px; }
+    .page-indicator {
+      min-width: 34px;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .page-indicator:hover {
+      border-color: var(--color-border-strong);
+      color: var(--color-text);
+    }
+    .page-indicator.is-active {
+      border-color: transparent;
+      background: var(--color-primary);
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(12, 87, 164, 0.22);
+    }
+    .page-indicator[disabled] {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .page-ellipsis {
+      color: var(--color-text-muted);
+      font-size: 12px;
+      padding: 0 2px;
+    }
     .export-panel { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .export-panel .btn { height: 32px; padding: 0 12px; font-size: 13px; }
     .export-panel .export-status { color: var(--color-primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -284,20 +378,45 @@
     .completeness-row { border: 1px dashed var(--color-border-strong); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
     .completeness-row .quality-meta { font-size: 11.5px; line-height: 1.5; }
     .completeness-row a { font-size: 12px; font-weight: 700; }
-    .table-container { width: 100%; overflow-x: auto; }
+    .table-container { width: 100%; flex: 1; min-height: 0; overflow: auto; }
+    .table-container::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .table-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .table-container::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.45);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    .table-container::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.65);
+      background-clip: padding-box;
+    }
     table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.35; table-layout: fixed; }
     th, td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); border-right: 1px solid var(--color-border); text-align: center !important; vertical-align: middle; overflow: hidden; }
     th:last-child, td:last-child { border-right: none; }
-    th { background: var(--color-surface-alt); color: var(--color-text-secondary); font-weight: 800; }
+    th { background: var(--color-surface-alt); color: var(--color-text-secondary); font-size: 11.5px; font-weight: 700; letter-spacing: 0.01em; }
     tr:hover td { background: var(--color-primary-bg) !important; }
+    td { font-size: 12px; font-weight: 500; color: var(--color-text); }
+    .cell-primary { display: block; font-size: 12px; font-weight: 600; color: var(--color-text); line-height: 1.25; }
+    .cell-primary.num-text { font-family: var(--font-mono); }
+    .cell-secondary { display: block; margin-top: 1px; font-size: 10px; font-weight: 500; color: var(--color-text-muted); line-height: 1.25; }
     .num-col { font-family: var(--font-mono); }
-    .val-unit { font-size: 11px; color: var(--color-text-muted); display: block; margin-top: 1px; font-weight: normal; }
-    .dft-table-muted { font-size: 11px; color: var(--color-text-muted); line-height: 1.3; margin-top: 2px; }
-    .paper-link-wrap { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
-    .confidence-badge { display: inline-flex; border-radius: var(--radius-pill); padding: 2px 6px; font-size: 10.5px; font-weight: 800; }
-    .confidence-badge.high { background: var(--color-success-bg); color: var(--color-success); }
-    .confidence-badge.medium { background: var(--color-warning-bg); color: var(--color-warning); }
-    .confidence-badge.low { background: var(--color-danger-bg); color: var(--color-danger); }
+    .val-unit { font-size: 10px; color: var(--color-text-muted); display: block; margin-top: 0; font-weight: 500; line-height: 1.2; }
+    .dft-table-muted { font-size: 10px; color: var(--color-text-muted); line-height: 1.25; margin-top: 1px; font-weight: 500; }
+    .paper-link-wrap { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 600; }
+    .paper-link-wrap a { color: inherit; font-weight: inherit; text-decoration: none; }
+    .paper-link-wrap a:hover { text-decoration: none; color: var(--color-primary); }
+    .status-text { display: inline-flex; color: var(--color-success); font-weight: 700; margin-bottom: 2px; font-size: 10.5px; }
+    .confidence-badge { display: inline-flex; padding: 0; font-size: 10.5px; font-weight: 700; line-height: 1.2; }
+    .confidence-badge.high { color: var(--color-success); }
+    .confidence-badge.medium { color: var(--color-warning); }
+    .confidence-badge.low { color: var(--color-danger); }
+    .confidence-badge.unknown { color: var(--color-text-muted); }
     .evidence-link {
       display: inline-flex;
       align-items: center;
@@ -389,6 +508,10 @@
       .quality-topbar .stat-divider { display: none; }
       .quality-topbar .actions-bar { margin-left: 0; width: 100%; justify-content: flex-end; }
       .dashboard-toolbar { align-items: flex-start; }
+      .scroll-area { overflow: visible; }
+      .data-panel { overflow: visible; }
+      .sidebar-pagination { align-items: stretch; }
+      .pagination-bar { width: 100%; justify-content: flex-start; margin-left: 0; }
       .dashboard-header-actions { margin-left: 0; width: 100%; justify-content: flex-start; }
       .export-panel { margin-left: 0; }
       .completeness-list { grid-template-columns: 1fr; }
@@ -405,10 +528,10 @@
         <div class="dashboard-toolbar">
           <div class="filter-grid">
             <div class="filter-field"><label for="libraryFilter">文献库</label><select id="libraryFilter" onchange="handleLibraryChange()"><option value="">全部文献库</option></select></div>
-            <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="queryDFT()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option></select></div>
-            <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="queryDFT()"></div>
-            <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="queryDFT()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
-            <div class="filter-field"><label for="minConfidence">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="queryDFT()"></div>
+            <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="handleDftFilterChange()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option></select></div>
+            <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
+            <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="handleDftFilterChange()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
+            <div class="filter-field"><label for="minConfidence">最低提取置信度（未记录者保留）</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
           </div>
           <div class="export-panel">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
@@ -438,7 +561,7 @@
         </div>
         <button class="btn btn-ghost btn-sm" onclick="queryDFT()">↻ 刷新</button>
       </div>
-      <div class="collapse-body" id="dftDataCollapse">
+      <div class="collapse-body" id="dftDataCollapse" style="flex:1;min-height:0;display:flex;flex-direction:column;">
         <div class="table-container">
           <table id="dftTable">
             <thead>
@@ -448,6 +571,10 @@
             </thead>
             <tbody id="dftList"><tr><td colspan="8" class="empty-state">加载已审核可导出 DFT 记录中...</td></tr></tbody>
           </table>
+        </div>
+        <div class="sidebar-pagination">
+          <div id="dftPaginationMeta" class="pagination-meta subtle">正在准备分页...</div>
+          <div id="dftPaginationBar" class="pagination-bar"></div>
         </div>
       </div>
     </section>
@@ -472,9 +599,22 @@
   </div>
   <script>
     const API_BASE = "/api/papers";
+    const DFT_FETCH_LIMIT = 500;
+    const DFT_DEFAULT_PAGE_SIZE = 25;
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     const DFT_DASHBOARD_STORAGE_KEY = "litai_dft_hide_dashboard";
-    const state = { items: [], currentLibrary: "", libraries: [] };
+    const state = {
+      items: [],
+      currentLibrary: "",
+      libraries: [],
+      pagination: { page: 1, pageSize: DFT_DEFAULT_PAGE_SIZE },
+      queryTotal: 0,
+      queryHasMore: false,
+      queryController: null,
+      querySeq: 0,
+      queryDebounceTimer: null,
+      overviewTimer: null,
+    };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function toggleDashboard() {
       const panel = document.getElementById("exportSafetyPanel");
@@ -635,6 +775,11 @@
       const select = document.getElementById("libraryFilter");
       if (select && select.value !== state.currentLibrary) state.currentLibrary = select.value;
       if (state.currentLibrary) return state.currentLibrary;
+      if (state.libraries.length) {
+        populateLibraryFilter();
+        state.currentLibrary = select ? select.value : "";
+        return state.currentLibrary;
+      }
       try {
         const libraries = await fetchJSON("/api/libraries");
         state.libraries = Array.isArray(libraries) ? libraries : [];
@@ -674,8 +819,157 @@
     }
     function handleLibraryChange() {
       setCurrentLibraryFromSelect();
-      loadExportSafetyOverview();
-      queryDFT();
+      resetDftPagination();
+      scheduleQueryDFT({ immediate: true });
+      scheduleExportSafetyOverview();
+    }
+    function ensureDftPaginationState() {
+      if (!state.pagination || typeof state.pagination !== "object") {
+        state.pagination = { page: 1, pageSize: DFT_DEFAULT_PAGE_SIZE };
+      }
+      if (!Number.isFinite(Number(state.pagination.page)) || Number(state.pagination.page) < 1) {
+        state.pagination.page = 1;
+      }
+      if (!Number.isFinite(Number(state.pagination.pageSize)) || Number(state.pagination.pageSize) < 1) {
+        state.pagination.pageSize = DFT_DEFAULT_PAGE_SIZE;
+      }
+    }
+    function resetDftPagination() {
+      ensureDftPaginationState();
+      state.pagination.page = 1;
+    }
+    function getDftPageSize() {
+      ensureDftPaginationState();
+      return Math.max(1, Number(state.pagination.pageSize || DFT_DEFAULT_PAGE_SIZE));
+    }
+    function getDftCurrentPage() {
+      ensureDftPaginationState();
+      return Math.max(1, Math.floor(Number(state.pagination.page || 1)));
+    }
+    function getDftTotalPages() {
+      if (!Number.isFinite(Number(state.queryTotal))) {
+        return Math.max(1, getDftCurrentPage() + (state.queryHasMore ? 1 : 0));
+      }
+      const totalItems = Math.max(0, Number(state.queryTotal || 0));
+      return Math.max(1, Math.ceil(totalItems / getDftPageSize()));
+    }
+    function handleDftFilterChange() {
+      resetDftPagination();
+      scheduleQueryDFT();
+    }
+    function setDftPage(page) {
+      ensureDftPaginationState();
+      const totalPages = getDftTotalPages();
+      const nextPage = Math.min(totalPages, Math.max(1, Math.floor(Number(page || 1))));
+      if (nextPage === state.pagination.page) return;
+      state.pagination.page = nextPage;
+      scheduleQueryDFT({ immediate: true });
+    }
+    function goToDftPage(page) {
+      setDftPage(page);
+    }
+    function prevDftPage() {
+      setDftPage(getDftCurrentPage() - 1);
+    }
+    function nextDftPage() {
+      setDftPage(getDftCurrentPage() + 1);
+    }
+    function setDftPageSize() {
+      const select = document.getElementById("dftPageSizeSelect");
+      const nextSize = Number(select && select.value ? select.value : getDftPageSize());
+      ensureDftPaginationState();
+      state.pagination.pageSize = Number.isFinite(nextSize) && nextSize > 0 ? nextSize : DFT_DEFAULT_PAGE_SIZE;
+      state.pagination.page = 1;
+      scheduleQueryDFT({ immediate: true });
+    }
+    function clearPendingDftQuery() {
+      if (state.queryDebounceTimer) {
+        window.clearTimeout(state.queryDebounceTimer);
+        state.queryDebounceTimer = null;
+      }
+    }
+    function cancelInFlightDftQuery() {
+      if (state.queryController) {
+        state.queryController.abort();
+        state.queryController = null;
+      }
+    }
+    function scheduleQueryDFT(options) {
+      const config = options || {};
+      clearPendingDftQuery();
+      if (config.immediate) {
+        queryDFT();
+        return;
+      }
+      state.queryDebounceTimer = window.setTimeout(() => {
+        state.queryDebounceTimer = null;
+        queryDFT();
+      }, 180);
+    }
+    function scheduleExportSafetyOverview() {
+      if (state.overviewTimer) {
+        window.clearTimeout(state.overviewTimer);
+        state.overviewTimer = null;
+      }
+      state.overviewTimer = window.setTimeout(() => {
+        state.overviewTimer = null;
+        loadExportSafetyOverview();
+      }, 600);
+    }
+    function buildDftPageList(totalPages, currentPage) {
+      const pages = [];
+      const nearCurrent = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
+      for (let page = 1; page <= totalPages; page += 1) {
+        if (page <= 2 || page > totalPages - 2 || nearCurrent.has(page)) pages.push(page);
+      }
+      const uniquePages = [...new Set(pages)].filter(page => page >= 1 && page <= totalPages).sort((a, b) => a - b);
+      const html = [];
+      let previous = 0;
+      uniquePages.forEach(page => {
+        if (previous && page - previous > 1) html.push('<span class="page-ellipsis">...</span>');
+        html.push('<button class="page-indicator' + (page === currentPage ? ' is-active' : '') + '" type="button" onclick="setDftPage(' + page + ')"' + (page === currentPage ? ' aria-current="page"' : '') + '>' + page + '</button>');
+        previous = page;
+      });
+      return html.join("");
+    }
+    function renderDftPagination(totalItems, startIndex, endIndex) {
+      const metaEl = document.getElementById("dftPaginationMeta");
+      const barEl = document.getElementById("dftPaginationBar");
+      if (!metaEl || !barEl) return;
+      const totalKnown = Number.isFinite(Number(totalItems));
+      if ((totalKnown && !totalItems) || (!totalKnown && !state.queryHasMore && endIndex === 0)) {
+        metaEl.textContent = "0 条结果";
+        barEl.innerHTML = '<span class="page-size-box">每页<select id="dftPageSizeSelect" onchange="setDftPageSize()"><option value="25"' + (getDftPageSize() === 25 ? ' selected' : '') + '>25 条</option><option value="50"' + (getDftPageSize() === 50 ? ' selected' : '') + '>50 条</option><option value="100"' + (getDftPageSize() === 100 ? ' selected' : '') + '>100 条</option></select></span>';
+        return;
+      }
+      const currentPage = getDftCurrentPage();
+      if (!totalKnown) {
+        metaEl.textContent = '第 ' + currentPage + ' 页，显示第 ' + (startIndex + 1) + '-' + endIndex + ' 条' + (state.queryHasMore ? '，还有下一页' : '');
+        barEl.innerHTML =
+          '<span class="page-size-box">每页<select id="dftPageSizeSelect" onchange="setDftPageSize()">' +
+            '<option value="25"' + (getDftPageSize() === 25 ? ' selected' : '') + '>25 条</option>' +
+            '<option value="50"' + (getDftPageSize() === 50 ? ' selected' : '') + '>50 条</option>' +
+            '<option value="100"' + (getDftPageSize() === 100 ? ' selected' : '') + '>100 条</option>' +
+          '</select></span>' +
+          '<button class="btn ghost small" type="button" onclick="goToDftPage(1)"' + (currentPage <= 1 ? ' disabled' : '') + '>首页</button>' +
+          '<button class="btn ghost small" type="button" onclick="prevDftPage()"' + (currentPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+          '<span class="pagination-pages"><button class="page-indicator is-active" type="button" aria-current="page">' + currentPage + '</button></span>' +
+          '<button class="btn ghost small" type="button" onclick="nextDftPage()"' + (!state.queryHasMore ? ' disabled' : '') + '>下一页</button>';
+        return;
+      }
+      const totalPages = getDftTotalPages();
+      metaEl.textContent = '第 ' + currentPage + ' / ' + totalPages + ' 页，显示第 ' + (startIndex + 1) + '-' + endIndex + ' 条，共 ' + totalItems + ' 条';
+      barEl.innerHTML =
+        '<span class="page-size-box">每页<select id="dftPageSizeSelect" onchange="setDftPageSize()">' +
+          '<option value="25"' + (getDftPageSize() === 25 ? ' selected' : '') + '>25 条</option>' +
+          '<option value="50"' + (getDftPageSize() === 50 ? ' selected' : '') + '>50 条</option>' +
+          '<option value="100"' + (getDftPageSize() === 100 ? ' selected' : '') + '>100 条</option>' +
+        '</select></span>' +
+        '<button class="btn ghost small" type="button" onclick="goToDftPage(1)"' + (currentPage <= 1 ? ' disabled' : '') + '>首页</button>' +
+        '<button class="btn ghost small" type="button" onclick="prevDftPage()"' + (currentPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+        '<span class="pagination-pages">' + buildDftPageList(totalPages, currentPage) + '</span>' +
+        '<button class="btn ghost small" type="button" onclick="nextDftPage()"' + (currentPage >= totalPages ? ' disabled' : '') + '>下一页</button>' +
+        '<button class="btn ghost small" type="button" onclick="goToDftPage(' + totalPages + ')"' + (currentPage >= totalPages ? ' disabled' : '') + '>末页</button>';
     }
     function applyLibraryParam(params) {
       if (state.currentLibrary) params.set("library_name", state.currentLibrary);
@@ -769,31 +1063,58 @@
       }
     }
     async function queryDFT() {
+      clearPendingDftQuery();
       await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
       const catalyst = document.getElementById("catalystType").value;
       const minConf = document.getElementById("minConfidence").value || 0.3;
       const backendStatus = "exportable";
+      const pageSize = getDftPageSize();
+      const currentPage = getDftCurrentPage();
+      const offset = Math.max(0, (currentPage - 1) * pageSize);
       const params = applyLibraryParam(new URLSearchParams());
       params.set("min_confidence", minConf);
-      params.set("limit", "50");
+      params.set("limit", String(Math.min(pageSize, DFT_FETCH_LIMIT)));
+      params.set("offset", String(offset));
       params.set("status", backendStatus);
+      params.set("compact", "1");
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
       if (catalyst) params.set("catalyst_type", catalyst);
       const url = `${API_BASE}/compare?${params.toString()}`;
       const list = document.getElementById("dftList");
       list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询已审核可导出 DFT 数据...</td></tr>';
+      cancelInFlightDftQuery();
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const requestSeq = state.querySeq + 1;
+      state.querySeq = requestSeq;
+      state.queryController = controller;
       try {
-        const data = await fetchJSON(url);
+        const data = await fetchJSON(url, controller ? { signal: controller.signal } : undefined);
+        if (requestSeq !== state.querySeq) return;
         let items = data.items || [];
         if (!prop) items = items;
         state.items = items;
-        renderResultSummary(data.total == null ? items.length : Number(data.total), items.length);
-        renderRows(items);
+        state.queryHasMore = Boolean(data.has_more);
+        state.queryTotal = data.total == null ? null : Number(data.total);
+        const totalPages = getDftTotalPages();
+        if (Number.isFinite(Number(state.queryTotal)) && state.queryTotal > 0 && currentPage > totalPages) {
+          state.pagination.page = totalPages;
+          return queryDFT();
+        }
+        renderDftTable();
       } catch (error) {
+        if (error && error.name === "AbortError") return;
+        if (requestSeq !== state.querySeq) return;
+        state.items = [];
+        state.queryTotal = 0;
+        state.queryHasMore = false;
+        renderResultSummary(0, 0, 0, 0);
+        renderDftPagination(0, 0, 0);
         list.innerHTML = `<tr><td colspan="8" class="empty-state">查询失败：${esc(error.message)}</td></tr>`;
+      } finally {
+        if (state.queryController === controller) state.queryController = null;
       }
     }
     function firstLocator(row) {
@@ -1082,9 +1403,16 @@
     function handleEvidenceBackdropClick(event) {
       if (event && event.target && event.target.id === "evidenceModal") closeEvidenceModal();
     }
-    function renderResultSummary(total, shown) {
+    function renderResultSummary(total, shown, currentPage, totalPages) {
       const suffix = "条已审核可导出 DFT 记录";
-      const label = total === shown ? `${total} ${suffix}` : `${total} ${suffix}（当前显示 ${shown} 条）`;
+      let label = "";
+      if (Number.isFinite(Number(total))) {
+        label = `${total} ${suffix}`;
+      } else {
+        label = `当前页 ${shown} ${suffix}`;
+        if (shown > 0) label += ` · 第 ${currentPage} 页`;
+        if (state.queryHasMore) label += " · 还有下一页";
+      }
       document.getElementById("resultSummary").textContent = label;
     }
     function renderRows(items) {
@@ -1094,22 +1422,39 @@
         return;
       }
       list.innerHTML = items.map((item, idx) => {
-        const catName = item.catalysts && item.catalysts[0] ? item.catalysts[0].name : "-";
-        const conf = Number(item.confidence || 0);
-        const cls = conf >= 0.8 ? "high" : conf >= 0.5 ? "medium" : "low";
+        const catName = item.display_catalyst_name || (item.catalysts && item.catalysts[0] ? item.catalysts[0].name : "-");
+        const hasConfidence = item.confidence != null && Number.isFinite(Number(item.confidence));
+        const conf = hasConfidence ? Number(item.confidence) : null;
+        const cls = !hasConfidence ? "unknown" : conf >= 0.8 ? "high" : conf >= 0.5 ? "medium" : "low";
+        const confidenceLabel = hasConfidence ? `${Math.round(conf * 100)}%` : "未记录";
         const validation = "validated";
-        const validationColor = "var(--color-success)";
+        const catalystHint = item.material_binding_status === "derived_from_evidence"
+          ? "当前未绑定催化剂样本，名称来自证据中的材料/结构标识。"
+          : "已绑定催化剂样本。";
         return `<tr>
-          <td><strong>${esc(catName)}</strong></td>
-          <td>${esc(item.adsorbate || "-")}</td>
-          <td>${esc(item.property_type || "-")}</td>
-          <td class="num-col"><strong>${item.value != null ? Number(item.value).toFixed(4) : "-"}</strong><span class="val-unit">${esc(item.unit || "")}</span></td>
-          <td>${esc(item.reaction_step || "-")}<div class="dft-table-muted">${esc(item.source_section || "-")}</div></td>
-          <td><span style="display:inline-flex;color:${validationColor};font-weight:900;margin-bottom:3px;font-size:11.5px;">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}">${Math.round(conf * 100)}%</span></td>
+          <td><span class="cell-primary" title="${esc(catalystHint)}">${esc(catName)}</span></td>
+          <td><span class="cell-primary">${esc(item.adsorbate || "-")}</span></td>
+          <td><span class="cell-primary">${esc(item.property_type || "-")}</span></td>
+          <td class="num-col"><span class="cell-primary num-text">${item.value != null ? Number(item.value).toFixed(4) : "-"}</span><span class="val-unit">${esc(item.unit || "")}</span></td>
+          <td><span class="cell-primary">${esc(item.reaction_step || "-")}</span><div class="dft-table-muted">${esc(item.source_section || "-")}</div></td>
+          <td><span class="status-text">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}" title="${hasConfidence ? '解析阶段记录的提取置信度' : '历史记录未保存提取置信度；导出资格以审核与证据安全门为准'}">${confidenceLabel}</span></td>
           <td><button class="evidence-link" onclick="showEvidence(${idx})">证据</button></td>
           <td><div class="paper-link-wrap"><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}" target="_blank" rel="noopener noreferrer" title="${esc(item.title || '文献')}">${esc(item.title || "文献")}</a></div><div class="dft-table-muted">${esc(item.doi || "无 DOI")}</div></td>
         </tr>`;
       }).join("");
+    }
+    function renderDftTable() {
+      const totalItems = Number.isFinite(Number(state.queryTotal)) ? Math.max(0, Number(state.queryTotal || 0)) : null;
+      const pageItems = Array.isArray(state.items) ? state.items : [];
+      const totalPages = getDftTotalPages();
+      const currentPage = Math.min(getDftCurrentPage(), totalPages);
+      const startIndex = pageItems.length > 0 ? Math.max(0, (currentPage - 1) * getDftPageSize()) : 0;
+      const endIndex = pageItems.length > 0
+        ? (totalItems == null ? startIndex + pageItems.length : Math.min(totalItems, startIndex + pageItems.length))
+        : 0;
+      renderResultSummary(totalItems, pageItems.length, currentPage, totalPages);
+      renderRows(pageItems);
+      renderDftPagination(totalItems, startIndex, endIndex);
     }
     function showEvidence(index) {
       const item = state.items[index];
@@ -1133,9 +1478,13 @@
       await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
+      const catalyst = document.getElementById("catalystType").value;
+      const minConf = document.getElementById("minConfidence").value || 0.3;
       const params = new URLSearchParams();
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
+      if (catalyst) params.set("catalyst_type", catalyst);
+      params.set("min_confidence", minConf);
       applyLibraryParam(params);
       let url = `/api/papers/export/csv?${params.toString()}`;
       const headers = {};
@@ -1204,9 +1553,13 @@
       await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
+      const catalyst = document.getElementById("catalystType").value;
+      const minConf = document.getElementById("minConfidence").value || 0.3;
       const params = new URLSearchParams();
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
+      if (catalyst) params.set("catalyst_type", catalyst);
+      params.set("min_confidence", minConf);
       applyLibraryParam(params);
       let url = `/api/papers/export/dft-dataset?${params.toString()}`;
       const headers = {};
@@ -1253,8 +1606,8 @@
         if (event.key === "Escape") closeEvidenceModal();
       });
       loadLibraries().finally(() => {
-        loadExportSafetyOverview();
         queryDFT();
+        scheduleExportSafetyOverview();
       });
     });
   </script>

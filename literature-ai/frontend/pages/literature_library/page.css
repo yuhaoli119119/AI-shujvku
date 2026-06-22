@@ -39,7 +39,7 @@ body {
     border-color: var(--color-warning);
 }
 .toolbar {
-    padding: 12px 14px;
+    padding: 8px 14px;
     margin-top: 0;
     position: relative;
     z-index: 60;

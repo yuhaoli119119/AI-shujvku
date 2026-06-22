@@ -49,6 +49,7 @@ from app.schemas.api import (
     FigureDataPointResponse,
 )
 from app.services.paper_codes import ensure_paper_codes
+from app.services.paper_workbench_service import PaperWorkbenchService
 from app.config import get_settings
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
@@ -197,6 +198,20 @@ class PaperQueryService:
             self.session.commit()
 
         paper_ids = [p.id for p in papers]
+        normalized_library = normalize_library_name(filters.library_name) if filters.library_name else None
+        workbench_rows = PaperWorkbenchService(self.session, get_settings()).review_center(
+            limit=len(paper_ids),
+            sort_by="recent",
+            library_name=normalized_library,
+            summary_only=True,
+            paper_ids=paper_ids,
+        ).get("rows", [])
+        paper_id_set = {str(paper_id) for paper_id in paper_ids}
+        workbench_status_map = {
+            str(row.get("paper_id")): row
+            for row in workbench_rows
+            if str(row.get("paper_id") or "") in paper_id_set
+        }
         from collections import defaultdict
         
         models_to_count = {
@@ -259,6 +274,7 @@ class PaperQueryService:
                 {**counts_map[paper.id], "comprehensive_analysis": 1 if paper.comprehensive_analysis else 0},
                 relationship_summary_map.get(paper.id, {}),
                 impact_metadata=impact_metadata_map.get(paper.id),
+                review_status=workbench_status_map.get(str(paper.id)),
             ) for paper in papers
         ]
 
@@ -326,6 +342,80 @@ class PaperQueryService:
             return None
         if ensure_paper_codes(self.session, [paper]):
             self.session.commit()
+
+        if compact:
+            models_to_count = {
+                "sections": PaperSection,
+                "tables": PaperTable,
+                "figures": PaperFigure,
+                "dft_settings": DFTSetting,
+                "catalyst_samples": CatalystSample,
+                "dft_results": DFTResult,
+                "electrochemical_performance": ElectrochemicalPerformance,
+                "mechanism_claims": MechanismClaim,
+                "writing_cards": WritingCard,
+                "figure_data_points": FigureDataPoint,
+            }
+            counts: dict[str, int] = {}
+            for key, model in models_to_count.items():
+                counts[key] = int(
+                    self.session.scalar(
+                        select(func.count()).select_from(model).where(model.paper_id == paper_id)
+                    )
+                    or 0
+                )
+            counts["comprehensive_analysis"] = 1 if paper.comprehensive_analysis else 0
+
+            relationship_summary = {
+                relationship_type: int(count or 0)
+                for relationship_type, count in self.session.execute(
+                    select(PaperRelationship.relationship_type, func.count())
+                    .where(PaperRelationship.source_paper_id == paper_id)
+                    .group_by(PaperRelationship.relationship_type)
+                ).all()
+            }
+            impact_metadata = self.session.get(PaperImpactMetadata, paper.id)
+            workbench_status = PaperWorkbenchService(self.session, get_settings()).review_center(
+                limit=1,
+                sort_by="recent",
+                summary_only=True,
+                paper_ids=[paper_id],
+            ).get("rows", [])
+            review_status = workbench_status[0] if workbench_status else {}
+            base = self._build_list_item_with_counts(
+                paper,
+                counts,
+                relationship_summary,
+                impact_metadata=impact_metadata,
+                review_status=review_status,
+                include_heavy=True,
+            )
+            base_payload = base.model_dump()
+            return PaperDetailResponse(
+                **base_payload,
+                sections=[],
+                tables=[],
+                figures=[],
+                paper_notes=[],
+                dft_settings_items=[],
+                catalyst_samples_items=[],
+                dft_results_items=[],
+                electrochemical_performance_items=[],
+                mechanism_claims_items=[],
+                writing_cards_items=[],
+                outgoing_relationships=[],
+                incoming_relationships=[],
+                references=[],
+                figure_data_points_items=[],
+                artifact_status=build_paper_artifact_status(paper),
+                abstract_review_status="raw_only" if bool(paper.abstract) else "missing",
+                sections_review_status="raw_only" if counts["sections"] > 0 else "missing",
+                writing_cards_review_status="raw_only" if counts["writing_cards"] > 0 else "missing",
+                figures_review_status="raw_only" if counts["figures"] > 0 else "missing",
+                dft_review_status="candidate" if counts["dft_results"] > 0 else "missing",
+                translation_review_status="final_trusted" if base_payload.get("full_translation_zh") else "missing",
+                rag_quality={},
+            )
 
         all_sections = self.session.scalars(
             select(PaperSection)
@@ -1573,11 +1663,12 @@ class PaperQueryService:
         relationship_summary: dict[str, int] | None = None,
         *,
         impact_metadata: PaperImpactMetadata | None = None,
+        review_status: dict[str, Any] | None = None,
         include_heavy: bool = False,
     ) -> PaperListItemResponse:
         c = PaperCountsResponse(**counts)
         localized = self._localized_metadata(paper)
-        
+        status = review_status if isinstance(review_status, dict) else {}
         pdf_size = self._cached_pdf_size(paper.pdf_path)
 
         return PaperListItemResponse(
@@ -1612,6 +1703,25 @@ class PaperQueryService:
             pdf_quality_status=getattr(paper, "pdf_quality_status", None),
             pdf_quality_score=getattr(paper, "pdf_quality_score", None),
             pdf_quality_report=getattr(paper, "pdf_quality_report", None) if include_heavy else None,
+            pdf_artifact_status=status.get("pdf_artifact_status"),
+            pdf_exists=bool(status.get("pdf_exists", False)),
+            pdf_file_size=status.get("pdf_file_size"),
+            pdf_path_kind=status.get("pdf_path_kind"),
+            has_parsed_content=bool(status.get("has_parsed_content", False)),
+            manual_review_progress=(
+                status.get("manual_review_progress")
+                if isinstance(status.get("manual_review_progress"), dict)
+                else {}
+            ),
+            needs_human_confirmation=bool(status.get("needs_human_confirmation", False)),
+            has_active_dft_candidates=bool(status.get("has_active_dft_candidates", False)),
+            active_dft_candidate_count=int(status.get("active_dft_candidate_count") or 0),
+            dft_review_conflict_count=int(status.get("dft_review_conflict_count") or 0),
+            dft_review_conflict_total_count=int(status.get("dft_review_conflict_total_count") or 0),
+            visual_review_conflict_count=int(status.get("visual_review_conflict_count") or 0),
+            visual_review_conflict_total_count=int(status.get("visual_review_conflict_total_count") or 0),
+            content_review_conflict_count=int(status.get("content_review_conflict_count") or 0),
+            content_review_conflict_total_count=int(status.get("content_review_conflict_total_count") or 0),
             workspace_path=getattr(paper, "workspace_path", None),
             comprehensive_analysis=paper.comprehensive_analysis if include_heavy else None,
             created_at=paper.created_at,

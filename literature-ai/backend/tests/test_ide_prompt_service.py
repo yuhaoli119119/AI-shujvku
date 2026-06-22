@@ -18,7 +18,7 @@ def test_prompt_contract_has_one_canonical_mcp_path_and_all_modules():
 def test_figure_table_composite_keeps_one_common_preamble_and_both_modules():
     prompt = build_ide_review_prompt("figure_table")
 
-    assert prompt.count("你现在是 Literature AI 的 IDE 审核 AI") == 1
+    assert prompt.count("你现在是 Literature AI 的 IDE AI") == 1
     assert "本次模块：图表专项核验" in prompt
     assert "本次模块：表格与章节核验" in prompt
 
@@ -35,11 +35,14 @@ def test_common_prompt_preserves_controlled_in_process_fallback_and_safety_gates
     assert "禁止直接导入 service/session/model" in prompt
     assert "pdf_quality_status 属于 A_text_readable 或 B_text_partial" in prompt
     assert "blocked_by_pdf_quality" in prompt
-    assert "verified/safe_verified/export gate" in prompt
-    assert "all_non_dft" in prompt
-    assert "module_write_lock_required:notes" in prompt
+    assert "DFT 的 verified/safe_verified/export gate" in prompt
+    assert "后写入的 AI 结果允许覆盖先前 AI 结果" in prompt
+    assert "POST /api/external-analysis/import" in prompt
     assert "object_review_audits 的 evidence_location" in prompt
     assert "优先用 get_paper 或 get_codex_item 回读字段值" in prompt
+    assert "不要把预览图、候选裁剪图、调试 JSON、临时分析文本写到仓库根目录" in prompt
+    assert "outputs/tmp/" in prompt
+    assert "outputs/exports/" in prompt
     assert "paper-uuid" in prompt
     assert "codex_overall_20260619_120000" in prompt
 

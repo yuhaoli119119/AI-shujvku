@@ -1,0 +1,442 @@
+[
+  {
+    "dft_result_id": "91df5769-9d47-4b42-a0be-6e3dbeb59542",
+    "property_type": "adsorption_energy",
+    "adsorbate": "CO",
+    "value": -1.05,
+    "unit": "eV",
+    "reaction_step": null,
+    "evidence_text": "2 due to the perturbation of *CO 2 binding on M 2 site. In other words, there exists the synergistic effect of M-M atoms and C 2 N substrate on O = C = O bond activation. For M 2 @C 2 N studied, the adsorption strength is increased in the order of FeFe (-1.05 eV) > F eCo (-0.97 eV) > FeCu (-0.85 eV) > FeNi (-0.77 eV) > CuCo (-0.55 eV) > CuNi (-0.43 eV) > CuCu (-0.31 eV), which is correlated well w...",
+    "evidence_page": null
+  },
+  {
+    "dft_result_id": "0dff3de3-6bf3-4692-9cd5-a98a9416f284",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCo",
+    "value": 0.9,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.90; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "b69bb551-2893-4044-883e-a1e698873c7e",
+    "property_type": "bader_charge",
+    "adsorbate": "FeNi",
+    "value": 0.82,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.82; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "034951b4-0c7a-4450-8b32-0dfa1f437dbf",
+    "property_type": "bader_charge",
+    "adsorbate": "FeNi",
+    "value": 0.67,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.67; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "b59aa27c-84a5-4b29-a576-688a7705b354",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCu",
+    "value": 0.71,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "ff0eaf91-1977-462b-aad5-7e9ea028e49d",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCu",
+    "value": 0.5,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "6383dbc0-4158-403f-b44a-2db1c9c5a840",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCu",
+    "value": 0.84,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.84; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "9c84bc8f-b79a-49b7-ba35-88e633e07f60",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCu",
+    "value": 0.66,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.66; row: FeCu | 0.71 | 0.50 | -6.83 | 0.84 | 0.66 | 1.51 | -1.03/-1.08 | -0.61 | -0.85 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "9a43b761-b309-48e3-8ef3-d7dff7c22068",
+    "property_type": "bader_charge",
+    "adsorbate": "CuCo",
+    "value": 0.6,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.60; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "7d2494a1-f251-4fe8-a622-0d82779ff405",
+    "property_type": "bader_charge",
+    "adsorbate": "CuCo",
+    "value": 0.59,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.59; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "6c8f459b-aabd-4316-ac73-a231b49e2a2b",
+    "property_type": "bader_charge",
+    "adsorbate": "CuCo",
+    "value": 0.71,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.71; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "1a4691fb-e13e-4747-9173-e16874e83dd6",
+    "property_type": "bader_charge",
+    "adsorbate": "CuCo",
+    "value": 0.74,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCo | 0.60 | 0.59 | -6.86 | 0.71 | 0.74 | 1.55 | -1.03/-1.08 | -0.56 | -0.55 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "5aaeee26-2d1e-4d3c-987c-95ea1e61ceb0",
+    "property_type": "bader_charge",
+    "adsorbate": "CuNi",
+    "value": 0.58,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.58; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "a33b7453-7b11-4400-8ed5-2138f9ea254f",
+    "property_type": "bader_charge",
+    "adsorbate": "CuNi",
+    "value": 0.56,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "976c20e1-fdac-494a-a55b-f064dc07154a",
+    "property_type": "bader_charge",
+    "adsorbate": "CuNi",
+    "value": 0.72,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.72; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "ba828cef-3b6d-44ca-9126-07b7b50cc86b",
+    "property_type": "bader_charge",
+    "adsorbate": "CuNi",
+    "value": 0.63,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.63; row: CuNi | 0.58 | 0.56 | -7.03 | 0.72 | 0.63 | 1.50 | -1.02/-1.06 | -0.58 | -0.43 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "3348c274-0a14-43bc-9c39-87aac2d5b13d",
+    "property_type": "bader_charge",
+    "adsorbate": "CuCu",
+    "value": 0.57,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.57; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "da707ac9-5511-423b-bfcd-8f726d953ff0",
+    "property_type": "bader_charge",
+    "adsorbate": "CuCu",
+    "value": 0.74,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.74; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "fdb9d934-6c9a-44a2-b202-a3b2aa027bb2",
+    "property_type": "bader_charge",
+    "adsorbate": "CuCu",
+    "value": 0.64,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.64; row: CuCu | 0.57 |  | -5.71 | 0.74 | 0.64 | 1.52 | -1.03/-1.04 | -0.55 | -0.31 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "cf91cef7-b517-45c6-9477-0e2e03140055",
+    "property_type": "bader_charge",
+    "adsorbate": "FeFe",
+    "value": 0.68,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "b22f9829-ccb2-4a33-bf50-3adc0e055b63",
+    "property_type": "bader_charge",
+    "adsorbate": "FeFe",
+    "value": 0.76,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.76; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "ab74c05e-3b98-4f1d-9c6c-cb6535ab22b6",
+    "property_type": "bader_charge",
+    "adsorbate": "FeFe",
+    "value": 0.89,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.89; row: FeFe | 0.68 |  | -8.37 | 0.76 | 0.89 | 1.45 | -1.02/-1.07 | -0.64 | -1.05 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "86e9b043-6ebd-468d-846c-01c64e587ddb",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCo",
+    "value": 0.68,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "0d3e1f08-f8b1-4bfe-a545-7ca0dc1332fe",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCo",
+    "value": 0.56,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.56; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "748700a1-6125-4172-8e90-376309030bc7",
+    "property_type": "bader_charge",
+    "adsorbate": "FeCo",
+    "value": 0.68,
+    "unit": "e",
+    "reaction_step": "CO 2 /M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "CO 2 /M 2 N 4 Bader charge (e /C0 ): 0.68; row: FeCo | 0.68 | 0.56 | -8.52 | 0.90 | 0.68 | 1.51 | -1.03/-1.07 | -0.59 | -0.97 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "0db00cb5-868b-45c7-a5a9-1d0a630a3e35",
+    "property_type": "bader_charge",
+    "adsorbate": "FeNi",
+    "value": 0.71,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.71; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "ea98cb68-6311-4ead-b678-da804a963fbc",
+    "property_type": "bader_charge",
+    "adsorbate": "FeNi",
+    "value": 0.5,
+    "unit": "e",
+    "reaction_step": "M 2 N 4 Bader charge (e /C0 )",
+    "evidence_text": "M 2 N 4 Bader charge (e /C0 ): 0.50; row: FeNi | 0.71 | 0.50 | -8.36 | 0.82 | 0.67 | 1.48 | -1.03/-1.07 | -0.63 | -0.77 | 176",
+    "evidence_page": 3
+  },
+  {
+    "dft_result_id": "a7da57c0-0aa7-4aa6-b145-438f7e1ad64f",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -1.36,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -1.36; row:  | *CO+*CO ? *CO+*COH | -1.36 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "fa29c5ec-aa49-41cd-b7ee-9935aaa456fa",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -1.16,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -1.16; row: CuCu | *CO ? *CHO | -1.16 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "63b3a143-2bc1-40d5-a90b-f20daa390b92",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -1.2,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -1.20; row:  | *CO+*CO ? *CO+*COH | -1.20 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "ca121dac-ca4c-478a-9075-9eeba50261b2",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.92,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.92 *; row: FeFe | *CO ? *CHO | -0.92 * | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "42c7ee56-4ab7-420b-be5a-508e7ff768ec",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.7,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.70; row: FeCo | *CO ? *CHO | -0.70 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "2f7551ec-560a-401e-aa59-783dda4060a1",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.63,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.63; row:  | *CO+*CO ? *CO+*COH | -0.63 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "a0d57699-4a4f-48ac-884e-89e87bcd66f7",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.93,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.93; row: FeNi | *CO ? *CHO | -0.93 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "02965e5d-ee93-4d57-b7c5-089f255cae90",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.88,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.88; row:  | *CO+*CO ? *CO+*COH | -0.88 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "d59890cf-5469-4172-aeb0-b60877586d53",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.76,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.76; row:  | *CO+*CO ? *CO+*COH | -0.76 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "e7c4ea79-c50c-4703-ac71-340aea2e7f0a",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -1.07,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -1.07; row: FeCu | *CO ? *CHO | -1.07 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "a611c4f6-d643-481b-b539-4ab54b83a25b",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.95,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.95; row:  | *CO+*CO ? *CO+*COH | -0.95 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "c1715a7e-5981-4f31-b483-f1acd44c383b",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.83,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.83; row:  | *CO+*CO ? *CO+*COH | -0.83 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "0e1a5cc1-1397-4f38-bf6b-b03c3479ddf9",
+    "property_type": "limiting_potential",
+    "adsorbate": "CO",
+    "value": -0.79,
+    "unit": "V",
+    "reaction_step": "U L (V)",
+    "evidence_text": "U L (V): -0.79; row:  | *CO+*COH ? *COCOH | -0.79 | 2 | 4",
+    "evidence_page": 6
+  },
+  {
+    "dft_result_id": "4d3be4e0-c173-47a9-9ab4-609a9d78d2b7",
+    "property_type": "reaction_barrier",
+    "adsorbate": "CO",
+    "value": 42.0,
+    "unit": "eV",
+    "reaction_step": null,
+    "evidence_text": "C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even become the P...",
+    "evidence_page": null
+  },
+  {
+    "dft_result_id": "157c2cf0-ba91-4c4d-981a-5dd8cb1db86c",
+    "property_type": "reaction_barrier",
+    "adsorbate": "CO",
+    "value": 2.0,
+    "unit": "eV",
+    "reaction_step": null,
+    "evidence_text": "ucts by C-C coupling during CO 2 RR (Section 3.3). Besides, the formed *OH can also be considerably populated on M 2 site due partly to its not-so-easy removal via *OH + H + + e À ?*H 2 O, whose free energy barrier follows CuNi (0. 42 eV) < FeNi (0.55 eV) < FeCu (0.57 eV) = CuCo (0.57 eV) < CuCu (0.66 eV) < FeFe (0.74 eV) % FeCo (0.75 eV). Note here that the removal of adsorbed *OH could even beco...",
+    "evidence_page": null
+  },
+  {
+    "dft_result_id": "467fadf7-11df-4f80-8d27-3627076a0a5c",
+    "property_type": "reaction_barrier",
+    "adsorbate": "CO",
+    "value": 3.0,
+    "unit": "eV",
+    "reaction_step": null,
+    "evidence_text": "CO ? *CO + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 pro...",
+    "evidence_page": null
+  },
+  {
+    "dft_result_id": "ed5922a1-c097-442a-b43d-e87043150935",
+    "property_type": "reaction_barrier",
+    "adsorbate": "CO",
+    "value": 0.63,
+    "unit": "eV",
+    "reaction_step": null,
+    "evidence_text": "O + *COH ? *COCOH ? *COHCOH, as displayed in Figs. 6 and 7 (a), in which the additional *CO is produced from another CO 2 hydrogenation step. Specifically, the C-C coupling encounters the free energy barrier in the order of FeCo (0.63 eV) < FeFe (0.76 eV) < CuCo (0.83 eV) < FeNi (0.88 eV) < FeCu (0.95 e V) < CuCu (1.20 eV) < CuNi (1.36 eV). As compared to the calculated barriers for C 1 products (...",
+    "evidence_page": null
+  }
+]

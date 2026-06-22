@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -377,11 +376,16 @@ def build_human_verification_preflight_report(
     library_root: str | Path | None = None,
     docling_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return HumanVerificationPreflight(
-        db_path,
-        library_root=library_root,
-        docling_payload=docling_payload,
-    ).build_report()
+    raise RuntimeError("SQLite human-verification preflight has been removed. Use PostgreSQL-backed review APIs.")
+
+
+def _disabled_build_human_verification_preflight_report(
+    *,
+    db_path: str | Path,
+    artifact_root: str | Path,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    raise RuntimeError("SQLite human-verification preflight has been removed.")
 
 
 def write_preflight_report_json(report: dict[str, Any], output_path: str | Path) -> Path:
@@ -391,14 +395,11 @@ def write_preflight_report_json(report: dict[str, Any], output_path: str | Path)
     return path
 
 
-def _connect_read_only(db_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only = ON")
-    return connection
+def _connect_read_only(db_path: Path) -> Any:
+    raise RuntimeError("SQLite read-only connections have been removed.")
 
 
-def _review_from_row(row: sqlite3.Row) -> PreflightReviewRow:
+def _review_from_row(row: Any) -> PreflightReviewRow:
     return PreflightReviewRow(
         id=_canonical_id(row["id"]),
         paper_id=str(row["paper_id"]),
@@ -414,7 +415,7 @@ def _review_from_row(row: sqlite3.Row) -> PreflightReviewRow:
     )
 
 
-def _locator_from_row(row: sqlite3.Row) -> PreflightLocatorRow:
+def _locator_from_row(row: Any) -> PreflightLocatorRow:
     return PreflightLocatorRow(
         id=_canonical_id(row["id"]),
         paper_id=str(row["paper_id"]),

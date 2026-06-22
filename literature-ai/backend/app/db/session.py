@@ -15,7 +15,7 @@ from app.db.models import Base
 #   postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
 #
 # IMPORTANT for AI developers:
-# - PostgreSQL supports concurrent read/write — no SQLite-style file locking.
+# - PostgreSQL supports concurrent read/write.
 # - pgvector provides HNSW vector indexing for semantic search.
 # - JSONB columns are used for structured data (not plain JSON).
 # - UUID columns are native PostgreSQL UUID type (not CHAR(32)).
@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_engine(database_url: str):
+    if database_url.strip().lower().startswith("sqlite"):
+        raise RuntimeError("SQLite is disabled. Configure PostgreSQL via LITAI_DATABASE_URL.")
     if database_url not in _engines:
         engine_kwargs: dict[str, object] = {
             "future": True,
@@ -62,6 +64,8 @@ def init_db(database_url: str, *, force: bool = False) -> None:
         force: If True, re-run migrations even if this URL was already initialized.
                Use after schema changes that need to be applied immediately.
     """
+    if database_url.strip().lower().startswith("sqlite"):
+        raise RuntimeError("SQLite is disabled. Configure PostgreSQL via LITAI_DATABASE_URL.")
     # Skip redundant initialization — migrations are idempotent but expensive
     # (each init_db call does ~50 inspector.get_columns() queries on PostgreSQL).
     if not force and database_url in _initialized_urls:
@@ -172,25 +176,6 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                               FROM papers WHERE serial_number IS NULL
                             ) sub WHERE papers.id = sub.id
                         """))
-                    else:
-                        # SQLite: fetch and update individually
-                        rows = connection.execute(
-                            text("SELECT id, library_name, created_at FROM papers WHERE serial_number IS NULL ORDER BY library_name, created_at")
-                        ).fetchall()
-                        counters: dict[str, int] = {}
-                        for row in rows:
-                            lib = row[1] or "\u9ed8\u8ba4\u6587\u732e\u5e93"
-                            if lib not in counters:
-                                max_q = connection.execute(
-                                    text("SELECT MAX(serial_number) FROM papers WHERE library_name = :lib AND serial_number IS NOT NULL"),
-                                    {"lib": lib}
-                                ).scalar()
-                                counters[lib] = (max_q or 0)
-                            counters[lib] += 1
-                            connection.execute(
-                                text("UPDATE papers SET serial_number = :sn WHERE id = :pid"),
-                                {"sn": counters[lib], "pid": row[0]}
-                            )
             except Exception:
                 logger.exception("Automatic database migration failed while backfilling papers.serial_number")
             execute_migration_step(
@@ -753,8 +738,6 @@ def _mask_url_internal(database_url: str) -> str:
     """Mask credentials in a database URL for logging."""
     if "@" in database_url:
         return database_url.split("@")[-1]
-    if database_url.startswith("sqlite:///"):
-        return f"sqlite:///{Path(database_url.removeprefix('sqlite:///')).name}"
     return "***"
 
 
@@ -798,7 +781,7 @@ def switch_database(database_url: str, storage_root: str | None = None) -> None:
     Optionally updates storage_root in the active settings instance.
 
     Args:
-        database_url: New SQLite or PostgreSQL URL.
+        database_url: New PostgreSQL URL.
         storage_root: If provided, the storage directory for the new library
                       (e.g. ``/path/to/library/storage``). Settings.storage_root
                       will be updated to this path.
@@ -809,15 +792,8 @@ def switch_database(database_url: str, storage_root: str | None = None) -> None:
     from app.config import get_settings
 
     settings = get_settings()
-    if (
-        bool(getattr(settings, "force_configured_database", False))
-        and database_url.strip().lower().startswith("sqlite")
-        and not settings.database_url.strip().lower().startswith("sqlite")
-    ):
-        raise RuntimeError(
-            "Runtime SQLite switching is disabled because LITAI_FORCE_CONFIGURED_DATABASE=true "
-            f"and the configured database is {settings.database_url!r}."
-        )
+    if database_url.strip().lower().startswith("sqlite"):
+        raise RuntimeError("SQLite is disabled. Runtime database switching only supports PostgreSQL URLs.")
     old_url = settings.database_url
 
     # Dispose old engine if it exists

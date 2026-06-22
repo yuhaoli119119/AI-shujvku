@@ -384,3 +384,67 @@ async def attach_pdf_to_existing_paper(
         raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
         
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
+
+
+@router.post("/{paper_id}/attach-pdf/jobs")
+async def queue_attach_pdf_to_existing_paper(
+    paper_id: UUID,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    identifier: str | None = Form(default=None, description="Optional DOI or identifier to fetch metadata"),
+    confirm_identity_mismatch: bool = Form(
+        default=False,
+        description="Allow low-confidence title/year binding. Explicit DOI conflicts are still rejected.",
+    ),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    target = session.get(Paper, paper_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    _validate_upload_request(file)
+
+    external_metadata = None
+    if identifier:
+        try:
+            svc = DiscoveryService()
+            _, external_metadata = await run_in_threadpool(svc.fetch_metadata, identifier)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
+
+    staged_pdf = await _stage_uploaded_pdf(file, settings)
+    job_payload = {
+        "pdf_path": str(staged_pdf.resolve()),
+        "library_name": target.library_name,
+        "original_filename": file.filename,
+        "trusted_staged_upload": True,
+        "attach_to_paper_id": str(target.id),
+        "confirm_identity_mismatch": bool(confirm_identity_mismatch),
+    }
+    if external_metadata:
+        job_payload.update(external_metadata)
+
+    job = create_job(
+        session=session,
+        job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
+        library_name=target.library_name,
+        payload=job_payload,
+        runtime_context=build_job_runtime_context(settings),
+        progress={
+            "phase": "queued",
+            "message": "Uploaded PDF attach is queued for background parsing.",
+            "source_path": str(staged_pdf.resolve()),
+            "attach_to_paper_id": str(target.id),
+        },
+    )
+
+    db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else settings.database_url
+    dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
+    if dispatch_mode != "celery":
+        session.refresh(job)
+
+    data = serialize_job(job)
+    data["dispatch_mode"] = dispatch_mode
+    return data

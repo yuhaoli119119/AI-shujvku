@@ -403,11 +403,12 @@ def test_catalyst_sample_create_candidate_materializes_and_reuses_exact_identity
             run = service.import_run(paper.id, "ai_a", "AI A", None, payload)
             materialized = service.materialize_candidates(run.id, explicit_all=True)
             assert materialized.created_corrections == 1
+            assert materialized.auto_applied_corrections == 1
             correction = session.query(PaperCorrection).one()
             assert correction.operation == "create"
-            approved = ReviewService(session).approve_correction(correction.id, reviewer="dual_ai")
-            first_id = approved.evidence_payload["sample_resolution"]["catalyst_sample_id"]
-            assert approved.evidence_payload["sample_resolution"]["status"] == "create"
+            assert correction.status == "approved"
+            first_id = correction.evidence_payload["sample_resolution"]["catalyst_sample_id"]
+            assert correction.evidence_payload["sample_resolution"]["status"] == "create"
 
             second = PaperCorrection(
                 paper_id=paper.id,

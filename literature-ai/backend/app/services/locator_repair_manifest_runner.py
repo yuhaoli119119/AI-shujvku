@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -326,11 +325,16 @@ def build_d4_3g_manifest(
     library_root: str | Path | None = None,
     docling_blocks: tuple[dict[str, Any], ...] | None = None,
 ) -> dict[str, Any]:
-    return ReadOnlyLocatorRepairManifestRunner(
-        db_path,
-        library_root=library_root,
-        docling_blocks=docling_blocks,
-    ).build_manifest()
+    raise RuntimeError("SQLite locator repair manifest runner has been removed. Use PostgreSQL-backed review APIs.")
+
+
+def _disabled_build_d4_3g_manifest(
+    *,
+    db_path: str | Path,
+    library_root: str | Path,
+    docling_blocks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    raise RuntimeError("SQLite locator repair manifest runner has been removed.")
 
 
 def write_manifest_json(manifest: dict[str, Any], output_path: str | Path) -> Path:
@@ -340,14 +344,11 @@ def write_manifest_json(manifest: dict[str, Any], output_path: str | Path) -> Pa
     return path
 
 
-def _connect_read_only(db_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only = ON")
-    return connection
+def _connect_read_only(db_path: Path) -> Any:
+    raise RuntimeError("SQLite read-only connections have been removed.")
 
 
-def _review_from_row(row: sqlite3.Row) -> ReviewRow:
+def _review_from_row(row: Any) -> ReviewRow:
     return ReviewRow(
         id=str(row["id"]),
         paper_id=str(row["paper_id"]),
@@ -363,7 +364,7 @@ def _review_from_row(row: sqlite3.Row) -> ReviewRow:
     )
 
 
-def _span_from_row(row: sqlite3.Row) -> EvidenceSpanRow:
+def _span_from_row(row: Any) -> EvidenceSpanRow:
     return EvidenceSpanRow(
         object_type=str(row["object_type"]),
         object_id=str(row["object_id"]),
