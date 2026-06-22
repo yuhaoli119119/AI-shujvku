@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from uuid import UUID
+from unittest.mock import MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +25,7 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.main import app
+from app.services.verification_session_service import VerificationSessionService
 
 
 @pytest.fixture
@@ -60,6 +62,166 @@ def verification_env(monkeypatch):
         _engines.clear()
         _session_factories.clear()
         get_settings.cache_clear()
+
+
+def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="bader_charge",
+        adsorbate="FeCo",
+        value=0.9,
+        unit="e",
+        evidence_text="FeCo Bader charge is 0.90 e.",
+    )
+    revise = {
+        "source_identity": "dynamic-review-source-a",
+        "decision": "REVISE",
+        "field_name": "dft_results",
+        "corrected_value": {
+            "property_type": "bader_charge",
+            "adsorbate": "FeCo",
+            "material_identity": "FeCo@C2N",
+            "value": 0.9,
+            "unit": "e",
+        },
+        "evidence_payload": {"page": 3, "quoted_text": "FeCo | 0.90"},
+    }
+    passed = {
+        "source_identity": "dynamic-review-source-b",
+        "decision": "PASS",
+        "field_name": "dft_results",
+        "corrected_value": {
+            "property_type": "bader_charge",
+            "adsorbate": "FeCo",
+            "material_identity": "FeCo@C2N",
+            "value": 0.90,
+            "unit": "|e|",
+        },
+        "evidence_payload": {"page": 3, "quoted_text": "FeCo | 0.90"},
+    }
+    service = object.__new__(VerificationSessionService)
+    service.session = MagicMock()
+    service.session.get.return_value = None
+
+    proposal = service._latest_dft_whole_row_proposal([revise, passed])
+    assert proposal is revise
+    assert service._supporting_pass_for_row(row, [revise, passed], proposal) is passed
+    assert service._all_nonnegative_dft_opinions_match(row, [revise, passed]) is True
+
+    conflicting = {
+        **passed,
+        "source_identity": "dynamic-review-source-c",
+        "corrected_value": {**passed["corrected_value"], "value": 1.2},
+    }
+    assert service._all_nonnegative_dft_opinions_match(row, [revise, passed, conflicting]) is False
+
+    third_ai = {
+        "source_identity": "dynamic-adjudicator",
+        "decision": "PROPOSED",
+        "field_name": "dft_results",
+        "adjudication_role": "third_ai",
+        "selected_source_ids": ["dynamic-review-source-a"],
+        "corrected_value": {"value": 0.91},
+    }
+    inherited = service._inherit_selected_dft_evidence(third_ai, [revise, passed, third_ai])
+    completed = service._complete_dft_third_ai_adjudication(row, inherited, [revise, passed, inherited])
+    assert completed["corrected_value"] == {
+        "property_type": "bader_charge",
+        "adsorbate": "FeCo",
+        "reaction_step": None,
+        "value": 0.91,
+        "unit": "e",
+        "material_identity": "FeCo@C2N",
+    }
+    assert completed["evidence_payload"] == revise["evidence_payload"]
+
+
+def test_pending_third_ai_adjudication_reopens_an_already_settled_dft_row():
+    assert VerificationSessionService._has_pending_dft_adjudication(
+        [
+            {"status": "materialized", "adjudication_role": "third_ai"},
+            {"status": "candidate", "adjudication_role": "third_ai"},
+        ]
+    ) is True
+    assert VerificationSessionService._has_pending_dft_adjudication(
+        [{"status": "materialized", "adjudication_role": "third_ai"}]
+    ) is False
+
+
+def test_dft_material_identity_comparison_is_case_insensitive():
+    assert VerificationSessionService._material_identity_parts_compatible("CuNi@C2N", "cuni@c2n") is True
+
+
+def test_new_dft_semantic_signature_ignores_locator_but_keeps_scientific_identity():
+    base = {
+        "material_identity": "CuCu@C2N",
+        "property_type": "limiting_potential",
+        "value": -0.76,
+        "unit": "V",
+        "adsorbate": "C2H4",
+        "reaction_step": "limiting potential via *CO -> *CO+*CO",
+    }
+    same_science_different_locator = {**base, "source_figure": "Table 2", "page": 6}
+
+    assert VerificationSessionService._new_dft_semantic_signature(base) == (
+        "cucu@c2n",
+        "limiting_potential",
+        "-0.76",
+        "v",
+        "c2h4",
+        "limiting potential via *co -> *co+*co",
+    )
+    assert VerificationSessionService._new_dft_semantic_signature(base) == (
+        VerificationSessionService._new_dft_semantic_signature(same_science_different_locator)
+    )
+
+
+def test_borrowed_reference_new_candidate_is_retired_instead_of_left_pending():
+    candidate = MagicMock()
+    service = object.__new__(VerificationSessionService)
+    service.session = MagicMock()
+
+    service._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
+
+    assert candidate.status == "ignored"
+    service.session.add.assert_called_once_with(candidate)
+
+
+def test_matching_third_ai_adjudication_is_consumed_without_rewriting_settled_row():
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="reaction_barrier",
+        adsorbate="OH",
+        reaction_step="*OH -> *H2O",
+        value=0.75,
+        unit="eV",
+    )
+    candidate = MagicMock()
+    candidate.status = "candidate"
+    audit = {
+        "candidate": candidate,
+        "candidate_id": "adjudication-1",
+        "source_identity": "dynamic-adjudicator",
+        "status": "candidate",
+        "decision": "PROPOSED",
+        "field_name": "dft_results",
+        "adjudication_role": "third_ai",
+        "corrected_value": {
+            "property_type": "reaction_barrier",
+            "adsorbate": "OH",
+            "reaction_step": "*OH -> *H2O",
+            "value": 0.75,
+            "unit": "eV",
+        },
+    }
+    service = object.__new__(VerificationSessionService)
+    service.session = MagicMock()
+
+    assert service._consume_matching_settled_dft_adjudication(row=row, audits=[audit]) is True
+    assert candidate.status == "ai_reviewed"
+    service.session.add.assert_called_once_with(candidate)
 
 
 def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_notes(verification_env):

@@ -348,6 +348,7 @@ class VerificationSessionService:
         reviewer: str,
         write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
+        new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
         rows = self.session.scalars(
             select(DFTResult)
             .where(DFTResult.paper_id == paper_id)
@@ -362,9 +363,22 @@ class VerificationSessionService:
 
         for row in rows:
             row_id = str(row.id)
-            if self._has_settled_dft_review(paper_id=paper_id, target_id=row_id):
-                continue
             audits = audits_by_target.get(row_id, [])
+            if self._has_settled_dft_review(paper_id=paper_id, target_id=row_id):
+                if not self._has_pending_dft_adjudication(audits):
+                    continue
+                if self._consume_matching_settled_dft_adjudication(row=row, audits=audits):
+                    auto_applied.append(
+                        {
+                            "record_id": row_id,
+                            "field_name": "dft_results",
+                            "property_type": row.property_type,
+                            "value": row.value,
+                            "unit": row.unit,
+                            "action": "already_settled",
+                        }
+                    )
+                    continue
             row_summary = self._settle_dft_row_from_existing_audits(
                 row=row,
                 audits=audits,
@@ -386,6 +400,7 @@ class VerificationSessionService:
         self.session.flush()
         summary = {
             "paper_id": str(paper_id),
+            "new_dft_candidates": new_dft_summary,
             "auto_applied_count": len(auto_applied),
             "auto_applied_items": auto_applied,
             "need_third_ai_count": len(need_third_ai),
@@ -440,6 +455,7 @@ class VerificationSessionService:
             .order_by(ExternalAnalysisCandidate.created_at.asc())
         ).all()
         existing_by_signature = self._existing_new_dft_signatures(paper_id)
+        existing_by_semantic_signature = self._existing_new_dft_semantic_signatures(paper_id)
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for candidate, run in rows:
@@ -451,15 +467,22 @@ class VerificationSessionService:
                 continue
             if bool(payload.get("borrowed_from_reference")):
                 skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
+                self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
                 continue
             candidate_item, reason = self._new_dft_candidate_item(payload, run=run)
             if candidate_item is None:
                 skipped.append({"candidate_id": str(candidate.id), "reason": reason})
-                candidate.status = "requires_resolution"
-                self.session.add(candidate)
+                self._retire_skipped_new_dft_candidate(candidate, reason=reason)
                 continue
             signature = candidate_item["signature"]
             existing = existing_by_signature.get(signature)
+            if existing is None:
+                semantic_matches = existing_by_semantic_signature.get(
+                    self._new_dft_semantic_signature(candidate_item),
+                    [],
+                )
+                if len(semantic_matches) == 1:
+                    existing = semantic_matches[0]
             if existing is None:
                 existing = self._insert_new_dft_candidate(
                     paper_id=paper_id,
@@ -467,6 +490,8 @@ class VerificationSessionService:
                     source_label=run.source_label or run.source or reviewer,
                 )
                 existing_by_signature[signature] = existing
+                semantic_signature = self._new_dft_semantic_signature(candidate_item)
+                existing_by_semantic_signature.setdefault(semantic_signature, []).append(existing)
                 action = "created"
             else:
                 action = "deduplicated"
@@ -690,6 +715,45 @@ class VerificationSessionService:
             )
             signatures.setdefault(signature, row)
         return signatures
+
+    def _existing_new_dft_semantic_signatures(self, paper_id: UUID) -> dict[tuple[str, ...], list[DFTResult]]:
+        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        signatures: dict[tuple[str, ...], list[DFTResult]] = defaultdict(list)
+        for row in rows:
+            evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+            material_identity = self._first_text(evidence_payload.get("material_identity"))
+            if row.catalyst_sample_id:
+                sample = self.session.get(CatalystSample, row.catalyst_sample_id)
+                if sample is not None and str(sample.name or "").strip():
+                    material_identity = str(sample.name).strip()
+            signature = self._new_dft_semantic_signature(
+                {
+                    "material_identity": material_identity,
+                    "property_type": row.property_type,
+                    "value": row.value,
+                    "unit": row.unit,
+                    "adsorbate": row.adsorbate,
+                    "reaction_step": row.reaction_step,
+                }
+            )
+            signatures[signature].append(row)
+        return signatures
+
+    @staticmethod
+    def _new_dft_semantic_signature(candidate_item: dict[str, Any]) -> tuple[str, ...]:
+        value = candidate_item.get("value")
+        value_part = "" if value is None else f"{float(value):.8g}"
+        return tuple(
+            str(part or "").strip().lower()
+            for part in (
+                candidate_item.get("material_identity"),
+                candidate_item.get("property_type"),
+                value_part,
+                candidate_item.get("unit"),
+                candidate_item.get("adsorbate"),
+                candidate_item.get("reaction_step"),
+            )
+        )
 
     @staticmethod
     def _new_dft_signature(
@@ -1447,6 +1511,7 @@ class VerificationSessionService:
             if current is None or (audit.get("confidence") or 0) >= (current.get("confidence") or 0):
                 deduped[audit["source_identity"]] = audit
         opinions = list(deduped.values())
+        opinions = [self._inherit_selected_dft_evidence(opinion, opinions) for opinion in opinions]
         anchored = [audit for audit in opinions if self._opinion_has_anchor(audit)]
         if opinions and not anchored:
             row_ref["reason"] = "missing_evidence_anchor"
@@ -1459,12 +1524,21 @@ class VerificationSessionService:
         ]
         if third_ai:
             adopted = max(third_ai, key=lambda item: item.get("confidence") or 0)
-            result = self._apply_dft_consensus_outcome(
-                row=row,
-                adopted=adopted,
-                reviewer=reviewer,
-                write_lock_tokens=write_lock_tokens,
-            )
+            if self._is_negative_dft_decision(adopted.get("decision")):
+                result = self._apply_reject_all(
+                    paper_id=row.paper_id,
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    reviewer=reviewer,
+                )
+            else:
+                adopted = self._complete_dft_third_ai_adjudication(row, adopted, anchored)
+                result = self._apply_dft_consensus_outcome(
+                    row=row,
+                    adopted=adopted,
+                    reviewer=reviewer,
+                    write_lock_tokens=write_lock_tokens,
+                )
             for audit in audits:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
@@ -1506,11 +1580,7 @@ class VerificationSessionService:
 
         whole_row = self._latest_dft_whole_row_proposal(anchored)
         supporting_pass = self._supporting_pass_for_row(row, anchored, whole_row)
-        if whole_row and not supporting_pass:
-            row_ref["reason"] = "awaiting_matching_second_ai"
-            row_ref["status"] = "need_third_ai"
-            return row_ref
-        if whole_row and supporting_pass:
+        if whole_row and supporting_pass and self._all_nonnegative_dft_opinions_match(row, anchored):
             result = self._apply_dft_whole_row_consensus(
                 row=row,
                 proposal=whole_row,
@@ -1522,6 +1592,10 @@ class VerificationSessionService:
                 self.session.add(audit["candidate"])
             row_ref.update(result)
             row_ref["status"] = "auto_applied"
+            return row_ref
+        if whole_row:
+            row_ref["reason"] = "value_conflict"
+            row_ref["status"] = "need_third_ai"
             return row_ref
 
         supported_field_proposal = self._latest_supported_dft_field_proposal(row, anchored)
@@ -1771,6 +1845,80 @@ class VerificationSessionService:
         )
 
     @staticmethod
+    def _has_pending_dft_adjudication(audits: list[dict[str, Any]]) -> bool:
+        return any(
+            str(audit.get("status") or "").strip().lower() in {"candidate", "pending", "requires_resolution"}
+            and str(audit.get("adjudication_role") or "").strip().lower() == "third_ai"
+            for audit in audits
+        )
+
+    def _consume_matching_settled_dft_adjudication(
+        self,
+        *,
+        row: DFTResult,
+        audits: list[dict[str, Any]],
+    ) -> bool:
+        eligible = [
+            audit
+            for audit in audits
+            if str(audit.get("status") or "").strip().lower()
+            in {"candidate", "pending", "requires_resolution", "materialized"}
+        ]
+        adjudications = [
+            audit
+            for audit in eligible
+            if str(audit.get("adjudication_role") or "").strip().lower() == "third_ai"
+        ]
+        if not adjudications:
+            return False
+        adopted = max(adjudications, key=lambda item: item.get("confidence") or 0)
+        adopted = self._complete_dft_third_ai_adjudication(row, adopted, eligible)
+        if not self._dft_adjudication_matches_row(row=row, adjudication=adopted):
+            return False
+        for audit in audits:
+            if str(audit.get("status") or "").strip().lower() not in {"candidate", "pending", "requires_resolution"}:
+                continue
+            candidate = audit.get("candidate")
+            if candidate is None:
+                continue
+            candidate.status = "ai_reviewed"
+            self.session.add(candidate)
+        return True
+
+    def _dft_adjudication_matches_row(self, *, row: DFTResult, adjudication: dict[str, Any]) -> bool:
+        corrected = adjudication.get("corrected_value")
+        if not isinstance(corrected, dict):
+            return False
+        current_target = {"corrected_value": {"value": row.value, "unit": row.unit}, "field_name": "dft_results"}
+        proposed_target = self._normalized_dft_audit_target(row, adjudication)
+        if not self._same_normalized_dft_value(
+            self._normalized_dft_audit_target(row, current_target),
+            proposed_target,
+        ):
+            return False
+        for source_fields, target_field in (
+            (("property_type", "property", "energy_type"), "property_type"),
+            (("adsorbate",), "adsorbate"),
+            (("reaction_step",), "reaction_step"),
+        ):
+            proposed_value = next((corrected.get(key) for key in source_fields if key in corrected), None)
+            if self._value_key(proposed_value) != self._value_key(getattr(row, target_field, None)):
+                return False
+        proposed_material = self._dft_material_identity_value(
+            adjudication,
+            target_id=str(row.id),
+            field_name="dft_results",
+        )
+        if proposed_material:
+            current_material = ""
+            if row.catalyst_sample_id:
+                sample = self.session.get(CatalystSample, row.catalyst_sample_id)
+                current_material = str(sample.name or "").strip() if sample is not None else ""
+            if not current_material or not self._material_identity_values_compatible(proposed_material, current_material):
+                return False
+        return True
+
+    @staticmethod
     def _is_negative_dft_decision(decision: Any) -> bool:
         return str(decision or "").strip().upper() in {"REJECT", "REJECTED", "BLOCK", "DENY", "DROP"}
 
@@ -1778,7 +1926,7 @@ class VerificationSessionService:
     def _latest_dft_whole_row_proposal(audits: list[dict[str, Any]]) -> dict[str, Any] | None:
         proposals = [
             audit for audit in audits
-            if str(audit.get("decision") or "").strip().upper() in {"PROPOSED", "NEW_CANDIDATE"}
+            if str(audit.get("decision") or "").strip().upper() in {"PROPOSED", "REVISE", "NEW_CANDIDATE"}
             and str(audit.get("field_name") or "").strip() == "dft_results"
             and isinstance(audit.get("corrected_value"), dict)
         ]
@@ -1786,6 +1934,104 @@ class VerificationSessionService:
             return None
         proposals.sort(key=lambda item: (str(item.get("source_identity") or ""), item.get("confidence") or 0), reverse=True)
         return proposals[0]
+
+    def _complete_dft_third_ai_adjudication(
+        self,
+        row: DFTResult,
+        adopted: dict[str, Any],
+        audits: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        selected_ids = {
+            str(item).strip()
+            for item in (adopted.get("selected_source_ids") or [])
+            if str(item).strip()
+        }
+        selected = [
+            audit for audit in audits
+            if selected_ids & {
+                str(audit.get("candidate_id") or "").strip(),
+                str(audit.get("source_identity") or "").strip(),
+                str(audit.get("source_label") or "").strip(),
+            }
+        ]
+        corrected: dict[str, Any] = {
+            "property_type": row.property_type,
+            "adsorbate": row.adsorbate,
+            "reaction_step": row.reaction_step,
+            "value": row.value,
+            "unit": row.unit,
+        }
+        for opinion in selected:
+            payload = opinion.get("corrected_value")
+            if isinstance(payload, dict):
+                corrected.update({key: value for key, value in payload.items() if value not in (None, "")})
+        adopted_corrected = adopted.get("corrected_value")
+        if isinstance(adopted_corrected, dict):
+            corrected.update({key: value for key, value in adopted_corrected.items() if value not in (None, "")})
+
+        material_identity = next(
+            (
+                value for value in (
+                    corrected.get("material_identity"),
+                    corrected.get("material"),
+                    corrected.get("catalyst"),
+                    adopted.get("normalized_material"),
+                    adopted.get("normalized_material_or_catalyst"),
+                )
+                if value not in (None, "")
+            ),
+            None,
+        )
+        if material_identity is None and row.catalyst_sample_id:
+            sample = self.session.get(CatalystSample, row.catalyst_sample_id)
+            if sample is not None and str(sample.name or "").strip():
+                corrected["material_identity"] = sample.name
+
+        evidence_payload = adopted.get("evidence_payload")
+        if not self._opinion_has_anchor({"evidence_payload": evidence_payload}):
+            evidence_payload = next(
+                (audit.get("evidence_payload") for audit in selected if self._opinion_has_anchor(audit)),
+                adopted.get("evidence_payload"),
+            )
+        return {
+            **adopted,
+            "field_name": "dft_results",
+            "corrected_value": corrected,
+            "evidence_payload": evidence_payload,
+        }
+
+    def _inherit_selected_dft_evidence(
+        self,
+        opinion: dict[str, Any],
+        opinions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if self._opinion_has_anchor(opinion):
+            return opinion
+        if str(opinion.get("adjudication_role") or "").strip().lower() != "third_ai":
+            return opinion
+        selected_ids = {
+            str(item).strip()
+            for item in (opinion.get("selected_source_ids") or [])
+            if str(item).strip()
+        }
+        if not selected_ids:
+            return opinion
+        selected = next(
+            (
+                candidate for candidate in opinions
+                if candidate is not opinion
+                and self._opinion_has_anchor(candidate)
+                and selected_ids & {
+                    str(candidate.get("candidate_id") or "").strip(),
+                    str(candidate.get("source_identity") or "").strip(),
+                    str(candidate.get("source_label") or "").strip(),
+                }
+            ),
+            None,
+        )
+        if selected is None:
+            return opinion
+        return {**opinion, "evidence_payload": selected.get("evidence_payload")}
 
     def _supporting_pass_for_row(
         self,
@@ -1798,7 +2044,8 @@ class VerificationSessionService:
         proposed_target = self._normalized_dft_audit_target(row, proposal)
         proposal_source = str(proposal.get("source_identity") or "")
         for audit in audits:
-            if str(audit.get("decision") or "").strip().upper() != "PASS":
+            decision = str(audit.get("decision") or "").strip().upper()
+            if decision not in {"PASS", "PROPOSED", "REVISE", "NEW_CANDIDATE"}:
                 continue
             if str(audit.get("source_identity") or "") == proposal_source:
                 continue
@@ -1813,6 +2060,13 @@ class VerificationSessionService:
                 ):
                     continue
             else:
+                continue
+            left_material = self._dft_material_identity_value(proposal, target_id=str(row.id))
+            right_material = self._dft_material_identity_value(audit, target_id=str(row.id))
+            if left_material and right_material and not self._material_identity_values_compatible(
+                left_material,
+                right_material,
+            ):
                 continue
             return audit
         return None
@@ -1903,6 +2157,17 @@ class VerificationSessionService:
             return False
         return all(self._same_normalized_dft_value(first, item) for item in normalized if item.get("value") is not None)
 
+    def _all_nonnegative_dft_opinions_match(self, row: DFTResult, audits: list[dict[str, Any]]) -> bool:
+        opinions = [audit for audit in audits if not self._is_negative_dft_decision(audit.get("decision"))]
+        if len(opinions) < 2:
+            return False
+        normalized = [self._normalized_dft_audit_target(row, audit) for audit in opinions]
+        if any(item.get("value") is None for item in normalized):
+            return False
+        if not all(self._same_normalized_dft_value(normalized[0], item) for item in normalized[1:]):
+            return False
+        return self._dft_material_identities_compatible(opinions, target_id=str(row.id), field_name="dft_results")
+
     def _dft_material_identities_compatible(
         self,
         audits: list[dict[str, Any]],
@@ -1936,18 +2201,20 @@ class VerificationSessionService:
 
     @staticmethod
     def _material_identity_parts_compatible(left: str, right: str) -> bool:
-        if left == right:
+        left_normalized = str(left or "").strip().lower()
+        right_normalized = str(right or "").strip().lower()
+        if left_normalized == right_normalized:
             return True
-        if left in right or right in left:
+        if left_normalized in right_normalized or right_normalized in left_normalized:
             return True
         left_tokens = {
             token
-            for token in re.split(r"[^a-z0-9]+", left.lower())
+            for token in re.split(r"[^a-z0-9]+", left_normalized)
             if len(token) >= 5
         }
         right_tokens = {
             token
-            for token in re.split(r"[^a-z0-9]+", right.lower())
+            for token in re.split(r"[^a-z0-9]+", right_normalized)
             if len(token) >= 5
         }
         return bool(left_tokens & right_tokens)
@@ -1973,6 +2240,8 @@ class VerificationSessionService:
         except (TypeError, ValueError):
             numeric = None
         normalized_unit = str(unit or "").strip().lower().replace(" ", "")
+        if normalized_unit in {"e", "|e|", "electron", "electrons"}:
+            normalized_unit = "e"
         if normalized_unit == "mev" and numeric is not None:
             return {"value": numeric / 1000.0, "unit": "ev"}
         return {"value": numeric, "unit": normalized_unit}
@@ -2092,6 +2361,15 @@ class VerificationSessionService:
             "manual_conflicts": pending_conflicts,
             "skipped_items": skipped,
         }
+
+    def _retire_skipped_new_dft_candidate(
+        self,
+        candidate: ExternalAnalysisCandidate,
+        *,
+        reason: str,
+    ) -> None:
+        candidate.status = "ignored" if reason == "borrowed_supporting_reference" else "requires_resolution"
+        self.session.add(candidate)
 
     def _consensus_opinion(
         self,

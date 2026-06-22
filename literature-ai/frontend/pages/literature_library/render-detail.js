@@ -1017,14 +1017,20 @@ function dftOpinionSource(audit) {
 
 function dftOpinionHasAnchor(audit) {
     const loc = audit && audit.evidence_location;
-    return !!(loc && loc.page != null && String(loc.quoted_text || "").trim());
+    if (!loc) return false;
+    if (typeof loc === "string") return !!loc.trim();
+    if (typeof loc !== "object") return false;
+    return ["page", "section", "section_title", "figure", "figure_id", "table", "table_id", "quoted_text", "evidence_text", "bbox"]
+        .some(function(key) {
+            return loc[key] != null && String(loc[key]).trim();
+        });
 }
 
 function dftWholeRowProposal(row) {
     const audits = row && Array.isArray(row.object_review_audits) ? row.object_review_audits.slice() : [];
     return audits
         .filter(function(audit) {
-            return dftOpinionDecision(audit) === "PROPOSED" &&
+            return ["PROPOSED", "REVISE", "NEW_CANDIDATE"].includes(dftOpinionDecision(audit)) &&
                 String(audit.field_name || "").trim() === "dft_results" &&
                 audit.corrected_value &&
                 typeof audit.corrected_value === "object" &&
@@ -1038,6 +1044,9 @@ function normalizeDftDecisionValue(value, unit) {
     const rawUnit = String(unit || "").trim();
     const unitKey = rawUnit.toLowerCase().replace(/\s+/g, "");
     if (!Number.isFinite(numeric)) return { value: null, unit: rawUnit };
+    if (["e", "|e|", "electron", "electrons"].includes(unitKey)) {
+        return { value: numeric, unit: "e" };
+    }
     if (unitKey === "mev") return { value: numeric / 1000, unit: "eV" };
     if (unitKey === "ev") return { value: numeric, unit: "eV" };
     if (unitKey.includes("gpu")) {
@@ -1064,14 +1073,36 @@ function dftSameNormalizedValue(left, right) {
     return Math.abs(left.value - right.value) <= tolerance;
 }
 
+function dftAuditMaterialIdentity(audit) {
+    const corrected = audit && audit.corrected_value;
+    const value = corrected && typeof corrected === "object"
+        ? (corrected.material_identity || corrected.material || corrected.catalyst || corrected.structure_name)
+        : "";
+    return String(value || audit && (audit.normalized_material || audit.normalized_material_or_catalyst) || "")
+        .trim()
+        .toLowerCase();
+}
+
+function dftIndependentOpinionsAgree(row, opinions) {
+    const normalized = (opinions || []).map(function(audit) { return dftAuditNormalizedTarget(row, audit); });
+    if (normalized.length < 2 || !normalized.every(function(item) {
+        return dftSameNormalizedValue(normalized[0], item);
+    })) return false;
+    const materials = (opinions || []).map(dftAuditMaterialIdentity).filter(Boolean);
+    if (materials.length < 2) return true;
+    return materials.every(function(material) {
+        return material === materials[0] || material.includes(materials[0]) || materials[0].includes(material);
+    });
+}
+
 function dftSupportingValuePass(row, proposal) {
     if (!proposal) return null;
     const proposedTarget = dftAuditNormalizedTarget(row, proposal);
     const proposalSource = dftOpinionSource(proposal);
     const audits = row && Array.isArray(row.object_review_audits) ? row.object_review_audits : [];
     return audits.find(function(audit) {
-        if (dftOpinionDecision(audit) !== "PASS") return false;
-        if (String(audit.field_name || "").trim() !== "value") return false;
+        if (!["PASS", "PROPOSED", "REVISE", "NEW_CANDIDATE"].includes(dftOpinionDecision(audit))) return false;
+        if (!["value", "dft_results"].includes(String(audit.field_name || "").trim())) return false;
         if (dftOpinionSource(audit) === proposalSource) return false;
         if (!dftOpinionHasAnchor(audit)) return false;
         return dftSameNormalizedValue(proposedTarget, dftAuditNormalizedTarget(row, audit));
@@ -1109,38 +1140,56 @@ function dftIsAutoRejectDuplicate(row) {
 }
 
 function classifyDftAutomationRows(rows) {
-    const result = { autoAccept: [], autoReject: [], thirdAi: [], manual: [] };
+    const result = { consensus: [], conflicts: [], newReview: [] };
     (rows || []).forEach(function(row) {
         if (!row || row.is_exportable === true) return;
-        const audits = Array.isArray(row.object_review_audits) ? row.object_review_audits : [];
-        if (!audits.length) {
-            result.manual.push(row);
+        const audits = (Array.isArray(row.object_review_audits) ? row.object_review_audits : [])
+            .filter(dftOpinionHasAnchor)
+            .sort(sortDftAuditsNewestFirst);
+        const bySource = {};
+        audits.forEach(function(audit) {
+            const source = dftOpinionSource(audit);
+            if (!bySource[source]) bySource[source] = audit;
+        });
+        const independent = Object.keys(bySource).map(function(source) { return bySource[source]; });
+        const repairReasons = new Set(["missing_material_identity", "missing_evidence", "missing_evidence_text", "unsafe_locator"]);
+        const blockedReasons = Array.isArray(row.blocked_reasons) ? row.blocked_reasons : [];
+        if (independent.length < 2 || blockedReasons.some(function(reason) { return repairReasons.has(reason); })) {
+            result.newReview.push(row);
             return;
         }
-        const hasReject = audits.some(function(audit) { return isNegativeDftDecision(audit && audit.decision); });
-        const hasPositive = audits.some(function(audit) {
+        const hasReject = independent.some(function(audit) { return isNegativeDftDecision(audit && audit.decision); });
+        const hasPositive = independent.some(function(audit) {
             const decision = dftOpinionDecision(audit);
-            return decision === "PASS" || decision === "PROPOSED";
+            return ["PASS", "PROPOSED", "REVISE", "NEW_CANDIDATE"].includes(decision);
         });
         if (dftIsAutoRejectDuplicate(row)) {
-            result.autoReject.push(row);
+            result.consensus.push(row);
             return;
         }
         if (hasReject && hasPositive) {
-            result.thirdAi.push(row);
+            result.conflicts.push(row);
+            return;
+        }
+        if (hasReject && !hasPositive) {
+            result.consensus.push(row);
             return;
         }
         const proposal = dftWholeRowProposal(row);
         const support = dftSupportingValuePass(row, proposal);
-        if (proposal && support) {
-            result.autoAccept.push(row);
+        if (proposal && support && dftIndependentOpinionsAgree(row, independent)) {
+            result.consensus.push(row);
             return;
         }
-        if (proposal || hasReject) {
-            result.thirdAi.push(row);
+        if (proposal) {
+            result.conflicts.push(row);
             return;
         }
-        result.manual.push(row);
+        if (dftIndependentOpinionsAgree(row, independent)) {
+            result.consensus.push(row);
+            return;
+        }
+        result.conflicts.push(row);
     });
     return result;
 }
@@ -1154,13 +1203,11 @@ async function refreshDftAutomationSummaryBadges(container) {
             const el = container.querySelector('[data-role="' + role + '"]');
             if (el) el.textContent = value;
         };
-        setText("dft-auto-accept-count", "可自动采纳 " + classified.autoAccept.length);
-        setText("dft-auto-reject-count", "可自动拒绝 " + classified.autoReject.length);
-        setText("dft-third-ai-count", "需第三 AI " + classified.thirdAi.length);
-        setText("dft-manual-count", "剩余需人工 " + classified.manual.length);
+        setText("dft-new-review-count", "新数据审核 " + classified.newReview.length);
+        setText("dft-conflict-count", "冲突裁决 " + classified.conflicts.length);
     } catch (_) {
-        const manual = container.querySelector('[data-role="dft-manual-count"]');
-        if (manual) manual.textContent = "剩余需人工 ?";
+        const pending = container.querySelector('[data-role="dft-new-review-count"]');
+        if (pending) pending.textContent = "新数据审核 ?";
     }
 }
 
@@ -1173,13 +1220,11 @@ async function refreshReadableDftAutomationSummaryBadges(container) {
             const el = container.querySelector('[data-role="' + role + '"]');
             if (el) el.textContent = value;
         };
-        setText("dft-auto-accept-count", "可自动写回 " + classified.autoAccept.length);
-        setText("dft-auto-reject-count", "可自动拒绝 " + classified.autoReject.length);
-        setText("dft-third-ai-count", "需第三AI裁决 " + classified.thirdAi.length);
-        setText("dft-manual-count", "剩余需人工 " + classified.manual.length);
+        setText("dft-new-review-count", "新数据审核 " + classified.newReview.length);
+        setText("dft-conflict-count", "冲突裁决 " + classified.conflicts.length);
     } catch (_) {
-        const manual = container.querySelector('[data-role="dft-manual-count"]');
-        if (manual) manual.textContent = "剩余需人工 ?";
+        const pending = container.querySelector('[data-role="dft-new-review-count"]');
+        if (pending) pending.textContent = "新数据审核 ?";
     }
 }
 
@@ -1589,6 +1634,46 @@ function renderFigureParseDetailHtml(item) {
             return '<div class="figure-parse-row"><strong>' + esc(row[0]) + '</strong><span>' + esc(row[1]) + '</span></div>';
         }).join("") +
     '</div>';
+}
+
+function openFigureLightbox(options) {
+    options = options || {};
+    const overlay = $("figureLightboxOverlay");
+    const image = $("figureLightboxImage");
+    const title = $("figureLightboxTitle");
+    const meta = $("figureLightboxMeta");
+    const src = options.src || "";
+    if (!overlay || !image || !src) return;
+    image.src = src;
+    image.alt = options.alt || "图片大图预览";
+    if (title) title.textContent = options.title || "图片预览";
+    if (meta) {
+        meta.textContent = [options.caption || "", options.page ? ("PDF 第 " + options.page + " 页") : ""]
+            .filter(Boolean)
+            .join(" | ");
+    }
+    overlay.style.display = "flex";
+}
+
+function closeFigureLightbox() {
+    const overlay = $("figureLightboxOverlay");
+    const image = $("figureLightboxImage");
+    if (overlay) overlay.style.display = "none";
+    if (image) {
+        image.removeAttribute("src");
+        image.alt = "图片大图预览";
+    }
+}
+
+if (!window.__litaiFigureLightboxBound) {
+    window.__litaiFigureLightboxBound = true;
+    document.addEventListener("click", function(event) {
+        const overlay = $("figureLightboxOverlay");
+        if (overlay && event.target === overlay) closeFigureLightbox();
+    });
+    document.addEventListener("keydown", function(event) {
+        if (event.key === "Escape") closeFigureLightbox();
+    });
 }
 
 function escAttr(value) {
@@ -2154,14 +2239,19 @@ function renderDetail(detail, audit) {
             let imgHtml = "";
             const noisyFigure = isLikelyNoisyFigure(item);
             if (item.image_path && !noisyFigure) {
-                imgHtml = '<div class="figure-image-placeholder" data-figure-src="/api/papers/assets/' + escAttr(item.image_path) + '" style="margin-top:12px;text-align:center;">' +
-                    '<button class="btn ghost small" type="button" onclick="event.stopPropagation(); loadFigureCardImage(this.parentElement);">加载图片</button>' +
-                    '<span class="subtle" style="margin-left:8px;">展开或点击后加载，避免图片页卡顿。</span>' +
-                '</div>';
                 const imageSrc = item.asset_url || ("/api/papers/assets/" + item.image_path);
+                const lightboxPayload = escAttr(JSON.stringify({
+                    src: imageSrc,
+                    title: item.figure_label || ("图片 " + (index + 1)),
+                    caption: item.caption || "",
+                    page: item.page || "",
+                    alt: item.figure_label || ("图片 " + (index + 1))
+                }));
                 imgHtml = '<figure class="figure-image-block">' +
-                    '<img src="' + escAttr(imageSrc) + '" loading="lazy" decoding="async" alt="Parsed paper figure" />' +
-                    '<figcaption>' + esc(item.figure_label || ("figure " + (index + 1))) + '</figcaption>' +
+                    '<button type="button" class="figure-lightbox-trigger" onclick="event.stopPropagation(); openFigureLightbox(' + lightboxPayload + ')" style="display:block;width:100%;padding:0;border:0;background:transparent;cursor:zoom-in;">' +
+                        '<img src="' + escAttr(imageSrc) + '" loading="lazy" decoding="async" alt="Parsed paper figure" style="display:block;width:100%;max-height:420px;object-fit:contain;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);" />' +
+                    '</button>' +
+                    '<figcaption><button type="button" class="btn ghost small" onclick="event.stopPropagation(); openFigureLightbox(' + lightboxPayload + ')">点击查看大图</button> <span class="subtle" style="margin-left:8px;">' + esc(item.figure_label || ("figure " + (index + 1))) + '</span></figcaption>' +
                 '</figure>';
             } else if (noisyFigure) {
                 var pageLink = item.page
@@ -2200,8 +2290,9 @@ function renderDetail(detail, audit) {
             return '<details class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '" data-rag-blocked="' + (ragBlocked ? "true" : "false") + '" ontoggle="if(this.open){loadFigureCardImage(this.querySelector(\'.figure-image-placeholder\'));}">' +
                    '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + figLabel + '</h3><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + ragStatusHtml + codexAction + '</div></div></summary>' +
                    '<div style="margin-top:10px;">' +
-                   '<div class="prewrap">' + esc(item.caption || "无 caption") + "</div>" +
-                   summaryHtml + metaHtml + renderFigureParseDetailHtml(item) + reviewSummary + imgHtml + '</div></details>';
+                   imgHtml +
+                   '<div class="prewrap" style="margin-top:12px;">' + esc(item.caption || "无 caption") + "</div>" +
+                   summaryHtml + metaHtml + renderFigureParseDetailHtml(item) + reviewSummary + '</div></details>';
         }).join("");
         
         const figureNotice = noisyCount
@@ -2334,7 +2425,7 @@ function renderDetail(detail, audit) {
     }
     if (dftEl && activeTab === "dft") {
         dftEl.innerHTML =
-            renderManualReviewCompletionCard(detail, "dft", "DFT 进度", "当本篇 DFT 审核已经收口时标记完成。已拒绝也算流程完成，但不会导出。点击“结算现有AI审核”后，若当前没有待完成项，系统会自动标记为完成。") +
+            renderManualReviewCompletionCard(detail, "dft", "DFT 进度", "当本篇 DFT 审核已经收口时标记完成。已拒绝也算流程完成，但不会导出。一致意见会在生成下一份审核包前自动写回。") +
             renderDftExportReadiness(detail) +
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
             renderJSONCards("催化剂样本", detail.catalyst_samples_items || []) +
@@ -2463,7 +2554,7 @@ function cachePaperDetail(detail) {
 }
 
 function detailModeForTab(tab) {
-    return ["sections", "writing", "translation", "review"].includes(tab) ? "full" : "light";
+    return tab === "summary" ? "light" : "full";
 }
 
 function renderImmediatePaperDetail(paperId) {
@@ -2501,7 +2592,7 @@ async function loadPaperDetail(paperId, options) {
         return;
     }
     const opts = options || {};
-    const detailMode = opts.mode || detailModeForTab(state.currentTab);
+    const detailMode = opts.mode || "light";
     const loadToken = Date.now() + ":" + paperId;
     state.detailLoadToken = loadToken;
     state.selectedPaperId = paperId;
@@ -2528,6 +2619,13 @@ async function loadPaperDetail(paperId, options) {
         renderDetail(detail, null);
         showWorkspace();
         syncQueryParams();
+        if (!opts.mode && detailMode !== "full" && detailModeForTab(state.currentTab) === "full") {
+            window.setTimeout(function() {
+                if (state.selectedPaperId === paperId) {
+                    ensureFullPaperDetailForTab(state.currentTab);
+                }
+            }, 0);
+        }
         scheduleDetailEnrichment(paperId, loadToken);
         loadEvidenceLocators(paperId);
         if (state.currentTab === "review") loadExternalRuns();
@@ -2724,8 +2822,8 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         paper.codex_context.source_assets.pdf_path
     ) || "<source_pdf>";
     const header = [
-        "任务：批量处理当前论文里所有“需处理 / 不可导出”的 DFT 候选；不要处理已可导出的记录。",
-        "要求：先核对 PDF 证据，再逐条决定：该拒绝就拒绝；能补字段就补字段；发现漏提就新增 new_candidate。",
+        "任务：审核下面这些新发现或缺少独立第二意见的 DFT 候选；不要处理清单以外的记录。",
+        "要求：先核对 PDF 证据，再逐条给出完整意见。审核来源名称不固定，但必须与每条记录 existing_review_sources 中的来源不同。",
         "不要输出长解释；只输出一个可直接用于 import_analysis 的 JSON，顶层只保留 object_review_audits。",
         "如果当前 IDE 没有暴露 MCP 工具，不要直接停下；请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具。禁止直接调用 service/session/model 或数据库。",
         "",
@@ -2763,42 +2861,47 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         "doi=" + doi,
         "paper_id=" + paperId,
         paperCode ? ("paper_code=" + paperCode) : "",
-        "待补审数量=" + rows.length,
+        "新数据审核数量=" + rows.length,
         "",
-        "待补审候选清单：",
+        "新数据审核候选清单：",
     ].filter(Boolean).join("\n");
     const body = rows.map(function(row, index) {
-        return buildCompactBlockedDftRow(row, index);
+        const sources = (row.object_review_audits || []).map(dftOpinionSource).filter(function(source, sourceIndex, all) {
+            return all.indexOf(source) === sourceIndex;
+        });
+        return "existing_review_sources=" + JSON.stringify(sources) + "\n" + buildCompactBlockedDftRow(row, index);
     }).join("\n\n");
     return header + "\n\n" + body;
 }
 
-async function copyBlockedDftBatchPrompt() {
+async function settleDftConsensusBeforePrompt() {
+    return fetchJSON(
+        API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/settle-ai-dft-reviews",
+        { method: "POST" }
+    );
+}
+
+async function copyNewDftReviewPrompt() {
     if (!state.selectedPaperId) {
         showToast("请先选择一篇文献。", "error");
         return;
     }
     try {
-        showToast("正在生成 DFT 补审提示词...", "info");
-        const queue = await fetchJSON(
-            "/api/papers/export/dft-review-queue?paper_id=" +
-            encodeURIComponent(state.selectedPaperId) +
-            "&status=needs_review&limit=200"
-        );
-        const rows = Array.isArray(queue && queue.rows) ? queue.rows.filter(function(row) {
-            return row && row.is_exportable !== true;
-        }) : [];
+        showToast("正在写回一致意见并生成新数据审核提示词...", "info");
+        await settleDftConsensusBeforePrompt();
+        const pendingRows = await fetchSelectedDftReviewRows(200);
+        const rows = classifyDftAutomationRows(pendingRows).newReview;
         if (!rows.length) {
-            showToast("当前这篇论文没有待补审的 DFT 候选。", "info");
+            showToast("当前没有新发现或缺少独立第二意见的 DFT 数据。", "info");
             return;
         }
         const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
         await navigator.clipboard.writeText(
             [canonicalPrompt, buildCompactBlockedDftBatchPrompt(rows)].filter(Boolean).join("\n\n")
         );
-        showToast("已复制本篇 DFT 补审提示词，可直接发给 IDE AI / Codex。", "success");
+        showToast("新数据审核提示词已复制，请交给未审核过这些记录的独立 AI。", "success");
     } catch (error) {
-        showToast("DFT 补审提示词生成失败：" + error.message, "error");
+        showToast("新数据审核提示词生成失败：" + error.message, "error");
     }
 }
 
@@ -2912,6 +3015,8 @@ function buildThirdAiDftAdjudicationPrompt(rows) {
             },
             prior_ai_opinions: (row.object_review_audits || []).map(function(audit) {
                 return {
+                    candidate_id: audit.candidate_id,
+                    source_identity: audit.source_label || audit.source || "unknown",
                     source: audit.source_label || audit.source || "unknown",
                     decision: audit.decision,
                     field_name: audit.field_name,
@@ -2923,15 +3028,18 @@ function buildThirdAiDftAdjudicationPrompt(rows) {
         };
     });
     return [
-        "任务：你是第三 AI 仲裁员，只处理下面 DFT 候选的冲突/不完整审核意见。",
+        "任务：你是第三 AI 裁决员，只处理下面最终数据真正不一致的 DFT 候选。",
         "必须读取原始 PDF 或 PDF 证据包；不要只复述前两个 AI 的意见。",
         "如果当前 IDE 没有暴露 MCP 工具，请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具读取证据；禁止直接操作 service/session/model 或数据库。",
-        "如果缺证据页码或原文，请主动在 PDF 中定位；找不到就输出 NEEDS_HUMAN。",
+        "只需输出有争议字段的最终值；未争议字段由系统从当前记录和 selected_source_ids 自动补齐。",
+        "必须填写 adjudication_role='third_ai'。选择已有意见时填写 selected_source_ids；可填 candidate_id、source_identity 或 source。",
+        "可以给出新的 evidence_location；若沿用被选意见的证据，系统会从 selected_source_ids 自动继承。",
+        "如果缺证据页码或原文，请主动在 PDF 中定位；确实找不到时输出 NEEDS_HUMAN，记录继续留在冲突裁决队列。",
         "单位标准：能量统一为 eV，meV 除以 1000；渗透率统一为 GPU，10^3 GPU 乘以 1000；原始表达写入 raw_value/raw_unit 或 evidence quoted_text。",
         "重复项必须明确 duplicate_of，并说明保留哪条、拒绝哪条。",
         "只输出 JSON：顶层 object_review_audits，不要长解释。",
         "",
-        "输出字段：decision=PASS|PROPOSED|REJECT|NEEDS_HUMAN；target_type=dft_results；field_name=dft_results；corrected_value 必须包含 property、adsorbate、material、method、value、unit、raw_value、raw_unit；evidence_location 必须包含 page、quoted_text、source_document_type、source_pdf。",
+        "输出字段：decision=PASS|PROPOSED|REJECT|NEEDS_HUMAN；target_type=dft_results；field_name=dft_results；adjudication_role=third_ai；selected_source_ids=[]；corrected_value 只写裁决后需要覆盖的字段；evidence_location 写新证据时包含 page、quoted_text、source_document_type、source_pdf。",
         "",
         "paper_id=" + paperId,
         "title=" + (paper.title_zh || paper.title || "-"),
@@ -2948,20 +3056,21 @@ async function copyThirdAiDftAdjudicationPrompt() {
         return;
     }
     try {
-        showToast("正在生成 DFT 冲突仲裁提示词...", "info");
+        showToast("正在写回一致意见并生成 DFT 冲突裁决提示词...", "info");
+        await settleDftConsensusBeforePrompt();
         const rows = await fetchSelectedDftReviewRows(200);
         const classified = classifyDftAutomationRows(rows);
-        if (!classified.thirdAi.length) {
-            showToast("当前没有需要第三 AI 仲裁的 DFT 候选。", "info");
+        if (!classified.conflicts.length) {
+            showToast("当前没有最终数据真正不一致的 DFT 意见。", "info");
             return;
         }
         const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
         await navigator.clipboard.writeText(
-            [canonicalPrompt, buildThirdAiDftAdjudicationPrompt(classified.thirdAi)].filter(Boolean).join("\n\n")
+            [canonicalPrompt, buildThirdAiDftAdjudicationPrompt(classified.conflicts)].filter(Boolean).join("\n\n")
         );
-        showToast("DFT 冲突仲裁提示词已复制。", "success");
+        showToast("DFT 冲突裁决提示词已复制。", "success");
     } catch (error) {
-        showToast("DFT 冲突仲裁提示词生成失败：" + error.message, "error");
+        showToast("DFT 冲突裁决提示词生成失败：" + error.message, "error");
     }
 }
 
@@ -2981,22 +3090,12 @@ function decorateDftReadinessPanel(detail) {
     actions.innerHTML =
         (blockedCount
             ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">' +
-                '<span class="status-chip ok" data-role="dft-auto-accept-count">可自动采纳 ...</span>' +
-                '<span class="status-chip failed" data-role="dft-auto-reject-count">可自动拒绝 ...</span>' +
-                '<span class="status-chip meta" data-role="dft-third-ai-count">需第三 AI ...</span>' +
-                '<span class="status-chip" data-role="dft-manual-count">剩余需人工 ...</span>' +
+                '<span class="status-chip meta" data-role="dft-new-review-count">新数据审核 ...</span>' +
+                '<span class="status-chip failed" data-role="dft-conflict-count">冲突裁决 ...</span>' +
               '</div>' +
-              '<button class="btn primary small" type="button" onclick="autoProcessLowRiskDftRows()">一键处理低风险项</button>' +
-              '<button class="btn ghost small" type="button" onclick="copyThirdAiDftAdjudicationPrompt()">复制 DFT 冲突仲裁提示词</button>' +
-              '<button class="btn ghost small" type="button" onclick="copyBlockedDftBatchPrompt()">复制 DFT 补审提示词</button>'
-            : "") +
-        '<button class="btn ghost small" type="button" onclick="openSelectedReviewCenter()">查看审核概览</button>';
-    const settleButton = document.createElement("button");
-    settleButton.className = "btn primary small";
-    settleButton.type = "button";
-    settleButton.textContent = "结算现有AI审核";
-    settleButton.addEventListener("click", settleAiDftReviews);
-    actions.insertBefore(settleButton, actions.firstChild);
+              '<button class="btn primary small" type="button" onclick="copyThirdAiDftAdjudicationPrompt()">冲突裁决</button>' +
+              '<button class="btn primary small" type="button" onclick="copyNewDftReviewPrompt()">新数据审核</button>'
+            : "");
     const firstSubtle = card.querySelector(".subtle");
     if (firstSubtle && firstSubtle.parentNode === card) {
         card.insertBefore(actions, firstSubtle);
