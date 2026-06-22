@@ -51,9 +51,9 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    # NOTE: The database is PostgreSQL (with pgvector), NOT SQLite.
+    # PostgreSQL with pgvector is the only supported database.
     # In production this can be pinned with LITAI_FORCE_CONFIGURED_DATABASE=true
-    # so the app never falls back to per-library SQLite databases.
+    # so the app always uses the configured source of truth.
     database_url: str = "postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai"
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
@@ -108,8 +108,6 @@ class Settings(BaseSettings):
     share_rate_limit_per_minute: int = 120
     share_max_concurrency: int = 8
     share_public_base_url: str | None = None
-    force_configured_database: bool = True
-    enable_deprecated_db_endpoints: bool = False
     settings_admin_token: str | None = None
     browse_roots: str = "/host/users,/data,/legacy"
 

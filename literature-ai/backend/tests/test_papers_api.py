@@ -20,58 +20,6 @@ from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
 import app.api.papers as papers_api
 
-pytestmark = pytest.mark.skip(
-    reason="Retired legacy SQLite API fixture; PostgreSQL-backed API coverage should replace this module."
-)
-
-@pytest.fixture
-def setup_test_db(monkeypatch):
-    # Create temp DB file
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_root = Path(tmpdir)
-        db_path = tmp_root / "test_api.db"
-        db_url = f"sqlite:///{db_path}"
-        storage_root = tmp_root / "storage"
-        
-        # Keep API tests from writing uploads into the real active library.
-        monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
-        monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
-        monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", tmpdir)
-        monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
-        get_settings.cache_clear()
-        
-        # Setup tables
-        engine = create_engine(db_url, future=True)
-        Base.metadata.create_all(engine)
-        
-        # Override dependency for standard FastAPI injection
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        def override_get_db_session():
-            db = TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-        
-        app.dependency_overrides[get_db_session] = override_get_db_session
-        
-        yield engine
-        
-        # Clean up
-        app.dependency_overrides.clear()
-        engine.dispose()
-        
-        # Clean up global engines cache to unlock file on Windows
-        from app.db.session import _engines, _session_factories
-        for eng in list(_engines.values()):
-            try:
-                eng.dispose()
-            except Exception:
-                pass
-        _engines.clear()
-        _session_factories.clear()
-        get_settings.cache_clear()
-
 def test_papers_status_and_stream(setup_test_db, monkeypatch):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)

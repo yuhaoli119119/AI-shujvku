@@ -11,7 +11,7 @@ from app.db.models import Base
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATABASE: This project uses PostgreSQL (with pgvector extension) as its
-# primary database, NOT SQLite. The default connection string is:
+# primary database. The default connection string is:
 #   postgresql+psycopg://literature_ai:literature_ai@postgres:5432/literature_ai
 #
 # IMPORTANT for AI developers:
@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_engine(database_url: str):
-    if database_url.strip().lower().startswith("sqlite"):
-        raise RuntimeError("SQLite is disabled. Configure PostgreSQL via LITAI_DATABASE_URL.")
+    if not database_url.strip().lower().startswith("postgresql"):
+        raise RuntimeError("Only PostgreSQL is supported. Configure LITAI_DATABASE_URL.")
     if database_url not in _engines:
         engine_kwargs: dict[str, object] = {
             "future": True,
@@ -64,8 +64,8 @@ def init_db(database_url: str, *, force: bool = False) -> None:
         force: If True, re-run migrations even if this URL was already initialized.
                Use after schema changes that need to be applied immediately.
     """
-    if database_url.strip().lower().startswith("sqlite"):
-        raise RuntimeError("SQLite is disabled. Configure PostgreSQL via LITAI_DATABASE_URL.")
+    if not database_url.strip().lower().startswith("postgresql"):
+        raise RuntimeError("Only PostgreSQL is supported. Configure LITAI_DATABASE_URL.")
     # Skip redundant initialization — migrations are idempotent but expensive
     # (each init_db call does ~50 inspector.get_columns() queries on PostgreSQL).
     if not force and database_url in _initialized_urls:
@@ -73,45 +73,43 @@ def init_db(database_url: str, *, force: bool = False) -> None:
         return
 
     engine = get_engine(database_url)
-    if engine.dialect.name == "postgresql":
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-            for extension in ("vector", "pgcrypto", "pg_trgm"):
-                try:
-                    connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
-                except Exception:
-                    logger.warning(
-                        "Could not create PostgreSQL extension %s; assuming it is preinstalled or managed externally",
-                        extension,
-                    )
-    Base.metadata.create_all(engine)
-    if engine.dialect.name == "postgresql":
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE papers DROP CONSTRAINT IF EXISTS papers_doi_key"))
-            connection.execute(text("DROP INDEX IF EXISTS ix_papers_doi"))
-            connection.execute(text("ALTER TABLE paper_notes ALTER COLUMN section_title TYPE TEXT"))
-            connection.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_library_doi "
-                    "ON papers (library_name, doi) WHERE doi IS NOT NULL"
-                )
-            )
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_paper_id ON paper_chunks(paper_id)"))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_section_id ON paper_chunks(section_id)"))
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        for extension in ("vector", "pgcrypto", "pg_trgm"):
             try:
-                connection.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS paper_chunks_embedding_hnsw "
-                        "ON paper_chunks USING hnsw (embedding vector_cosine_ops)"
-                    )
-                )
+                connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
             except Exception:
-                logger.warning("Could not create paper_chunks HNSW index; pgvector may be unavailable")
+                logger.warning(
+                    "Could not create PostgreSQL extension %s; assuming it is preinstalled or managed externally",
+                    extension,
+                )
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE papers DROP CONSTRAINT IF EXISTS papers_doi_key"))
+        connection.execute(text("DROP INDEX IF EXISTS ix_papers_doi"))
+        connection.execute(text("ALTER TABLE paper_notes ALTER COLUMN section_title TYPE TEXT"))
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_library_doi "
+                "ON papers (library_name, doi) WHERE doi IS NOT NULL"
+            )
+        )
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_paper_id ON paper_chunks(paper_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_chunks_section_id ON paper_chunks(section_id)"))
+        try:
             connection.execute(
                 text(
-                    "CREATE INDEX IF NOT EXISTS paper_chunks_text_gin "
-                    "ON paper_chunks USING gin (to_tsvector('simple', coalesce(text, '')))"
+                    "CREATE INDEX IF NOT EXISTS paper_chunks_embedding_hnsw "
+                    "ON paper_chunks USING hnsw (embedding vector_cosine_ops)"
                 )
             )
+        except Exception:
+            logger.warning("Could not create paper_chunks HNSW index; pgvector may be unavailable")
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS paper_chunks_text_gin "
+                "ON paper_chunks USING gin (to_tsvector('simple', coalesce(text, '')))"
+            )
+        )
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
 
@@ -142,275 +140,158 @@ def init_db(database_url: str, *, force: bool = False) -> None:
             execute_migration_step(
                 "papers",
                 "comprehensive_analysis",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS comprehensive_analysis JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN comprehensive_analysis JSON"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS comprehensive_analysis JSONB",
             )
             execute_migration_step(
                 "papers",
                 "library_name",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS library_name VARCHAR(255) NOT NULL DEFAULT '\u9ed8\u8ba4\u6587\u732e\u5e93'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN library_name VARCHAR(255) NOT NULL DEFAULT '\u9ed8\u8ba4\u6587\u732e\u5e93'"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS library_name VARCHAR(255) NOT NULL DEFAULT '\u9ed8\u8ba4\u6587\u732e\u5e93'",
             )
             serial_added = execute_migration_step(
                 "papers",
                 "serial_number",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS serial_number INTEGER"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN serial_number INTEGER"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS serial_number INTEGER",
             )
             try:
                 if serial_added or has_column("papers", "serial_number"):
-                    if engine.dialect.name == "postgresql":
-                        # Backfill serial_number for existing papers ordered by created_at per library
-                        connection.execute(text("""
-                            UPDATE papers SET serial_number = sub.rn FROM (
-                              SELECT id, ROW_NUMBER() OVER (PARTITION BY library_name ORDER BY created_at) AS rn
-                              FROM papers WHERE serial_number IS NULL
-                            ) sub WHERE papers.id = sub.id
-                        """))
+                    # Backfill serial_number for existing papers ordered by created_at per library.
+                    connection.execute(text("""
+                        UPDATE papers SET serial_number = sub.rn FROM (
+                          SELECT id, ROW_NUMBER() OVER (PARTITION BY library_name ORDER BY created_at) AS rn
+                          FROM papers WHERE serial_number IS NULL
+                        ) sub WHERE papers.id = sub.id
+                    """))
             except Exception:
                 logger.exception("Automatic database migration failed while backfilling papers.serial_number")
             execute_migration_step(
                 "papers",
                 "paper_type",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_type VARCHAR(20)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN paper_type VARCHAR(20)"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_type VARCHAR(20)",
             )
             execute_migration_step(
                 "papers",
                 "paper_code",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_code VARCHAR(16)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN paper_code VARCHAR(16)"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_code VARCHAR(16)",
             )
             try:
-                if engine.dialect.name == "postgresql":
-                    connection.execute(
-                        text(
-                            "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_paper_code "
-                            "ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> ''"
-                        )
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_paper_code "
+                        "ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> ''"
                     )
-                else:
-                    connection.execute(
-                        text(
-                            "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_paper_code "
-                            "ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> ''"
-                        )
-                    )
+                )
             except Exception:
                 logger.exception("Automatic database migration failed while indexing papers.paper_code")
             execute_migration_step(
                 "papers",
                 "type_confidence",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS type_confidence DOUBLE PRECISION"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN type_confidence FLOAT"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS type_confidence DOUBLE PRECISION",
             )
             execute_migration_step(
                 "papers",
                 "classification_source",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS classification_source VARCHAR(20)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN classification_source VARCHAR(20)"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS classification_source VARCHAR(20)",
             )
             execute_migration_step(
                 "papers",
                 "workflow_status",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS workflow_status VARCHAR(64) NOT NULL DEFAULT 'Imported'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN workflow_status VARCHAR(64) NOT NULL DEFAULT 'Imported'"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS workflow_status VARCHAR(64) NOT NULL DEFAULT 'Imported'",
             )
             execute_migration_step(
                 "papers",
                 "pdf_quality_status",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_status VARCHAR(32)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN pdf_quality_status VARCHAR(32)"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_status VARCHAR(32)",
             )
             execute_migration_step(
                 "papers",
                 "pdf_quality_score",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_score DOUBLE PRECISION"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN pdf_quality_score FLOAT"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_score DOUBLE PRECISION",
             )
             execute_migration_step(
                 "papers",
                 "pdf_quality_report",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_report JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN pdf_quality_report JSON"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS pdf_quality_report JSONB",
             )
             execute_migration_step(
                 "papers",
                 "workspace_path",
-                (
-                    "ALTER TABLE papers ADD COLUMN IF NOT EXISTS workspace_path TEXT"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE papers ADD COLUMN workspace_path TEXT"
-                ),
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS workspace_path TEXT",
             )
             should_backfill_paper_codes = True
             execute_migration_step(
                 "paper_tables",
                 "prov",
-                (
-                    "ALTER TABLE paper_tables ADD COLUMN IF NOT EXISTS prov JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_tables ADD COLUMN prov JSON"
-                ),
+                "ALTER TABLE paper_tables ADD COLUMN IF NOT EXISTS prov JSONB",
             )
             execute_migration_step(
                 "paper_sections",
                 "section_level",
-                (
-                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS section_level INTEGER"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_sections ADD COLUMN section_level INTEGER"
-                ),
+                "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS section_level INTEGER",
             )
             execute_migration_step(
                 "paper_sections",
                 "section_number",
-                (
-                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS section_number VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_sections ADD COLUMN section_number VARCHAR(64)"
-                ),
+                "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS section_number VARCHAR(64)",
             )
             execute_migration_step(
                 "paper_sections",
                 "parent_heading",
-                (
-                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS parent_heading TEXT"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_sections ADD COLUMN parent_heading TEXT"
-                ),
+                "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS parent_heading TEXT",
             )
             execute_migration_step(
                 "paper_sections",
                 "heading_path",
-                (
-                    "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS heading_path JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_sections ADD COLUMN heading_path JSON"
-                ),
+                "ALTER TABLE paper_sections ADD COLUMN IF NOT EXISTS heading_path JSONB",
             )
             execute_migration_step(
                 "paper_figures",
                 "role_confidence",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS role_confidence FLOAT"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN role_confidence FLOAT"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS role_confidence FLOAT",
             )
             execute_migration_step(
                 "paper_figures",
                 "content_summary",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS content_summary TEXT"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN content_summary TEXT"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS content_summary TEXT",
             )
             execute_migration_step(
                 "paper_figures",
                 "key_elements",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS key_elements JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN key_elements JSON"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS key_elements JSONB",
             )
             execute_migration_step(
                 "paper_figures",
                 "prov",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS prov JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN prov JSON"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS prov JSONB",
             )
             execute_migration_step(
                 "paper_figures",
                 "figure_label",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS figure_label VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN figure_label VARCHAR(64)"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS figure_label VARCHAR(64)",
             )
             execute_migration_step(
                 "paper_figures",
                 "crop_status",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_status VARCHAR(32) NOT NULL DEFAULT 'candidate_crop'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN crop_status VARCHAR(32) NOT NULL DEFAULT 'candidate_crop'"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_status VARCHAR(32) NOT NULL DEFAULT 'candidate_crop'",
             )
             execute_migration_step(
                 "paper_figures",
                 "crop_confidence",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_confidence DOUBLE PRECISION"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN crop_confidence FLOAT"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_confidence DOUBLE PRECISION",
             )
             execute_migration_step(
                 "paper_figures",
                 "crop_source",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_source VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN crop_source VARCHAR(64)"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS crop_source VARCHAR(64)",
             )
             execute_migration_step(
                 "dft_results",
                 "reaction_step",
-                (
-                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_step VARCHAR(255)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE dft_results ADD COLUMN reaction_step VARCHAR(255)"
-                ),
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_step VARCHAR(255)",
             )
             execute_migration_step(
                 "dft_results",
                 "candidate_status",
-                (
-                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_status VARCHAR(64) NOT NULL DEFAULT 'system_candidate'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE dft_results ADD COLUMN candidate_status VARCHAR(64) NOT NULL DEFAULT 'system_candidate'"
-                ),
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_status VARCHAR(64) NOT NULL DEFAULT 'system_candidate'",
             )
             try:
                 connection.execute(
@@ -435,38 +316,22 @@ def init_db(database_url: str, *, force: bool = False) -> None:
             execute_migration_step(
                 "dft_results",
                 "evidence_payload",
-                (
-                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS evidence_payload JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE dft_results ADD COLUMN evidence_payload JSON"
-                ),
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS evidence_payload JSONB",
             )
             execute_migration_step(
                 "dft_results",
                 "extraction_protocol_version",
-                (
-                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS extraction_protocol_version VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE dft_results ADD COLUMN extraction_protocol_version VARCHAR(64)"
-                ),
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS extraction_protocol_version VARCHAR(64)",
             )
             execute_migration_step(
                 "paper_figures",
                 "write_version",
-                (
-                    "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS write_version INTEGER NOT NULL DEFAULT 1"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE paper_figures ADD COLUMN write_version INTEGER NOT NULL DEFAULT 1"
-                ),
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS write_version INTEGER NOT NULL DEFAULT 1",
             )
             execute_migration_step(
                 "dft_results",
                 "candidate_identity",
-                (
-                    "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_identity VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE dft_results ADD COLUMN candidate_identity VARCHAR(64)"
-                ),
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_identity VARCHAR(64)",
             )
             connection.execute(
                 text(
@@ -477,245 +342,137 @@ def init_db(database_url: str, *, force: bool = False) -> None:
             execute_migration_step(
                 "evidence_locators",
                 "claim_id",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS claim_id UUID"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN claim_id CHAR(32)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS claim_id UUID",
             )
             execute_migration_step(
                 "evidence_locators",
                 "chunk_id",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS chunk_id VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN chunk_id VARCHAR(64)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS chunk_id VARCHAR(64)",
             )
             execute_migration_step(
                 "evidence_locators",
                 "source_type",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) NOT NULL DEFAULT 'unknown'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN source_type VARCHAR(32) NOT NULL DEFAULT 'unknown'"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) NOT NULL DEFAULT 'unknown'",
             )
             execute_migration_step(
                 "evidence_locators",
                 "page",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS page INTEGER"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN page INTEGER"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS page INTEGER",
             )
             execute_migration_step(
                 "evidence_locators",
                 "bbox",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS bbox JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN bbox JSON"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS bbox JSONB",
             )
             execute_migration_step(
                 "evidence_locators",
                 "section",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS section VARCHAR(255)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN section VARCHAR(255)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS section VARCHAR(255)",
             )
             execute_migration_step(
                 "evidence_locators",
                 "figure_id",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS figure_id UUID"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN figure_id CHAR(32)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS figure_id UUID",
             )
             execute_migration_step(
                 "evidence_locators",
                 "table_id",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS table_id UUID"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN table_id CHAR(32)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS table_id UUID",
             )
             execute_migration_step(
                 "evidence_locators",
                 "equation_id",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS equation_id VARCHAR(128)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN equation_id VARCHAR(128)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS equation_id VARCHAR(128)",
             )
             execute_migration_step(
                 "evidence_locators",
                 "target_type",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS target_type VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN target_type VARCHAR(64)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS target_type VARCHAR(64)",
             )
             execute_migration_step(
                 "evidence_locators",
                 "target_id",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS target_id VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN target_id VARCHAR(64)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS target_id VARCHAR(64)",
             )
             execute_migration_step(
                 "evidence_locators",
                 "field_name",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS field_name VARCHAR(128)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN field_name VARCHAR(128)"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS field_name VARCHAR(128)",
             )
             execute_migration_step(
                 "evidence_locators",
                 "char_start",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS char_start INTEGER"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN char_start INTEGER"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS char_start INTEGER",
             )
             execute_migration_step(
                 "evidence_locators",
                 "char_end",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS char_end INTEGER"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN char_end INTEGER"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS char_end INTEGER",
             )
             execute_migration_step(
                 "evidence_locators",
                 "locator_status",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS locator_status VARCHAR(32) NOT NULL DEFAULT 'missing'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN locator_status VARCHAR(32) NOT NULL DEFAULT 'missing'"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS locator_status VARCHAR(32) NOT NULL DEFAULT 'missing'",
             )
             execute_migration_step(
                 "evidence_locators",
                 "locator_confidence",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS locator_confidence DOUBLE PRECISION NOT NULL DEFAULT 0"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN locator_confidence FLOAT NOT NULL DEFAULT 0"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS locator_confidence DOUBLE PRECISION NOT NULL DEFAULT 0",
             )
             execute_migration_step(
                 "evidence_locators",
                 "parser_source",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS parser_source VARCHAR(32) NOT NULL DEFAULT 'unknown'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN parser_source VARCHAR(32) NOT NULL DEFAULT 'unknown'"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS parser_source VARCHAR(32) NOT NULL DEFAULT 'unknown'",
             )
             execute_migration_step(
                 "evidence_locators",
                 "warning_reason",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS warning_reason TEXT"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN warning_reason TEXT"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS warning_reason TEXT",
             )
             execute_migration_step(
                 "evidence_locators",
                 "updated_at",
-                (
-                    "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE evidence_locators ADD COLUMN updated_at DATETIME"
-                ),
+                "ALTER TABLE evidence_locators ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "target_fingerprint",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_fingerprint VARCHAR(128)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN target_fingerprint VARCHAR(128)"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_fingerprint VARCHAR(128)",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "target_label",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_label VARCHAR(255)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN target_label VARCHAR(255)"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_label VARCHAR(255)",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "field_path",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS field_path VARCHAR(255)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN field_path VARCHAR(255)"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS field_path VARCHAR(255)",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "target_resolution_status",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_resolution_status VARCHAR(32) NOT NULL DEFAULT 'active'"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN target_resolution_status VARCHAR(32) NOT NULL DEFAULT 'active'"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS target_resolution_status VARCHAR(32) NOT NULL DEFAULT 'active'",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "remapped_from_target_id",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS remapped_from_target_id VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN remapped_from_target_id VARCHAR(64)"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS remapped_from_target_id VARCHAR(64)",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "last_resolved_target_id",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS last_resolved_target_id VARCHAR(64)"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN last_resolved_target_id VARCHAR(64)"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS last_resolved_target_id VARCHAR(64)",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "review_payload",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS review_payload JSONB"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN review_payload JSON"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS review_payload JSONB",
             )
             execute_migration_step(
                 "extraction_field_reviews",
                 "write_version",
-                (
-                    "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS write_version INTEGER NOT NULL DEFAULT 1"
-                    if engine.dialect.name == "postgresql"
-                    else "ALTER TABLE extraction_field_reviews ADD COLUMN write_version INTEGER NOT NULL DEFAULT 1"
-                ),
+                "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS write_version INTEGER NOT NULL DEFAULT 1",
             )
 
     if should_backfill_paper_codes:
@@ -771,50 +528,3 @@ def session_scope(database_url: str):
         raise
     finally:
         session.close()
-
-
-def switch_database(database_url: str, storage_root: str | None = None) -> None:
-    """Switch the active database at runtime.
-
-    Disposes the old engine, updates the environment variable,
-    clears settings cache, and initializes the new database.
-    Optionally updates storage_root in the active settings instance.
-
-    Args:
-        database_url: New PostgreSQL URL.
-        storage_root: If provided, the storage directory for the new library
-                      (e.g. ``/path/to/library/storage``). Settings.storage_root
-                      will be updated to this path.
-    """
-    import os
-    from pathlib import Path
-
-    from app.config import get_settings
-
-    settings = get_settings()
-    if database_url.strip().lower().startswith("sqlite"):
-        raise RuntimeError("SQLite is disabled. Runtime database switching only supports PostgreSQL URLs.")
-    old_url = settings.database_url
-
-    # Dispose old engine if it exists
-    if old_url in _engines:
-        old_engine = _engines.pop(old_url, None)
-        _session_factories.pop(old_url, None)
-        _initialized_urls.discard(old_url)
-        if old_engine:
-            old_engine.dispose()
-
-    # Update environment so Settings picks it up
-    os.environ["LITAI_DATABASE_URL"] = database_url
-    if storage_root is not None:
-        os.environ["LITAI_STORAGE_ROOT"] = storage_root
-    get_settings.cache_clear()
-
-    # Also patch the in-process settings instance so callers that already
-    # hold a reference see the new storage_root immediately.
-    if storage_root is not None:
-        new_settings = get_settings()
-        object.__setattr__(new_settings, "storage_root", Path(storage_root))
-
-    # Initialize new database
-    init_db(database_url)

@@ -1,5 +1,4 @@
 -- PostgreSQL + pgvector baseline schema generated from app.db.models.
--- SQLite is legacy/import-only and is not represented by this baseline.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

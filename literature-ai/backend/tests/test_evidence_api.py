@@ -1,3 +1,4 @@
+import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,8 +44,7 @@ def _clear_engine_cache():
 
 def test_claim_locator_returns_exact_bbox(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_evidence_exact.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()
 
@@ -116,8 +116,7 @@ def test_claim_locator_returns_exact_bbox(monkeypatch):
 
 def test_claim_locator_page_only_fallback(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_evidence_page_only.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()
 
@@ -169,8 +168,7 @@ def test_claim_locator_page_only_fallback(monkeypatch):
 
 def test_claim_locator_legacy_missing_or_text_only_fallback(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_evidence_legacy.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()
 
@@ -215,8 +213,7 @@ def test_claim_locator_legacy_missing_or_text_only_fallback(monkeypatch):
 
 def test_extraction_results_include_evidence_locator_and_locator_api(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_evidence_extraction.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()
 
@@ -287,8 +284,7 @@ def test_extraction_results_include_evidence_locator_and_locator_api(monkeypatch
 
 def test_stage2_replace_cleanup_removes_old_extraction_locators_but_keeps_reviews_and_claims(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_evidence_stage2_cleanup.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()
 
@@ -416,8 +412,7 @@ def test_stage2_replace_cleanup_removes_old_extraction_locators_but_keeps_review
 
 def test_malformed_bbox_degrades_to_page_only(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_evidence_bad_bbox.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()
 
@@ -462,8 +457,7 @@ def test_malformed_bbox_degrades_to_page_only(monkeypatch):
 
 def test_missing_claim_locator_returns_404(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_evidence_missing_claim.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()
 

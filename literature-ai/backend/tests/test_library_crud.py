@@ -32,7 +32,7 @@ def test_library_manager():
 
         root = Path(created.root_path)
         assert root.exists()
-        assert (root / "database.sqlite").exists()
+        assert not any(root.glob("*.db"))
         assert (root / "library.json").exists()
         assert (root / "papers").exists()
         for subdir in ("pdf", "text", "tei", "docling_json", "figures", "tables", "markdown"):

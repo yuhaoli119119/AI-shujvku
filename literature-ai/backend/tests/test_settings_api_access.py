@@ -8,7 +8,6 @@ from sqlalchemy import text
 from app.api.settings import _advertised_base_url, _enforce_settings_write_access, _is_local_request_host, _mcp_runner_command
 from app.config import get_settings
 from app.main import app
-from test_papers_api import setup_test_db
 
 
 def _make_request(host: str, headers: dict[str, str] | None = None):

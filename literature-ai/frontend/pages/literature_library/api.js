@@ -266,16 +266,13 @@ async function loadLibraryRuntimeInfo() {
             throw new Error("未获取到数据库运行时信息");
         }
         const activeRootFromApi = info.active_library_root || "";
-        const activeDb = info.active_library_db_path || info.effective_db_path || "";
-        const storageRoot = info.effective_storage_root || info.storage_root || "";
+        const storageRoot = info.storage_root || "";
         const registryPath = "/data/library_registry.json";
         let activeRoot = activeRootFromApi ? activeRootFromApi.replace(/\\/g, "/") : "";
-        if (info.dialect === "postgresql" && !activeRoot) {
+        if (!activeRoot) {
             activeRoot = storageRoot ? storageRoot.replace(/\\/g, "/").replace(/\/storage$/i, "") : "";
         }
-        const dbDisplay = info.dialect === "postgresql"
-            ? "PostgreSQL: <code>" + esc(info.database_url_masked || activeDb || "-") + "</code>"
-            : "Database (" + esc(info.dialect || "unknown") + "): <code>" + esc(activeDb || info.database_url_masked || "-") + "</code>";
+        const dbDisplay = "PostgreSQL: <code>" + esc(info.database_url_masked || "-") + "</code>";
         el.innerHTML =
             dbDisplay +
             " | 注册表: <code>" + esc(registryPath) + "</code>" +

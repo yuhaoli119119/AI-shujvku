@@ -260,6 +260,7 @@ async function materializeRun(runId) {
     var ok = confirm(
         "将处理 " + pendingCount + " 个 IDE AI 回写项。\n\n" +
         "非 DFT 修正会直接应用，后续 AI 可再次覆盖；DFT 数据仍按审核中心流程处理。\n\n" +
+        "这不是人工 verified，也不会绕过 DFT 安全门。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
@@ -313,6 +314,7 @@ async function materializeCandidateIds(runId, candidateIds) {
     var ok = confirm(
         "将处理 " + candidateIds.length + " 个 IDE AI 回写项。\n\n" +
         "非 DFT 修正会直接应用，后续 AI 可再次覆盖；DFT 数据仍按审核中心流程处理。\n\n" +
+        "这不是人工 verified，也不会绕过 DFT 安全门。\n\n" +
         "是否继续？"
     );
     if (!ok) return;

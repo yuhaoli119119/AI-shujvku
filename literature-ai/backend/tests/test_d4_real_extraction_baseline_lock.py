@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-import sqlite3
+import os
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -10,12 +9,11 @@ from app.config import Settings
 from app.db.models import Base, DFTResult, EvidenceLocator, EvidenceSpan, ExtractionFieldReview, Paper, WritingCard
 from app.rag.retriever import Retriever
 from app.services.extraction_pipeline import ExtractionPipelineService
-from app.utils import active_database
 from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 
 
 def _session(tmp_path):
-    db_url = f"sqlite:///{tmp_path / 'd4_real_extraction_lock.db'}"
+    db_url = os.environ["LITAI_TEST_DATABASE_URL"]
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
@@ -177,51 +175,3 @@ def test_text_only_writing_evidence_without_safe_review_payload_is_blocked(tmp_p
             assert "insufficient_reliable_core_fields" in gate.blocked_reasons
     finally:
         engine.dispose()
-
-
-def test_active_database_info_ignores_temp_sqlite_when_configured_database_is_postgresql(tmp_path, monkeypatch):
-    registry_path = tmp_path / "library.json"
-    active_root = tmp_path / "libraries" / "default"
-    active_root.mkdir(parents=True)
-    db_path = active_root / "database.sqlite"
-    connection = sqlite3.connect(db_path)
-    try:
-        connection.execute("CREATE TABLE papers (id TEXT PRIMARY KEY)")
-        connection.execute("INSERT INTO papers (id) VALUES ('paper-1')")
-        connection.commit()
-    finally:
-        connection.close()
-
-    registry_path.write_text(
-        json.dumps(
-            {
-                "active_library": "default",
-                "libraries": [{"name": "default", "root_path": str(active_root)}],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(active_database, "canonical_registry_path", lambda: registry_path)
-    monkeypatch.setattr(active_database, "WORKSPACE_ROOT", tmp_path / "workspace")
-    monkeypatch.setattr(active_database, "BACKEND_ROOT", tmp_path / "backend")
-
-    import app.config as config
-
-    monkeypatch.setattr(
-        config,
-        "get_settings",
-        lambda: Settings(
-            database_url="postgresql+psycopg://example:example@127.0.0.1:1/example?connect_timeout=1",
-            storage_root=active_root / "storage",
-        ),
-    )
-
-    info = active_database.get_active_database_info()
-
-    assert info["configured_db_kind"] == "postgresql"
-    assert info["active_library_db_path"] is None
-    assert info["active_library_root"] == str(active_root.resolve())
-    assert info["effective_db_path"] is None
-    assert info["effective_db_papers_total"] == 0
-    assert info["matches_active_library_db_path"] is False

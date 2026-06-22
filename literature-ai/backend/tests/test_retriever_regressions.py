@@ -1,3 +1,4 @@
+import os
 import pytest
 from app.rag.retriever import Retriever
 from app.services.embedding import EmbeddingUnavailableError
@@ -51,9 +52,7 @@ def test_global_dedup_content_fallback_only_for_synthetic_items():
 
 def test_figure_evidence_conditions():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retriever.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -173,9 +172,7 @@ def test_query_embedding_failure_falls_back_to_lexical():
 
 def test_structured_token_prefilter_empty_result_falls_back_with_paper_scope():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retriever.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -222,9 +219,7 @@ def test_structured_token_prefilter_empty_result_falls_back_with_paper_scope():
 
 def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retriever_rag_cards.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:

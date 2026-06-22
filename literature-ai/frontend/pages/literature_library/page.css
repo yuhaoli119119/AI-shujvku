@@ -780,6 +780,17 @@ details.section-card:not([open]) summary {
     color: var(--color-text-secondary);
     font-size: 12px;
 }
+.figure-image-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.figure-image-label {
+    display: inline-block;
+    margin-left: 8px;
+}
 .figure-image-block .figure-image-trigger {
     display: block;
     width: 100%;

@@ -1,7 +1,6 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
-from test_papers_api import setup_test_db
 
 
 def test_writer_settings_endpoint_is_disabled(setup_test_db):

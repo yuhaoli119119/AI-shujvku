@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import tempfile
 from pathlib import Path
 from uuid import UUID
@@ -20,13 +22,12 @@ from app.services.artifact_reliability_audit_service import ArtifactReliabilityA
 def audit_env(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
-        db_path = root / "audit.db"
         storage_root = root / "storage"
-        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+        monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
         get_settings.cache_clear()
 
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         Session = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 

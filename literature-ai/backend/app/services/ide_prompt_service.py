@@ -51,7 +51,7 @@ _COMMON_RULES = """你现在是 Literature AI 的 IDE AI。你的任务是依据
 证据与回写：
 - 用 get_codex_item 和 read_paper_page 核对具体页；页眉页脚清理不会取消 page/page_start/page_end 来源。
 - object_review_audits 的 evidence_location 和 correction_proposals 的 evidence_payload 优先使用结构化 dict，至少包含 page、table、figure、section、quoted_text、bbox、evidence_text 之一；不要只给一句模糊自然语言。
-- 非 DFT 修正或创建对象时，直接调用 import_analysis(auto_apply_review_rules=true)；后写入的 AI 结果允许覆盖先前 AI 结果。
+- 非 DFT 修正或创建对象时，直接调用 import_analysis(auto_apply_review_rules=true)；禁止申请模块写锁，后写入的 AI 结果允许覆盖先前 AI 结果。
 - 如果当前会话里的 MCP import_analysis 路径不可用，而正式 HTTP API 已覆盖同一受控写回能力，可回退到 HTTP API：POST /api/external-analysis/import。
 - 仅提交候选审计时可使用 auto_apply_review_rules=false，但不得宣称已应用。
 - 图像裁剪只能直接调用 recrop_figure 或 create_figure_from_bbox，不能伪装成 import_analysis correction。

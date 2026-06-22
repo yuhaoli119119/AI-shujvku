@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -14,17 +15,15 @@ from app.main import app
 from app.services.module_write_lock_service import ModuleWriteLockService
 
 
-def _session(tmp_path, name: str = "module_locks.db"):
-    engine = create_engine(f"sqlite:///{tmp_path / name}", future=True)
-    with engine.begin() as connection:
-        connection.execute(text("PRAGMA foreign_keys=ON"))
+def _session():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     return engine, SessionLocal
 
 
 def test_module_write_lock_blocks_same_module_and_allows_different_modules(tmp_path):
-    engine, SessionLocal = _session(tmp_path)
+    engine, SessionLocal = _session()
     try:
         with Session(engine) as session:
             paper = Paper(title="Lock Paper", pdf_path="paper.pdf", authors=[])
@@ -56,7 +55,7 @@ def test_module_write_lock_blocks_same_module_and_allows_different_modules(tmp_p
 
 
 def test_module_write_lock_blocks_parent_child_scope(tmp_path):
-    engine, SessionLocal = _session(tmp_path, "module_lock_parent_child.db")
+    engine, SessionLocal = _session()
     try:
         with Session(engine) as session:
             paper = Paper(title="Parent Child Lock Paper", pdf_path="paper.pdf", authors=[])
@@ -74,7 +73,7 @@ def test_module_write_lock_blocks_parent_child_scope(tmp_path):
 
 
 def test_module_write_lock_scope_and_release(tmp_path):
-    engine, SessionLocal = _session(tmp_path, "module_lock_scope.db")
+    engine, SessionLocal = _session()
     try:
         with Session(engine) as session:
             paper = Paper(title="Scope Paper", pdf_path="paper.pdf", authors=[])
@@ -113,7 +112,7 @@ def test_module_write_lock_scope_and_release(tmp_path):
 
 
 def test_module_write_lock_audit_truncates_long_owner_source(tmp_path):
-    engine, SessionLocal = _session(tmp_path, "module_lock_long_owner.db")
+    engine, SessionLocal = _session()
     try:
         with Session(engine) as session:
             paper = Paper(title="Long Owner Lock Paper", pdf_path="paper.pdf", authors=[])
@@ -138,7 +137,7 @@ def test_module_write_lock_audit_truncates_long_owner_source(tmp_path):
 
 
 def test_module_write_lock_expired_lock_can_be_reacquired(tmp_path):
-    engine, SessionLocal = _session(tmp_path, "module_lock_expiry.db")
+    engine, SessionLocal = _session()
     try:
         with Session(engine) as session:
             paper = Paper(title="Expiry Paper", pdf_path="paper.pdf", authors=[])
@@ -177,8 +176,8 @@ def test_module_write_lock_uses_non_blocking_postgres_scope_lock():
         service._lock_paper_scope(uuid4())
 
 
-def test_module_write_lock_api_requires_token_for_direct_auto_apply(tmp_path):
-    engine, SessionLocal = _session(tmp_path, "module_lock_api.db")
+def test_non_dft_auto_apply_uses_last_writer_wins_and_accepts_optional_lock(tmp_path):
+    engine, SessionLocal = _session()
 
     def override_get_db_session():
         db = SessionLocal()
@@ -196,7 +195,7 @@ def test_module_write_lock_api_requires_token_for_direct_auto_apply(tmp_path):
             paper_id = paper.id
 
         client = TestClient(app)
-        blocked = client.post(
+        direct = client.post(
             "/api/external-analysis/import",
             json={
                 "paper_id": str(paper_id),
@@ -218,8 +217,9 @@ def test_module_write_lock_api_requires_token_for_direct_auto_apply(tmp_path):
                 },
             },
         )
-        assert blocked.status_code == 409
-        assert "module_write_lock_required" in blocked.text
+        assert direct.status_code == 200, direct.text
+        with Session(engine) as session:
+            assert session.get(Paper, paper_id).abstract == "New abstract"
 
         acquired = client.post(
             "/api/module-locks/acquire",
@@ -258,7 +258,7 @@ def test_module_write_lock_api_requires_token_for_direct_auto_apply(tmp_path):
 
 
 def test_external_analysis_api_defaults_reviewer_from_source_label_for_lock_validation(tmp_path):
-    engine, SessionLocal = _session(tmp_path, "module_lock_api_default_reviewer.db")
+    engine, SessionLocal = _session()
 
     def override_get_db_session():
         db = SessionLocal()

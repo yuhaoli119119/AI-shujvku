@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import json
 from uuid import UUID
 
@@ -24,7 +26,7 @@ APPROVED_IDS = {
 
 
 def _session(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'd4_3h1_write.db'}", future=True)
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
     return engine, SessionLocal

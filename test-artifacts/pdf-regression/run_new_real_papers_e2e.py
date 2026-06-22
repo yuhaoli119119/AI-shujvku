@@ -7,7 +7,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "literature-ai" / "backend"
@@ -15,7 +15,6 @@ sys.path.insert(0, str(BACKEND))
 
 RUN_DIR = ROOT / "test-artifacts" / "pdf-regression" / f"new_real_{int(time.time())}"
 STORAGE_DIR = RUN_DIR / "storage"
-DB_PATH = RUN_DIR / "regression.sqlite"
 PDF_DIR = ROOT / "test-artifacts" / "pdf-regression" / "new_real_papers"
 
 PAPERS = [
@@ -42,14 +41,34 @@ PAPERS = [
 ]
 
 
-def configure_environment() -> None:
-    os.environ["LITAI_DATABASE_URL"] = f"sqlite:///{DB_PATH.as_posix()}"
+def configure_environment() -> tuple[str, object]:
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+
+    base_url = os.getenv("LITAI_TEST_ROOT_DATABASE_URL") or os.getenv("LITAI_DATABASE_URL")
+    if not base_url:
+        raise RuntimeError("Set LITAI_TEST_ROOT_DATABASE_URL or LITAI_DATABASE_URL to PostgreSQL")
+    parsed = make_url(base_url)
+    if not parsed.drivername.startswith("postgresql"):
+        raise RuntimeError("PDF regression requires PostgreSQL")
+
+    admin_url = parsed.difference_update_query(["options"])
+    schema = f"pdf_regression_{uuid4().hex}"
+    admin_engine = create_engine(admin_url, future=True)
+    with admin_engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+    query = dict(admin_url.query)
+    query["options"] = f"-csearch_path={schema},public"
+    database_url = admin_url.set(query=query).render_as_string(hide_password=False)
+    os.environ["LITAI_DATABASE_URL"] = database_url
     os.environ["LITAI_STORAGE_ROOT"] = str(STORAGE_DIR)
     os.environ["LITAI_GROBID_URL"] = "http://127.0.0.1:9"
     os.environ["LITAI_WRITER_BACKEND"] = "rule"
     os.environ["LITAI_WRITER_API_BASE"] = ""
     os.environ["LITAI_WRITER_API_KEY"] = ""
     os.environ["LITAI_WRITER_TIMEOUT_SECONDS"] = "2"
+    return schema, admin_engine
 
 
 def counts_for(session, paper_id: UUID) -> dict[str, int]:
@@ -142,7 +161,7 @@ def mark_one_review_verified(session, paper_id: UUID, detail) -> dict:
 
 
 async def run() -> dict:
-    configure_environment()
+    schema, admin_engine = configure_environment()
     if RUN_DIR.exists():
         shutil.rmtree(RUN_DIR)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -159,13 +178,14 @@ async def run() -> dict:
 
     get_settings.cache_clear()
     settings = get_settings()
-    init_db(settings.database_url)
+    try:
+        init_db(settings.database_url)
 
-    summaries = []
-    with session_scope(settings.database_url) as session:
-        service = PaperIngestionService(session, settings)
-        for item in PAPERS:
-            paper = await service.ingest_pdf(
+        summaries = []
+        with session_scope(settings.database_url) as session:
+            service = PaperIngestionService(session, settings)
+            for item in PAPERS:
+                paper = await service.ingest_pdf(
                 source_path=item["path"],
                 original_filename=item["path"].name,
                 external_metadata=item["metadata"],
@@ -174,69 +194,86 @@ async def run() -> dict:
                 ingest_source="downloaded_semantic_scholar_pdf",
             )
 
-            review_service = ExtractionReviewService(session)
-            prepared = review_service.prepare_pending_reviews(paper.id)
-            detail = PaperQueryService(session).get_paper_detail(paper.id)
-            manual_verify = mark_one_review_verified(session, paper.id, detail)
-            detail = PaperQueryService(session).get_paper_detail(paper.id)
-            translation = await preview_paper_translation(
-                paper.id,
-                PaperTranslationPreviewRequest(include_abstract=True, max_sections=2, max_chars_per_item=1200),
-                session=session,
-                settings=settings,
-            )
-            locators = EvidenceLocatorService(session).list_locators_for_paper(paper.id)
-            schema_payload = ExtractionSchemaService(session).results(paper.id)
-            counts = counts_for(session, paper.id)
-            dft_types: dict[str, int] = {}
-            dft_examples = []
-            for result in detail.dft_results_items:
-                dft_types[result.property_type or "unknown"] = dft_types.get(result.property_type or "unknown", 0) + 1
-                if len(dft_examples) < 8:
-                    dft_examples.append(result.model_dump(mode="json"))
+                review_service = ExtractionReviewService(session)
+                prepared = review_service.prepare_pending_reviews(paper.id)
+                detail = PaperQueryService(session).get_paper_detail(paper.id)
+                manual_verify = mark_one_review_verified(session, paper.id, detail)
+                detail = PaperQueryService(session).get_paper_detail(paper.id)
+                translation = await preview_paper_translation(
+                    paper.id,
+                    PaperTranslationPreviewRequest(include_abstract=True, max_sections=2, max_chars_per_item=1200),
+                    session=session,
+                    settings=settings,
+                )
+                locators = EvidenceLocatorService(session).list_locators_for_paper(paper.id)
+                schema_payload = ExtractionSchemaService(session).results(paper.id)
+                counts = counts_for(session, paper.id)
+                dft_types: dict[str, int] = {}
+                dft_examples = []
+                for result in detail.dft_results_items:
+                    dft_types[result.property_type or "unknown"] = dft_types.get(result.property_type or "unknown", 0) + 1
+                    if len(dft_examples) < 8:
+                        dft_examples.append(result.model_dump(mode="json"))
 
-            summaries.append(
-                {
-                    "filename": item["path"].name,
-                    "paper_id": str(paper.id),
-                    "title": paper.title,
-                    "doi": paper.doi,
-                    "year": paper.year,
-                    "journal": paper.journal,
-                    "paper_type": getattr(paper, "paper_type", None),
-                    "type_confidence": getattr(paper, "type_confidence", None),
-                    "classification_source": getattr(paper, "classification_source", None),
-                    "counts": counts,
-                    "detail_counts": detail.counts.model_dump(),
-                    "prepared_reviews": prepared.created_count + prepared.existing_count,
-                    "manual_verify": manual_verify,
-                    "verified_reviews": sum(
-                        1 for item in review_service.list_reviews(paper.id) if item.reviewer_status == "verified"
-                    ),
-                    "safe_verified_reviews": sum(
-                        1 for item in review_service.list_reviews(paper.id) if item.verified
-                    ),
-                    "translation_backend": translation.backend_used,
-                    "translation_status": translation.llm_status,
-                    "translation_items": len(translation.items),
-                    "locator_count_from_api": len(locators),
-                    "schema_result_counts": {key: len(value) for key, value in schema_payload.results.items()},
-                    "validation_status": schema_payload.validation_status,
-                    "warning_counts": warning_counts(session, paper.id),
-                    "dft_types": dft_types,
-                    "dft_examples": dft_examples,
-                }
-            )
+                summaries.append(
+                    {
+                        "filename": item["path"].name,
+                        "paper_id": str(paper.id),
+                        "title": paper.title,
+                        "doi": paper.doi,
+                        "year": paper.year,
+                        "journal": paper.journal,
+                        "paper_type": getattr(paper, "paper_type", None),
+                        "type_confidence": getattr(paper, "type_confidence", None),
+                        "classification_source": getattr(paper, "classification_source", None),
+                        "counts": counts,
+                        "detail_counts": detail.counts.model_dump(),
+                        "prepared_reviews": prepared.created_count + prepared.existing_count,
+                        "manual_verify": manual_verify,
+                        "verified_reviews": sum(
+                            1
+                            for item in review_service.list_reviews(paper.id)
+                            if item.reviewer_status == "verified"
+                        ),
+                        "safe_verified_reviews": sum(
+                            1 for item in review_service.list_reviews(paper.id) if item.verified
+                        ),
+                        "translation_backend": translation.backend_used,
+                        "translation_status": translation.llm_status,
+                        "translation_items": len(translation.items),
+                        "locator_count_from_api": len(locators),
+                        "schema_result_counts": {
+                            key: len(value) for key, value in schema_payload.results.items()
+                        },
+                        "validation_status": schema_payload.validation_status,
+                        "warning_counts": warning_counts(session, paper.id),
+                        "dft_types": dft_types,
+                        "dft_examples": dft_examples,
+                    }
+                )
 
-    result = {
-        "run_dir": str(RUN_DIR),
-        "database": str(DB_PATH),
-        "storage": str(STORAGE_DIR),
-        "papers": summaries,
-    }
-    RUN_DIR.mkdir(parents=True, exist_ok=True)
-    (RUN_DIR / "summary.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    return result
+        result = {
+            "run_dir": str(RUN_DIR),
+            "database_schema": schema,
+            "storage": str(STORAGE_DIR),
+            "papers": summaries,
+        }
+        RUN_DIR.mkdir(parents=True, exist_ok=True)
+        (RUN_DIR / "summary.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result
+    finally:
+        from sqlalchemy import text
+
+        from app.db.session import _engines, _session_factories
+
+        for engine in list(_engines.values()):
+            engine.dispose()
+        _engines.clear()
+        _session_factories.clear()
+        get_settings.cache_clear()
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        admin_engine.dispose()
 
 
 if __name__ == "__main__":

@@ -37,6 +37,9 @@ def test_common_prompt_preserves_controlled_in_process_fallback_and_safety_gates
     assert "blocked_by_pdf_quality" in prompt
     assert "DFT 的 verified/safe_verified/export gate" in prompt
     assert "后写入的 AI 结果允许覆盖先前 AI 结果" in prompt
+    assert "禁止申请模块写锁" in build_ide_review_prompt("figure")
+    assert "非 DFT 修正或创建对象时，直接调用 import_analysis" in prompt
+    assert "非 DFT 不申请写锁" in build_ide_review_prompt("dft")
     assert "POST /api/external-analysis/import" in prompt
     assert "object_review_audits 的 evidence_location" in prompt
     assert "优先用 get_paper 或 get_codex_item 回读字段值" in prompt

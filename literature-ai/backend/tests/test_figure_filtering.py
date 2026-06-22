@@ -1,6 +1,8 @@
 """Tests for decorative figure filtering and figure number extraction."""
 from __future__ import annotations
 
+import os
+
 from io import BytesIO
 from pathlib import Path
 
@@ -605,7 +607,7 @@ class TestRepairScripts:
 
     @staticmethod
     def _session(tmp_path):
-        db_url = f"sqlite:///{tmp_path / 'cleanup.db'}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         engine = create_engine(db_url, future=True)
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

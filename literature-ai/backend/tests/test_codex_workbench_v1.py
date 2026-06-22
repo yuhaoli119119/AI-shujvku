@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import json
 import re
 import tempfile
@@ -46,15 +48,14 @@ from app.utils.workbench_status import workflow_needs_human_confirmation
 def workbench_env(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
-        db_path = root / "workbench.db"
         storage_root = root / "storage"
-        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+        monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
         monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
         monkeypatch.setenv("LITAI_DOCLING_DO_OCR", "false")
         get_settings.cache_clear()
 
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         Session = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
@@ -569,6 +570,95 @@ def test_paper_detail_exposes_dft_conflict_affected_field_names(workbench_env):
     assert set(dft_payload.conflict_field_names) >= {"property_type", "adsorbate", "reaction_step"}
     assert set(dft_payload.field_conflicts[0]["affected_field_names"]) >= {"property_type", "adsorbate", "reaction_step"}
     assert dft_payload.field_conflicts[0]["field_name"] == "value"
+
+
+def test_rejected_dft_target_clears_current_and_summary_conflicts(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(
+            title="Rejected DFT conflict lifecycle",
+            pdf_path="rejected-dft-conflicts.pdf",
+            workflow_status="Parsed_Material_Ready",
+        )
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="*O",
+            value=1.8,
+            unit="eV",
+            candidate_status="Rejected",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                original_value=1.8,
+                reviewed_value=None,
+                reviewer_status="rejected",
+                reviewer="literature_library_dft",
+            )
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="REVISE",
+            corrected_value=2.3,
+            confidence=0.9,
+            locator_status="exact_page",
+            evidence_text="Historical AI correction.",
+            source="older_dft_audit",
+        )
+        _seed_object_review_audit(
+            session,
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=row.id,
+            field_name="value",
+            decision="REJECT",
+            corrected_value=None,
+            confidence=0.95,
+            locator_status="exact_page",
+            evidence_text="Final rejection evidence.",
+            source="newer_dft_audit",
+        )
+        session.commit()
+
+        conflicts = ReviewConflictAggregationService(session).list_conflicts(
+            paper_id=paper.id,
+            limit=1000,
+        )
+        center = PaperWorkbenchService(session, get_settings()).review_center(
+            limit=10,
+            paper_ids=[paper.id],
+        )["rows"][0]
+        light_center = PaperWorkbenchService(session, get_settings()).review_center(
+            limit=10,
+            summary_only=True,
+            paper_ids=[paper.id],
+        )["rows"][0]
+        light_detail = PaperQueryService(session).get_paper_detail(paper.id, compact=True)
+
+    assert conflicts["conflict_count"] == 0
+    assert center["has_dft_candidates"] is True
+    assert center["has_active_dft_candidates"] is False
+    assert center["active_dft_candidate_count"] == 0
+    assert center["dft_review_conflict_count"] == 0
+    assert center["dft_review_conflict_total_count"] == 0
+    assert center["dft_completeness_status"] == "Human_Complete"
+    assert light_center["dft_completeness_status"] == "Human_Complete"
+    assert light_center["dft_audit"]["ide_ai_review_recommended"] is False
+    assert light_center["dft_audit"]["rescan_stop_reason"] == "all_candidates_rejected"
+    assert light_detail is not None
+    assert light_detail.dft_review_status == "reviewed"
 
 
 def test_paper_detail_dft_conflict_state_stays_pending_when_whole_row_fix_is_not_fully_absorbed(workbench_env):
@@ -1950,7 +2040,7 @@ def test_review_conflicts_dft_opposite_review_decisions_still_produce_decision_c
     assert "value_conflict" not in conflict_types
 
 
-def test_review_conflicts_non_dft_behavior_does_not_regress(workbench_env):
+def test_review_conflicts_non_dft_object_reviews_stay_out_of_dft_conflict_queue(workbench_env):
     _, _, Session = workbench_env
     with Session() as session:
         paper = Paper(title="Non DFT conflict regression", pdf_path="non-dft-conflict.pdf", workflow_status="Parsed_Material_Ready")
@@ -1995,10 +2085,8 @@ def test_review_conflicts_non_dft_behavior_does_not_regress(workbench_env):
         session.commit()
         payload = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper.id)
 
-    assert payload["conflict_count"] == 1
-    conflict_types = payload["rows"][0]["conflict_types"]
-    assert "value_conflict" in conflict_types
-    assert "decision_conflict" in conflict_types
+    assert payload["conflict_count"] == 0
+    assert payload["rows"] == []
 
 
 def test_review_conflicts_figure_key_elements_structural_shape_equivalence_does_not_conflict(workbench_env):

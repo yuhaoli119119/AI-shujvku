@@ -31,7 +31,6 @@ curl http://localhost:8000/api/health
 | [literature-ai/AGENTS.md](./literature-ai/AGENTS.md) | AI 协作者规则与交付边界（新 AI 必读） |
 | [literature-ai/README.md](./literature-ai/README.md) | 子项目技术说明 |
 | [literature-ai/使用说明.md](./literature-ai/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md) | 中文使用说明 |
-| [literature-ai/docs/README.md](./literature-ai/docs/README.md) | 文档索引 |
 
 ## 仓库结构
 
@@ -48,4 +47,4 @@ AI-shujvku/
 
 1. **先读 `AGENTS.md`** — 它定义了数据安全红线、权限边界和文档同步原则
 2. **以 `git status` 和 `git log` 为准** — 当前真实状态以代码和提交历史为准，不要依赖已被删除的历史文档
-3. **数据库是 PostgreSQL，不是 SQLite** — SQLite 文件若存在，仅为历史遗留，不作为活跃数据源
+3. **数据库唯一真源是 PostgreSQL** — 运行、测试和工具脚本统一使用隔离 schema

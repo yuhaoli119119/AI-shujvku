@@ -71,12 +71,6 @@ class LibraryManager:
             return tuple(sorted(DEFAULT_LIBRARY_ALIASES))
         return (normalized,)
 
-    @staticmethod
-    def _force_configured_database() -> bool:
-        from app.config import get_settings
-
-        return bool(getattr(get_settings(), "force_configured_database", False))
-
     def list_libraries(self) -> list[LibraryInfo]:
         registry = self._read_registry()
         active_name = self.normalize_library_name(registry.get("active_library"))

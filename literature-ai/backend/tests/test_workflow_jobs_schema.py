@@ -1,3 +1,4 @@
+import os
 import asyncio
 import importlib
 import tempfile
@@ -37,8 +38,7 @@ from app.services.workflow_jobs import (
 
 def test_init_db_creates_workflow_jobs_table():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "schema_check.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
 
         db_session.init_db(db_url)
 
@@ -207,8 +207,7 @@ def test_serialize_agent_activity_job_summarizes_ai_work_trace():
 
 def test_record_agent_activity_persists_to_workflow_jobs_table():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "agent_activity.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         factory = db_session._session_factories[db_url]
@@ -240,8 +239,7 @@ def test_record_agent_activity_persists_to_workflow_jobs_table():
 
 def test_force_delete_active_agent_activity_record():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "delete_active.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         factory = db_session._session_factories[db_url]
@@ -271,8 +269,7 @@ def test_force_delete_active_agent_activity_record():
 
 def test_legacy_ai_workflow_delete_endpoint_can_delete_agent_activity_record():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "legacy_delete.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         factory = db_session._session_factories[db_url]
@@ -302,8 +299,7 @@ def test_legacy_ai_workflow_delete_endpoint_can_delete_agent_activity_record():
 
 def test_paper_type_stats_are_database_backed_and_empty_when_no_papers():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "type_stats.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         factory = db_session._session_factories[db_url]
@@ -336,8 +332,7 @@ def test_paper_type_stats_are_database_backed_and_empty_when_no_papers():
 
 def test_create_job_or_reuse_active_deduplicates_same_extraction_target():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "jobs.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         factory = db_session._session_factories[db_url]
@@ -373,8 +368,7 @@ def test_create_job_or_reuse_active_deduplicates_same_extraction_target():
 
 def test_retry_reuses_active_equivalent_job():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "retry.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         factory = db_session._session_factories[db_url]
@@ -418,8 +412,7 @@ def test_retry_reuses_active_equivalent_job():
 
 def test_extraction_preflight_blocks_metadata_only_paper_even_with_abstract():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "preflight.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         paper_id = uuid4()
@@ -455,8 +448,7 @@ def test_extraction_preflight_blocks_metadata_only_paper_even_with_abstract():
 
 def test_extraction_preflight_blocks_missing_pdf_reference():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "preflight_missing_pdf.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         paper_id = uuid4()
@@ -495,8 +487,7 @@ def test_extraction_preflight_requires_parsed_body_sections():
         pdf_path = tmp_path / "storage" / "pdf" / "paper.pdf"
         pdf_path.parent.mkdir(parents=True)
         pdf_path.write_bytes(b"%PDF-1.4\n")
-        db_path = tmp_path / "preflight_no_text.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         paper_id = uuid4()
@@ -531,8 +522,7 @@ def test_extraction_preflight_requires_parsed_body_sections():
 
 def test_create_job_or_reuse_active_ignores_stale_running_job():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "stale_jobs.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         db_session.init_db(db_url)
 
         factory = db_session._session_factories[db_url]
@@ -575,8 +565,7 @@ def test_create_job_or_reuse_active_ignores_stale_running_job():
 
 def test_run_discovery_download_ingest_job_rolls_back_and_falls_back_to_metadata_only():
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "discovery_job.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         storage_root = Path(tmpdir) / "storage"
         db_session.init_db(db_url)
 

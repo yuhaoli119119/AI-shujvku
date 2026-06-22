@@ -529,6 +529,10 @@ function jsonResponse(route, payload, status = 200) {
   });
 }
 
+function isPaperListPath(pathname) {
+  return pathname === '/api/papers' || pathname === '/api/papers/';
+}
+
 async function mockApi(route) {
   const requestUrl = new URL(route.request().url());
   const pathname = requestUrl.pathname;
@@ -571,7 +575,7 @@ async function mockApi(route) {
     return jsonResponse(route, { ok: true });
   }
 
-  if ((pathname === '/api/papers' || pathname === '/api/papers/') && method === 'GET') {
+  if (isPaperListPath(pathname) && method === 'GET') {
     return jsonResponse(route, PAPERS);
   }
 
@@ -714,6 +718,8 @@ async function mockApi(route) {
         mean: -1.23,
         unit: 'eV',
       },
+      total: 2,
+      has_more: false,
     });
   }
 
@@ -1887,7 +1893,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.route('**/api/papers**', async route => {
       const request = route.request();
       const url = new URL(request.url());
-      if (request.method() !== 'GET' || url.pathname !== '/api/papers') {
+      if (request.method() !== 'GET' || !isPaperListPath(url.pathname)) {
         return route.fallback();
       }
       const limit = Number(url.searchParams.get('limit') || 25);
@@ -2140,7 +2146,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       }
     });
 
-    await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+    await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
     await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
@@ -2195,7 +2201,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     let prepared = false;
     const preparePayloads = [];
 
-    await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+    await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
     await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => {
       return jsonResponse(route, prepared ? PILOT_EXTRACTION_RESULTS : makePilotExtractionWithoutPendingReviews());
@@ -2269,7 +2275,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('D4-3D.2: existing pending rows disable prepare and do not auto-post', async ({ page }) => {
     let prepareCalls = 0;
 
-    await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+    await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
     await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
@@ -2296,7 +2302,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
     await expect(page.locator('#dftTable')).toContainText('Li2S4');
-    await page.click('button:has-text("证据链接")');
+    await page.click('button:has-text("证据")');
     await expect(page.locator('#evidenceDetail')).toContainText('片段定位状态');
     await expect(page.locator('#evidenceDetail')).toContainText('来源章节');
     await expect(page.locator('#evidenceDetail')).toContainText('Results');
@@ -2440,9 +2446,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityDonuts')).toContainText('2');
     await expect(page.locator('#qualityReasonChips')).toContainText('缺少人工确认');
     await expect(page.locator('#qualityReasonChips')).toContainText('PDF 定位不可靠');
-    await expect(page.locator('#resultSummary')).toContainText('1 条已审核可导出 DFT 记录');
+    await expect(page.locator('#resultSummary')).toContainText('2 条已审核可导出 DFT 记录');
     await expect(page.locator('#dftList')).toContainText('Li2S4');
-    await expect(page.locator('#dftList')).toContainText('-1.2300 eV');
+    await expect(page.locator('#dftList')).toContainText('-1.2300');
+    await expect(page.locator('#dftList')).toContainText('eV');
     await expect(page.locator('#dftList')).toContainText('已审核可导出');
     await expect(page.locator('#dftList')).not.toContainText('待处理');
     expect(verifyPayload).toBeNull();
@@ -2486,7 +2493,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(secondStatus).toContainText('DFT');
     await expect(secondStatus).toContainText('内容解析');
     await expect(secondAudit).toContainText('未见 DFT');
-    await expect(secondAudit).toContainText('冲突 2');
+    await expect(secondAudit).not.toContainText('冲突');
     await expect(secondAudit).not.toContainText('疑似漏提');
 
     await parsedRow.locator('[data-action="open-details"]').click();
@@ -2508,12 +2515,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('#infoOverlay .modal-close').click();
     await expect(page.locator('#infoOverlay')).not.toHaveClass(/open/);
 
-    await missingRow.locator('[data-action="open-conflicts"]').click();
-    const conflictOverlay = page.locator('#infoOverlay.open');
-    await expect(conflictOverlay).toBeVisible();
-    await expect(conflictOverlay).toContainText('冲突详情');
-    await expect(conflictOverlay).toContainText('只读聚合，不自动合并');
-    await page.locator('#infoOverlay .modal-close').click();
+    await expect(missingRow.locator('[data-action="open-conflicts"]')).toHaveCount(0);
 
     await missingRow.locator('[data-action="open-details"]').click();
     const missingDetailOverlay = page.locator('#infoOverlay.open');
@@ -2799,7 +2801,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#dftContent')).toContainText('候选 DFT 入库安全状态');
     await expect(page.locator('#dftContent')).toContainText('可导出 0');
     await expect(page.locator('#dftContent')).toContainText('双AI一致，待系统写回');
-    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(2);
+    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(5);
     const dftCandidateCard = page.locator('#dftContent details.readable-card').filter({ hasText: 'adsorption_energy' }).first();
     await dftCandidateCard.locator('summary').click();
     await expect(dftCandidateCard.locator('button:has-text("接受入库")')).toBeVisible();
@@ -3161,9 +3163,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           { name: requestedLibrary, paper_count: requestedPapers.length, is_active: false, root_path: '/libraries/dual-atom' },
         ]);
       });
-      await page.route(/\/api\/papers(\?.*)?$/, route => {
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
         const url = new URL(route.request().url());
-        if (route.request().method() !== 'GET' || url.pathname !== '/api/papers') {
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
           return route.fallback();
         }
         const libraryName = url.searchParams.get('library_name') || '';
@@ -3215,9 +3217,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.route(/\/api\/libraries\/[^/]+\/activate$/, route => {
         return jsonResponse(route, { detail: '激活文献库失败：mock db switch failed' }, 500);
       });
-      await page.route(/\/api\/papers(\?.*)?$/, route => {
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
         const url = new URL(route.request().url());
-        if (route.request().method() !== 'GET' || url.pathname !== '/api/papers') {
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
           return route.fallback();
         }
         return jsonResponse(route, [{
@@ -3261,7 +3263,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
       await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
         const url = new URL(route.request().url());
-        if (route.request().method() !== 'GET' || !['/api/papers', '/api/papers/'].includes(url.pathname)) {
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
           return route.fallback();
         }
         return jsonResponse(route, [{
@@ -3305,7 +3307,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
       await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
         const url = new URL(route.request().url());
-        if (route.request().method() !== 'GET' || !['/api/papers', '/api/papers/'].includes(url.pathname)) {
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
           return route.fallback();
         }
         seenSorts.push({
@@ -3359,9 +3361,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           { name: activeLibrary, paper_count: 1, is_active: true, root_path: '/libraries/graphdiyne' },
         ]);
       });
-      await page.route(/\/api\/papers(\?.*)?$/, async route => {
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, async route => {
         const url = new URL(route.request().url());
-        if (route.request().method() !== 'GET' || url.pathname !== '/api/papers') {
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
           return route.fallback();
         }
         papersRequestCount += 1;
@@ -3556,7 +3558,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('#figuresContent details.figure-card').evaluateAll(details => {
       details.forEach(item => item.setAttribute('open', ''));
     });
-    await page.click('#figuresContent button:has-text("Open PDF page 3")');
+    await page.click('#figuresContent button:has-text("打开图片对应页面")');
     await expect(page.locator('#pdfViewerOverlay')).toBeVisible();
     await page.evaluate(() => window.closePdfViewer && window.closePdfViewer());
 
@@ -3843,7 +3845,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: delete current paper opens confirmation and clears selection', async ({ page }) => {
     let deleted = false;
 
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, deleted ? [] : PAPERS);
       }
@@ -3899,7 +3901,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: literature library displays metadata-only state', async ({ page }) => {
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, [
           {
@@ -3948,7 +3950,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       counts: { sections: 3, figures: 1, dft_results: 0, writing_cards: 0 },
     };
 
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, [artifactPdfPaper]);
       }
@@ -4000,7 +4002,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       counts: { sections: 3, figures: 1, dft_results: 0, writing_cards: 0 },
     };
 
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, [missingArtifactPaper]);
       }
@@ -4164,9 +4166,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       rag_quality: {},
     };
 
-    await page.route(/\/api\/papers(\?.*)?$/, route => {
+    await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
       const url = new URL(route.request().url());
-      if (route.request().method() === 'GET' && url.pathname === '/api/papers') {
+      if (route.request().method() === 'GET' && isPaperListPath(url.pathname)) {
         return jsonResponse(route, listRows);
       }
       return route.fallback();
@@ -4197,7 +4199,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: metadata-only attach pdf and workflow status checks', async ({ page }) => {
     let attachCalled = false;
     
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         if (attachCalled) {
           return jsonResponse(route, [
@@ -4252,14 +4254,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
     });
 
-    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf\/jobs$/, route => {
       attachCalled = true;
       return jsonResponse(route, {
-        paper_id: 'paper-meta-only',
-        title: 'Metadata Only Paper (Attached)',
-        status: 'completed'
+        job_id: 'attach-success',
+        status: 'queued'
       });
     });
+    await page.route(/\/api\/jobs\/attach-success$/, route => jsonResponse(route, {
+      job_id: 'attach-success',
+      status: 'completed',
+      result: { paper_id: 'paper-meta-only', title: 'Metadata Only Paper (Attached)', status: 'completed' },
+    }));
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
@@ -4288,14 +4294,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
 
     await expect(page.locator('.paper-row.active')).toContainText('Metadata Only Paper (Attached)');
-    await expect(page.locator('.paper-row.active .status-chip.parsed')).toBeVisible();
+    await expect(page.locator('.paper-row.active')).toContainText('PDF 可用');
+    await expect(page.locator('.paper-row.active')).toContainText('章节: 5');
   });
 
   test('business flow: attach-pdf identity verification - needs_confirmation and confirm', async ({ page }) => {
-    let firstCall = true;
     let secondCallPayload = null;
 
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, [
           {
@@ -4324,32 +4330,32 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
     });
 
-    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf\/jobs$/, route => {
       const postData = route.request().postData() || '';
       if (postData.includes('confirm_identity_mismatch') && postData.includes('true')) {
         secondCallPayload = postData;
-        return jsonResponse(route, {
-          paper_id: 'paper-meta-only',
-          title: 'Metadata Only Paper (Attached Confirmed)',
-          status: 'merged_confirmed'
-        });
-      } else {
-        return route.fulfill({
-          status: 409,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            detail: {
-              status: 'needs_confirmation',
-              target_paper_id: 'paper-meta-only',
-              target: { title: 'Metadata Only Paper', doi: '10.1000/xyz', year: 2025 },
-              incoming: { title: 'Different Ingested Title', doi: '10.1000/xyz', year: 2026 },
-              match_score: 0.65,
-              match_reason: 'Title similarity is slightly low but DOI matches.'
-            }
-          })
-        });
+        return jsonResponse(route, { job_id: 'attach-confirmed', status: 'queued' });
       }
+      return jsonResponse(route, { job_id: 'attach-needs-confirmation', status: 'queued' });
     });
+    await page.route(/\/api\/jobs\/attach-needs-confirmation$/, route => jsonResponse(route, {
+      job_id: 'attach-needs-confirmation',
+      status: 'completed',
+      result: {
+        status: 'needs_confirmation',
+        paper_id: 'paper-meta-only',
+        target_paper_id: 'paper-meta-only',
+        target: { title: 'Metadata Only Paper', doi: '10.1000/xyz', year: 2025 },
+        incoming: { title: 'Different Ingested Title', doi: '10.1000/xyz', year: 2026 },
+        match_score: 0.65,
+        match_reason: 'Title similarity is slightly low but DOI matches.',
+      },
+    }));
+    await page.route(/\/api\/jobs\/attach-confirmed$/, route => jsonResponse(route, {
+      job_id: 'attach-confirmed',
+      status: 'completed',
+      result: { paper_id: 'paper-meta-only', title: 'Metadata Only Paper (Attached Confirmed)', status: 'merged_confirmed' },
+    }));
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
@@ -4403,7 +4409,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: attach-pdf identity verification - identity_mismatch block', async ({ page }) => {
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, [
           {
@@ -4432,22 +4438,22 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
     });
 
-    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
-      return route.fulfill({
-        status: 409,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          detail: {
-            status: 'identity_mismatch',
-            target_paper_id: 'paper-meta-only',
-            target: { title: 'Metadata Only Paper', doi: '10.1000/xyz', year: 2025 },
-            incoming: { title: 'Entirely Different Paper', doi: '10.1000/abc', year: 2026 },
-            match_score: 0.12,
-            match_reason: 'DOIs are incompatible.'
-          }
-        })
-      });
-    });
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf\/jobs$/, route => jsonResponse(route, {
+      job_id: 'attach-mismatch', status: 'queued',
+    }));
+    await page.route(/\/api\/jobs\/attach-mismatch$/, route => jsonResponse(route, {
+      job_id: 'attach-mismatch',
+      status: 'completed',
+      result: {
+        status: 'identity_mismatch',
+        paper_id: 'paper-meta-only',
+        target_paper_id: 'paper-meta-only',
+        target: { title: 'Metadata Only Paper', doi: '10.1000/xyz', year: 2025 },
+        incoming: { title: 'Entirely Different Paper', doi: '10.1000/abc', year: 2026 },
+        match_score: 0.12,
+        match_reason: 'DOIs are incompatible.',
+      },
+    }));
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
@@ -4481,7 +4487,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: attach-pdf identity verification - already_exists', async ({ page }) => {
-    await page.route(/\/api\/papers(\?|$)/, route => {
+    await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
         return jsonResponse(route, [
           {
@@ -4510,19 +4516,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
     });
 
-    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf$/, route => {
-      return route.fulfill({
-        status: 409,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          detail: {
-            status: 'already_exists',
-            target_paper_id: 'paper-existing',
-            title: 'Existing Full Paper'
-          }
-        })
-      });
-    });
+    await page.route(/\/api\/papers\/paper-meta-only\/attach-pdf\/jobs$/, route => jsonResponse(route, {
+      job_id: 'attach-existing', status: 'queued',
+    }));
+    await page.route(/\/api\/jobs\/attach-existing$/, route => jsonResponse(route, {
+      job_id: 'attach-existing',
+      status: 'completed',
+      result: { status: 'already_exists', paper_id: 'paper-existing', title: 'Existing Full Paper' },
+    }));
 
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
@@ -5726,7 +5727,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         }
       ];
 
-      await page.route(/\/api\/papers\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
+    await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
       await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
       await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
       await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));

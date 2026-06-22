@@ -17,6 +17,8 @@ Verifies that:
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -54,7 +56,7 @@ from app.utils.review_safety import (
 
 
 def _session(tmp_path):
-    db_url = f"sqlite:///{tmp_path / 'review_boundary.db'}"
+    db_url = os.environ["LITAI_TEST_DATABASE_URL"]
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

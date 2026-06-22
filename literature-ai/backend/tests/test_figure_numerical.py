@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
@@ -26,10 +27,8 @@ def test_vlm_level3_extraction_and_rag_integration():
         tmp_path = Path(tmpdir)
         
         # 1. 模拟数据库初始化
-        engine = create_engine(f"sqlite:///{tmp_path / 'test_numerical.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
-            with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(engine)
 
             # 2. 构造 Ingestion 需要的 UnifiedPaperDocument 传输对象

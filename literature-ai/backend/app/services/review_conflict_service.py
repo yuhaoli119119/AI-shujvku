@@ -78,7 +78,8 @@ class ReviewConflictAggregationService:
             field_name=field_name,
         )
         opinions = [
-            item for item in opinions
+            item
+            for item in self._exclude_rejected_dft_targets(opinions)
             if self._is_dft_target_type(item.get("target_type"))
         ]
         if active_only:
@@ -242,6 +243,22 @@ class ReviewConflictAggregationService:
             if str(item.get("source_type") or "") not in {"external_audit_opinion", "object_review_audit"}
             or str(item.get("status") or "").strip().lower() in ACTIVE_EXTERNAL_AUDIT_STATUSES
         ]
+
+    def _exclude_rejected_dft_targets(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        active: list[dict[str, Any]] = []
+        for item in opinions:
+            if self._safe_canonical_target_type(str(item.get("target_type") or "")) != "dft_results":
+                active.append(item)
+                continue
+            target_id = str(item.get("target_id") or "").strip()
+            target_row = self._load_target_row("dft_results", target_id) if target_id else None
+            if (
+                isinstance(target_row, DFTResult)
+                and str(target_row.candidate_status or "").strip().lower() == "rejected"
+            ):
+                continue
+            active.append(item)
+        return active
 
     def _collapse_repeated_source_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         latest_by_source: dict[str, dict[str, Any]] = {}
@@ -900,6 +917,19 @@ class ReviewConflictAggregationService:
         if len(mapping_keys) > 1:
             conflict_types.append("mapping_conflict")
         if dft_target is not None:
+            target_id = str(opinions[0].get("target_id") or "").strip()
+            target_row = self._load_target_row("dft_results", target_id) if target_id else None
+            has_finalized_truth = any(
+                (
+                    str(item.get("source_type") or "") == "extraction_field_review"
+                    and self._decision_bucket(item.get("decision") or item.get("status")) == "positive"
+                )
+                or (
+                    str(item.get("source_type") or "") == "paper_correction"
+                    and str(item.get("status") or "").strip().lower() == "approved"
+                )
+                for item in opinions
+            )
             for field_name, conflict_name in (
                 ("property", "property_conflict"),
                 ("material", "material_conflict"),
@@ -908,6 +938,8 @@ class ReviewConflictAggregationService:
                 ("reaction_step", "reaction_step_conflict"),
             ):
                 field_keys = {item[field_name] for item in dft_target if item[field_name]}
+                if isinstance(target_row, DFTResult) and has_finalized_truth and field_keys:
+                    field_keys.add(self._dft_row_field_key(target_row, field_name))
                 if len(field_keys) > 1:
                     conflict_types.append(conflict_name)
         if len(identity_keys) > 1:

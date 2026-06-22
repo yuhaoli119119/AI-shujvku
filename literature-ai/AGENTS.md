@@ -17,7 +17,7 @@
 ## 0. 当前基线
 
 - **PostgreSQL + pgvector** 是当前唯一的 source of truth 和活跃业务库。
-- SQLite 已经被全面弃用，不再是活跃数据库。
+- PostgreSQL 是唯一数据库，禁止引入其它数据库实现或兼容层。
 - 默认不改 canonical registry。
 - 默认不删除真实 `data/`、`artifacts/`、shadow report。
 - **27-Tool MCP 系统** 已全面激活，涵盖提取、裁切、审核流程。

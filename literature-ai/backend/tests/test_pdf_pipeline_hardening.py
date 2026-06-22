@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from io import BytesIO
+import os
+
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -8,7 +9,6 @@ import sys
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from starlette.datastructures import UploadFile
 
 from app.config import Settings, get_settings
 from app.db.models import Base, Paper, PaperChunk, PaperSection
@@ -279,14 +279,13 @@ def _unified_builder(tmp_path, monkeypatch):
     return service
 
 
-def _sqlite_ingestion_service(tmp_path):
-    db_path = tmp_path / "pipeline_hardening.sqlite"
-    engine = create_engine(f"sqlite:///{db_path}", future=True)
+def _postgresql_ingestion_service(tmp_path):
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
     session = Session(engine)
     settings = Settings(
         storage_root=tmp_path / "storage",
-        database_url=f"sqlite:///{db_path}",
+        database_url=os.environ["LITAI_TEST_DATABASE_URL"],
         embedding_provider="deterministic",
     )
     service = PaperIngestionService(session=session, settings=settings)
@@ -558,7 +557,7 @@ async def test_unified_document_repairs_truncated_titles_and_preserves_heading_m
 
 
 def test_persisted_sections_keep_heading_metadata_and_figure_captions_do_not_create_chunks(tmp_path):
-    engine, session, service = _sqlite_ingestion_service(tmp_path)
+    engine, session, service = _postgresql_ingestion_service(tmp_path)
     try:
         paper = Paper(title="Structured paper", pdf_path="paper.pdf", authors=[])
         session.add(paper)
@@ -665,18 +664,6 @@ def test_structural_chunking_prefers_paragraphs_and_bounds_long_text():
 
 
 @pytest.mark.asyncio
-async def test_deprecated_database_endpoints_default_to_gone(monkeypatch):
-    from app.api.system import SwitchDbPayload, switch_db
-
-    monkeypatch.delenv("LITAI_ENABLE_DEPRECATED_DB_ENDPOINTS", raising=False)
-    get_settings.cache_clear()
-    with pytest.raises(Exception) as exc_info:
-        await switch_db(SwitchDbPayload(database_url="sqlite:///legacy.db"))
-    assert exc_info.value.status_code == 410
-    get_settings.cache_clear()
-
-
-@pytest.mark.asyncio
 async def test_agent_guide_common_tool_lists_exclude_review_paper():
     from app.api.system import get_agent_guide
 
@@ -685,40 +672,6 @@ async def test_agent_guide_common_tool_lists_exclude_review_paper():
     advertised_tools = {tool for tools in tool_groups.values() for tool in tools}
     assert "review_paper" not in advertised_tools
     assert {"get_codex_context", "get_codex_item", "read_paper_page", "import_analysis"} <= advertised_tools
-
-
-@pytest.mark.asyncio
-async def test_deprecated_database_endpoint_requires_explicit_enable_and_keeps_guards(monkeypatch):
-    from app.api.system import SwitchDbPayload, switch_db, upload_db
-
-    monkeypatch.setenv("LITAI_ENABLE_DEPRECATED_DB_ENDPOINTS", "true")
-    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
-    get_settings.cache_clear()
-    switched: list[str] = []
-    monkeypatch.setattr("app.db.session.switch_database", switched.append)
-
-    with pytest.raises(Exception) as force_exc:
-        await switch_db(SwitchDbPayload(database_url="sqlite:///legacy.db"))
-    assert force_exc.value.status_code == 400
-    assert switched == []
-
-    monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "false")
-    get_settings.cache_clear()
-
-    response = await switch_db(SwitchDbPayload(database_url="sqlite:///legacy.db"))
-    assert response["status"] == "ok"
-    assert switched == ["sqlite:///legacy.db"]
-
-    with pytest.raises(Exception) as exc_info:
-        await switch_db(SwitchDbPayload(database_url="postgresql://unsafe"))
-    assert exc_info.value.status_code == 400
-    with pytest.raises(Exception) as upload_exc:
-        await upload_db(UploadFile(filename="not-a-db.txt", file=BytesIO(b"x")))
-    assert upload_exc.value.status_code == 400
-    with pytest.raises(Exception) as traversal_exc:
-        await upload_db(UploadFile(filename="../unsafe.db", file=BytesIO(b"x")))
-    assert traversal_exc.value.status_code == 400
-    get_settings.cache_clear()
 
 
 def test_frontend_has_no_writer_secret_inputs_or_review_paper_tool():

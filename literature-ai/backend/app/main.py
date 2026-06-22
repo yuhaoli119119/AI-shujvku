@@ -46,11 +46,10 @@ async def lifespan(_: FastAPI):
     info = activate_active_library_database()
     startup_logger = logging.getLogger("app.startup")
     startup_logger.info(
-        "Database source-of-truth: kind=%s, library=%s, configured=%s, effective=%s",
+        "Database source-of-truth: kind=%s, library=%s, configured=%s",
         info["db_kind"],
         info["active_library"] or "(none)",
         info["db_url_masked"],
-        info.get("effective_db_path"),
     )
     settings = get_settings()
     try:

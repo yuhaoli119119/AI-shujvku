@@ -53,7 +53,7 @@ ALLOWED_ROOT_CAUSES = {
     "api_artifact_status_uses_different_code_path",
     "api_server_not_reloaded_or_running_old_code",
     "storage_root_mismatch_between_cli_and_api",
-    "legacy_sqlite_used_as_runtime_source",
+    "non_postgresql_runtime_source",
     "unknown",
 }
 
@@ -819,7 +819,7 @@ def classify_root_cause(report: dict[str, Any]) -> str | None:
     db_guard = (report.get("runtime") or {}).get("database_guard") or {}
     if not db_guard.get("ok"):
         if not str(db_guard.get("drivername") or "").startswith("postgresql"):
-            return "legacy_sqlite_used_as_runtime_source"
+            return "non_postgresql_runtime_source"
         return "unknown"
     runtime_debug = (report.get("verification") or {}).get("runtime_debug") or {}
     if not runtime_debug.get("ok") or runtime_debug.get("status") == 404:

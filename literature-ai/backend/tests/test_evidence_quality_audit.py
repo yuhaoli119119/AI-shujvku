@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -19,7 +21,7 @@ from scripts.audit_evidence_extraction_quality import run_audit
 
 
 def _session(tmp_path):
-    db_url = f"sqlite:///{tmp_path / 'evidence_audit.db'}"
+    db_url = os.environ["LITAI_TEST_DATABASE_URL"]
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

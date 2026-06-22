@@ -1,6 +1,4 @@
-import shutil
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from fastapi import APIRouter
 
 from app.services.ide_prompt_service import (
     CANONICAL_MCP_PATH,
@@ -11,17 +9,6 @@ from app.services.ide_prompt_service import (
 
 
 router = APIRouter()
-
-
-class SwitchDbPayload(BaseModel):
-    database_url: str
-
-
-def _ensure_deprecated_db_endpoints_enabled() -> None:
-    raise HTTPException(
-        status_code=410,
-        detail="Deprecated SQLite database endpoints have been removed. Use PostgreSQL and the libraries API.",
-    )
 
 
 @router.get("/db-info")
@@ -59,32 +46,12 @@ async def get_db_info() -> dict:
     return {
         "database_url_masked": info["db_url_masked"],
         "dialect": info["db_kind"],
-        "db_path": info["db_path"],
         "storage_root": str(settings.storage_root),
         "active_library": info["active_library"],
-        "active_library_db_path": info["active_library_db_path"],
-        "is_active_library_sqlite": info["is_active_library_sqlite"],
-        "matches_active_library_db_path": info["matches_active_library_db_path"],
-        "effective_db_path": info.get("effective_db_path"),
-        "effective_storage_root": info.get("effective_storage_root"),
-        "effective_db_papers_total": effective_db_papers_total,
+        "active_library_root": info.get("active_library_root"),
+        "papers_total": effective_db_papers_total,
         "configured_db_papers_total": configured_db_papers_total,
-        "effective_matches_active_library_db_path": info.get("effective_matches_active_library_db_path"),
-        "recovered_from_candidate_scan": info.get("recovered_from_candidate_scan"),
-        "force_configured_database": info.get("force_configured_database"),
     }
-
-
-@router.post("/switch-db", deprecated=True)
-async def switch_db(payload: SwitchDbPayload) -> dict:
-    """已废弃。请改用 POST /api/libraries/{name}/activate 切换库。"""
-    _ensure_deprecated_db_endpoints_enabled()
-
-
-@router.post("/upload-db", deprecated=True)
-async def upload_db(file: UploadFile = File(...)) -> dict:
-    """已废弃。请改用 POST /api/libraries 或 POST /api/libraries/import 管理库。"""
-    _ensure_deprecated_db_endpoints_enabled()
 
 
 @router.get("/agent-guide")
@@ -98,7 +65,7 @@ async def get_agent_guide() -> dict:
             "A local literature toolbench for Codex-centered workflows. "
             "The system stores papers, parses PDFs into readable artifacts, exposes evidence and structured candidates, "
             "and lets Codex or a human decide what is reliable. "
-            "NOTE: The database is PostgreSQL (with pgvector extension), NOT SQLite."
+            "The database is PostgreSQL with the pgvector extension."
         ),
         "recommended_entrypoint": {
             "mode": "codex_mcp_first",

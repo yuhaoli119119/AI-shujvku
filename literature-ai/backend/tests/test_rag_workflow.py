@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -26,10 +27,8 @@ from app.rag.writer import Writer
 
 def test_retriever_writer_and_citation_guard_work_together():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
-            with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(engine)
 
             with Session(engine) as session:

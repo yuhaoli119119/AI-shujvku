@@ -4,6 +4,8 @@ Tests for POST /api/papers/{paper_id}/relationships
 """
 from __future__ import annotations
 
+import os
+
 import tempfile
 from pathlib import Path
 from uuid import uuid4
@@ -23,8 +25,7 @@ from app.db.session import get_db_session
 def setup_test_db(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_root = Path(tmpdir)
-        db_path = tmp_root / "test_relationships.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         storage_root = tmp_root / "storage"
 
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)

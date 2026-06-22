@@ -107,6 +107,10 @@ class DFTCompletenessAuditor:
             numeric_value_count=int(text_llm_numeric_summary["numeric_value_count"]),
         )
         dft_rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        all_candidates_rejected = self._all_candidates_rejected(
+            dft_rows,
+            parsed_count=int(parsed_count or 0),
+        )
         unique_candidate_count, duplicate_evidence_count = self._dedupe_counts(
             dft_rows,
             fallback_count=int(parsed_count or 0),
@@ -115,14 +119,18 @@ class DFTCompletenessAuditor:
             unique_candidate_count=unique_candidate_count,
             text_numeric_signal_count=int(text_llm_numeric_summary["numeric_value_count"]),
         )
-        rescan_recommended = coverage_ratio < 0.7 and int(text_llm_numeric_summary["numeric_value_count"]) >= 10
-        suspected_missing_count = max(
+        rescan_recommended = (
+            not all_candidates_rejected
+            and coverage_ratio < 0.7
+            and int(text_llm_numeric_summary["numeric_value_count"]) >= 10
+        )
+        suspected_missing_count = 0 if all_candidates_rejected else max(
             0,
             signal_count - int(parsed_count or 0),
             int(low_recall["estimated_missing_count"]),
             int(text_llm_numeric_summary["numeric_value_count"]) - unique_candidate_count if rescan_recommended else 0,
         )
-        status = self._coverage_status(
+        status = "Human_Complete" if all_candidates_rejected else self._coverage_status(
             signal_count=signal_count,
             parsed_count=int(parsed_count or 0),
             suspected_missing_count=suspected_missing_count,
@@ -147,14 +155,14 @@ class DFTCompletenessAuditor:
             "duplicate_evidence_count": duplicate_evidence_count,
             "excluded_numeric_signal_count": 0,
             "rescan_recommended": rescan_recommended,
-            "rescan_stop_reason": None,
+            "rescan_stop_reason": "all_candidates_rejected" if all_candidates_rejected else None,
             "rescan_next_status": "Needs_IDE_Rescan" if rescan_recommended else None,
             "numeric_signal_summary": numeric_summary,
             "text_llm_numeric_signal_summary": text_llm_numeric_summary,
-            "low_recall_warning": bool(low_recall["warning"]),
-            "low_recall_reasons": low_recall["reasons"],
+            "low_recall_warning": False if all_candidates_rejected else bool(low_recall["warning"]),
+            "low_recall_reasons": [] if all_candidates_rejected else low_recall["reasons"],
             "llm_rescan_recommended": False,
-            "ide_ai_review_recommended": bool(low_recall["warning"] or rescan_recommended),
+            "ide_ai_review_recommended": False if all_candidates_rejected else bool(low_recall["warning"] or rescan_recommended),
             "candidate_generation_policy": {
                 "web_llm_extract": "disabled",
                 "web_llm_scope": "disabled_use_prepare_ai_context_codex_item_import_analysis",
@@ -206,18 +214,26 @@ class DFTCompletenessAuditor:
                 dft_rows_by_paper.get(paper_id, []),
                 fallback_count=parsed_count,
             )
+            all_candidates_rejected = self._all_candidates_rejected(
+                dft_rows_by_paper.get(paper_id, []),
+                parsed_count=parsed_count,
+            )
             coverage_ratio = self._coverage_ratio(
                 unique_candidate_count=unique_candidate_count,
                 text_numeric_signal_count=int(text_llm_numeric_summary["numeric_value_count"]),
             )
-            rescan_recommended = coverage_ratio < 0.7 and int(text_llm_numeric_summary["numeric_value_count"]) >= 10
-            suspected_missing_count = max(
+            rescan_recommended = (
+                not all_candidates_rejected
+                and coverage_ratio < 0.7
+                and int(text_llm_numeric_summary["numeric_value_count"]) >= 10
+            )
+            suspected_missing_count = 0 if all_candidates_rejected else max(
                 0,
                 signal_count - parsed_count,
                 int(low_recall["estimated_missing_count"]),
                 int(text_llm_numeric_summary["numeric_value_count"]) - unique_candidate_count if rescan_recommended else 0,
             )
-            status = self._coverage_status(
+            status = "Human_Complete" if all_candidates_rejected else self._coverage_status(
                 signal_count=signal_count,
                 parsed_count=parsed_count,
                 suspected_missing_count=suspected_missing_count,
@@ -242,14 +258,14 @@ class DFTCompletenessAuditor:
                 "duplicate_evidence_count": duplicate_evidence_count,
                 "excluded_numeric_signal_count": 0,
                 "rescan_recommended": rescan_recommended,
-                "rescan_stop_reason": None,
+                "rescan_stop_reason": "all_candidates_rejected" if all_candidates_rejected else None,
                 "rescan_next_status": "Needs_IDE_Rescan" if rescan_recommended else None,
                 "numeric_signal_summary": numeric_summary,
                 "text_llm_numeric_signal_summary": text_llm_numeric_summary,
-                "low_recall_warning": bool(low_recall["warning"]),
-                "low_recall_reasons": low_recall["reasons"],
+                "low_recall_warning": False if all_candidates_rejected else bool(low_recall["warning"]),
+                "low_recall_reasons": [] if all_candidates_rejected else low_recall["reasons"],
                 "llm_rescan_recommended": False,
-                "ide_ai_review_recommended": bool(low_recall["warning"] or rescan_recommended),
+                "ide_ai_review_recommended": False if all_candidates_rejected else bool(low_recall["warning"] or rescan_recommended),
                 "candidate_generation_policy": {
                     "web_llm_extract": "disabled",
                     "web_llm_scope": "disabled_use_prepare_ai_context_codex_item_import_analysis",
@@ -582,6 +598,14 @@ class DFTCompletenessAuditor:
             if re.search(pattern, text or "", re.IGNORECASE):
                 hits.append(pattern.replace("\\b", "").replace("\\s+", " "))
         return hits[:6]
+
+    @staticmethod
+    def _all_candidates_rejected(rows: list[DFTResult], *, parsed_count: int) -> bool:
+        return (
+            parsed_count > 0
+            and len(rows) == parsed_count
+            and all(str(row.candidate_status or "").strip().lower() == "rejected" for row in rows)
+        )
 
     @staticmethod
     def _coverage_status(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -9,7 +11,7 @@ from scripts.recover_evidence_pages import analyze_evidence_pages, apply_recover
 
 
 def _session(tmp_path):
-    db_url = f"sqlite:///{tmp_path / 'evidence_page_recovery.db'}"
+    db_url = os.environ["LITAI_TEST_DATABASE_URL"]
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

@@ -13,10 +13,6 @@ venv/
 # Environment configurations
 .env
 
-# Local databases and run metadata
-*.sqlite
-*.sqlite3
-*.db
 *#U*
 D#Uf03a*
 backend/D*/

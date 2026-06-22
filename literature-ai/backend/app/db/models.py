@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # NOTE: This project uses PostgreSQL (with pgvector extension) as its database.
 # All models use PostgreSQL-native types: UUID, JSONB, vector(N).
-# SQLite compatibility is intentionally unsupported.
+# Models target PostgreSQL and pgvector exclusively.
 
 import json
 import os

@@ -9,7 +9,7 @@ The application does not treat any AI output as final truth by default.
 - The software is the workbench: it handles paper intake, PDF parsing, artifact preparation, evidence retrieval, candidate extraction, queues, and guarded export.
 - AI roles are assigned per task by the user. Codex, Gemini, GLM, Claude, or another IDE AI may parse, inspect figures, audit DFT data, summarize evidence, or perform a second pass.
 - Model names do not grant trust. All AI outputs remain candidates until they pass the required evidence, review, and confirmation gates.
-- PostgreSQL with pgvector is the active business database. SQLite is legacy/import/test infrastructure only.
+- PostgreSQL with pgvector is the sole business and test database.
 - MCP is the preferred controlled collaboration surface for IDE AI workers and other clients.
 - HTTP MCP always requires a configured Bearer key; private-network source addresses do not grant capabilities. Repository-native `mcp_auth_context` remains the in-process fallback.
 - Docker exposes a loopback-only Owner gateway on port 8000 and a separate LAN read-only share gateway on port 8080. PostgreSQL, Redis, MinIO, Grobid, and the backend service are not directly exposed to the LAN.

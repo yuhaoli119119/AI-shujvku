@@ -602,7 +602,7 @@ function codexItemActionHtml(itemType, item) {
         escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">复制审核提示</button>';
 }
 
-function figureReviewSummaryHtml(item, paperId) {
+function figureReviewSummaryHtml(item) {
     const imageReview = item.image_review || {};
     const cropStatus = item.crop_status || imageReview.crop_status || "unknown";
     const flags = Array.isArray(item.flags) && item.flags.length ? item.flags : (Array.isArray(imageReview.flags) ? imageReview.flags : []);
@@ -614,16 +614,6 @@ function figureReviewSummaryHtml(item, paperId) {
     const auditCount = Number(item.object_review_audit_count || (item.object_review_audits && item.object_review_audits.length) || 0);
     const conflictCount = Number(item.conflict_count || (item.field_conflicts && item.field_conflicts.length) || 0);
     const latest = item.latest_object_review_audit || ((item.object_review_audits || [])[0]) || null;
-    const page = Number(item.page || 0);
-    const openPdfAction = page
-        ? buildPdfJumpButtonHtml({
-            paperId: paperId,
-            page: page,
-            evidenceText: clipText(item.caption || "", 160),
-            label: 'Open PDF page ' + page,
-            stopPropagation: true
-        })
-        : "";
     const latestHtml = latest
         ? '<div class="figure-review-latest"><strong>Latest audit:</strong> ' +
             esc(latest.source_label || latest.source || "unknown") +
@@ -661,7 +651,6 @@ function figureReviewSummaryHtml(item, paperId) {
         auditChecklist +
         latestHtml +
         conflictHtml +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + openPdfAction + '</div>' +
     '</div>';
 }
 
@@ -919,6 +908,15 @@ function renderDftItemStatusChip(item) {
 function dftAiOpinionMeta(item) {
     const audits = item && Array.isArray(item.object_review_audits) ? item.object_review_audits : [];
     if (!audits.length) {
+        const candidateStatus = String(item && item.candidate_status || "").trim().toLowerCase();
+        const importPolicy = String(item && item.evidence_payload && item.evidence_payload.import_policy || "").trim().toLowerCase();
+        if (candidateStatus === "new_candidate" || importPolicy === "new_candidate_unverified_dft_result") {
+            return {
+                label: "待对象审核",
+                className: "meta",
+                title: "这条 DFT 数据由 AI 新发现并写入候选队列，必须完成对象级证据审核后才能进入正式数据库。"
+            };
+        }
         return {
             label: "无 AI 意见",
             className: "ok",
@@ -933,7 +931,7 @@ function dftAiOpinionMeta(item) {
     audits.forEach(function(audit) {
         const source = audit.source_label || audit.source || "unknown";
         sources[source] = true;
-        const decision = String(audit.decision || "").trim().toUpperCase();
+        const decision = dftOpinionDecision(audit);
         if (isNegativeDftDecision(decision)) hasReject = true;
         if (decision === "PROPOSED") hasProposed = true;
         if (decision === "PASS") hasPass = true;
@@ -945,7 +943,9 @@ function dftAiOpinionMeta(item) {
         item.is_exportable === true ||
         (safety && (safety.is_exportable === true || safety.eligible === true))
     );
-    if (exportable && hasProposed) {
+    const hasUnresolvedConflicts = Number(item && item.conflict_count || 0) > 0 ||
+        Boolean(item && Array.isArray(item.field_conflicts) && item.field_conflicts.length);
+    if (exportable && hasProposed && !hasUnresolvedConflicts) {
         return {
             label: "已采纳 AI 修正",
             className: "ok",
@@ -1008,7 +1008,10 @@ function renderDftAiOpinionChip(item) {
 }
 
 function dftOpinionDecision(audit) {
-    return String(audit && audit.decision || "").trim().toUpperCase();
+    const decision = String(audit && audit.decision || "").trim().toUpperCase();
+    if (["CONFIRMED", "ACCEPT", "ACCEPTED", "APPROVED", "VERIFIED", "OK"].includes(decision)) return "PASS";
+    if (["CONFIRMED_WITH_CORRECTIONS", "CORRECTED", "REVISE", "REVISION"].includes(decision)) return "PROPOSED";
+    return decision;
 }
 
 function dftOpinionSource(audit) {
@@ -1386,6 +1389,36 @@ function mechanismClaimAuditSummaryHtml(item) {
     '</div>';
 }
 
+function dftConflictSummaryHtml(item) {
+    const conflicts = Array.isArray(item && item.field_conflicts) ? item.field_conflicts : [];
+    const conflictCount = Number(item && (item.conflict_count || conflicts.length) || 0);
+    if (!conflictCount) return "";
+    const fields = [];
+    [item && item.affected_field_names, item && item.conflict_field_names].concat(
+        conflicts.map(function(conflict) {
+            return conflict && (conflict.affected_field_names || conflict.conflict_field_names);
+        })
+    ).forEach(function(values) {
+        (Array.isArray(values) ? values : []).forEach(function(field) {
+            const normalized = compactText(field);
+            if (normalized && !fields.includes(normalized)) fields.push(normalized);
+        });
+    });
+    return '<div class="figure-review-summary" style="margin-top:12px;display:grid;gap:8px;">' +
+        '<div><span class="status-chip danger">Conflicts ' + conflictCount + '</span></div>' +
+        (fields.length ? '<div class="subtle">Conflict fields: ' + esc(fields.join(", ")) + '</div>' : '') +
+    '</div>';
+}
+
+function isPendingNavigationItem(itemType, item) {
+    const target = state.pendingNavigationTarget;
+    return !!(
+        target && item && item.id &&
+        target.itemType === itemType &&
+        String(target.targetId) === String(item.id)
+    );
+}
+
 function renderWritingCardsCompact(items) {
     if (!items || !items.length) {
         return '<div class="section-card"><h3>写作卡片</h3><div class="muted">暂无内容。</div></div>';
@@ -1413,7 +1446,9 @@ function renderWritingCardsCompact(items) {
         const blocked = Array.isArray(item && item.blocked_reasons) && item.blocked_reasons.length
             ? '<div class="knowledge-detail-block"><div class="knowledge-detail-title">当前限制</div><div class="knowledge-detail-text">' + esc(item.blocked_reasons.join("、")) + '</div></div>'
             : "";
-        return '<details class="section-card writing-card-compact">' +
+        const navigationAttrs = ' data-codex-item-type="writing_card" data-target-id="' + escAttr(String(item && item.id || "")) + '"' +
+            (isPendingNavigationItem("writing_card", item) ? " open" : "");
+        return '<details class="section-card writing-card-compact"' + navigationAttrs + '>' +
             '<summary style="display:flex; justify-content:space-between; align-items:flex-start; flex:1; width:100%;">' +
                 '<div style="flex:1;">' +
                     '<div class="knowledge-card-head">' +
@@ -1452,17 +1487,17 @@ function renderReadableCards(title, items) {
         return renderWritingCardsCompact(items);
     }
     const keySets = {
-        "DFT ??": ["software", "functional", "dispersion_correction", "pseudopotential", "cutoff_energy_ev", "cutoff_energy", "k_points", "convergence_settings", "vacuum_thickness_a", "vacuum_thickness"],
-        "?????": ["name", "catalyst_type", "metal_centers", "coordination", "support", "synthesis_method", "evidence_text", "confidence"],
-        "DFT ??": ["catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "evidence_text", "confidence"],
+        "DFT 设置": ["software", "functional", "dispersion_correction", "pseudopotential", "cutoff_energy_ev", "cutoff_energy", "k_points", "convergence_settings", "vacuum_thickness_a", "vacuum_thickness"],
+        "催化剂样本": ["name", "catalyst_type", "metal_centers", "coordination", "support", "synthesis_method", "evidence_text", "confidence"],
+        "DFT 结果": ["catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "evidence_text", "confidence"],
         "候选 DFT 数据": ["candidate_status", "catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
         "DFT 候选结果": ["candidate_status", "catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
-        "?????": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
-        "????": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
-        "????": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
-        "??": ["caption", "page", "markdown_content"],
-        "????": ["relationship_type", "target_title", "target_doi", "reason"],
-        "????": ["relationship_type", "source_title", "source_doi", "reason"]
+        "电化学性能": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
+        "机理声明": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
+        "写作卡片": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
+        "表格": ["caption", "page", "markdown_content"],
+        "出站关联": ["relationship_type", "target_title", "target_doi", "reason"],
+        "入站关联": ["relationship_type", "source_title", "source_doi", "reason"]
     };
     let keys = keySets[title] ? keySets[title].slice() : Object.keys(items[0] || {}).filter(function(key) {
         return !["id", "paper_id", "raw_json", "created_at", "updated_at"].includes(key);
@@ -1481,14 +1516,18 @@ function renderReadableCards(title, items) {
         const dftAiChip = itemType === "dft_result" ? renderDftAiOpinionChip(item) : "";
         const mechanismAuditSummary = itemType === "mechanism_claim" ? mechanismClaimAuditSummaryHtml(item || {}) : "";
         const dftEvidenceSource = itemType === "dft_result" ? renderDftEvidenceSource(item) : "";
+        const dftConflictSummary = itemType === "dft_result" ? dftConflictSummaryHtml(item) : "";
         const safety = (title === "DFT 结果" || title === "候选 DFT 数据" || title === "DFT 候选结果") ? renderDftItemSafety(item) : "";
         const tableReviewChip = title === "\u8868\u683c" ? tableReviewChipHtml(item) : "";
-        const openAttr = "";
-        return '<details class="section-card readable-card"' + openAttr + '>' +
+        const itemTypeAttr = itemType ? ' data-codex-item-type="' + escAttr(itemType) + '"' : "";
+        const targetIdAttr = item && item.id ? ' data-target-id="' + escAttr(String(item.id)) + '"' : "";
+        const openAttr = isPendingNavigationItem(itemType, item) ? " open" : "";
+        return '<details class="section-card readable-card"' + itemTypeAttr + targetIdAttr + openAttr + '>' +
             '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' + dftStatusChip + dftAiChip + tableReviewChip + action + '</div></div></summary>' +
             '<div style="margin-top:10px;">' +
             renderReadableFields(item || {}, keys) +
             dftEvidenceSource +
+            dftConflictSummary +
             mechanismAuditSummary +
             safety +
             '</div>' +
@@ -2247,11 +2286,20 @@ function renderDetail(detail, audit) {
                     page: item.page || "",
                     alt: item.figure_label || ("图片 " + (index + 1))
                 }));
+                const openPageAction = item.page
+                    ? buildPdfJumpButtonHtml({
+                        paperId: detail.id,
+                        page: item.page,
+                        evidenceText: clipText(item.caption || "", 160),
+                        label: "打开图片对应页面",
+                        stopPropagation: true
+                    })
+                    : "";
                 imgHtml = '<figure class="figure-image-block">' +
                     '<button type="button" class="figure-lightbox-trigger" onclick="event.stopPropagation(); openFigureLightbox(' + lightboxPayload + ')" style="display:block;width:100%;padding:0;border:0;background:transparent;cursor:zoom-in;">' +
                         '<img src="' + escAttr(imageSrc) + '" loading="lazy" decoding="async" alt="Parsed paper figure" style="display:block;width:100%;max-height:420px;object-fit:contain;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);" />' +
                     '</button>' +
-                    '<figcaption><button type="button" class="btn ghost small" onclick="event.stopPropagation(); openFigureLightbox(' + lightboxPayload + ')">点击查看大图</button> <span class="subtle" style="margin-left:8px;">' + esc(item.figure_label || ("figure " + (index + 1))) + '</span></figcaption>' +
+                    '<figcaption><span class="figure-image-actions"><button type="button" class="btn ghost small" onclick="event.stopPropagation(); openFigureLightbox(' + lightboxPayload + ')">点击查看大图</button>' + openPageAction + '</span><span class="subtle figure-image-label">' + esc(item.figure_label || ("figure " + (index + 1))) + '</span></figcaption>' +
                 '</figure>';
             } else if (noisyFigure) {
                 var pageLink = item.page
@@ -2285,14 +2333,20 @@ function renderDetail(detail, audit) {
             var figNum = figureSortNumber(item);
             var figLabel = figNum !== null ? '图片 ' + figNum : '图片 ' + (index + 1);
             var codexAction = codexItemActionHtml("figure", item);
-            var reviewSummary = figureReviewSummaryHtml(item, detail.id);
+            var directDeleteAction = item.direct_delete_eligible
+                ? '<button type="button" class="btn danger small" onclick="event.stopPropagation(); directDeleteFigure(\'' + escAttr(detail.id) + '\', \'' + escAttr(item.id) + '\', this)">直接删除</button>'
+                : '';
+            var legacyDeleteNote = Number(item.pending_delete_proposal_count || 0) > 0
+                ? '<div class="subtle">Legacy delete proposals still pending (' + Number(item.pending_delete_proposal_count || 0) + ')</div>'
+                : '';
+            var reviewSummary = figureReviewSummaryHtml(item);
 
             return '<details class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '" data-rag-blocked="' + (ragBlocked ? "true" : "false") + '" ontoggle="if(this.open){loadFigureCardImage(this.querySelector(\'.figure-image-placeholder\'));}">' +
-                   '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + figLabel + '</h3><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + ragStatusHtml + codexAction + '</div></div></summary>' +
+                   '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + figLabel + '</h3><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + ragStatusHtml + directDeleteAction + codexAction + '</div></div></summary>' +
                    '<div style="margin-top:10px;">' +
                    imgHtml +
                    '<div class="prewrap" style="margin-top:12px;">' + esc(item.caption || "无 caption") + "</div>" +
-                   summaryHtml + metaHtml + renderFigureParseDetailHtml(item) + reviewSummary + '</div></details>';
+                   summaryHtml + metaHtml + legacyDeleteNote + renderFigureParseDetailHtml(item) + reviewSummary + '</div></details>';
         }).join("");
         
         const figureNotice = noisyCount
@@ -2586,6 +2640,23 @@ function scheduleDetailEnrichment(paperId, loadToken) {
     }
 }
 
+function applyPendingPdfJump(paperId) {
+    const pending = state.pendingPdfJump;
+    if (!pending || pending.opened || String(pending.paperId) !== String(paperId)) return;
+    pending.opened = true;
+    window.setTimeout(function() {
+        if (state.selectedPaperId !== paperId) return;
+        openPdfViewer(
+            paperId,
+            pending.page,
+            false,
+            null,
+            pending.locatorStatus || "exact_page",
+            pending.evidenceText || ""
+        );
+    }, 0);
+}
+
 async function loadPaperDetail(paperId, options) {
     if (!paperId) {
         showEmptyWorkspace();
@@ -2618,6 +2689,7 @@ async function loadPaperDetail(paperId, options) {
         renderWorkspaceHeader(detail);
         renderDetail(detail, null);
         showWorkspace();
+        applyPendingPdfJump(paperId);
         syncQueryParams();
         if (!opts.mode && detailMode !== "full" && detailModeForTab(state.currentTab) === "full") {
             window.setTimeout(function() {
@@ -3532,6 +3604,43 @@ async function revokeDftResult(itemId) {
         await loadPaperDetail(state.selectedPaperId);
     } catch (error) {
         showToast("取消入库失败：" + error.message, "error");
+    }
+}
+
+async function directDeleteFigure(paperId, figureId, button) {
+    const reason = window.prompt("请输入直接删除这张污染/重复图片的理由：");
+    if (!reason || !reason.trim()) return;
+    const figures = state.selectedPaper && Array.isArray(state.selectedPaper.figures) ? state.selectedPaper.figures : [];
+    const figure = figures.find(function(item) { return String(item.id) === String(figureId); }) || {};
+    try {
+        await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(paperId) + "/figures/" + encodeURIComponent(figureId) + "/delete",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    confirm_direct_delete: true,
+                    reviewer: "literature_library_user",
+                    reason: reason.trim(),
+                    evidence_payload: {
+                        page: figure.page || null,
+                        figure_label: figure.figure_label || null,
+                        caption: figure.caption || null,
+                    },
+                    delete_image_file: true,
+                }),
+            }
+        );
+        if (state.selectedPaper && Array.isArray(state.selectedPaper.figures)) {
+            state.selectedPaper.figures = state.selectedPaper.figures.filter(function(item) {
+                return String(item.id) !== String(figureId);
+            });
+        }
+        const card = button && button.closest ? button.closest("details.figure-card") : null;
+        if (card) card.remove();
+        showToast("污染/重复图片已删除。", "success");
+    } catch (error) {
+        showToast("图片删除失败：" + error.message, "error");
     }
 }
 

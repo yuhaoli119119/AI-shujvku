@@ -39,14 +39,23 @@ def _text_list(value: Any) -> list[str]:
 def normalized_figure_identity(item: Any) -> str | None:
     figure_label = str(_read_value(item, "figure_label") or "").strip()
     caption = str(_read_value(item, "caption") or "").strip()
-    raw = " ".join(part for part in [figure_label, caption] if part).strip()
-    if not raw:
-        return None
-    match = re.search(r"(?:fig(?:ure)?|scheme)?[_\s.\-]*(\d+)([a-z])?", raw, flags=re.IGNORECASE)
+    for raw in (figure_label, caption):
+        match = re.search(
+            r"\b(?P<kind>fig(?:ure)?|scheme)[_\s.\-]*(?P<number>\d+)(?P<suffix>[a-z])?",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        kind = "scheme" if match.group("kind").lower() == "scheme" else "figure"
+        suffix = (match.group("suffix") or "").lower()
+        return f"{kind}:{match.group('number')}{suffix}"
+
+    match = re.search(r"\b(\d+)([a-z])?\b", figure_label)
     if not match:
         return None
     suffix = (match.group(2) or "").lower()
-    return f"{match.group(1)}{suffix}"
+    return f"figure:{match.group(1)}{suffix}"
 
 
 def direct_delete_eligibility(item: Any, *, duplicate_group_size: int = 1) -> tuple[bool, str | None]:

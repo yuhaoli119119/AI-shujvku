@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -86,9 +87,7 @@ def test_heuristic_import_maps_legacy_candidates_notes():
 
 def test_external_analysis_import_and_materialize_flow():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -202,9 +201,7 @@ def test_external_analysis_import_and_materialize_flow():
 
 def test_import_analysis_auto_applies_non_dft_corrections():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'non_dft_auto_apply.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -306,9 +303,7 @@ def test_import_analysis_auto_applies_non_dft_corrections():
 
 def test_import_analysis_auto_creates_non_dft_structured_objects():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'non_dft_create.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -434,9 +429,7 @@ def test_import_analysis_auto_creates_non_dft_structured_objects():
 
 def test_import_analysis_auto_applies_figure_delete_correction():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_delete.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -526,9 +519,7 @@ def test_import_analysis_rejects_figure_recrop_submission(monkeypatch):
         root = Path(tmpdir)
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(root / "storage"))
         get_settings.cache_clear()
-        engine = create_engine(f"sqlite:///{root / 'figure_recrop.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -619,9 +610,7 @@ def test_import_analysis_rejects_figure_recrop_submission(monkeypatch):
 
 def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'si_candidate.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -713,10 +702,8 @@ def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
 
 def test_import_analysis_marks_supporting_reference_candidate_as_borrowed():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'supporting_reference.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
-            with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(engine)
             with Session(engine) as session:
                 paper = Paper(title="Main Paper", pdf_path="main.pdf", authors=["A"])
@@ -763,9 +750,7 @@ def test_import_analysis_marks_supporting_reference_candidate_as_borrowed():
 
 def test_external_analysis_relationship_resolution_stays_in_source_library():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_scope.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -828,9 +813,7 @@ def test_external_analysis_relationship_resolution_stays_in_source_library():
 
 def test_external_analysis_relationship_resolution_blocks_ambiguous_same_library_title():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_ambiguous.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -895,9 +878,7 @@ def test_external_analysis_relationship_resolution_blocks_ambiguous_same_library
 
 def test_external_analysis_materialize_rejects_empty_or_implicit_all():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_contract.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -955,9 +936,7 @@ def test_external_analysis_materialize_rejects_empty_or_implicit_all():
 
 def test_external_analysis_paper_level_audit_payload_creates_unverified_candidate():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_audit.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1035,9 +1014,7 @@ def test_external_analysis_paper_level_audit_payload_creates_unverified_candidat
 
 def test_external_analysis_object_level_dft_audit_payload_creates_unverified_candidate():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'object_dft_audit.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1131,9 +1108,7 @@ def test_external_analysis_object_level_dft_audit_payload_creates_unverified_can
 
 def test_external_analysis_object_level_writing_card_audit_payload_is_candidate_only():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'object_writing_audit.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1213,9 +1188,7 @@ def test_external_analysis_object_level_writing_card_audit_payload_is_candidate_
 
 def test_external_analysis_auto_apply_review_rules_materializes_single_ai_anchored_content():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_single_ai.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1297,9 +1270,7 @@ def test_external_analysis_auto_apply_review_rules_materializes_single_ai_anchor
 
 def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_modules():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_non_dft_structured.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1411,7 +1382,7 @@ def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_mo
 
 def test_external_analysis_import_rejects_empty_payload():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'empty_import.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1459,9 +1430,7 @@ def test_external_analysis_import_rejects_empty_payload():
 
 def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_dft():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_dual_dft.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1577,9 +1546,7 @@ def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_dft():
 
 def test_external_analysis_dft_dual_ai_missing_material_identity_stays_pending():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_missing_dft_identity.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1613,11 +1580,16 @@ def test_external_analysis_dft_dual_ai_missing_material_identity_stays_pending()
                 row_id = row.id
 
             client = TestClient(app)
+            write_lock_tokens = [
+                _acquire_write_lock(client, paper_id, module_name="catalyst_samples", locked_by="ide_ai"),
+                _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai"),
+            ]
             payload = {
                 "paper_id": str(paper_id),
                 "source": "ide_ai",
                 "auto_apply_review_rules": True,
                 "reviewer": "ide_ai",
+                "write_lock_tokens": write_lock_tokens,
                 "raw_payload": {
                     "object_review_audits": [
                         {
@@ -1658,9 +1630,7 @@ def test_external_analysis_dft_dual_ai_missing_material_identity_stays_pending()
 
 def test_external_analysis_dft_dual_ai_requires_same_material_identity():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_dft_identity.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1703,6 +1673,10 @@ def test_external_analysis_dft_dual_ai_requires_same_material_identity():
                 row_id = row.id
 
             client = TestClient(app)
+            write_lock_tokens = [
+                _acquire_write_lock(client, paper_id, module_name="catalyst_samples", locked_by="ide_ai"),
+                _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai"),
+            ]
 
             def payload_for(source_label: str, material: str) -> dict[str, Any]:
                 return {
@@ -1711,6 +1685,7 @@ def test_external_analysis_dft_dual_ai_requires_same_material_identity():
                     "source_label": source_label,
                     "auto_apply_review_rules": True,
                     "reviewer": "ide_ai",
+                    "write_lock_tokens": write_lock_tokens,
                     "raw_payload": {
                         "object_review_audits": [
                             {
@@ -1752,7 +1727,7 @@ def test_external_analysis_dft_dual_ai_requires_same_material_identity():
 
 def test_new_dft_candidates_do_not_create_target_new_conflicts():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'new_candidate_conflicts.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         try:
             with Session(engine) as session:
@@ -1807,9 +1782,7 @@ def test_new_dft_candidates_do_not_create_target_new_conflicts():
 
 def test_external_analysis_auto_apply_review_rules_single_ai_applies_figures():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_dual_figure.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1887,9 +1860,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_applies_figures():
 
 def test_external_analysis_auto_apply_figure_summary_strips_caption_echo_prefix():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_figure_caption_echo.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -1972,9 +1943,7 @@ def test_external_analysis_auto_apply_figure_summary_strips_caption_echo_prefix(
 
 def test_external_analysis_auto_apply_figure_key_elements_normalizes_stringified_dicts():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_figure_key_elements.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2056,9 +2025,7 @@ def test_external_analysis_auto_apply_figure_key_elements_normalizes_stringified
 
 def test_external_analysis_auto_apply_review_rules_single_ai_accepts_tables():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_table_accept.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2135,9 +2102,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_accepts_tables():
 
 def test_external_analysis_auto_apply_review_rules_single_ai_rejects_tables():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_table_reject.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2214,9 +2179,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_rejects_tables():
 
 def test_external_analysis_auto_apply_review_rules_single_ai_revises_tables():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_table_revise.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2299,9 +2262,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_revises_tables():
 
 def test_external_analysis_auto_apply_review_rules_normalizes_legacy_codex_item_table_correction():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_legacy_codex_item_table.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2382,9 +2343,7 @@ def test_external_analysis_auto_apply_review_rules_normalizes_legacy_codex_item_
 
 def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_sample():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'auto_apply_dft_binding.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2482,9 +2441,7 @@ def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_samp
 
 def test_object_level_audit_payloads_participate_in_conflict_aggregation():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'object_conflicts.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2575,9 +2532,7 @@ def test_object_level_audit_payloads_participate_in_conflict_aggregation():
 
 def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'third_ai_adjudication.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2612,6 +2567,10 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
                 row_id = row.id
 
             client = TestClient(app)
+            write_lock_tokens = [
+                _acquire_write_lock(client, paper_id, module_name="catalyst_samples", locked_by="ide_ai"),
+                _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai"),
+            ]
 
             def payload_for(
                 source_label: str,
@@ -2654,12 +2613,14 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
                     body["write_lock_tokens"] = write_lock_tokens
                 return body
 
-            first = client.post("/api/external-analysis/import", json=payload_for("ide-ai-1", "PASS", -1.10, 0.81))
-            second = client.post("/api/external-analysis/import", json=payload_for("ide-ai-2", "REVISE", -1.26, 0.84))
-            third_lock_tokens = [
-                _acquire_write_lock(client, paper_id, module_name="catalyst_samples", locked_by="ide_ai"),
-                _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai"),
-            ]
+            first = client.post(
+                "/api/external-analysis/import",
+                json=payload_for("ide-ai-1", "PASS", -1.10, 0.81, write_lock_tokens=write_lock_tokens),
+            )
+            second = client.post(
+                "/api/external-analysis/import",
+                json=payload_for("ide-ai-2", "REVISE", -1.26, 0.84, write_lock_tokens=write_lock_tokens),
+            )
             third = client.post(
                 "/api/external-analysis/import",
                 json=payload_for(
@@ -2668,7 +2629,7 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
                     -1.26,
                     0.92,
                     adjudication_role="third_ai",
-                    write_lock_tokens=third_lock_tokens,
+                    write_lock_tokens=write_lock_tokens,
                 ),
             )
 
@@ -2700,7 +2661,7 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
             assert all(item.status == "approved" for item in corrections)
             assert value_corrections[0].evidence_payload["adjudication_role"] == "third_ai"
             assert value_corrections[0].evidence_payload["selected_source_ids"] == ["ide-ai-1", "ide-ai-2"]
-            assert {candidate.status for candidate in candidates} == {"ai_applied"}
+            assert {candidate.status for candidate in candidates} == {"materialized"}
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -2708,9 +2669,7 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
 
 def test_external_analysis_delete_post_alias_and_utc_created_at():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'external_analysis_delete.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2762,13 +2721,10 @@ def test_external_analysis_delete_post_alias_and_utc_created_at():
 
 
 def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
-    with TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "database.sqlite"
-        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+    with TemporaryDirectory():
+        monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
         get_settings.cache_clear()
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2843,9 +2799,9 @@ def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
             health = client.get("/api/health")
             assert health.status_code == 200
             health_payload = health.json()
-            assert health_payload["db_kind"] == "sqlite"
-            assert health_payload["db_path"].endswith("database.sqlite")
-            assert health_payload["is_active_library_sqlite"] is True
+            assert health_payload["db_kind"] == "postgresql"
+            assert health_payload["db_url_masked"]
+            assert "db_path" not in health_payload
 
             response = client.post(
                 f"/api/external-analysis/papers/{main_paper.id}/internal-parse",
@@ -2867,17 +2823,15 @@ def test_internal_ai_parse_endpoint_auto_materializes(monkeypatch):
 
 
 def test_internal_ai_parse_uses_persisted_writer_settings(monkeypatch):
-    with TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "persisted_settings.sqlite"
-        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+    with TemporaryDirectory():
+        monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
         monkeypatch.delenv("LITAI_WRITER_API_KEY", raising=False)
         monkeypatch.delenv("LITAI_WRITER_API_BASE", raising=False)
         monkeypatch.delenv("LITAI_WRITER_MODEL", raising=False)
         get_settings.cache_clear()
 
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(connection)
             connection.execute(
                 text(

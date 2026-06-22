@@ -282,20 +282,6 @@ class ControlledLocatorRepairWriteService:
             raise LocatorRepairWriteError("Expected target locator count was not written")
 
 
-def apply_locator_repair_plan_to_sqlite(
-    *,
-    db_path: str | Path,
-    disabled_plan_path: str | Path,
-    proposal_manifest_path: str | Path,
-    approved_review_ids: set[str],
-    rollback_snapshot_path: str | Path,
-    allow_active_db_write: bool = False,
-    confirmed_approval: bool = False,
-    dry_run: bool = True,
-) -> LocatorRepairWriteResult:
-    raise LocatorRepairWriteError("SQLite locator repair writes have been removed. Use PostgreSQL session services.")
-
-
 def _warning_reason(item: dict[str, Any]) -> str:
     return (
         "controlled_locator_repair:D4-3H.1;"
@@ -315,16 +301,6 @@ def _uuid(value: Any) -> UUID:
 
 def _uuid_hex(value: Any) -> str:
     return _uuid(value).hex
-
-
-def _write_snapshot(path: str | Path, snapshot: dict[str, Any], *, db_path: str | Path) -> None:
-    payload = {
-        "active_db_path": str(Path(db_path).resolve()),
-        **snapshot,
-    }
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _review_to_dict(review: ExtractionFieldReview) -> dict[str, Any]:

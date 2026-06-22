@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import tempfile
 from pathlib import Path
 from uuid import UUID
@@ -65,8 +67,7 @@ from app.utils.library_names import DEFAULT_LIBRARY_NAME
 @pytest.fixture
 def mcp_test_env(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "mcp_test.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         monkeypatch.setenv(
             "LITAI_MCP_API_KEYS",
@@ -205,7 +206,7 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
             reason="Cross-check against the uploaded PDF abstract.",
             evidence_payload={"page": 1, "section_title": "Abstract"},
         )
-        assert correction["status"] == "pending"
+        assert correction["status"] == "approved"
         assert correction["target_path"] == "abstract"
 
     with Session(mcp_test_env["engine"]) as session:
@@ -215,7 +216,7 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
 
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
-        assert [item.action for item in audit_logs] == ["append_note", "propose_correction"]
+        assert [item.action for item in audit_logs] == ["append_note", "propose_correction", "approve_correction"]
 
 
 def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_test_env):
@@ -1200,7 +1201,7 @@ def test_mcp_propose_dft_result_correction_enters_review_queue(mcp_test_env):
         assert audit.target_id == correction["id"]
 
 
-def test_ai_reviewer_mcp_approve_non_dft_requires_module_lock(mcp_test_env):
+def test_propose_correction_applies_non_dft_without_module_lock(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="AI Review Lock Target", abstract="Old abstract", pdf_path="review-lock.pdf")
         session.add(paper)
@@ -1217,17 +1218,8 @@ def test_ai_reviewer_mcp_approve_non_dft_requires_module_lock(mcp_test_env):
             reason="AI proposes a safer abstract.",
         )
 
-    with mcp_auth_context(_ai_reviewer_auth()):
-        with pytest.raises(ValueError, match="module_write_lock_required"):
-            approve_correction(correction["id"])
-        lock = acquire_module_write_lock(
-            paper_id=paper_id,
-            module_name="content",
-            locked_by="ai_pc_1",
-        )
-        approved = approve_correction(correction["id"], write_lock_token=lock["lock_token"])
-        assert approved["status"] == "approved"
-        assert approved["reviewed_by"] == "ai_pc_1"
+        assert correction["status"] == "approved"
+        assert correction["reviewed_by"] == "claude"
 
     with Session(mcp_test_env["engine"]) as session:
         updated = session.get(Paper, UUID(paper_id))
@@ -1394,7 +1386,7 @@ def test_import_analysis_object_review_can_apply_paper_type_metadata(mcp_test_en
         assert updated.paper_type == "B"
 
 
-def test_admin_mcp_review_flow_applies_or_rejects_corrections(mcp_test_env):
+def test_non_dft_proposals_apply_immediately_and_leave_queue_empty(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="Review Target", abstract="Old abstract", pdf_path="review.pdf")
         session.add(paper)
@@ -1418,29 +1410,23 @@ def test_admin_mcp_review_flow_applies_or_rejects_corrections(mcp_test_env):
             proposed_value="Rejected title",
             reason="This one should be rejected.",
         )
+        assert first["status"] == "approved"
+        assert second["status"] == "approved"
 
     with mcp_auth_context(_admin_auth()):
         queue = get_correction_queue()
-        assert len(queue["items"]) == 2
-
-        approved = approve_correction(first["id"])
-        assert approved["status"] == "approved"
-        assert approved["reviewed_by"] == "admin"
-
-        rejected = reject_correction(second["id"], reason="Not supported by source PDF.")
-        assert rejected["status"] == "rejected"
-        assert rejected["reviewed_by"] == "admin"
+        assert queue["items"] == []
 
     with Session(mcp_test_env["engine"]) as session:
         paper = session.get(Paper, UUID(first["paper_id"]))
         assert paper is not None
         assert paper.abstract == "Approved abstract"
-        assert paper.title == "Review Target"
+        assert paper.title == "Rejected title"
 
         logs = session.scalars(select(AuditLog).order_by(AuditLog.created_at.asc())).all()
         actions = [log.action for log in logs]
         assert "approve_correction" in actions
-        assert "reject_correction" in actions
+        assert "reject_correction" not in actions
 
 
 def test_admin_mcp_review_flow_accepts_paper_type_alias_target_path(mcp_test_env):
@@ -1461,9 +1447,7 @@ def test_admin_mcp_review_flow_accepts_paper_type_alias_target_path(mcp_test_env
             evidence_payload={"page": 1, "quoted_text": "Review-style summary of prior work."},
         )
 
-    with mcp_auth_context(_admin_auth()):
-        approved = approve_correction(correction["id"])
-        assert approved["status"] == "approved"
+        assert correction["status"] == "approved"
 
     with Session(mcp_test_env["engine"]) as session:
         updated = session.get(Paper, UUID(paper_id))
@@ -1544,11 +1528,9 @@ def test_admin_mcp_review_flow_applies_mechanism_claim_patch(mcp_test_env):
 
     with mcp_auth_context(_admin_auth()):
         detail = get_correction_detail(correction["id"])
-        assert detail["current_value"] == "Fe-N4 suppresses the shuttle effect."
+        assert detail["current_value"] == "Fe-N4 is associated with reduced shuttle behavior under the reported test conditions."
         assert detail["proposed_value"] == "Fe-N4 is associated with reduced shuttle behavior under the reported test conditions."
-
-        approved = approve_correction(correction["id"])
-        assert approved["status"] == "approved"
+        assert detail["status"] == "approved"
 
     with Session(mcp_test_env["engine"]) as session:
         updated = session.get(MechanismClaim, UUID(claim_id))

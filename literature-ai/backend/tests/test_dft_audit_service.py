@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
@@ -13,9 +15,7 @@ from app.services.dft_rescan_policy import (
 
 
 def _make_session() -> Session:
-    engine = create_engine("sqlite:///:memory:", future=True)
-    with engine.begin() as connection:
-        connection.execute(text("PRAGMA foreign_keys=ON"))
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
     return Session(engine)
 
@@ -110,6 +110,54 @@ def test_dft_audit_does_not_flag_when_candidates_cover_numeric_table():
         assert audit["low_recall_warning"] is False
         assert audit["llm_rescan_recommended"] is False
         assert audit["coverage_status"] in {"Human_Complete", "Initial_Parsed"}
+    finally:
+        session.close()
+
+
+def test_dft_audit_treats_all_rejected_candidates_as_review_complete():
+    session = _make_session()
+    try:
+        paper = Paper(title="Rejected DFT paper", pdf_path="rejected.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        session.add(
+            PaperTable(
+                paper_id=paper.id,
+                caption="DFT adsorption energy table.",
+                markdown_content="| Intermediate | E_ads / eV |\n| --- | --- |\n| O | -1.10 |\n| OH | -0.82 |",
+                page=4,
+            )
+        )
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    adsorbate="O",
+                    property_type="adsorption_energy",
+                    value=-1.10,
+                    unit="eV",
+                    candidate_status="Rejected",
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    adsorbate="OH",
+                    property_type="adsorption_energy",
+                    value=-0.82,
+                    unit="eV",
+                    candidate_status="Rejected",
+                ),
+            ]
+        )
+        session.commit()
+
+        audit = DFTCompletenessAuditor(session).audit_paper(paper.id, blocked_count=0)
+
+        assert audit["coverage_status"] == "Human_Complete"
+        assert audit["suspected_missing_count"] == 0
+        assert audit["rescan_recommended"] is False
+        assert audit["rescan_stop_reason"] == "all_candidates_rejected"
+        assert audit["low_recall_warning"] is False
+        assert audit["ide_ai_review_recommended"] is False
     finally:
         session.close()
 

@@ -134,9 +134,7 @@ class SettingsUpdateRequest(BaseModel):
 def _get_active_engine():
     """Return the currently active database engine.
 
-    Use ``get_settings().database_url`` as the source of truth.  The active
-    library recovery path updates this value via ``switch_database``; picking an
-    arbitrary cached engine can otherwise read settings from a stale shadow DB.
+    Use ``get_settings().database_url`` as the PostgreSQL source of truth.
     """
     from app.config import get_settings
     from app.db.session import get_engine

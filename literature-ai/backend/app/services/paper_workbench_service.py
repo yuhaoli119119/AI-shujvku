@@ -580,7 +580,12 @@ class PaperWorkbenchService:
         for paper_id, rows_for_paper in dft_rows_by_paper.items():
             exportable = sum(1 for row in rows_for_paper if gate_by_id.get(str(row.id)) and gate_by_id[str(row.id)].eligible)
             exportable_counts[paper_id] = exportable
-            blocked_counts[paper_id] = max(0, len(rows_for_paper) - exportable)
+            blocked_counts[paper_id] = sum(
+                1
+                for row in rows_for_paper
+                if self._is_active_dft_candidate(row.candidate_status)
+                and not (gate_by_id.get(str(row.id)) and gate_by_id[str(row.id)].eligible)
+            )
         dft_audits = (
             {}
             if summary_only or auditor is None
@@ -595,14 +600,22 @@ class PaperWorkbenchService:
             status_counts[paper.workflow_status or "Imported"] += 1
             quality_counts[paper.pdf_quality_status or "unknown"] += 1
             dft_rows = dft_rows_by_paper.get(paper.id, [])
-            dft_count = dft_count_by_paper.get(paper.id, len(dft_rows))
+            dft_count = (
+                dft_count_by_paper.get(paper.id, 0)
+                if summary_only
+                else len(dft_rows)
+            )
             active_dft_count = (
                 active_dft_count_by_paper.get(paper.id, 0)
                 if summary_only
                 else self._count_active_dft_candidates(dft_rows)
             )
             figures = figure_rows_by_paper.get(paper.id, [])
-            figure_count = figure_count_by_paper.get(paper.id, len(figures))
+            figure_count = (
+                figure_count_by_paper.get(paper.id, 0)
+                if summary_only
+                else len(figures)
+            )
             table_count = table_counts.get(paper.id, 0)
             evidence_count = evidence_counts.get(paper.id, 0)
             paper_candidates = candidates_by_paper.get(paper.id, [])
@@ -720,6 +733,7 @@ class PaperWorkbenchService:
                 parsed_count=dft_count,
                 exportable_count=exportable_count,
                 blocked_count=blocked_count,
+                candidate_status_counts=dft_candidate_status_counts,
             )
             locator_reliability = locator_reliability_by_paper.get(str(paper.id)) or {
                 "status": "reliable",
@@ -998,9 +1012,18 @@ class PaperWorkbenchService:
         parsed_count: int,
         exportable_count: int,
         blocked_count: int,
+        candidate_status_counts: dict[str, int],
     ) -> dict[str, Any]:
+        rejected_count = sum(
+            int(count or 0)
+            for candidate_status, count in candidate_status_counts.items()
+            if str(candidate_status or "").strip().lower() == "rejected"
+        )
+        all_candidates_rejected = parsed_count > 0 and rejected_count == parsed_count
         status = "Unparsed"
-        if parsed_count > 0:
+        if all_candidates_rejected:
+            status = "Human_Complete"
+        elif parsed_count > 0:
             status = "DB_Ready" if exportable_count > 0 and blocked_count == 0 else "Initial_Parsed"
         if str(paper.workflow_status or "") == "Suspected_Missing":
             status = "Suspected_Missing"
@@ -1011,6 +1034,7 @@ class PaperWorkbenchService:
                 "Unparsed": "未解析",
                 "Initial_Parsed": "初步解析",
                 "Suspected_Missing": "疑似漏提",
+                "Human_Complete": "人工确认完整",
                 "DB_Ready": "可入库",
             }.get(status, status),
             "detected_signal_count": parsed_count,
@@ -1025,6 +1049,7 @@ class PaperWorkbenchService:
             "unique_candidate_count": parsed_count,
             "duplicate_evidence_count": 0,
             "rescan_recommended": status == "Suspected_Missing",
+            "rescan_stop_reason": "all_candidates_rejected" if all_candidates_rejected else None,
             "rescan_next_status": "Needs_IDE_Rescan" if status == "Suspected_Missing" else None,
             "low_recall_warning": status == "Suspected_Missing",
             "low_recall_reasons": [],

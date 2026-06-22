@@ -1,6 +1,6 @@
 """Read-only share API — all endpoints are GET-only, token-scoped, and strictly read.
 
-This project uses PostgreSQL (pgvector), not SQLite.
+This project uses PostgreSQL with pgvector.
 """
 import mimetypes
 import re

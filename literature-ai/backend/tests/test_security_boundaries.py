@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import socket
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,7 +32,7 @@ def _request(host: str, authorization: str = ""):
 
 @pytest.fixture
 def share_client(tmp_path, monkeypatch):
-    db_url = f"sqlite:///{tmp_path / 'share-security.db'}"
+    db_url = os.environ["LITAI_TEST_DATABASE_URL"]
     monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
     monkeypatch.setenv("LITAI_OWNER_API_TOKEN", " ")
     monkeypatch.setenv("LITAI_SHARE_MAX_PAGE_SIZE", "10")
@@ -64,7 +66,7 @@ def share_client(tmp_path, monkeypatch):
 
 @pytest.fixture
 def export_clients(tmp_path, monkeypatch):
-    db_url = f"sqlite:///{tmp_path / 'export-security.db'}"
+    db_url = os.environ["LITAI_TEST_DATABASE_URL"]
     monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
     monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "owner-secret")
     monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "false")

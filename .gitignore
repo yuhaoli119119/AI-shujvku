@@ -51,10 +51,7 @@ outputs/tmp/**
 !outputs/tmp/
 !outputs/tmp/.gitkeep
 
-# Local databases and run metadata
-*.sqlite
-*.sqlite3
-*.db
+# Local run metadata
 *#U*
 D#Uf03a*
 literature-ai/backend/D*/

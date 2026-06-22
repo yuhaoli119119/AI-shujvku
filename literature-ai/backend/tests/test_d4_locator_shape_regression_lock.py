@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import asyncio
 import csv
 import io
@@ -27,7 +29,7 @@ PRECISE_BBOX = {
 
 
 def _session(tmp_path):
-    db_url = f"sqlite:///{tmp_path / 'd4_locator_shape_lock.db'}"
+    db_url = os.environ["LITAI_TEST_DATABASE_URL"]
     engine = create_engine(db_url, future=True)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

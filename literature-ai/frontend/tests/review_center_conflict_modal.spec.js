@@ -96,6 +96,9 @@ test.describe('Review Center Conflict Modal', () => {
               object_review_audit_count: 0,
               object_review_audits: [],
               review_conflict_count: 2,
+              review_conflict_total_count: 2,
+              dft_review_conflict_count: 2,
+              dft_review_conflict_total_count: 2,
               workspace_path: '/workspace/paper-2',
               paper_short_id: 'cf73c0c5',
             },
@@ -230,15 +233,15 @@ test.describe('Review Center Conflict Modal', () => {
               ],
             },
             {
-              target_type: 'writing_card',
-              target_id: 'writing-card-2',
-              field_name: 'core_hypothesis',
+              target_type: 'catalyst_sample',
+              target_id: 'catalyst-sample-2',
+              field_name: 'coordination',
               reviewer_count: 2,
               conflict_types: ['mapping_conflict'],
               adjudication: {
                 adjudication_mode: 'manual',
                 recommended_action: 'jump_to_review',
-                reason_summary: 'Writing-card conflicts should stay in object review.',
+                reason_summary: 'Catalyst-sample conflicts should stay in object review.',
                 blocked_reasons: ['requires_object_review'],
               },
               opinions: [
@@ -251,10 +254,10 @@ test.describe('Review Center Conflict Modal', () => {
                   confidence: 0.58,
                   reason: 'Hypothesis may map to mechanism claim instead.',
                   evidence: {
-                    source_type: 'writing_card',
-                    source_label: 'Writing card',
-                    evidence_text: 'Defect sites alter adsorption and charge redistribution, which may fit the mechanism claim better.',
-                    context_before: 'The writing card summarizes the study framing for the introduction.',
+                    source_type: 'catalyst_sample',
+                    source_label: 'Catalyst sample',
+                    evidence_text: 'The catalyst sample uses an Fe-N4 coordination environment.',
+                    context_before: 'The structured catalyst sample summarizes the active-site environment.',
                     locator: { page: 2, locator_status: 'exact_page' },
                   },
                 },
@@ -312,8 +315,8 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(selectedPanel).toContainText('dft-paper-2-1');
     await conflictItems.nth(1).click();
     await expect(conflictItems.nth(1)).toHaveClass(/is-active/);
-    await expect(selectedPanel).toContainText('Writing-card conflicts should stay in object review.');
-    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('Defect sites alter adsorption and charge redistribution');
+    await expect(selectedPanel).toContainText('Catalyst-sample conflicts should stay in object review.');
+    await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The catalyst sample uses an Fe-N4 coordination environment.');
     await expect(selectedPanel).not.toContainText('接受 AI 裁定');
     await conflictItems.nth(0).click();
     await expect(conflictItems.nth(0)).toHaveClass(/is-active/);
@@ -667,6 +670,8 @@ test.describe('Review Center Conflict Modal', () => {
               latest_paper_notes: [],
               review_conflict_count: 0,
               review_conflict_total_count: 2,
+              dft_review_conflict_count: 0,
+              dft_review_conflict_total_count: 2,
             },
           ],
         });
@@ -692,8 +697,8 @@ test.describe('Review Center Conflict Modal', () => {
 
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
 
-    await expect(page.locator('#stats .stat').filter({ hasText: '未收口冲突' })).toContainText('0');
-    await expect(page.locator('#rows .chip.subtle[title*="历史上出现过冲突"]')).toContainText('已处理冲突 2');
+    await expect(page.locator('#stats .stat').filter({ hasText: 'DFT 冲突' })).toContainText('0');
+    await expect(page.locator('#rows .chip.subtle[title*="历史上出现过 DFT 冲突"]')).toContainText('已处理冲突 2');
     await expect(page.locator('#rows [data-action="open-conflicts"]')).toHaveCount(0);
   });
 });

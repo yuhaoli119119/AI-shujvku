@@ -8,10 +8,12 @@
   - 重复 DOI 检测             → candidate.status == "duplicate"
   - 批量 ingest-approved      → 只有 approved 的候选被触发
 
-所有测试使用 SQLite in-memory，不依赖网络或真实 PostgreSQL。
+所有测试使用独立 PostgreSQL 测试库，不依赖网络检索。
 DiscoveryService.search 被 monkeypatched 返回固定结果。
 """
 from __future__ import annotations
+
+import os
 
 import uuid
 from typing import Any
@@ -29,14 +31,13 @@ from app.services.intake_screening_service import IntakeScreeningService, Screen
 
 
 # ---------------------------------------------------------------------------
-# 数据库 fixture（SQLite in-memory）
+# 数据库 fixture（独立 PostgreSQL 测试库）
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def engine():
+@pytest.fixture()
+def engine(default_test_database_mode):
     _engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
+        os.environ["LITAI_TEST_DATABASE_URL"],
     )
     Base.metadata.create_all(_engine)
     yield _engine

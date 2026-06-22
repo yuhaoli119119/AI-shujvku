@@ -43,7 +43,7 @@ ALLOWED_ROOT_CAUSES = {
     "api_artifact_status_uses_different_code_path",
     "api_server_not_reloaded_or_running_old_code",
     "storage_root_mismatch_between_cli_and_api",
-    "legacy_sqlite_used_as_runtime_source",
+    "non_postgresql_runtime_source",
     "repeatability_inconsistent_results",
     "unknown",
 }

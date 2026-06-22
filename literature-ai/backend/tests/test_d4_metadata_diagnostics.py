@@ -1,3 +1,4 @@
+import os
 import tempfile
 from pathlib import Path
 from uuid import uuid4
@@ -15,8 +16,7 @@ from app.main import app
 @pytest.fixture
 def client_db(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "d4_diagnostics.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         get_settings.cache_clear()

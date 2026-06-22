@@ -11,14 +11,10 @@ from app.utils.project_paths import canonical_registry_path
 def _kind_from_url(database_url: str) -> str:
     if database_url.startswith("postgresql"):
         return "postgresql"
-    if database_url.startswith("sqlite"):
-        return "sqlite_disabled"
-    return "unknown"
+    return "unsupported"
 
 
 def _mask_url(database_url: str) -> str:
-    if database_url.startswith("sqlite"):
-        return "disabled"
     if "@" in database_url:
         return database_url.split("@")[-1]
     return "***"
@@ -109,13 +105,12 @@ def get_registered_active_library_info() -> dict[str, Any]:
         "canonical_registry_path": str(registry_path),
         "active_library": active_library,
         "active_library_root": active_library_root,
-        "active_library_db_path": None,
         "registry_entry_found": entry is not None,
     }
 
 
 def get_active_database_info() -> dict[str, Any]:
-    """Return PostgreSQL source-of-truth metadata without SQLite discovery."""
+    """Return metadata for the configured PostgreSQL source of truth."""
     from app.config import get_settings
 
     settings = get_settings()
@@ -127,25 +122,12 @@ def get_active_database_info() -> dict[str, Any]:
 
     return {
         "db_kind": configured_kind,
-        "db_path": None,
         "db_url_masked": _mask_url(database_url),
-        "configured_db_kind": configured_kind,
-        "configured_db_path": None,
-        "configured_db_url_masked": _mask_url(database_url),
         "active_library": active_library,
-        "active_library_db_path": None,
         "active_library_root": registered_active.get("active_library_root"),
-        "matches_active_library_db_path": False,
-        "configured_matches_active_library_db_path": False,
-        "is_active_library_sqlite": False,
-        "effective_db_path": None,
-        "effective_storage_root": str(Path(settings.storage_root).resolve()),
-        "effective_db_has_papers_table": False,
-        "effective_db_papers_total": configured_counts["active_library_papers_total"],
+        "storage_root": str(Path(settings.storage_root).resolve()),
+        "papers_total": configured_counts["active_library_papers_total"],
         "configured_db_papers_total": configured_counts["papers_total"],
-        "effective_matches_active_library_db_path": False,
-        "recovered_from_candidate_scan": False,
-        "force_configured_database": bool(getattr(settings, "force_configured_database", False)),
     }
 
 
@@ -155,11 +137,7 @@ def activate_active_library_database() -> dict[str, Any]:
     from app.db.session import init_db
 
     settings = get_settings()
-    if settings.database_url.strip().lower().startswith("sqlite"):
-        raise RuntimeError("SQLite is disabled as a runtime database. Configure PostgreSQL via LITAI_DATABASE_URL.")
+    if not settings.database_url.strip().lower().startswith("postgresql"):
+        raise RuntimeError("Only PostgreSQL is supported. Configure LITAI_DATABASE_URL.")
     init_db(settings.database_url)
     return get_active_database_info()
-
-
-def require_active_library_sqlite() -> dict[str, Any]:
-    raise RuntimeError("SQLite active-library mode has been removed. Use the configured PostgreSQL database.")

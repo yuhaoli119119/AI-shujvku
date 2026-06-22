@@ -626,7 +626,13 @@ def append_note(
         return _serialize_note(note)
 
 
-@mcp_server.tool(name="propose_correction", description="Submit a correction proposal for curator review.")
+@mcp_server.tool(
+    name="propose_correction",
+    description=(
+        "Apply a non-DFT correction immediately with last-writer-wins semantics. "
+        "DFT data/settings corrections remain pending for the dedicated review flow."
+    ),
+)
 def propose_correction(
     paper_id: str,
     field_name: str,
@@ -667,6 +673,13 @@ def propose_correction(
                 },
             )
         )
+        dft_fields = {"dft_result", "dft_results", "dft_setting", "dft_settings"}
+        target_root = str(target_path or "").strip().lower().replace(".", ":").split(":", 1)[0]
+        if str(field_name or "").strip().lower() not in dft_fields and target_root not in dft_fields:
+            correction = ReviewService(session).approve_correction(
+                correction.id,
+                reviewer=auth.source_prefix,
+            )
         session.refresh(correction)
         return _serialize_correction(correction)
 
@@ -1025,8 +1038,8 @@ async def review_paper(
     description=(
         "Import IDE AI analysis results into the library. "
         "Supports free-text or structured JSON, including object-level review audits with target_type, target_id, "
-        "field_name, decision, evidence_location, and corrected_value. Direct non-DFT auto-apply requires "
-        "a write_lock_token from acquire_module_write_lock."
+        "field_name, decision, evidence_location, and corrected_value. Non-DFT AI writes are applied directly "
+        "with last-writer-wins semantics and do not require a module write lock."
     ),
 )
 def import_analysis(
@@ -1067,18 +1080,36 @@ def import_analysis(
             raw_text=raw_text,
             raw_payload=raw_payload,
         )
+        candidates = service.list_candidates(run.id)
+        effective_write_lock_token = write_lock_token
+        auto_lock = None
+        imports_dft = any(
+            str((candidate.normalized_payload or {}).get("target_type") or "").strip().lower()
+            in {"dft_result", "dft_results"}
+            for candidate in candidates
+            if isinstance(candidate.normalized_payload, dict)
+        )
+        if auto_apply_review_rules and imports_dft and not effective_write_lock_token:
+            auto_lock = ModuleWriteLockService(session).acquire(
+                paper_id=UUID(paper_id),
+                module_name="dft_results",
+                locked_by=effective_internal_reviewer,
+                meta={"source": "mcp_import_analysis", "run_id": str(run.id)},
+            )
+            effective_write_lock_token = auto_lock.lock_token
         auto_apply_summary = None
         if auto_apply_review_rules:
             non_dft_summary = service.auto_apply_non_dft_review_outputs(
                 run.id,
                 reviewer=effective_internal_reviewer,
-                write_lock_tokens=[write_lock_token] if write_lock_token else None,
+                write_lock_tokens=[effective_write_lock_token] if effective_write_lock_token else None,
                 write_lock_owner=effective_lock_owners,
             )
             dft_auto_apply_summary = VerificationSessionService(session, settings).apply_import_rules_for_paper(
                 paper_id=UUID(paper_id),
                 reviewer=effective_internal_reviewer,
-                write_lock_tokens=[write_lock_token] if write_lock_token else None,
+                candidate_run_id=run.id,
+                write_lock_tokens=[effective_write_lock_token] if effective_write_lock_token else None,
                 write_lock_owner=effective_lock_owners,
             )
             auto_apply_summary = {
@@ -1091,6 +1122,11 @@ def import_analysis(
                     "skipped_candidates": non_dft_summary.skipped_candidates,
                 },
             }
+        if auto_lock is not None:
+            ModuleWriteLockService(session).release(
+                lock_token=auto_lock.lock_token,
+                released_by=effective_internal_reviewer,
+            )
         candidates = service.list_candidates(run.id)
         session.commit()
         return {
@@ -1313,7 +1349,7 @@ def recrop_figure(
     import fitz
 
     # Phase 1: Read figure + paper metadata from DB, then close session immediately.
-    # NOTE: This project uses PostgreSQL (pgvector), not SQLite. We avoid holding a session
+    # Avoid holding a session
     # open during PDF rendering and file I/O — long-lived transactions prevent connection
     # pool recycling and can cause idle-in-transaction timeouts.
     fig_meta: dict[str, Any] = {}

@@ -28,7 +28,7 @@ def isolated_manager(tmp_path, monkeypatch):
 def test_create_library_builds_shared_project_layout(isolated_manager):
     root = Path(isolated_manager.create_library("共享库").root_path)
 
-    assert (root / "database.sqlite").exists()
+    assert not any(root.glob("*.db"))
     assert (root / "papers" / "pdf").exists()
     assert (root / "papers" / "docling_json").exists()
     assert (root / "config" / "project_config.json").exists()
@@ -50,17 +50,11 @@ def test_import_desktop_project_detects_shared_storage(isolated_manager, monkeyp
     )
 
     imported = isolated_manager.import_library(str(root))
-    calls: list[tuple[str, str]] = []
-
-    def fake_switch_database(database_url: str, storage_root: str | None = None) -> None:
-        calls.append((database_url, storage_root or ""))
-
-    monkeypatch.setattr("app.db.session.switch_database", fake_switch_database)
     activated = isolated_manager.activate_library(imported.name)
 
     assert activated.name == "桌面项目"
-    assert calls
-    assert calls[-1][1].endswith(str(Path("papers")))
+    assert activated.is_active is True
+    assert (root / "papers").is_dir()
 
 
 def test_activate_library_tolerates_read_only_access_metadata_updates(isolated_manager, monkeypatch, tmp_path):
@@ -73,18 +67,12 @@ def test_activate_library_tolerates_read_only_access_metadata_updates(isolated_m
     )
 
     imported = isolated_manager.import_library(str(root))
-    calls: list[tuple[str, str]] = []
-
-    def fake_switch_database(database_url: str, storage_root: str | None = None) -> None:
-        calls.append((database_url, storage_root or ""))
-
     def raise_meta_permission(*args, **kwargs):
         raise PermissionError(13, "Permission denied", str(root / "library.json"))
 
     def raise_config_permission(*args, **kwargs):
         raise PermissionError(13, "Permission denied", str(root / "config" / "project_config.json"))
 
-    monkeypatch.setattr("app.db.session.switch_database", fake_switch_database)
     monkeypatch.setattr(LibraryManager, "_write_library_meta", raise_meta_permission)
     monkeypatch.setattr(LibraryManager, "_ensure_shared_project_config", raise_config_permission)
 
@@ -92,24 +80,16 @@ def test_activate_library_tolerates_read_only_access_metadata_updates(isolated_m
 
     assert activated.name == "桌面项目"
     assert activated.is_active is True
-    assert calls
-    assert calls[-1][1].endswith(str(Path("papers")))
 
 
-def test_default_library_stays_on_legacy_storage(isolated_manager, monkeypatch):
-    calls: list[tuple[str, str]] = []
+def test_default_library_uses_legacy_artifact_layout_without_database_switch(isolated_manager):
+    activated = isolated_manager.activate_library(DEFAULT_LIBRARY_NAME)
 
-    def fake_switch_database(database_url: str, storage_root: str | None = None) -> None:
-        calls.append((database_url, storage_root or ""))
-
-    monkeypatch.setattr("app.db.session.switch_database", fake_switch_database)
-    isolated_manager.activate_library(DEFAULT_LIBRARY_NAME)
-
-    assert calls
-    assert calls[-1][1].endswith(str(Path(LEGACY_STORAGE_MODE)))
+    assert activated.is_active is True
+    assert (Path(activated.root_path) / LEGACY_STORAGE_MODE).is_dir()
 
 
-def test_force_configured_database_does_not_create_or_switch_sqlite(tmp_path, monkeypatch):
+def test_configured_postgresql_does_not_create_file_database(tmp_path, monkeypatch):
     registry_path = tmp_path / "registry.json"
     default_root = tmp_path / "default-library"
     monkeypatch.setattr(LibraryManager, "REGISTRY_PATH", registry_path)
@@ -118,18 +98,11 @@ def test_force_configured_database_does_not_create_or_switch_sqlite(tmp_path, mo
     monkeypatch.setenv("LITAI_FORCE_CONFIGURED_DATABASE", "true")
     get_settings.cache_clear()
 
-    calls: list[tuple[str, str]] = []
-
-    def fake_switch_database(database_url: str, storage_root: str | None = None) -> None:
-        calls.append((database_url, storage_root or ""))
-
-    monkeypatch.setattr("app.db.session.switch_database", fake_switch_database)
     manager = LibraryManager()
     activated = manager.activate_library(DEFAULT_LIBRARY_NAME)
 
     assert activated.is_active is True
-    assert calls == []
-    assert not (default_root / "database.sqlite").exists()
+    assert not any(default_root.glob("*.db"))
     get_settings.cache_clear()
 
 
@@ -140,7 +113,7 @@ def test_create_library_uses_selected_parent_directory(isolated_manager, tmp_pat
     created = isolated_manager.create_library("共享库", root_path=str(parent))
 
     assert Path(created.root_path) == (parent / "共享库").resolve()
-    assert (parent / "共享库" / "database.sqlite").exists()
+    assert not any((parent / "共享库").glob("*.db"))
 
 
 def test_import_rejects_plain_directory_without_library_markers(isolated_manager, tmp_path):

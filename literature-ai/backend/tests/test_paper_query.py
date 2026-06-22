@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -26,9 +27,7 @@ from app.services.paper_query import PaperQueryService, _cached_pdf_size_for_sto
 
 def test_paper_query_service_returns_counts_and_detail_payload():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'query.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -77,9 +76,7 @@ def test_paper_query_service_returns_counts_and_detail_payload():
 
 def test_detail_payload_cleans_pdf_text_without_flattening_table_markdown():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'cleanup.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -134,9 +131,7 @@ def test_detail_payload_cleans_pdf_text_without_flattening_table_markdown():
 
 def test_table_review_status_recognizes_legacy_codex_item_corrections():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'table_review_status.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -181,9 +176,7 @@ def test_table_review_status_recognizes_legacy_codex_item_corrections():
 
 def test_table_review_status_treats_approved_style_object_audit_as_verified():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'table_review_positive_audit.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -235,9 +228,7 @@ def test_table_review_status_treats_approved_style_object_audit_as_verified():
 
 def test_figure_detail_exposes_pending_delete_proposal_count():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_pending_delete.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -281,9 +272,7 @@ def test_figure_detail_exposes_pending_delete_proposal_count():
 
 def test_figure_detail_hides_direct_delete_for_clean_figure():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_clean_delete_gate.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -314,9 +303,7 @@ def test_figure_detail_hides_direct_delete_for_clean_figure():
 
 def test_figure_detail_marks_duplicate_figure_number_as_direct_delete_eligible():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_duplicate_delete_gate.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -360,9 +347,7 @@ def test_figure_detail_marks_duplicate_figure_number_as_direct_delete_eligible()
 
 def test_detail_review_status_recognizes_legacy_ai_materialized_records():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'legacy_ai.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -431,9 +416,7 @@ def test_detail_review_status_recognizes_legacy_ai_materialized_records():
 
 def test_detail_review_status_recognizes_approved_ide_ai_corrections():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'approved_corrections.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -472,9 +455,7 @@ def test_detail_review_status_recognizes_approved_ide_ai_corrections():
 
 def test_detail_excludes_page_and_deprecated_sections_from_display():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'display_sections.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -521,9 +502,7 @@ def test_detail_excludes_page_and_deprecated_sections_from_display():
 
 def test_detail_payload_exposes_figure_approved_correction_fields():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_corrections.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -584,9 +563,7 @@ def test_detail_payload_exposes_figure_approved_correction_fields():
 
 def test_detail_payload_normalizes_stringified_figure_key_elements():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'figure_key_elements_cleanup.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -635,9 +612,7 @@ def test_cached_pdf_size_uses_direct_storage_candidates(tmp_path):
 def test_list_papers_with_filters():
     """Verify year/journal/has_dft_results/reviewed_writing_cards/has_pdf/limit/offset filtering."""
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'filter.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -752,9 +727,7 @@ def test_list_papers_with_filters():
 
 def test_list_papers_defaults_to_newest_year_then_serial_order():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'sort.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -780,9 +753,7 @@ def test_list_papers_defaults_to_newest_year_then_serial_order():
 
 def test_list_papers_supports_descending_year_serial_order():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'sort_desc.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:

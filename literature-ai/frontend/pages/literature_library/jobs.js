@@ -198,22 +198,26 @@ function renderQueuedIngestJob(job) {
     );
 }
 
-async function pollWorkflowIngestJob(jobId) {
+async function pollWorkflowIngestJob(jobId, context) {
     if (!jobId) return;
     try {
         const job = await fetchJSON("/api/jobs/" + encodeURIComponent(jobId));
         renderQueuedIngestJob(job);
         if (job.status === "queued" || job.status === "running") {
-            setTimeout(function() { pollWorkflowIngestJob(jobId); }, 3000);
+            setTimeout(function() { pollWorkflowIngestJob(jobId, context); }, 3000);
         } else if (job.status === "completed") {
             const result = job.result || {};
             if (result.status === "already_exists") {
                 showToast("文献已在库中：" + (result.title || ""), "info");
                 if (result.paper_id) showAlreadyExistsPrompt(result.paper_id, result.title || "已存在的文献");
             } else if (result.status === "needs_confirmation") {
-                showToast("PDF 已解析，但系统需要你重新选择同一文件并确认绑定。", "info");
+                if (context && context.paperId && context.file) {
+                    showIdentityConfirmationPrompt(context.paperId, context.file, result);
+                } else {
+                    showToast("PDF 已解析，但系统需要你重新选择同一文件并确认绑定。", "info");
+                }
             } else if (result.status === "identity_mismatch") {
-                showToast("目标条目与上传 PDF 身份冲突，请检查后再重新上传。", "error");
+                showIdentityMismatchPrompt(result);
             } else if (result.status === "metadata_only") {
                 showToast("已按元数据收录：" + (result.title || ""), "info");
             } else {
@@ -921,7 +925,7 @@ async function attachPDFToPaperFile(paperId, file, confirmIdentityMismatch) {
             showToast("PDF 关联任务已进入后台队列：" + jobId, "success");
         }
         renderQueuedIngestJob(data);
-        pollWorkflowIngestJob(data.job_id);
+        pollWorkflowIngestJob(data.job_id, { paperId: paperId, file: file });
         state.selectedPaperId = paperId;
         closeAddLiteraturePanel();
     } catch (error) {

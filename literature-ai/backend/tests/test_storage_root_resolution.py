@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import logging
 from pathlib import Path
 from uuid import uuid4
@@ -79,7 +81,7 @@ def test_container_style_storage_root_is_not_rewritten(monkeypatch, tmp_path):
 def test_prepare_paper_workspace_uses_unified_storage_root(monkeypatch, tmp_path):
     repo_root, backend_root = _patch_project_roots(monkeypatch, tmp_path)
     monkeypatch.setenv("LITAI_STORAGE_ROOT", "./data/storage")
-    monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{tmp_path / 'workspace.db'}")
+    monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
     monkeypatch.chdir(backend_root)
     get_settings.cache_clear()
     settings = get_settings()

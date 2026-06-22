@@ -1,3 +1,4 @@
+import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,8 +19,7 @@ from app.services.extraction_pipeline import ExtractionPipelineService
 @pytest.fixture
 def setup_test_db(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_extraction_reviews.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
 
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()

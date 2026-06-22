@@ -1,3 +1,4 @@
+import os
 import pytest
 from uuid import UUID
 from fastapi.testclient import TestClient
@@ -15,8 +16,7 @@ from app.db.session import get_db_session
 def setup_test_db(monkeypatch):
     monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_d5_4_export.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
 
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()

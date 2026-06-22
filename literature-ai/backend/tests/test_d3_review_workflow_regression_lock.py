@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import asyncio
 import csv
 import io
@@ -30,8 +32,8 @@ from app.services.extraction_review_service import ExtractionReviewService
 from app.services.paper_query import PaperQueryService
 
 
-def _session(tmp_path, name: str = "d3_review_lock.db"):
-    engine = create_engine(f"sqlite:///{tmp_path / name}", future=True)
+def _session():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     return engine, SessionLocal
@@ -124,7 +126,7 @@ def _export_rows(session: Session):
 
 
 def test_external_ai_materialize_never_creates_verified_review_even_with_verified_like_payload(tmp_path):
-    engine, SessionLocal = _session(tmp_path)
+    engine, SessionLocal = _session()
     try:
         with SessionLocal() as session:
             paper = _paper(session)
@@ -199,7 +201,7 @@ def test_external_ai_materialize_never_creates_verified_review_even_with_verifie
 
 
 def test_save_reviews_rejects_verified_status_and_does_not_mutate_existing_verified(tmp_path):
-    engine, SessionLocal = _session(tmp_path)
+    engine, SessionLocal = _session()
     try:
         with SessionLocal() as session:
             paper = _paper(session)
@@ -244,7 +246,7 @@ def test_save_reviews_rejects_verified_status_and_does_not_mutate_existing_verif
 
 
 def test_serialized_unsafe_review_payload_cannot_unlock_writing(tmp_path):
-    engine, SessionLocal = _session(tmp_path)
+    engine, SessionLocal = _session()
     try:
         with SessionLocal() as session:
             paper = _paper(session)
@@ -276,7 +278,7 @@ def test_serialized_unsafe_review_payload_cannot_unlock_writing(tmp_path):
 
 
 def test_export_headers_and_block_counts_are_stable_for_mixed_safe_unsafe_rows(tmp_path):
-    engine, SessionLocal = _session(tmp_path)
+    engine, SessionLocal = _session()
     try:
         with SessionLocal() as session:
             paper = _paper(session)

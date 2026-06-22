@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import tempfile
 from pathlib import Path
 from uuid import uuid4
@@ -31,8 +33,7 @@ from app.services.impact_metadata_import_service import (
 @pytest.fixture
 def impact_client(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "impact_import.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         get_settings.cache_clear()
@@ -235,7 +236,9 @@ def test_import_does_not_modify_papers_reviews_locators_or_verified_gates(impact
 
 
 def test_no_online_fetch_or_scrape_path_exists():
-    source = Path("app/services/impact_metadata_import_service.py").read_text(encoding="utf-8")
+    source = (
+        Path(__file__).resolve().parents[1] / "app/services/impact_metadata_import_service.py"
+    ).read_text(encoding="utf-8")
     assert "requests" not in source
     assert "httpx" not in source
     assert "urllib" not in source

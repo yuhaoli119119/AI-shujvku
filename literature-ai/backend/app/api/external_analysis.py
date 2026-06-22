@@ -72,6 +72,7 @@ async def import_external_analysis(
             VerificationSessionService(session, settings).apply_import_rules_for_paper(
                 paper_id=payload.paper_id,
                 reviewer=effective_reviewer,
+                candidate_run_id=run.id,
                 write_lock_tokens=write_lock_tokens,
             )
         session.commit()

@@ -1,3 +1,4 @@
+import os
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -50,10 +51,8 @@ def test_rerun_stage2_replaces_existing_outputs():
         (tmp_path / "paper.tei.xml").write_text("<TEI/>", encoding="utf-8")
         (tmp_path / "paper.docling.json").write_text("{}", encoding="utf-8")
 
-        engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
-            with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(engine)
 
             with Session(engine) as session:
@@ -204,7 +203,7 @@ def test_rerun_stage2_replaces_existing_outputs():
 def test_classify_single_paper_fallback():
     with TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        engine = create_engine(f"sqlite:///{tmp_path / 'test_classify.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:

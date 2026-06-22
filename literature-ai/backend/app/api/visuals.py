@@ -1227,21 +1227,13 @@ def _build_descriptor_correlation_summary_v2(
                 descriptor=descriptor,
             )
             source = "reviewed_exportable"
-            if not pair_payload:
-                pair_payload = _raw_exploratory_descriptor_points(
-                    session,
-                    filters,
-                    target_property=target,
-                    descriptor=descriptor,
-                    reaction_category=reaction_category,
-                    adsorbate=adsorbate,
-                    material_family=material_family,
-                )
-                if pair_payload:
-                    source = "exploratory_non_rejected"
             stats = _correlation_stats(pair_payload)
             n = len(pair_payload)
-            status = "ready" if n >= min_n and stats["pearson_r"] is not None else "insufficient_paired_data"
+            status = (
+                "ready"
+                if source == "reviewed_exportable" and n >= min_n and stats["pearson_r"] is not None
+                else "insufficient_paired_data"
+            )
             color = _correlation_color(stats["pearson_r"]) if status == "ready" else "gray"
             cells.append(
                 {
@@ -1257,8 +1249,6 @@ def _build_descriptor_correlation_summary_v2(
                     "source": source,
                     "message": (
                         f"已形成 {n} 个最新导出逻辑下的配对样本。"
-                        if status == "ready" and source == "reviewed_exportable"
-                        else f"已形成 {n} 个同样本探索性配对样本，已排除 Rejected。"
                         if status == "ready"
                         else "Correlation is withheld until the current ML dataset logic yields paired descriptor/target "
                         f"values with n >= {min_n} under the selected reaction/adsorbate/material filters."
@@ -1448,21 +1438,12 @@ async def descriptor_correlation_pairs(
         descriptor=descriptor_key,
     )
     source = "reviewed_exportable"
-    if not pairs:
-        filters = _paper_filters(library_name)
-        pairs = _raw_exploratory_descriptor_points(
-            session,
-            filters,
-            target_property=target,
-            descriptor=descriptor_key,
-            reaction_category=reaction_category,
-            adsorbate=adsorbate,
-            material_family=material_family,
-        )
-        if pairs:
-            source = "exploratory_non_rejected"
     stats = _correlation_stats(pairs)
-    ready = len(pairs) >= min_n and stats["pearson_r"] is not None
+    ready = (
+        source == "reviewed_exportable"
+        and len(pairs) >= min_n
+        and stats["pearson_r"] is not None
+    )
     return {
         "schema_version": "descriptor_scatter_v2",
         "target_property": target,

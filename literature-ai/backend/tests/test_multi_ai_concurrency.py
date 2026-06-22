@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,15 +34,11 @@ from app.services.review_service import ReviewService
 from app.services.verification_session_service import VerificationSessionService
 
 
-def _database(tmp_path: Path, name: str):
+def _database():
     engine = create_engine(
-        f"sqlite:///{tmp_path / name}",
-        connect_args={"timeout": 15},
+        os.environ["LITAI_TEST_DATABASE_URL"],
         future=True,
     )
-    with engine.begin() as connection:
-        connection.execute(text("PRAGMA foreign_keys=ON"))
-        connection.execute(text("PRAGMA journal_mode=WAL"))
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     return engine, factory
@@ -55,7 +53,7 @@ def _paper(factory, title: str = "Concurrent paper"):
 
 
 def test_overlapping_module_locks_are_atomic_but_different_papers_succeed(tmp_path):
-    engine, factory = _database(tmp_path, "module-race.db")
+    engine, factory = _database()
     first_id = _paper(factory, "First")
     second_id = _paper(factory, "Second")
     gate = Barrier(2)
@@ -89,7 +87,7 @@ def test_overlapping_module_locks_are_atomic_but_different_papers_succeed(tmp_pa
 
 
 def test_extraction_review_concurrent_create_has_one_winner(tmp_path):
-    engine, factory = _database(tmp_path, "review-race.db")
+    engine, factory = _database()
     paper_id = _paper(factory)
     target_id = "00000000-0000-0000-0000-000000000001"
     gate = Barrier(2)
@@ -116,7 +114,7 @@ def test_extraction_review_concurrent_create_has_one_winner(tmp_path):
 
 
 def test_dft_candidate_identity_prevents_concurrent_duplicates(tmp_path):
-    engine, factory = _database(tmp_path, "dft-race.db")
+    engine, factory = _database()
     paper_id = _paper(factory)
     gate = Barrier(2)
     item = {
@@ -153,7 +151,7 @@ def test_dft_candidate_identity_prevents_concurrent_duplicates(tmp_path):
 
 
 def test_verification_session_claim_is_all_or_nothing_and_released_on_settle(tmp_path):
-    engine, factory = _database(tmp_path, "session-claim.db")
+    engine, factory = _database()
     paper_id = _paper(factory)
     gate = Barrier(2)
 
@@ -187,7 +185,7 @@ def test_verification_session_claim_is_all_or_nothing_and_released_on_settle(tmp
 
 
 def test_rebuild_operation_lock_rejects_same_paper_and_recovers(tmp_path):
-    engine, factory = _database(tmp_path, "rebuild-race.db")
+    engine, factory = _database()
     paper_id = _paper(factory)
     entered = Event()
     release = Event()
@@ -228,7 +226,7 @@ def test_rebuild_operation_lock_rejects_same_paper_and_recovers(tmp_path):
 
 
 def test_direct_workspace_prepare_cannot_bypass_same_paper_operation_lock(tmp_path):
-    engine, factory = _database(tmp_path, "prepare-lock.db")
+    engine, factory = _database()
     paper_id = _paper(factory, "Prepare locked")
     other_paper_id = _paper(factory, "Prepare other")
 
@@ -267,7 +265,7 @@ def test_direct_workspace_prepare_cannot_bypass_same_paper_operation_lock(tmp_pa
 
 
 def test_new_dft_candidate_materialization_requires_dft_results_write_lock(tmp_path):
-    engine, factory = _database(tmp_path, "dft-lock.db")
+    engine, factory = _database()
     paper_id = _paper(factory, "DFT lock")
 
     with factory() as session:
@@ -339,7 +337,7 @@ def test_new_dft_candidate_materialization_requires_dft_results_write_lock(tmp_p
 
 def test_recrop_stale_write_removes_rendered_orphan_file(tmp_path, monkeypatch):
     fitz = pytest.importorskip("fitz")
-    engine, factory = _database(tmp_path, "recrop-stale.db")
+    engine, factory = _database()
     storage_root = tmp_path / "storage"
     pdf_path = storage_root / "pdf" / "paper.pdf"
     pdf_path.parent.mkdir(parents=True)
@@ -363,7 +361,7 @@ def test_recrop_stale_write_removes_rendered_orphan_file(tmp_path, monkeypatch):
         session.commit()
         figure_id = figure.id
 
-    settings = Settings(storage_root=storage_root, database_url="sqlite://")
+    settings = Settings(storage_root=storage_root, database_url=os.environ["LITAI_TEST_DATABASE_URL"])
     scope_calls = 0
 
     @contextmanager
@@ -409,13 +407,13 @@ def test_recrop_stale_write_removes_rendered_orphan_file(tmp_path, monkeypatch):
 
 def test_review_service_recrop_approval_updates_figure_and_evidence(tmp_path, monkeypatch):
     pytest.importorskip("fitz")
-    engine, factory = _database(tmp_path, "review-recrop-success.db")
+    engine, factory = _database()
     storage_root = tmp_path / "storage"
     pdf_path = storage_root / "pdf" / "paper.pdf"
     pdf_path.parent.mkdir(parents=True)
     monkeypatch.setattr(
         "app.services.review_service.get_settings",
-        lambda: Settings(storage_root=storage_root, database_url="sqlite://"),
+        lambda: Settings(storage_root=storage_root, database_url=os.environ["LITAI_TEST_DATABASE_URL"]),
     )
 
     import fitz
@@ -481,13 +479,13 @@ def test_review_service_recrop_approval_updates_figure_and_evidence(tmp_path, mo
 
 def test_review_service_recrop_stale_write_removes_rendered_orphan_file(tmp_path, monkeypatch):
     pytest.importorskip("fitz")
-    engine, factory = _database(tmp_path, "review-recrop-stale.db")
+    engine, factory = _database()
     storage_root = tmp_path / "storage"
     pdf_path = storage_root / "pdf" / "paper.pdf"
     pdf_path.parent.mkdir(parents=True)
     monkeypatch.setattr(
         "app.services.review_service.get_settings",
-        lambda: Settings(storage_root=storage_root, database_url="sqlite://"),
+        lambda: Settings(storage_root=storage_root, database_url=os.environ["LITAI_TEST_DATABASE_URL"]),
     )
 
     import fitz
@@ -554,7 +552,7 @@ def test_review_service_recrop_stale_write_removes_rendered_orphan_file(tmp_path
 
 
 def test_workspace_commit_failure_restores_existing_writing_card_files(tmp_path, monkeypatch):
-    engine, factory = _database(tmp_path, "workspace-restore.db")
+    engine, factory = _database()
     storage_root = tmp_path / "storage"
     with factory() as session:
         paper = Paper(

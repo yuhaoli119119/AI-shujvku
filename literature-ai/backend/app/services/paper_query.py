@@ -343,80 +343,6 @@ class PaperQueryService:
         if ensure_paper_codes(self.session, [paper]):
             self.session.commit()
 
-        if compact:
-            models_to_count = {
-                "sections": PaperSection,
-                "tables": PaperTable,
-                "figures": PaperFigure,
-                "dft_settings": DFTSetting,
-                "catalyst_samples": CatalystSample,
-                "dft_results": DFTResult,
-                "electrochemical_performance": ElectrochemicalPerformance,
-                "mechanism_claims": MechanismClaim,
-                "writing_cards": WritingCard,
-                "figure_data_points": FigureDataPoint,
-            }
-            counts: dict[str, int] = {}
-            for key, model in models_to_count.items():
-                counts[key] = int(
-                    self.session.scalar(
-                        select(func.count()).select_from(model).where(model.paper_id == paper_id)
-                    )
-                    or 0
-                )
-            counts["comprehensive_analysis"] = 1 if paper.comprehensive_analysis else 0
-
-            relationship_summary = {
-                relationship_type: int(count or 0)
-                for relationship_type, count in self.session.execute(
-                    select(PaperRelationship.relationship_type, func.count())
-                    .where(PaperRelationship.source_paper_id == paper_id)
-                    .group_by(PaperRelationship.relationship_type)
-                ).all()
-            }
-            impact_metadata = self.session.get(PaperImpactMetadata, paper.id)
-            workbench_status = PaperWorkbenchService(self.session, get_settings()).review_center(
-                limit=1,
-                sort_by="recent",
-                summary_only=True,
-                paper_ids=[paper_id],
-            ).get("rows", [])
-            review_status = workbench_status[0] if workbench_status else {}
-            base = self._build_list_item_with_counts(
-                paper,
-                counts,
-                relationship_summary,
-                impact_metadata=impact_metadata,
-                review_status=review_status,
-                include_heavy=True,
-            )
-            base_payload = base.model_dump()
-            return PaperDetailResponse(
-                **base_payload,
-                sections=[],
-                tables=[],
-                figures=[],
-                paper_notes=[],
-                dft_settings_items=[],
-                catalyst_samples_items=[],
-                dft_results_items=[],
-                electrochemical_performance_items=[],
-                mechanism_claims_items=[],
-                writing_cards_items=[],
-                outgoing_relationships=[],
-                incoming_relationships=[],
-                references=[],
-                figure_data_points_items=[],
-                artifact_status=build_paper_artifact_status(paper),
-                abstract_review_status="raw_only" if bool(paper.abstract) else "missing",
-                sections_review_status="raw_only" if counts["sections"] > 0 else "missing",
-                writing_cards_review_status="raw_only" if counts["writing_cards"] > 0 else "missing",
-                figures_review_status="raw_only" if counts["figures"] > 0 else "missing",
-                dft_review_status="candidate" if counts["dft_results"] > 0 else "missing",
-                translation_review_status="final_trusted" if base_payload.get("full_translation_zh") else "missing",
-                rag_quality={},
-            )
-
         all_sections = self.session.scalars(
             select(PaperSection)
             .where(PaperSection.paper_id == paper_id)
@@ -478,7 +404,12 @@ class PaperQueryService:
             writing_card_conflicts: dict[str, list[dict[str, Any]]] = {}
             mechanism_claim_audits: dict[str, list[dict[str, Any]]] = {}
             mechanism_claim_conflicts: dict[str, list[dict[str, Any]]] = {}
-            dft_result_audits: dict[str, list[dict[str, Any]]] = {}
+            dft_result_ids = {str(item.id) for item in dft_results}
+            dft_result_audits = self._object_review_audits_by_target(
+                paper_id,
+                dft_result_ids,
+                target_types={"dft_result", "dft_results"},
+            )
             dft_result_conflicts: dict[str, list[dict[str, Any]]] = {}
         else:
             references = self.session.scalars(
@@ -580,24 +511,20 @@ class PaperQueryService:
                 }
         base_payload = base.model_dump()
         base_payload["full_translation_zh"] = full_translation
-        review_status = (
-            {}
-            if compact
-            else self._paper_detail_review_status(
-                paper_id=paper_id,
-                paper=paper,
-                sections=sections,
-                figures=figures,
-                writing_cards=writing_cards,
-                dft_results=dft_results,
-                full_translation=full_translation,
-                figure_audits=figure_audits,
-                figure_conflicts=figure_conflicts,
-                writing_card_audits=writing_card_audits,
-                writing_card_conflicts=writing_card_conflicts,
-                dft_result_audits=dft_result_audits,
-                dft_result_conflicts=dft_result_conflicts,
-            )
+        review_status = self._paper_detail_review_status(
+            paper_id=paper_id,
+            paper=paper,
+            sections=sections,
+            figures=figures,
+            writing_cards=writing_cards,
+            dft_results=dft_results,
+            full_translation=full_translation,
+            figure_audits=figure_audits,
+            figure_conflicts=figure_conflicts,
+            writing_card_audits=writing_card_audits,
+            writing_card_conflicts=writing_card_conflicts,
+            dft_result_audits=dft_result_audits,
+            dft_result_conflicts=dft_result_conflicts,
         )
         return PaperDetailResponse(
             **base_payload,

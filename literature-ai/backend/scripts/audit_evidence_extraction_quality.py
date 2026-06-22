@@ -18,7 +18,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.config import get_settings
 from app.db.models import DFTResult, WritingCard
 from app.db.session import session_scope
-from app.utils.active_database import activate_active_library_database, require_active_library_sqlite
+from app.utils.active_database import activate_active_library_database, get_active_database_info
 from app.utils.locator_degradation import locator_degradation
 from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 from scripts.recover_evidence_pages import analyze_evidence_pages
@@ -817,7 +817,7 @@ def main() -> int:
     args = parser.parse_args()
 
     activate_active_library_database()
-    db_info = require_active_library_sqlite()
+    db_info = get_active_database_info()
     settings = get_settings()
 
     print(
@@ -825,7 +825,7 @@ def main() -> int:
         f"kind={db_info['db_kind']}, "
         f"library={db_info['active_library']}, "
         f"path={db_info['db_path']}, "
-        f"is_active_library_sqlite={db_info['is_active_library_sqlite']}"
+        f"db_kind={db_info['db_kind']}"
     )
 
     with session_scope(settings.database_url) as session:

@@ -32,8 +32,6 @@ async def import_impact_metadata(
 
     active_db_info = get_active_database_info()
     expected_total = expected_papers_total
-    if expected_total is None and _is_workspace_default_database(active_db_info.get("db_path")):
-        expected_total = 15
     service = ImpactMetadataImportService(session)
     try:
         result = service.import_items(
@@ -52,15 +50,7 @@ async def import_impact_metadata(
     result["invalid_items"] = [item.__dict__ for item in invalid]
     result["active_database"] = {
         "db_kind": active_db_info.get("db_kind"),
-        "db_path": active_db_info.get("db_path"),
         "active_library": active_db_info.get("active_library"),
-        "matches_active_library_db_path": active_db_info.get("matches_active_library_db_path"),
-        "effective_matches_active_library_db_path": active_db_info.get("effective_matches_active_library_db_path"),
-        "workspace_default_database": _is_workspace_default_database(active_db_info.get("db_path")),
         "expected_papers_total": expected_total,
     }
     return result
-
-
-def _is_workspace_default_database(db_path: object) -> bool:
-    return False

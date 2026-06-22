@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import tempfile
 from pathlib import Path
 from uuid import uuid4
@@ -33,8 +35,7 @@ CLAIM = "Single-atom catalysts can promote sulfur redox kinetics in lithium-sulf
 @pytest.fixture
 def citation_client(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "citation_candidates.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         get_settings.cache_clear()

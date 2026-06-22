@@ -36,7 +36,7 @@ ALLOWED_ROOT_CAUSES = {
     "artifact_files_not_present_in_api_storage",
     "api_artifact_status_uses_different_code_path",
     "external_audit_not_visible_in_review_center",
-    "legacy_sqlite_used_as_runtime_source",
+    "non_postgresql_runtime_source",
     "unknown",
 }
 
@@ -149,25 +149,20 @@ def mask_runtime_for_comparison(local: dict[str, Any], api_debug: dict[str, Any]
     }
 
 
-def legacy_sqlite_guard(settings, api_runtime_debug: dict[str, Any]) -> dict[str, Any]:
+def postgresql_runtime_guard(settings, api_runtime_debug: dict[str, Any]) -> dict[str, Any]:
     try:
         local_dialect = make_url(settings.database_url).drivername
     except Exception:
         local_dialect = settings.database_url.split(":", 1)[0]
     api_json = api_runtime_debug.get("json") if api_runtime_debug.get("ok") else {}
     api_dialect = api_json.get("database_dialect") if isinstance(api_json, dict) else None
-    legacy_ignored = bool(api_json.get("legacy_sqlite_ignored")) if isinstance(api_json, dict) else False
-    legacy_found = api_json.get("legacy_sqlite_paths_found") if isinstance(api_json, dict) else None
     return {
         "local_database_dialect": local_dialect,
         "api_database_dialect": api_dialect,
         "local_is_postgresql": local_dialect.startswith("postgresql"),
         "api_is_postgresql": str(api_dialect or "").startswith("postgresql"),
-        "legacy_sqlite_ignored": legacy_ignored,
-        "legacy_sqlite_paths_found": legacy_found or [],
-        "legacy_sqlite_used_as_runtime_source": not local_dialect.startswith("postgresql")
-        or not str(api_dialect or "").startswith("postgresql")
-        or not legacy_ignored,
+        "non_postgresql_runtime_source": not local_dialect.startswith("postgresql")
+        or not str(api_dialect or "").startswith("postgresql"),
     }
 
 
@@ -453,8 +448,8 @@ def classify_gate_root_cause(report: dict[str, Any]) -> str | None:
     runtime = report["runtime_guard"]
     if not runtime["database_connectivity_guard"]["ok"]:
         return "unknown"
-    if runtime["legacy_sqlite_guard"]["legacy_sqlite_used_as_runtime_source"]:
-        return "legacy_sqlite_used_as_runtime_source"
+    if runtime["postgresql_runtime_guard"]["non_postgresql_runtime_source"]:
+        return "non_postgresql_runtime_source"
     if not runtime["api_runtime_debug"].get("ok") or not runtime["api_runtime_debug"].get("json", {}).get(
         "artifact_status_module_path"
     ):
@@ -534,7 +529,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             live_report.get("api_runtime_debug") or {},
         ),
         "database_connectivity_guard": database_guard,
-        "legacy_sqlite_guard": legacy_sqlite_guard(settings, live_report.get("api_runtime_debug") or {}),
+        "postgresql_runtime_guard": postgresql_runtime_guard(settings, live_report.get("api_runtime_debug") or {}),
     }
 
     report: dict[str, Any] = {
@@ -580,8 +575,7 @@ def write_markdown(report: dict[str, Any], path: Path) -> None:
             "",
             "## Runtime Guard",
             "",
-            f"- Active database PostgreSQL: `{report['runtime_guard']['legacy_sqlite_guard']['api_is_postgresql']}`",
-            f"- Legacy SQLite ignored: `{report['runtime_guard']['legacy_sqlite_guard']['legacy_sqlite_ignored']}`",
+            f"- Active database PostgreSQL: `{report['runtime_guard']['postgresql_runtime_guard']['api_is_postgresql']}`",
             f"- API runtime-debug status: `{report['runtime_guard']['api_runtime_debug'].get('status')}`",
             f"- API storage root exists: `{(report['runtime_guard']['api_runtime_debug'].get('json') or {}).get('storage_root_exists')}`",
             "",

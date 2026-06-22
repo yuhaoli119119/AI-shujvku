@@ -1,4 +1,4 @@
-from pathlib import Path
+import os
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
@@ -13,17 +13,15 @@ from app.main import app
 
 
 def test_paper_translation_preview_ignores_persisted_writer_settings(monkeypatch):
-    with TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "translation_preview.sqlite"
-        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+    with TemporaryDirectory():
+        monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
         monkeypatch.setenv("LITAI_WRITER_API_KEY", "env-secret-should-stay")
         monkeypatch.setenv("LITAI_WRITER_API_BASE", "https://env.example.test")
         monkeypatch.setenv("LITAI_WRITER_MODEL", "env-model")
         get_settings.cache_clear()
 
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(connection)
             connection.execute(
                 text(
@@ -109,17 +107,15 @@ def test_paper_translation_preview_ignores_persisted_writer_settings(monkeypatch
 
 
 def test_paper_translation_preview_returns_source_only_fallback_without_writer_configuration(monkeypatch):
-    with TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "translation_unconfigured.sqlite"
-        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+    with TemporaryDirectory():
+        monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
         monkeypatch.setenv("LITAI_WRITER_API_KEY", "")
         monkeypatch.setenv("LITAI_WRITER_API_BASE", "")
         monkeypatch.setenv("LITAI_WRITER_MODEL", "")
         get_settings.cache_clear()
 
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(connection)
 
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -165,17 +161,15 @@ def test_paper_translation_preview_returns_source_only_fallback_without_writer_c
 
 
 def test_paper_translation_preview_respects_selected_sections(monkeypatch):
-    with TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "translation_selected_sections.sqlite"
-        monkeypatch.setenv("LITAI_DATABASE_URL", f"sqlite:///{db_path}")
+    with TemporaryDirectory():
+        monkeypatch.setenv("LITAI_DATABASE_URL", os.environ["LITAI_TEST_DATABASE_URL"])
         monkeypatch.delenv("LITAI_WRITER_API_KEY", raising=False)
         monkeypatch.delenv("LITAI_WRITER_API_BASE", raising=False)
         monkeypatch.delenv("LITAI_WRITER_MODEL", raising=False)
         get_settings.cache_clear()
 
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(connection)
             connection.execute(
                 text(
@@ -269,30 +263,25 @@ def test_paper_translation_preview_respects_selected_sections(monkeypatch):
 
 
 def test_sync_writer_settings_noop_does_not_leak_across_sessions(monkeypatch):
-    with TemporaryDirectory() as first_tmpdir, TemporaryDirectory() as second_tmpdir:
-        first_db = Path(first_tmpdir) / "first.sqlite"
-        second_db = Path(second_tmpdir) / "second.sqlite"
+    with TemporaryDirectory(), TemporaryDirectory():
         monkeypatch.setenv("LITAI_WRITER_API_KEY", "env-secret-should-stay")
         monkeypatch.setenv("LITAI_WRITER_API_BASE", "https://env.example.test")
         monkeypatch.setenv("LITAI_WRITER_MODEL", "env-model")
         get_settings.cache_clear()
 
-        for db_path, secret in (
-            (first_db, "persisted-secret-one"),
-            (second_db, "persisted-secret-two"),
-        ):
-            engine = create_engine(f"sqlite:///{db_path}", future=True)
+        for secret in ("persisted-secret-one", "persisted-secret-two"):
+            engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
             with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
                 Base.metadata.create_all(connection)
                 connection.execute(
                     text(
-                        "CREATE TABLE app_settings ("
+                        "CREATE TABLE IF NOT EXISTS app_settings ("
                         "  key   VARCHAR(255) PRIMARY KEY,"
                         "  value TEXT"
                         ")"
                     )
                 )
+                connection.execute(text("DELETE FROM app_settings"))
                 connection.execute(
                     text("INSERT INTO app_settings (key, value) VALUES (:key, :value)"),
                     [

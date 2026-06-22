@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -26,9 +27,7 @@ from app.services.retrieval_service import RetrievalService
 
 def test_rag_eligibility_recognizes_legacy_materialized_ai_records():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_eligibility.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -80,9 +79,7 @@ def test_rag_eligibility_recognizes_legacy_materialized_ai_records():
 
 def test_full_context_retrieval_requires_ai_reviewed_sections():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'full_context_sections.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -134,9 +131,7 @@ def test_full_context_retrieval_requires_ai_reviewed_sections():
 
 def test_rag_eligibility_recognizes_approved_ide_ai_corrections():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_approved_correction.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -178,9 +173,7 @@ def test_rag_eligibility_recognizes_approved_ide_ai_corrections():
 
 def test_rag_eligibility_does_not_promote_chunks_from_paper_level_ai_records():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_chunk_eligibility.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -246,9 +239,7 @@ def test_rag_eligibility_does_not_promote_chunks_from_paper_level_ai_records():
 
 def test_rag_eligibility_allows_only_classified_or_verified_figures():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_figure_eligibility.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -442,9 +433,7 @@ def test_rag_eligibility_allows_only_classified_or_verified_figures():
 
 def test_rag_quality_summary_blocks_reviewed_caption_echo_figures():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_quality_caption_echo.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -500,9 +489,7 @@ def test_rag_quality_summary_blocks_reviewed_caption_echo_figures():
 
 def test_dft_rag_eligibility_requires_identity_value_unit_and_locator():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_dft_eligibility.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -575,9 +562,7 @@ def test_dft_rag_eligibility_requires_identity_value_unit_and_locator():
 
 def test_writing_card_rag_eligibility_recognizes_approved_ide_ai_review():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_writing_cards.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -622,9 +607,7 @@ def test_writing_card_rag_eligibility_recognizes_approved_ide_ai_review():
 
 def test_writing_card_rag_eligibility_recognizes_approved_ide_ai_create():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_writing_card_create.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
@@ -675,9 +658,7 @@ def test_writing_card_rag_eligibility_recognizes_approved_ide_ai_create():
 
 def test_rag_quality_summary_counts_eligible_and_blocked_reasons():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'rag_quality.db'}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:

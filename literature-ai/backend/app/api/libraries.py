@@ -26,10 +26,8 @@ def _get_manager() -> LibraryManager:
     return _manager
 
 
-def _configured_database_library_counts(library_names: list[str]) -> dict[str, int] | None:
+def _database_library_counts(library_names: list[str]) -> dict[str, int]:
     settings = get_settings()
-    if not bool(getattr(settings, "force_configured_database", False)):
-        return None
     normalized_names = [normalize_library_name(name) for name in library_names]
     if not normalized_names:
         return {}
@@ -49,23 +47,13 @@ def _effective_active_library_response(
 ) -> LibraryInfoResponse:
     payload = lib.model_dump()
     info = active_db_info or get_active_database_info()
-    effective_db_path = info.get("effective_db_path")
-    effective_total = info.get("effective_db_papers_total")
     active_name = normalize_library_name(info.get("active_library"))
     library_name = normalize_library_name(str(payload.get("name") or ""))
-    configured_count = configured_counts.get(library_name) if configured_counts is not None else None
+    configured_count = configured_counts.get(library_name) if configured_counts is not None else 0
 
-    if configured_count is not None:
-        payload["paper_count"] = configured_count
-        if active_name and library_name == active_name:
-            payload["is_active"] = True
-    elif payload.get("is_active") and effective_db_path:
-        payload["root_path"] = str(Path(str(effective_db_path)).resolve().parent)
-        payload["paper_count"] = int(effective_total or 0)
-    elif active_name and library_name == active_name and effective_db_path:
+    payload["paper_count"] = configured_count
+    if active_name and library_name == active_name:
         payload["is_active"] = True
-        payload["root_path"] = str(Path(str(effective_db_path)).resolve().parent)
-        payload["paper_count"] = int(effective_total or 0)
     return LibraryInfoResponse(**payload)
 
 
@@ -171,7 +159,7 @@ def list_libraries() -> list[LibraryInfoResponse]:
     mgr = _get_manager()
     libs = mgr.list_libraries()
     active_db_info = get_active_database_info()
-    configured_counts = _configured_database_library_counts([str(lib.name) for lib in libs])
+    configured_counts = _database_library_counts([str(lib.name) for lib in libs])
     return [
         _effective_active_library_response(
             lib,
@@ -213,7 +201,7 @@ async def activate_library(name: str) -> LibraryInfoResponse:
         raise HTTPException(status_code=500, detail=f"激活文献库失败：{exc}") from exc
     try:
         active_db_info = activate_active_library_database()
-        configured_counts = _configured_database_library_counts([str(lib.name)])
+        configured_counts = _database_library_counts([str(lib.name)])
     except HTTPException:
         raise
     except Exception as exc:

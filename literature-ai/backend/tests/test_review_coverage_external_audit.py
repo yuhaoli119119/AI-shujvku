@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -31,13 +33,10 @@ def _make_external_audit_ready(paper: Paper, root: Path) -> None:
 
 def test_get_review_coverage_includes_external_audit_opinion(monkeypatch):
     with TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "coverage.db"
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
-        with engine.begin() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        settings = get_settings().model_copy(update={"database_url": f"sqlite:///{db_path}"})
+        settings = get_settings().model_copy(update={"database_url": os.environ["LITAI_TEST_DATABASE_URL"]})
 
         try:
             with Session(engine) as session:

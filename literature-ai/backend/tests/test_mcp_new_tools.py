@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import json
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -18,7 +20,7 @@ from app.services.external_analysis_service import ExternalAnalysisNormalizedMod
 def _make_mock_settings():
     """Create a mock Settings object with the required attributes."""
     settings = MagicMock()
-    settings.database_url = "sqlite:///test_mock.db"
+    settings.database_url = os.environ["LITAI_TEST_DATABASE_URL"]
     settings.embedding_dimension = 64
     return settings
 
@@ -148,6 +150,81 @@ class TestReviewPaper:
 
 
 # ---------------------------------------------------------------------------
+# propose_correction
+# ---------------------------------------------------------------------------
+
+class TestProposeCorrection:
+    @patch("app.mcp.server._serialize_correction")
+    @patch("app.mcp.server.ReviewService")
+    @patch("app.mcp.server.session_scope")
+    @patch("app.mcp.server.get_settings")
+    @patch("app.mcp.server.require_mcp_capability")
+    def test_non_dft_is_applied_immediately(
+        self,
+        mock_auth,
+        mock_settings,
+        mock_session_scope,
+        MockReviewService,
+        mock_serialize,
+    ):
+        from app.mcp.server import propose_correction
+
+        mock_auth.return_value.source_prefix = "codex"
+        mock_settings.return_value = _make_mock_settings()
+        mock_session = MagicMock()
+        mock_session_scope.return_value.__enter__.return_value = mock_session
+        approved = MagicMock()
+        approved.status = "approved"
+        MockReviewService.return_value.approve_correction.return_value = approved
+        mock_serialize.return_value = {"status": "approved"}
+
+        result = propose_correction(
+            paper_id=str(uuid4()),
+            field_name="figures",
+            target_path=f"figures:{uuid4()}:caption",
+            operation="replace",
+            proposed_value="Correct caption",
+            reason="Checked against PDF.",
+        )
+
+        assert result["status"] == "approved"
+        MockReviewService.return_value.approve_correction.assert_called_once()
+
+    @patch("app.mcp.server._serialize_correction")
+    @patch("app.mcp.server.ReviewService")
+    @patch("app.mcp.server.session_scope")
+    @patch("app.mcp.server.get_settings")
+    @patch("app.mcp.server.require_mcp_capability")
+    def test_dft_stays_pending(
+        self,
+        mock_auth,
+        mock_settings,
+        mock_session_scope,
+        MockReviewService,
+        mock_serialize,
+    ):
+        from app.mcp.server import propose_correction
+
+        mock_auth.return_value.source_prefix = "codex"
+        mock_settings.return_value = _make_mock_settings()
+        mock_session = MagicMock()
+        mock_session_scope.return_value.__enter__.return_value = mock_session
+        mock_serialize.return_value = {"status": "pending"}
+
+        result = propose_correction(
+            paper_id=str(uuid4()),
+            field_name="dft_results",
+            target_path=f"dft_results:{uuid4()}:value",
+            operation="replace",
+            proposed_value=-1.2,
+            reason="DFT evidence review.",
+        )
+
+        assert result["status"] == "pending"
+        MockReviewService.return_value.approve_correction.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # import_analysis
 # ---------------------------------------------------------------------------
 
@@ -190,6 +267,10 @@ class TestImportAnalysis:
         assert result["auto_apply_review_rules"] is True
         mock_service_instance.import_run.assert_called_once()
         MockVerificationSessionService.return_value.apply_import_rules_for_paper.assert_called_once()
+        assert (
+            MockVerificationSessionService.return_value.apply_import_rules_for_paper.call_args.kwargs["candidate_run_id"]
+            == mock_run.id
+        )
         mock_session.commit.assert_called_once()
 
     @patch("app.mcp.server.session_scope")
@@ -234,6 +315,10 @@ class TestImportAnalysis:
         assert result["candidate_count"] == 1
         assert result["candidates"][0]["type"] == "note"
         MockVerificationSessionService.return_value.apply_import_rules_for_paper.assert_called_once()
+        assert (
+            MockVerificationSessionService.return_value.apply_import_rules_for_paper.call_args.kwargs["candidate_run_id"]
+            == mock_run.id
+        )
 
 
 # ---------------------------------------------------------------------------

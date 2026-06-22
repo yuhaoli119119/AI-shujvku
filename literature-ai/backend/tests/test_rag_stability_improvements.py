@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -13,9 +15,9 @@ from app.rag.retriever import Retriever
 from app.services.embedding import EmbeddingUnavailableError
 
 
-def _engine(name: str):
+def _engine():
     tempdir = TemporaryDirectory()
-    engine = create_engine(f"sqlite:///{Path(tempdir.name) / name}", future=True)
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
     return tempdir, engine
 
@@ -36,7 +38,7 @@ def _safe_figure(paper_id, **overrides):
 
 
 def test_latest_figure_review_is_authoritative_and_rejected_survives_recrop():
-    tempdir, engine = _engine("figures.db")
+    tempdir, engine = _engine()
     try:
         with Session(engine) as session:
             paper = Paper(title="Figure paper", pdf_path="paper.pdf", authors=["A"])
@@ -61,7 +63,7 @@ def test_latest_figure_review_is_authoritative_and_rejected_survives_recrop():
 
 
 def test_all_unsafe_figure_states_remain_blocked():
-    tempdir, engine = _engine("unsafe_figures.db")
+    tempdir, engine = _engine()
     try:
         with Session(engine) as session:
             paper = Paper(title="Unsafe figures", pdf_path="paper.pdf", authors=["A"])
@@ -90,7 +92,7 @@ class FailingEmbedding:
 
 
 def test_section_and_chunk_candidates_merge_without_entering_writing_context():
-    tempdir, engine = _engine("sections.db")
+    tempdir, engine = _engine()
     try:
         with Session(engine) as session:
             paper = Paper(title="Boundary paper", pdf_path="paper.pdf", authors=["A"])

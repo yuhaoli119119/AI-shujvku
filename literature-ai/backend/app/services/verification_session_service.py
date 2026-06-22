@@ -269,20 +269,22 @@ class VerificationSessionService:
         *,
         paper_id: UUID,
         reviewer: str,
+        candidate_run_id: UUID | None = None,
         write_lock_tokens: list[str] | None = None,
         write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
-        required_modules = self._required_direct_write_modules_for_paper(paper_id)
-        try:
-            lock_check = ModuleWriteLockService(self.session).require_write(
-                paper_id=paper_id,
-                module_names=required_modules,
-                lock_tokens=write_lock_tokens,
-                locked_by=write_lock_owner or reviewer,
-            )
-        except ValueError as exc:
-            raise
-        new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
+        # Only a DFT candidate created by this import may require a lock. Pending
+        # candidates from older runs must never block unrelated non-DFT writes.
+        required_modules = self._required_direct_write_modules_for_paper(
+            paper_id,
+            candidate_run_id=candidate_run_id,
+        )
+        lock_check = ModuleWriteLockService(self.session).require_write(
+            paper_id=paper_id,
+            module_names=required_modules,
+            lock_tokens=write_lock_tokens,
+            locked_by=write_lock_owner or reviewer,
+        )
         low_risk_summary = self._auto_materialize_single_ai_candidates(
             paper_id=paper_id,
             reviewer=reviewer,
@@ -292,8 +294,10 @@ class VerificationSessionService:
         dft_settlement_summary = self.settle_ai_dft_reviews_for_paper(
             paper_id=paper_id,
             reviewer=reviewer,
+            candidate_run_id=candidate_run_id,
             write_lock_tokens=write_lock_tokens,
         )
+        new_dft_summary = dft_settlement_summary["new_dft_candidates"]
         object_review_summary = self._auto_apply_object_review_candidates(
             paper_id=paper_id,
             reviewer=reviewer,
@@ -346,8 +350,14 @@ class VerificationSessionService:
         *,
         paper_id: UUID,
         reviewer: str,
+        candidate_run_id: UUID | None = None,
         write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
+        if candidate_run_id is not None and "dft_results" not in self._required_direct_write_modules_for_paper(
+            paper_id,
+            candidate_run_id=candidate_run_id,
+        ):
+            return self._empty_dft_settlement_summary(paper_id)
         new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
         rows = self.session.scalars(
             select(DFTResult)
@@ -442,6 +452,34 @@ class VerificationSessionService:
         )
         self.session.flush()
         return summary
+
+    def _empty_dft_settlement_summary(self, paper_id: UUID) -> dict[str, Any]:
+        gate_counts = self._dft_settlement_counts(paper_id)
+        empty_candidates = {
+            "materialized_count": 0,
+            "materialized_items": [],
+            "skipped_count": 0,
+            "skipped_items": [],
+        }
+        return {
+            "paper_id": str(paper_id),
+            "new_dft_candidates": empty_candidates,
+            "auto_applied_count": 0,
+            "auto_applied_items": [],
+            "need_third_ai_count": 0,
+            "need_third_ai_items": [],
+            "need_repair_count": 0,
+            "need_repair_items": [],
+            "waiting_second_ai_count": 0,
+            "waiting_second_ai_items": [],
+            "skipped_count": 0,
+            "skipped_items": [],
+            "exportable_count": gate_counts["exportable_count"],
+            "blocked_reason_counts": gate_counts["blocked_reason_counts"],
+            "gate_need_third_ai_count": gate_counts["need_third_ai_count"],
+            "gate_need_repair_count": gate_counts["need_repair_count"],
+            "gate_waiting_second_ai_count": gate_counts["waiting_second_ai_count"],
+        }
 
     def _materialize_new_dft_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
         rows = self.session.execute(
@@ -814,13 +852,21 @@ class VerificationSessionService:
         except (TypeError, ValueError):
             return None
 
-    def _required_direct_write_modules_for_paper(self, paper_id: UUID) -> list[str]:
-        rows = self.session.execute(
+    def _required_direct_write_modules_for_paper(
+        self,
+        paper_id: UUID,
+        *,
+        candidate_run_id: UUID | None = None,
+    ) -> list[str]:
+        stmt = (
             select(ExternalAnalysisCandidate, ExternalAnalysisRun)
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(ExternalAnalysisCandidate.paper_id == paper_id)
             .where(ExternalAnalysisCandidate.status.in_(("candidate", "pending", "requires_resolution")))
-        ).all()
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        rows = self.session.execute(stmt).all()
         modules: set[str] = set()
         for candidate, _run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
@@ -828,18 +874,7 @@ class VerificationSessionService:
                 continue
             target_type = self._normalize_object_review_target_type(payload.get("target_type"))
             if target_type == "dft_results":
-                decision = str(payload.get("decision") or "").strip().lower()
-                target_id = str(payload.get("target_id") or "").strip().lower()
-                if decision == "new_candidate" or target_id == "new":
-                    modules.add("dft_results")
-                continue
-            try:
-                if target_type == "paper":
-                    modules.add(ModuleWriteLockService.module_from_field(payload.get("field_name")))
-                else:
-                    modules.add(ModuleWriteLockService.module_from_field(target_type))
-            except ValueError:
-                continue
+                modules.add("dft_results")
         return sorted(modules)
 
     def settle_session(self, session_id: str, *, reviewer: str) -> dict[str, Any]:
@@ -1968,6 +2003,11 @@ class VerificationSessionService:
         adopted_corrected = adopted.get("corrected_value")
         if isinstance(adopted_corrected, dict):
             corrected.update({key: value for key, value in adopted_corrected.items() if value not in (None, "")})
+        elif adopted_corrected not in (None, ""):
+            adopted_field = str(adopted.get("field_name") or "").strip()
+            mapped_field = self.DFT_FIELD_ALIASES.get(adopted_field, adopted_field)
+            if mapped_field in corrected:
+                corrected[mapped_field] = adopted_corrected
 
         material_identity = next(
             (

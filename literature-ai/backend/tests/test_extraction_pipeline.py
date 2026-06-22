@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -60,10 +61,8 @@ def test_dft_duplicate_candidates_merge_across_source_locations():
 
 def test_dft_persist_merges_existing_duplicate_candidate_without_new_row():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'dedup_existing.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
-            with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(engine)
             with Session(engine) as session:
                 paper = Paper(title="Duplicate Paper", pdf_path="dup.pdf", authors=[])
@@ -117,10 +116,8 @@ def test_dft_persist_merges_existing_duplicate_candidate_without_new_row():
 
 def test_extraction_pipeline_persists_stage2_outputs():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'test.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
-            with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(engine)
 
             with Session(engine) as session:
@@ -173,7 +170,6 @@ def test_extraction_pipeline_persists_stage2_outputs():
                 )
 
                 settings = get_settings()
-                settings.embedding_dimension = 8
                 service = ExtractionPipelineService(session=session, settings=settings)
                 service.comprehensive_extractor.extract_quick_classification = lambda doc: {
                     "paper_type": "B1",
@@ -203,10 +199,8 @@ def test_extraction_pipeline_persists_stage2_outputs():
 
 def test_extraction_pipeline_merges_computational_views_and_adds_quality_checks():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'merge_test.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
-            with engine.begin() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))
             Base.metadata.create_all(engine)
 
             with Session(engine) as session:
@@ -236,7 +230,6 @@ def test_extraction_pipeline_merges_computational_views_and_adds_quality_checks(
                 )
 
                 settings = get_settings()
-                settings.embedding_dimension = 8
                 service = ExtractionPipelineService(session=session, settings=settings)
                 service.dft_settings_extractor.extract = lambda doc: {}
                 service.catalyst_extractor.extract = lambda doc: {}

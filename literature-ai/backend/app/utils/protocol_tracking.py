@@ -9,8 +9,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # NOTE: This project uses PostgreSQL (with pgvector extension) as its database,
-# NOT SQLite. All session_scope() calls operate against PostgreSQL.
-# Do not assume SQLite-style locking or file-based database behavior.
+# All session_scope() calls operate against PostgreSQL.
 
 PROTOCOL_FILES: dict[str, str] = {
     "dft_results": "prompts/dft_results.yaml",

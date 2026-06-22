@@ -1,3 +1,4 @@
+import os
 import pytest
 from uuid import UUID
 from fastapi.testclient import TestClient
@@ -17,8 +18,7 @@ from app.utils.review_safety import is_safe_verified_review
 @pytest.fixture
 def setup_test_db(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test_verification.db"
-        db_url = f"sqlite:///{db_path}"
+        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
 
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
         get_settings.cache_clear()

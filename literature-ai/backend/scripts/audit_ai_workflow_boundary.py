@@ -29,7 +29,7 @@ from app.db.session import get_engine
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.paper_reprocessing import PaperReprocessingService
-from app.utils.active_database import activate_active_library_database, require_active_library_sqlite
+from app.utils.active_database import activate_active_library_database, get_active_database_info
 from app.utils.review_safety import has_required_evidence_reference, is_export_eligible_extraction, writing_card_gate
 
 
@@ -444,7 +444,7 @@ def main() -> None:
     args = parser.parse_args()
 
     activate_active_library_database()
-    db_info = require_active_library_sqlite()
+    db_info = get_active_database_info()
     settings = get_settings()
     engine = get_engine(settings.database_url)
     with Session(engine, autoflush=False, future=True) as session:
@@ -488,7 +488,7 @@ def main() -> None:
     print(f"active_db_kind={active['db_kind']}")
     print(f"active_db_path={active['db_path']}")
     print(f"active_library={active['active_library']}")
-    print(f"is_active_library_sqlite={active['is_active_library_sqlite']}")
+    print(f"db_kind={active['db_kind']}")
     for key, value in report["audit"].items():
         print(f"{key}={value}")
     if report["e2e_rollback"] is not None:

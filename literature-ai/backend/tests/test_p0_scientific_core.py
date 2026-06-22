@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -93,7 +95,7 @@ def _add_sections(session: Session, paper: Paper, count: int, prefix: str) -> No
 
 def test_evidence_service_audits_claims_against_unified_evidence():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'core.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
@@ -121,7 +123,7 @@ def test_evidence_service_audits_claims_against_unified_evidence():
 
 def test_retrieval_service_supports_focused_and_full_context_modes():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retrieval.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
@@ -150,7 +152,7 @@ def test_retrieval_service_supports_focused_and_full_context_modes():
 
 def test_retrieval_service_full_context_handles_empty_results_and_duplicate_paper_ids():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retrieval_empty.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
@@ -188,7 +190,7 @@ def test_retrieval_service_full_context_handles_empty_results_and_duplicate_pape
 
 def test_retrieval_service_full_context_reclaims_quota_from_empty_outer_papers():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retrieval_quota_fill.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
@@ -218,7 +220,7 @@ def test_retrieval_service_full_context_reclaims_quota_from_empty_outer_papers()
 
 def test_retrieval_service_full_context_redistributes_fairly_and_preserves_order():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retrieval_fair_order.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
@@ -258,7 +260,7 @@ def test_retrieval_service_full_context_redistributes_fairly_and_preserves_order
 
 def test_retrieval_service_full_context_returns_all_sections_when_below_limit():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retrieval_below_limit.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
@@ -309,7 +311,7 @@ def test_retrieval_search_request_limit_boundaries_match_schema():
 
 def test_retrieval_service_defaults_to_focused_mode_for_compatibility():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'retrieval_default.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
@@ -328,7 +330,7 @@ def test_retrieval_service_defaults_to_focused_mode_for_compatibility():
 
 def test_extraction_schema_results_and_validator_warnings():
     with TemporaryDirectory() as tmpdir:
-        engine = create_engine(f"sqlite:///{Path(tmpdir) / 'schema.db'}", future=True)
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         try:
             Base.metadata.create_all(engine)
             with Session(engine) as session:
