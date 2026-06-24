@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import csv
+import copy
 import io
 import json
 import logging
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -16,7 +17,10 @@ from sqlalchemy.orm import Session
 from app.db.models import CatalystSample as CS
 from app.db.models import DFTResult as DR
 from app.db.models import DFTSetting as DS
+from app.db.models import EvidenceSpan as ES
 from app.db.models import Paper as P
+from app.domain.reaction_taxonomy import PROFILE_VERSION as REACTION_PROFILE_VERSION
+from app.domain.tabular_task_profiles import evaluate_tabular_readiness, get_tabular_task_profile
 from app.normalizers.chemistry_normalizer import ChemistryNormalizer, canonicalize_adsorbate, get_property_taxonomy
 from app.normalizers.unit_normalizer import UnitNormalizer
 from app.services.catalyst_sample_identity import resolve_sample_identity
@@ -26,6 +30,19 @@ from app.utils.review_safety import bulk_export_gate_results, summarize_gate_res
 logger = logging.getLogger(__name__)
 _CHEMISTRY_NORMALIZER = ChemistryNormalizer()
 _UNIT_NORMALIZER = UnitNormalizer()
+_RDS_SEMANTIC_PATTERNS = (
+    re.compile(r"\brds\b", re.IGNORECASE),
+    re.compile(r"rate[-\s]?determining step", re.IGNORECASE),
+    re.compile(r"rate[-\s]?limiting step", re.IGNORECASE),
+    re.compile(r"决速步骤"),
+    re.compile(r"限速步骤"),
+)
+_OVERALL_SRR_GIBBS_PATTERNS = (
+    re.compile(r"overall\s+srr", re.IGNORECASE),
+    re.compile(r"overall\s+sulfur\s+reduction", re.IGNORECASE),
+    re.compile(r"overall.*s8.*li2s", re.IGNORECASE),
+    re.compile(r"整体.*自由能"),
+)
 
 
 def _fastapi_default(value: Any) -> Any:
@@ -370,7 +387,6 @@ def _build_instance_context(
     material_scope_key = "|".join(
         [
             f"material={_context_token(components['material_key'])}",
-            f"section={_context_token(components['source_section'])}",
             f"setting={_context_token(components['setting_binding'])}",
             f"matid={_context_token(components['material_identity'])}",
             f"material_name={_context_token(components['material'])}",
@@ -1039,6 +1055,378 @@ def build_dft_ml_dataset(
     }
 
 
+def _v3_catalyst_family(catalyst: dict[str, Any] | None) -> str | None:
+    if not catalyst:
+        return None
+    parts: list[str] = []
+    for key in ("name", "catalyst_type", "metal_centers", "coordination", "support"):
+        value = catalyst.get(key)
+        if isinstance(value, (list, tuple, set, frozenset)):
+            text = "+".join(sorted(_clean_text(item).lower() for item in value if _clean_text(item)))
+        else:
+            text = _clean_text(value).lower()
+        if text:
+            parts.append(f"{key}={text}")
+    return "|".join(parts) or None
+
+
+def _has_rds_semantics(*values: Any) -> bool:
+    text = " ".join(_clean_text(value) for value in values if _clean_text(value))
+    return any(pattern.search(text) for pattern in _RDS_SEMANTIC_PATTERNS)
+
+
+def _is_overall_srr_gibbs_record(*values: Any) -> bool:
+    text = " ".join(_clean_text(value) for value in values if _clean_text(value))
+    return any(pattern.search(text) for pattern in _OVERALL_SRR_GIBBS_PATTERNS)
+
+
+def _v3_exclusion_reason(
+    row: DR,
+    profile_key: str,
+    allowed_reaction: str,
+    allowed_properties: frozenset[str],
+) -> str | None:
+    reaction_type = _clean_text(row.reaction_type) or "UNKNOWN"
+    validation_status = _clean_text(row.reaction_validation_status).lower()
+    if reaction_type == "UNKNOWN":
+        return "unknown_reaction_type"
+    if reaction_type != allowed_reaction:
+        return f"reaction_type_{reaction_type}"
+    if validation_status != "valid":
+        return f"reaction_validation_{validation_status or 'missing'}"
+    canonical_property = get_property_taxonomy(row.property_type)["canonical_property_type"]
+    if canonical_property not in allowed_properties:
+        return "target_property_not_allowed"
+    if profile_key == "SRR_LiS:rds_gibbs_free_energy":
+        payload_strings = _iter_strings(row.evidence_payload)
+        if not _has_rds_semantics(row.reaction_step, row.evidence_text, *payload_strings):
+            return "missing_rds_semantics"
+        if _is_overall_srr_gibbs_record(row.reaction_step, row.evidence_text, *payload_strings):
+            return "overall_srr_free_energy_not_rds"
+    return None
+
+
+def _v3_readiness_input(record: dict[str, Any], row: DR, catalyst_family: str | None) -> dict[str, Any]:
+    target = record["target"]
+    provenance = record["provenance"]
+    catalyst = record.get("catalyst") or {}
+    setting = record.get("linked_dft_setting") or {}
+    sample_context = record.get("sample_context") or {}
+    return {
+        "reaction_type": row.reaction_type,
+        "reaction_validation_status": row.reaction_validation_status,
+        "canonical_property_type": target.get("canonical_property_type"),
+        "normalized_value": target.get("normalized_value"),
+        "normalized_unit": target.get("normalized_unit"),
+        "safety_gate_passed": True,
+        "evidence_present": bool(provenance.get("evidence_text")),
+        "locator_status": provenance.get("locator_status"),
+        "setting_link_status": record.get("setting_link_status"),
+        "linked_dft_setting": record.get("linked_dft_setting"),
+        "label_blockers": tuple(target.get("normalization_blockers") or ()),
+        "paper_id": (record.get("paper") or {}).get("paper_id"),
+        "catalyst_id": catalyst.get("catalyst_sample_id"),
+        "catalyst_family": catalyst_family,
+        "catalyst_type": catalyst.get("catalyst_type"),
+        "metal_centers": catalyst.get("metal_centers"),
+        "coordination": catalyst.get("coordination"),
+        "support": catalyst.get("support"),
+        "canonical_adsorbate": target.get("canonical_adsorbate"),
+        "reaction_step": target.get("reaction_step"),
+        "functional": setting.get("functional"),
+        "dispersion_correction": setting.get("dispersion_correction"),
+        "pseudopotential": setting.get("pseudopotential"),
+        "cutoff_energy_ev": setting.get("cutoff_energy_ev"),
+        "k_points": setting.get("k_points"),
+        "descriptor_instance_ambiguous": sample_context.get("descriptor_instance_ambiguous") is True,
+    }
+
+
+def build_dft_ml_dataset_v3(
+    session: Session,
+    *,
+    task: str,
+    ready_only: bool = False,
+    property_type: str | None = None,
+    adsorbate: str | None = None,
+    catalyst_type: str | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    library_name: str | None = None,
+    min_confidence: float | None = None,
+    paper_id: UUID | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Build a task-scoped v3 JSON dataset by enriching the v2 export payload."""
+    profile = get_tabular_task_profile(task)
+    limit = _fastapi_default(limit)
+    if limit is not None:
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be a non-negative integer or None") from exc
+        if limit < 0:
+            raise ValueError("limit must be a non-negative integer or None")
+    v2 = build_dft_ml_dataset(
+        session,
+        property_type=property_type,
+        adsorbate=adsorbate,
+        catalyst_type=catalyst_type,
+        year_min=year_min,
+        year_max=year_max,
+        library_name=library_name,
+        min_confidence=min_confidence,
+        paper_id=paper_id,
+        limit=None,
+    )
+    v2_records = v2["records"]
+    ids = [UUID(record["record_id"]) for record in v2_records]
+    rows_by_id = {
+        str(row.id): row
+        for row in session.scalars(select(DR).where(DR.id.in_(ids))).all()
+    } if ids else {}
+    pages_by_id: dict[str, list[int]] = defaultdict(list)
+    if ids:
+        spans = session.scalars(
+            select(ES).where(
+                ES.object_type.in_(("dft_result", "dft_results")),
+                ES.object_id.in_([str(value) for value in ids]),
+            )
+        ).all()
+        for span in spans:
+            if span.page is not None:
+                pages_by_id[span.object_id].append(span.page)
+
+    excluded = Counter()
+    candidates: list[dict[str, Any]] = []
+    for source_record in v2_records:
+        row = rows_by_id.get(source_record["record_id"])
+        if row is None:
+            excluded["missing_source_record"] += 1
+            continue
+        reason = _v3_exclusion_reason(
+            row,
+            profile.key,
+            profile.reaction_type,
+            profile.allowed_target_properties,
+        )
+        if reason:
+            excluded[reason] += 1
+            continue
+
+        record = copy.deepcopy(source_record)
+        record["provenance"]["page_locators"] = sorted(set(pages_by_id.get(record["record_id"], [])))
+        catalyst_family = _v3_catalyst_family(record.get("catalyst"))
+        readiness = evaluate_tabular_readiness(profile, _v3_readiness_input(record, row, catalyst_family))
+        record.update(
+            {
+                "reaction_type": row.reaction_type,
+                "reaction_profile_version": row.reaction_profile_version,
+                "reaction_validation_status": row.reaction_validation_status,
+                **readiness,
+                "split_group_values": {
+                    "paper_id": record["paper"]["paper_id"],
+                    "catalyst_family": catalyst_family,
+                },
+            }
+        )
+        record["label_blockers"] = sorted(set(record["label_blockers"]))
+        record["feature_blockers"] = sorted(set(record["feature_blockers"]))
+        candidates.append(record)
+
+    return_candidates = [
+        record for record in candidates
+        if not ready_only or (record["label_ready"] and record["tabular_ml_ready"])
+    ]
+    return_candidates.sort(key=lambda record: record["record_id"])
+    returned = return_candidates if limit is None else return_candidates[:limit]
+    filters = {
+        **v2["metadata"]["filters"],
+        "task": profile.key,
+        "reaction_type": profile.reaction_type,
+        "ready_only": bool(ready_only),
+        "limit": limit,
+    }
+    counts = {
+        "source_candidate_count": len(v2_records),
+        "candidate_count": len(candidates),
+        "task_candidate_count": len(return_candidates),
+        "returned_count": len(returned),
+        "label_ready_count": sum(bool(record["label_ready"]) for record in candidates),
+        "tabular_ready_count": sum(bool(record["tabular_ml_ready"]) for record in candidates),
+        "excluded_counts": dict(sorted(excluded.items())),
+    }
+    created_at = datetime.now(timezone.utc).isoformat()
+    contract = {
+        "schema_version": "dft_results_ml_v3",
+        "dataset_version": "dft-ml-dataset-v0.3",
+        "source_schema_version": "dft_results_ml_v2",
+        "source_dataset_version": v2["metadata"]["dataset_version"],
+        "task": profile.key,
+        "task_status": profile.status,
+        "task_profile_version": profile.version,
+        "reaction_profile": profile.reaction_type,
+        "reaction_profile_version": REACTION_PROFILE_VERSION,
+        "normalization_version": "dft_results_ml_v2_normalization",
+        "created_at": created_at,
+        "filters": filters,
+        "property_type_fields": [
+            "property_type",
+            "normalized_property_type",
+            "canonical_property_type",
+            "property_subtype",
+        ],
+        "property_type_display_priority": [
+            "property_subtype",
+            "normalized_property_type",
+            "property_type",
+            "canonical_property_type",
+        ],
+        **counts,
+    }
+    return {
+        "metadata": dict(contract),
+        "manifest": dict(contract),
+        "records": returned,
+    }
+
+
+DFT_ML_DATASET_V3_CSV_COLUMNS = (
+    "record_id",
+    "paper_id",
+    "title",
+    "year",
+    "catalyst_name",
+    "catalyst_type",
+    "metal_centers",
+    "coordination",
+    "support",
+    "reaction_type",
+    "task_profile",
+    "property_type",
+    "normalized_property_type",
+    "canonical_property_type",
+    "property_subtype",
+    "normalized_value",
+    "normalized_unit",
+    "raw_value",
+    "raw_unit",
+    "adsorbate",
+    "intermediate",
+    "reaction_step",
+    "dft_software",
+    "dft_functional",
+    "evidence_text",
+    "page_locators",
+    "label_ready",
+    "tabular_ml_ready",
+    "label_blockers",
+    "feature_blockers",
+    "split_paper_id",
+    "split_catalyst_family",
+    "reaction_profile_version",
+    "task_profile_version",
+)
+
+
+def _csv_cell(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return value
+
+
+def _v3_csv_row(record: dict[str, Any]) -> dict[str, Any]:
+    paper = record.get("paper") or {}
+    catalyst = record.get("catalyst") or {}
+    target = record.get("target") or {}
+    setting = record.get("linked_dft_setting") or {}
+    provenance = record.get("provenance") or {}
+    split = record.get("split_group_values") or {}
+    return {
+        "record_id": record.get("record_id"),
+        "paper_id": paper.get("paper_id"),
+        "title": paper.get("title"),
+        "year": paper.get("year"),
+        "catalyst_name": catalyst.get("name"),
+        "catalyst_type": catalyst.get("catalyst_type"),
+        "metal_centers": catalyst.get("metal_centers"),
+        "coordination": catalyst.get("coordination"),
+        "support": catalyst.get("support"),
+        "reaction_type": record.get("reaction_type"),
+        "task_profile": record.get("task_profile"),
+        "property_type": target.get("property_type"),
+        "normalized_property_type": target.get("normalized_property_type"),
+        "canonical_property_type": target.get("canonical_property_type"),
+        "property_subtype": target.get("property_subtype"),
+        "normalized_value": target.get("normalized_value"),
+        "normalized_unit": target.get("normalized_unit"),
+        "raw_value": target.get("value"),
+        "raw_unit": target.get("unit"),
+        "adsorbate": target.get("adsorbate"),
+        "intermediate": target.get("canonical_adsorbate"),
+        "reaction_step": target.get("reaction_step"),
+        "dft_software": setting.get("software"),
+        "dft_functional": setting.get("functional"),
+        "evidence_text": provenance.get("evidence_text"),
+        "page_locators": provenance.get("page_locators") or [],
+        "label_ready": record.get("label_ready"),
+        "tabular_ml_ready": record.get("tabular_ml_ready"),
+        "label_blockers": record.get("label_blockers") or [],
+        "feature_blockers": record.get("feature_blockers") or [],
+        "split_paper_id": split.get("paper_id"),
+        "split_catalyst_family": split.get("catalyst_family"),
+        "reaction_profile_version": record.get("reaction_profile_version"),
+        "task_profile_version": record.get("task_profile_version"),
+    }
+
+
+def build_dft_ml_dataset_v3_csv(
+    session: Session,
+    *,
+    task: str,
+    ready_only: bool = True,
+    property_type: str | None = None,
+    adsorbate: str | None = None,
+    catalyst_type: str | None = None,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    library_name: str | None = None,
+    min_confidence: float | None = None,
+    paper_id: UUID | None = None,
+    limit: int | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build a pandas-friendly v3 CSV from the strict v3 dataset contract."""
+    payload = build_dft_ml_dataset_v3(
+        session,
+        task=task,
+        ready_only=ready_only,
+        property_type=property_type,
+        adsorbate=adsorbate,
+        catalyst_type=catalyst_type,
+        year_min=year_min,
+        year_max=year_max,
+        library_name=library_name,
+        min_confidence=min_confidence,
+        paper_id=paper_id,
+        limit=limit,
+    )
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=DFT_ML_DATASET_V3_CSV_COLUMNS, lineterminator="\n")
+    writer.writeheader()
+    for record in payload["records"]:
+        writer.writerow(
+            {
+                column: _csv_cell(value)
+                for column, value in _v3_csv_row(record).items()
+            }
+        )
+    return output.getvalue(), payload["manifest"]
+
+
 def build_dft_csv_rows(
     session: Session,
     *,
@@ -1083,6 +1471,9 @@ def build_dft_csv_rows(
             "year",
             "authors",
             "property_type",
+            "normalized_property_type",
+            "canonical_property_type",
+            "property_subtype",
             "adsorbate",
             "value",
             "unit",
@@ -1108,6 +1499,8 @@ def build_dft_csv_rows(
         gate_results.append(gate)
         if not gate.eligible:
             continue
+        normalized_property_type = _normalized_property_type(dr.property_type)
+        taxonomy = get_property_taxonomy(dr.property_type)
         display_value, display_unit = normalize_dft_display_value(dr.value, dr.unit)
         authors_str = ", ".join(paper.authors) if isinstance(paper.authors, list) else (paper.authors or "")
         writer.writerow(
@@ -1119,6 +1512,9 @@ def build_dft_csv_rows(
                 paper.year or "",
                 authors_str,
                 dr.property_type or "",
+                normalized_property_type or "",
+                taxonomy["canonical_property_type"],
+                taxonomy["property_subtype"] or "",
                 dr.adsorbate or "",
                 display_value if display_value is not None else "",
                 display_unit or "",

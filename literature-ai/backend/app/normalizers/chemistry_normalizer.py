@@ -302,7 +302,19 @@ class ChemistryNormalizer:
 
     @staticmethod
     def _normalize_property(raw: str) -> str:
-        lowered = raw.strip().lower().replace("–", "-").replace("—", "-")
+        lowered = (
+            raw.strip()
+            .lower()
+            .replace("–", "-")
+            .replace("—", "-")
+            .replace("Δ", "delta ")
+            .replace("δ", "delta ")
+            .replace("△", "delta ")
+            .replace("∗", "*")
+            .replace("‡", " double_dagger ")
+        )
+        lowered = re.sub(r"\s+", " ", lowered).strip()
+        compact = lowered.replace(" ", "")
         mapping = {
             "adsorption energy": "adsorption_energy",
             "adsorption_energy": "adsorption_energy",
@@ -312,13 +324,34 @@ class ChemistryNormalizer:
             "gibbs free energy change": "gibbs_free_energy_change",
             "free energy change": "gibbs_free_energy_change",
             "free energy": "gibbs_free_energy_change",
+            "rds gibbs free energy": "gibbs_free_energy_change",
+            "gibbs free energy of rds": "gibbs_free_energy_change",
+            "delta g of rds": "gibbs_free_energy_change",
+            "rds free energy": "gibbs_free_energy_change",
+            "rate determining step gibbs free energy": "gibbs_free_energy_change",
+            "rate-determining step gibbs free energy": "gibbs_free_energy_change",
+            "决速步骤自由能": "gibbs_free_energy_change",
+            "决速步骤吉布斯自由能": "gibbs_free_energy_change",
+            "决速步骤对应的吉布斯自由能": "gibbs_free_energy_change",
+            "rds 对应吉布斯自由能": "gibbs_free_energy_change",
             "reaction barrier": "reaction_barrier",
             "activation energy": "activation_energy",
+            "barrier": "reaction_barrier",
             "energy barrier": "reaction_barrier",
             "migration barrier": "migration_barrier",
+            "diffusion barrier": "migration_barrier",
             "permeation barrier": "permeation_barrier",
             "li2s decomposition barrier": "li2s_decomposition_barrier",
             "li2s nucleation barrier": "li2s_nucleation_barrier",
+            "reaction free energy": "gibbs_free_energy_change",
+            "自由能变化": "gibbs_free_energy_change",
+            "吉布斯自由能变化": "gibbs_free_energy_change",
+            "反应能垒": "reaction_barrier",
+            "活化能": "activation_energy",
+            "能量屏障": "reaction_barrier",
+            "迁移能垒": "migration_barrier",
+            "扩散能垒": "migration_barrier",
+            "li2s 分解能垒": "li2s_decomposition_barrier",
             "d band center": "d_band_center",
             "d-band center": "d_band_center",
             "d_band_center": "d_band_center",
@@ -334,6 +367,23 @@ class ChemistryNormalizer:
         normalized = mapping.get(lowered)
         if normalized:
             return normalized
+        rds_markers = (
+            "rds",
+            "rate determining step",
+            "rate-determining step",
+            "决速步骤",
+        )
+        free_energy_markers = (
+            "gibbs free energy",
+            "free energy",
+            "delta g",
+            "吉布斯自由能",
+            "自由能",
+        )
+        if any(marker in lowered for marker in rds_markers) and any(
+            marker in lowered for marker in free_energy_markers
+        ):
+            return "gibbs_free_energy_change"
         underscored = lowered.replace(" ", "_")
         if underscored in _PROPERTY_TAXONOMY_MAP:
             return underscored
@@ -341,8 +391,22 @@ class ChemistryNormalizer:
             return "li2s_decomposition_barrier"
         if "li2s" in lowered and "nucleat" in lowered:
             return "li2s_nucleation_barrier"
-        if "migration" in lowered and "barrier" in lowered:
+        if "li2s" in lowered and "分解" in lowered:
+            return "li2s_decomposition_barrier"
+        if ("migration" in lowered or "diffus" in lowered or "迁移" in lowered or "扩散" in lowered) and (
+            "barrier" in lowered or "能垒" in lowered or "屏障" in lowered
+        ):
             return "migration_barrier"
         if "permeation" in lowered and "barrier" in lowered:
             return "permeation_barrier"
+        if (
+            "activation energy" in lowered
+            or "活化能" in lowered
+            or "double_dagger" in lowered
+            or "deltag‡" in compact
+            or "deltagdouble_dagger" in compact
+        ):
+            return "activation_energy"
+        if "barrier" in lowered or "能垒" in lowered or "屏障" in lowered:
+            return "reaction_barrier"
         return underscored

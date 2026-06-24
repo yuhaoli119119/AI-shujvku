@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 import re
 from typing import Iterable
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from app.db.models import Paper
 
 
 PAPER_CODE_RE = re.compile(r"^([A-Z])(\d+)$")
+SUPPLEMENTARY_MAIN_CODE_RE = re.compile(r"^[A-Z](\d+)$")
+SUPPLEMENTARY_CODE_RE = re.compile(r"^S(\d+)(?:-(\d+))?$")
 
 
 def paper_code_prefix(paper_type: str | None) -> str:
@@ -32,6 +35,46 @@ def paper_code_prefix(paper_type: str | None) -> str:
 def format_paper_code(prefix: str, number: int) -> str:
     width = max(4, len(str(number)))
     return f"{prefix}{number:0{width}d}"
+
+
+def supplementary_base_code(main_paper_code: str | None = None, serial_number: int | None = None) -> str:
+    clean_code = str(main_paper_code or "").strip().upper()
+    match = SUPPLEMENTARY_MAIN_CODE_RE.match(clean_code)
+    if match:
+        return format_paper_code("S", int(match.group(1)))
+    if serial_number is not None:
+        return format_paper_code("S", int(serial_number))
+    raise ValueError("supplementary_code_requires_main_code_or_serial")
+
+
+def next_supplementary_paper_code(
+    session: Session,
+    *,
+    main_paper_code: str | None = None,
+    serial_number: int | None = None,
+    exclude_paper_id: UUID | None = None,
+) -> str:
+    base_code = supplementary_base_code(main_paper_code=main_paper_code, serial_number=serial_number)
+    existing_codes = session.execute(
+        select(Paper.paper_code, Paper.id).where(Paper.paper_code.ilike(f"{base_code}%"))
+    ).all()
+
+    occupied_ordinals: set[int] = set()
+    for raw_code, paper_id in existing_codes:
+        if exclude_paper_id is not None and paper_id == exclude_paper_id:
+            continue
+        clean_code = str(raw_code or "").strip().upper()
+        match = SUPPLEMENTARY_CODE_RE.match(clean_code)
+        if not match:
+            continue
+        if match.group(1) != base_code[1:]:
+            continue
+        suffix = match.group(2)
+        occupied_ordinals.add(int(suffix) if suffix else 1)
+
+    if 1 not in occupied_ordinals:
+        return base_code
+    return f"{base_code}-{max(occupied_ordinals) + 1}"
 
 
 def ensure_paper_codes(session: Session, papers: Iterable[Paper] | None = None) -> dict[str, str]:

@@ -18,6 +18,11 @@ def require_mcp_exports_enabled(settings: Settings | None = None) -> None:
 def _is_export_path(path: str) -> bool:
     return (
         path.startswith("/api/papers/export/")
+        or path == "/api/dft/ml-dataset-v3"
+        or path == "/api/dft/ml-dataset-v3.csv"
+        or path == "/api/dft/ml-dataset-v3/manifest"
+        or path == "/api/dft/project-library-ml-export"
+        or path == "/api/dft/project-library-ml-export.csv"
         or path == "/api/writing/export"
         or path.startswith("/api/writing/word/")
     )
