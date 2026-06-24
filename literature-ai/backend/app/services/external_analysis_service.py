@@ -736,9 +736,9 @@ class ExternalAnalysisService:
         if operation == "delete":
             parts = [part.strip() for part in target_path.split(":")]
             return (
-                field_name == "figures"
+                field_name in {"figures", "tables"}
                 and len(parts) == 3
-                and parts[0] == "figures"
+                and parts[0] == field_name
                 and parts[1]
                 and parts[2] == "delete"
                 and has_evidence_anchor(evidence_payload)

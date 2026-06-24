@@ -29,6 +29,12 @@ from app.extractors.electrochemical_performance_extractor import Electrochemical
 from app.extractors.mechanism_extractor import MechanismExtractor
 from app.extractors.writing_card_extractor import WritingCardExtractor
 from app.extractors.comprehensive_extractor import ComprehensiveExtractor
+from app.domain.reaction_taxonomy import (
+    classify_reaction_record,
+    get_reaction_profile,
+    normalize_reaction_type,
+    validate_reaction_record,
+)
 from app.normalizers.chemistry_normalizer import ChemistryNormalizer
 from app.normalizers.dft_normalizer import DFTNormalizer
 from app.schemas.documents import UnifiedPaperDocument
@@ -142,7 +148,20 @@ class ExtractionPipelineService:
             "classification_source": "rule_heuristic"
         }
 
-    def run_stage2(self, paper: Paper, document: UnifiedPaperDocument) -> dict[str, int]:
+    def run_stage2(
+        self,
+        paper: Paper,
+        document: UnifiedPaperDocument,
+        target_reaction: Any = "SRR_LiS",
+    ) -> dict[str, Any]:
+        target_profile = get_reaction_profile(normalize_reaction_type(target_reaction))
+        original_paper_type = str(paper.paper_type or "").strip()
+        preserve_supplementary_type = original_paper_type.lower() in {
+            "supplementary",
+            "supplementary_information",
+            "supporting_information",
+            "si",
+        }
         # Stage 2a (快速分类)
         quick_class = None
         sections_text = "\n".join(section.text or "" for section in (document.sections or [])[:12])
@@ -160,10 +179,11 @@ class ExtractionPipelineService:
 
         paper_type = "Unknown"
         if quick_class:
-            paper.paper_type = quick_class.get("paper_type", "Unknown")
-            paper.type_confidence = quick_class.get("type_confidence", 0.0)
-            paper.classification_source = quick_class.get("classification_source", "quick")
-            paper_type = str(paper.paper_type)
+            paper_type = str(quick_class.get("paper_type", "Unknown"))
+            if not preserve_supplementary_type:
+                paper.paper_type = paper_type
+                paper.type_confidence = quick_class.get("type_confidence", 0.0)
+                paper.classification_source = quick_class.get("classification_source", "quick")
             
         # Stage 2b (差异化抽取)
         is_computational = paper_type.startswith("A") or paper_type.startswith("B") or paper_type == "Unknown"
@@ -204,7 +224,12 @@ class ExtractionPipelineService:
 
         settings_count = self._persist_dft_settings(paper.id, dft_settings, document)
         catalyst_count = self._persist_catalyst_samples(paper.id, catalyst_data)
-        dft_count = self._persist_dft_results(paper.id, dft_results)
+        dft_processing_report = self._persist_dft_results_with_report(
+            paper.id,
+            dft_results,
+            target_reaction=target_profile.key,
+        )
+        dft_count = dft_processing_report["persisted"]
         electrochemical_count = self._persist_electrochemical_performance(paper.id, electrochemical_items)
         mechanism_count = self._persist_mechanism_claims(paper.id, mechanism_claims)
         writing_count = 0
@@ -218,12 +243,14 @@ class ExtractionPipelineService:
         if comprehensive_data:
             paper.comprehensive_analysis = comprehensive_data
             ptype = comprehensive_data.get("paper_type")
-            if ptype:
+            if ptype and not preserve_supplementary_type:
                 paper.paper_type = str(ptype)
                 if "type_confidence" in comprehensive_data:
                     conf = comprehensive_data["type_confidence"]
                     paper.type_confidence = float(conf) if conf is not None else 0.0
                 paper.classification_source = "full"
+            elif preserve_supplementary_type:
+                paper.paper_type = "supplementary"
                 
         self.session.add(paper)
         self.session.flush()
@@ -236,6 +263,7 @@ class ExtractionPipelineService:
             "mechanism_claims": mechanism_count,
             "writing_cards": writing_count,
             "comprehensive_analysis": 1 if comprehensive_data else 0,
+            "dft_processing_report": dft_processing_report,
         }
 
     @staticmethod
@@ -583,60 +611,232 @@ class ExtractionPipelineService:
         return 1
 
     def _persist_dft_results(self, paper_id: UUID, items: list[dict[str, Any]]) -> int:
+        return self._persist_dft_results_with_report(paper_id, items)["persisted"]
+
+    def _persist_dft_results_with_report(
+        self,
+        paper_id: UUID,
+        items: list[dict[str, Any]],
+        *,
+        target_reaction: Any = "SRR_LiS",
+    ) -> dict[str, Any]:
+        target_profile = get_reaction_profile(normalize_reaction_type(target_reaction))
         count = 0
+        errors: list[dict[str, Any]] = []
+        reaction_counts = {
+            "valid": 0,
+            "out_of_scope": 0,
+            "ambiguous": 0,
+        }
+        merged_items = self._merge_duplicate_dft_items(items)
         existing_by_key = self._existing_dft_results_by_key(paper_id)
-        for item in self._merge_duplicate_dft_items(items):
-            location = item.get("source_location") or {}
-            norm_item = self.chemistry_normalizer.normalize({
-                "adsorbate": item.get("adsorbate") or "",
-                "property_type": item.get("category") or "",
-            })
-            evidence_payload = PaperWorkbenchService.dft_evidence_payload(item)
-            if item.get("evidence_sources"):
-                evidence_payload["evidence_sources"] = item.get("evidence_sources")
-                evidence_payload["duplicate_merge"] = {
-                    "merged": True,
-                    "source_count": len(item.get("evidence_sources") or []),
-                    "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
-                }
+        for item in merged_items:
             key = self._normalized_dft_candidate_key(item)
-            existing = existing_by_key.get(key)
-            if existing is not None:
-                self._merge_existing_dft_result(
-                    existing,
-                    item=item,
-                    norm_item=norm_item,
-                    location=location,
-                    evidence_payload=evidence_payload,
-                )
+            record: DFTResult | None = None
+            persisted_status: str | None = None
+            try:
+                with self.session.begin_nested():
+                    location = item.get("source_location") or {}
+                    norm_item = self.chemistry_normalizer.normalize({
+                        "adsorbate": item.get("adsorbate") or "",
+                        "property_type": item.get("category") or "",
+                    })
+                    reaction_fields = self._dft_reaction_fields(
+                        item,
+                        target_reaction=target_profile.key,
+                    )
+                    evidence_payload = PaperWorkbenchService.dft_evidence_payload(item)
+                    if item.get("evidence_sources"):
+                        evidence_payload["evidence_sources"] = item.get("evidence_sources")
+                        evidence_payload["duplicate_merge"] = {
+                            "merged": True,
+                            "source_count": len(item.get("evidence_sources") or []),
+                            "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
+                        }
+                    existing = existing_by_key.get(key)
+                    if existing is not None:
+                        self._fill_missing_dft_reaction_fields(existing, reaction_fields)
+                        self._merge_existing_dft_result(
+                            existing,
+                            item=item,
+                            norm_item=norm_item,
+                            location=location,
+                            evidence_payload=evidence_payload,
+                        )
+                        persisted_status = existing.reaction_validation_status
+                    else:
+                        record = DFTResult(
+                            paper_id=paper_id,
+                            adsorbate=norm_item.get("adsorbate") or item.get("adsorbate"),
+                            property_type=norm_item.get("property_type") or item.get("category"),
+                            value=item.get("value"),
+                            unit=item.get("unit"),
+                            reaction_step=item.get("reaction_step"),
+                            source_section=location.get("section"),
+                            source_figure=location.get("figure"),
+                            evidence_text=item.get("evidence_text"),
+                            confidence=item.get("confidence"),
+                            candidate_status="system_candidate",
+                            evidence_payload=evidence_payload,
+                            extraction_protocol_version=EXTRACTION_PROTOCOL_VERSION,
+                            **reaction_fields,
+                        )
+                        self.session.add(record)
+                        self.session.flush()
+                        self._persist_evidence_span(
+                            paper_id=paper_id,
+                            object_type="dft_result",
+                            object_id=str(record.id),
+                            item=item,
+                        )
+                        persisted_status = record.reaction_validation_status
+                if record is not None:
+                    existing_by_key[key] = record
                 count += 1
-                continue
-            record = DFTResult(
-                paper_id=paper_id,
-                adsorbate=norm_item.get("adsorbate") or item.get("adsorbate"),
-                property_type=norm_item.get("property_type") or item.get("category"),
-                value=item.get("value"),
-                unit=item.get("unit"),
-                reaction_step=item.get("reaction_step"),
-                source_section=location.get("section"),
-                source_figure=location.get("figure"),
-                evidence_text=item.get("evidence_text"),
-                confidence=item.get("confidence"),
-                candidate_status="system_candidate",
-                evidence_payload=evidence_payload,
-                extraction_protocol_version=EXTRACTION_PROTOCOL_VERSION,
+                if persisted_status in reaction_counts:
+                    reaction_counts[persisted_status] += 1
+            except Exception as exc:
+                error = self._dft_persistence_error_detail(item, key, exc)
+                errors.append(error)
+                logger.warning(
+                    "DFT candidate persistence failed without blocking later candidates "
+                    "(paper_id=%s, candidate_key=%s)",
+                    paper_id,
+                    key,
+                    exc_info=True,
+                )
+        return self._dft_processing_report(
+            paper_id=paper_id,
+            dft_candidates_total=len(merged_items),
+            persisted=count,
+            reaction_counts=reaction_counts,
+            errors=errors,
+            target_reaction=target_profile.key,
+        )
+
+    @staticmethod
+    def _dft_persistence_error_detail(item: dict[str, Any], key: str, exc: Exception) -> dict[str, Any]:
+        reason = str(exc) or exc.__class__.__name__
+        return {
+            "candidate_key": key,
+            "reason": reason,
+            "error_type": exc.__class__.__name__,
+            "adsorbate": item.get("adsorbate"),
+            "category": item.get("category"),
+            "reaction_step": item.get("reaction_step"),
+        }
+
+    @staticmethod
+    def _dft_processing_report(
+        *,
+        paper_id: UUID,
+        dft_candidates_total: int,
+        persisted: int,
+        reaction_counts: dict[str, int],
+        errors: list[dict[str, Any]],
+        target_reaction: Any = "SRR_LiS",
+    ) -> dict[str, Any]:
+        target_profile = get_reaction_profile(normalize_reaction_type(target_reaction))
+        error_count = len(errors)
+        if dft_candidates_total and error_count >= dft_candidates_total and persisted == 0:
+            parse_status = "failed"
+        elif error_count and persisted > 0:
+            parse_status = "partial_success"
+        else:
+            parse_status = "success"
+        rejection_reasons: dict[str, Any] = {}
+        if errors:
+            rejection_reasons["persistence_error"] = error_count
+        return {
+            "paper_id": str(paper_id),
+            "target_reaction": target_profile.key,
+            "profile_version": target_profile.version,
+            "parse_status": parse_status,
+            "dft_candidates_total": dft_candidates_total,
+            "reaction_valid": reaction_counts.get("valid", 0),
+            "out_of_scope": reaction_counts.get("out_of_scope", 0),
+            "ambiguous": reaction_counts.get("ambiguous", 0),
+            "persisted": persisted,
+            "persistence_errors": error_count,
+            "persistence_error_details": errors,
+            "label_ready": 0,
+            "tabular_ml_ready_by_task": {},
+            "rejection_reasons": rejection_reasons,
+        }
+
+    @staticmethod
+    def _dft_reaction_fields(
+        item: dict[str, Any],
+        *,
+        target_reaction: Any = "SRR_LiS",
+    ) -> dict[str, Any]:
+        # The extractor and taxonomy intentionally use different public field names.
+        # Build a compatible candidate so category is not lost as property_type.
+        candidate = {
+            "reaction_type": item.get("reaction_type"),
+            "property_type": item.get("category"),
+            "intermediate": item.get("adsorbate"),
+            "reaction_step": item.get("reaction_step"),
+            "evidence_text": item.get("evidence_text"),
+        }
+        try:
+            target_profile = get_reaction_profile(normalize_reaction_type(target_reaction))
+            contextual_classification = classify_reaction_record(
+                candidate,
+                paper_context=target_profile.key,
             )
-            self.session.add(record)
-            self.session.flush()
-            existing_by_key[key] = record
-            self._persist_evidence_span(
-                paper_id=paper_id,
-                object_type="dft_result",
-                object_id=str(record.id),
-                item=item,
+            candidate_classification = classify_reaction_record(candidate)
+            classification = (
+                contextual_classification
+                if candidate_classification.get("status") == "ambiguous"
+                else candidate_classification
             )
-            count += 1
-        return count
+            reaction_type = classification["reaction_type"]
+            validation = validate_reaction_record(reaction_type, candidate)
+            validation_status = (
+                "ambiguous"
+                if classification.get("status") == "ambiguous"
+                else validation.get("status", "unsupported")
+            )
+            if validation_status not in {
+                "valid", "out_of_scope", "ambiguous", "unsupported", "error"
+            }:
+                validation_status = "unsupported"
+            return {
+                "reaction_type": reaction_type,
+                "reaction_type_source": (
+                    "explicit"
+                    if classification.get("reason") == "explicit_reaction_type"
+                    else "rule"
+                ),
+                "reaction_type_confidence": classification.get("confidence"),
+                "reaction_profile_version": get_reaction_profile(reaction_type).version,
+                "reaction_validation_status": validation_status,
+            }
+        except Exception:
+            logger.warning("DFT reaction classification failed; preserving candidate as UNKNOWN/error", exc_info=True)
+            return {
+                "reaction_type": "UNKNOWN",
+                "reaction_type_source": "rule",
+                "reaction_type_confidence": 0.0,
+                "reaction_profile_version": get_reaction_profile("UNKNOWN").version,
+                "reaction_validation_status": "error",
+            }
+
+    @staticmethod
+    def _fill_missing_dft_reaction_fields(
+        row: DFTResult,
+        reaction_fields: dict[str, Any],
+    ) -> None:
+        if (row.reaction_type_source or "").lower() in {"human", "manual"}:
+            return
+        if row.reaction_type:
+            if row.reaction_profile_version is None:
+                row.reaction_profile_version = get_reaction_profile(row.reaction_type).version
+            return
+        for name, value in reaction_fields.items():
+            if getattr(row, name) is None:
+                setattr(row, name, value)
 
     def _existing_dft_results_by_key(self, paper_id: UUID) -> dict[str, DFTResult]:
         rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()

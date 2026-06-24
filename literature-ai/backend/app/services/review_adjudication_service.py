@@ -358,6 +358,7 @@ class ReviewAdjudicationService:
                 reviewer=reviewer,
                 reviewer_note=action_note,
                 field_names=payload.get("field_names") or [str(row.get("field_name") or "value")],
+                evidence_payload=payload.get("evidence_payload"),
             )
         elif action == "reject":
             result = self.dft_reviews.reject_result(

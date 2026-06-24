@@ -9,15 +9,16 @@ from pathlib import Path
 from uuid import UUID, uuid4
 from fastapi import Request
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, WorkflowJob, WritingCard
+from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
+from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code
 import app.api.papers as papers_api
 
 def test_papers_status_and_stream(setup_test_db, monkeypatch):
@@ -490,8 +491,12 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
-    assert data["prompt_schema_version"] == "ide_review_prompt_v5"
+    assert data["prompt_schema_version"] == "ide_review_prompt_v7"
     assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
+    assert "SRR_LiS" in data["prompt_contract"]["reaction_profile_templates"]
+    assert "li_s_sac_dac" in data["prompt_contract"]["project_library_contexts"]
+    assert "li_s_sac_dac" in data["prompt_contract"]["topic_field_dictionaries"]
+    assert "li_s_sac_dac" in data["prompt_contract"]["project_library_prompt_templates"]
     assert "app.mcp.context.mcp_auth_context" in data["suggested_client_prompt"]
     assert "A_text_readable 或 B_text_partial" in data["suggested_client_prompt"]
     assert "后写入的 AI 结果允许覆盖先前 AI 结果" in data["suggested_client_prompt"]
@@ -617,6 +622,22 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
         )
         session.add(paper)
         session.flush()
+        si_paper = Paper(
+            title="Graphene vacancy defect DFT test paper SI",
+            pdf_path="graphene-vacancy-si.pdf",
+            paper_type="supplementary",
+            paper_code="U0094",
+        )
+        session.add(si_paper)
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=paper.id,
+                target_paper_id=si_paper.id,
+                relationship_type="supplementary",
+                note="Linked SI",
+            )
+        )
         section = PaperSection(
             paper_id=paper.id,
             section_title="Computational Methods",
@@ -733,6 +754,7 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
         )
         session.commit()
         paper_id = paper.id
+        si_paper_id = si_paper.id
         figure_id = figure.id
         dft_result_id = dft_result.id
         catalyst_a_id = catalyst_a.id
@@ -745,6 +767,15 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     assert data["paper_id"] == str(paper_id)
     assert data["context"]["reliability_policy"]["automatic_outputs_are_candidates"] is True
     assert data["context"]["reliability_policy"]["figure_crops_are_candidates"] is True
+    assert data["context"]["relationships"]["outgoing"][0]["target_paper_id"] == str(si_paper_id)
+    assert data["context"]["relationships"]["relationship_summary"]["supplementary"] == 1
+    source_documents = data["context"]["source_documents"]
+    assert source_documents[0]["source_document_type"] == "main_text"
+    linked_si = source_documents[1]
+    assert linked_si["source_document_type"] == "supplementary_information"
+    assert linked_si["related_paper_id"] == str(si_paper_id)
+    assert linked_si["read_paper_page_paper_id"] == str(si_paper_id)
+    assert linked_si["writeback_paper_id"] == str(paper_id)
     assert data["context"]["content"]["sections"][0]["title"] == "Computational Methods"
     figure = data["context"]["content"]["figures"][0]
     assert figure["prov"][0]["bbox"]["l"] == 10
@@ -768,6 +799,7 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     assert any(item["code"] == "figure_crop_review" for item in data["context"]["warnings"])
     assert "Graphene vacancy defect DFT test paper" in data["markdown"]
     assert "Automatic parser, extraction, and external analysis outputs are candidates" in data["markdown"]
+
     assert "crop=needs_review" in data["markdown"]
     assert "DFT Export Readiness" in data["markdown"]
 
@@ -809,6 +841,135 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
 
     invalid_response = client.get(f"/api/papers/{paper_id}/codex-item/not_supported/{figure_id}")
     assert invalid_response.status_code == 400
+
+
+def test_paper_detail_exposes_linked_si_tables_with_main_review_audits(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        main = Paper(
+            title="Main paper with SI tables",
+            pdf_path="main.pdf",
+            paper_code="B0093",
+            paper_type="B",
+            comprehensive_analysis={
+                "manual_review_progress": {
+                    "content": {"completed": True, "updated_by": "test"},
+                    "figures": {"completed": True, "updated_by": "test"},
+                    "dft": {"completed": True, "updated_by": "test"},
+                }
+            },
+        )
+        si = Paper(
+            title="Main paper supporting information",
+            pdf_path="si.pdf",
+            paper_code="U0094",
+            paper_type="supplementary",
+        )
+        session.add_all([main, si])
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=main.id,
+                target_paper_id=si.id,
+                relationship_type="supplementary",
+                note="Linked SI",
+            )
+        )
+        main_table = PaperTable(
+            paper_id=main.id,
+            caption="Table 1",
+            markdown_content="",
+            page=6,
+        )
+        si_table = PaperTable(
+            paper_id=si.id,
+            caption="Table S4",
+            markdown_content="| substrate | Li2S |\n| FeN4 | -1.2 |",
+            page=5,
+        )
+        session.add_all([main_table, si_table])
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=main.id,
+            source="ide_ai",
+            source_label="reasonix_table_test",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="completed",
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=main.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "paper_id": str(main.id),
+                    "target_type": "table",
+                    "target_id": str(si_table.id),
+                    "field_name": "markdown_content",
+                    "source": "ide_ai",
+                    "source_label": "reasonix_table_test",
+                    "decision": "correct",
+                    "reason": "SI table content verified against page 5.",
+                    "evidence_location": {
+                        "page": 5,
+                        "related_paper_id": str(si.id),
+                        "source_document_type": "supplementary_information",
+                    },
+                },
+                status="candidate",
+            )
+        )
+        session.commit()
+        main_id = str(main.id)
+        si_id = str(si.id)
+        main_table_id = str(main_table.id)
+        si_table_id = str(si_table.id)
+
+    client = TestClient(app)
+    main_response = client.get(f"/api/papers/{main_id}")
+    assert main_response.status_code == 200
+    main_payload = main_response.json()
+    main_tables = {item["id"]: item for item in main_payload["tables"]}
+    assert set(main_tables) == {main_table_id, si_table_id}
+    assert main_payload["counts"]["tables"] == 1
+
+    linked_si_table = main_tables[si_table_id]
+    assert linked_si_table["source_document_type"] == "supplementary_information"
+    assert linked_si_table["related_paper_id"] == si_id
+    assert linked_si_table["related_paper_code"] == "U0094"
+    assert linked_si_table["writeback_paper_id"] == main_id
+    assert linked_si_table["object_review_audit_count"] == 1
+    assert linked_si_table["table_review_status"] == "review_candidate"
+    assert main_payload["outgoing_relationships"][0]["related_paper_code"] == "U0094"
+    assert main_payload["outgoing_relationships"][0]["related_paper_title"] == "Main paper supporting information"
+
+    si_response = client.get(f"/api/papers/{si_id}")
+    assert si_response.status_code == 200
+    si_payload = si_response.json()
+    assert len(si_payload["tables"]) == 1
+    si_table_payload = si_payload["tables"][0]
+    assert si_table_payload["id"] == si_table_id
+    assert si_table_payload["source_document_type"] == "supplementary_information"
+    assert si_table_payload["related_paper_code"] == "U0094"
+    assert si_table_payload["writeback_paper_id"] == main_id
+    assert si_table_payload["object_review_audit_count"] == 1
+    assert si_table_payload["table_review_status"] == "review_candidate"
+    assert si_payload["incoming_relationships"][0]["related_paper_code"] == "B0093"
+    assert si_payload["incoming_relationships"][0]["related_paper_title"] == "Main paper with SI tables"
+    assert si_payload["incoming_relationships"][0]["related_manual_review_progress"]["figures"]["completed"] is True
+    assert si_payload["incoming_relationships"][0]["related_manual_review_progress"]["dft"]["completed"] is True
+
+    list_response = client.get("/api/papers/", params={"limit": 100})
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    si_list_item = next(item for item in list_payload if item["paper_id"] == si_id)
+    assert si_list_item["manual_review_progress"]["figures"]["completed"] is True
+    assert si_list_item["manual_review_progress"]["dft"]["completed"] is True
 
 
 def test_paper_knowledge_context_uses_section_fallback_and_external_candidates(setup_test_db):
@@ -1573,6 +1734,49 @@ def test_compare_dft_results_only_attaches_bound_catalyst_sample(setup_test_db):
     assert items["cohesive_energy"]["catalysts"] == []
 
 
+def test_compare_dft_results_exposes_specific_and_canonical_property_types(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Property label compare paper", year=2026, pdf_path="property-labels.pdf")
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="migration_barrier",
+                    adsorbate="Li+",
+                    value=0.31,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="RDS Gibbs free energy",
+                    adsorbate="Li2S4",
+                    reaction_step="RDS",
+                    value=0.12,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get("/api/papers/compare", params={"min_confidence": 0.0, "status": "all"})
+    assert response.status_code == 200
+    items = {item["property_type"]: item for item in response.json()["items"]}
+
+    assert items["migration_barrier"]["normalized_property_type"] == "migration_barrier"
+    assert items["migration_barrier"]["canonical_property_type"] == "reaction_barrier"
+    assert items["migration_barrier"]["property_subtype"] == "migration_barrier"
+    assert items["RDS Gibbs free energy"]["normalized_property_type"] == "gibbs_free_energy_change"
+    assert items["RDS Gibbs free energy"]["canonical_property_type"] == "gibbs_free_energy_change"
+    assert items["RDS Gibbs free energy"]["property_subtype"] == "gibbs_free_energy_change"
+
+
 def test_compare_dft_results_without_property_type_returns_all_types(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -1766,6 +1970,73 @@ def test_compare_dft_results_compact_keeps_exact_total_across_chunk_boundary_for
     assert payload["has_more"] is True
     assert len(payload["items"]) == 25
     assert payload["stats"] == {"count": 130}
+
+
+def test_compare_dft_results_property_mix_sort_interleaves_property_types(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Mixed property compare paper", year=2026, pdf_path="mixed-property.pdf")
+        session.add(paper)
+        session.flush()
+        rows = [
+            DFTResult(
+                paper_id=paper.id,
+                property_type="adsorption_energy",
+                adsorbate=f"Li2S{idx}",
+                value=-6.0 + idx,
+                unit="eV",
+                evidence_text=f"adsorption energy #{idx}",
+                confidence=0.9,
+            )
+            for idx in range(6)
+        ]
+        rows.extend(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="charge_transfer",
+                    value=-0.2,
+                    unit="e",
+                    evidence_text="charge transfer value",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="migration_barrier",
+                    value=0.35,
+                    unit="eV",
+                    evidence_text="migration barrier value",
+                    confidence=0.9,
+                ),
+            ]
+        )
+        session.add_all(rows)
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/papers/compare",
+        params={
+            "min_confidence": 0.0,
+            "limit": 3,
+            "offset": 0,
+            "compact": "true",
+            "status": "all",
+            "sort": "property_mix",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    first_page_types = [item["property_type"] for item in payload["items"]]
+    assert first_page_types == ["adsorption_energy", "charge_transfer", "migration_barrier"]
+    assert payload["stats"]["count"] == 8
+    assert payload["stats"]["property_type_counts"] == {
+        "adsorption_energy": 6,
+        "charge_transfer": 1,
+        "migration_barrier": 1,
+    }
 
 
 def test_compare_dft_results_exposes_evidence_derived_catalyst_name_when_unbound(setup_test_db):
@@ -2080,8 +2351,9 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
         },
     )
     assert before_response.status_code == 200
-    assert before_response.json()["ready"] is False
-    assert before_response.json()["n"] == 0
+    assert before_response.json()["ready"] is True
+    assert before_response.json()["n"] == 3
+    assert before_response.json()["source"] == "exploratory_same_sample"
 
     for paper_id, row_id in rows_to_verify:
         verify_response = client.post(
@@ -2125,9 +2397,242 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
     pairs = pairs_response.json()
     assert pairs["ready"] is True
     assert pairs["n"] == 3
+    assert pairs["source"] == "reviewed_exportable"
     assert pairs["pearson_r"] == -1.0
     assert len(pairs["points"]) == 3
     assert {point["match_scope"] for point in pairs["points"]} == {"direct_catalyst"}
+
+
+def test_visuals_descriptor_correlation_pairs_same_material_across_sections(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    rows_to_verify = []
+    with Session() as session:
+        for index, (work_function, adsorption_energy) in enumerate(
+            [(5.1, -1.0), (5.3, -1.2), (5.5, -1.4)],
+            start=1,
+        ):
+            paper = Paper(
+                title=f"Cross-section correlation paper {index}",
+                year=2026,
+                journal="Codex Test Journal",
+                library_name="CorrelationLibrary",
+                pdf_path=f"cross-section-correlation-{index}.pdf",
+                doi=f"10.1000/cross-section-correlation-{index}",
+            )
+            session.add(paper)
+            session.flush()
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name=f"Pt-surface-{index}",
+                metal_centers=["Pt"],
+                support="graphdiyne",
+            )
+            session.add(catalyst)
+            session.flush()
+            target = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                property_type="adsorption_energy",
+                adsorbate="H2",
+                value=adsorption_energy,
+                unit="eV",
+                reaction_step="DFT-PBE",
+                source_section="Page 4",
+                evidence_text=f"The H2 adsorption energy is {adsorption_energy} eV on page 4.",
+                confidence=0.95,
+            )
+            descriptor = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                property_type="work_function",
+                adsorbate="H2",
+                value=work_function,
+                unit="eV",
+                reaction_step="DFT-PBE",
+                source_section="Page 3",
+                evidence_text=f"The work function is {work_function} eV on page 3.",
+                confidence=0.95,
+            )
+            session.add_all([target, descriptor])
+            session.flush()
+            for row in (target, descriptor):
+                session.add(
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="text",
+                        page=index,
+                        target_type="dft_results",
+                        target_id=str(row.id),
+                        field_name="value",
+                        evidence_text=row.evidence_text,
+                        locator_status="exact_page",
+                        locator_confidence=0.98,
+                        parser_source="test",
+                    )
+                )
+                rows_to_verify.append((paper.id, row.id))
+        session.commit()
+
+    client = TestClient(app)
+    for paper_id, row_id in rows_to_verify:
+        verify_response = client.post(
+            f"/api/papers/{paper_id}/dft-results/{row_id}/verify",
+            json={
+                "confirm_reviewed_against_pdf": True,
+                "reviewer": "correlation_test",
+                "reviewer_note": "Verified against exact-page test evidence.",
+            },
+        )
+        assert verify_response.status_code == 200
+        assert verify_response.json()["export_safety"]["eligible"] is True
+
+    overview_response = client.get(
+        "/api/visuals/overview",
+        params={"library_name": "CorrelationLibrary", "matrix_status": "reviewed", "corr_min_n": 3},
+    )
+    assert overview_response.status_code == 200
+    overview = overview_response.json()
+    cell = next(
+        item
+        for item in overview["descriptor_correlation"]["cells"]
+        if item["target_property"] == "adsorption_energy" and item["descriptor"] == "work_function"
+    )
+    assert cell["status"] == "ready"
+    assert cell["n"] == 3
+
+    pairs_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "CorrelationLibrary",
+            "target_property": "adsorption_energy",
+            "descriptor": "work_function",
+            "min_n": 3,
+        },
+    )
+    assert pairs_response.status_code == 200
+    pairs = pairs_response.json()
+    assert pairs["ready"] is True
+    assert pairs["n"] == 3
+    assert len(pairs["points"]) == 3
+    assert {point["match_scope"] for point in pairs["points"]} == {"direct_catalyst"}
+
+
+def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pairs(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    rows_to_verify = []
+    with Session() as session:
+        for index, (bader_charge, adsorption_energy) in enumerate(
+            [(0.1, -1.0), (0.2, -1.2), (0.3, -1.4)],
+            start=1,
+        ):
+            paper = Paper(
+                title=f"Exploratory fallback paper {index}",
+                year=2026,
+                journal="Codex Test Journal",
+                library_name="CorrelationLibrary",
+                pdf_path=f"exploratory-fallback-{index}.pdf",
+                doi=f"10.1000/exploratory-fallback-{index}",
+            )
+            session.add(paper)
+            session.flush()
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name=f"Fe-GDY-{index}",
+                metal_centers=["Fe"],
+                support="graphdiyne",
+            )
+            session.add(catalyst)
+            session.flush()
+            target = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                property_type="adsorption_energy",
+                adsorbate="H",
+                value=adsorption_energy,
+                unit="eV",
+                reaction_step="H adsorption",
+                source_section="Results",
+                evidence_text=f"The H adsorption energy is {adsorption_energy} eV.",
+                confidence=0.95,
+            )
+            descriptor = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                property_type="bader_charge",
+                adsorbate=None,
+                value=bader_charge,
+                unit="e",
+                reaction_step="Bader charge analysis",
+                source_section="Discussion",
+                evidence_text=f"The Bader charge is {bader_charge} e.",
+                confidence=0.95,
+            )
+            session.add_all([target, descriptor])
+            session.flush()
+            for row in (target, descriptor):
+                session.add(
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="text",
+                        page=index,
+                        target_type="dft_results",
+                        target_id=str(row.id),
+                        field_name="value",
+                        evidence_text=row.evidence_text,
+                        locator_status="exact_page",
+                        locator_confidence=0.98,
+                        parser_source="test",
+                    )
+                )
+                rows_to_verify.append((paper.id, row.id))
+        session.commit()
+
+    client = TestClient(app)
+    for paper_id, row_id in rows_to_verify:
+        verify_response = client.post(
+            f"/api/papers/{paper_id}/dft-results/{row_id}/verify",
+            json={
+                "confirm_reviewed_against_pdf": True,
+                "reviewer": "correlation_test",
+                "reviewer_note": "Verified against exact-page test evidence.",
+            },
+        )
+        assert verify_response.status_code == 200
+        assert verify_response.json()["export_safety"]["eligible"] is True
+
+    overview_response = client.get(
+        "/api/visuals/overview",
+        params={"library_name": "CorrelationLibrary", "matrix_status": "reviewed", "corr_min_n": 3},
+    )
+    assert overview_response.status_code == 200
+    overview = overview_response.json()
+    cell = next(
+        item
+        for item in overview["descriptor_correlation"]["cells"]
+        if item["target_property"] == "adsorption_energy" and item["descriptor"] == "bader_charge"
+    )
+    assert cell["status"] == "ready"
+    assert cell["n"] == 3
+    assert cell["source"] == "exploratory_same_sample"
+
+    pairs_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "CorrelationLibrary",
+            "target_property": "adsorption_energy",
+            "descriptor": "bader_charge",
+            "min_n": 3,
+        },
+    )
+    assert pairs_response.status_code == 200
+    pairs = pairs_response.json()
+    assert pairs["ready"] is True
+    assert pairs["n"] == 3
+    assert pairs["source"] == "exploratory_same_sample"
+    assert len(pairs["points"]) == 3
+    assert {point["match_scope"] for point in pairs["points"]} == {"exploratory_same_sample"}
 
 
 def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, monkeypatch):
@@ -2853,11 +3358,18 @@ def test_legacy_ai_workflow_metadata_only_fallback_is_disabled(setup_test_db, mo
         assert papers[0].oa_status == "metadata_only"
 
 
-def _install_ingest_document_stubs(monkeypatch, metadata: dict[str, object], section_text: str = "Parsed section text"):
+def _install_ingest_document_stubs(
+    monkeypatch,
+    metadata: dict[str, object],
+    section_text: str = "Parsed section text",
+    docling_calls: list[dict[str, object]] | None = None,
+):
     async def fake_grobid_parse(self, stored_pdf):
         return None
 
-    async def fake_docling_parse(self, stored_pdf):
+    async def fake_docling_parse(self, stored_pdf, **kwargs):
+        if docling_calls is not None:
+            docling_calls.append(dict(kwargs))
         return None
 
     async def fake_build_unified_document(self, stored_pdf, grobid_result, docling_result):
@@ -3147,6 +3659,359 @@ def test_queue_upload_job_reports_already_exists_without_overwriting_pdf(setup_t
         paper = session.get(Paper, UUID(existing_id))
         assert paper is not None
         assert paper.pdf_path == "existing.pdf"
+
+
+def test_supplementary_code_helpers_follow_main_numbering(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    assert supplementary_base_code("B0095") == "S0095"
+    assert supplementary_base_code("C0092") == "S0092"
+    assert supplementary_base_code(serial_number=95) == "S0095"
+
+    with Session() as session:
+        session.add_all(
+            [
+                Paper(title="Main", pdf_path="main.pdf", paper_code="B0095", serial_number=95),
+                Paper(title="SI 1", pdf_path="si1.pdf", paper_code="S0095", paper_type="supplementary"),
+                Paper(title="SI 2", pdf_path="si2.pdf", paper_code="S0095-2", paper_type="supplementary"),
+            ]
+        )
+        session.commit()
+        assert next_supplementary_paper_code(session, main_paper_code="B0095", serial_number=95) == "S0095-3"
+
+
+def test_queue_supplementary_upload_creates_supplementary_paper_even_with_same_identity(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    docling_calls = []
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Main DOI Paper",
+            "doi": "10.1000/main-doi",
+            "year": 2024,
+            "journal": "Supp Journal",
+        },
+        docling_calls=docling_calls,
+    )
+
+    with Session() as session:
+        main = Paper(
+            library_name="SuppLibrary",
+            doi="10.1000/main-doi",
+            title="Main DOI Paper",
+            year=2024,
+            journal="Supp Journal",
+            pdf_path="main.pdf",
+            oa_status="uploaded",
+            paper_type="B",
+            paper_code="B0095",
+            serial_number=95,
+        )
+        session.add(main)
+        session.commit()
+        session.refresh(main)
+        main_id = str(main.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{main_id}/supplementary/upload/jobs",
+        files={"file": ("main-si.pdf", io.BytesIO(b"%PDF-1.4 supplementary main doi"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    poll = client.get(f"/api/jobs/{job_id}")
+    assert poll.status_code == 200
+    job = poll.json()
+    assert job["status"] == "completed"
+    assert job["result"]["status"] == "completed"
+    assert job["result"]["paper_id"] != main_id
+    assert docling_calls
+    assert docling_calls[0]["document_timeout"] == get_settings().docling_supplementary_document_timeout
+
+    with Session() as session:
+        si_paper = session.get(Paper, UUID(job["result"]["paper_id"]))
+        assert si_paper is not None
+        assert si_paper.paper_type == "supplementary"
+        assert si_paper.paper_code == "S0095"
+        assert si_paper.doi is None
+        assert si_paper.library_name == "SuppLibrary"
+        assert si_paper.authors == []
+        relationship = session.scalar(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == UUID(main_id),
+                PaperRelationship.target_paper_id == si_paper.id,
+                PaperRelationship.relationship_type == "supplementary",
+            )
+        )
+        assert relationship is not None
+
+
+def test_reparse_existing_supplementary_preserves_null_doi(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    docling_calls = []
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Supporting Information",
+            "doi": "10.1000/main-doi",
+            "year": 2024,
+            "journal": "Supp Journal",
+        },
+        docling_calls=docling_calls,
+    )
+
+    settings = get_settings()
+    pdf_path = settings.storage_paths["pdf"] / "reparse-si-preserve-doi.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4 supplementary reparse")
+
+    with Session() as session:
+        main = Paper(
+            library_name="SuppReparseLibrary",
+            doi="10.1000/main-doi",
+            title="Main DOI Paper",
+            pdf_path="main.pdf",
+            paper_code="B0095",
+            serial_number=95,
+            paper_type="B",
+        )
+        si = Paper(
+            library_name="SuppReparseLibrary",
+            doi=None,
+            title="Existing SI",
+            pdf_path=str(pdf_path),
+            paper_code="S0095",
+            paper_type="supplementary",
+        )
+        session.add_all([main, si])
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=main.id,
+                target_paper_id=si.id,
+                relationship_type="supplementary",
+            )
+        )
+        session.commit()
+        si_id = si.id
+
+    with Session() as session:
+        service = PaperIngestionService(session=session, settings=settings)
+        reparsed = asyncio.run(service.reparse_existing_paper(si_id))
+        assert reparsed.doi is None
+        assert reparsed.paper_type == "supplementary"
+        assert docling_calls
+        assert docling_calls[0]["document_timeout"] == settings.docling_supplementary_document_timeout
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "SuppReparseLibrary")).all()
+        assert {paper.paper_code: paper.doi for paper in papers} == {
+            "B0095": "10.1000/main-doi",
+            "S0095": None,
+        }
+
+
+def test_queue_supplementary_upload_uses_incremented_s_code_when_needed(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    settings = get_settings()
+    existing_pdf = settings.storage_paths["pdf"] / "existing-si.pdf"
+    existing_pdf.parent.mkdir(parents=True, exist_ok=True)
+    existing_pdf.write_bytes(b"%PDF-1.4 existing supplementary bytes")
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Main DOI Paper",
+            "doi": "10.1000/main-doi",
+            "year": 2024,
+            "journal": "Supp Journal",
+        },
+    )
+
+    with Session() as session:
+        main = Paper(
+            library_name="SuppLibrary",
+            doi="10.1000/main-doi",
+            title="Main DOI Paper",
+            year=2024,
+            journal="Supp Journal",
+            pdf_path="main.pdf",
+            oa_status="uploaded",
+            paper_type="B",
+            paper_code="B0095",
+            serial_number=95,
+        )
+        existing_si = Paper(
+            library_name="SuppLibrary",
+            title="Existing SI",
+            pdf_path="storage/pdf/existing-si.pdf",
+            oa_status="uploaded",
+            paper_type="supplementary",
+            paper_code="S0095",
+        )
+        session.add_all([main, existing_si])
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=main.id,
+                target_paper_id=existing_si.id,
+                relationship_type="supplementary",
+                created_by="test",
+            )
+        )
+        session.commit()
+        session.refresh(main)
+        main_id = str(main.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{main_id}/supplementary/upload/jobs",
+        files={"file": ("main-si-2.pdf", io.BytesIO(b"%PDF-1.4 second supplementary bytes"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    poll = client.get(f"/api/jobs/{job_id}")
+    assert poll.status_code == 200
+    job = poll.json()
+    assert job["status"] == "completed"
+
+    with Session() as session:
+        si_paper = session.get(Paper, UUID(job["result"]["paper_id"]))
+        assert si_paper is not None
+        assert si_paper.paper_code == "S0095-2"
+
+
+def test_queue_supplementary_upload_is_idempotent_for_same_hash(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    settings = get_settings()
+    existing_pdf = settings.storage_paths["pdf"] / "existing-si-same.pdf"
+    existing_pdf.parent.mkdir(parents=True, exist_ok=True)
+    existing_bytes = b"%PDF-1.4 same supplementary bytes"
+    existing_pdf.write_bytes(existing_bytes)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Main DOI Paper",
+            "doi": "10.1000/main-doi",
+            "year": 2024,
+            "journal": "Supp Journal",
+        },
+    )
+
+    with Session() as session:
+        main = Paper(
+            library_name="SuppLibrary",
+            doi="10.1000/main-doi",
+            title="Main DOI Paper",
+            year=2024,
+            journal="Supp Journal",
+            pdf_path="main.pdf",
+            oa_status="uploaded",
+            paper_type="B",
+            paper_code="B0095",
+            serial_number=95,
+        )
+        existing_si = Paper(
+            library_name="SuppLibrary",
+            title="Existing SI",
+            pdf_path="storage/pdf/existing-si-same.pdf",
+            oa_status="uploaded",
+            paper_type="supplementary",
+            paper_code="S0095",
+        )
+        session.add_all([main, existing_si])
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=main.id,
+                target_paper_id=existing_si.id,
+                relationship_type="supplementary",
+                created_by="test",
+            )
+        )
+        session.commit()
+        session.refresh(main)
+        main_id = str(main.id)
+        existing_si_id = str(existing_si.id)
+        before_papers = session.scalar(select(func.count(Paper.id)))
+        before_relationships = session.scalar(select(func.count(PaperRelationship.id)))
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{main_id}/supplementary/upload/jobs",
+        files={"file": ("main-si-same.pdf", io.BytesIO(existing_bytes), "application/pdf")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    poll = client.get(f"/api/jobs/{job_id}")
+    assert poll.status_code == 200
+    job = poll.json()
+    assert job["status"] == "completed"
+    assert job["result"]["status"] == "already_linked"
+    assert job["result"]["paper_id"] == existing_si_id
+
+    with Session() as session:
+        assert session.scalar(select(func.count(Paper.id))) == before_papers
+        assert session.scalar(select(func.count(PaperRelationship.id))) == before_relationships
+
+
+def test_ordinary_upload_dedup_still_returns_already_exists_after_supplementary_support(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    _install_ingest_document_stubs(
+        monkeypatch,
+        metadata={
+            "title": "Main DOI Paper",
+            "doi": "10.1000/main-doi",
+            "year": 2024,
+            "journal": "Supp Journal",
+        },
+    )
+
+    with Session() as session:
+        main = Paper(
+            library_name="SuppLibrary",
+            doi="10.1000/main-doi",
+            title="Main DOI Paper",
+            year=2024,
+            journal="Supp Journal",
+            pdf_path="main.pdf",
+            oa_status="uploaded",
+            paper_type="B",
+            paper_code="B0095",
+            serial_number=95,
+        )
+        session.add(main)
+        session.commit()
+        session.refresh(main)
+        main_id = str(main.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/papers/ingest/upload/jobs",
+        data={"library_name": "SuppLibrary"},
+        files={"file": ("ordinary.pdf", io.BytesIO(b"%PDF-1.4 ordinary duplicate"), "application/pdf")},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    poll = client.get(f"/api/jobs/{job_id}")
+    assert poll.status_code == 200
+    job = poll.json()
+    assert job["status"] == "completed"
+    assert job["result"]["status"] == "already_exists"
+    assert job["result"]["paper_id"] == main_id
+
+    with Session() as session:
+        papers = session.scalars(select(Paper).where(Paper.library_name == "SuppLibrary")).all()
+        assert len(papers) == 1
 
 
 def test_reset_upload_keeps_paper_but_clears_pdf_and_derived_artifacts(setup_test_db):

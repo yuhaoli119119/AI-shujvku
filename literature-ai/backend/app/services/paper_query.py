@@ -60,13 +60,169 @@ from app.utils.evidence_anchors import first_evidence_anchor
 from app.utils.figure_reliability import build_figure_image_review
 from app.utils.text_cleaning import repair_mojibake_text
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import writing_card_gate
+from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
 from app.rag.quality import build_rag_quality_summary
 
 
 def _escape_like(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+_SEARCH_DASHES = ("-", "\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212")
+_SEARCH_DASH_TRANSLATION = str.maketrans({dash: "-" for dash in _SEARCH_DASHES[1:]})
+
+
+def _normalize_search_token(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").translate(_SEARCH_DASH_TRANSLATION)).strip().lower()
+
+
+_SEARCH_ALIAS_GROUPS = (
+    (
+        "lis",
+        "li-s",
+        "li s",
+        "lithium-sulfur",
+        "lithium sulfur",
+        "lithiumsulfur",
+        "锂硫",
+        "锂-硫",
+        "锂 硫",
+    ),
+    ("电池", "battery", "batteries", "cell", "cells"),
+    ("多硫化物", "polysulfide", "polysulfides"),
+    ("硫还原", "sulfur reduction", "sulfur redox", "srr"),
+)
+_SEARCH_ALIAS_LOOKUP = {
+    _normalize_search_token(alias): group
+    for group in _SEARCH_ALIAS_GROUPS
+    for alias in group
+}
+_MAX_SEARCH_ALIAS_WORDS = max(
+    len(_normalize_search_token(alias).split())
+    for group in _SEARCH_ALIAS_GROUPS
+    for alias in group
+)
+
+
+def _expand_search_token(value: str) -> list[str]:
+    normalized = _normalize_search_token(value)
+    aliases = _SEARCH_ALIAS_LOOKUP.get(normalized, (normalized,))
+    variants: list[str] = []
+
+    for alias in aliases:
+        candidate = _normalize_search_token(alias)
+        if not candidate:
+            continue
+        candidate_variants = [candidate]
+        if "-" in candidate and all(part for part in candidate.split("-")):
+            parts = candidate.split("-")
+            candidate_variants.extend(dash.join(parts) for dash in _SEARCH_DASHES)
+            candidate_variants.extend(("".join(parts), " ".join(parts)))
+        for variant in candidate_variants:
+            if variant not in variants:
+                variants.append(variant)
+
+    return variants
+
+
+_SEARCH_ALIAS_KEYS_BY_LENGTH = sorted(_SEARCH_ALIAS_LOOKUP, key=len, reverse=True)
+
+
+def _split_compound_search_token(value: str) -> list[list[str]] | None:
+    normalized = _normalize_search_token(value)
+    if not normalized or " " in normalized:
+        return None
+
+    groups: list[list[str]] = []
+    index = 0
+    while index < len(normalized):
+        match = next(
+            (
+                alias
+                for alias in _SEARCH_ALIAS_KEYS_BY_LENGTH
+                if normalized.startswith(alias, index)
+            ),
+            None,
+        )
+        if match is None:
+            return None
+        groups.append(_expand_search_token(match))
+        index += len(match)
+
+    return groups or None
+
+
+def _needs_boundary_match(variant: str) -> bool:
+    return variant.isascii() and variant.isalnum() and len(variant) <= 3
+
+
+def _build_text_match(column, variant: str):
+    if _needs_boundary_match(variant):
+        regex = rf"(^|[^[:alnum:]]){re.escape(variant)}([^[:alnum:]]|$)"
+        return column.op("~*")(regex)
+    return column.ilike(f"%{_escape_like(variant)}%", escape="\\")
+
+
+def _iter_search_groups(value: str) -> list[list[str]]:
+    tokens = _normalize_search_token(value).split()
+    groups: list[list[str]] = []
+    index = 0
+
+    while index < len(tokens):
+        matched = False
+        max_width = min(_MAX_SEARCH_ALIAS_WORDS, len(tokens) - index)
+        for width in range(max_width, 0, -1):
+            candidate = " ".join(tokens[index : index + width])
+            if candidate not in _SEARCH_ALIAS_LOOKUP:
+                continue
+            groups.append(_expand_search_token(candidate))
+            index += width
+            matched = True
+            break
+        if matched:
+            continue
+        compound_groups = _split_compound_search_token(tokens[index])
+        if compound_groups:
+            groups.extend(compound_groups)
+        else:
+            groups.append(_expand_search_token(tokens[index]))
+        index += 1
+
+    return [group for group in groups if group]
+
+
+def _build_keyword_group_clause(variants: list[str]):
+    author_text = cast(Paper.authors, String)
+    metadata_columns = (
+        Paper.title,
+        Paper.paper_code,
+        Paper.doi,
+        Paper.journal,
+        Paper.abstract,
+        author_text,
+    )
+    metadata_matches = [
+        _build_text_match(column, variant)
+        for variant in variants
+        for column in metadata_columns
+    ]
+    section_matches = [
+        _build_text_match(column, variant)
+        for variant in variants
+        for column in (PaperSection.section_title, PaperSection.text)
+    ]
+    section_sub = (
+        select(PaperSection.paper_id)
+        .where(
+            PaperSection.paper_id == Paper.id,
+            or_(*section_matches),
+        )
+        .correlate(Paper)
+        .exists()
+    )
+    return or_(*metadata_matches, section_sub)
 
 
 @lru_cache(maxsize=8192)
@@ -124,32 +280,8 @@ class PaperQueryService:
         if filters.library_name:
             query = query.where(build_library_name_clause(Paper.library_name, filters.library_name))
         if filters.q:
-            for kw in filters.q.strip().split():
-                keyword = f"%{_escape_like(kw)}%"
-                author_text = cast(Paper.authors, String)
-                section_sub = (
-                    select(PaperSection.paper_id)
-                    .where(
-                        PaperSection.paper_id == Paper.id,
-                        or_(
-                            PaperSection.section_title.ilike(keyword, escape="\\"),
-                            PaperSection.text.ilike(keyword, escape="\\"),
-                        ),
-                    )
-                    .correlate(Paper)
-                    .exists()
-                )
-                query = query.where(
-                    or_(
-                        Paper.title.ilike(keyword, escape="\\"),
-                        Paper.paper_code.ilike(keyword, escape="\\"),
-                        Paper.doi.ilike(keyword, escape="\\"),
-                        Paper.journal.ilike(keyword, escape="\\"),
-                        Paper.abstract.ilike(keyword, escape="\\"),
-                        author_text.ilike(keyword, escape="\\"),
-                        section_sub,
-                    )
-                )
+            for variants in _iter_search_groups(filters.q):
+                query = query.where(_build_keyword_group_clause(variants))
         if filters.source_path:
             query = query.where(Paper.source_path == filters.source_path)
         if filters.year is not None:
@@ -261,6 +393,30 @@ class PaperQueryService:
             summary = relationship_summary_map[row.source_paper_id]
             summary[row.relationship_type] = summary.get(row.relationship_type, 0) + 1
 
+        incoming_supplementary_rows = self.session.scalars(
+            select(PaperRelationship).where(
+                PaperRelationship.target_paper_id.in_(paper_ids),
+                PaperRelationship.relationship_type.in_(
+                    ["supplementary", "supplementary_information", "supporting_information", "si"]
+                ),
+            )
+        ).all()
+        supplementary_main_ids = {row.source_paper_id for row in incoming_supplementary_rows}
+        supplementary_main_progress = {}
+        if supplementary_main_ids:
+            supplementary_main_papers = self.session.scalars(
+                select(Paper).where(Paper.id.in_(list(supplementary_main_ids)))
+            ).all()
+            supplementary_main_progress = {
+                item.id: self._manual_review_progress_from_analysis(item.comprehensive_analysis)
+                for item in supplementary_main_papers
+            }
+        inherited_progress_by_paper_id: dict[UUID, dict[str, Any]] = {}
+        for row in incoming_supplementary_rows:
+            main_progress = supplementary_main_progress.get(row.source_paper_id)
+            if main_progress:
+                inherited_progress_by_paper_id[row.target_paper_id] = main_progress
+
         impact_metadata_map = {
             row.paper_id: row
             for row in self.session.scalars(
@@ -274,7 +430,10 @@ class PaperQueryService:
                 {**counts_map[paper.id], "comprehensive_analysis": 1 if paper.comprehensive_analysis else 0},
                 relationship_summary_map.get(paper.id, {}),
                 impact_metadata=impact_metadata_map.get(paper.id),
-                review_status=workbench_status_map.get(str(paper.id)),
+                review_status=self._list_review_status_with_inherited_progress(
+                    workbench_status_map.get(str(paper.id)),
+                    inherited_progress_by_paper_id.get(paper.id),
+                ),
             ) for paper in papers
         ]
 
@@ -389,6 +548,33 @@ class PaperQueryService:
         incoming_relationships = self.session.scalars(
             select(PaperRelationship).where(PaperRelationship.target_paper_id == paper_id)
         ).all()
+        supplementary_outgoing = [
+            row for row in outgoing_relationships if self._is_supplementary_relationship(row.relationship_type)
+        ]
+        supplementary_incoming = [
+            row for row in incoming_relationships if self._is_supplementary_relationship(row.relationship_type)
+        ]
+        supplementary_table_papers: dict[UUID, Paper] = {}
+        supplementary_tables: list[PaperTable] = []
+        supplementary_table_writeback_paper_ids: dict[str, UUID] = {}
+        supplementary_table_source_papers: dict[str, Paper] = {}
+        incoming_writeback_paper_id = supplementary_incoming[0].source_paper_id if supplementary_incoming else None
+        if not compact and supplementary_outgoing:
+            supplementary_paper_ids = {row.target_paper_id for row in supplementary_outgoing}
+            supplementary_table_papers = {
+                item.id: item
+                for item in self.session.scalars(select(Paper).where(Paper.id.in_(list(supplementary_paper_ids)))).all()
+            }
+            supplementary_tables = self.session.scalars(
+                select(PaperTable)
+                .where(PaperTable.paper_id.in_(list(supplementary_paper_ids)))
+                .order_by(PaperTable.paper_id.asc(), PaperTable.page.asc().nulls_last())
+            ).all()
+            for item in supplementary_tables:
+                supplementary_table_writeback_paper_ids[str(item.id)] = paper_id
+                if item.paper_id in supplementary_table_papers:
+                    supplementary_table_source_papers[str(item.id)] = supplementary_table_papers[item.paper_id]
+        display_tables = list(tables) + list(supplementary_tables)
 
         if compact:
             references = []
@@ -424,13 +610,29 @@ class PaperQueryService:
             ).all()
             full_translation = self._latest_full_translation(paper_id)
             figure_ids = {str(figure.id) for figure in figures}
-            table_ids = {str(table.id) for table in tables}
-            table_audits = self._object_review_audits_by_target(
-                paper_id,
+            table_ids = {str(table.id) for table in display_tables}
+            table_audit_owner_ids = {paper_id}
+            table_audit_owner_ids.update(table.paper_id for table in display_tables)
+            if incoming_writeback_paper_id:
+                table_audit_owner_ids.add(incoming_writeback_paper_id)
+            table_audits = self._merge_object_review_audit_maps(
+                [
+                    self._object_review_audits_by_target(
+                        owner_id,
+                        table_ids,
+                        target_types={"table", "tables", "paper_table", "paper_tables"},
+                    )
+                    for owner_id in table_audit_owner_ids
+                ],
                 table_ids,
-                target_types={"table", "tables", "paper_table", "paper_tables"},
             )
-            table_corrections = self._table_corrections_by_target(paper_id, table_ids)
+            table_corrections = self._merge_correction_maps(
+                [
+                    self._table_corrections_by_target(owner_id, table_ids)
+                    for owner_id in table_audit_owner_ids
+                ],
+                table_ids,
+            )
             figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
             figure_approved_corrections = self._figure_approved_corrections(paper_id, figure_ids)
             figure_pending_corrections = self._figure_pending_corrections(paper_id, figure_ids)
@@ -473,6 +675,7 @@ class PaperQueryService:
                 target_ids=dft_result_ids,
             )
         catalyst_by_id = {str(item.id): item for item in catalyst_samples}
+        dft_gate_by_id = bulk_export_gate_results(self.session, dft_results, target_type="dft_results")
 
         base_counts = {
             "sections": len(sections),
@@ -497,18 +700,20 @@ class PaperQueryService:
             impact_metadata=self.session.get(PaperImpactMetadata, paper.id),
             include_heavy=True,
         )
-        if compact:
-            outgoing_relationships = []
-            incoming_relationships = []
-            related_titles = {}
-        else:
-            related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {row.source_paper_id for row in incoming_relationships}
-            related_titles = {}
-            if related_paper_ids:
-                related_titles = {
-                    item.id: item.title
-                    for item in self.session.scalars(select(Paper).where(Paper.id.in_(list(related_paper_ids)))).all()
-                }
+        related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {
+            row.source_paper_id for row in incoming_relationships
+        }
+        related_titles = {}
+        related_codes = {}
+        related_manual_review_progress = {}
+        if related_paper_ids:
+            related_papers = self.session.scalars(select(Paper).where(Paper.id.in_(list(related_paper_ids)))).all()
+            related_titles = {item.id: item.title for item in related_papers}
+            related_codes = {item.id: item.paper_code for item in related_papers}
+            related_manual_review_progress = {
+                item.id: self._manual_review_progress_from_analysis(item.comprehensive_analysis)
+                for item in related_papers
+            }
         base_payload = base.model_dump()
         base_payload["full_translation_zh"] = full_translation
         review_status = self._paper_detail_review_status(
@@ -534,8 +739,18 @@ class PaperQueryService:
                     item,
                     object_review_audits=table_audits.get(str(item.id), []),
                     corrections=table_corrections.get(str(item.id), []),
+                    source_paper=(
+                        supplementary_table_source_papers.get(str(item.id))
+                        or (paper if incoming_writeback_paper_id and item.paper_id == paper_id else None)
+                    ),
+                    source_document_type=(
+                        "supplementary_information"
+                        if str(item.id) in supplementary_table_source_papers
+                        else ("supplementary_information" if incoming_writeback_paper_id else "main_text")
+                    ),
+                    writeback_paper_id=supplementary_table_writeback_paper_ids.get(str(item.id), incoming_writeback_paper_id),
                 )
-                for item in tables
+                for item in display_tables
             ],
             figures=[
                 self._serialize_figure(
@@ -557,6 +772,7 @@ class PaperQueryService:
                     catalyst_by_id=catalyst_by_id,
                     object_review_audits=dft_result_audits.get(str(item.id), []),
                     field_conflicts=dft_result_conflicts.get(str(item.id), []),
+                    gate=dft_gate_by_id.get(str(item.id)),
                 )
                 for item in dft_results
             ],
@@ -580,10 +796,22 @@ class PaperQueryService:
                 for item in writing_cards
             ],
             outgoing_relationships=[
-                self._serialize_relationship(item, related_titles.get(item.target_paper_id)) for item in outgoing_relationships
+                self._serialize_relationship(
+                    item,
+                    related_paper_title=related_titles.get(item.target_paper_id),
+                    related_paper_code=related_codes.get(item.target_paper_id),
+                    related_manual_review_progress=related_manual_review_progress.get(item.target_paper_id),
+                )
+                for item in outgoing_relationships
             ],
             incoming_relationships=[
-                self._serialize_relationship(item, related_titles.get(item.source_paper_id)) for item in incoming_relationships
+                self._serialize_relationship(
+                    item,
+                    related_paper_title=related_titles.get(item.source_paper_id),
+                    related_paper_code=related_codes.get(item.source_paper_id),
+                    related_manual_review_progress=related_manual_review_progress.get(item.source_paper_id),
+                )
+                for item in incoming_relationships
             ],
             references=[ReferenceEntryResponse.model_validate(item) for item in references],
             figure_data_points_items=[FigureDataPointResponse.model_validate(item) for item in figure_data_points],
@@ -1015,20 +1243,86 @@ class PaperQueryService:
         *,
         object_review_audits: list[dict[str, Any]] | None = None,
         corrections: list[dict[str, Any]] | None = None,
+        source_paper: Paper | None = None,
+        source_document_type: str | None = None,
+        writeback_paper_id: UUID | None = None,
     ) -> PaperTableResponse:
         payload = PaperTableResponse.model_validate(item)
         audits = object_review_audits or []
         table_corrections = corrections or []
+        clean_caption = cls._clean_pdf_text(payload.caption)
+        clean_markdown = cls._clean_pdf_layout_text(payload.markdown_content)
+        table_review_status = cls._table_review_status(audits, table_corrections)
+        if table_review_status in {"verified", "review_candidate"} and not str(clean_markdown or "").strip():
+            table_review_status = "reviewed_empty_content"
         return payload.model_copy(
             update={
-                "caption": cls._clean_pdf_text(payload.caption),
-                "markdown_content": cls._clean_pdf_layout_text(payload.markdown_content),
-                "table_review_status": cls._table_review_status(audits, table_corrections),
+                "caption": clean_caption,
+                "markdown_content": clean_markdown,
+                "source_document_type": source_document_type,
+                "related_paper_id": source_paper.id if source_paper else None,
+                "related_paper_code": source_paper.paper_code if source_paper else None,
+                "related_paper_title": source_paper.title if source_paper else None,
+                "writeback_paper_id": writeback_paper_id,
+                "table_review_status": table_review_status,
                 "object_review_audit_count": len(audits),
                 "object_review_audits": audits[:5],
                 "latest_object_review_audit": audits[0] if audits else None,
             }
         )
+
+    @staticmethod
+    def _is_supplementary_relationship(relationship_type: str | None) -> bool:
+        return str(relationship_type or "").strip().lower() in {
+            "supplementary",
+            "supplementary_information",
+            "supporting_information",
+            "si",
+        }
+
+    @staticmethod
+    def _merge_object_review_audit_maps(
+        maps: list[dict[str, list[dict[str, Any]]]],
+        target_ids: set[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        merged: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
+        seen_by_target: dict[str, set[str]] = {target_id: set() for target_id in target_ids}
+        for audit_map in maps:
+            for target_id, audits in audit_map.items():
+                if target_id not in merged:
+                    continue
+                for audit in audits:
+                    audit_id = str(audit.get("candidate_id") or json.dumps(audit, sort_keys=True, default=str))
+                    if audit_id in seen_by_target[target_id]:
+                        continue
+                    seen_by_target[target_id].add(audit_id)
+                    merged[target_id].append(audit)
+        for target_id, audits in merged.items():
+            merged[target_id] = sorted(
+                audits,
+                key=lambda item: str(item.get("created_at") or ""),
+                reverse=True,
+            )[:5]
+        return merged
+
+    @staticmethod
+    def _merge_correction_maps(
+        maps: list[dict[str, list[dict[str, Any]]]],
+        target_ids: set[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        merged: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
+        seen_by_target: dict[str, set[str]] = {target_id: set() for target_id in target_ids}
+        for correction_map in maps:
+            for target_id, corrections in correction_map.items():
+                if target_id not in merged:
+                    continue
+                for correction in corrections:
+                    correction_id = str(correction.get("correction_id") or json.dumps(correction, sort_keys=True, default=str))
+                    if correction_id in seen_by_target[target_id]:
+                        continue
+                    seen_by_target[target_id].add(correction_id)
+                    merged[target_id].append(correction)
+        return merged
 
     @staticmethod
     def _table_review_status(audits: list[dict[str, Any]], corrections: list[dict[str, Any]] | None = None) -> str:
@@ -1294,7 +1588,11 @@ class PaperQueryService:
             if target_id not in target_ids or target_type not in normalized_target_types:
                 continue
             audit_payload = self._object_review_audit_payload(candidate, payload)
-            dedupe_key = self._object_review_audit_dedupe_key(target_type, audit_payload)
+            dedupe_key = (
+                (str(candidate.id),)
+                if target_type in {"dft_results", "dft_result"}
+                else self._object_review_audit_dedupe_key(target_type, audit_payload)
+            )
             target_bucket = deduped_by_target.setdefault(target_id, {})
             existing = target_bucket.get(dedupe_key)
             if existing is None or self._object_review_audit_payload_rank(audit_payload) > self._object_review_audit_payload_rank(existing):
@@ -1468,11 +1766,22 @@ class PaperQueryService:
         catalyst_by_id: dict[str, CatalystSample] | None = None,
         object_review_audits: list[dict[str, Any]] | None = None,
         field_conflicts: list[dict[str, Any]] | None = None,
+        gate: Any = None,
     ) -> DFTResultResponse:
         payload = DFTResultResponse.model_validate(item)
         audits = object_review_audits or []
         conflicts = field_conflicts or []
         conflict_field_names = cls._aggregate_conflict_field_names(conflicts)
+        ai_review_display = DFTReviewQueueService.build_ai_review_display_status(
+            gate=gate or {},
+            object_review_audits=audits,
+            conflicts=conflicts,
+        )
+        workflow_state = DFTReviewQueueService.build_dft_workflow_state(
+            gate=gate or {},
+            object_review_audits=audits,
+            candidate_status=item.candidate_status,
+        )
         linked_catalyst = (
             catalyst_by_id.get(str(item.catalyst_sample_id))
             if catalyst_by_id and item.catalyst_sample_id is not None
@@ -1512,6 +1821,17 @@ class PaperQueryService:
                 "object_review_audit_count": len(audits),
                 "object_review_audits": audits[:5],
                 "latest_object_review_audit": audits[0] if audits else None,
+                "ai_review_display_status": ai_review_display["status"],
+                "ai_review_display_label": ai_review_display["label"],
+                "ai_review_display_reason": ai_review_display["reason"],
+                "ai_review_display_class": ai_review_display["class_name"],
+                "dft_workflow_state": workflow_state["state"],
+                "dft_workflow_label": workflow_state["label"],
+                "dft_workflow_reason": workflow_state["reason"],
+                "valid_ai_opinion_count": workflow_state["valid_ai_opinion_count"],
+                "raw_ai_opinion_count": workflow_state["raw_ai_opinion_count"],
+                "effective_ai_opinions": workflow_state["effective_ai_opinions"],
+                "next_required_action": workflow_state["next_required_action"],
                 "conflict_count": len(conflicts),
                 "field_conflicts": conflicts[:5],
                 "affected_field_names": conflict_field_names,
@@ -1782,7 +2102,12 @@ class PaperQueryService:
         )
 
     @staticmethod
-    def _serialize_relationship(item: PaperRelationship, related_paper_title: str | None) -> PaperRelationshipItemResponse:
+    def _serialize_relationship(
+        item: PaperRelationship,
+        related_paper_title: str | None,
+        related_paper_code: str | None = None,
+        related_manual_review_progress: dict[str, Any] | None = None,
+    ) -> PaperRelationshipItemResponse:
         return PaperRelationshipItemResponse(
             id=item.id,
             source_paper_id=item.source_paper_id,
@@ -1791,5 +2116,58 @@ class PaperQueryService:
             note=item.note,
             created_by=item.created_by,
             created_at=item.created_at,
+            related_paper_code=related_paper_code,
             related_paper_title=related_paper_title,
+            related_manual_review_progress=related_manual_review_progress or {},
         )
+
+    @staticmethod
+    def _manual_review_progress_from_analysis(analysis: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(analysis, dict):
+            return {}
+        progress = analysis.get("manual_review_progress")
+        return progress if isinstance(progress, dict) else {}
+
+    @classmethod
+    def _list_review_status_with_inherited_progress(
+        cls,
+        status: dict[str, Any] | None,
+        inherited_progress: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not inherited_progress:
+            return status
+        merged_status = dict(status or {})
+        merged_status["manual_review_progress"] = cls._merge_manual_review_progress(
+            merged_status.get("manual_review_progress"),
+            inherited_progress,
+        )
+        return merged_status
+
+    @classmethod
+    def _merge_manual_review_progress(
+        cls,
+        own_progress: dict[str, Any] | None,
+        inherited_progress: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        own = own_progress if isinstance(own_progress, dict) else {}
+        inherited = inherited_progress if isinstance(inherited_progress, dict) else {}
+        merged: dict[str, Any] = {}
+        for module in ("content", "figures", "dft"):
+            own_entry = cls._normalize_manual_review_progress_entry(own.get(module))
+            inherited_entry = cls._normalize_manual_review_progress_entry(inherited.get(module))
+            merged[module] = own_entry if own_entry.get("completed") else inherited_entry
+        return merged
+
+    @staticmethod
+    def _normalize_manual_review_progress_entry(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return {
+                "completed": bool(value.get("completed")),
+                "updated_at": value.get("updated_at"),
+                "updated_by": value.get("updated_by"),
+            }
+        return {
+            "completed": bool(value),
+            "updated_at": None,
+            "updated_by": None,
+        }

@@ -939,7 +939,12 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
 def test_review_center_api_filters_by_library_name(workbench_env):
     _, _, Session = workbench_env
     with Session() as session:
-        paper_a = Paper(title="Library A review paper", pdf_path="library-a.pdf", library_name="库A")
+        paper_a = Paper(
+            title="Library A review paper",
+            pdf_path="library-a.pdf",
+            library_name="库A",
+            paper_type="supplementary",
+        )
         paper_b = Paper(title="Library B review paper", pdf_path="library-b.pdf", library_name="库B")
         session.add_all([paper_a, paper_b])
         session.flush()
@@ -958,6 +963,7 @@ def test_review_center_api_filters_by_library_name(workbench_env):
     payload = response.json()
     titles = {row["title"] for row in payload["rows"]}
     assert titles == {"Library A review paper"}
+    assert payload["rows"][0]["paper_type"] == "supplementary"
     assert payload["metadata"]["library_name"] == "库A"
 
 
@@ -1321,8 +1327,7 @@ def test_review_center_suppresses_conflicts_when_current_value_already_matches_f
     client = TestClient(app)
     conflicts = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}")
     assert conflicts.status_code == 200
-    assert conflicts.json()["conflict_count"] == 1
-    assert conflicts.json()["rows"][0]["adjudication"]["recommended_action"] == "verify"
+    assert conflicts.json()["conflict_count"] == 0
 
     center = client.get("/api/workbench/review-center?limit=50")
     assert center.status_code == 200

@@ -39,6 +39,25 @@ DFT_CONFLICT_FIELD_MAP = {
     "adsorbate_conflict": "adsorbate",
     "reaction_step_conflict": "reaction_step",
 }
+DFT_SETTLED_REVIEW_STATUSES = {"verified", "rejected"}
+DFT_SAFE_REVIEW_RESOLUTION_STATUSES = {"active", "remapped"}
+DFT_SETTLEMENT_FIELD_ALIASES = {
+    "property": "energy_type",
+    "property_type": "energy_type",
+    "energy": "energy_type",
+    "energy_type": "energy_type",
+    "value": "value",
+    "unit": "unit",
+    "catalyst": "catalyst",
+    "catalyst_id": "catalyst",
+    "catalyst_sample": "catalyst",
+    "catalyst_sample_id": "catalyst",
+    "material": "catalyst",
+    "material_identity": "catalyst",
+    "structure_name": "catalyst",
+    "adsorbate": "adsorbate",
+    "reaction_step": "reaction_step",
+}
 
 
 class ReviewConflictAggregationService:
@@ -96,6 +115,14 @@ class ReviewConflictAggregationService:
                 continue
             paper, target, target_value, field = key.split("|", 3)
             affected_field_names = self._affected_field_names(target, field, conflict_types)
+            if active_only and self._dft_conflict_group_is_settled(
+                target_type=target,
+                target_id=target_value,
+                field_name=field,
+                affected_field_names=affected_field_names,
+                conflict_types=conflict_types,
+            ):
+                continue
             target_summary = self._build_target_summary(target, target_value, enriched_items)
             anchor_summary = self._build_anchor_summary(enriched_items)
             rows.append(
@@ -198,6 +225,7 @@ class ReviewConflictAggregationService:
             paper_id=None,
             target_type=canonical,
             include_non_conflicts=False,
+            active_only=True,
             limit=1000,
         )
         by_target: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -259,6 +287,98 @@ class ReviewConflictAggregationService:
                 continue
             active.append(item)
         return active
+
+    def _dft_conflict_group_is_settled(
+        self,
+        *,
+        target_type: str,
+        target_id: str,
+        field_name: str,
+        affected_field_names: list[str],
+        conflict_types: list[str],
+    ) -> bool:
+        if self._safe_canonical_target_type(target_type) != "dft_results":
+            return False
+        target_row = self._load_target_row("dft_results", target_id)
+        if not isinstance(target_row, DFTResult):
+            return False
+        if str(getattr(target_row, "candidate_status", "") or "").strip().lower() == "rejected":
+            return True
+        fields = self._dft_settlement_fields(
+            field_name=field_name,
+            affected_field_names=affected_field_names,
+            conflict_types=conflict_types,
+        )
+        if not fields:
+            return False
+        settled_fields = self._settled_dft_review_fields(target_row, fields)
+        if fields.issubset(settled_fields):
+            return True
+        settled_fields.update(self._approved_dft_correction_fields(target_row, fields))
+        return fields.issubset(settled_fields)
+
+    def _dft_settlement_fields(
+        self,
+        *,
+        field_name: str,
+        affected_field_names: list[str],
+        conflict_types: list[str],
+    ) -> set[str]:
+        raw_fields: list[str] = []
+        for name in affected_field_names:
+            raw_fields.append(str(name or "").strip())
+        for conflict_type in conflict_types:
+            mapped = DFT_CONFLICT_FIELD_MAP.get(str(conflict_type or "").strip())
+            if mapped:
+                raw_fields.append(mapped)
+        if field_name and field_name != "dft_results":
+            raw_fields.append(field_name)
+
+        fields: set[str] = set()
+        for raw in raw_fields:
+            normalized = DFT_SETTLEMENT_FIELD_ALIASES.get(str(raw or "").strip().lower())
+            if normalized:
+                fields.add(normalized)
+        return fields
+
+    def _settled_dft_review_fields(self, target_row: DFTResult, fields: set[str]) -> set[str]:
+        rows = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == target_row.paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(target_row.id),
+                ExtractionFieldReview.field_name.in_(sorted(fields)),
+            )
+        ).all()
+        settled: set[str] = set()
+        for row in rows:
+            status = str(row.reviewer_status or "").strip().lower()
+            resolution_status = str(row.target_resolution_status or "").strip().lower()
+            if status in DFT_SETTLED_REVIEW_STATUSES and resolution_status in DFT_SAFE_REVIEW_RESOLUTION_STATUSES:
+                normalized = DFT_SETTLEMENT_FIELD_ALIASES.get(str(row.field_name or "").strip().lower())
+                if normalized:
+                    settled.add(normalized)
+        return settled
+
+    def _approved_dft_correction_fields(self, target_row: DFTResult, fields: set[str]) -> set[str]:
+        rows = self.session.scalars(
+            select(PaperCorrection).where(
+                PaperCorrection.paper_id == target_row.paper_id,
+                PaperCorrection.status == "approved",
+            )
+        ).all()
+        settled: set[str] = set()
+        for row in rows:
+            parsed = self._correction_target(row)
+            if parsed is None:
+                continue
+            _paper_id, target_type, target_id, correction_field = parsed
+            if target_type != "dft_results" or target_id != str(target_row.id):
+                continue
+            normalized = DFT_SETTLEMENT_FIELD_ALIASES.get(str(correction_field or "").strip().lower())
+            if normalized in fields:
+                settled.add(normalized)
+        return settled
 
     def _collapse_repeated_source_opinions(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         latest_by_source: dict[str, dict[str, Any]] = {}

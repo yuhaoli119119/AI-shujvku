@@ -8,10 +8,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, PaperCorrection, PaperNote
+from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperNote
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
+from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.evidence_anchors import (
     first_evidence_anchor,
     first_material_correction_anchor,
@@ -334,6 +335,7 @@ class CodexContextService:
                 ).get("markdown_trust") if isinstance(detail.pdf_quality_report, dict) else None,
                 "full_translation_available": bool(detail.full_translation_zh),
             },
+            "source_documents": self._build_source_documents(detail, artifact_status),
             "artifact_status": artifact_status,
             "external_audit_precondition": {
                 "status": "ready"
@@ -429,6 +431,60 @@ class CodexContextService:
             "recommended_next_actions": self._next_actions(detail, warnings, locator_status_counts),
         }
         return context
+
+    def _build_source_documents(
+        self,
+        detail: PaperDetailResponse,
+        main_artifact_status: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        main_id = str(detail.id)
+        documents = [
+            {
+                "source_document_type": "main_text",
+                "label": "Main PDF",
+                "paper_id": main_id,
+                "human_ref": detail.paper_code,
+                "title": detail.title,
+                "available": bool(main_artifact_status.get("pdf_exists")),
+                "pdf_url": f"/api/papers/{detail.id}/pdf",
+                "pdf_path": detail.pdf_path,
+                "read_paper_page_paper_id": main_id,
+                "writeback_paper_id": main_id,
+            }
+        ]
+        supplementary_types = {"supplementary", "supplementary_information", "si"}
+        seen_target_ids: set[str] = set()
+        for relationship in detail.outgoing_relationships or []:
+            relationship_type = str(relationship.relationship_type or "").strip().lower()
+            if relationship_type not in supplementary_types:
+                continue
+            target_id = str(relationship.target_paper_id)
+            if target_id in seen_target_ids:
+                continue
+            seen_target_ids.add(target_id)
+            target = self.session.get(Paper, relationship.target_paper_id)
+            if target is None:
+                continue
+            target_status = build_paper_artifact_status(target, settings=self.settings)
+            documents.append(
+                {
+                    "source_document_type": "supplementary_information",
+                    "label": target.title or "SI",
+                    "paper_id": main_id,
+                    "related_paper_id": target_id,
+                    "related_human_ref": target.paper_code,
+                    "relationship_id": str(relationship.id),
+                    "relationship_type": relationship_type,
+                    "title": target.title,
+                    "available": bool(target_status.get("pdf_exists")),
+                    "pdf_url": f"/api/papers/{target.id}/pdf",
+                    "pdf_path": target.pdf_path,
+                    "read_paper_page_paper_id": target_id,
+                    "writeback_paper_id": main_id,
+                    "note": "Read as SI evidence for the main paper; do not review or cite it as an independent paper.",
+                }
+            )
+        return documents
 
     def _build_warnings(
         self,
@@ -691,7 +747,10 @@ class CodexContextService:
             "- Write conclusions back through import_analysis as structured review/correction candidates. After import, read back the target item or review coverage before claiming success.",
             "- auto_apply_review_rules=false is candidate-only. It may record an unverified audit, but it does not mean PASS/completed/applied and must not be described as a finished review.",
             "- For missing DFT rows that should enter the system candidate queue, use object_review_audits with decision=new_candidate, a structured corrected_value, and auto_apply_review_rules=true. This materializes an unverified DFTResult candidate; it does not mark the row final or exportable.",
-            "- Directly applying non-DFT fixes or [AI_REVIEWED] status uses import_analysis(auto_apply_review_rules=true); non-DFT AI writes are last-writer-wins and do not require module write locks.",
+            "- Directly applying non-DFT text/object fixes or [AI_REVIEWED] status generally uses import_analysis(auto_apply_review_rules=true); non-DFT AI writes are last-writer-wins and do not require module write locks.",
+            "- Table object lifecycle is direct-tool-only: use update_table for caption/markdown/page/prov fixes, create_table for missing tables, merge_table for split/continued/duplicate table fragments, and delete_table for invalid table objects. Do not only write a note or submit table deletion/merge through import_analysis.",
+            "- For tables shown from supplementary_information, call table tools with the table object's real paper_id (often related_paper_id/read_paper_page_paper_id), not the main paper_id. Scientific candidates extracted from SI still use the main writeback_paper_id.",
+            "- Table tool calls require structured evidence_payload with page/table/quoted_text/table_id/bbox evidence. After calling a table tool, read back get_paper or get_codex_item and confirm table count, markdown_content, table_review_status, and audit/correction records.",
             "- When submitting object_review_audits with decision=approve_correction, evidence_location MUST contain structured anchor keys (page, table, figure, quoted_text, etc.) or the auto-apply will skip with missing_evidence_anchor. A plain string (even a descriptive one like \"PDF page 13, Table 5\") is treated as quoted_text and works, but a structured dict like {\"page\": 13, \"table\": \"Table 5\", \"quoted_text\": \"...\"} is preferred for reliable page/section-level evidence tracing.",
             "- Figure image creation/recropping is direct-tool-only: use recrop_figure or create_figure_from_bbox through MCP/API, never import_analysis bbox/crop payloads.",
             "",

@@ -148,11 +148,17 @@ class PaperTranslationPreviewResponse(BaseModel):
 
 class PaperTableResponse(BaseModel):
     id: UUID
+    paper_id: UUID | None = None
     caption: str | None = None
     markdown_content: str | None = None
     page: int | None = None
     extraction_source: str | None = None
     prov: list[Any] | None = None
+    source_document_type: str | None = None
+    related_paper_id: UUID | None = None
+    related_paper_code: str | None = None
+    related_paper_title: str | None = None
+    writeback_paper_id: UUID | None = None
     table_review_status: str | None = None
     object_review_audit_count: int = 0
     object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
@@ -247,6 +253,17 @@ class DFTResultResponse(BaseModel):
     object_review_audit_count: int = 0
     object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
     latest_object_review_audit: dict[str, Any] | None = None
+    ai_review_display_status: str | None = None
+    ai_review_display_label: str | None = None
+    ai_review_display_reason: str | None = None
+    ai_review_display_class: str | None = None
+    dft_workflow_state: str | None = None
+    dft_workflow_label: str | None = None
+    dft_workflow_reason: str | None = None
+    valid_ai_opinion_count: int = 0
+    raw_ai_opinion_count: int = 0
+    effective_ai_opinions: list[dict[str, Any]] = Field(default_factory=list)
+    next_required_action: str | None = None
     conflict_count: int = 0
     field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
     affected_field_names: list[str] = Field(default_factory=list)
@@ -570,7 +587,9 @@ class PaperRelationshipItemResponse(BaseModel):
     note: str | None = None
     confidence: float | None = None
     created_at: datetime
+    related_paper_code: str | None = None
     related_paper_title: str | None = None
+    related_manual_review_progress: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"from_attributes": True}
 

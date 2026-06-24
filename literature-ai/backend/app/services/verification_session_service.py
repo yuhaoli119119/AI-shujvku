@@ -1316,16 +1316,23 @@ class VerificationSessionService:
             for opinion in opinions:
                 if opinion["candidate"].status not in {"candidate", "pending", "requires_resolution"}:
                     continue
-                key = opinion["source_identity"]
+                key = opinion["candidate_id"] if target_type == "dft_results" else opinion["source_identity"]
                 current = deduped.get(key)
                 if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
                     deduped[key] = opinion
             eligible = [item for item in deduped.values() if self._opinion_has_anchor(item)]
             third_ai = [item for item in eligible if str(item.get("adjudication_role") or "").strip().lower() == "third_ai"]
+            resolves_as_rejected = (
+                any(self._is_negative_dft_decision(item.get("decision")) for item in third_ai)
+                or (
+                    len(eligible) >= 2
+                    and all(self._is_negative_dft_decision(item.get("decision")) for item in eligible)
+                )
+            )
             if target_type == "dft_results" and eligible and not all(
                 self._dft_has_material_identity(item, target_id=target_id, field_name=field_name)
                 for item in eligible
-            ):
+            ) and not resolves_as_rejected:
                 pending.append(
                     {
                         "target_type": target_type,
@@ -1542,9 +1549,12 @@ class VerificationSessionService:
         for audit in audits:
             if audit["status"] not in {"candidate", "pending", "requires_resolution", "materialized"}:
                 continue
-            current = deduped.get(audit["source_identity"])
+            submission_id = str(audit.get("candidate_id") or "").strip()
+            if not submission_id:
+                continue
+            current = deduped.get(submission_id)
             if current is None or (audit.get("confidence") or 0) >= (current.get("confidence") or 0):
-                deduped[audit["source_identity"]] = audit
+                deduped[submission_id] = audit
         opinions = list(deduped.values())
         opinions = [self._inherit_selected_dft_evidence(opinion, opinions) for opinion in opinions]
         anchored = [audit for audit in opinions if self._opinion_has_anchor(audit)]
@@ -1967,7 +1977,10 @@ class VerificationSessionService:
         ]
         if not proposals:
             return None
-        proposals.sort(key=lambda item: (str(item.get("source_identity") or ""), item.get("confidence") or 0), reverse=True)
+        proposals.sort(
+            key=lambda item: (item.get("confidence") or 0, str(item.get("candidate_id") or "")),
+            reverse=True,
+        )
         return proposals[0]
 
     def _complete_dft_third_ai_adjudication(
@@ -2082,12 +2095,11 @@ class VerificationSessionService:
         if proposal is None:
             return None
         proposed_target = self._normalized_dft_audit_target(row, proposal)
-        proposal_source = str(proposal.get("source_identity") or "")
         for audit in audits:
             decision = str(audit.get("decision") or "").strip().upper()
             if decision not in {"PASS", "PROPOSED", "REVISE", "NEW_CANDIDATE"}:
                 continue
-            if str(audit.get("source_identity") or "") == proposal_source:
+            if self._same_dft_review_submission(audit, proposal):
                 continue
             field_name = str(audit.get("field_name") or "").strip()
             if field_name == "value":
@@ -2121,7 +2133,10 @@ class VerificationSessionService:
             if str(audit.get("decision") or "").strip().upper() in {"PROPOSED", "NEW_CANDIDATE"}
             and str(audit.get("field_name") or "").strip() not in {"", "dft_results"}
         ]
-        proposals.sort(key=lambda item: (item.get("confidence") or 0, str(item.get("source_identity") or "")), reverse=True)
+        proposals.sort(
+            key=lambda item: (item.get("confidence") or 0, str(item.get("candidate_id") or "")),
+            reverse=True,
+        )
         for proposal in proposals:
             supporting_pass = self._supporting_value_pass_for_field_proposal(row, audits, proposal)
             if supporting_pass is not None:
@@ -2134,7 +2149,6 @@ class VerificationSessionService:
         audits: list[dict[str, Any]],
         proposal: dict[str, Any],
     ) -> dict[str, Any] | None:
-        proposal_source = str(proposal.get("source_identity") or "")
         proposal_field = str(proposal.get("field_name") or "").strip()
         row_value_target = {"value": row.value, "unit": str(row.unit or "").strip().lower().replace(" ", "")}
         for audit in audits:
@@ -2142,7 +2156,7 @@ class VerificationSessionService:
                 continue
             if str(audit.get("field_name") or "").strip() != "value":
                 continue
-            if str(audit.get("source_identity") or "") == proposal_source:
+            if self._same_dft_review_submission(audit, proposal):
                 continue
             if not self._material_identity_values_compatible(
                 self._dft_material_identity_value(proposal, target_id=str(row.id)),
@@ -2159,6 +2173,14 @@ class VerificationSessionService:
                 continue
             return audit
         return None
+
+    @staticmethod
+    def _same_dft_review_submission(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        left_id = str(left.get("candidate_id") or "").strip()
+        right_id = str(right.get("candidate_id") or "").strip()
+        if left_id and right_id:
+            return left_id == right_id
+        return left is right
 
     def _synthesize_dft_whole_row_proposal(
         self,

@@ -1218,7 +1218,7 @@ def _build_descriptor_correlation_summary_v2(
         property_counts[_record_target(record).get("canonical_property_type") or ""] += 1
     for target in TARGET_PROPERTY_ORDER:
         for descriptor in DESCRIPTOR_PROPERTY_ORDER:
-            pair_payload, _ = _paired_descriptor_points_v2(
+            strict_pair_payload, _ = _paired_descriptor_points_v2(
                 dataset,
                 reaction_category=reaction_category,
                 adsorbate=adsorbate,
@@ -1226,12 +1226,25 @@ def _build_descriptor_correlation_summary_v2(
                 target_property=target,
                 descriptor=descriptor,
             )
+            pair_payload = strict_pair_payload
             source = "reviewed_exportable"
+            if not pair_payload:
+                pair_payload = _raw_exploratory_descriptor_points(
+                    session,
+                    filters,
+                    target_property=target,
+                    descriptor=descriptor,
+                    reaction_category=reaction_category,
+                    adsorbate=adsorbate,
+                    material_family=material_family,
+                )
+                if pair_payload:
+                    source = "exploratory_same_sample"
             stats = _correlation_stats(pair_payload)
             n = len(pair_payload)
             status = (
                 "ready"
-                if source == "reviewed_exportable" and n >= min_n and stats["pearson_r"] is not None
+                if n >= min_n and stats["pearson_r"] is not None
                 else "insufficient_paired_data"
             )
             color = _correlation_color(stats["pearson_r"]) if status == "ready" else "gray"
@@ -1248,10 +1261,19 @@ def _build_descriptor_correlation_summary_v2(
                     "color": color,
                     "source": source,
                     "message": (
-                        f"已形成 {n} 个最新导出逻辑下的配对样本。"
+                        (
+                            f"已形成 {n} 个最新导出逻辑下的配对样本。"
+                            if source == "reviewed_exportable"
+                            else f"已形成 {n} 个同样本探索性配对样本。"
+                        )
                         if status == "ready"
-                        else "Correlation is withheld until the current ML dataset logic yields paired descriptor/target "
-                        f"values with n >= {min_n} under the selected reaction/adsorbate/material filters."
+                        else (
+                            "Correlation is withheld until the current ML dataset logic yields paired descriptor/target "
+                            f"values with n >= {min_n} under the selected reaction/adsorbate/material filters."
+                            if source == "reviewed_exportable"
+                            else "Strict reviewed/exportable pairing is empty, and the exploratory same-sample fallback "
+                            f"still has n < {min_n} under the selected reaction/adsorbate/material filters."
+                        )
                     ),
                 }
             )
@@ -1272,7 +1294,8 @@ def _build_descriptor_correlation_summary_v2(
         },
         "correlation_policy": (
             "Correlations are derived from the current DFT ML dataset export logic. "
-            "Only reviewed/exportable numeric rows are considered, and descriptor matching follows instance/material scope rules."
+            "Strict reviewed/exportable matching is preferred. When strict pairing is empty, the visualization falls back "
+            "to same-sample non-rejected exploratory pairs."
         ),
     }
 
@@ -1429,7 +1452,7 @@ async def descriptor_correlation_pairs(
     target = _canonical_property_type(target_property)
     descriptor_key = _canonical_property_type(descriptor)
     dataset = _visual_dataset(session, library_name)
-    pairs, filtered_target_count = _paired_descriptor_points_v2(
+    strict_pairs, filtered_target_count = _paired_descriptor_points_v2(
         dataset,
         reaction_category=reaction_category,
         adsorbate=adsorbate,
@@ -1437,13 +1460,22 @@ async def descriptor_correlation_pairs(
         target_property=target,
         descriptor=descriptor_key,
     )
+    pairs = strict_pairs
     source = "reviewed_exportable"
+    if not pairs:
+        pairs = _raw_exploratory_descriptor_points(
+            session,
+            _paper_filters(library_name),
+            target_property=target,
+            descriptor=descriptor_key,
+            reaction_category=reaction_category,
+            adsorbate=adsorbate,
+            material_family=material_family,
+        )
+        if pairs:
+            source = "exploratory_same_sample"
     stats = _correlation_stats(pairs)
-    ready = (
-        source == "reviewed_exportable"
-        and len(pairs) >= min_n
-        and stats["pearson_r"] is not None
-    )
+    ready = len(pairs) >= min_n and stats["pearson_r"] is not None
     return {
         "schema_version": "descriptor_scatter_v2",
         "target_property": target,

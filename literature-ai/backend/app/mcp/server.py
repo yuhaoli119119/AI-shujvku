@@ -132,6 +132,82 @@ def _ensure_paper_exists(session, paper_id: UUID) -> Paper:
     return paper
 
 
+def _ensure_table_belongs_to_paper(session, paper_id: UUID, table_id: UUID) -> PaperTable:
+    table = session.get(PaperTable, table_id)
+    if not table:
+        raise ValueError("Table not found")
+    if table.paper_id != paper_id:
+        raise ValueError("Table does not belong to the target paper")
+    return table
+
+
+def _table_snapshot(table: PaperTable) -> dict[str, Any]:
+    return {
+        "id": str(table.id),
+        "paper_id": str(table.paper_id),
+        "caption": table.caption,
+        "markdown_content": table.markdown_content,
+        "page": table.page,
+        "extraction_source": table.extraction_source,
+        "prov": table.prov,
+    }
+
+
+def _evidence_payload_with_meta(
+    evidence_payload: dict[str, Any] | list[Any] | None,
+    key: str,
+    value: dict[str, Any],
+) -> dict[str, Any] | list[Any]:
+    if isinstance(evidence_payload, dict):
+        return {**evidence_payload, key: value}
+    return {"evidence_payload": evidence_payload, key: value}
+
+
+def _approve_mcp_structured_correction(
+    session,
+    *,
+    paper_id: UUID,
+    source: str,
+    field_name: str,
+    target_path: str,
+    operation: str,
+    proposed_value: Any,
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any] | None = None,
+) -> PaperCorrection:
+    correction = PaperCorrection(
+        paper_id=paper_id,
+        source=source,
+        field_name=field_name,
+        target_path=target_path,
+        operation=operation,
+        proposed_value=proposed_value,
+        reason=reason,
+        evidence_payload=evidence_payload,
+        status="pending",
+    )
+    session.add(correction)
+    session.flush()
+    session.add(
+        AuditLog(
+            paper_id=paper_id,
+            action="propose_correction",
+            source=source,
+            target_type="paper_correction",
+            target_id=str(correction.id),
+            payload={
+                "field_name": field_name,
+                "target_path": target_path,
+                "operation": operation,
+            },
+        )
+    )
+    approved = ReviewService(session).approve_correction(correction.id, reviewer=source)
+    session.flush()
+    session.refresh(approved)
+    return approved
+
+
 @mcp_server.tool(
     name="query_papers",
     description=(
@@ -767,6 +843,255 @@ def reject_corrections_batch(correction_ids: list[str], reason: str | None = Non
             reviewer=auth.source_prefix,
             reason=reason,
         )
+
+
+@mcp_server.tool(
+    name="update_table",
+    description="Update one parsed table through structured PaperCorrection review flow. Supported fields: caption, markdown_content, page, extraction_source, prov.",
+)
+def update_table(
+    paper_id: str,
+    table_id: str,
+    reason: str,
+    updates: dict[str, Any] | None = None,
+    evidence_payload: dict[str, Any] | list[Any] | None = None,
+    caption: str | None = None,
+    markdown_content: str | None = None,
+    page: int | None = None,
+    extraction_source: str | None = None,
+    prov: list[Any] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    allowed_fields = {"caption", "markdown_content", "page", "extraction_source", "prov"}
+    proposed_updates = dict(updates or {})
+    named_updates = {
+        "caption": caption,
+        "markdown_content": markdown_content,
+        "page": page,
+        "extraction_source": extraction_source,
+        "prov": prov,
+    }
+    proposed_updates.update({key: value for key, value in named_updates.items() if value is not None})
+    unsupported = sorted(set(proposed_updates) - allowed_fields)
+    if unsupported:
+        raise ValueError(f"Unsupported table update fields: {', '.join(unsupported)}")
+    if not proposed_updates:
+        raise ValueError("update_table requires at least one supported field update")
+
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        pid = UUID(paper_id)
+        tid = UUID(table_id)
+        _ensure_paper_exists(session, pid)
+        _ensure_table_belongs_to_paper(session, pid, tid)
+        corrections = []
+        for field_name, value in proposed_updates.items():
+            correction = _approve_mcp_structured_correction(
+                session,
+                paper_id=pid,
+                source=auth.source_prefix,
+                field_name="tables",
+                target_path=f"tables:{tid}:{field_name}",
+                operation="replace",
+                proposed_value=value,
+                reason=reason,
+                evidence_payload=evidence_payload,
+            )
+            corrections.append(correction)
+        table = _ensure_table_belongs_to_paper(session, pid, tid)
+        return {
+            "paper_id": str(pid),
+            "table_id": str(tid),
+            "updated_fields": sorted(proposed_updates),
+            "corrections": [_serialize_correction(item) for item in corrections],
+            "table": _table_snapshot(table),
+        }
+
+
+@mcp_server.tool(
+    name="create_table",
+    description="Create a missing parsed table through structured PaperCorrection review flow using target_path='tables:new:create'. Requires evidence anchor.",
+)
+def create_table(
+    paper_id: str,
+    reason: str,
+    caption: str | None = None,
+    markdown_content: str | None = None,
+    page: int | None = None,
+    extraction_source: str | None = None,
+    prov: list[Any] | None = None,
+    evidence_payload: dict[str, Any] | list[Any] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    proposed_value = {
+        key: value
+        for key, value in {
+            "caption": caption,
+            "markdown_content": markdown_content,
+            "page": page,
+            "extraction_source": extraction_source,
+            "prov": prov,
+        }.items()
+        if value is not None
+    }
+    if not proposed_value:
+        raise ValueError("create_table requires caption or markdown_content")
+
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        pid = UUID(paper_id)
+        _ensure_paper_exists(session, pid)
+        correction = _approve_mcp_structured_correction(
+            session,
+            paper_id=pid,
+            source=auth.source_prefix,
+            field_name="tables",
+            target_path="tables:new:create",
+            operation="create",
+            proposed_value=proposed_value,
+            reason=reason,
+            evidence_payload=evidence_payload,
+        )
+        structured_create = (correction.evidence_payload or {}).get("structured_create", {})
+        table_id = structured_create.get("target_id")
+        table = session.get(PaperTable, UUID(table_id)) if table_id else None
+        return {
+            "paper_id": str(pid),
+            "table_id": table_id,
+            "correction": _serialize_correction(correction),
+            "table": _table_snapshot(table) if table else None,
+        }
+
+
+@mcp_server.tool(
+    name="delete_table",
+    description="Delete a duplicate or invalid parsed table through structured PaperCorrection review flow using target_path='tables:<id>:delete'. Requires evidence anchor.",
+)
+def delete_table(
+    paper_id: str,
+    table_id: str,
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any] | None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        pid = UUID(paper_id)
+        tid = UUID(table_id)
+        _ensure_paper_exists(session, pid)
+        table = _ensure_table_belongs_to_paper(session, pid, tid)
+        snapshot = _table_snapshot(table)
+        correction = _approve_mcp_structured_correction(
+            session,
+            paper_id=pid,
+            source=auth.source_prefix,
+            field_name="tables",
+            target_path=f"tables:{tid}:delete",
+            operation="delete",
+            proposed_value=None,
+            reason=reason,
+            evidence_payload=evidence_payload,
+        )
+        return {
+            "paper_id": str(pid),
+            "table_id": str(tid),
+            "deleted": session.get(PaperTable, tid) is None,
+            "source_snapshot": snapshot,
+            "correction": _serialize_correction(correction),
+        }
+
+
+@mcp_server.tool(
+    name="merge_table",
+    description="Merge a source table into a target table. Optionally updates the target markdown_content first, then deletes the source table. Requires evidence anchor.",
+)
+def merge_table(
+    paper_id: str,
+    source_table_id: str,
+    target_table_id: str,
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any] | None,
+    target_markdown_content: str | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        pid = UUID(paper_id)
+        source_tid = UUID(source_table_id)
+        target_tid = UUID(target_table_id)
+        if source_tid == target_tid:
+            raise ValueError("source_table_id and target_table_id must be different")
+        _ensure_paper_exists(session, pid)
+        source_table = _ensure_table_belongs_to_paper(session, pid, source_tid)
+        target_table = _ensure_table_belongs_to_paper(session, pid, target_tid)
+        source_snapshot = _table_snapshot(source_table)
+        target_before = _table_snapshot(target_table)
+
+        corrections = []
+        if target_markdown_content is not None:
+            corrections.append(
+                _approve_mcp_structured_correction(
+                    session,
+                    paper_id=pid,
+                    source=auth.source_prefix,
+                    field_name="tables",
+                    target_path=f"tables:{target_tid}:markdown_content",
+                    operation="replace",
+                    proposed_value=target_markdown_content,
+                    reason=reason,
+                    evidence_payload=evidence_payload,
+                )
+            )
+        corrections.append(
+            _approve_mcp_structured_correction(
+                session,
+                paper_id=pid,
+                source=auth.source_prefix,
+                field_name="tables",
+                target_path=f"tables:{source_tid}:delete",
+                operation="delete",
+                proposed_value=None,
+                reason=reason,
+                evidence_payload=_evidence_payload_with_meta(
+                    evidence_payload,
+                    "merge_table",
+                    {
+                        "source_table_id": str(source_tid),
+                        "target_table_id": str(target_tid),
+                        "source_snapshot": source_snapshot,
+                        "target_before": target_before,
+                    },
+                ),
+            )
+        )
+        target_after = _ensure_table_belongs_to_paper(session, pid, target_tid)
+        session.add(
+            AuditLog(
+                paper_id=pid,
+                action="merge_table",
+                source=auth.source_prefix,
+                target_type="tables",
+                target_id=str(target_tid),
+                payload={
+                    "source_table_id": str(source_tid),
+                    "target_table_id": str(target_tid),
+                    "source_snapshot": source_snapshot,
+                    "target_before": target_before,
+                    "target_after": _table_snapshot(target_after),
+                    "source_deleted": session.get(PaperTable, source_tid) is None,
+                    "correction_ids": [str(item.id) for item in corrections],
+                },
+            )
+        )
+        return {
+            "paper_id": str(pid),
+            "source_table_id": str(source_tid),
+            "target_table_id": str(target_tid),
+            "source_deleted": session.get(PaperTable, source_tid) is None,
+            "source_snapshot": source_snapshot,
+            "target_table": _table_snapshot(target_after),
+            "corrections": [_serialize_correction(item) for item in corrections],
+        }
 
 
 @mcp_server.tool(
@@ -1831,20 +2156,34 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
             select(PaperTable).where(PaperTable.paper_id == pid)
         ).all()
 
-        table_corr = session.scalars(
-            select(PaperCorrection)
-            .where(PaperCorrection.paper_id == pid)
-            .where(PaperCorrection.field_name == "table")
-        ).all()
-
-        reviewed_table_ids = {c.target_path for c in table_corr if c.status != "pending"}
+        table_ids = {str(tbl.id) for tbl in all_tables}
+        query_service = PaperQueryService(session)
+        table_audits = query_service._object_review_audits_by_target(
+            pid,
+            table_ids,
+            target_types={"table", "tables", "paper_table", "paper_tables"},
+        )
+        table_corrections = query_service._table_corrections_by_target(pid, table_ids)
+        table_status_by_id = {
+            table_id: PaperQueryService._table_review_status(
+                table_audits.get(table_id, []),
+                table_corrections.get(table_id, []),
+            )
+            for table_id in table_ids
+        }
+        reviewed_table_ids = {
+            table_id for table_id, status in table_status_by_id.items() if status != "unreviewed"
+        }
         table_report = []
         for tbl in all_tables:
+            table_id = str(tbl.id)
             table_report.append({
-                "table_id": str(tbl.id),
+                "table_id": table_id,
                 "caption": tbl.caption,
                 "page": tbl.page,
-                "review_status": "has_correction" if str(tbl.id) in reviewed_table_ids else "unreviewed",
+                "review_status": table_status_by_id.get(table_id, "unreviewed"),
+                "corrections": table_corrections.get(table_id, []),
+                "object_review_audits": table_audits.get(table_id, []),
             })
 
         # --- Sections ---

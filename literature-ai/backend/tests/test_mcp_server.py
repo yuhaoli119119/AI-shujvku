@@ -46,19 +46,24 @@ from app.mcp.server import (
     get_dft_review_queue,
     get_paper_knowledge,
     get_parse_status,
+    get_review_coverage,
     ingest_pdf_batch,
     insert_word_citation,
     import_analysis,
     list_notes,
+    merge_table,
     parse_paper,
     propose_correction,
     propose_dft_result_correction,
     reject_dft_result,
     review_figure,
     query_papers,
+    create_table,
+    delete_table,
     reject_correction,
     scan_local_pdfs,
     scan_duplicate_dois,
+    update_table,
 )
 from app.services.paper_query import PaperQueryService
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
@@ -217,6 +222,179 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
         assert [item.action for item in audit_logs] == ["append_note", "propose_correction", "approve_correction"]
+
+
+def test_update_table_mcp_applies_markdown_and_marks_table_verified(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Table Update MCP", pdf_path="table-update.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        table = PaperTable(
+            paper_id=paper.id,
+            caption="Table 1",
+            markdown_content="| raw |\n| --- |\n| pars er |",
+            page=4,
+            extraction_source="docling",
+        )
+        session.add(table)
+        session.commit()
+        paper_id = str(paper.id)
+        table_id = str(table.id)
+
+    with mcp_auth_context(_auth()):
+        result = update_table(
+            paper_id=paper_id,
+            table_id=table_id,
+            reason="Correct parsed table markdown.",
+            markdown_content="| raw |\n| --- |\n| parser |",
+            evidence_payload={"page": 4, "table_id": table_id, "quoted_text": "Table 1"},
+        )
+
+    assert result["updated_fields"] == ["markdown_content"]
+    assert result["corrections"][0]["status"] == "approved"
+
+    with Session(mcp_test_env["engine"]) as session:
+        updated = session.get(PaperTable, UUID(table_id))
+        assert updated.markdown_content == "| raw |\n| --- |\n| parser |"
+        detail = PaperQueryService(session).get_paper_detail(UUID(paper_id))
+        assert detail is not None
+        assert detail.tables[0].table_review_status == "verified"
+
+
+def test_create_table_mcp_uses_structured_create_flow(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Table Create MCP", pdf_path="table-create.pdf", authors=["A"])
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    with mcp_auth_context(_auth()):
+        result = create_table(
+            paper_id=paper_id,
+            caption="Missing Table 2",
+            markdown_content="| metric |\n| --- |\n| 42 |",
+            page=8,
+            extraction_source="manual_review",
+            reason="Recovered table from SI page.",
+            evidence_payload={"page": 8, "table": "Table 2", "quoted_text": "metric"},
+        )
+
+    assert result["correction"]["status"] == "approved"
+    assert result["table_id"]
+
+    with Session(mcp_test_env["engine"]) as session:
+        tables = session.scalars(select(PaperTable).where(PaperTable.paper_id == UUID(paper_id))).all()
+        assert len(tables) == 1
+        assert str(tables[0].id) == result["table_id"]
+        assert tables[0].caption == "Missing Table 2"
+
+
+def test_delete_table_mcp_removes_table_and_preserves_snapshot(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Table Delete MCP", pdf_path="table-delete.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        keep = PaperTable(paper_id=paper.id, caption="Table 1", markdown_content="| ok |", page=2)
+        duplicate = PaperTable(paper_id=paper.id, caption="Duplicate Table", markdown_content="| dup |", page=2)
+        session.add_all([keep, duplicate])
+        session.commit()
+        paper_id = str(paper.id)
+        duplicate_id = str(duplicate.id)
+
+    with mcp_auth_context(_auth()):
+        result = delete_table(
+            paper_id=paper_id,
+            table_id=duplicate_id,
+            reason="Duplicate parser table fragment.",
+            evidence_payload={"page": 2, "table_id": duplicate_id, "quoted_text": "Duplicate Table"},
+        )
+
+    assert result["deleted"] is True
+    assert result["source_snapshot"]["caption"] == "Duplicate Table"
+
+    with Session(mcp_test_env["engine"]) as session:
+        tables = session.scalars(select(PaperTable).where(PaperTable.paper_id == UUID(paper_id))).all()
+        assert len(tables) == 1
+        assert str(tables[0].id) != duplicate_id
+        correction = session.scalars(select(PaperCorrection).where(PaperCorrection.target_path == f"tables:{duplicate_id}:delete")).one()
+        assert correction.status == "approved"
+        assert correction.evidence_payload["structured_delete"]["snapshot"]["caption"] == "Duplicate Table"
+        audit = session.scalars(select(AuditLog).where(AuditLog.action == "delete_structured_object")).one()
+        assert audit.payload["snapshot"]["id"] == duplicate_id
+
+
+def test_merge_table_mcp_updates_target_and_deletes_source_with_audit(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Table Merge MCP", pdf_path="table-merge.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        target = PaperTable(paper_id=paper.id, caption="Table 1", markdown_content="| a |\n| --- |\n| old |", page=5)
+        source = PaperTable(paper_id=paper.id, caption="Table 1 continued", markdown_content="| a |\n| --- |\n| new |", page=6)
+        session.add_all([target, source])
+        session.commit()
+        paper_id = str(paper.id)
+        target_id = str(target.id)
+        source_id = str(source.id)
+
+    with mcp_auth_context(_auth()):
+        result = merge_table(
+            paper_id=paper_id,
+            source_table_id=source_id,
+            target_table_id=target_id,
+            target_markdown_content="| a |\n| --- |\n| old |\n| new |",
+            reason="Merge continued table fragment into the canonical table.",
+            evidence_payload={"page": 6, "table_id": source_id, "quoted_text": "Table 1 continued"},
+        )
+
+    assert result["source_deleted"] is True
+    assert result["target_table"]["markdown_content"] == "| a |\n| --- |\n| old |\n| new |"
+    assert result["source_snapshot"]["caption"] == "Table 1 continued"
+
+    with Session(mcp_test_env["engine"]) as session:
+        tables = session.scalars(select(PaperTable).where(PaperTable.paper_id == UUID(paper_id))).all()
+        assert len(tables) == 1
+        assert str(tables[0].id) == target_id
+        assert tables[0].markdown_content == "| a |\n| --- |\n| old |\n| new |"
+        merge_audit = session.scalars(select(AuditLog).where(AuditLog.action == "merge_table")).one()
+        assert merge_audit.payload["source_snapshot"]["id"] == source_id
+        assert merge_audit.payload["source_deleted"] is True
+        detail = PaperQueryService(session).get_paper_detail(UUID(paper_id))
+        assert detail is not None
+        assert detail.tables[0].table_review_status == "verified"
+
+
+def test_review_coverage_uses_structured_table_status(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="Table Coverage MCP", pdf_path="coverage.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        table = PaperTable(paper_id=paper.id, caption="Table 3", markdown_content="| a |", page=3)
+        session.add(table)
+        session.flush()
+        session.add(
+            PaperCorrection(
+                paper_id=paper.id,
+                source="ide_ai",
+                field_name="tables",
+                target_path=f"tables:{table.id}:markdown_content",
+                operation="replace",
+                proposed_value="| a |\n| --- |\n| checked |",
+                reason="Approved table markdown.",
+                status="approved",
+                reviewed_by="ide_ai",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        table_id = str(table.id)
+
+    with mcp_auth_context(_auth()):
+        coverage = get_review_coverage(paper_id)
+
+    assert coverage["tables"]["with_corrections"] == 1
+    assert coverage["tables"]["unreviewed"] == 0
+    assert coverage["tables"]["details"][0]["table_id"] == table_id
+    assert coverage["tables"]["details"][0]["review_status"] == "verified"
 
 
 def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_test_env):

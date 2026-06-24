@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -23,6 +23,71 @@ from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.extraction_schema_service import ExtractionSchemaService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.extraction_validator import ExtractionValidator
+
+
+def _minimal_document(title="Reaction report test"):
+    return UnifiedPaperDocument(
+        metadata={"title": title},
+        abstract="Computational screening of Li-S catalysts.",
+        sections=[
+            UnifiedSection(
+                section_title="Results",
+                section_type="results",
+                text="DFT results are summarized.",
+                page_start=1,
+                page_end=1,
+            )
+        ],
+        tables=[],
+        figures=[],
+        references=[],
+        markdown="",
+        tei_xml="",
+        docling_json={},
+        source_pdf_path=Path("test.pdf"),
+    )
+
+
+def _stage2_service_with_stubbed_extractors(session, dft_items):
+    service = ExtractionPipelineService(session=session, settings=get_settings())
+    service.comprehensive_extractor.extract_quick_classification = lambda doc: {
+        "paper_type": "A1",
+        "type_confidence": 0.9,
+        "classification_source": "quick",
+    }
+    service.dft_settings_extractor.extract = lambda doc: {}
+    service.dft_results_extractor.extract = lambda doc: dft_items
+    service.catalyst_extractor.extract = lambda doc: {}
+    service.electrochemical_extractor.extract = lambda doc: []
+    service.mechanism_extractor.extract = lambda doc: []
+    service.writing_card_extractor.extract = lambda doc: {}
+    service.comprehensive_extractor.extract = lambda doc: {}
+    return service
+
+
+def test_stage2_preserves_supplementary_paper_type():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        paper = Paper(title="Supporting information", pdf_path="si.pdf", paper_type="supplementary")
+        session.add(paper)
+        session.flush()
+        paper_id = paper.id
+
+        service = _stage2_service_with_stubbed_extractors(session, [])
+        service.comprehensive_extractor.extract = lambda doc: {
+            "paper_type": "A1",
+            "type_confidence": 0.91,
+        }
+
+        service.run_stage2(paper, _minimal_document("Supporting information"))
+        session.commit()
+
+    with Session(engine) as session:
+        stored = session.get(Paper, paper_id)
+        assert stored is not None
+        assert stored.paper_type == "supplementary"
 
 
 def test_dft_duplicate_candidates_merge_across_source_locations():
@@ -195,6 +260,323 @@ def test_extraction_pipeline_persists_stage2_outputs():
                 assert session.query(EvidenceSpan).count() >= 1
         finally:
             engine.dispose()
+
+
+def test_run_stage2_preserves_counts_and_returns_dft_processing_report():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="Report Paper", pdf_path="report.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "adsorption_energy",
+                        "adsorbate": "Li2S6",
+                        "value": -1.25,
+                        "unit": "eV",
+                        "evidence_text": "The Li2S6 adsorption energy is -1.25 eV.",
+                        "confidence": 0.88,
+                    }
+                ],
+            )
+
+            summary = service.run_stage2(paper, _minimal_document())
+
+            for field in (
+                "dft_settings",
+                "catalyst_samples",
+                "dft_results",
+                "electrochemical_performance",
+                "mechanism_claims",
+                "writing_cards",
+                "comprehensive_analysis",
+            ):
+                assert field in summary
+            report = summary["dft_processing_report"]
+            assert report["paper_id"] == str(paper.id)
+            assert report["target_reaction"] == "SRR_LiS"
+            assert report["profile_version"] == "reaction_profiles_v1"
+            assert report["parse_status"] == "success"
+            assert report["dft_candidates_total"] == 1
+            assert report["persisted"] == summary["dft_results"] == 1
+            assert report["persistence_errors"] == 0
+            assert report["label_ready"] == 0
+            assert report["tabular_ml_ready_by_task"] == {}
+            assert report["rejection_reasons"] == {}
+    finally:
+        engine.dispose()
+
+
+def test_run_stage2_reports_partial_success_for_dft_candidate_persistence_error():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="Partial Paper", pdf_path="partial.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "adsorption_energy",
+                        "adsorbate": "Li2S6",
+                        "value": -1.25,
+                        "unit": "eV",
+                        "evidence_text": "The first candidate should fail evidence persistence.",
+                    },
+                    {
+                        "category": "adsorption_energy",
+                        "adsorbate": "Li2S4",
+                        "value": -1.05,
+                        "unit": "eV",
+                        "evidence_text": "The second candidate should persist.",
+                    },
+                ],
+            )
+            calls = 0
+
+            def fail_first_evidence_span(**_):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise RuntimeError("simulated evidence persistence failure")
+
+            service._persist_evidence_span = fail_first_evidence_span
+
+            summary = service.run_stage2(paper, _minimal_document("Partial Paper"))
+            report = summary["dft_processing_report"]
+
+            assert summary["dft_results"] == 1
+            assert report["parse_status"] == "partial_success"
+            assert report["dft_candidates_total"] == 2
+            assert report["persisted"] == 1
+            assert report["persistence_errors"] == 1
+            assert report["rejection_reasons"]["persistence_error"] == 1
+            assert report["persistence_error_details"][0]["adsorbate"] == "Li2S6"
+            assert "simulated evidence persistence failure" in report["persistence_error_details"][0]["reason"]
+            assert session.query(DFTResult).count() == 1
+            assert session.query(DFTResult).one().adsorbate == "Li2S4"
+    finally:
+        engine.dispose()
+
+
+def test_run_stage2_reports_success_when_no_dft_candidates():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="No DFT Paper", pdf_path="nodft.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(session, [])
+
+            summary = service.run_stage2(paper, _minimal_document("No DFT Paper"))
+            report = summary["dft_processing_report"]
+
+            assert summary["dft_results"] == 0
+            assert report["parse_status"] == "success"
+            assert report["dft_candidates_total"] == 0
+            assert report["persisted"] == 0
+            assert report["persistence_errors"] == 0
+            assert report["reaction_valid"] == 0
+            assert report["out_of_scope"] == 0
+            assert report["ambiguous"] == 0
+    finally:
+        engine.dispose()
+
+
+def test_run_stage2_uses_explicit_target_reaction_as_classification_context():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="HER Paper", pdf_path="her.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "gibbs_free_energy_change",
+                        "adsorbate": "*H",
+                        "value": -0.05,
+                        "unit": "eV",
+                        "evidence_text": "The adsorption free energy of *H is -0.05 eV.",
+                    }
+                ],
+            )
+
+            summary = service.run_stage2(
+                paper,
+                _minimal_document("HER Paper"),
+                target_reaction="HER",
+            )
+            report = summary["dft_processing_report"]
+            row = session.scalars(select(DFTResult)).one()
+
+            assert report["target_reaction"] == "HER"
+            assert report["profile_version"] == "reaction_profiles_v1"
+            assert row.reaction_type == "HER"
+            assert row.reaction_type_source == "rule"
+            assert row.reaction_validation_status == "valid"
+    finally:
+        engine.dispose()
+
+
+def test_explicit_other_reaction_candidate_is_preserved_under_her_target():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="Mixed Paper", pdf_path="mixed.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "reaction_type": "OER",
+                        "category": "gibbs_free_energy_change",
+                        "adsorbate": "*OOH",
+                        "value": 0.42,
+                        "unit": "eV",
+                        "reaction_step": "*O -> *OOH",
+                        "evidence_text": "For OER, the *OOH free energy change is 0.42 eV.",
+                    }
+                ],
+            )
+
+            summary = service.run_stage2(
+                paper,
+                _minimal_document("Mixed Paper"),
+                target_reaction="HER",
+            )
+            row = session.scalars(select(DFTResult)).one()
+
+            assert summary["dft_results"] == 1
+            assert summary["dft_processing_report"]["target_reaction"] == "HER"
+            assert row.reaction_type == "OER"
+            assert row.reaction_type_source == "explicit"
+            assert row.reaction_validation_status == "valid"
+    finally:
+        engine.dispose()
+
+
+def test_no_dft_candidates_still_report_explicit_target_reaction():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="Empty HER Paper", pdf_path="empty-her.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(session, [])
+
+            summary = service.run_stage2(
+                paper,
+                _minimal_document("Empty HER Paper"),
+                target_reaction="HER",
+            )
+            report = summary["dft_processing_report"]
+
+            assert report["target_reaction"] == "HER"
+            assert report["profile_version"] == "reaction_profiles_v1"
+            assert report["parse_status"] == "success"
+            assert report["dft_candidates_total"] == 0
+    finally:
+        engine.dispose()
+
+
+def test_invalid_target_reaction_uses_unknown_quarantine_profile():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="Unknown Target", pdf_path="unknown.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "gibbs_free_energy_change",
+                        "adsorbate": "*H",
+                        "value": -0.05,
+                        "unit": "eV",
+                        "evidence_text": "The adsorption free energy of *H is -0.05 eV.",
+                    }
+                ],
+            )
+
+            summary = service.run_stage2(
+                paper,
+                _minimal_document("Unknown Target"),
+                target_reaction="not-a-real-reaction",
+            )
+            report = summary["dft_processing_report"]
+            row = session.scalars(select(DFTResult)).one()
+
+            assert report["target_reaction"] == "UNKNOWN"
+            assert report["profile_version"] == "reaction_profiles_v1"
+            assert row.reaction_type == "UNKNOWN"
+            assert row.reaction_validation_status == "ambiguous"
+    finally:
+        engine.dispose()
+
+
+def test_run_stage2_dft_processing_report_counts_reaction_statuses():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(title="Status Paper", pdf_path="status.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "adsorption_energy",
+                        "adsorbate": "Li2S6",
+                        "value": -1.25,
+                        "unit": "eV",
+                        "evidence_text": "The Li2S6 adsorption energy is -1.25 eV.",
+                    },
+                    {
+                        "reaction_type": "SRR_LiS",
+                        "category": "adsorption_energy",
+                        "adsorbate": "*OOH",
+                        "value": -0.32,
+                        "unit": "eV",
+                        "evidence_text": "The *OOH adsorption energy is -0.32 eV.",
+                    },
+                    {
+                        "category": "gibbs_free_energy_change",
+                        "adsorbate": "*OOH",
+                        "value": 0.42,
+                        "unit": "eV",
+                        "reaction_step": "*O -> *OOH",
+                        "evidence_text": "The free energy change for *OOH is 0.42 eV.",
+                    },
+                ],
+            )
+
+            summary = service.run_stage2(paper, _minimal_document("Status Paper"))
+            report = summary["dft_processing_report"]
+
+            assert report["parse_status"] == "success"
+            assert report["dft_candidates_total"] == 3
+            assert report["persisted"] == 3
+            assert report["reaction_valid"] == 1
+            assert report["out_of_scope"] == 2
+            assert report["ambiguous"] == 0
+    finally:
+        engine.dispose()
 
 
 def test_extraction_pipeline_merges_computational_views_and_adds_quality_checks():

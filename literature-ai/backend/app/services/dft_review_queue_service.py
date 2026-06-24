@@ -271,6 +271,16 @@ class DFTReviewQueueService:
             (item for item in paper_catalysts if item["id"] == str(row.catalyst_sample_id)),
             None,
         )
+        ai_review_display = self.build_ai_review_display_status(
+            gate=gate,
+            object_review_audits=object_review_audits or [],
+            conflicts=conflicts or [],
+        )
+        workflow_state = self.build_dft_workflow_state(
+            gate=gate,
+            object_review_audits=object_review_audits or [],
+            candidate_status=row.candidate_status,
+        )
         return {
             "record_id": result_id,
             "dft_result_id": result_id,
@@ -324,6 +334,17 @@ class DFTReviewQueueService:
             "latest_external_audit_opinions": (external_audits or [])[:5],
             "object_review_audits_count": len(object_review_audits or []),
             "object_review_audits": (object_review_audits or [])[:5],
+            "ai_review_display_status": ai_review_display["status"],
+            "ai_review_display_label": ai_review_display["label"],
+            "ai_review_display_reason": ai_review_display["reason"],
+            "ai_review_display_class": ai_review_display["class_name"],
+            "dft_workflow_state": workflow_state["state"],
+            "dft_workflow_label": workflow_state["label"],
+            "dft_workflow_reason": workflow_state["reason"],
+            "valid_ai_opinion_count": workflow_state["valid_ai_opinion_count"],
+            "raw_ai_opinion_count": workflow_state["raw_ai_opinion_count"],
+            "effective_ai_opinions": workflow_state["effective_ai_opinions"],
+            "next_required_action": workflow_state["next_required_action"],
             "conflicts_count": len(conflicts or []),
             "field_conflicts": conflicts or [],
             "evidence_check": {
@@ -508,7 +529,7 @@ class DFTReviewQueueService:
             if target_id not in target_ids or target_type not in DFT_TARGET_TYPES:
                 continue
             audit_payload = self._object_review_audit_payload(candidate, payload)
-            dedupe_key = self._object_review_audit_dedupe_key(audit_payload)
+            dedupe_key = (str(candidate.id),)
             target_bucket = deduped_by_target.setdefault(target_id, {})
             existing = target_bucket.get(dedupe_key)
             if existing is None or self._object_review_audit_payload_rank(audit_payload) > self._object_review_audit_payload_rank(existing):
@@ -606,6 +627,286 @@ class DFTReviewQueueService:
         if normalized in {"exportable", "eligible", "verified"}:
             return gate.eligible
         return normalized in set(gate.reasons)
+
+    @staticmethod
+    def build_ai_review_display_status(
+        *,
+        gate: Any,
+        object_review_audits: list[dict[str, Any]] | None,
+        conflicts: list[dict[str, Any]] | None,
+    ) -> dict[str, str]:
+        audits = DFTReviewQueueService._unique_dft_review_submissions(object_review_audits or [])
+        conflict_items = conflicts or []
+        exportable = DFTReviewQueueService._gate_is_eligible(gate)
+        has_unresolved_conflicts = bool(conflict_items)
+
+        if not audits:
+            return {
+                "status": "no_ai_opinion",
+                "label": "无 AI 意见",
+                "reason": (
+                    "This DFT item has no object-level AI review audits; exportability is determined by the safety gate."
+                ),
+                "class_name": "ok" if exportable else "meta",
+            }
+
+        decisions = [DFTReviewQueueService._normalize_ai_review_decision(audit.get("decision")) for audit in audits]
+        has_reject = any(DFTReviewQueueService._is_reject_decision(decision) for decision in decisions)
+        has_proposed = any(decision == "PROPOSED" for decision in decisions)
+        has_pass = any(decision == "PASS" for decision in decisions)
+        has_needs_human = any(decision == "NEEDS_HUMAN" for decision in decisions)
+
+        if exportable:
+            if has_reject:
+                return {
+                    "status": "exportable_with_historical_reject",
+                    "label": "AI 意见已收敛",
+                    "reason": (
+                        "The export safety gate is eligible; historical reject/conflict audits no longer describe "
+                        "the current export state."
+                    ),
+                    "class_name": "ok",
+                }
+            if has_proposed:
+                return {
+                    "status": "converged_adopted",
+                    "label": "已采纳 AI 修正",
+                    "reason": "The export safety gate is eligible after AI-proposed corrections were adopted.",
+                    "class_name": "ok",
+                }
+            if has_pass:
+                return {
+                    "status": "pass_exportable",
+                    "label": "AI 字段通过",
+                    "reason": "AI review audits are non-negative and the export safety gate is eligible.",
+                    "class_name": "ok",
+                }
+
+        if has_unresolved_conflicts and has_reject and (has_pass or has_proposed):
+            return {
+                "status": "conflict",
+                "label": "AI 冲突",
+                "reason": "Unresolved object-review conflicts include both reject and pass/proposed AI opinions.",
+                "class_name": "failed",
+            }
+        if not exportable and has_reject and not (has_pass or has_proposed):
+            reject_submission_count = sum(
+                1 for decision in decisions if DFTReviewQueueService._is_reject_decision(decision)
+            )
+            if reject_submission_count >= 2:
+                return {
+                    "status": "rejected",
+                    "label": "AI 一致拒绝",
+                    "reason": "At least two independent review submissions recommend rejecting this non-exportable DFT candidate.",
+                    "class_name": "failed",
+                }
+            return {
+                "status": "reject_suggested",
+                "label": "AI 建议拒绝",
+                "reason": "One review submission recommends rejecting this non-exportable DFT candidate.",
+                "class_name": "failed",
+            }
+        if has_needs_human:
+            return {
+                "status": "needs_human",
+                "label": "AI 无法确认",
+                "reason": "At least one AI review audit requested human review.",
+                "class_name": "meta",
+            }
+        if has_proposed:
+            return {
+                "status": "proposed",
+                "label": "AI 已提修正",
+                "reason": "AI proposed a correction that has not yet passed the current export safety gate.",
+                "class_name": "meta",
+            }
+        if has_pass:
+            return {
+                "status": "pass_partial",
+                "label": "AI 字段通过",
+                "reason": "AI confirmed at least one field, but the item is not yet fully exportable.",
+                "class_name": "ok",
+            }
+        return {
+            "status": "unknown",
+            "label": "AI 意见待判定",
+            "reason": "Object-level AI review audits exist but do not match a known display status.",
+            "class_name": "meta",
+        }
+
+    @staticmethod
+    def _gate_is_eligible(gate: Any) -> bool:
+        if isinstance(gate, dict):
+            return bool(gate.get("eligible") or gate.get("is_exportable"))
+        return bool(getattr(gate, "eligible", False) or getattr(gate, "is_exportable", False))
+
+    @staticmethod
+    def _normalize_ai_review_decision(value: Any) -> str:
+        decision = str(value or "").strip().upper()
+        if decision in {"CONFIRMED", "ACCEPT", "ACCEPTED", "APPROVED", "VERIFIED", "OK"}:
+            return "PASS"
+        if decision in {"CONFIRMED_WITH_CORRECTIONS", "CORRECTED", "REVISE", "REVISION"}:
+            return "PROPOSED"
+        return decision
+
+    @staticmethod
+    def _is_reject_decision(value: str) -> bool:
+        return value in {"REJECT", "REJECTED", "BLOCK", "DENY", "DROP"}
+
+    @staticmethod
+    def build_dft_workflow_state(
+        *,
+        gate: Any,
+        object_review_audits: list[dict[str, Any]] | None,
+        candidate_status: str | None = None,
+    ) -> dict[str, Any]:
+        audits = DFTReviewQueueService._unique_dft_review_submissions(object_review_audits or [])
+        exportable = DFTReviewQueueService._gate_is_eligible(gate)
+        blocked_reasons = set(DFTReviewQueueService._gate_reasons(gate))
+        review_statuses = DFTReviewQueueService._gate_review_statuses(gate)
+        raw_count = len(audits)
+        effective = [
+            DFTReviewQueueService._effective_ai_opinion_payload(audit)
+            for audit in audits
+            if DFTReviewQueueService._is_countable_ai_review_decision(audit.get("decision"))
+        ]
+        valid = [opinion for opinion in effective if opinion["has_anchor"]]
+        valid_count = len(valid)
+        decisions = [DFTReviewQueueService._normalize_ai_review_decision(opinion["decision"]) for opinion in valid]
+        has_reject = any(DFTReviewQueueService._is_reject_decision(decision) for decision in decisions)
+        has_positive = any(decision in {"PASS", "PROPOSED", "REVISE"} for decision in decisions)
+        all_reject = bool(decisions) and all(DFTReviewQueueService._is_reject_decision(decision) for decision in decisions)
+
+        is_rejected = (
+            str(candidate_status or "").strip().lower() == "rejected"
+            or "rejected" in review_statuses
+            or "rejected" in blocked_reasons
+        )
+
+        if is_rejected:
+            state = "rejected"
+            label = "已拒绝"
+            reason = "这条 DFT 已被人工或审核结算拒绝，当前为终态，不再提供接受入库或重复拒绝操作。"
+            action = "none"
+        elif exportable:
+            state = "exportable"
+            label = "可导出"
+            reason = "这条 DFT 已满足当前导出安全门要求，可进入导出/训练数据集。"
+            action = "none"
+        elif "missing_material_identity" in blocked_reasons:
+            state = "missing_material_binding"
+            label = "缺材料/结构绑定"
+            reason = "不能入库：当前候选缺少可核验的材料/结构身份绑定，需要先补齐材料 identity 或 catalyst_sample 绑定。"
+            action = "bind_material_identity"
+        elif raw_count >= 2 and valid_count < 2:
+            state = "missing_evidence_anchor"
+            label = "第二意见缺证据定位"
+            reason = "不能入库：已有多个 AI 审核记录，但带 page 和 quoted_text 的有效证据定位不足 2 条。"
+            action = "provide_evidence_anchor"
+        elif raw_count > 0 and valid_count < 2:
+            state = "waiting_second_ai"
+            label = "等待第二个有效 AI 意见"
+            reason = "不能入库：当前只有一个带证据定位的有效审核提交，需要再导入一轮包含 page 和 quoted_text 的审核意见。"
+            action = "run_second_ai_with_evidence"
+        elif has_reject and has_positive:
+            state = "needs_third_ai"
+            label = "需第三轮 AI 裁决"
+            reason = "不能入库：有效审核提交同时包含拒绝和通过/修正，需要第三轮 AI 审核提交根据 PDF 证据裁决。"
+            action = "run_third_ai_adjudication"
+        elif valid_count >= 2 and all_reject:
+            state = "rejected_consensus_pending_write"
+            label = "一致拒绝待写回"
+            reason = "不能入库：至少两个带证据定位的有效 AI 意见一致拒绝，需点击重新检查写回或等待系统结算为已拒绝。"
+            action = "settle_consensus"
+        elif raw_count == 0:
+            state = "waiting_second_ai"
+            label = "等待第二个有效 AI 意见"
+            reason = "不能入库：当前没有可计数的对象级 AI 审核意见，需要生成下一轮 AI 审核任务并提供证据定位。"
+            action = "run_second_ai_with_evidence"
+        else:
+            state = "unknown_blocked"
+            label = "阻塞原因待判定"
+            reason = "不能入库：导出安全门仍阻塞，但现有 AI 意见尚未匹配到明确 workflow 状态，请重新检查写回或人工复核。"
+            action = "none"
+
+        return {
+            "state": state,
+            "label": label,
+            "reason": reason,
+            "valid_ai_opinion_count": valid_count,
+            "raw_ai_opinion_count": raw_count,
+            "effective_ai_opinions": effective[:3],
+            "next_required_action": action,
+        }
+
+    @staticmethod
+    def _unique_dft_review_submissions(audits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unique: list[dict[str, Any]] = []
+        seen_candidate_ids: set[str] = set()
+        for audit in audits:
+            candidate_id = str(audit.get("candidate_id") or "").strip()
+            if candidate_id:
+                if candidate_id in seen_candidate_ids:
+                    continue
+                seen_candidate_ids.add(candidate_id)
+            unique.append(audit)
+        return unique
+
+    @staticmethod
+    def _gate_review_statuses(gate: Any) -> set[str]:
+        value = gate.get("review_status") if isinstance(gate, dict) else getattr(gate, "review_status", None)
+        return DFTReviewQueueService._review_statuses(value)
+
+    @staticmethod
+    def _gate_reasons(gate: Any) -> tuple[str, ...]:
+        if isinstance(gate, dict):
+            value = gate.get("reasons") or gate.get("blocked_reasons") or ()
+        else:
+            value = getattr(gate, "reasons", ())
+        if isinstance(value, str):
+            return tuple(part.strip() for part in value.split(",") if part.strip())
+        return tuple(str(item) for item in (value or ()) if str(item).strip())
+
+    @staticmethod
+    def _is_countable_ai_review_decision(value: Any) -> bool:
+        decision = DFTReviewQueueService._normalize_ai_review_decision(value)
+        return decision in {"PASS", "REJECT", "REJECTED", "PROPOSED", "REVISE", "NEEDS_HUMAN"}
+
+    @staticmethod
+    def _effective_ai_opinion_payload(audit: dict[str, Any]) -> dict[str, Any]:
+        location = audit.get("evidence_location") if isinstance(audit, dict) else None
+        has_anchor = DFTReviewQueueService._has_valid_evidence_anchor(location)
+        return {
+            "source_label": audit.get("source_label") or audit.get("source") or "unknown",
+            "decision": DFTReviewQueueService._normalize_ai_review_decision(audit.get("decision")),
+            "has_anchor": has_anchor,
+            "anchor_summary": DFTReviewQueueService._anchor_summary(location),
+            "reason_short": DFTReviewQueueService._shorten(audit.get("reason"), 160),
+        }
+
+    @staticmethod
+    def _has_valid_evidence_anchor(location: Any) -> bool:
+        if not isinstance(location, dict):
+            return False
+        page = location.get("page")
+        quoted = location.get("quoted_text") or location.get("evidence_text")
+        return page not in (None, "") and bool(str(quoted or "").strip())
+
+    @staticmethod
+    def _anchor_summary(location: Any) -> str:
+        if not isinstance(location, dict):
+            return ""
+        parts = []
+        if location.get("page") not in (None, ""):
+            parts.append(f"p.{location.get('page')}")
+        for key in ("table", "figure", "section", "section_title"):
+            if location.get(key):
+                parts.append(str(location.get(key)))
+                break
+        quoted = DFTReviewQueueService._shorten(location.get("quoted_text") or location.get("evidence_text"), 80)
+        if quoted:
+            parts.append(quoted)
+        return " | ".join(parts)
 
     @staticmethod
     def _recommended_action(reasons: list[str], gate: Any, sanity_flags: list[str] | None = None) -> str:

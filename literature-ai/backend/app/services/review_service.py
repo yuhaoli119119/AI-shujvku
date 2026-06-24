@@ -167,7 +167,7 @@ class ReviewService:
             allowed_fields=frozenset({"section_title", "section_type", "text", "page_start", "page_end"}),
         ),
     }
-    STRUCTURED_DELETE_TARGETS = frozenset({"figures"})
+    STRUCTURED_DELETE_TARGETS = frozenset({"figures", "tables"})
     STRUCTURED_CREATE_TARGETS = frozenset(
         {
             "figures",
@@ -443,7 +443,7 @@ class ReviewService:
         if correction.operation == "recrop_figure" and correction.field_name == "figures":
             self._apply_figure_recrop_correction(correction)
             return
-        if correction.operation == "delete" and correction.field_name == "figures":
+        if correction.operation == "delete" and correction.field_name in self.STRUCTURED_DELETE_TARGETS:
             self._apply_structured_delete(correction)
             return
         if correction.operation == "create" and correction.field_name == "catalyst_samples":
@@ -1284,6 +1284,16 @@ class ReviewService:
                 "figure_role": getattr(record, "figure_role", None),
                 "crop_status": getattr(record, "crop_status", None),
                 "image_path": getattr(record, "image_path", None),
+            }
+        if collection == "tables":
+            return {
+                "id": str(record.id),
+                "paper_id": str(getattr(record, "paper_id", "")),
+                "caption": getattr(record, "caption", None),
+                "markdown_content": getattr(record, "markdown_content", None),
+                "page": getattr(record, "page", None),
+                "extraction_source": getattr(record, "extraction_source", None),
+                "prov": getattr(record, "prov", None),
             }
         return {"id": str(getattr(record, "id", ""))}
 

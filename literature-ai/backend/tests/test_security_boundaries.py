@@ -217,6 +217,31 @@ def test_exports_default_off_blocks_remote_non_owner_but_not_owner_http_access(m
     assert local_response.status_code == 200
     assert local_response.json()["metadata"]["schema_version"] == "dft_results_ml_v2"
 
+    v3_path = "/api/dft/ml-dataset-v3?task=adsorption_energy"
+    blocked_v3 = remote.get(v3_path)
+    assert blocked_v3.status_code == 403
+    assert blocked_v3.json()["detail"] == "Exports are disabled by server policy"
+    owner_v3 = remote.get(v3_path, headers={"X-LitAI-Owner-Token": "owner-secret"})
+    assert owner_v3.status_code == 200
+    assert owner_v3.json()["manifest"]["schema_version"] == "dft_results_ml_v3"
+    local_v3 = local.get(v3_path)
+    assert local_v3.status_code == 200
+    assert local_v3.json()["manifest"]["schema_version"] == "dft_results_ml_v3"
+
+    for export_path in (
+        "/api/dft/ml-dataset-v3.csv?task=adsorption_energy",
+        "/api/dft/ml-dataset-v3/manifest?task=adsorption_energy",
+        "/api/dft/project-library-ml-export?task=adsorption_energy",
+        "/api/dft/project-library-ml-export.csv?task=adsorption_energy",
+    ):
+        blocked = remote.get(export_path)
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "Exports are disabled by server policy"
+        owner = remote.get(export_path, headers={"X-LitAI-Owner-Token": "owner-secret"})
+        assert owner.status_code == 200
+        local_export = local.get(export_path)
+        assert local_export.status_code == 200
+
 
 def test_exports_default_off_still_disables_mcp_export_capabilities(monkeypatch):
     monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "false")

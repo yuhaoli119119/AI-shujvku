@@ -772,6 +772,7 @@ class PaperWorkbenchService:
                     "doi": paper.doi,
                     "year": paper.year,
                     "journal": paper.journal,
+                    "paper_type": paper.paper_type,
                     "workflow_status": paper.workflow_status,
                     "pdf_quality_status": paper.pdf_quality_status,
                     "pdf_quality_score": paper.pdf_quality_score,
@@ -1314,10 +1315,11 @@ class PaperWorkbenchService:
                     "web_llm_extract": "disabled",
                     "required_workflow": (
                         "prepare-ai-context / codex-item -> IDE AI -> import_analysis. Non-DFT "
-                        "metadata, sections, tables, figure metadata, writing_cards, mechanism_claims, "
+                        "metadata, sections, table field corrections, figure metadata, writing_cards, mechanism_claims, "
                         "electrochemical_performance, catalyst_samples, notes, and relationships may be "
                         "auto-applied with PDF evidence anchors and module write locks. DFT results/settings "
-                        "remain candidates until the review/export gate passes."
+                        "remain candidates until the review/export gate passes. Table object lifecycle operations "
+                        "use direct MCP table tools: update_table, create_table, merge_table, and delete_table."
                     ),
                 },
                 "non_dft_direct_write_policy": {
@@ -1345,7 +1347,9 @@ class PaperWorkbenchService:
                         "section creation requires a strong text/section/table/figure/bbox anchor",
                     ],
                     "write_path": (
-                        "Use import_analysis with auto_apply_review_rules=true plus a module write lock. "
+                        "Use import_analysis with auto_apply_review_rules=true plus a module write lock for ordinary "
+                        "non-DFT field writes. Use update_table/create_table/merge_table/delete_table directly for "
+                        "table object lifecycle operations, then read back table count/status/audit records. "
                         "For figure image cropping, call recrop_figure or create_figure_from_bbox directly, "
                         "then read back the updated figure record."
                     ),
@@ -1470,10 +1474,14 @@ class PaperWorkbenchService:
                 "ai_task": (
                     "Read the main text and any available supplementary_information source documents. First repair "
                     "non-DFT content directly through import_analysis when there is checkable PDF evidence: metadata, "
-                    "sections, tables, figure metadata/summaries, writing_cards, mechanism_claims, "
+                    "sections, table field corrections, figure metadata/summaries, writing_cards, mechanism_claims, "
                     "electrochemical_performance, catalyst_samples, notes, and relationships. For missing sections or "
                     "writing_cards, create objects with target_path=<collection>:new:create. For existing objects, use "
-                    "replace corrections with target_path=<collection>:<id>:<field>. Figure image crop/create operations "
+                    "replace corrections with target_path=<collection>:<id>:<field>. Table object lifecycle operations "
+                    "are direct MCP calls: update_table for table field fixes, create_table for missing tables, "
+                    "merge_table for parser-split or duplicate fragments, and delete_table for invalid table objects. "
+                    "Use the table object's real paper_id for these table tools, including SI related_paper_id when the "
+                    "table belongs to supplementary_information. Figure image crop/create operations "
                     "must call recrop_figure or create_figure_from_bbox directly instead of import_analysis. Extract "
                     "DFT data using the explicit AI protocol only as candidates: SI data belongs to this main paper_id, "
                     "but each candidate must mark evidence_location.source_document_type=supplementary_information. "
