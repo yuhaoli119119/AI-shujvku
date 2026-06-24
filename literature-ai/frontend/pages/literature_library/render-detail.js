@@ -12,13 +12,15 @@ function renderWorkspaceHeader(paper) {
         titleEl.textContent = titleStr;
     }
     if (metaEl) {
+        const freshness = state.paperResourceFreshness && state.paperResourceFreshness[String(stablePaperId || "")];
         metaEl.innerHTML = [
             esc(paper.year || "-"),
             esc(paper.journal || "-"),
             esc(paperTypeLabel(paper.paper_type)),
             renderDoiMeta(paper.doi),
-            displayCode ? ('文献短号: <code>' + esc(displayCode) + '</code>') : ""
-        ].join(" | ");
+            displayCode ? ('文献短号: <code>' + esc(displayCode) + '</code>') : "",
+            freshness && freshness.updatedAt ? ('<span class="subtle">' + esc(formatPaperResourceFreshness(freshness)) + '</span>') : ""
+        ].filter(Boolean).join(" | ");
     }
     if (pdfBtn) {
         const hasPdf = paperHasPdf(paper);
@@ -61,6 +63,9 @@ function tableReviewChipHtml(item) {
     if (status === "verified") {
         return '<span class="status-chip ok" title="' + escAttr("\u8868\u683c\u5df2\u6838\u9a8c") + '">' + esc("\u5df2\u9a8c\u8bc1") + '</span>';
     }
+    if (status === "reviewed_empty_content") {
+        return '<span class="status-chip warn" title="' + escAttr("已有审核记录，但表格内容为空；需要补回 markdown_content。") + '">已审核但内容为空</span>';
+    }
     if (status === "rejected") {
         return '<span class="status-chip danger" title="' + escAttr("\u8868\u683c\u5df2\u88ab\u62d2\u7edd") + '">' + esc("\u5df2\u4e22\u5f03") + '</span>';
     }
@@ -72,6 +77,18 @@ function tableReviewChipHtml(item) {
     }
     if (auditCount > 0) {
         return '<span class="status-chip meta" title="' + escAttr("\u6709\u8868\u683c\u5ba1\u6838\u610f\u89c1\uff0c\u5f85\u786e\u8ba4") + '">' + esc("\u5f85\u6838\u9a8c") + '</span>';
+    }
+    return "";
+}
+
+function tableSourceChipHtml(item) {
+    const sourceType = String(item && item.source_document_type || "").trim().toLowerCase();
+    if (sourceType === "supplementary_information" || sourceType === "si") {
+        const code = item && item.related_paper_code ? " " + item.related_paper_code : "";
+        return '<span class="status-chip ok" title="' + escAttr("该表格来自已绑定支撑文献，审核/写回仍归属主文献。") + '">SI' + esc(code) + '</span>';
+    }
+    if (sourceType === "main_text") {
+        return '<span class="status-chip" title="' + escAttr("该表格来自主文献正文。") + '">主文</span>';
     }
     return "";
 }
@@ -516,7 +533,11 @@ const DETAIL_FIELD_LABELS = {
     journal: "期刊",
     one_sentence_takeaway: "一句话结论",
     real_world_impact: "实际意义",
-    conclusion_mapping: "结论对应"
+    conclusion_mapping: "结论对应",
+    source_document_type: "来源文档",
+    related_paper_code: "关联短号",
+    related_paper_title: "关联文献",
+    writeback_paper_id: "写回主文献"
 };
 
 function readableFieldLabel(key) {
@@ -709,11 +730,11 @@ function figureIssuesFromFlags(flags) {
 
 function dftMissingReviewLabel(item) {
     if (!item) return DFT_BLOCK_REASON_LABELS.missing_review;
-    const audits = (Array.isArray(item.object_review_audits) ? item.object_review_audits : [])
-        .filter(dftOpinionHasAnchor);
-    const sources = new Set(audits.map(dftOpinionSource));
-    if (sources.size === 0) return "尚无 AI 对象审核";
-    if (sources.size === 1) return "仅有一个 AI 意见，等待第二 AI";
+    const audits = uniqueDftReviewSubmissions(
+        (Array.isArray(item.object_review_audits) ? item.object_review_audits : []).filter(dftOpinionHasAnchor)
+    );
+    if (audits.length === 0) return "尚无 AI 对象审核";
+    if (audits.length === 1) return "仅有一个审核提交，等待下一轮";
     const classified = classifyDftAutomationRows([item]);
     if (classified.consensus.length) return "双 AI 一致，待系统写回";
     if (classified.conflicts.length) return "多 AI 意见有冲突，待裁决";
@@ -721,10 +742,33 @@ function dftMissingReviewLabel(item) {
 }
 
 function dftBlockedReasonText(reasons, item) {
+    if (item && item.dft_workflow_reason) return item.dft_workflow_reason;
     return (Array.isArray(reasons) ? reasons : []).map(function(reason) {
         if (reason === "missing_review") return dftMissingReviewLabel(item);
         return DFT_BLOCK_REASON_LABELS[reason] || reason;
     }).join("、");
+}
+
+function dftWorkflowMeta(item) {
+    const stateValue = String(item && item.dft_workflow_state || "").trim();
+    if (!stateValue && !(item && item.dft_workflow_label)) return null;
+    const classByState = {
+        exportable: "parsed",
+        waiting_second_ai: "meta",
+        missing_evidence_anchor: "failed",
+        missing_material_binding: "failed",
+        needs_third_ai: "failed",
+        rejected_consensus_pending_write: "failed",
+        rejected: "failed",
+        unknown_blocked: "meta"
+    };
+    return {
+        state: stateValue,
+        label: item.dft_workflow_label || stateValue || "状态待判定",
+        className: classByState[stateValue] || "meta",
+        reason: item.dft_workflow_reason || "DFT workflow state is computed by the backend safety gate.",
+        action: item.next_required_action || "none"
+    };
 }
 
 function dftEvidencePayload(item) {
@@ -776,10 +820,11 @@ function renderDftEvidenceSource(item) {
 
 function renderDftItemSafety(item) {
     const safety = item && item.export_safety;
+    const workflow = dftWorkflowMeta(item);
     if (!safety) {
         return '<div class="figure-warning" style="margin-top:12px;">' +
             '<strong>安全状态待加载</strong>' +
-            '<div>这条 DFT 记录暂未拿到导出安全门详情；仍可人工拒绝，接受入库时后端会重新校验。</div>' +
+            '<div>' + esc(workflow && workflow.reason || "这条 DFT 记录暂未拿到导出安全门详情；仍可人工拒绝，接受入库时后端会重新校验。") + '</div>' +
             renderDftDecisionActions(item, false) +
         '</div>';
     }
@@ -788,8 +833,11 @@ function renderDftItemSafety(item) {
     return '<div class="figure-warning" style="margin-top:12px;">' +
         '<strong>' + (exportable ? "已审核可导出" : "候选不可进入正式数据库") + '</strong>' +
         '<div>' + (exportable
-            ? "该条记录已满足人工核验、证据原文和准确 PDF 定位要求。"
-            : "阻断原因：" + (reasons || "待按 AI 协议和 PDF 证据检查")) + '</div>' +
+            ? esc(workflow && workflow.reason || "该条记录已满足人工核验、证据原文和准确 PDF 定位要求。")
+            : "阻断原因：" + esc(reasons || "待按 AI 协议和 PDF 证据检查")) + '</div>' +
+        (workflow && workflow.action && workflow.action !== "none"
+            ? '<div class="subtle" data-role="dft-next-required-action" style="margin-top:6px;">下一步：' + esc(workflow.action) + '</div>'
+            : '') +
         renderDftDecisionActions(item, exportable) +
     '</div>';
 }
@@ -872,13 +920,13 @@ function renderDftDecisionActions(item, exportable) {
         .split(",")
         .map(function(part) { return part.trim(); })
         .filter(Boolean);
-    if (reviewStatuses.includes("rejected")) {
+    const candidateStatus = String(item && item.candidate_status || "").trim().toLowerCase();
+    const workflowState = String(item && item.dft_workflow_state || "").trim().toLowerCase();
+    if (candidateStatus === "rejected" || workflowState === "rejected" || reviewStatuses.includes("rejected")) {
         return "";
     }
     if (exportable) {
-        return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
-            '<button class="btn ghost small" type="button" onclick="revokeDftResult(\'' + escAttr(resultId) + '\')">取消入库</button>' +
-        '</div>';
+        return "";
     }
     return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
         '<button class="btn primary small" type="button" onclick="acceptDftResult(\'' + escAttr(resultId) + '\')">接受入库</button>' +
@@ -887,6 +935,14 @@ function renderDftDecisionActions(item, exportable) {
 }
 
 function dftItemStatusMeta(item) {
+    const workflow = dftWorkflowMeta(item);
+    if (workflow) {
+        return {
+            label: workflow.label,
+            className: workflow.className,
+            title: workflow.reason
+        };
+    }
     const safety = item && item.export_safety;
     if (!safety) {
         return {
@@ -926,6 +982,13 @@ function renderDftItemStatusChip(item) {
 }
 
 function dftAiOpinionMeta(item) {
+    if (item && item.ai_review_display_status) {
+        return {
+            label: item.ai_review_display_label || dftAiReviewDisplayFallbackLabel(item.ai_review_display_status),
+            className: item.ai_review_display_class || dftAiReviewDisplayFallbackClass(item.ai_review_display_status),
+            title: item.ai_review_display_reason || "AI 审核展示状态由后端导出安全门和对象审核记录统一计算。"
+        };
+    }
     const audits = item && Array.isArray(item.object_review_audits) ? item.object_review_audits : [];
     if (!audits.length) {
         const candidateStatus = String(item && item.candidate_status || "").trim().toLowerCase();
@@ -965,18 +1028,39 @@ function dftAiOpinionMeta(item) {
     );
     const hasUnresolvedConflicts = Number(item && item.conflict_count || 0) > 0 ||
         Boolean(item && Array.isArray(item.field_conflicts) && item.field_conflicts.length);
-    if (exportable && hasProposed && !hasUnresolvedConflicts) {
+    if (hasUnresolvedConflicts && hasProposed) {
+        return {
+            label: "AI 已提修正",
+            className: "meta",
+            title: "当前仍有字段冲突未解，AI 修正意见还不能视为已采纳。"
+        };
+    }
+    if (exportable && hasReject) {
+        return {
+            label: "AI 意见已收敛",
+            className: "ok",
+            title: "这条 DFT 已通过导出安全门；历史拒绝意见已被后续修正、替代或安全门结果收敛，不再阻断当前记录。"
+        };
+    }
+    if (exportable && hasProposed) {
         return {
             label: "已采纳 AI 修正",
             className: "ok",
             title: "这条 DFT 已采纳 AI 修正意见，并已通过导出安全门。"
         };
     }
+    if (exportable && hasPass) {
+        return {
+            label: sourceCount >= 2 ? "AI 字段通过" : "AI 确认字段",
+            className: "ok",
+            title: "AI 审核意见不阻断当前导出安全门。"
+        };
+    }
     if (hasReject && (hasPass || hasProposed)) {
         return {
             label: "AI 冲突",
             className: "failed",
-            title: "至少一个 AI 建议拒绝，同时存在另一个 AI 的保留/通过意见，必须人工裁决。"
+            title: "至少一个审核提交建议拒绝，同时存在保留/通过意见，必须人工裁决。"
         };
     }
     if (hasReject) {
@@ -990,14 +1074,14 @@ function dftAiOpinionMeta(item) {
         return {
             label: "AI 无法确认",
             className: "meta",
-            title: "AI 无法从当前证据确认这条 DFT 候选，需要第三 AI 补证据或人工裁决。"
+            title: "AI 无法从当前证据确认这条 DFT 候选，需要下一轮审核提交补证据或人工裁决。"
         };
     }
     if (hasProposed && sourceCount >= 2) {
         return {
             label: "AI 修正待采纳",
             className: "meta",
-            title: "已有 AI 修正意见和另一 AI 的字段确认，但不是完整的双 AI 同字段一致；需要采纳修正并跑安全门。"
+            title: "已有 AI 修正意见和字段确认，但尚未形成可写回的一致提交；需要采纳修正并跑安全门。"
         };
     }
     if (hasProposed) {
@@ -1021,6 +1105,30 @@ function dftAiOpinionMeta(item) {
     };
 }
 
+function dftAiReviewDisplayFallbackLabel(status) {
+    const value = String(status || "").trim();
+    return {
+        no_ai_opinion: "无 AI 意见",
+        exportable_with_historical_reject: "AI 意见已收敛",
+        converged_adopted: "已采纳 AI 修正",
+        pass_exportable: "AI 字段通过",
+        conflict: "AI 冲突",
+        rejected: "AI 一致拒绝",
+        reject_suggested: "AI 建议拒绝",
+        needs_human: "AI 无法确认",
+        proposed: "AI 已提修正",
+        pass_partial: "AI 字段通过",
+        unknown: "AI 意见待判定"
+    }[value] || "AI 意见待判定";
+}
+
+function dftAiReviewDisplayFallbackClass(status) {
+    const value = String(status || "").trim();
+    if (["conflict", "rejected", "reject_suggested"].includes(value)) return "failed";
+    if (["exportable_with_historical_reject", "converged_adopted", "pass_exportable", "pass_partial", "no_ai_opinion"].includes(value)) return "ok";
+    return "meta";
+}
+
 function renderDftAiOpinionChip(item) {
     const meta = dftAiOpinionMeta(item);
     if (!meta) return "";
@@ -1040,8 +1148,16 @@ function dftOpinionSource(audit) {
 
 function dftOpinionHasAnchor(audit) {
     const loc = audit && audit.evidence_location;
+    if (!loc || typeof loc !== "object") return false;
+    const page = loc.page;
+    const quoted = loc.quoted_text || loc.evidence_text;
+    return page != null && String(page).trim() && quoted != null && String(quoted).trim();
+}
+
+function dftOpinionHasAnyLocation(audit) {
+    const loc = audit && audit.evidence_location;
     if (!loc) return false;
-    if (typeof loc === "string") return !!loc.trim();
+    if (typeof loc === "string") return Boolean(loc.trim());
     if (typeof loc !== "object") return false;
     return ["page", "section", "section_title", "figure", "figure_id", "table", "table_id", "quoted_text", "evidence_text", "bbox"]
         .some(function(key) {
@@ -1163,30 +1279,42 @@ function dftIsAutoRejectDuplicate(row) {
 }
 
 function classifyDftAutomationRows(rows) {
-    const result = { consensus: [], conflicts: [], newReview: [] };
+    const result = { consensus: [], conflicts: [], newReview: [], autoAccept: [], autoReject: [] };
     (rows || []).forEach(function(row) {
         if (!row || row.is_exportable === true) return;
-        const audits = (Array.isArray(row.object_review_audits) ? row.object_review_audits : [])
-            .filter(dftOpinionHasAnchor)
-            .sort(sortDftAuditsNewestFirst);
-        const bySource = {};
-        audits.forEach(function(audit) {
-            const source = dftOpinionSource(audit);
-            if (!bySource[source]) bySource[source] = audit;
-        });
-        const independent = Object.keys(bySource).map(function(source) { return bySource[source]; });
+        const workflowState = String(row.dft_workflow_state || "").trim();
+        if (workflowState === "needs_third_ai") {
+            result.conflicts.push(row);
+            return;
+        }
+        if (workflowState === "waiting_second_ai" || workflowState === "missing_evidence_anchor" || workflowState === "missing_material_binding") {
+            result.newReview.push(row);
+            return;
+        }
+        if (workflowState === "rejected_consensus_pending_write") {
+            result.consensus.push(row);
+            return;
+        }
+        const submissions = uniqueDftReviewSubmissions(
+            (Array.isArray(row.object_review_audits) ? row.object_review_audits : [])
+                .filter(dftOpinionHasAnchor)
+                .sort(sortDftAuditsNewestFirst)
+        );
         const repairReasons = new Set(["missing_material_identity", "missing_evidence", "missing_evidence_text", "unsafe_locator"]);
         const blockedReasons = Array.isArray(row.blocked_reasons) ? row.blocked_reasons : [];
-        const hasReject = independent.some(function(audit) { return isNegativeDftDecision(audit && audit.decision); });
-        const hasPositive = independent.some(function(audit) {
+        const hasReject = submissions.some(function(audit) { return isNegativeDftDecision(audit && audit.decision); });
+        const hasPositive = submissions.some(function(audit) {
             const decision = dftOpinionDecision(audit);
             return ["PASS", "PROPOSED", "REVISE", "NEW_CANDIDATE"].includes(decision);
+        });
+        const allReject = submissions.length > 0 && submissions.every(function(audit) {
+            return isNegativeDftDecision(audit && audit.decision);
         });
         if (hasReject && hasPositive) {
             result.conflicts.push(row);
             return;
         }
-        if (independent.length < 2 || blockedReasons.some(function(reason) { return repairReasons.has(reason); })) {
+        if (submissions.length < 2 || blockedReasons.some(function(reason) { return repairReasons.has(reason); })) {
             result.newReview.push(row);
             return;
         }
@@ -1194,13 +1322,13 @@ function classifyDftAutomationRows(rows) {
             result.consensus.push(row);
             return;
         }
-        if (hasReject && !hasPositive) {
+        if (allReject) {
             result.consensus.push(row);
             return;
         }
         const proposal = dftWholeRowProposal(row);
         const support = dftSupportingValuePass(row, proposal);
-        if (proposal && support && dftIndependentOpinionsAgree(row, independent)) {
+        if (proposal && support && dftIndependentOpinionsAgree(row, submissions)) {
             result.consensus.push(row);
             return;
         }
@@ -1208,13 +1336,24 @@ function classifyDftAutomationRows(rows) {
             result.conflicts.push(row);
             return;
         }
-        if (dftIndependentOpinionsAgree(row, independent)) {
+        if (dftIndependentOpinionsAgree(row, submissions)) {
             result.consensus.push(row);
             return;
         }
         result.conflicts.push(row);
     });
     return result;
+}
+
+function uniqueDftReviewSubmissions(audits) {
+    const seenCandidateIds = new Set();
+    return (audits || []).filter(function(audit) {
+        const candidateId = String(audit && audit.candidate_id || "").trim();
+        if (!candidateId) return true;
+        if (seenCandidateIds.has(candidateId)) return false;
+        seenCandidateIds.add(candidateId);
+        return true;
+    });
 }
 
 async function refreshDftAutomationSummaryBadges(container, paperId, renderSeq) {
@@ -1234,8 +1373,8 @@ async function refreshDftAutomationSummaryBadges(container, paperId, renderSeq) 
             const el = container.querySelector('[data-role="' + role + '"]');
             if (el) el.textContent = value;
         };
-        setText("dft-new-review-count", "第二 AI / 补证据 " + classified.newReview.length);
-        setText("dft-conflict-count", "第三 AI 裁决 " + classified.conflicts.length);
+        setText("dft-new-review-count", "下一轮审核 / 补证据 " + classified.newReview.length);
+        setText("dft-conflict-count", "第三轮 AI 裁决 " + classified.conflicts.length);
         setText(
             "dft-next-action",
             "生成下一轮 AI 审核任务（" + (classified.newReview.length + classified.conflicts.length) + "）"
@@ -1299,8 +1438,32 @@ function dftResultsWithSafety(detail) {
         return Object.assign({}, item, {
             record_id: recordId,
             export_safety: safety,
-            candidate_status: effectiveCandidateStatus
+            candidate_status: effectiveCandidateStatus,
+            dft_workflow_state: item.dft_workflow_state || safety.dft_workflow_state,
+            dft_workflow_label: item.dft_workflow_label || safety.dft_workflow_label,
+            dft_workflow_reason: item.dft_workflow_reason || safety.dft_workflow_reason,
+            valid_ai_opinion_count: item.valid_ai_opinion_count == null ? safety.valid_ai_opinion_count : item.valid_ai_opinion_count,
+            raw_ai_opinion_count: item.raw_ai_opinion_count == null ? safety.raw_ai_opinion_count : item.raw_ai_opinion_count,
+            effective_ai_opinions: item.effective_ai_opinions || safety.effective_ai_opinions,
+            next_required_action: item.next_required_action || safety.next_required_action
         });
+    }).sort(function(a, b) {
+        const aExportable = String(a.dft_workflow_state || "") === "exportable" || (a.export_safety && (a.export_safety.is_exportable || a.export_safety.eligible));
+        const bExportable = String(b.dft_workflow_state || "") === "exportable" || (b.export_safety && (b.export_safety.is_exportable || b.export_safety.eligible));
+        if (aExportable !== bExportable) return aExportable ? 1 : -1;
+        const priority = {
+            needs_third_ai: 0,
+            missing_evidence_anchor: 1,
+            waiting_second_ai: 2,
+            missing_material_binding: 3,
+            rejected_consensus_pending_write: 4,
+            unknown_blocked: 5,
+            exportable: 9
+        };
+        const left = priority[a.dft_workflow_state] == null ? 6 : priority[a.dft_workflow_state];
+        const right = priority[b.dft_workflow_state] == null ? 6 : priority[b.dft_workflow_state];
+        if (left !== right) return left - right;
+        return String(a.property_type || "").localeCompare(String(b.property_type || ""));
     });
 }
 
@@ -1330,7 +1493,7 @@ function renderDftExportReadiness(detail) {
                 : '<span class="status-chip meta">安全状态加载中</span>' +
                   '<span class="status-chip">候选总数 ' + fallbackTotal + '</span>') +
         '</div>' +
-        '<div class="subtle">处理方式：点击“生成下一轮 AI 审核任务”，交给一位尚未审核这些记录的 AI；AI 回写后再点一次。系统会先自动写回一致项，只把缺第二意见、缺证据或真正冲突的记录放进下一轮。审核全部收口后才允许标记完成。</div>' +
+        '<div class="subtle">处理方式：点击“生成下一轮 AI 审核任务”后导入下一轮审核结果；同一 AI/模型可以重复审核，每次成功回写按独立 candidate_id 计一票。每条有效意见仍必须提供 evidence_location.page 和 quoted_text。系统会先自动写回一致项，只把缺下一轮有效意见、缺证据或真正冲突的记录放进下一轮。审核全部收口后才允许标记完成。</div>' +
         (reasons ? '<div class="subtle" style="margin-top:6px;">当前阻断：' + esc(reasons) + '</div>' : '') +
     '</div>';
 }
@@ -1556,7 +1719,7 @@ function renderReadableCards(title, items) {
         "电化学性能": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
         "机理声明": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
         "写作卡片": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
-        "表格": ["caption", "page", "markdown_content"],
+        "表格": ["source_document_type", "related_paper_code", "caption", "page", "markdown_content"],
         "出站关联": ["relationship_type", "target_title", "target_doi", "reason"],
         "入站关联": ["relationship_type", "source_title", "source_doi", "reason"]
     };
@@ -1580,11 +1743,12 @@ function renderReadableCards(title, items) {
         const dftConflictSummary = itemType === "dft_result" ? dftConflictSummaryHtml(item) : "";
         const safety = (title === "DFT 结果" || title === "候选 DFT 数据" || title === "DFT 候选结果") ? renderDftItemSafety(item) : "";
         const tableReviewChip = title === "\u8868\u683c" ? tableReviewChipHtml(item) : "";
+        const tableSourceChip = title === "\u8868\u683c" ? tableSourceChipHtml(item) : "";
         const itemTypeAttr = itemType ? ' data-codex-item-type="' + escAttr(itemType) + '"' : "";
         const targetIdAttr = item && item.id ? ' data-target-id="' + escAttr(String(item.id)) + '"' : "";
         const openAttr = isPendingNavigationItem(itemType, item) ? " open" : "";
         return '<details class="section-card readable-card"' + itemTypeAttr + targetIdAttr + openAttr + '>' +
-            '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' + dftStatusChip + dftAiChip + tableReviewChip + action + '</div></div></summary>' +
+            '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' + dftStatusChip + dftAiChip + tableSourceChip + tableReviewChip + action + '</div></div></summary>' +
             '<div style="margin-top:10px;">' +
             renderReadableFields(item || {}, keys) +
             dftEvidenceSource +
@@ -1892,11 +2056,24 @@ function renderEvidenceLocators(locators) {
     panel.innerHTML = html;
 }
 
-async function loadEvidenceLocators(paperId) {
-    var result = await fetchPaperEvidenceLocators(paperId);
-    if (state.selectedPaperId !== paperId) return;
+async function loadEvidenceLocators(paperId, options) {
+    const opts = options || {};
+    const result = await fetchPaperResource(
+        paperId,
+        "evidence/locators",
+        LOCATORS_VARIANT,
+        API_BASE + "/" + encodeURIComponent(paperId) + "/evidence/locators",
+        { forceRefresh: opts.forceRefresh === true }
+    ).then(function(entry) {
+        return entry.value;
+    }).catch(function(error) {
+        if (!opts.silent) console.warn("Evidence locators are not available:", error);
+        throw error;
+    });
+    if (state.selectedPaperId !== paperId) return result;
     state.selectedPaperEvidenceLocators = result;
     renderEvidenceLocators(result);
+    return result;
 }
 
 function triggerDetailLocatorAction(uid) {
@@ -1928,6 +2105,7 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
         bbox = bboxOrJson;
     }
 
+    document.body.classList.add("pdf-viewer-open");
     overlay.style.display = "flex";
 
     var iframe = $("pdfViewerIframe");
@@ -1947,38 +2125,59 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
     if (viewerPdfUnavailable) viewerPdfUnavailable.style.display = "none";
     if (viewerPdfContent) viewerPdfContent.style.display = "block";
 
+    var pdfUrl = "/api/papers/" + encodeURIComponent(paperId) + "/pdf";
+
     // Build evidence panel content
     var evidenceHtml = "";
     evidenceHtml = '<div style="font-size:12px;margin-bottom:4px;font-weight:700;color:var(--color-primary);">PDF 页码定位</div>' +
         '<div style="font-size:11px;color:var(--color-text-secondary);">这里用于查看原文页和核对证据。浏览器 PDF 工具栏里的临时高亮/绘制不会写回系统；需要保存结论时，请通过审核中心或 import_analysis 回写。</div>' +
+        '<div style="margin-top:8px;"><a class="btn ghost small" target="_blank" rel="noopener" href="' + escAttr(pdfUrl) + '#page=' + Math.max(1, page || 1) + '">新窗口打开 PDF</a></div>' +
         (evidenceText ? '<div style="font-size:11px;margin-top:6px;padding:6px 8px;background:var(--color-surface-alt);border-radius:var(--radius);border:1px solid var(--color-border);">"' + esc(evidenceText) + '"</div>' : '');
     if (viewerEvidencePanel) viewerEvidencePanel.innerHTML = evidenceHtml;
 
-    // Probe PDF availability with HEAD request
-    var pdfUrl = "/api/papers/" + encodeURIComponent(paperId) + "/pdf";
+    // Load the PDF immediately. A slow HEAD probe must never block preview.
+    if (iframe) {
+        iframe.onload = function() {
+            if (viewerStatus && overlay.style.display !== "none") viewerStatus.textContent = "";
+        };
+        iframe.onerror = function() {
+            if (viewerStatus && overlay.style.display !== "none") viewerStatus.textContent = "PDF 加载失败，可尝试新窗口打开";
+        };
+        iframe.src = pdfUrl + "#page=" + Math.max(1, page || 1) + "&toolbar=0&navpanes=0";
+        iframe.style.display = "block";
+    }
+
+    var slowTimer = window.setTimeout(function() {
+        if (viewerStatus && overlay.style.display !== "none" && viewerStatus.textContent === "加载中...") {
+            viewerStatus.textContent = "PDF 加载较慢，可尝试新窗口打开";
+        }
+    }, 6000);
+
+    // Probe PDF availability with a short timeout for clearer failure messages.
     try {
-        var probeResp = await fetch(pdfUrl, { method: "HEAD" });
+        var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timeoutId = controller ? window.setTimeout(function() { controller.abort(); }, 4000) : null;
+        var probeResp = await fetch(pdfUrl, {
+            method: "HEAD",
+            signal: controller ? controller.signal : undefined
+        });
+        if (timeoutId) window.clearTimeout(timeoutId);
         if (!probeResp.ok && probeResp.status !== 405) {
-            // PDF not available
             if (viewerPdfContent) viewerPdfContent.style.display = "none";
             if (viewerPdfUnavailable) viewerPdfUnavailable.style.display = "block";
             if (viewerStatus) viewerStatus.textContent = "PDF 尚未上传或不可预览";
+            if (iframe) iframe.src = "";
             return;
         }
+        if (viewerStatus && overlay.style.display !== "none" && viewerStatus.textContent === "加载中...") {
+            viewerStatus.textContent = "";
+        }
     } catch (_) {
-        // Network error
-        if (viewerPdfContent) viewerPdfContent.style.display = "none";
-        if (viewerPdfUnavailable) viewerPdfUnavailable.style.display = "block";
-        if (viewerStatus) viewerStatus.textContent = "PDF 请求失败";
-        return;
-    }
-
-    if (viewerStatus) viewerStatus.textContent = "";
-
-    // Load PDF in iframe with page fragment
-    if (iframe) {
-        iframe.src = pdfUrl + "#page=" + Math.max(1, page || 1) + "&toolbar=0&navpanes=0";
-        iframe.style.display = "block";
+        if (viewerStatus && overlay.style.display !== "none" && viewerStatus.textContent === "加载中...") {
+            viewerStatus.textContent = "PDF 请求较慢，已继续尝试加载";
+        }
+    } finally {
+        window.clearTimeout(slowTimer);
     }
 
     // Clear highlight overlay (bbox positioning over iframe is unreliable;
@@ -1989,31 +2188,78 @@ async function openPdfViewer(paperId, page, hasBbox, bboxOrJson, locatorStatus, 
 function closePdfViewer() {
     var overlay = $("pdfViewerOverlay");
     if (overlay) overlay.style.display = "none";
+    document.body.classList.remove("pdf-viewer-open");
     var iframe = $("pdfViewerIframe");
-    if (iframe) iframe.src = "";
+    if (iframe) {
+        iframe.onload = null;
+        iframe.onerror = null;
+        iframe.src = "";
+    }
 }
 
 function contentReviewStatus(detail, key) {
     return (detail && detail[key]) || "missing";
 }
 
+function isSupplementaryRelationshipType(value) {
+    return String(value || "").trim().toLowerCase() === "supplementary";
+}
+
+function normalizeManualReviewProgressValue(value) {
+    if (value && typeof value === "object") {
+        return {
+            completed: !!value.completed,
+            updated_at: value.updated_at || null,
+            updated_by: value.updated_by || "",
+            inherited: !!value.inherited,
+            inherited_from_code: value.inherited_from_code || "",
+            inherited_from_title: value.inherited_from_title || ""
+        };
+    }
+    return {
+        completed: !!value,
+        updated_at: null,
+        updated_by: "",
+        inherited: false,
+        inherited_from_code: "",
+        inherited_from_title: ""
+    };
+}
+
+function supplementaryMainReviewProgress(detail) {
+    if (!detail || !isSupplementaryPaperType(detail.paper_type)) return null;
+    const relationships = Array.isArray(detail.incoming_relationships) ? detail.incoming_relationships : [];
+    for (let i = 0; i < relationships.length; i++) {
+        const item = relationships[i] || {};
+        const progress = item.related_manual_review_progress;
+        if (isSupplementaryRelationshipType(item.relationship_type) && progress && typeof progress === "object") {
+            return {
+                progress: progress,
+                code: item.related_paper_code || "",
+                title: item.related_paper_title || ""
+            };
+        }
+    }
+    return null;
+}
+
 function manualReviewProgress(detail) {
     const source = detail && detail.comprehensive_analysis && detail.comprehensive_analysis.manual_review_progress;
     const progress = source && typeof source === "object" ? source : {};
+    const mainProgress = supplementaryMainReviewProgress(detail);
     function normalize(module) {
-        const value = progress[module];
-        if (value && typeof value === "object") {
-            return {
-                completed: !!value.completed,
-                updated_at: value.updated_at || null,
-                updated_by: value.updated_by || ""
-            };
+        const own = normalizeManualReviewProgressValue(progress[module]);
+        if (own.completed || !mainProgress) {
+            return own;
         }
-        return {
-            completed: !!value,
-            updated_at: null,
-            updated_by: ""
-        };
+        const inherited = normalizeManualReviewProgressValue(mainProgress.progress[module]);
+        if (!inherited.completed) {
+            return own;
+        }
+        inherited.inherited = true;
+        inherited.inherited_from_code = mainProgress.code;
+        inherited.inherited_from_title = mainProgress.title;
+        return inherited;
     }
     return {
         content: normalize("content"),
@@ -2028,25 +2274,40 @@ function isManualReviewCompleted(detail, module) {
 }
 
 function renderManualReviewCompletionCard(detail, module, title, message) {
-    const status = isManualReviewCompleted(detail, module);
+    const progress = manualReviewProgress(detail);
+    const moduleProgress = progress[module] || {};
+    const status = !!moduleProgress.completed;
+    const inherited = !!moduleProgress.inherited;
+    const sourceText = moduleProgress.inherited_from_code || moduleProgress.inherited_from_title || "主文献";
+    const inheritedNote = inherited
+        ? '<div class="subtle" style="margin-top:6px;">此 SI 的完成状态随主文献 ' + esc(sourceText) + ' 同步显示；如需取消，请在主文献详情页调整。</div>'
+        : "";
     return '<div class="section-card figure-audit-note">' +
         '<h3>' + esc(title) + '</h3>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 10px;">' +
             '<span class="status-chip ' + (status ? 'ok' : 'subtle') + '">' + esc(status ? '已完成' : '未完成') + '</span>' +
-            '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
-                esc(status ? '取消已完成' : '标记已完成') +
-            '</button>' +
+            (inherited
+                ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("该状态来自已绑定主文献。") + '">随主文献同步</button>'
+                : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
+                    esc(status ? '取消已完成' : '标记已完成') +
+                  '</button>') +
         '</div>' +
         '<div class="subtle">' + esc(message) + '</div>' +
+        inheritedNote +
     '</div>';
 }
 
 function renderManualReviewCompletionControls(detail, module) {
-    const status = isManualReviewCompleted(detail, module);
+    const progress = manualReviewProgress(detail);
+    const moduleProgress = progress[module] || {};
+    const status = !!moduleProgress.completed;
+    const inherited = !!moduleProgress.inherited;
     return '<span class="status-chip ' + (status ? 'ok' : 'subtle') + '">' + esc(status ? '已完成' : '未完成') + '</span>' +
-        '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
-            esc(status ? '取消已完成' : '标记已完成') +
-        '</button>';
+        (inherited
+            ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("该状态来自已绑定主文献。") + '">随主文献同步</button>'
+            : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
+                esc(status ? '取消已完成' : '标记已完成') +
+              '</button>');
 }
 
 async function setManualReviewProgress(module, completed) {
@@ -2078,6 +2339,13 @@ async function setManualReviewProgress(module, completed) {
             state.selectedPaper.comprehensive_analysis = analysis;
             cachePaperDetail(state.selectedPaper);
             rerenderSelectedDetail(state.selectedPaperId);
+        }
+        if (typeof fetchPapers === "function") {
+            fetchPapers({
+                preserveList: true,
+                preserveDetail: true,
+                loadingMessage: "正在同步支撑文献进度..."
+            });
         }
         showToast((labels[module] || "当前模块") + (completed ? "已标记完成。" : "已取消完成。"), "success");
     } catch (error) {
@@ -2568,7 +2836,7 @@ function renderDetail(detail, audit) {
             sectionCards +
             referenceCards +
             '<div style="margin-bottom:16px;">' +
-            '<button class="btn primary small" onclick="promptAddRelationship(\'' + detail.id + '\')">添加关联文献</button>' +
+            '<button class="btn primary small" onclick="promptAddRelationship(\'' + detail.id + '\')">绑定支撑文献</button>' +
             '</div>' +
             renderJSONCards("出向关系", detail.outgoing_relationships || []) +
             renderJSONCards("入向关系", detail.incoming_relationships || []);
@@ -2695,6 +2963,171 @@ function buildPreviewDetail(paper) {
     };
 }
 
+const DETAIL_LIGHT_VARIANT = "mode=light";
+const DETAIL_FULL_VARIANT = "mode=full";
+const AUDIT_VARIANT = "reviews/audit";
+const LOCATORS_VARIANT = "evidence/locators";
+const CODEX_CONTEXT_VARIANT = "max_sections=1&max_chars_per_section=300&max_figures=0&max_tables=0&max_candidates=500";
+const KNOWLEDGE_CONTEXT_VARIANT = "max_candidates=24&max_chars_per_candidate=600";
+const PAPER_RESOURCE_CACHE_LIMIT = 60;
+
+function formatPaperResourceFreshness(freshness) {
+    if (!freshness || !freshness.updatedAt) return "";
+    const date = new Date(freshness.updatedAt);
+    if (Number.isNaN(date.getTime())) return "";
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    const ss = String(date.getSeconds()).padStart(2, "0");
+    return (freshness.fromCache ? "使用缓存" : "状态更新时间") + "：" + hh + ":" + mm + ":" + ss;
+}
+
+function paperResourceCacheKey(paperId, resourceType, variant) {
+    return [String(paperId || ""), String(resourceType || ""), String(variant || "")].join("::");
+}
+
+function getPaperResourceCacheEntry(paperId, resourceType, variant) {
+    const key = paperResourceCacheKey(paperId, resourceType, variant);
+    return state.paperResourceCache && state.paperResourceCache[key] ? state.paperResourceCache[key] : null;
+}
+
+function getPaperResourceCachedValue(paperId, resourceType, variant) {
+    const entry = getPaperResourceCacheEntry(paperId, resourceType, variant);
+    return entry ? entry.value : null;
+}
+
+function setPaperResourceCacheEntry(paperId, resourceType, variant, value) {
+    const key = paperResourceCacheKey(paperId, resourceType, variant);
+    const updatedAt = Date.now();
+    state.paperResourceCache = state.paperResourceCache || {};
+    state.paperResourceCacheOrder = state.paperResourceCacheOrder || [];
+    state.paperResourceCache[key] = {
+        paperId: String(paperId || ""),
+        resourceType: String(resourceType || ""),
+        variant: String(variant || ""),
+        updatedAt: updatedAt,
+        value: value,
+    };
+    state.paperResourceCacheOrder = state.paperResourceCacheOrder.filter(function(item) { return item !== key; });
+    state.paperResourceCacheOrder.push(key);
+    while (state.paperResourceCacheOrder.length > PAPER_RESOURCE_CACHE_LIMIT) {
+        const oldestKey = state.paperResourceCacheOrder.shift();
+        if (!oldestKey) break;
+        delete state.paperResourceCache[oldestKey];
+    }
+    return state.paperResourceCache[key];
+}
+
+function clearPaperResourceCaches(paperId) {
+    const id = String(paperId || "");
+    if (!id) return;
+    state.paperResourceCache = state.paperResourceCache || {};
+    state.paperResourceCacheOrder = state.paperResourceCacheOrder || [];
+    Object.keys(state.paperResourceCache).forEach(function(key) {
+        if (key.indexOf(id + "::") === 0) delete state.paperResourceCache[key];
+    });
+    state.paperResourceCacheOrder = state.paperResourceCacheOrder.filter(function(key) {
+        return key.indexOf(id + "::") !== 0;
+    });
+    if (state.paperDetailCache) delete state.paperDetailCache[id];
+    if (state.paperResourceFreshness) delete state.paperResourceFreshness[id];
+}
+
+function setPaperResourceFreshness(paperId, updatedAt, fromCache) {
+    const id = String(paperId || "");
+    if (!id || !updatedAt) return;
+    state.paperResourceFreshness = state.paperResourceFreshness || {};
+    state.paperResourceFreshness[id] = {
+        updatedAt: updatedAt,
+        fromCache: fromCache === true,
+    };
+}
+
+function fetchPaperResource(paperId, resourceType, variant, url, options) {
+    const opts = options || {};
+    const key = paperResourceCacheKey(paperId, resourceType, variant);
+    const cached = opts.forceRefresh ? null : getPaperResourceCacheEntry(paperId, resourceType, variant);
+    if (cached) {
+        return Promise.resolve({
+            value: cached.value,
+            updatedAt: cached.updatedAt,
+            fromCache: true,
+        });
+    }
+    state.paperResourceInflight = state.paperResourceInflight || {};
+    if (state.paperResourceInflight[key]) {
+        return state.paperResourceInflight[key];
+    }
+    const request = fetchJSON(url)
+        .then(function(value) {
+            const entry = setPaperResourceCacheEntry(paperId, resourceType, variant, value);
+            return {
+                value: entry.value,
+                updatedAt: entry.updatedAt,
+                fromCache: false,
+            };
+        })
+        .finally(function() {
+            if (state.paperResourceInflight) delete state.paperResourceInflight[key];
+        });
+    state.paperResourceInflight[key] = request;
+    return request;
+}
+
+function mergeCachedPaperResources(detail, paperId) {
+    if (!detail) return detail;
+    const id = String(paperId || detail.id || "");
+    const codexBundle = getPaperResourceCachedValue(id, "codex-context", CODEX_CONTEXT_VARIANT);
+    const knowledgeContext = getPaperResourceCachedValue(id, "knowledge-context", KNOWLEDGE_CONTEXT_VARIANT);
+    if (codexBundle && codexBundle.context && !detail.codex_context) {
+        detail.codex_context = codexBundle.context;
+    }
+    if (knowledgeContext && !detail.knowledge_context) {
+        detail.knowledge_context = knowledgeContext;
+    }
+    return detail;
+}
+
+function cachedDetailForMode(paperId, detailMode) {
+    const exactVariant = detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT;
+    const exact = getPaperResourceCacheEntry(paperId, "detail", exactVariant);
+    if (exact) return exact;
+    if (detailMode !== "full") {
+        return getPaperResourceCacheEntry(paperId, "detail", DETAIL_FULL_VARIANT);
+    }
+    return null;
+}
+
+function syncSelectedPaperSupplementalFromCache(paperId) {
+    const auditEntry = getPaperResourceCacheEntry(paperId, "reviews/audit", AUDIT_VARIANT);
+    const locatorEntry = getPaperResourceCacheEntry(paperId, "evidence/locators", LOCATORS_VARIANT);
+    state.selectedPaperAudit = auditEntry ? auditEntry.value : null;
+    state.selectedPaperEvidenceLocators = locatorEntry ? locatorEntry.value : undefined;
+    if (state.selectedPaper) {
+        mergeCachedPaperResources(state.selectedPaper, paperId);
+    }
+}
+
+function applySelectedPaperDetail(detail, options) {
+    if (!detail) return;
+    const opts = options || {};
+    const paperId = String(detail.paper_id || detail.id || "");
+    mergeCachedPaperResources(detail, paperId);
+    state.selectedPaper = detail;
+    if (opts.cache !== false) {
+        cachePaperDetail(detail);
+    }
+    if (opts.updatedAt) {
+        setPaperResourceFreshness(paperId, opts.updatedAt, opts.fromCache === true);
+    }
+    renderPaperList();
+    renderWorkspaceHeader(detail);
+    renderDetail(detail, state.selectedPaperAudit || null);
+    if (state.currentTab === "dft") {
+        decorateDftReadinessPanel(detail);
+    }
+    showWorkspace();
+}
+
 function cachePaperDetail(detail) {
     if (!detail || !detail.id) return;
     state.paperDetailCache = state.paperDetailCache || {};
@@ -2703,6 +3136,12 @@ function cachePaperDetail(detail) {
         return;
     }
     state.paperDetailCache[detail.id] = detail;
+    setPaperResourceCacheEntry(
+        detail.id,
+        "detail",
+        detail._detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT,
+        detail
+    );
     const keys = Object.keys(state.paperDetailCache);
     if (keys.length > 3) {
         delete state.paperDetailCache[keys[0]];
@@ -2721,11 +3160,22 @@ function renderImmediatePaperDetail(paperId) {
         renderDetailSkeleton();
         return false;
     }
-    state.selectedPaper = immediate;
-    renderPaperList();
-    renderWorkspaceHeader(immediate);
-    renderDetail(immediate, state.selectedPaperAudit || null);
-    showWorkspace();
+    syncSelectedPaperSupplementalFromCache(paperId);
+    const variant = immediate._detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT;
+    const entry = immediate.id ? getPaperResourceCacheEntry(immediate.id, "detail", variant) : null;
+    if (entry) {
+        applySelectedPaperDetail(immediate, {
+            updatedAt: entry.updatedAt,
+            fromCache: true,
+            cache: false,
+        });
+    } else {
+        state.selectedPaper = immediate;
+        renderPaperList();
+        renderWorkspaceHeader(immediate);
+        renderDetail(immediate, state.selectedPaperAudit || null);
+        showWorkspace();
+    }
     return true;
 }
 
@@ -2766,42 +3216,62 @@ async function loadPaperDetail(paperId, options) {
     }
     const opts = options || {};
     const detailMode = opts.mode || "light";
-    const loadToken = Date.now() + ":" + paperId;
+    const resolvedPaperId = canonicalPaperId(paperId);
+    const loadToken = Date.now() + ":" + resolvedPaperId;
     state.detailLoadToken = loadToken;
-    state.selectedPaperId = paperId;
-    state.selectedPaperAudit = null;
-    state.selectedPaperEvidenceLocators = undefined;
+    state.selectedPaperId = resolvedPaperId;
+    syncSelectedPaperSupplementalFromCache(resolvedPaperId);
     try {
         clearDeferredDetailPanels();
-        renderImmediatePaperDetail(paperId);
-        syncQueryParams();
-        let detail = await fetchJSON(
-            API_BASE + "/" + encodeURIComponent(paperId) + "?mode=" + encodeURIComponent(detailMode)
-        );
-        if (state.detailLoadToken !== loadToken) return;
-        const cachedFullDetail = state.paperDetailCache && state.paperDetailCache[paperId];
-        if (cachedFullDetail && cachedFullDetail._detailMode === "full" && detailMode !== "full") {
-            detail = cachedFullDetail;
+        const cachedDetailEntry = opts.forceRefresh ? null : cachedDetailForMode(resolvedPaperId, detailMode);
+        if (cachedDetailEntry && cachedDetailEntry.value) {
+            const cachedDetail = cachedDetailEntry.value;
+            cachedDetail._detailMode = cachedDetail._detailMode || (cachedDetailEntry.variant === DETAIL_FULL_VARIANT ? "full" : detailMode);
+            applySelectedPaperDetail(cachedDetail, {
+                updatedAt: cachedDetailEntry.updatedAt,
+                fromCache: true,
+                cache: false,
+            });
         } else {
-            detail._detailMode = detailMode;
+            renderImmediatePaperDetail(paperId);
         }
-        state.selectedPaper = detail;
-        cachePaperDetail(detail);
-        renderPaperList();
-        renderWorkspaceHeader(detail);
-        renderDetail(detail, null);
-        showWorkspace();
-        applyPendingPdfJump(paperId);
+        syncQueryParams();
+        if (!cachedDetailEntry || opts.forceRefresh) {
+            let detailResult = await fetchPaperResource(
+                resolvedPaperId,
+                "detail",
+                detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT,
+                API_BASE + "/" + encodeURIComponent(resolvedPaperId) + "?mode=" + encodeURIComponent(detailMode),
+                { forceRefresh: opts.forceRefresh === true }
+            );
+            if (state.detailLoadToken !== loadToken) return;
+            let detail = detailResult.value;
+            const detailStableId = stablePaperIdOf(detail);
+            if (detailStableId) {
+                state.selectedPaperId = detailStableId;
+            }
+            const cachedFullDetail = state.paperDetailCache && state.paperDetailCache[state.selectedPaperId];
+            if (cachedFullDetail && cachedFullDetail._detailMode === "full" && detailMode !== "full") {
+                detail = cachedFullDetail;
+            } else {
+                detail._detailMode = detailMode;
+            }
+            applySelectedPaperDetail(detail, {
+                updatedAt: detailResult.updatedAt,
+                fromCache: detailResult.fromCache,
+            });
+        }
+        applyPendingPdfJump(state.selectedPaperId);
         syncQueryParams();
         if (!opts.mode && detailMode !== "full" && detailModeForTab(state.currentTab) === "full") {
             window.setTimeout(function() {
-                if (state.selectedPaperId === paperId) {
+                if (state.selectedPaperId === resolvedPaperId) {
                     ensureFullPaperDetailForTab(state.currentTab);
                 }
             }, 0);
         }
-        scheduleDetailEnrichment(paperId, loadToken);
-        loadEvidenceLocators(paperId);
+        scheduleDetailEnrichment(state.selectedPaperId, loadToken);
+        loadEvidenceLocators(state.selectedPaperId, { forceRefresh: opts.forceRefresh === true });
         if (state.currentTab === "review") loadExternalRuns();
         if (state.currentTab === "aggregate") loadAggregate();
         if (state.currentTab === "writer") ensureWriterStatus();
@@ -2837,24 +3307,34 @@ async function refreshSelectedPaperDetail(options) {
     if (!state.selectedPaperId) return null;
     const opts = options || {};
     const paperId = state.selectedPaperId;
+    const shouldForce = opts.forceRefresh === true || opts.invalidateCache === true || opts.mode === "full";
+    if (shouldForce) {
+        clearPaperResourceCaches(paperId);
+    }
     const mode = opts.mode || (state.selectedPaper && state.selectedPaper._detailMode) || detailModeForTab(state.currentTab);
     const refreshToken = Date.now() + ":refresh:" + paperId + ":" + (opts.reason || "detail");
     state.detailRefreshToken = refreshToken;
-    const detail = await fetchJSON(
-        API_BASE + "/" + encodeURIComponent(paperId) + "?mode=" + encodeURIComponent(mode)
+    const detailResult = await fetchPaperResource(
+        paperId,
+        "detail",
+        mode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT,
+        API_BASE + "/" + encodeURIComponent(paperId) + "?mode=" + encodeURIComponent(mode),
+        { forceRefresh: shouldForce }
     );
+    const detail = detailResult.value;
     if (state.detailRefreshToken !== refreshToken || state.selectedPaperId !== paperId) {
         return null;
     }
     detail._detailMode = mode;
-    state.selectedPaper = detail;
-    cachePaperDetail(detail);
-    renderWorkspaceHeader(detail);
-    renderDetail(detail, state.selectedPaperAudit || null);
-    if (state.currentTab === "dft") {
-        decorateDftReadinessPanel(detail);
-    }
-    showWorkspace();
+    applySelectedPaperDetail(detail, {
+        updatedAt: detailResult.updatedAt,
+        fromCache: detailResult.fromCache,
+    });
+    await Promise.all([
+        loadEvidenceLocators(paperId, { forceRefresh: shouldForce, silent: true }),
+        loadPaperDetailEnrichment(paperId, state.detailLoadToken, { forceRefresh: shouldForce, silent: true }),
+    ]);
+    rerenderSelectedDetail(paperId);
     return detail;
 }
 
@@ -2871,7 +3351,12 @@ async function refreshSelectedPaperDetailFromHeader() {
         button.textContent = "刷新中…";
     }
     try {
-        const detail = await refreshSelectedPaperDetail({ reason: "header_manual_refresh" });
+        clearPaperResourceCaches(state.selectedPaperId);
+        const detail = await refreshSelectedPaperDetail({
+            reason: "header_manual_refresh",
+            forceRefresh: true,
+            invalidateCache: true,
+        });
         if (detail) {
             showToast("当前文献详情已刷新", "success");
         }
@@ -2885,62 +3370,86 @@ async function refreshSelectedPaperDetailFromHeader() {
     }
 }
 
-function loadPaperDetailEnrichment(paperId, loadToken) {
-    fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit")
-        .then(function(audit) {
-            if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
-                state.selectedPaperAudit = audit;
-                rerenderSelectedDetail(paperId);
-            }
-        })
-        .catch(function(e) {
-            console.warn("Audit API is not available or failed:", e);
-        });
-
-    if ((state.currentTab === "dft" || state.currentTab === "review") && !(state.selectedPaper && state.selectedPaper.codex_context)) {
-        fetchJSON(
-            API_BASE + "/" + encodeURIComponent(paperId) +
-            "/codex-context?max_sections=1&max_chars_per_section=300&max_figures=0&max_tables=0&max_candidates=500"
+function loadPaperDetailEnrichment(paperId, loadToken, options) {
+    const opts = options || {};
+    const tasks = [];
+    tasks.push(
+        fetchPaperResource(
+            paperId,
+            "reviews/audit",
+            AUDIT_VARIANT,
+            "/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit",
+            { forceRefresh: opts.forceRefresh === true }
         )
-            .then(function(codexBundle) {
-                if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId && codexBundle && codexBundle.context) {
-                    state.selectedPaper.codex_context = codexBundle.context;
-                    rerenderSelectedDetail(paperId);
-                }
-            })
-            .catch(function(error) {
-                console.warn("Codex context summary is not available:", error);
-            });
-    }
-
-    if (state.currentTab === "writing") {
-        loadPaperKnowledgeContext(paperId);
-    }
-}
-
-function loadPaperKnowledgeContext(paperId) {
-    if (!paperId || state.selectedPaperId !== paperId) return;
-    if (state.selectedPaper && state.selectedPaper.knowledge_context) return;
-    if (state.knowledgeContextLoadingFor === paperId) return;
-    state.knowledgeContextLoadingFor = paperId;
-    fetchJSON(
-        API_BASE + "/" + encodeURIComponent(paperId) +
-        "/knowledge-context?max_candidates=24&max_chars_per_candidate=600"
-    )
-            .then(function(audit) {
-                if (state.selectedPaperId === paperId && state.selectedPaper) {
-                    state.selectedPaper.knowledge_context = audit;
-                    rerenderSelectedDetail(paperId);
+            .then(function(result) {
+                if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
+                    state.selectedPaperAudit = result.value;
                 }
             })
             .catch(function(e) {
-                console.warn("Knowledge context is not available:", e);
+                if (!opts.silent) console.warn("Audit API is not available or failed:", e);
             })
-            .finally(function() {
-                if (state.knowledgeContextLoadingFor === paperId) {
-                    state.knowledgeContextLoadingFor = null;
-                }
-            });
+    );
+
+    if ((state.currentTab === "dft" || state.currentTab === "review") && (opts.forceRefresh === true || !(state.selectedPaper && state.selectedPaper.codex_context))) {
+        tasks.push(
+            fetchPaperResource(
+                paperId,
+                "codex-context",
+                CODEX_CONTEXT_VARIANT,
+                API_BASE + "/" + encodeURIComponent(paperId) + "/codex-context?" + CODEX_CONTEXT_VARIANT,
+                { forceRefresh: opts.forceRefresh === true }
+            )
+                .then(function(result) {
+                    if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId && state.selectedPaper && result.value && result.value.context) {
+                        state.selectedPaper.codex_context = result.value.context;
+                    }
+                })
+                .catch(function(error) {
+                    if (!opts.silent) console.warn("Codex context summary is not available:", error);
+                })
+        );
+    }
+
+    if (state.currentTab === "writing") {
+        tasks.push(loadPaperKnowledgeContext(paperId, opts));
+    }
+
+    return Promise.all(tasks).then(function() {
+        if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
+            rerenderSelectedDetail(paperId);
+        }
+    });
+}
+
+function loadPaperKnowledgeContext(paperId, options) {
+    if (!paperId || state.selectedPaperId !== paperId) return;
+    const opts = options || {};
+    if (state.selectedPaper && state.selectedPaper.knowledge_context && opts.forceRefresh !== true) return Promise.resolve(state.selectedPaper.knowledge_context);
+    state.knowledgeContextLoadingFor = paperId;
+    return fetchPaperResource(
+        paperId,
+        "knowledge-context",
+        KNOWLEDGE_CONTEXT_VARIANT,
+        API_BASE + "/" + encodeURIComponent(paperId) + "/knowledge-context?" + KNOWLEDGE_CONTEXT_VARIANT,
+        { forceRefresh: opts.forceRefresh === true }
+    )
+        .then(function(result) {
+            if (state.selectedPaperId === paperId && state.selectedPaper) {
+                state.selectedPaper.knowledge_context = result.value;
+                rerenderSelectedDetail(paperId);
+            }
+            return result.value;
+        })
+        .catch(function(e) {
+            if (!opts.silent) console.warn("Knowledge context is not available:", e);
+            throw e;
+        })
+        .finally(function() {
+            if (state.knowledgeContextLoadingFor === paperId) {
+                state.knowledgeContextLoadingFor = null;
+            }
+        });
 }
 
 function openPaperDetailPage() {
@@ -2974,11 +3483,59 @@ function buildBlockedDftFallbackPrompt(row, index) {
     ].join("\n");
 }
 
+function inferReactionProfileFromText(text) {
+    const value = String(text || "").toLowerCase();
+    if (!value) return "UNKNOWN";
+    if (
+        /\b(li[-\s]?s|lithium[-\s]?sulfur|srr)\b/.test(value) ||
+        value.includes("锂硫") ||
+        value.includes("多硫化") ||
+        value.includes("硫还原") ||
+        value.includes("shuttle effect")
+    ) return "SRR_LiS";
+    if (/\b(her|hydrogen evolution)\b/.test(value)) return "HER";
+    if (/\b(oer|oxygen evolution)\b/.test(value)) return "OER";
+    if (/\b(orr|oxygen reduction)\b/.test(value)) return "ORR";
+    if (/\b(co2rr|co2 reduction|carbon dioxide reduction)\b/.test(value)) return "CO2RR";
+    return "UNKNOWN";
+}
+
+function inferPromptTargetReactionForSelectedPaper(kind) {
+    if (kind !== "dft") return "UNKNOWN";
+    const paper = state.selectedPaper || {};
+    const dftItems = Array.isArray(paper.dft_results_items) ? paper.dft_results_items : [];
+    const dftText = dftItems.map(function(item) {
+        return [
+            item && item.reaction_type,
+            item && item.reaction_step,
+            item && item.adsorbate,
+            item && item.property_type,
+            item && item.evidence_text
+        ].filter(Boolean).join(" ");
+    }).join(" ");
+    return inferReactionProfileFromText([
+        paper.library_name,
+        paper.paper_code,
+        paper.title,
+        paper.title_zh,
+        paper.abstract,
+        paper.keywords,
+        dftText
+    ].filter(Boolean).join(" "));
+}
+
 async function canonicalIdePromptForSelectedPaper(kind) {
     const guide = await fetchJSON("/api/system/agent-guide");
     const contract = guide && guide.prompt_contract ? guide.prompt_contract : {};
     const templates = contract.templates && typeof contract.templates === "object" ? contract.templates : {};
-    const template = templates[kind] || templates.overall || guide.suggested_client_prompt || "";
+    const reactionProfileTemplates = contract.reaction_profile_templates && typeof contract.reaction_profile_templates === "object"
+        ? contract.reaction_profile_templates
+        : {};
+    const targetReaction = inferPromptTargetReactionForSelectedPaper(kind);
+    const profileTemplates = reactionProfileTemplates[targetReaction] && typeof reactionProfileTemplates[targetReaction] === "object"
+        ? reactionProfileTemplates[targetReaction]
+        : {};
+    const template = profileTemplates[kind] || templates[kind] || templates.overall || guide.suggested_client_prompt || "";
     if (!template) return "";
 
     const paper = state.selectedPaper || {};
@@ -2994,7 +3551,8 @@ async function canonicalIdePromptForSelectedPaper(kind) {
     const sourceLabel = "<agent_name>_" + kind + "_" + runTag;
     return String(template)
         .split(contract.target_list_token || "{{TARGET_LIST}}").join(targetList)
-        .split(contract.source_label_token || "{{SOURCE_LABEL}}").join(sourceLabel);
+        .split(contract.source_label_token || "{{SOURCE_LABEL}}").join(sourceLabel)
+        .split(contract.target_reaction_token || "{{TARGET_REACTION}}").join(targetReaction);
 }
 
 function buildBlockedDftBatchPrompt(rows) {
@@ -3031,6 +3589,9 @@ function buildCompactBlockedDftRow(row, index) {
         "blocked=" + (blockedReasons.length ? blockedReasons.join(", ") : "none") +
             " | action=" + (row.recommended_action || "review_candidate") +
             " | page=" + (evidencePage == null ? "-" : evidencePage),
+        "workflow=" + (row.dft_workflow_label || row.dft_workflow_state || "-") +
+            " | next_required_action=" + (row.next_required_action || "-"),
+        "workflow_reason=" + clipText(row.dft_workflow_reason || "-", 180),
         "source=" + (row.source_section || "-") + " / " + (row.source_figure || "-"),
         "evidence=\"" + clipText(row.evidence_text || row.evidence_preview || "-", 140) + "\"",
     ].join("\n");
@@ -3049,8 +3610,9 @@ function buildCompactBlockedDftBatchPrompt(rows) {
     ) || "<source_pdf>";
     const header = [
         "任务：审核下面这些已列出的 DFT 候选；不要把清单内候选重新当成新数据提交。",
-        "要求：先核对 PDF 证据，再逐条给出完整意见。审核来源名称不固定，但必须与每条记录 existing_review_sources 中的来源不同。",
+        "要求：先核对 PDF 证据，再逐条给出完整意见。系统按独立 candidate_id 审核提交计票，不按 AI、模型或 source_label 去重；同一模型可以再次提交下一轮审核。",
         "强制规则：清单内每条候选都必须使用该行给出的 target_id；禁止对清单内候选输出 target_id='new' 或 decision='new_candidate'。",
+        "有效 AI 意见必须在 evidence_location 同时填写 page 和 quoted_text；缺任一项都不会计入第二意见或裁决依据。",
         "不要输出长解释；只输出一个可直接用于 import_analysis 的 JSON，顶层只保留 object_review_audits。",
         "如果当前 IDE 没有暴露 MCP 工具，不要直接停下；请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具。禁止直接调用 service/session/model 或数据库。",
         "",
@@ -3063,6 +3625,7 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         "- 只有发现清单外确实漏提的额外 DFT 行时，才可在处理完清单后追加 decision='new_candidate'、target_id='new'、field_name='dft_results'。",
         "- 追加漏提行后，不要只停在 candidate-only JSON；实际调用 import_analysis 时应使用 auto_apply_review_rules=true，让 new_candidate 自动进入未验证 DFT 候选队列。",
         "- 缺 material identity、缺证据原文、缺准确页码定位时，不要 PASS。",
+        "- 即使是 duplicate / REJECT，也必须给出 evidence_location.page 和 quoted_text；重复项还要在 reason 或 corrected_value.duplicate_of 写明保留项 target_id。",
         "- 单位标准：能量统一为 eV，meV 除以 1000；渗透率统一为 GPU，10^3 GPU 乘以 1000；原始表达写入 raw_value/raw_unit 或 evidence_location.quoted_text。",
         "",
         "输出模板：",
@@ -3120,14 +3683,14 @@ async function copyNewDftReviewPrompt() {
         const pendingRows = await fetchSelectedDftReviewRows(200);
         const rows = classifyDftAutomationRows(pendingRows).newReview;
         if (!rows.length) {
-            showToast("当前没有新发现或缺少独立第二意见的 DFT 数据。", "info");
+            showToast("当前没有新发现或缺少下一轮有效审核提交的 DFT 数据。", "info");
             return;
         }
         const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
         await navigator.clipboard.writeText(
             [canonicalPrompt, buildCompactBlockedDftBatchPrompt(rows)].filter(Boolean).join("\n\n")
         );
-        showToast("新数据审核提示词已复制，请交给未审核过这些记录的独立 AI。", "success");
+        showToast("新数据审核提示词已复制，请作为下一轮独立审核提交导入。", "success");
     } catch (error) {
         showToast("新数据审核提示词生成失败：" + error.message, "error");
     }
@@ -3185,6 +3748,8 @@ async function autoProcessLowRiskDftRows() {
         showToast("请先选择一篇文献。", "error");
         return;
     }
+    showToast("低风险自动处理入口已暂停；请使用“重新检查写回”按后端 workflow 结算一致项。", "info");
+    return;
     try {
         showToast("正在分析低风险 DFT 候选...", "info");
         const rows = await fetchSelectedDftReviewRows(200);
@@ -3197,7 +3762,7 @@ async function autoProcessLowRiskDftRows() {
         }
         const ok = window.confirm(
             "将自动采纳 " + acceptCount + " 条、自动拒绝重复项 " + rejectCount +
-            " 条；其余仍保留为第三 AI 仲裁或人工处理。继续吗？"
+            " 条；其余仍保留为第三轮 AI 仲裁或人工处理。继续吗？"
         );
         if (!ok) return;
         let applied = 0;
@@ -3241,12 +3806,14 @@ function buildThirdAiDftAdjudicationPrompt(rows) {
                 value: row.value,
                 unit: row.unit,
                 reaction_step: row.reaction_step,
-                blocked_reasons: row.blocked_reasons || []
+                blocked_reasons: row.blocked_reasons || [],
+                workflow_state: row.dft_workflow_state || null,
+                workflow_reason: row.dft_workflow_reason || null,
+                next_required_action: row.next_required_action || null
             },
             prior_ai_opinions: (row.object_review_audits || []).map(function(audit) {
                 return {
                     candidate_id: audit.candidate_id,
-                    source_identity: audit.source_label || audit.source || "unknown",
                     source: audit.source_label || audit.source || "unknown",
                     decision: audit.decision,
                     field_name: audit.field_name,
@@ -3258,15 +3825,16 @@ function buildThirdAiDftAdjudicationPrompt(rows) {
         };
     });
     return [
-        "任务：你是第三 AI 裁决员，只处理下面最终数据真正不一致的 DFT 候选。",
+        "任务：你是第三轮 AI 裁决员，只处理下面最终数据真正不一致的 DFT 候选。",
         "必须读取原始 PDF 或 PDF 证据包；不要只复述前两个 AI 的意见。",
         "如果当前 IDE 没有暴露 MCP 工具，请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具读取证据；禁止直接操作 service/session/model 或数据库。",
         "只需输出有争议字段的最终值；未争议字段由系统从当前记录和 selected_source_ids 自动补齐。",
-        "必须填写 adjudication_role='third_ai'。选择已有意见时填写 selected_source_ids；可填 candidate_id、source_identity 或 source。",
+        "必须填写 adjudication_role='third_ai'。本流程按独立 candidate_id 审核提交计票，不按 AI、模型或 source_label 去重；同一模型可以再次审核并作为第三轮提交。",
+        "选择已有意见时填写 selected_source_ids，优先填写准确的 candidate_id，避免同来源多次提交时产生歧义。",
         "可以给出新的 evidence_location；若沿用被选意见的证据，系统会从 selected_source_ids 自动继承。",
-        "如果缺证据页码或原文，请主动在 PDF 中定位；确实找不到时输出 NEEDS_HUMAN，记录继续留在冲突裁决队列。",
+        "有效裁决必须在 evidence_location 同时包含 page 和 quoted_text；如果既有意见缺证据页码或原文，请主动在 PDF 中定位；确实找不到时输出 NEEDS_HUMAN，记录继续留在冲突裁决队列。",
         "单位标准：能量统一为 eV，meV 除以 1000；渗透率统一为 GPU，10^3 GPU 乘以 1000；原始表达写入 raw_value/raw_unit 或 evidence quoted_text。",
-        "重复项必须明确 duplicate_of，并说明保留哪条、拒绝哪条。",
+        "重复项/REJECT 也必须给出 evidence_location.page 和 quoted_text，并明确 duplicate_of 或 PDF 证据，说明保留哪条、拒绝哪条。",
         "只输出 JSON：顶层 object_review_audits，不要长解释。",
         "",
         "输出字段：decision=PASS|PROPOSED|REJECT|NEEDS_HUMAN；target_type=dft_results；field_name=dft_results；adjudication_role=third_ai；selected_source_ids=[]；corrected_value 只写裁决后需要覆盖的字段；evidence_location 写新证据时包含 page、quoted_text、source_document_type、source_pdf。",
@@ -3330,8 +3898,8 @@ async function copyNextDftAiReviewPrompt() {
         await navigator.clipboard.writeText(promptParts.filter(Boolean).join("\n\n"));
         await refreshSelectedPaperDetail({ reason: "dft_next_ai_prompt", mode: "full" });
         showToast(
-            "下一轮任务已复制：第二 AI / 补证据 " + classified.newReview.length +
-            " 条，第三 AI 裁决 " + classified.conflicts.length + " 条。",
+            "下一轮任务已复制：下一轮审核 / 补证据 " + classified.newReview.length +
+            " 条，第三轮 AI 裁决 " + classified.conflicts.length + " 条。",
             "success"
         );
     } catch (error) {
@@ -3358,8 +3926,8 @@ function decorateDftReadinessPanel(detail) {
     actions.innerHTML =
         (blockedCount
             ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">' +
-                '<span class="status-chip meta" data-role="dft-new-review-count">第二 AI / 补证据 ...</span>' +
-                '<span class="status-chip failed" data-role="dft-conflict-count">第三 AI 裁决 ...</span>' +
+                '<span class="status-chip meta" data-role="dft-new-review-count">下一轮审核 / 补证据 ...</span>' +
+                '<span class="status-chip failed" data-role="dft-conflict-count">第三轮 AI 裁决 ...</span>' +
               '</div>' +
               '<button class="btn primary small" data-role="dft-next-action" type="button" onclick="copyNextDftAiReviewPrompt()">生成下一轮 AI 审核任务</button>'
             : "") +
@@ -3441,7 +4009,7 @@ function renderAiAuditTrail(items) {
     return (
         '<div id="aiAuditTrailPanel" class="section-card" style="border:1px solid var(--color-border);margin-bottom:16px;">' +
             '<h3>AI 审核建议记录</h3>' +
-            '<div class="subtle">这里显示 AI / GLM / 第二 AI 写入的审核意见。AI 结论不会直接进入可信数据库；冲突项会标记为 review_conflict 并要求人工确认。</div>' +
+            '<div class="subtle">这里显示 AI / GLM / 外部审核提交写入的审核意见。AI 结论不会直接进入可信数据库；冲突项会标记为 review_conflict 并要求人工确认。</div>' +
             '<div style="display:grid;gap:10px;margin-top:12px;">' +
                 aiItems.map(renderAiAuditTrailItem).join("") +
             '</div>' +
@@ -3766,6 +4334,19 @@ async function rejectDftResult(itemId) {
                 })
             }
         );
+        const detailItems = state.selectedPaper && Array.isArray(state.selectedPaper.dft_results_items)
+            ? state.selectedPaper.dft_results_items
+            : [];
+        detailItems.forEach(function(item) {
+            if (dftResultId(item) !== String(itemId)) return;
+            item.candidate_status = "Rejected";
+            item.dft_workflow_state = "rejected";
+            item.dft_workflow_label = "已拒绝";
+            item.dft_workflow_reason = "这条 DFT 已被人工拒绝，当前为终态。";
+            item.next_required_action = "none";
+            if (item.export_safety) item.export_safety.review_status = "rejected";
+        });
+        rerenderSelectedDetail(state.selectedPaperId);
         showToast("这条 DFT 已拒绝。", "success");
         await refreshSelectedPaperDetail({ reason: "reject_dft_result", mode: "full" });
     } catch (error) {
@@ -3866,29 +4447,27 @@ async function recropPaperFigures(paperId) {
 }
 
 async function promptAddRelationship(paperId) {
-    const targetId = window.prompt("请输入目标文献的 ID (例如您刚上传的补充材料):");
+    const targetId = window.prompt("请输入支撑文献 SI 的 ID 或短号（例如 U0094）:");
     if (!targetId) return;
-    const relType = window.prompt("请输入关联类型 (如: supplementary, citation):", "supplementary");
-    if (!relType) return;
-    
+
     try {
-        showToast("正在创建关联...", "info");
+        showToast("正在绑定支撑文献...", "info");
         await fetchJSON(API_BASE + "/" + encodeURIComponent(paperId) + "/relationships", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 target_paper_id: targetId.trim(),
-                relationship_type: relType.trim(),
-                note: "Manual frontend binding"
+                relationship_type: "supplementary",
+                note: "Manual SI binding"
             })
         });
-        showToast("关联创建成功", "success");
+        showToast("支撑文献绑定成功", "success");
         if (state.selectedPaperId === paperId) {
             await refreshSelectedPaperDetail({ reason: "relationship_created", mode: "full" });
         } else {
             await loadPaperDetail(paperId);
         }
     } catch (e) {
-        showToast("创建失败: " + e.message, "error");
+        showToast("绑定失败: " + e.message, "error");
     }
 }

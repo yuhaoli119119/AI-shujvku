@@ -224,7 +224,7 @@ function renderPaperList() {
             '<tr class="paper-row' + active + '" data-id="' + stablePaperId + '" onclick="selectPaperById(\'' + stablePaperId + '\')" ondblclick="openWorkspaceForPaper(\'' + stablePaperId + '\')">' +
                 '<td class="col-divider" style="text-align:center; color:var(--color-text-secondary);">' + esc(displayCode || (idx + 1)) + '</td>' +
                 '<td style="text-align:center; color:var(--color-text-secondary);">' + esc(paper.year || "-") + '</td>' +
-                '<td style="text-align:center; color:var(--color-text-secondary); font-weight:600;">' + esc(paperTypeLabel(paper.paper_type)) + '</td>' +
+                '<td style="text-align:center; color:var(--color-text-secondary); font-weight:600;">' + paperTypeCellHtml(paper.paper_type) + '</td>' +
                 '<td class="col-divider" style="text-align:center; vertical-align:middle;">' + renderImpactFactor(paper) + '</td>' +
                 '<td class="col-divider" style="text-align:left; padding-left:16px;">' +
                     '<div class="paper-title" title="' + esc(paper.title || "未命名文献") + '">' + titleLine + '</div>' +
