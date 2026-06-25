@@ -1124,6 +1124,69 @@ def import_analysis(
 
 
 @mcp_server.tool(
+    name="apply_analysis_review_rules",
+    description=(
+        "Apply IDE-AI review rules to an existing external analysis run. "
+        "This is the MCP counterpart of HTTP POST /runs/{run_id}/apply-review-rules. "
+        "Use it to materialize DFT object_review_audit candidates that were imported "
+        "with auto_apply_review_rules=False, or to re-evaluate a run after new candidates "
+        "have been added."
+    ),
+)
+def apply_analysis_review_rules(
+    run_id: str,
+    reviewer: str | None = None,
+    write_lock_token: str | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
+    effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
+    effective_lock_owners = list(
+        dict.fromkeys(
+            item
+            for item in [effective_internal_reviewer, effective_reviewer]
+            if str(item or "").strip()
+        )
+    )
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        service = ExternalAnalysisService(session=session, settings=settings)
+        run = service.get_run(UUID(run_id))
+        auto_apply_summary = service.apply_review_rules_for_run(
+            run.id,
+            reviewer=effective_internal_reviewer,
+            write_lock_tokens=[write_lock_token] if write_lock_token else None,
+            write_lock_owner=effective_lock_owners,
+            auto_lock_owner=effective_internal_reviewer,
+            lock_meta_source="mcp_apply_review_rules",
+        )
+        candidates = service.list_candidates(run.id)
+        session.commit()
+        return {
+            "run_id": str(run.id),
+            "paper_id": str(run.paper_id),
+            "reviewer": effective_reviewer,
+            "auto_apply_summary": auto_apply_summary,
+            "candidate_count": len(candidates),
+            "candidates": [
+                {
+                    "id": str(c.id),
+                    "type": c.candidate_type,
+                    "confidence": c.confidence,
+                    "status": c.status,
+                    "target_type": (c.normalized_payload or {}).get("target_type"),
+                    "target_id": (c.normalized_payload or {}).get("target_id"),
+                    "field_name": (c.normalized_payload or {}).get("field_name"),
+                    "decision": (c.normalized_payload or {}).get("decision") or (c.normalized_payload or {}).get("verdict"),
+                    "materialized_target_type": c.materialized_target_type,
+                    "materialized_target_id": c.materialized_target_id,
+                }
+                for c in candidates
+            ],
+        }
+
+
+@mcp_server.tool(
     name="compare_papers",
     description="Compare extracted data across multiple papers side-by-side. Returns structured results for DFT settings, catalyst samples, performance metrics, mechanism claims, etc. Useful for finding contradictions or confirming trends.",
 )
