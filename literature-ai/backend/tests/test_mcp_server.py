@@ -62,6 +62,7 @@ from app.mcp.server import (
     reject_correction,
     scan_local_pdfs,
     scan_duplicate_dois,
+    _mcp_review_identity,
 )
 from app.services.paper_query import PaperQueryService
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
@@ -1942,3 +1943,34 @@ def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(m
             )
         ).all()
         assert active_locks == [], "active dft_results lock remains after explicit release"
+
+
+def test_mcp_review_identity_helper_consistency():
+    """Unit test for the _mcp_review_identity helper shared by import_analysis
+    and apply_analysis_review_rules. Verifies the three documented identity
+    contracts without touching the database.
+    """
+    # Case 1: reviewer=None, source_prefix="claude" -> all collapse to "claude"
+    auth = MCPAuthInfo(
+        source_prefix="claude",
+        display_name="claude",
+        capabilities=frozenset(),
+        raw_key="",
+    )
+    reviewer, internal, owners = _mcp_review_identity(None, auth)
+    assert reviewer == "claude"
+    assert internal == "claude"
+    assert owners == ["claude"]
+
+    # Case 2: reviewer="codex_window_b", source_prefix="claude"
+    # -> reviewer=codex_window_b, internal=claude, owners=[claude, codex_window_b]
+    reviewer, internal, owners = _mcp_review_identity("codex_window_b", auth)
+    assert reviewer == "codex_window_b"
+    assert internal == "claude"
+    assert owners == ["claude", "codex_window_b"]
+
+    # Case 3: reviewer="claude" == source_prefix="claude" -> dedup to ["claude"]
+    reviewer, internal, owners = _mcp_review_identity("claude", auth)
+    assert reviewer == "claude"
+    assert internal == "claude"
+    assert owners == ["claude"]

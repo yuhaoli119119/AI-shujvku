@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
+from app.mcp.context import MCPAuthInfo
 from app.rag.retriever import Retriever
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
 from app.services.discovery_service import DiscoveryService
@@ -67,6 +68,38 @@ def _allowed_mcp_hosts() -> list[str]:
         hosts.add("testserver")
         hosts.add("testserver:*")
     return sorted(hosts)
+
+
+def _mcp_review_identity(
+    reviewer: str | None,
+    auth: MCPAuthInfo,
+) -> tuple[str, str, list[str]]:
+    """Derive the (reviewer, internal_reviewer, lock_owners) triple used by the
+    MCP external-analysis entry points (``import_analysis`` and
+    ``apply_analysis_review_rules``).
+
+    The semantics are intentionally identical across both entry points so that
+    a pre-acquired lock validated under one tool can be reused by the other:
+
+    - ``effective_reviewer``: the externally visible reviewer label. Defaults
+      to ``auth.source_prefix`` when the caller does not pass one.
+    - ``effective_internal_reviewer``: the identity recorded on auto-applied
+      outputs and used as the ``auto_lock_owner`` when the service needs to
+      auto-acquire a DFT write lock. Prefers ``auth.source_prefix``.
+    - ``effective_lock_owners``: de-duplicated ``[internal, reviewer]`` list
+      used to validate caller-supplied ``write_lock_token``\\ s. When both
+      identities coincide the list collapses to a single entry.
+    """
+    effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
+    effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
+    effective_lock_owners = list(
+        dict.fromkeys(
+            item
+            for item in [effective_internal_reviewer, effective_reviewer]
+            if str(item or "").strip()
+        )
+    )
+    return effective_reviewer, effective_internal_reviewer, effective_lock_owners
 
 
 mcp_server = FastMCP(
@@ -1061,15 +1094,7 @@ def import_analysis(
         has_payload = bool(raw_payload)
     if not has_text and not has_payload:
         raise ValueError("import_analysis requires non-empty raw_text or raw_payload")
-    effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
-    effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
-    effective_lock_owners = list(
-        dict.fromkeys(
-            item
-            for item in [effective_internal_reviewer, effective_reviewer]
-            if str(item or "").strip()
-        )
-    )
+    effective_reviewer, effective_internal_reviewer, effective_lock_owners = _mcp_review_identity(reviewer, auth)
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         service = ExternalAnalysisService(session=session, settings=settings)
@@ -1139,15 +1164,7 @@ def apply_analysis_review_rules(
     write_lock_token: str | None = None,
 ) -> dict[str, Any]:
     auth = require_mcp_capability("propose_corrections")
-    effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
-    effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
-    effective_lock_owners = list(
-        dict.fromkeys(
-            item
-            for item in [effective_internal_reviewer, effective_reviewer]
-            if str(item or "").strip()
-        )
-    )
+    effective_reviewer, effective_internal_reviewer, effective_lock_owners = _mcp_review_identity(reviewer, auth)
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         service = ExternalAnalysisService(session=session, settings=settings)
