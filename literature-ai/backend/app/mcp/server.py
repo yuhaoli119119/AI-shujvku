@@ -14,7 +14,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
 
 from app.config import get_settings
-from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.rag.retriever import Retriever
@@ -281,7 +281,7 @@ def get_paper(paper_id: str) -> dict[str, Any]:
         return payload
 
 
-@mcp_server.tool(name="get_codex_context", description="Get a compact Codex-ready paper bundle with metadata, sections, figures, tables, candidates, warnings, notes, and Markdown.")
+@mcp_server.tool(name="get_codex_context", description="Get a compact Codex-ready paper bundle with metadata, sections, figures, tables, candidates, warnings, notes, and Markdown. Table review includes main plus supplementary tables; figure review defaults to main-paper figures unless include_supplementary_figures is true.")
 def get_codex_context(
     paper_id: str,
     max_sections: int = 8,
@@ -289,6 +289,7 @@ def get_codex_context(
     max_figures: int = 12,
     max_tables: int = 8,
     max_candidates: int = 20,
+    include_supplementary_figures: bool = False,
 ) -> dict[str, Any]:
     require_mcp_capability("read_papers")
     settings = get_settings()
@@ -300,6 +301,7 @@ def get_codex_context(
             max_figures=max(0, min(max_figures, 40)),
             max_tables=max(0, min(max_tables, 30)),
             max_candidates=max(1, min(max_candidates, 100)),
+            include_supplementary_figures=bool(include_supplementary_figures),
         )
         if context is None:
             raise ValueError("Paper not found")
@@ -1405,52 +1407,15 @@ def import_analysis(
             raw_text=raw_text,
             raw_payload=raw_payload,
         )
-        candidates = service.list_candidates(run.id)
-        effective_write_lock_token = write_lock_token
-        auto_lock = None
-        imports_dft = any(
-            str((candidate.normalized_payload or {}).get("target_type") or "").strip().lower()
-            in {"dft_result", "dft_results"}
-            for candidate in candidates
-            if isinstance(candidate.normalized_payload, dict)
-        )
-        if auto_apply_review_rules and imports_dft and not effective_write_lock_token:
-            auto_lock = ModuleWriteLockService(session).acquire(
-                paper_id=UUID(paper_id),
-                module_name="dft_results",
-                locked_by=effective_internal_reviewer,
-                meta={"source": "mcp_import_analysis", "run_id": str(run.id)},
-            )
-            effective_write_lock_token = auto_lock.lock_token
         auto_apply_summary = None
         if auto_apply_review_rules:
-            non_dft_summary = service.auto_apply_non_dft_review_outputs(
+            auto_apply_summary = service.apply_review_rules_for_run(
                 run.id,
                 reviewer=effective_internal_reviewer,
-                write_lock_tokens=[effective_write_lock_token] if effective_write_lock_token else None,
+                write_lock_tokens=[write_lock_token] if write_lock_token else None,
                 write_lock_owner=effective_lock_owners,
-            )
-            dft_auto_apply_summary = VerificationSessionService(session, settings).apply_import_rules_for_paper(
-                paper_id=UUID(paper_id),
-                reviewer=effective_internal_reviewer,
-                candidate_run_id=run.id,
-                write_lock_tokens=[effective_write_lock_token] if effective_write_lock_token else None,
-                write_lock_owner=effective_lock_owners,
-            )
-            auto_apply_summary = {
-                **(dft_auto_apply_summary or {}),
-                "non_dft_auto_apply": {
-                    "created_notes": non_dft_summary.created_notes,
-                    "created_corrections": non_dft_summary.created_corrections,
-                    "created_relationships": non_dft_summary.created_relationships,
-                    "auto_applied_corrections": non_dft_summary.auto_applied_corrections,
-                    "skipped_candidates": non_dft_summary.skipped_candidates,
-                },
-            }
-        if auto_lock is not None:
-            ModuleWriteLockService(session).release(
-                lock_token=auto_lock.lock_token,
-                released_by=effective_internal_reviewer,
+                auto_lock_owner=effective_internal_reviewer,
+                lock_meta_source="mcp_import_analysis",
             )
         candidates = service.list_candidates(run.id)
         session.commit()
@@ -1999,7 +1964,7 @@ def create_figure_from_bbox(
 
 @mcp_server.tool(
     name="review_figure",
-    description="Record and optionally apply a review verdict for a specific figure. Verdicts: verified (AI summary matches the image), needs_attention (summary is incomplete or misleading), incorrect (summary contradicts the image). For non-DFT figure metadata, IDE AI may directly update figure_role, content_summary, key_elements, and crop_status after checking the PDF/image evidence.",
+    description="Record and optionally apply a review verdict for a specific figure. Figure review defaults to main-paper figures; SI figures are opt-in or evidence-anchor-triggered. Verdicts: verified (AI summary matches the image), needs_attention (summary is incomplete or misleading), incorrect (summary contradicts the image). For non-DFT figure metadata, IDE AI may directly update figure_role, content_summary, key_elements, and crop_status after checking the PDF/image evidence. Figure-derived DFT data must be submitted as DFT candidates/object_review_audits, not final verified or ML_Ready data.",
 )
 def review_figure(
     figure_id: str,
@@ -2100,7 +2065,7 @@ def review_figure(
 
 @mcp_server.tool(
     name="get_review_coverage",
-    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Aggregates review_figure verdicts, historical chart notes, and PaperCorrection records to produce a coverage report.",
+    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Table coverage includes main plus supplementary tables; figure coverage defaults to main-paper figures only. Aggregates review_figure verdicts, historical chart notes, and PaperCorrection records to produce a coverage report.",
 )
 def get_review_coverage(paper_id: str) -> dict[str, Any]:
     require_mcp_capability("read_papers")
@@ -2110,10 +2075,26 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
         pid = UUID(paper_id)
         _ensure_paper_exists(session, pid)
 
+        supplementary_relationship_types = {"supplementary", "supplementary_information", "supporting_information", "si"}
+        supplementary_paper_ids = [
+            row.target_paper_id
+            for row in session.scalars(
+                select(PaperRelationship).where(PaperRelationship.source_paper_id == pid)
+            ).all()
+            if str(row.relationship_type or "").strip().lower() in supplementary_relationship_types
+        ]
+
         # --- Figures ---
         all_figures = session.scalars(
             select(PaperFigure).where(PaperFigure.paper_id == pid)
         ).all()
+        supplementary_figures_available_count = (
+            session.scalar(
+                select(func.count(PaperFigure.id)).where(PaperFigure.paper_id.in_(supplementary_paper_ids))
+            )
+            if supplementary_paper_ids
+            else 0
+        ) or 0
 
         figure_logs = session.scalars(
             select(AuditLog)
@@ -2152,18 +2133,30 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
             })
 
         # --- Tables ---
+        table_owner_ids = [pid] + supplementary_paper_ids
         all_tables = session.scalars(
-            select(PaperTable).where(PaperTable.paper_id == pid)
+            select(PaperTable)
+            .where(PaperTable.paper_id.in_(table_owner_ids))
+            .order_by(PaperTable.paper_id.asc(), PaperTable.page.asc().nulls_last())
         ).all()
 
         table_ids = {str(tbl.id) for tbl in all_tables}
         query_service = PaperQueryService(session)
-        table_audits = query_service._object_review_audits_by_target(
-            pid,
+        table_audits = query_service._merge_object_review_audit_maps(
+            [
+                query_service._object_review_audits_by_target(
+                    owner_id,
+                    table_ids,
+                    target_types={"table", "tables", "paper_table", "paper_tables"},
+                )
+                for owner_id in table_owner_ids
+            ],
             table_ids,
-            target_types={"table", "tables", "paper_table", "paper_tables"},
         )
-        table_corrections = query_service._table_corrections_by_target(pid, table_ids)
+        table_corrections = query_service._merge_correction_maps(
+            [query_service._table_corrections_by_target(owner_id, table_ids) for owner_id in table_owner_ids],
+            table_ids,
+        )
         table_status_by_id = {
             table_id: PaperQueryService._table_review_status(
                 table_audits.get(table_id, []),
@@ -2241,6 +2234,12 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
 
         return {
             "paper_id": paper_id,
+            "review_scope": {
+                "table_review_scope": "main_plus_supplementary",
+                "figure_review_scope": "main_only",
+                "include_supplementary_figures": False,
+                "supplementary_figures_available_count": int(supplementary_figures_available_count),
+            },
             "figures": {
                 "total": len(all_figures),
                 "reviewed": fig_reviewed,

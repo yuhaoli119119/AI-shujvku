@@ -84,6 +84,21 @@ class ExternalAnalysisMaterializeRequest(BaseModel):
     created_by: str = "system"
 
 
+class ExternalAnalysisApplyReviewRulesRequest(BaseModel):
+    reviewer: str | None = Field(
+        default=None,
+        description="Reviewer label recorded when auto-applying review rules. Defaults to source_label/source/ide_ai.",
+    )
+    write_lock_token: str | None = Field(
+        default=None,
+        description="Optional pre-acquired dft_results write lock token. When omitted the service auto-acquires one.",
+    )
+    write_lock_tokens: list[str] = Field(
+        default_factory=list,
+        description="Additional pre-acquired write lock tokens for multi-module direct AI writes.",
+    )
+
+
 class PaperRelationshipResponse(BaseModel):
     id: UUID
     source_paper_id: UUID

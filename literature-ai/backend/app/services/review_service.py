@@ -219,7 +219,27 @@ class ReviewService:
         correction.status = "approved"
         correction.reviewed_by = reviewer
         correction.reviewed_at = datetime.utcnow()
-        self._apply_correction(correction)
+        try:
+            self._apply_correction(correction)
+        except Exception:
+            # Revert: _apply_correction failed, so the correction must NOT
+            # remain in the "approved" state.  If the inner method already
+            # set a more appropriate status (e.g. "requires_resolution" for
+            # ambiguous catalyst samples), preserve it.  Otherwise roll back
+            # to "failed" so that approve_corrections_batch (which catches
+            # the exception) reports it as skipped, and downstream queries
+            # do not see a false "approved" record with no materialized
+            # target.
+            if correction.status == "approved":
+                self.session.execute(
+                    update(PaperCorrection)
+                    .where(PaperCorrection.id == correction_id)
+                    .values(status="failed")
+                    .execution_options(synchronize_session=False)
+                )
+                correction.status = "failed"
+            self.session.flush()
+            raise
         self.session.add(correction)
         self.session.add(
             AuditLog(
@@ -453,6 +473,11 @@ class ReviewService:
             self._apply_structured_create(correction)
             return
         if correction.operation != "replace":
+            if correction.operation == "create" and correction.field_name in {"dft_results", "dft_result"}:
+                raise ValueError(
+                    "DFT results cannot be created via PaperCorrection; use import_analysis with "
+                    "object_review_audit (target_type=dft_results, decision=new_candidate) instead."
+                )
             raise ValueError("Only replace corrections and approved structured creation are supported in the current review flow")
 
         if self._is_top_level_paper_correction(correction):
