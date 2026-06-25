@@ -1481,3 +1481,257 @@ def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):
         stored = session.get(DFTResult, UUID(row_id))
         assert stored.value == pytest.approx(-1.35)
         assert session.scalar(select(AuditLog).where(AuditLog.action == "manual_conflict_resolution")) is not None
+
+
+# ---------------------------------------------------------------------------
+# Characterization tests for _settle_dft_row_from_existing_audits branch
+# priority.  Each test pins which branch fires for a given opinion
+# configuration, so future refactors cannot silently reorder the priority
+# ladder.
+# ---------------------------------------------------------------------------
+
+
+def _make_settle_service() -> VerificationSessionService:
+    """Build a VerificationSessionService with a MagicMock session, matching
+    the existing characterization-test pattern in this file."""
+    service = object.__new__(VerificationSessionService)
+    service.session = MagicMock()
+    service.session.get.return_value = None  # _dft_identity_key looks up row
+    return service
+
+
+def _make_audit(
+    *,
+    source_identity: str,
+    decision: str,
+    field_name: str = "dft_results",
+    corrected_value: dict | None = None,
+    evidence_payload: dict | None = None,
+    adjudication_role: str = "",
+    confidence: float = 0.8,
+    material: str | None = None,
+    candidate_id: str | None = None,
+) -> dict:
+    """Build a minimal audit dict accepted by _settle_dft_row_from_existing_audits."""
+    audit: dict = {
+        "source_identity": source_identity,
+        "candidate_id": candidate_id or f"cand-{source_identity}",
+        "status": "materialized",
+        "decision": decision,
+        "field_name": field_name,
+        "corrected_value": corrected_value or {},
+        "evidence_payload": evidence_payload if evidence_payload is not None else {"page": 1, "quoted_text": "evidence"},
+        "confidence": confidence,
+        "candidate": MagicMock(),
+    }
+    if adjudication_role:
+        audit["adjudication_role"] = adjudication_role
+    if material:
+        audit["material"] = material
+    return audit
+
+
+def test_settle_third_ai_priority_over_pass_reject_conflict():
+    """When PASS + REJECT conflict AND a third_ai adjudication exists, the
+    third_ai branch must fire — NOT the has_reject+has_positive → need_third_ai
+    branch.  The third_ai check sits above the decision-conflict check in the
+    priority ladder."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=-0.95,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV"},
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="REJECT",
+            corrected_value={"value": -0.95, "unit": "eV"},
+        ),
+        _make_audit(
+            source_identity="adjudicator",
+            decision="REJECT",
+            adjudication_role="third_ai",
+            corrected_value={"value": -0.95, "unit": "eV"},
+            confidence=0.95,
+        ),
+    ]
+
+    service = _make_settle_service()
+    # Mock the reject-all path so we don't need a real DFTResultReviewService.
+    service._apply_reject_all = MagicMock(
+        return_value={"action": "reject", "target_type": "dft_results", "result": {"status": "rejected"}}
+    )
+
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "auto_applied"
+    assert result.get("reason") != "decision_conflict"
+    service._apply_reject_all.assert_called_once()
+
+
+def test_settle_missing_evidence_anchor_priority_over_waiting_second_ai():
+    """When opinions exist but NONE have an evidence anchor, the settle
+    function must return need_repair / missing_evidence_anchor — NOT
+    waiting_second_ai (which would fire if anchored < 2 but the anchor
+    check comes first in the priority ladder)."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=-0.95,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV"},
+            evidence_payload={},  # no anchor keys
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV"},
+            evidence_payload={},  # no anchor keys either
+        ),
+    ]
+
+    service = _make_settle_service()
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "need_repair"
+    assert result["reason"] == "missing_evidence_anchor"
+
+
+def test_settle_whole_row_proposal_without_supporting_pass_returns_value_conflict():
+    """A whole-row PROPOSED opinion with no supporting PASS (values differ)
+    must return need_third_ai / value_conflict.  It must NOT fall through to
+    the same_field_consensus branch, because the whole_row check returns
+    early."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=0.75,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PROPOSED",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": 0.95,
+                "unit": "eV",
+            },
+            confidence=0.9,
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="PASS",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": 0.80,  # different value → no supporting pass
+                "unit": "eV",
+            },
+            confidence=0.85,
+        ),
+    ]
+
+    service = _make_settle_service()
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "need_third_ai"
+    assert result["reason"] == "value_conflict"
+
+
+def test_settle_incompatible_material_identity_returns_need_repair_not_auto_apply():
+    """Two anchored PASS opinions with matching values but incompatible
+    material identities must return need_repair / material_identity_conflict
+    — NOT auto_applied.  The material-identity check sits inside the
+    pass-consensus branch and short-circuits before any apply call."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=-0.95,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PASS",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": -0.95,
+                "unit": "eV",
+                "material_identity": "CoN3",
+            },
+            material="CoN3",
+            confidence=0.9,
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="PASS",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": -0.95,
+                "unit": "eV",
+                "material_identity": "FeN4",
+            },
+            material="FeN4",  # incompatible with CoN3
+            confidence=0.88,
+        ),
+    ]
+
+    service = _make_settle_service()
+    # If the material-identity guard fails, _apply_dft_consensus_outcome
+    # would be called.  Wire it to fail the test if reached.
+    service._apply_dft_consensus_outcome = MagicMock(
+        side_effect=AssertionError("material_identity_conflict should short-circuit before apply")
+    )
+
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "need_repair"
+    assert result["reason"] == "material_identity_conflict"
+    service._apply_dft_consensus_outcome.assert_not_called()
