@@ -676,6 +676,137 @@ class ExternalAnalysisService:
         self.session.flush()
         return result
 
+    def apply_review_rules_for_run(
+        self,
+        run_id: UUID,
+        *,
+        reviewer: str,
+        write_lock_tokens: list[str] | None = None,
+        write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
+        auto_lock_owner: str | None = None,
+        lock_meta_source: str = "external_analysis_import",
+    ) -> dict[str, Any]:
+        """Apply IDE-AI review rules to an existing external analysis run.
+
+        This is the single shared pipeline used by both the MCP ``import_analysis``
+        tool and the HTTP ``POST /import`` endpoint.  It:
+
+        1. Detects whether the run contains DFT ``object_review_audit`` candidates.
+        2. When DFT candidates are present and no external ``write_lock_tokens``
+           were supplied, auto-acquires a ``dft_results`` module write lock so the
+           downstream ``apply_import_rules_for_paper`` gate does not reject the
+           write.  The lock is released in a ``finally`` block to guarantee it
+           never leaks on success or failure.
+        3. Runs the non-DFT auto-apply path (notes/corrections/relationships).
+        4. Runs the DFT settlement path (materialize new candidates + dual-AI
+           consensus state machine) via ``VerificationSessionService``.
+        5. Returns the combined ``auto_apply_summary`` mirroring the historical
+           MCP response shape.
+
+        Parameters
+        ----------
+        reviewer:
+            Reviewer label recorded on auto-applied outputs.  This is also used
+            as the ``write_lock_owner`` fallback when the caller does not pass
+            an explicit owner list.
+        write_lock_tokens:
+            Lock tokens supplied by the caller (e.g. previously acquired via
+            ``acquire_module_write_lock``).  When non-empty the auto-acquire
+            step is skipped.
+        write_lock_owner:
+            Owner(s) allowed to validate the supplied tokens.  MCP passes a
+            list ``[internal, reviewer]``; HTTP passes a single ``reviewer``.
+            This deliberately preserves the two entry points' identity
+            semantics rather than collapsing them.
+        auto_lock_owner:
+            ``locked_by`` to use when auto-acquiring a DFT lock.  MCP passes
+            ``effective_internal_reviewer``; HTTP passes ``effective_reviewer``.
+            Defaults to ``reviewer`` when not specified.
+        lock_meta_source:
+            Source tag recorded in the lock's metadata for audit traceability.
+        """
+
+        run = self.get_run(run_id)
+        candidates = self.list_candidates(run.id)
+        tokens: list[str] = [str(item).strip() for item in (write_lock_tokens or []) if str(item or "").strip()]
+        imports_dft = any(
+            str((c.normalized_payload or {}).get("target_type") or "").strip().lower()
+            in {"dft_result", "dft_results"}
+            for c in candidates
+            if isinstance(c.normalized_payload, dict)
+        )
+
+        lock_service = ModuleWriteLockService(self.session)
+        auto_lock = None
+        if imports_dft and not tokens:
+            acquire_owner = str(auto_lock_owner or reviewer or "ide_ai").strip() or "ide_ai"
+            auto_lock = lock_service.acquire(
+                paper_id=run.paper_id,
+                module_name="dft_results",
+                locked_by=acquire_owner,
+                meta={"source": lock_meta_source, "run_id": str(run.id)},
+            )
+            tokens.append(auto_lock.lock_token)
+
+        try:
+            non_dft_summary = self.auto_apply_non_dft_review_outputs(
+                run.id,
+                reviewer=reviewer,
+                write_lock_tokens=tokens or None,
+                write_lock_owner=write_lock_owner,
+            )
+            from app.services.verification_session_service import VerificationSessionService
+
+            dft_summary = VerificationSessionService(self.session, self.settings).apply_import_rules_for_paper(
+                paper_id=run.paper_id,
+                reviewer=reviewer,
+                candidate_run_id=run.id,
+                write_lock_tokens=tokens or None,
+                write_lock_owner=write_lock_owner,
+            )
+        finally:
+            if auto_lock is not None:
+                release_owner = str(auto_lock_owner or reviewer or "ide_ai").strip() or "ide_ai"
+                try:
+                    lock_service.release(
+                        lock_token=auto_lock.lock_token,
+                        released_by=release_owner,
+                    )
+                except Exception as release_exc:
+                    # Best-effort release; surface nothing that would mask the
+                    # original apply error.  But log an audit entry so that a
+                    # leaked lock is observable rather than silently lost.
+                    # Stale locks are also reaped by TTL as a backstop.
+                    self.session.add(
+                        AuditLog(
+                            paper_id=run.paper_id,
+                            action="auto_lock_release_failed",
+                            source=release_owner,
+                            target_type="module_write_lock",
+                            target_id=auto_lock.lock_token,
+                            payload={
+                                "run_id": str(run.id),
+                                "module_name": "dft_results",
+                                "error": str(release_exc),
+                            },
+                        )
+                    )
+                    try:
+                        self.session.flush()
+                    except Exception:
+                        pass
+
+        return {
+            **(dft_summary or {}),
+            "non_dft_auto_apply": {
+                "created_notes": non_dft_summary.created_notes,
+                "created_corrections": non_dft_summary.created_corrections,
+                "created_relationships": non_dft_summary.created_relationships,
+                "auto_applied_corrections": non_dft_summary.auto_applied_corrections,
+                "skipped_candidates": non_dft_summary.skipped_candidates,
+            },
+        }
+
     def _required_auto_apply_modules(self, candidates: list[ExternalAnalysisCandidate]) -> list[str]:
         modules: set[str] = set()
         for candidate in candidates:
@@ -736,9 +867,9 @@ class ExternalAnalysisService:
         if operation == "delete":
             parts = [part.strip() for part in target_path.split(":")]
             return (
-                field_name == "figures"
+                field_name in {"figures", "tables"}
                 and len(parts) == 3
-                and parts[0] == "figures"
+                and parts[0] == field_name
                 and parts[1]
                 and parts[2] == "delete"
                 and has_evidence_anchor(evidence_payload)

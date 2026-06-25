@@ -1080,52 +1080,15 @@ def import_analysis(
             raw_text=raw_text,
             raw_payload=raw_payload,
         )
-        candidates = service.list_candidates(run.id)
-        effective_write_lock_token = write_lock_token
-        auto_lock = None
-        imports_dft = any(
-            str((candidate.normalized_payload or {}).get("target_type") or "").strip().lower()
-            in {"dft_result", "dft_results"}
-            for candidate in candidates
-            if isinstance(candidate.normalized_payload, dict)
-        )
-        if auto_apply_review_rules and imports_dft and not effective_write_lock_token:
-            auto_lock = ModuleWriteLockService(session).acquire(
-                paper_id=UUID(paper_id),
-                module_name="dft_results",
-                locked_by=effective_internal_reviewer,
-                meta={"source": "mcp_import_analysis", "run_id": str(run.id)},
-            )
-            effective_write_lock_token = auto_lock.lock_token
         auto_apply_summary = None
         if auto_apply_review_rules:
-            non_dft_summary = service.auto_apply_non_dft_review_outputs(
+            auto_apply_summary = service.apply_review_rules_for_run(
                 run.id,
                 reviewer=effective_internal_reviewer,
-                write_lock_tokens=[effective_write_lock_token] if effective_write_lock_token else None,
+                write_lock_tokens=[write_lock_token] if write_lock_token else None,
                 write_lock_owner=effective_lock_owners,
-            )
-            dft_auto_apply_summary = VerificationSessionService(session, settings).apply_import_rules_for_paper(
-                paper_id=UUID(paper_id),
-                reviewer=effective_internal_reviewer,
-                candidate_run_id=run.id,
-                write_lock_tokens=[effective_write_lock_token] if effective_write_lock_token else None,
-                write_lock_owner=effective_lock_owners,
-            )
-            auto_apply_summary = {
-                **(dft_auto_apply_summary or {}),
-                "non_dft_auto_apply": {
-                    "created_notes": non_dft_summary.created_notes,
-                    "created_corrections": non_dft_summary.created_corrections,
-                    "created_relationships": non_dft_summary.created_relationships,
-                    "auto_applied_corrections": non_dft_summary.auto_applied_corrections,
-                    "skipped_candidates": non_dft_summary.skipped_candidates,
-                },
-            }
-        if auto_lock is not None:
-            ModuleWriteLockService(session).release(
-                lock_token=auto_lock.lock_token,
-                released_by=effective_internal_reviewer,
+                auto_lock_owner=effective_internal_reviewer,
+                lock_meta_source="mcp_import_analysis",
             )
         candidates = service.list_candidates(run.id)
         session.commit()
