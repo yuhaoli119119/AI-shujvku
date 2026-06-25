@@ -74,7 +74,7 @@ class DFTReviewQueueService:
             )
         ).all()
         gate_results = []
-        queue_rows = []
+        queue_candidates = []
         paper_ids = set()
         paper_meta_by_id: dict[str, dict[str, Any]] = {}
         exportable_by_paper: dict[str, int] = defaultdict(int)
@@ -84,18 +84,6 @@ class DFTReviewQueueService:
 
         dft_rows = [row for row, _paper in rows]
         gate_by_id = bulk_export_gate_results(self.session, dft_rows, target_type="dft_results")
-        locators_by_id = self._bulk_locator_payloads(dft_rows)
-        catalysts_by_paper = self._bulk_catalyst_payloads({paper.id for _row, paper in rows})
-        external_audits_by_paper = self._bulk_external_audit_payloads({paper.id for _row, paper in rows})
-        object_audits_by_target = self._bulk_object_review_audit_payloads(
-            {paper.id for _row, paper in rows},
-            target_ids={str(row.id) for row in dft_rows},
-        )
-        conflicts_by_target = ReviewConflictAggregationService(self.session).conflicts_by_target(
-            paper_ids={paper.id for _row, paper in rows},
-            target_type="dft_results",
-            target_ids={str(row.id) for row in dft_rows},
-        )
 
         for row, paper in rows:
             gate = gate_by_id.get(str(row.id))
@@ -121,27 +109,44 @@ class DFTReviewQueueService:
                 continue
             if not self._status_matches(status, gate):
                 continue
-            queue_rows.append(
-                self._row_payload(
-                    row,
-                    paper,
-                    gate,
-                    catalysts_by_paper.get(str(paper.id), []),
-                    locators_by_id.get(str(row.id), []),
-                    external_audits_by_paper.get(str(paper.id), []),
-                    object_audits_by_target.get(str(row.id), []),
-                    conflicts_by_target.get(str(row.id), []),
-                )
-            )
+            queue_candidates.append((row, paper, gate, self._sanity_flags(row)))
 
-        queue_rows.sort(
+        queue_candidates.sort(
             key=lambda item: (
-                bool(item.get("sanity_flags")),
-                not bool(item.get("can_mark_verified")),
-                -(item.get("year") or 0),
-                str(item.get("title") or ""),
+                bool(item[3]),
+                not (set(item[2].reasons) == {"missing_review"} and not item[3]),
+                -(item[1].year or 0),
+                str(item[1].title or ""),
             )
         )
+        selected_candidates = queue_candidates[:limit]
+        selected_dft_rows = [row for row, _paper, _gate, _sanity_flags in selected_candidates]
+        selected_paper_ids = {paper.id for _row, paper, _gate, _sanity_flags in selected_candidates}
+        locators_by_id = self._bulk_locator_payloads(selected_dft_rows)
+        catalysts_by_paper = self._bulk_catalyst_payloads(selected_paper_ids)
+        external_audits_by_paper = self._bulk_external_audit_payloads(selected_paper_ids)
+        object_audits_by_target = self._bulk_object_review_audit_payloads(
+            selected_paper_ids,
+            target_ids={str(row.id) for row in selected_dft_rows},
+        )
+        conflicts_by_target = ReviewConflictAggregationService(self.session).conflicts_by_target(
+            paper_ids=selected_paper_ids,
+            target_type="dft_results",
+            target_ids={str(row.id) for row in selected_dft_rows},
+        )
+        queue_rows = [
+            self._row_payload(
+                row,
+                paper,
+                gate,
+                catalysts_by_paper.get(str(paper.id), []),
+                locators_by_id.get(str(row.id), []),
+                external_audits_by_paper.get(str(paper.id), []),
+                object_audits_by_target.get(str(row.id), []),
+                conflicts_by_target.get(str(row.id), []),
+            )
+            for row, paper, gate, _sanity_flags in selected_candidates
+        ]
 
         catalyst_counts: Counter[str] = Counter()
         setting_counts: Counter[str] = Counter()
@@ -211,9 +216,9 @@ class DFTReviewQueueService:
                 "blocked_reasons": gate_summary["blocked_reasons"],
                 "review_status_counts": dict(sorted(review_status_counts.items())),
                 "total_candidates": gate_summary["total_candidates"],
-                "returned": min(len(queue_rows), limit),
+                "returned": len(queue_rows),
             },
-            "rows": queue_rows[:limit],
+            "rows": queue_rows,
             "paper_completeness": paper_completeness[:limit],
         }
 

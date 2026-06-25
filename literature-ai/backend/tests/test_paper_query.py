@@ -75,6 +75,40 @@ def test_paper_query_service_returns_counts_and_detail_payload():
         engine.dispose()
 
 
+def test_detail_keeps_supplementary_tables_but_not_supplementary_figures_by_default():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        main = Paper(title="Main paper with SI", pdf_path="main.pdf", authors=["A"])
+        si = Paper(title="Supplementary information", pdf_path="si.pdf", authors=["A"], paper_type="supplementary")
+        session.add_all([main, si])
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=main.id,
+                target_paper_id=si.id,
+                relationship_type="supplementary",
+            )
+        )
+        session.add(PaperTable(paper_id=main.id, caption="Table 1. Main", markdown_content="| main |", page=2))
+        session.add(PaperTable(paper_id=si.id, caption="Table S1. SI", markdown_content="| si |", page=3))
+        session.add(PaperFigure(paper_id=main.id, caption="Figure 1. Main", image_path="figures/main.png", page=4))
+        session.add(PaperFigure(paper_id=si.id, caption="Figure S1. SI", image_path="figures/si.png", page=5))
+        session.commit()
+
+        detail = PaperQueryService(session).get_paper_detail(main.id, compact=True)
+
+        assert detail is not None
+        assert [table.caption for table in detail.tables] == ["Table 1. Main", "Table S1. SI"]
+        assert detail.tables[1].source_document_type == "supplementary_information"
+        assert detail.tables[1].related_paper_id == si.id
+        assert detail.tables[1].writeback_paper_id == main.id
+        assert [figure.caption for figure in detail.figures] == ["Figure 1. Main"]
+
+    engine.dispose()
+
+
 def test_detail_payload_cleans_pdf_text_without_flattening_table_markdown():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)

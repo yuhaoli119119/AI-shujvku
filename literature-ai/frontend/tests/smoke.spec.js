@@ -3166,14 +3166,22 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           blocked_reasons: ['missing_material_identity'],
         },
       };
+      const mlReadyWithoutSafety = {
+        id: 'ml-ready-row',
+        candidate_status: 'ML_Ready',
+        dft_workflow_state: 'exportable',
+        dft_workflow_label: '可导出',
+      };
       return {
         consensusCount: classified.consensus.length,
         rejectedActions: renderDftDecisionActions(rejected, false),
+        mlReadyActions: renderDftDecisionActions(mlReadyWithoutSafety, false),
         rejectedStatus: dftItemStatusMeta(rejected).label,
       };
     });
     expect(submissionVoteBehavior.consensusCount).toBe(1);
     expect(submissionVoteBehavior.rejectedActions).toBe('');
+    expect(submissionVoteBehavior.mlReadyActions).toBe('');
     expect(submissionVoteBehavior.rejectedStatus).toBe('已拒绝');
     const exportableFallbackDisplay = await page.evaluate(() => dftAiOpinionMeta({
       is_exportable: true,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -33,6 +34,9 @@ from app.utils.evidence_anchors import has_evidence_anchor, has_material_correct
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalReviewNoteModel(BaseModel):
@@ -777,6 +781,15 @@ class ExternalAnalysisService:
                     # original apply error.  But log an audit entry so that a
                     # leaked lock is observable rather than silently lost.
                     # Stale locks are also reaped by TTL as a backstop.
+                    logger.exception(
+                        "Failed to release auto-acquired DFT module write lock",
+                        extra={
+                            "paper_id": str(run.paper_id),
+                            "run_id": str(run.id),
+                            "module_name": "dft_results",
+                            "lock_token": auto_lock.lock_token,
+                        },
+                    )
                     self.session.add(
                         AuditLog(
                             paper_id=run.paper_id,

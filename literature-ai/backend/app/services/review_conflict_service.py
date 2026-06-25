@@ -69,6 +69,7 @@ class ReviewConflictAggregationService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self._target_cache: dict[tuple[str, str], Any] = {}
+        self._catalyst_cache: dict[str, CatalystSample | None] = {}
 
     def list_conflicts(
         self,
@@ -96,6 +97,7 @@ class ReviewConflictAggregationService:
             target_id=target_id,
             field_name=field_name,
         )
+        self._prefetch_target_rows(opinions)
         opinions = [
             item
             for item in self._exclude_rejected_dft_targets(opinions)
@@ -1227,6 +1229,62 @@ class ReviewConflictAggregationService:
         self._target_cache[key] = row
         return row
 
+    def _prefetch_target_rows(self, opinions: list[dict[str, Any]]) -> None:
+        models = {
+            "dft_results": DFTResult,
+            "figures": PaperFigure,
+            "tables": PaperTable,
+            "mechanism_claims": MechanismClaim,
+            "writing_cards": WritingCard,
+        }
+        target_ids_by_type: dict[str, set[UUID]] = defaultdict(set)
+        for opinion in opinions:
+            target_type = self._safe_canonical_target_type(str(opinion.get("target_type") or ""))
+            target_id = str(opinion.get("target_id") or "").strip()
+            if target_type not in models or not target_id:
+                continue
+            try:
+                target_ids_by_type[target_type].add(UUID(target_id))
+            except (TypeError, ValueError):
+                self._target_cache[(target_type, target_id)] = None
+        for target_type, ids in target_ids_by_type.items():
+            missing_ids = {
+                target_id
+                for target_id in ids
+                if (target_type, str(target_id)) not in self._target_cache
+            }
+            if not missing_ids:
+                continue
+            model = models[target_type]
+            rows = self.session.scalars(select(model).where(model.id.in_(missing_ids))).all()
+            found_ids = set()
+            for row in rows:
+                row_id = getattr(row, "id", None)
+                if row_id is None:
+                    continue
+                found_ids.add(row_id)
+                self._target_cache[(target_type, str(row_id))] = row
+            for missing_id in missing_ids - found_ids:
+                self._target_cache[(target_type, str(missing_id))] = None
+        catalyst_ids = {
+            row.catalyst_sample_id
+            for (target_type, _target_id), row in self._target_cache.items()
+            if target_type == "dft_results"
+            and isinstance(row, DFTResult)
+            and row.catalyst_sample_id is not None
+            and str(row.catalyst_sample_id) not in self._catalyst_cache
+        }
+        if catalyst_ids:
+            catalysts = self.session.scalars(
+                select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))
+            ).all()
+            found_catalyst_ids = set()
+            for sample in catalysts:
+                found_catalyst_ids.add(sample.id)
+                self._catalyst_cache[str(sample.id)] = sample
+            for missing_id in catalyst_ids - found_catalyst_ids:
+                self._catalyst_cache[str(missing_id)] = None
+
     def _dft_target_matches_opinion(self, row: DFTResult, opinion: dict[str, Any]) -> bool:
         proposed = self._dft_structured_value_payload(opinion)
         proposed_value = proposed.get("value") if isinstance(proposed, dict) else opinion.get("value")
@@ -1511,7 +1569,12 @@ class ReviewConflictAggregationService:
             material_value = None
             catalyst_sample_id = getattr(row, "catalyst_sample_id", None)
             if catalyst_sample_id:
-                sample = self.session.get(CatalystSample, catalyst_sample_id)
+                sample_key = str(catalyst_sample_id)
+                if sample_key in self._catalyst_cache:
+                    sample = self._catalyst_cache[sample_key]
+                else:
+                    sample = self.session.get(CatalystSample, catalyst_sample_id)
+                    self._catalyst_cache[sample_key] = sample
                 material_value = sample.name if sample is not None else str(catalyst_sample_id)
             return self._norm(material_value)
         if field_name == "structure_name":

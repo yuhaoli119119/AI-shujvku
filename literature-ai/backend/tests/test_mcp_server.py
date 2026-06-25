@@ -24,6 +24,7 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     MechanismClaim,
+    ModuleWriteLock,
     Paper,
     PaperCorrection,
     PaperFigure,
@@ -38,6 +39,7 @@ from app.mcp.context import MCPAuthInfo, mcp_auth_context
 from app.mcp.server import (
     append_note,
     approve_correction,
+    apply_analysis_review_rules,
     acquire_module_write_lock,
     get_correction_detail,
     get_codex_context,
@@ -46,24 +48,21 @@ from app.mcp.server import (
     get_dft_review_queue,
     get_paper_knowledge,
     get_parse_status,
-    get_review_coverage,
     ingest_pdf_batch,
     insert_word_citation,
     import_analysis,
     list_notes,
-    merge_table,
     parse_paper,
     propose_correction,
     propose_dft_result_correction,
     reject_dft_result,
+    release_module_write_lock,
     review_figure,
     query_papers,
-    create_table,
-    delete_table,
     reject_correction,
     scan_local_pdfs,
     scan_duplicate_dois,
-    update_table,
+    _mcp_review_identity,
 )
 from app.services.paper_query import PaperQueryService
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
@@ -222,179 +221,6 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
         assert [item.action for item in audit_logs] == ["append_note", "propose_correction", "approve_correction"]
-
-
-def test_update_table_mcp_applies_markdown_and_marks_table_verified(mcp_test_env):
-    with Session(mcp_test_env["engine"]) as session:
-        paper = Paper(title="Table Update MCP", pdf_path="table-update.pdf", authors=["A"])
-        session.add(paper)
-        session.flush()
-        table = PaperTable(
-            paper_id=paper.id,
-            caption="Table 1",
-            markdown_content="| raw |\n| --- |\n| pars er |",
-            page=4,
-            extraction_source="docling",
-        )
-        session.add(table)
-        session.commit()
-        paper_id = str(paper.id)
-        table_id = str(table.id)
-
-    with mcp_auth_context(_auth()):
-        result = update_table(
-            paper_id=paper_id,
-            table_id=table_id,
-            reason="Correct parsed table markdown.",
-            markdown_content="| raw |\n| --- |\n| parser |",
-            evidence_payload={"page": 4, "table_id": table_id, "quoted_text": "Table 1"},
-        )
-
-    assert result["updated_fields"] == ["markdown_content"]
-    assert result["corrections"][0]["status"] == "approved"
-
-    with Session(mcp_test_env["engine"]) as session:
-        updated = session.get(PaperTable, UUID(table_id))
-        assert updated.markdown_content == "| raw |\n| --- |\n| parser |"
-        detail = PaperQueryService(session).get_paper_detail(UUID(paper_id))
-        assert detail is not None
-        assert detail.tables[0].table_review_status == "verified"
-
-
-def test_create_table_mcp_uses_structured_create_flow(mcp_test_env):
-    with Session(mcp_test_env["engine"]) as session:
-        paper = Paper(title="Table Create MCP", pdf_path="table-create.pdf", authors=["A"])
-        session.add(paper)
-        session.commit()
-        paper_id = str(paper.id)
-
-    with mcp_auth_context(_auth()):
-        result = create_table(
-            paper_id=paper_id,
-            caption="Missing Table 2",
-            markdown_content="| metric |\n| --- |\n| 42 |",
-            page=8,
-            extraction_source="manual_review",
-            reason="Recovered table from SI page.",
-            evidence_payload={"page": 8, "table": "Table 2", "quoted_text": "metric"},
-        )
-
-    assert result["correction"]["status"] == "approved"
-    assert result["table_id"]
-
-    with Session(mcp_test_env["engine"]) as session:
-        tables = session.scalars(select(PaperTable).where(PaperTable.paper_id == UUID(paper_id))).all()
-        assert len(tables) == 1
-        assert str(tables[0].id) == result["table_id"]
-        assert tables[0].caption == "Missing Table 2"
-
-
-def test_delete_table_mcp_removes_table_and_preserves_snapshot(mcp_test_env):
-    with Session(mcp_test_env["engine"]) as session:
-        paper = Paper(title="Table Delete MCP", pdf_path="table-delete.pdf", authors=["A"])
-        session.add(paper)
-        session.flush()
-        keep = PaperTable(paper_id=paper.id, caption="Table 1", markdown_content="| ok |", page=2)
-        duplicate = PaperTable(paper_id=paper.id, caption="Duplicate Table", markdown_content="| dup |", page=2)
-        session.add_all([keep, duplicate])
-        session.commit()
-        paper_id = str(paper.id)
-        duplicate_id = str(duplicate.id)
-
-    with mcp_auth_context(_auth()):
-        result = delete_table(
-            paper_id=paper_id,
-            table_id=duplicate_id,
-            reason="Duplicate parser table fragment.",
-            evidence_payload={"page": 2, "table_id": duplicate_id, "quoted_text": "Duplicate Table"},
-        )
-
-    assert result["deleted"] is True
-    assert result["source_snapshot"]["caption"] == "Duplicate Table"
-
-    with Session(mcp_test_env["engine"]) as session:
-        tables = session.scalars(select(PaperTable).where(PaperTable.paper_id == UUID(paper_id))).all()
-        assert len(tables) == 1
-        assert str(tables[0].id) != duplicate_id
-        correction = session.scalars(select(PaperCorrection).where(PaperCorrection.target_path == f"tables:{duplicate_id}:delete")).one()
-        assert correction.status == "approved"
-        assert correction.evidence_payload["structured_delete"]["snapshot"]["caption"] == "Duplicate Table"
-        audit = session.scalars(select(AuditLog).where(AuditLog.action == "delete_structured_object")).one()
-        assert audit.payload["snapshot"]["id"] == duplicate_id
-
-
-def test_merge_table_mcp_updates_target_and_deletes_source_with_audit(mcp_test_env):
-    with Session(mcp_test_env["engine"]) as session:
-        paper = Paper(title="Table Merge MCP", pdf_path="table-merge.pdf", authors=["A"])
-        session.add(paper)
-        session.flush()
-        target = PaperTable(paper_id=paper.id, caption="Table 1", markdown_content="| a |\n| --- |\n| old |", page=5)
-        source = PaperTable(paper_id=paper.id, caption="Table 1 continued", markdown_content="| a |\n| --- |\n| new |", page=6)
-        session.add_all([target, source])
-        session.commit()
-        paper_id = str(paper.id)
-        target_id = str(target.id)
-        source_id = str(source.id)
-
-    with mcp_auth_context(_auth()):
-        result = merge_table(
-            paper_id=paper_id,
-            source_table_id=source_id,
-            target_table_id=target_id,
-            target_markdown_content="| a |\n| --- |\n| old |\n| new |",
-            reason="Merge continued table fragment into the canonical table.",
-            evidence_payload={"page": 6, "table_id": source_id, "quoted_text": "Table 1 continued"},
-        )
-
-    assert result["source_deleted"] is True
-    assert result["target_table"]["markdown_content"] == "| a |\n| --- |\n| old |\n| new |"
-    assert result["source_snapshot"]["caption"] == "Table 1 continued"
-
-    with Session(mcp_test_env["engine"]) as session:
-        tables = session.scalars(select(PaperTable).where(PaperTable.paper_id == UUID(paper_id))).all()
-        assert len(tables) == 1
-        assert str(tables[0].id) == target_id
-        assert tables[0].markdown_content == "| a |\n| --- |\n| old |\n| new |"
-        merge_audit = session.scalars(select(AuditLog).where(AuditLog.action == "merge_table")).one()
-        assert merge_audit.payload["source_snapshot"]["id"] == source_id
-        assert merge_audit.payload["source_deleted"] is True
-        detail = PaperQueryService(session).get_paper_detail(UUID(paper_id))
-        assert detail is not None
-        assert detail.tables[0].table_review_status == "verified"
-
-
-def test_review_coverage_uses_structured_table_status(mcp_test_env):
-    with Session(mcp_test_env["engine"]) as session:
-        paper = Paper(title="Table Coverage MCP", pdf_path="coverage.pdf", authors=["A"])
-        session.add(paper)
-        session.flush()
-        table = PaperTable(paper_id=paper.id, caption="Table 3", markdown_content="| a |", page=3)
-        session.add(table)
-        session.flush()
-        session.add(
-            PaperCorrection(
-                paper_id=paper.id,
-                source="ide_ai",
-                field_name="tables",
-                target_path=f"tables:{table.id}:markdown_content",
-                operation="replace",
-                proposed_value="| a |\n| --- |\n| checked |",
-                reason="Approved table markdown.",
-                status="approved",
-                reviewed_by="ide_ai",
-            )
-        )
-        session.commit()
-        paper_id = str(paper.id)
-        table_id = str(table.id)
-
-    with mcp_auth_context(_auth()):
-        coverage = get_review_coverage(paper_id)
-
-    assert coverage["tables"]["with_corrections"] == 1
-    assert coverage["tables"]["unreviewed"] == 0
-    assert coverage["tables"]["details"][0]["table_id"] == table_id
-    assert coverage["tables"]["details"][0]["review_status"] == "verified"
 
 
 def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_test_env):
@@ -1930,3 +1756,221 @@ def test_http_correction_review_api_requires_admin_and_applies_update(mcp_test_e
         paper = session.get(Paper, UUID(paper_id))
         assert paper is not None
         assert paper.abstract == "HTTP approved abstract"
+
+
+def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp_test_env):
+    """A run imported with auto_apply_review_rules=False must be materializable
+    later via the apply_analysis_review_rules MCP tool — the counterpart of
+    HTTP POST /runs/{run_id}/apply-review-rules.
+    """
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Deferred DFT Paper", pdf_path="mcp-deferred.pdf", authors=[])
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "Co-N3",
+                    "property_type": "adsorption_energy",
+                    "value": -0.95,
+                    "unit": "eV",
+                    "adsorbate": "H",
+                    "reaction_step": "adsorption",
+                },
+                "evidence_location": {
+                    "page": 5,
+                    "quoted_text": "Co-N3 H -0.95 eV",
+                },
+                "confidence": 0.88,
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit deferred",
+            raw_payload=payload,
+            auto_apply_review_rules=False,
+        )
+
+    run_id = imported["run_id"]
+    assert imported["auto_apply_summary"] is None
+    assert imported["candidate_count"] == 1
+
+    # Pre-condition: no DFTResult yet, candidate still in "candidate" status
+    with Session(mcp_test_env["engine"]) as session:
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
+        ).all()
+        assert len(dft_rows) == 0
+        candidate = session.scalar(
+            select(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.run_id == UUID(run_id)
+            )
+        )
+        assert candidate is not None
+        assert candidate.status == "candidate"
+
+    with mcp_auth_context(_auth()):
+        result = apply_analysis_review_rules(run_id=run_id)
+
+    assert result["run_id"] == run_id
+    assert result["paper_id"] == paper_id
+    assert result["reviewer"] == "claude"
+    assert result["candidate_count"] == 1
+    assert result["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+
+    candidate_payload = result["candidates"][0]
+    assert candidate_payload["status"] == "materialized"
+    assert candidate_payload["materialized_target_type"] == "dft_results"
+    assert candidate_payload["materialized_target_id"] is not None
+
+    with Session(mcp_test_env["engine"]) as session:
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
+        ).all()
+        assert len(dft_rows) == 1
+        assert dft_rows[0].candidate_status == "new_candidate"
+        assert dft_rows[0].value == pytest.approx(-0.95)
+        assert dft_rows[0].adsorbate == "H"
+
+        # No active dft_results lock leaked
+        active_locks = session.scalars(
+            select(ModuleWriteLock).where(
+                ModuleWriteLock.paper_id == UUID(paper_id),
+                ModuleWriteLock.module_name == "dft_results",
+                ModuleWriteLock.status == "active",
+            )
+        ).all()
+        assert active_locks == [], "apply_analysis_review_rules leaked an active dft_results lock"
+
+
+def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(mcp_test_env):
+    """When the MCP auth source_prefix differs from the reviewer, and a lock was
+    pre-acquired by auth.source_prefix, apply_analysis_review_rules must accept
+    the caller's token because effective_lock_owners includes both identities.
+    """
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(
+            title="MCP Owner Semantics DFT Paper", pdf_path="mcp-owner-semantics.pdf", authors=[]
+        )
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "Fe-N4",
+                    "property_type": "adsorption_energy",
+                    "value": -1.23,
+                    "unit": "eV",
+                    "adsorbate": "Li2S4",
+                    "reaction_step": "adsorption",
+                },
+                "evidence_location": {
+                    "page": 3,
+                    "table": "Table 1",
+                    "quoted_text": "The adsorption energy of Li2S4 is -1.23 eV on Fe-N4.",
+                },
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        # Import without auto-apply so candidates remain pending
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit owner semantics",
+            raw_payload=payload,
+            auto_apply_review_rules=False,
+        )
+        run_id = imported["run_id"]
+
+        # Pre-acquire a dft_results lock locked_by = auth.source_prefix ("claude")
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="dft_results",
+        )
+        assert lock["locked_by"] == "claude"
+
+        # Apply with reviewer="codex_window_b" and the pre-acquired token.
+        # effective_lock_owners = ["claude", "codex_window_b"], so the token
+        # locked_by="claude" should be accepted.
+        result = apply_analysis_review_rules(
+            run_id=run_id,
+            reviewer="codex_window_b",
+            write_lock_token=lock["lock_token"],
+        )
+
+        # The caller-provided lock is NOT auto-released by the apply step
+        # (only auto-acquired locks are). Release it explicitly.
+        release_module_write_lock(lock_token=lock["lock_token"])
+
+    assert result["reviewer"] == "codex_window_b"
+    assert result["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+
+    with Session(mcp_test_env["engine"]) as session:
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
+        ).all()
+        assert len(dft_rows) == 1
+        assert dft_rows[0].candidate_status == "new_candidate"
+        assert dft_rows[0].adsorbate == "Li2S4"
+
+        # No active dft_results lock leaked after explicit release
+        active_locks = session.scalars(
+            select(ModuleWriteLock).where(
+                ModuleWriteLock.paper_id == UUID(paper_id),
+                ModuleWriteLock.module_name == "dft_results",
+                ModuleWriteLock.status == "active",
+            )
+        ).all()
+        assert active_locks == [], "active dft_results lock remains after explicit release"
+
+
+def test_mcp_review_identity_helper_consistency():
+    """Unit test for the _mcp_review_identity helper shared by import_analysis
+    and apply_analysis_review_rules. Verifies the three documented identity
+    contracts without touching the database.
+    """
+    # Case 1: reviewer=None, source_prefix="claude" -> all collapse to "claude"
+    auth = MCPAuthInfo(
+        source_prefix="claude",
+        display_name="claude",
+        capabilities=frozenset(),
+        raw_key="",
+    )
+    reviewer, internal, owners = _mcp_review_identity(None, auth)
+    assert reviewer == "claude"
+    assert internal == "claude"
+    assert owners == ["claude"]
+
+    # Case 2: reviewer="codex_window_b", source_prefix="claude"
+    # -> reviewer=codex_window_b, internal=claude, owners=[claude, codex_window_b]
+    reviewer, internal, owners = _mcp_review_identity("codex_window_b", auth)
+    assert reviewer == "codex_window_b"
+    assert internal == "claude"
+    assert owners == ["claude", "codex_window_b"]
+
+    # Case 3: reviewer="claude" == source_prefix="claude" -> dedup to ["claude"]
+    reviewer, internal, owners = _mcp_review_identity("claude", auth)
+    assert reviewer == "claude"
+    assert internal == "claude"
+    assert owners == ["claude"]

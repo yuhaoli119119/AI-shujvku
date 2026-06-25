@@ -491,7 +491,7 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
-    assert data["prompt_schema_version"] == "ide_review_prompt_v7"
+    assert data["prompt_schema_version"] == "ide_review_prompt_v8"
     assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
     assert "SRR_LiS" in data["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in data["prompt_contract"]["project_library_contexts"]
@@ -500,6 +500,9 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "app.mcp.context.mcp_auth_context" in data["suggested_client_prompt"]
     assert "A_text_readable 或 B_text_partial" in data["suggested_client_prompt"]
     assert "后写入的 AI 结果允许覆盖先前 AI 结果" in data["suggested_client_prompt"]
+    assert "图片核验默认只核验主文 paper_id 的 figures" in data["suggested_client_prompt"]
+    assert "Figure-derived DFT values become candidates and require second review/safety gate" in data["prompt_contract"]["templates"]["figure"]
+    assert "Figure-derived DFT data must be submitted as DFT candidates" in data["legacy_suggested_client_prompt"]
     assert "section_level" in data["prompt_contract"]["templates"]["sections_writing"]
     ai_search = next(item for item in data["http_endpoints"] if item["name"] == "ai_search")
     assert "raw query" in ai_search["purpose"]

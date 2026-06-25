@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperNote
+from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
@@ -76,6 +76,7 @@ class CodexContextService:
         max_figures: int = 12,
         max_tables: int = 8,
         max_candidates: int = 20,
+        include_supplementary_figures: bool = False,
     ) -> CodexContextResponse | None:
         detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=True)
         if detail is None:
@@ -94,6 +95,7 @@ class CodexContextService:
             max_figures=max_figures,
             max_tables=max_tables,
             max_candidates=max_candidates,
+            include_supplementary_figures=include_supplementary_figures,
         )
         markdown = self._build_markdown(context)
         return CodexContextResponse(
@@ -260,6 +262,7 @@ class CodexContextService:
         max_figures: int,
         max_tables: int,
         max_candidates: int,
+        include_supplementary_figures: bool,
     ) -> dict[str, Any]:
         counts = detail.counts.model_dump(mode="json") if detail.counts else {}
         dft_export_readiness = self._build_dft_export_readiness(detail, limit=max_candidates)
@@ -291,6 +294,16 @@ class CodexContextService:
             if not item.get("catalyst_sample_id")
             and "missing_material_identity" in ((item.get("export_safety") or {}).get("blocked_reasons") or [])
         ]
+        supplementary_figure_payload = self._load_supplementary_figure_payloads(detail)
+        figure_review_scope = "main_plus_supplementary" if include_supplementary_figures else "main_only"
+        figure_items = self._figure_context_items(
+            detail.figures or [],
+            detail.id,
+            source_document_type="main_text",
+            writeback_paper_id=detail.id,
+        )
+        if include_supplementary_figures:
+            figure_items.extend(supplementary_figure_payload)
 
         context: dict[str, Any] = {
             "schema_version": self.schema_version,
@@ -298,8 +311,28 @@ class CodexContextService:
             "reliability_policy": {
                 "automatic_outputs_are_candidates": True,
                 "figure_crops_are_candidates": True,
+                "figure_review_scope": figure_review_scope,
+                "include_supplementary_figures": include_supplementary_figures,
+                "supplementary_figures_available_count": len(supplementary_figure_payload),
                 "requires_human_or_codex_review": True,
                 "do_not_treat_as_verified": True,
+            },
+            "review_scope": {
+                "table_review_scope": "main_plus_supplementary",
+                "figure_review_scope": figure_review_scope,
+                "include_supplementary_figures": include_supplementary_figures,
+                "supplementary_figures_available_count": len(supplementary_figure_payload),
+                "supplementary_figures_policy": (
+                    "Figure review defaults to main paper only. SI figures are opt-in and should be requested only "
+                    "when include_supplementary_figures=true, a task explicitly cites Figure Sxx, or an evidence "
+                    "anchor points to an SI figure."
+                ),
+                "figure_derived_dft_policy": (
+                    "Figure-derived DFT values become DFT candidates/object_review_audits with figure_id/label, "
+                    "page, quoted text or readable annotation, value, unit, property_type, adsorbate or reaction_step, "
+                    "and material_identity when available. They must pass the existing DFT second review/export safety "
+                    "gate before ML export."
+                ),
             },
             "paper": {
                 "id": str(detail.id),
@@ -360,27 +393,7 @@ class CodexContextService:
                     }
                     for section in (detail.sections or [])[:max_sections]
                 ],
-                "figures": [
-                    {
-                        "id": str(figure.id),
-                        "caption": self._clip(figure.caption, 1200),
-                        "page": figure.page,
-                        "image_path": figure.image_path,
-                        "asset_url": f"/api/papers/assets/{figure.image_path}" if figure.image_path else None,
-                        "prov": figure.prov,
-                        "image_review": self._build_figure_image_review(figure, paper_id=detail.id),
-                        "figure_label": figure.figure_label,
-                        "figure_role": figure.figure_role,
-                        "role_confidence": figure.role_confidence,
-                        "content_summary": figure.content_summary,
-                        "key_elements": figure.key_elements,
-                        "crop_status": figure.crop_status,
-                        "crop_confidence": figure.crop_confidence,
-                        "crop_source": figure.crop_source,
-                        "candidate_status": "candidate_unverified",
-                    }
-                    for figure in (detail.figures or [])[:max_figures]
-                ],
+                "figures": figure_items[:max_figures],
                 "tables": [
                     {
                         "id": str(table.id),
@@ -485,6 +498,95 @@ class CodexContextService:
                 }
             )
         return documents
+
+    def _load_supplementary_figure_payloads(self, detail: PaperDetailResponse) -> list[dict[str, Any]]:
+        supplementary_types = {"supplementary", "supplementary_information", "supporting_information", "si"}
+        target_ids = [
+            relationship.target_paper_id
+            for relationship in (detail.outgoing_relationships or [])
+            if str(relationship.relationship_type or "").strip().lower() in supplementary_types
+        ]
+        if not target_ids:
+            return []
+        target_papers = {
+            paper.id: paper
+            for paper in self.session.scalars(select(Paper).where(Paper.id.in_(target_ids))).all()
+        }
+        figures = self.session.scalars(
+            select(PaperFigure)
+            .where(PaperFigure.paper_id.in_(target_ids))
+            .order_by(PaperFigure.paper_id.asc(), PaperFigure.page.asc().nulls_last())
+        ).all()
+        payloads: list[dict[str, Any]] = []
+        for figure in figures:
+            source_paper = target_papers.get(figure.paper_id)
+            payloads.extend(
+                self._figure_context_items(
+                    [figure],
+                    detail.id,
+                    source_document_type="supplementary_information",
+                    related_paper_id=figure.paper_id,
+                    related_paper_code=source_paper.paper_code if source_paper else None,
+                    related_paper_title=source_paper.title if source_paper else None,
+                    writeback_paper_id=detail.id,
+                )
+            )
+        return payloads
+
+    def _figure_context_items(
+        self,
+        figures: list[PaperFigure | PaperFigureResponse],
+        paper_id: UUID,
+        *,
+        source_document_type: str,
+        writeback_paper_id: UUID,
+        related_paper_id: UUID | None = None,
+        related_paper_code: str | None = None,
+        related_paper_title: str | None = None,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for figure in figures:
+            image_path = getattr(figure, "image_path", None)
+            review_payload = {
+                "id": str(figure.id),
+                "image_path": image_path,
+                "caption": getattr(figure, "caption", None),
+                "page": getattr(figure, "page", None),
+                "figure_label": getattr(figure, "figure_label", None),
+                "prov": getattr(figure, "prov", None),
+                "crop_status": getattr(figure, "crop_status", None),
+                "crop_confidence": getattr(figure, "crop_confidence", None),
+                "crop_source": getattr(figure, "crop_source", None),
+            }
+            items.append(
+                {
+                    "id": str(figure.id),
+                    "caption": self._clip(getattr(figure, "caption", None), 1200),
+                    "page": getattr(figure, "page", None),
+                    "image_path": image_path,
+                    "asset_url": f"/api/papers/assets/{image_path}" if image_path else None,
+                    "prov": getattr(figure, "prov", None),
+                    "image_review": self._build_figure_image_review(
+                        review_payload,
+                        paper_id=getattr(figure, "paper_id", paper_id),
+                    ),
+                    "figure_label": getattr(figure, "figure_label", None),
+                    "figure_role": getattr(figure, "figure_role", None),
+                    "role_confidence": getattr(figure, "role_confidence", None),
+                    "content_summary": getattr(figure, "content_summary", None),
+                    "key_elements": getattr(figure, "key_elements", None),
+                    "crop_status": getattr(figure, "crop_status", None),
+                    "crop_confidence": getattr(figure, "crop_confidence", None),
+                    "crop_source": getattr(figure, "crop_source", None),
+                    "source_document_type": source_document_type,
+                    "related_paper_id": str(related_paper_id) if related_paper_id else None,
+                    "related_paper_code": related_paper_code,
+                    "related_paper_title": related_paper_title,
+                    "writeback_paper_id": str(writeback_paper_id),
+                    "candidate_status": "candidate_unverified",
+                }
+            )
+        return items
 
     def _build_warnings(
         self,
@@ -621,6 +723,18 @@ class CodexContextService:
             lines.extend(["## Warnings"])
             lines.extend(f"- `{item['code']}`: {item['message']}" for item in context["warnings"])
             lines.append("")
+
+        review_scope = context.get("review_scope") or {}
+        lines.extend(
+            [
+                "## Review Scope",
+                f"- Table review scope: `{review_scope.get('table_review_scope') or 'main_plus_supplementary'}`",
+                f"- Figure review scope: `{review_scope.get('figure_review_scope') or 'main_only'}`",
+                f"- Include supplementary figures: {review_scope.get('include_supplementary_figures') is True}; available SI figures: {review_scope.get('supplementary_figures_available_count') or 0}",
+                f"- Figure-derived DFT policy: {review_scope.get('figure_derived_dft_policy')}",
+                "",
+            ]
+        )
 
         abstract = context["content"].get("abstract") or context["content"].get("abstract_zh")
         if abstract:

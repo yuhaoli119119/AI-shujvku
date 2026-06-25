@@ -911,9 +911,28 @@ function dftResultId(item) {
     ).trim();
 }
 
+function isFinalizedDftResult(item, exportable) {
+    if (!item) return false;
+    const safety = item.export_safety || {};
+    if (exportable || safety.is_exportable === true || safety.eligible === true) return true;
+    const candidateStatus = String(item.candidate_status || "").trim().toLowerCase();
+    if (["ml_ready", "rejected", "human_confirmed", "citation_ready", "verified", "human_verified"].includes(candidateStatus)) {
+        return true;
+    }
+    const workflowState = String(item.dft_workflow_state || "").trim().toLowerCase();
+    if (["exportable", "rejected"].includes(workflowState)) return true;
+    const reviewStatuses = String(safety.review_status || "")
+        .toLowerCase()
+        .split(",")
+        .map(function(part) { return part.trim(); })
+        .filter(Boolean);
+    return reviewStatuses.includes("rejected");
+}
+
 function renderDftDecisionActions(item, exportable) {
     const resultId = dftResultId(item);
     if (!resultId) return "";
+    if (isFinalizedDftResult(item, exportable)) return "";
     const safety = item && item.export_safety;
     const reviewStatuses = String((safety && safety.review_status) || "")
         .toLowerCase()

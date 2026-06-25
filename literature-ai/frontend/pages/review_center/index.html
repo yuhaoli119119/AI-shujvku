@@ -1353,6 +1353,36 @@
       return ["supplementary", "supplementary_information", "supporting_information", "si"].includes(key);
     }
 
+    function supplementaryGroup(row) {
+      const group = row && row.supplementary_group;
+      return group && typeof group === "object" ? group : null;
+    }
+
+    function supplementaryGroupLabel(row) {
+      const group = supplementaryGroup(row);
+      if (!group) return "";
+      const mainCode = group.main_paper_code || (group.main_paper_id ? String(group.main_paper_id).slice(0, 8) : "主文献");
+      if (group.role === "supplementary") return "SI 归属 " + mainCode;
+      const supportCodes = (group.support_papers || []).map(function (item) {
+        return item.paper_code || (item.paper_id ? String(item.paper_id).slice(0, 8) : "");
+      }).filter(Boolean);
+      return supportCodes.length ? ("含 SI " + supportCodes.join(" + ")) : "";
+    }
+
+    function supplementaryGroupTip(row) {
+      const group = supplementaryGroup(row);
+      if (!group) return "";
+      const mainCode = group.main_paper_code || "主文献";
+      const supportActive = toCount(group.support_active_dft_candidate_count);
+      const mainActive = toCount(group.main_active_dft_candidate_count);
+      const groupTotal = toCount(group.dft_candidate_count);
+      const groupActive = toCount(group.active_dft_candidate_count);
+      if (group.role === "supplementary") {
+        return "这行是 " + mainCode + " 的支撑文献记录；主文献待处理 DFT " + mainActive + " 条，SI 待处理 DFT " + supportActive + " 条，同步组总候选 " + groupTotal + " 条。";
+      }
+      return "这是主文献行；同步组总候选 " + groupTotal + " 条，组内待处理 " + groupActive + " 条，其中 SI 待处理 " + supportActive + " 条。";
+    }
+
     function getValue(id) {
       const el = document.getElementById(id);
       return el ? el.value.trim() : "";
@@ -2555,6 +2585,10 @@
 
     function compactExtractionMeta(row) {
       const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
+      const group = supplementaryGroup(row);
+      const groupRole = group && group.role;
+      const groupSupportActive = group ? toCount(group.support_active_dft_candidate_count) : 0;
+      const groupMainActive = group ? toCount(group.main_active_dft_candidate_count) : 0;
       const suspectedMissing = hasOwnValue(row.suspected_missing_dft_count)
         ? toCount(row.suspected_missing_dft_count)
         : toCount(dftAudit.suspected_missing_count);
@@ -2565,9 +2599,15 @@
         return { label: "疑似漏提", className: "bad", tip: "检测到 DFT 线索多于已解析候选，建议优先复核全文。", suspectedMissing: suspectedMissing };
       }
       if (hasActiveDftCandidates) {
+        if (groupRole === "supplementary") {
+          return { label: "SI 待审 DFT", className: "warn", tip: supplementaryGroupTip(row) || "这行是支撑文献记录，仍有待审 DFT 候选需要独立收口。", suspectedMissing: suspectedMissing };
+        }
         return { label: "待审 DFT", className: "warn", tip: "已有待审 DFT 候选，下一步去证据页核对字段和定位。", suspectedMissing: suspectedMissing };
       }
       if (row.has_dft_candidates === true) {
+        if (groupRole === "main" && groupSupportActive > 0 && groupMainActive === 0) {
+          return { label: "主文已审", className: "ok", tip: supplementaryGroupTip(row) || "主文献 DFT 已收口；支撑文献还有待处理项，不等同于主文献训练数据未入库。", suspectedMissing: suspectedMissing };
+        }
         return { label: "已审 DFT", className: "ok", tip: "当前 DFT 结果已写入或完成审核，列表中没有未收口候选。", suspectedMissing: suspectedMissing };
       }
       if (row.has_dft_candidates === false) {
@@ -2764,6 +2804,16 @@
       const candidateSummaryLines = compactSummarizeCounts(row.dft_candidate_status_counts || {}, candidateStatusLabel);
       const cropSummaryLines = compactSummarizeCounts(row.figure_crop_status_counts || {}, cropStatusLabel);
       const nextStep = explainDetailNextStep(row, extraction, pdfDisplay, conflictCount, activeDftCount, suspectedMissing);
+      const group = supplementaryGroup(row);
+      const groupSummary = group
+        ? [
+            supplementaryGroupLabel(row),
+            "同步组候选 " + toCount(group.dft_candidate_count),
+            "同步组待处理 " + toCount(group.active_dft_candidate_count),
+            "主文待处理 " + toCount(group.main_active_dft_candidate_count),
+            "SI 待处理 " + toCount(group.support_active_dft_candidate_count)
+          ].filter(Boolean).join(" | ")
+        : "";
       const pdfSummary = !pdfDisplay.pdf.hasPdf
         ? "当前没有可用 PDF 文件。"
         : [quality.label, qualityReasonText].filter(Boolean).join(" | ");
@@ -2786,6 +2836,7 @@
             compactDetailSection("PDF 状态", '<div class="detail-value">' + esc(pdfSummary) + '</div>') +
             compactDetailSection("流程状态", '<div class="detail-value">' + esc(workflow.label) + '</div><div class="detail-value muted">' + esc(workflow.tip) + '</div>') +
             compactDetailSection("DFT 状态", '<div class="detail-value">' + esc(extraction.label) + '</div><div class="detail-value muted">' + esc(extraction.tip) + '</div>') +
+            (groupSummary ? compactDetailSection("主/SI 同步", '<div class="detail-value">' + esc(groupSummary) + '</div><div class="detail-value muted">' + esc(supplementaryGroupTip(row)) + '</div>') : "") +
           '</div>' +
         '</section>' +
         '<section class="detail-section-card">' +
@@ -3874,6 +3925,12 @@
         if (suspectedMissing > 0) {
           auditMetrics.push('<span class="active">疑似漏提 ' + esc(suspectedMissing) + '</span>');
         }
+        const group = supplementaryGroup(row);
+        if (group && group.role === "main" && toCount(group.support_active_dft_candidate_count) > 0) {
+          auditMetrics.push('<span title="' + esc(supplementaryGroupTip(row)) + '">SI 待处理 ' + esc(toCount(group.support_active_dft_candidate_count)) + '</span>');
+        } else if (group && group.role === "supplementary") {
+          auditMetrics.push('<span title="' + esc(supplementaryGroupTip(row)) + '">归属 ' + esc(group.main_paper_code || "主文献") + '</span>');
+        }
         if (toCount(row.external_audit_count) > 0) {
           auditMetrics.push('外部审核 ' + esc(toCount(row.external_audit_count)));
         }
@@ -3890,6 +3947,11 @@
         const journalText = row.journal || "未知期刊";
         const displayCode = row.paper_code || "";
         const shortId = displayCode ? '<span class="mono paper-doi-inline" title="文献短号，仅用于人类沟通">' + esc(displayCode) + '</span>' : '';
+        const groupLabel = supplementaryGroupLabel(row);
+        const groupTip = supplementaryGroupTip(row);
+        const groupInline = groupLabel
+          ? '<span>|</span><span class="chip compact subtle" title="' + esc(groupTip || groupLabel) + '">' + esc(groupLabel) + '</span>'
+          : "";
         const yearText = row.year ? esc(row.year) : '<span class="muted">-</span>';
         const checked = selectedPaperIds.has(String(row.paper_id)) ? " checked" : "";
 
@@ -3898,7 +3960,7 @@
           '<td class="col-divider" style="text-align:center;"><span style="font-size:13px;">' + yearText + '</span></td>' +
           '<td class="col-divider">' +
             '<div class="paper-title" title="' + esc(titleText) + '">' + esc(titleText) + '</div>' +
-            '<div class="paper-meta-line"><span class="paper-doi-inline" title="' + esc(journalText) + '">' + esc(journalText) + '</span>' + (shortId ? '<span>|</span>' + shortId : '') + (doiInline ? '<span>|</span>' + doiInline : '') + '</div>' +
+            '<div class="paper-meta-line"><span class="paper-doi-inline" title="' + esc(journalText) + '">' + esc(journalText) + '</span>' + (shortId ? '<span>|</span>' + shortId : '') + groupInline + (doiInline ? '<span>|</span>' + doiInline : '') + '</div>' +
           '</td>' +
           '<td class="col-divider status-cell">' +
             '<div class="status-cluster">' +

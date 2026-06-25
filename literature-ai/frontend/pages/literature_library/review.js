@@ -153,6 +153,12 @@ async function importExternalAnalysis() {
 async function loadExternalRuns() {
     if (!state.selectedPaperId) return;
     const extRuns = $("externalRuns");
+    if (state.currentTab === "review" && state.selectedPaperId) {
+        state.externalRuns = [];
+        rerenderSelectedDetail(state.selectedPaperId);
+        if (extRuns) extRuns.innerHTML = "";
+        return;
+    }
     const reasonBanner = state.qualityReasonContext
         ? '<div class="section-card" style="border-color:var(--color-warning);"><h3>DFT 质量处理入口</h3><div class="subtle">来自 blocked reason：' + esc(state.qualityReasonContext) + '。请核对本论文的 review 状态、证据链和定位信息。</div></div>'
         : "";

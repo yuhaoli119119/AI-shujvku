@@ -14,9 +14,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
 
 from app.config import get_settings
-from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
+from app.mcp.context import MCPAuthInfo
 from app.rag.retriever import Retriever
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
 from app.services.discovery_service import DiscoveryService
@@ -67,6 +68,38 @@ def _allowed_mcp_hosts() -> list[str]:
         hosts.add("testserver")
         hosts.add("testserver:*")
     return sorted(hosts)
+
+
+def _mcp_review_identity(
+    reviewer: str | None,
+    auth: MCPAuthInfo,
+) -> tuple[str, str, list[str]]:
+    """Derive the (reviewer, internal_reviewer, lock_owners) triple used by the
+    MCP external-analysis entry points (``import_analysis`` and
+    ``apply_analysis_review_rules``).
+
+    The semantics are intentionally identical across both entry points so that
+    a pre-acquired lock validated under one tool can be reused by the other:
+
+    - ``effective_reviewer``: the externally visible reviewer label. Defaults
+      to ``auth.source_prefix`` when the caller does not pass one.
+    - ``effective_internal_reviewer``: the identity recorded on auto-applied
+      outputs and used as the ``auto_lock_owner`` when the service needs to
+      auto-acquire a DFT write lock. Prefers ``auth.source_prefix``.
+    - ``effective_lock_owners``: de-duplicated ``[internal, reviewer]`` list
+      used to validate caller-supplied ``write_lock_token``\\ s. When both
+      identities coincide the list collapses to a single entry.
+    """
+    effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
+    effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
+    effective_lock_owners = list(
+        dict.fromkeys(
+            item
+            for item in [effective_internal_reviewer, effective_reviewer]
+            if str(item or "").strip()
+        )
+    )
+    return effective_reviewer, effective_internal_reviewer, effective_lock_owners
 
 
 mcp_server = FastMCP(
@@ -130,82 +163,6 @@ def _ensure_paper_exists(session, paper_id: UUID) -> Paper:
     if not paper:
         raise ValueError("Paper not found")
     return paper
-
-
-def _ensure_table_belongs_to_paper(session, paper_id: UUID, table_id: UUID) -> PaperTable:
-    table = session.get(PaperTable, table_id)
-    if not table:
-        raise ValueError("Table not found")
-    if table.paper_id != paper_id:
-        raise ValueError("Table does not belong to the target paper")
-    return table
-
-
-def _table_snapshot(table: PaperTable) -> dict[str, Any]:
-    return {
-        "id": str(table.id),
-        "paper_id": str(table.paper_id),
-        "caption": table.caption,
-        "markdown_content": table.markdown_content,
-        "page": table.page,
-        "extraction_source": table.extraction_source,
-        "prov": table.prov,
-    }
-
-
-def _evidence_payload_with_meta(
-    evidence_payload: dict[str, Any] | list[Any] | None,
-    key: str,
-    value: dict[str, Any],
-) -> dict[str, Any] | list[Any]:
-    if isinstance(evidence_payload, dict):
-        return {**evidence_payload, key: value}
-    return {"evidence_payload": evidence_payload, key: value}
-
-
-def _approve_mcp_structured_correction(
-    session,
-    *,
-    paper_id: UUID,
-    source: str,
-    field_name: str,
-    target_path: str,
-    operation: str,
-    proposed_value: Any,
-    reason: str,
-    evidence_payload: dict[str, Any] | list[Any] | None = None,
-) -> PaperCorrection:
-    correction = PaperCorrection(
-        paper_id=paper_id,
-        source=source,
-        field_name=field_name,
-        target_path=target_path,
-        operation=operation,
-        proposed_value=proposed_value,
-        reason=reason,
-        evidence_payload=evidence_payload,
-        status="pending",
-    )
-    session.add(correction)
-    session.flush()
-    session.add(
-        AuditLog(
-            paper_id=paper_id,
-            action="propose_correction",
-            source=source,
-            target_type="paper_correction",
-            target_id=str(correction.id),
-            payload={
-                "field_name": field_name,
-                "target_path": target_path,
-                "operation": operation,
-            },
-        )
-    )
-    approved = ReviewService(session).approve_correction(correction.id, reviewer=source)
-    session.flush()
-    session.refresh(approved)
-    return approved
 
 
 @mcp_server.tool(
@@ -281,7 +238,7 @@ def get_paper(paper_id: str) -> dict[str, Any]:
         return payload
 
 
-@mcp_server.tool(name="get_codex_context", description="Get a compact Codex-ready paper bundle with metadata, sections, figures, tables, candidates, warnings, notes, and Markdown. Table review includes main plus supplementary tables; figure review defaults to main-paper figures unless include_supplementary_figures is true.")
+@mcp_server.tool(name="get_codex_context", description="Get a compact Codex-ready paper bundle with metadata, sections, figures, tables, candidates, warnings, notes, and Markdown.")
 def get_codex_context(
     paper_id: str,
     max_sections: int = 8,
@@ -289,7 +246,6 @@ def get_codex_context(
     max_figures: int = 12,
     max_tables: int = 8,
     max_candidates: int = 20,
-    include_supplementary_figures: bool = False,
 ) -> dict[str, Any]:
     require_mcp_capability("read_papers")
     settings = get_settings()
@@ -301,7 +257,6 @@ def get_codex_context(
             max_figures=max(0, min(max_figures, 40)),
             max_tables=max(0, min(max_tables, 30)),
             max_candidates=max(1, min(max_candidates, 100)),
-            include_supplementary_figures=bool(include_supplementary_figures),
         )
         if context is None:
             raise ValueError("Paper not found")
@@ -848,255 +803,6 @@ def reject_corrections_batch(correction_ids: list[str], reason: str | None = Non
 
 
 @mcp_server.tool(
-    name="update_table",
-    description="Update one parsed table through structured PaperCorrection review flow. Supported fields: caption, markdown_content, page, extraction_source, prov.",
-)
-def update_table(
-    paper_id: str,
-    table_id: str,
-    reason: str,
-    updates: dict[str, Any] | None = None,
-    evidence_payload: dict[str, Any] | list[Any] | None = None,
-    caption: str | None = None,
-    markdown_content: str | None = None,
-    page: int | None = None,
-    extraction_source: str | None = None,
-    prov: list[Any] | None = None,
-) -> dict[str, Any]:
-    auth = require_mcp_capability("propose_corrections")
-    allowed_fields = {"caption", "markdown_content", "page", "extraction_source", "prov"}
-    proposed_updates = dict(updates or {})
-    named_updates = {
-        "caption": caption,
-        "markdown_content": markdown_content,
-        "page": page,
-        "extraction_source": extraction_source,
-        "prov": prov,
-    }
-    proposed_updates.update({key: value for key, value in named_updates.items() if value is not None})
-    unsupported = sorted(set(proposed_updates) - allowed_fields)
-    if unsupported:
-        raise ValueError(f"Unsupported table update fields: {', '.join(unsupported)}")
-    if not proposed_updates:
-        raise ValueError("update_table requires at least one supported field update")
-
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        pid = UUID(paper_id)
-        tid = UUID(table_id)
-        _ensure_paper_exists(session, pid)
-        _ensure_table_belongs_to_paper(session, pid, tid)
-        corrections = []
-        for field_name, value in proposed_updates.items():
-            correction = _approve_mcp_structured_correction(
-                session,
-                paper_id=pid,
-                source=auth.source_prefix,
-                field_name="tables",
-                target_path=f"tables:{tid}:{field_name}",
-                operation="replace",
-                proposed_value=value,
-                reason=reason,
-                evidence_payload=evidence_payload,
-            )
-            corrections.append(correction)
-        table = _ensure_table_belongs_to_paper(session, pid, tid)
-        return {
-            "paper_id": str(pid),
-            "table_id": str(tid),
-            "updated_fields": sorted(proposed_updates),
-            "corrections": [_serialize_correction(item) for item in corrections],
-            "table": _table_snapshot(table),
-        }
-
-
-@mcp_server.tool(
-    name="create_table",
-    description="Create a missing parsed table through structured PaperCorrection review flow using target_path='tables:new:create'. Requires evidence anchor.",
-)
-def create_table(
-    paper_id: str,
-    reason: str,
-    caption: str | None = None,
-    markdown_content: str | None = None,
-    page: int | None = None,
-    extraction_source: str | None = None,
-    prov: list[Any] | None = None,
-    evidence_payload: dict[str, Any] | list[Any] | None = None,
-) -> dict[str, Any]:
-    auth = require_mcp_capability("propose_corrections")
-    proposed_value = {
-        key: value
-        for key, value in {
-            "caption": caption,
-            "markdown_content": markdown_content,
-            "page": page,
-            "extraction_source": extraction_source,
-            "prov": prov,
-        }.items()
-        if value is not None
-    }
-    if not proposed_value:
-        raise ValueError("create_table requires caption or markdown_content")
-
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        pid = UUID(paper_id)
-        _ensure_paper_exists(session, pid)
-        correction = _approve_mcp_structured_correction(
-            session,
-            paper_id=pid,
-            source=auth.source_prefix,
-            field_name="tables",
-            target_path="tables:new:create",
-            operation="create",
-            proposed_value=proposed_value,
-            reason=reason,
-            evidence_payload=evidence_payload,
-        )
-        structured_create = (correction.evidence_payload or {}).get("structured_create", {})
-        table_id = structured_create.get("target_id")
-        table = session.get(PaperTable, UUID(table_id)) if table_id else None
-        return {
-            "paper_id": str(pid),
-            "table_id": table_id,
-            "correction": _serialize_correction(correction),
-            "table": _table_snapshot(table) if table else None,
-        }
-
-
-@mcp_server.tool(
-    name="delete_table",
-    description="Delete a duplicate or invalid parsed table through structured PaperCorrection review flow using target_path='tables:<id>:delete'. Requires evidence anchor.",
-)
-def delete_table(
-    paper_id: str,
-    table_id: str,
-    reason: str,
-    evidence_payload: dict[str, Any] | list[Any] | None,
-) -> dict[str, Any]:
-    auth = require_mcp_capability("propose_corrections")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        pid = UUID(paper_id)
-        tid = UUID(table_id)
-        _ensure_paper_exists(session, pid)
-        table = _ensure_table_belongs_to_paper(session, pid, tid)
-        snapshot = _table_snapshot(table)
-        correction = _approve_mcp_structured_correction(
-            session,
-            paper_id=pid,
-            source=auth.source_prefix,
-            field_name="tables",
-            target_path=f"tables:{tid}:delete",
-            operation="delete",
-            proposed_value=None,
-            reason=reason,
-            evidence_payload=evidence_payload,
-        )
-        return {
-            "paper_id": str(pid),
-            "table_id": str(tid),
-            "deleted": session.get(PaperTable, tid) is None,
-            "source_snapshot": snapshot,
-            "correction": _serialize_correction(correction),
-        }
-
-
-@mcp_server.tool(
-    name="merge_table",
-    description="Merge a source table into a target table. Optionally updates the target markdown_content first, then deletes the source table. Requires evidence anchor.",
-)
-def merge_table(
-    paper_id: str,
-    source_table_id: str,
-    target_table_id: str,
-    reason: str,
-    evidence_payload: dict[str, Any] | list[Any] | None,
-    target_markdown_content: str | None = None,
-) -> dict[str, Any]:
-    auth = require_mcp_capability("propose_corrections")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        pid = UUID(paper_id)
-        source_tid = UUID(source_table_id)
-        target_tid = UUID(target_table_id)
-        if source_tid == target_tid:
-            raise ValueError("source_table_id and target_table_id must be different")
-        _ensure_paper_exists(session, pid)
-        source_table = _ensure_table_belongs_to_paper(session, pid, source_tid)
-        target_table = _ensure_table_belongs_to_paper(session, pid, target_tid)
-        source_snapshot = _table_snapshot(source_table)
-        target_before = _table_snapshot(target_table)
-
-        corrections = []
-        if target_markdown_content is not None:
-            corrections.append(
-                _approve_mcp_structured_correction(
-                    session,
-                    paper_id=pid,
-                    source=auth.source_prefix,
-                    field_name="tables",
-                    target_path=f"tables:{target_tid}:markdown_content",
-                    operation="replace",
-                    proposed_value=target_markdown_content,
-                    reason=reason,
-                    evidence_payload=evidence_payload,
-                )
-            )
-        corrections.append(
-            _approve_mcp_structured_correction(
-                session,
-                paper_id=pid,
-                source=auth.source_prefix,
-                field_name="tables",
-                target_path=f"tables:{source_tid}:delete",
-                operation="delete",
-                proposed_value=None,
-                reason=reason,
-                evidence_payload=_evidence_payload_with_meta(
-                    evidence_payload,
-                    "merge_table",
-                    {
-                        "source_table_id": str(source_tid),
-                        "target_table_id": str(target_tid),
-                        "source_snapshot": source_snapshot,
-                        "target_before": target_before,
-                    },
-                ),
-            )
-        )
-        target_after = _ensure_table_belongs_to_paper(session, pid, target_tid)
-        session.add(
-            AuditLog(
-                paper_id=pid,
-                action="merge_table",
-                source=auth.source_prefix,
-                target_type="tables",
-                target_id=str(target_tid),
-                payload={
-                    "source_table_id": str(source_tid),
-                    "target_table_id": str(target_tid),
-                    "source_snapshot": source_snapshot,
-                    "target_before": target_before,
-                    "target_after": _table_snapshot(target_after),
-                    "source_deleted": session.get(PaperTable, source_tid) is None,
-                    "correction_ids": [str(item.id) for item in corrections],
-                },
-            )
-        )
-        return {
-            "paper_id": str(pid),
-            "source_table_id": str(source_tid),
-            "target_table_id": str(target_tid),
-            "source_deleted": session.get(PaperTable, source_tid) is None,
-            "source_snapshot": source_snapshot,
-            "target_table": _table_snapshot(target_after),
-            "corrections": [_serialize_correction(item) for item in corrections],
-        }
-
-
-@mcp_server.tool(
     name="acquire_module_write_lock",
     description=(
         "Acquire a lease before directly applying non-DFT AI edits to a paper module. "
@@ -1388,15 +1094,7 @@ def import_analysis(
         has_payload = bool(raw_payload)
     if not has_text and not has_payload:
         raise ValueError("import_analysis requires non-empty raw_text or raw_payload")
-    effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
-    effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
-    effective_lock_owners = list(
-        dict.fromkeys(
-            item
-            for item in [effective_internal_reviewer, effective_reviewer]
-            if str(item or "").strip()
-        )
-    )
+    effective_reviewer, effective_internal_reviewer, effective_lock_owners = _mcp_review_identity(reviewer, auth)
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         service = ExternalAnalysisService(session=session, settings=settings)
@@ -1444,6 +1142,61 @@ def import_analysis(
                         or (c.normalized_payload or {}).get("recommended_action")
                         or ""
                     ),
+                }
+                for c in candidates
+            ],
+        }
+
+
+@mcp_server.tool(
+    name="apply_analysis_review_rules",
+    description=(
+        "Apply IDE-AI review rules to an existing external analysis run. "
+        "This is the MCP counterpart of HTTP POST /runs/{run_id}/apply-review-rules. "
+        "Use it to materialize DFT object_review_audit candidates that were imported "
+        "with auto_apply_review_rules=False, or to re-evaluate a run after new candidates "
+        "have been added."
+    ),
+)
+def apply_analysis_review_rules(
+    run_id: str,
+    reviewer: str | None = None,
+    write_lock_token: str | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    effective_reviewer, effective_internal_reviewer, effective_lock_owners = _mcp_review_identity(reviewer, auth)
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        service = ExternalAnalysisService(session=session, settings=settings)
+        run = service.get_run(UUID(run_id))
+        auto_apply_summary = service.apply_review_rules_for_run(
+            run.id,
+            reviewer=effective_internal_reviewer,
+            write_lock_tokens=[write_lock_token] if write_lock_token else None,
+            write_lock_owner=effective_lock_owners,
+            auto_lock_owner=effective_internal_reviewer,
+            lock_meta_source="mcp_apply_review_rules",
+        )
+        candidates = service.list_candidates(run.id)
+        session.commit()
+        return {
+            "run_id": str(run.id),
+            "paper_id": str(run.paper_id),
+            "reviewer": effective_reviewer,
+            "auto_apply_summary": auto_apply_summary,
+            "candidate_count": len(candidates),
+            "candidates": [
+                {
+                    "id": str(c.id),
+                    "type": c.candidate_type,
+                    "confidence": c.confidence,
+                    "status": c.status,
+                    "target_type": (c.normalized_payload or {}).get("target_type"),
+                    "target_id": (c.normalized_payload or {}).get("target_id"),
+                    "field_name": (c.normalized_payload or {}).get("field_name"),
+                    "decision": (c.normalized_payload or {}).get("decision") or (c.normalized_payload or {}).get("verdict"),
+                    "materialized_target_type": c.materialized_target_type,
+                    "materialized_target_id": c.materialized_target_id,
                 }
                 for c in candidates
             ],
@@ -1964,7 +1717,7 @@ def create_figure_from_bbox(
 
 @mcp_server.tool(
     name="review_figure",
-    description="Record and optionally apply a review verdict for a specific figure. Figure review defaults to main-paper figures; SI figures are opt-in or evidence-anchor-triggered. Verdicts: verified (AI summary matches the image), needs_attention (summary is incomplete or misleading), incorrect (summary contradicts the image). For non-DFT figure metadata, IDE AI may directly update figure_role, content_summary, key_elements, and crop_status after checking the PDF/image evidence. Figure-derived DFT data must be submitted as DFT candidates/object_review_audits, not final verified or ML_Ready data.",
+    description="Record and optionally apply a review verdict for a specific figure. Verdicts: verified (AI summary matches the image), needs_attention (summary is incomplete or misleading), incorrect (summary contradicts the image). For non-DFT figure metadata, IDE AI may directly update figure_role, content_summary, key_elements, and crop_status after checking the PDF/image evidence.",
 )
 def review_figure(
     figure_id: str,
@@ -2065,7 +1818,7 @@ def review_figure(
 
 @mcp_server.tool(
     name="get_review_coverage",
-    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Table coverage includes main plus supplementary tables; figure coverage defaults to main-paper figures only. Aggregates review_figure verdicts, historical chart notes, and PaperCorrection records to produce a coverage report.",
+    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Aggregates review_figure verdicts, historical chart notes, and PaperCorrection records to produce a coverage report.",
 )
 def get_review_coverage(paper_id: str) -> dict[str, Any]:
     require_mcp_capability("read_papers")
@@ -2075,26 +1828,10 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
         pid = UUID(paper_id)
         _ensure_paper_exists(session, pid)
 
-        supplementary_relationship_types = {"supplementary", "supplementary_information", "supporting_information", "si"}
-        supplementary_paper_ids = [
-            row.target_paper_id
-            for row in session.scalars(
-                select(PaperRelationship).where(PaperRelationship.source_paper_id == pid)
-            ).all()
-            if str(row.relationship_type or "").strip().lower() in supplementary_relationship_types
-        ]
-
         # --- Figures ---
         all_figures = session.scalars(
             select(PaperFigure).where(PaperFigure.paper_id == pid)
         ).all()
-        supplementary_figures_available_count = (
-            session.scalar(
-                select(func.count(PaperFigure.id)).where(PaperFigure.paper_id.in_(supplementary_paper_ids))
-            )
-            if supplementary_paper_ids
-            else 0
-        ) or 0
 
         figure_logs = session.scalars(
             select(AuditLog)
@@ -2133,50 +1870,24 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
             })
 
         # --- Tables ---
-        table_owner_ids = [pid] + supplementary_paper_ids
         all_tables = session.scalars(
-            select(PaperTable)
-            .where(PaperTable.paper_id.in_(table_owner_ids))
-            .order_by(PaperTable.paper_id.asc(), PaperTable.page.asc().nulls_last())
+            select(PaperTable).where(PaperTable.paper_id == pid)
         ).all()
 
-        table_ids = {str(tbl.id) for tbl in all_tables}
-        query_service = PaperQueryService(session)
-        table_audits = query_service._merge_object_review_audit_maps(
-            [
-                query_service._object_review_audits_by_target(
-                    owner_id,
-                    table_ids,
-                    target_types={"table", "tables", "paper_table", "paper_tables"},
-                )
-                for owner_id in table_owner_ids
-            ],
-            table_ids,
-        )
-        table_corrections = query_service._merge_correction_maps(
-            [query_service._table_corrections_by_target(owner_id, table_ids) for owner_id in table_owner_ids],
-            table_ids,
-        )
-        table_status_by_id = {
-            table_id: PaperQueryService._table_review_status(
-                table_audits.get(table_id, []),
-                table_corrections.get(table_id, []),
-            )
-            for table_id in table_ids
-        }
-        reviewed_table_ids = {
-            table_id for table_id, status in table_status_by_id.items() if status != "unreviewed"
-        }
+        table_corr = session.scalars(
+            select(PaperCorrection)
+            .where(PaperCorrection.paper_id == pid)
+            .where(PaperCorrection.field_name == "table")
+        ).all()
+
+        reviewed_table_ids = {c.target_path for c in table_corr if c.status != "pending"}
         table_report = []
         for tbl in all_tables:
-            table_id = str(tbl.id)
             table_report.append({
-                "table_id": table_id,
+                "table_id": str(tbl.id),
                 "caption": tbl.caption,
                 "page": tbl.page,
-                "review_status": table_status_by_id.get(table_id, "unreviewed"),
-                "corrections": table_corrections.get(table_id, []),
-                "object_review_audits": table_audits.get(table_id, []),
+                "review_status": "has_correction" if str(tbl.id) in reviewed_table_ids else "unreviewed",
             })
 
         # --- Sections ---
@@ -2234,12 +1945,6 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
 
         return {
             "paper_id": paper_id,
-            "review_scope": {
-                "table_review_scope": "main_plus_supplementary",
-                "figure_review_scope": "main_only",
-                "include_supplementary_figures": False,
-                "supplementary_figures_available_count": int(supplementary_figures_available_count),
-            },
             "figures": {
                 "total": len(all_figures),
                 "reviewed": fig_reviewed,

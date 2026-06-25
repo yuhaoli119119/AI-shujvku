@@ -35,7 +35,8 @@ def test_figure_and_table_prompts_are_separate_and_si_aware():
 
     assert "本次模块：图片专项核验" in figure_prompt
     assert "本次模块：表格专项核验" not in figure_prompt
-    assert "已关联 SI 中的图片" in figure_prompt
+    assert "Figure review defaults to main paper only" in figure_prompt
+    assert "不自动全量核验已关联 SI figures" in figure_prompt
     assert "本次模块：表格专项核验" in table_prompt
     assert "本次模块：图片专项核验" not in table_prompt
     assert "已关联 SI 中的表格" in table_prompt
@@ -78,6 +79,8 @@ def test_common_prompt_preserves_controlled_in_process_fallback_and_safety_gates
     assert "related_paper_id / read_paper_page_paper_id" in prompt
     assert "writeback_paper_id" in prompt
     assert "blocked_by_supplementary_evidence_unavailable" in prompt
+    assert "图片核验默认只核验主文 paper_id 的 figures" in prompt
+    assert "include_supplementary_figures=true" in prompt
 
 
 def test_sections_prompt_keeps_heading_hierarchy_fields():
@@ -143,6 +146,10 @@ def test_figure_prompt_distinguishes_review_verdicts_from_metadata_writeback():
     assert "优先调用 review_figure" in prompt
     assert "再走 import_analysis" in prompt
     assert "不得直接重复 caption" in prompt
+    assert "Figure-derived DFT values become candidates and require second review/safety gate" in prompt
+    assert "不得直接标记 ML_Ready" in prompt
+    assert "adsorption energy" in prompt
+    assert "Bader charge" in prompt
 
 
 def test_table_prompt_requires_direct_table_mcp_tools():

@@ -503,6 +503,7 @@ async def get_paper_codex_context(
     max_figures: int = 12,
     max_tables: int = 8,
     max_candidates: int = 20,
+    include_supplementary_figures: bool = False,
     session: Session = Depends(get_db_session),
 ) -> CodexContextResponse:
     context = CodexContextService(session).build_context(
@@ -512,6 +513,7 @@ async def get_paper_codex_context(
         max_figures=max(0, min(max_figures, 40)),
         max_tables=max(0, min(max_tables, 30)),
         max_candidates=max(1, min(max_candidates, 100)),
+        include_supplementary_figures=include_supplementary_figures,
     )
     if context is None:
         raise HTTPException(status_code=404, detail="Paper not found")

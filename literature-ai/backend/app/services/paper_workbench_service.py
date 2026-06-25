@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import json
 import re
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -64,6 +64,13 @@ FINALIZED_DFT_CANDIDATE_STATUSES = {
     "Citation_Ready",
     "verified",
     "human_verified",
+}
+
+SUPPLEMENTARY_RELATIONSHIP_TYPES = {
+    "supplementary",
+    "supplementary_information",
+    "supporting_information",
+    "si",
 }
 
 
@@ -407,16 +414,94 @@ class PaperWorkbenchService:
         if ensure_paper_codes(self.session, papers):
             self.session.commit()
         paper_ids = {paper.id for paper in papers}
+        supplementary_relationships = (
+            self.session.scalars(
+                select(PaperRelationship).where(
+                    PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
+                    or_(
+                        PaperRelationship.source_paper_id.in_(paper_ids),
+                        PaperRelationship.target_paper_id.in_(paper_ids),
+                    ),
+                )
+            ).all()
+            if paper_ids
+            else []
+        )
+        group_main_by_paper: dict[UUID, UUID] = {}
+        support_ids_by_main: dict[UUID, set[UUID]] = defaultdict(set)
+        related_paper_ids: set[UUID] = set(paper_ids)
+        for relationship in supplementary_relationships:
+            main_id = relationship.source_paper_id
+            support_id = relationship.target_paper_id
+            group_main_by_paper[main_id] = main_id
+            group_main_by_paper[support_id] = main_id
+            support_ids_by_main[main_id].add(support_id)
+            related_paper_ids.update({main_id, support_id})
+        related_paper_meta: dict[UUID, dict[str, Any]] = {}
+        if related_paper_ids:
+            for related in self.session.execute(
+                select(Paper.id, Paper.paper_code, Paper.title, Paper.paper_type).where(Paper.id.in_(related_paper_ids))
+            ).all():
+                related_paper_meta[related.id] = {
+                    "paper_id": str(related.id),
+                    "paper_code": related.paper_code,
+                    "title": related.title,
+                    "paper_type": related.paper_type,
+                }
+        group_dft_status_counts_by_paper: dict[UUID, dict[str, int]] = {paper_id: {} for paper_id in related_paper_ids}
+        if related_paper_ids:
+            for paper_id, candidate_status, count in self.session.execute(
+                select(
+                    DFTResult.paper_id,
+                    DFTResult.candidate_status,
+                    func.count(DFTResult.id),
+                )
+                .where(DFTResult.paper_id.in_(related_paper_ids))
+                .group_by(DFTResult.paper_id, DFTResult.candidate_status)
+            ).all():
+                group_dft_status_counts_by_paper.setdefault(paper_id, {})[
+                    str(candidate_status or "system_candidate")
+                ] = int(count or 0)
         rows = []
         status_counts: Counter[str] = Counter()
         quality_counts: Counter[str] = Counter()
         auditor = None if summary_only else DFTCompletenessAuditor(self.session)
         reliability_auditor = None if summary_only else ArtifactReliabilityAuditService(self.session, self.settings)
         conflict_service = ReviewConflictAggregationService(self.session)
-        conflict_total_counts = conflict_service.count_conflicts_by_paper(paper_ids)
-        conflict_total_counts_by_module = conflict_service.count_conflicts_by_paper_and_module(paper_ids)
-        conflict_counts = ReviewAdjudicationService(self.session).count_actionable_conflicts_by_paper(paper_ids)
-        conflict_counts_by_module = ReviewAdjudicationService(self.session).count_actionable_conflicts_by_paper_and_module(paper_ids)
+        conflict_total_counts_by_module = {
+            str(paper_id): {"dft": 0, "visual": 0, "content": 0, "other": 0}
+            for paper_id in paper_ids
+        }
+        allowed_conflict_paper_ids = {str(paper_id) for paper_id in paper_ids}
+        if paper_ids:
+            conflict_payload = conflict_service.list_conflicts(limit=1000)
+            for conflict_row in conflict_payload.get("rows") or []:
+                pid = str(conflict_row.get("paper_id") or "")
+                if pid not in allowed_conflict_paper_ids:
+                    continue
+                module = conflict_service._module_for_target_type(conflict_row.get("target_type"))
+                conflict_total_counts_by_module.setdefault(pid, {"dft": 0, "visual": 0, "content": 0, "other": 0})[module] += 1
+        conflict_total_counts = {
+            paper_id: sum(module_counts.values())
+            for paper_id, module_counts in conflict_total_counts_by_module.items()
+        }
+        adjudication_service = ReviewAdjudicationService(self.session)
+        conflict_counts_by_module = {
+            str(paper_id): {"dft": 0, "visual": 0, "content": 0, "other": 0}
+            for paper_id in paper_ids
+        }
+        if paper_ids:
+            adjudicated_payload = adjudication_service.list_with_adjudication(limit=1000)
+            for conflict_row in adjudicated_payload.get("rows") or []:
+                pid = str(conflict_row.get("paper_id") or "")
+                if pid not in allowed_conflict_paper_ids or not adjudication_service.is_actionable_conflict(conflict_row):
+                    continue
+                module = adjudication_service._module_for_target_type(conflict_row.get("target_type"))
+                conflict_counts_by_module.setdefault(pid, {"dft": 0, "visual": 0, "content": 0, "other": 0})[module] += 1
+        conflict_counts = {
+            paper_id: sum(module_counts.values())
+            for paper_id, module_counts in conflict_counts_by_module.items()
+        }
         dft_rows_by_paper: dict[UUID, list[DFTResult]] = {paper_id: [] for paper_id in paper_ids}
         dft_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
         dft_candidate_status_counts_by_paper: dict[UUID, dict[str, int]] = {paper_id: {} for paper_id in paper_ids}
@@ -753,6 +838,13 @@ class PaperWorkbenchService:
             manual_review_progress = self._manual_review_progress(paper.comprehensive_analysis)
             comprehensive_analysis = paper.comprehensive_analysis if isinstance(paper.comprehensive_analysis, dict) else {}
             parsed_analysis = {key: value for key, value in comprehensive_analysis.items() if key != "manual_review_progress"}
+            supplementary_group = self._supplementary_group_payload(
+                paper.id,
+                group_main_by_paper=group_main_by_paper,
+                support_ids_by_main=support_ids_by_main,
+                related_paper_meta=related_paper_meta,
+                dft_status_counts_by_paper=group_dft_status_counts_by_paper,
+            )
             has_parsed_content = bool(
                 paper.abstract
                 or parsed_analysis
@@ -773,6 +865,7 @@ class PaperWorkbenchService:
                     "year": paper.year,
                     "journal": paper.journal,
                     "paper_type": paper.paper_type,
+                    "supplementary_group": supplementary_group,
                     "workflow_status": paper.workflow_status,
                     "pdf_quality_status": paper.pdf_quality_status,
                     "pdf_quality_score": paper.pdf_quality_score,
@@ -876,6 +969,82 @@ class PaperWorkbenchService:
                 continue
             count += 1
         return count
+
+    @classmethod
+    def _active_count_from_status_counts(cls, candidate_status_counts: dict[str, int]) -> int:
+        return sum(
+            int(count or 0)
+            for candidate_status, count in candidate_status_counts.items()
+            if cls._is_active_dft_candidate(candidate_status)
+        )
+
+    @staticmethod
+    def _exportable_count_from_status_counts(candidate_status_counts: dict[str, int]) -> int:
+        exportable_statuses = {
+            "ml_ready",
+            "human_confirmed",
+            "citation_ready",
+            "verified",
+            "human_verified",
+        }
+        return sum(
+            int(count or 0)
+            for candidate_status, count in candidate_status_counts.items()
+            if str(candidate_status or "").strip().lower() in exportable_statuses
+        )
+
+    @classmethod
+    def _supplementary_group_payload(
+        cls,
+        paper_id: UUID,
+        *,
+        group_main_by_paper: dict[UUID, UUID],
+        support_ids_by_main: dict[UUID, set[UUID]],
+        related_paper_meta: dict[UUID, dict[str, Any]],
+        dft_status_counts_by_paper: dict[UUID, dict[str, int]],
+    ) -> dict[str, Any] | None:
+        main_id = group_main_by_paper.get(paper_id)
+        if main_id is None:
+            return None
+        support_ids = sorted(support_ids_by_main.get(main_id, set()), key=lambda item: str(item))
+        member_ids = [main_id] + support_ids
+        group_status_counts: Counter[str] = Counter()
+        support_status_counts: Counter[str] = Counter()
+        for member_id in member_ids:
+            member_counts = dft_status_counts_by_paper.get(member_id, {})
+            group_status_counts.update(member_counts)
+            if member_id != main_id:
+                support_status_counts.update(member_counts)
+        main_counts = dft_status_counts_by_paper.get(main_id, {})
+        return {
+            "role": "main" if paper_id == main_id else "supplementary",
+            "main_paper_id": str(main_id),
+            "main_paper_code": related_paper_meta.get(main_id, {}).get("paper_code"),
+            "support_papers": [
+                {
+                    "paper_id": str(support_id),
+                    "paper_code": related_paper_meta.get(support_id, {}).get("paper_code"),
+                    "title": related_paper_meta.get(support_id, {}).get("title"),
+                    "active_dft_candidate_count": cls._active_count_from_status_counts(
+                        dft_status_counts_by_paper.get(support_id, {})
+                    ),
+                    "dft_candidate_count": sum(
+                        int(count or 0) for count in dft_status_counts_by_paper.get(support_id, {}).values()
+                    ),
+                }
+                for support_id in support_ids
+            ],
+            "member_paper_ids": [str(member_id) for member_id in member_ids],
+            "dft_candidate_count": sum(int(count or 0) for count in group_status_counts.values()),
+            "active_dft_candidate_count": cls._active_count_from_status_counts(dict(group_status_counts)),
+            "exportable_dft_count": cls._exportable_count_from_status_counts(dict(group_status_counts)),
+            "main_dft_candidate_count": sum(int(count or 0) for count in main_counts.values()),
+            "main_active_dft_candidate_count": cls._active_count_from_status_counts(main_counts),
+            "main_exportable_dft_count": cls._exportable_count_from_status_counts(main_counts),
+            "support_dft_candidate_count": sum(int(count or 0) for count in support_status_counts.values()),
+            "support_active_dft_candidate_count": cls._active_count_from_status_counts(dict(support_status_counts)),
+            "candidate_status_counts": dict(sorted(group_status_counts.items())),
+        }
 
     @staticmethod
     def _dft_dedupe_signature(row: DFTResult) -> str:
@@ -1020,12 +1189,32 @@ class PaperWorkbenchService:
             for candidate_status, count in candidate_status_counts.items()
             if str(candidate_status or "").strip().lower() == "rejected"
         )
+        exportable_statuses = {
+            "ml_ready",
+            "human_confirmed",
+            "citation_ready",
+            "verified",
+            "human_verified",
+        }
+        finalized_statuses = {status.lower() for status in FINALIZED_DFT_CANDIDATE_STATUSES}
+        derived_exportable_count = sum(
+            int(count or 0)
+            for candidate_status, count in candidate_status_counts.items()
+            if str(candidate_status or "").strip().lower() in exportable_statuses
+        )
+        derived_active_count = sum(
+            int(count or 0)
+            for candidate_status, count in candidate_status_counts.items()
+            if str(candidate_status or "").strip().lower() not in finalized_statuses
+        )
+        effective_exportable_count = int(exportable_count or 0) or derived_exportable_count
+        effective_blocked_count = int(blocked_count or 0) or derived_active_count
         all_candidates_rejected = parsed_count > 0 and rejected_count == parsed_count
         status = "Unparsed"
         if all_candidates_rejected:
             status = "Human_Complete"
         elif parsed_count > 0:
-            status = "DB_Ready" if exportable_count > 0 and blocked_count == 0 else "Initial_Parsed"
+            status = "DB_Ready" if effective_exportable_count > 0 and effective_blocked_count == 0 else "Initial_Parsed"
         if str(paper.workflow_status or "") == "Suspected_Missing":
             status = "Suspected_Missing"
         return {
@@ -1043,10 +1232,10 @@ class PaperWorkbenchService:
             "detected_tables": 0,
             "detected_figures": 0,
             "parsed_dft_count": parsed_count,
-            "exportable_dft_count": exportable_count,
-            "blocked_dft_count": blocked_count,
+            "exportable_dft_count": effective_exportable_count,
+            "blocked_dft_count": effective_blocked_count,
             "suspected_missing_count": 1 if status == "Suspected_Missing" else 0,
-            "coverage_ratio": 1.0 if parsed_count and blocked_count == 0 else 0.0,
+            "coverage_ratio": 1.0 if parsed_count and effective_blocked_count == 0 else 0.0,
             "unique_candidate_count": parsed_count,
             "duplicate_evidence_count": 0,
             "rescan_recommended": status == "Suspected_Missing",
@@ -1249,6 +1438,38 @@ class PaperWorkbenchService:
         sections = self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper.id)).all()
         tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id == paper.id)).all()
         figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper.id)).all()
+        supplementary_relationships = self.session.scalars(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == paper.id,
+                PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
+            )
+        ).all()
+        supplementary_paper_ids = [relationship.target_paper_id for relationship in supplementary_relationships]
+        supplementary_papers = {
+            item.id: item
+            for item in (
+                self.session.scalars(select(Paper).where(Paper.id.in_(supplementary_paper_ids))).all()
+                if supplementary_paper_ids
+                else []
+            )
+        }
+        supplementary_tables = (
+            self.session.scalars(
+                select(PaperTable)
+                .where(PaperTable.paper_id.in_(supplementary_paper_ids))
+                .order_by(PaperTable.paper_id.asc(), PaperTable.page.asc().nulls_last())
+            ).all()
+            if supplementary_paper_ids
+            else []
+        )
+        supplementary_figures_available_count = (
+            self.session.scalar(
+                select(func.count(PaperFigure.id)).where(PaperFigure.paper_id.in_(supplementary_paper_ids))
+            )
+            if supplementary_paper_ids
+            else 0
+        ) or 0
+        display_tables = list(tables) + list(supplementary_tables)
         dft_rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
         dft_settings = self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper.id)).all()
         catalyst_samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper.id)).all()
@@ -1262,7 +1483,7 @@ class PaperWorkbenchService:
         content_coverage = self._build_content_coverage_summary(
             paper=paper,
             sections=sections,
-            tables=tables,
+            tables=display_tables,
             figures=figures,
             dft_settings=dft_settings,
             dft_rows=dft_rows,
@@ -1298,11 +1519,19 @@ class PaperWorkbenchService:
                 "source_documents": source_documents,
                 "abstract": paper.abstract,
                 "llm_input_policy": {
+                    "table_review_scope": "main_plus_supplementary",
+                    "figure_review_scope": "main_only",
+                    "include_supplementary_figures": False,
+                    "supplementary_figures_available_count": int(supplementary_figures_available_count),
+                    "supplementary_figures_policy": (
+                        "Do not automatically sweep all SI figures. Request SI figures only when the user explicitly "
+                        "asks, the task cites Figure Sxx, or an evidence anchor points to an SI figure."
+                    ),
                     "text_llm_scope": [
                         "paper metadata",
                         "abstract",
                         "text sections",
-                        "parsed markdown tables",
+                        "parsed markdown tables from main and supplementary documents",
                         "existing structured candidates",
                     ],
                     "excluded_from_text_llm": [
@@ -1321,6 +1550,44 @@ class PaperWorkbenchService:
                         "remain candidates until the review/export gate passes. Table object lifecycle operations "
                         "use direct MCP table tools: update_table, create_table, merge_table, and delete_table."
                     ),
+                },
+                "review_scope": {
+                    "table_review_scope": "main_plus_supplementary",
+                    "figure_review_scope": "main_only",
+                    "include_supplementary_figures": False,
+                    "supplementary_figures_available_count": int(supplementary_figures_available_count),
+                    "figure_derived_dft_policy": (
+                        "If a main-paper figure contains explicit DFT values such as adsorption energy, binding "
+                        "energy, dissociation energy, decomposition barrier, reaction barrier, free energy/Delta G, "
+                        "Bader charge, or charge transfer, extract them only as DFT candidates with figure/page/text/"
+                        "value/unit/property/material anchors. They must not become ML_Ready until the existing DFT "
+                        "second review and export safety gate pass."
+                    ),
+                },
+                "figure_dft_candidate_extraction_policy": {
+                    "allowed_signal_examples": [
+                        "adsorption energy",
+                        "binding energy",
+                        "dissociation energy",
+                        "decomposition barrier",
+                        "reaction barrier",
+                        "free energy / Delta G",
+                        "Bader charge",
+                        "charge transfer",
+                    ],
+                    "required_fields": [
+                        "figure_id or figure_label",
+                        "page",
+                        "quoted_text or readable annotation",
+                        "value",
+                        "unit",
+                        "property_type",
+                        "adsorbate or reaction_step",
+                        "material_identity when available",
+                    ],
+                    "write_path": "import_analysis object_review_audits decision=new_candidate or existing DFT candidate audit path",
+                    "must_not_set_status": "ML_Ready",
+                    "requires_second_review": True,
                 },
                 "non_dft_direct_write_policy": {
                     "ai_can_apply_without_human_confirmation": [
@@ -1360,23 +1627,39 @@ class PaperWorkbenchService:
                 "tables": [
                     {
                         "id": str(table.id),
+                        "paper_id": str(table.paper_id),
+                        "source_document_type": (
+                            "supplementary_information" if table.paper_id != paper.id else "main_text"
+                        ),
+                        "related_paper_id": str(table.paper_id) if table.paper_id != paper.id else None,
+                        "related_paper_code": (
+                            supplementary_papers.get(table.paper_id).paper_code
+                            if table.paper_id in supplementary_papers
+                            else None
+                        ),
+                        "writeback_paper_id": str(paper.id),
                         "caption": table.caption,
                         "page": table.page,
                         "markdown_content": table.markdown_content,
                         "prov": table.prov,
                     }
-                    for table in tables
+                    for table in display_tables
                 ],
                 "figures": [
                     {
                         "id": str(figure.id),
+                        "source_document_type": "main_text",
+                        "writeback_paper_id": str(paper.id),
                         "figure_label": figure.figure_label,
                         "caption": figure.caption,
                         "page": figure.page,
                         "image_path": figure.image_path,
                         "text_llm_allowed": False,
                         "review_route": "human_or_ide_visual_only",
-                        "text_llm_note": "Do not ask a text-only LLM to interpret this figure image/crop or read chart values.",
+                        "text_llm_note": (
+                            "Do not ask a text-only LLM to interpret this figure image/crop or read chart values. "
+                            "IDE visual review may extract explicit readable DFT annotations as DFT candidates only."
+                        ),
                         "crop_status": figure.crop_status,
                         "crop_confidence": figure.crop_confidence,
                         "prov": figure.prov,

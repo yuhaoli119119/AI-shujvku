@@ -150,7 +150,7 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert payload["mcp_url"].endswith("/mcp")
     assert payload["cursor_config"]["mcpServers"]["literature-ai"]["command"] in {"npx", "npx.cmd"}
     assert "--header" in payload["cursor_config"]["mcpServers"]["literature-ai"]["args"]
-    assert payload["prompt_schema_version"] == "ide_review_prompt_v7"
+    assert payload["prompt_schema_version"] == "ide_review_prompt_v8"
     assert "SRR_LiS" in payload["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["project_library_contexts"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["topic_field_dictionaries"]

@@ -27,7 +27,6 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.main import app
-from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 
@@ -78,8 +77,7 @@ def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
         evidence_text="FeCo Bader charge is 0.90 e.",
     )
     revise = {
-        "candidate_id": "submission-a",
-        "source_identity": "same-review-ai",
+        "source_identity": "dynamic-review-source-a",
         "decision": "REVISE",
         "field_name": "dft_results",
         "corrected_value": {
@@ -92,8 +90,7 @@ def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
         "evidence_payload": {"page": 3, "quoted_text": "FeCo | 0.90"},
     }
     passed = {
-        "candidate_id": "submission-b",
-        "source_identity": "same-review-ai",
+        "source_identity": "dynamic-review-source-b",
         "decision": "PASS",
         "field_name": "dft_results",
         "corrected_value": {
@@ -126,7 +123,7 @@ def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
         "decision": "PROPOSED",
         "field_name": "dft_results",
         "adjudication_role": "third_ai",
-        "selected_source_ids": ["submission-a"],
+        "selected_source_ids": ["dynamic-review-source-a"],
         "corrected_value": {"value": 0.91},
     }
     inherited = service._inherit_selected_dft_evidence(third_ai, [revise, passed, third_ai])
@@ -140,236 +137,6 @@ def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
         "material_identity": "FeCo@C2N",
     }
     assert completed["evidence_payload"] == revise["evidence_payload"]
-
-
-def test_dft_workflow_state_requires_evidence_anchor_for_valid_ai_opinion():
-    gate = {"eligible": False, "reasons": ["missing_review"]}
-    audits = [
-        {
-            "source_label": "first_ai",
-            "decision": "REJECT",
-            "reason": "No PDF support.",
-            "evidence_location": {"page": 5},
-        },
-        {
-            "source_label": "second_ai",
-            "decision": "REJECT",
-            "reason": "Duplicate row.",
-            "evidence_location": {"page": 5, "quoted_text": "Delta G H* = 0.02 eV."},
-        },
-        {
-            "source_label": "new_candidate_import",
-            "decision": "new_candidate",
-            "evidence_location": {"page": 5, "quoted_text": "Delta G H* = 0.02 eV."},
-        },
-    ]
-
-    state = DFTReviewQueueService.build_dft_workflow_state(
-        gate=gate,
-        object_review_audits=audits,
-    )
-
-    assert state["state"] == "missing_evidence_anchor"
-    assert state["label"] == "第二意见缺证据定位"
-    assert state["valid_ai_opinion_count"] == 1
-    assert state["raw_ai_opinion_count"] == 3
-    assert state["next_required_action"] == "provide_evidence_anchor"
-    assert [item["decision"] for item in state["effective_ai_opinions"]] == ["REJECT", "REJECT"]
-
-
-def test_dft_workflow_state_routes_conflict_and_rejected_consensus():
-    anchored_reject = {
-        "source_label": "reject_ai",
-        "decision": "REJECT",
-        "reason": "Contradicts the PDF.",
-        "evidence_location": {"page": 7, "quoted_text": "The value is not reported."},
-    }
-    anchored_pass = {
-        "source_label": "pass_ai",
-        "decision": "PASS",
-        "reason": "Matches the table.",
-        "evidence_location": {"page": 7, "quoted_text": "Adsorption energy is -1.23 eV."},
-    }
-    gate = {"eligible": False, "reasons": ["missing_review"]}
-
-    conflict = DFTReviewQueueService.build_dft_workflow_state(
-        gate=gate,
-        object_review_audits=[anchored_reject, anchored_pass],
-    )
-    rejected = DFTReviewQueueService.build_dft_workflow_state(
-        gate=gate,
-        object_review_audits=[
-            anchored_reject,
-            {**anchored_reject, "source_label": "reject_ai_2"},
-        ],
-    )
-
-    assert conflict["state"] == "needs_third_ai"
-    assert conflict["next_required_action"] == "run_third_ai_adjudication"
-    assert rejected["state"] == "rejected_consensus_pending_write"
-    assert rejected["next_required_action"] == "settle_consensus"
-
-
-def test_dft_workflow_counts_candidate_submissions_instead_of_ai_identity():
-    anchored = {
-        "source_label": "same_ai",
-        "decision": "PASS",
-        "evidence_location": {"page": 4, "quoted_text": "The reported value is 0.42 eV."},
-    }
-    audits = [
-        {**anchored, "candidate_id": "submission-1"},
-        {**anchored, "candidate_id": "submission-2"},
-        {**anchored, "candidate_id": "submission-3", "adjudication_role": "third_ai"},
-        {**anchored, "candidate_id": "submission-3", "reason": "duplicate payload instance"},
-    ]
-
-    state = DFTReviewQueueService.build_dft_workflow_state(
-        gate={"eligible": False, "reasons": ["missing_review"]},
-        object_review_audits=audits,
-    )
-
-    assert state["valid_ai_opinion_count"] == 3
-    assert state["raw_ai_opinion_count"] == 3
-
-
-def test_dft_workflow_rejected_terminal_state_precedes_missing_material_binding():
-    state = DFTReviewQueueService.build_dft_workflow_state(
-        gate={
-            "eligible": False,
-            "reasons": ["missing_material_identity", "unsafe_review"],
-            "review_status": "rejected",
-        },
-        object_review_audits=[],
-        candidate_status="Rejected",
-    )
-
-    assert state["state"] == "rejected"
-    assert state["label"] == "已拒绝"
-    assert state["next_required_action"] == "none"
-
-
-def test_dft_settlement_accepts_same_ai_as_independent_third_submission():
-    row = DFTResult(
-        id=uuid4(),
-        paper_id=uuid4(),
-        property_type="adsorption_energy",
-        adsorbate="H",
-        value=0.42,
-        unit="eV",
-    )
-    service = object.__new__(VerificationSessionService)
-    service.session = MagicMock()
-    service._apply_reject_all = MagicMock(return_value={"action": "reject", "result": "rejected"})
-
-    def audit(candidate_id: str, decision: str, *, third_ai: bool = False):
-        candidate = MagicMock()
-        candidate.status = "candidate"
-        return {
-            "candidate_id": candidate_id,
-            "candidate": candidate,
-            "status": "candidate",
-            "source_identity": "same_ai",
-            "source_label": "same_ai",
-            "decision": decision,
-            "confidence": 0.9,
-            "evidence_payload": {"page": 4, "quoted_text": "The reported value is 0.42 eV."},
-            "adjudication_role": "third_ai" if third_ai else None,
-        }
-
-    result = service._settle_dft_row_from_existing_audits(
-        row=row,
-        audits=[
-            audit("submission-1", "PASS"),
-            audit("submission-2", "REJECT"),
-            audit("submission-3", "REJECT", third_ai=True),
-        ],
-        reviewer="test",
-        write_lock_tokens=None,
-    )
-
-    assert result["status"] == "auto_applied"
-    service._apply_reject_all.assert_called_once()
-
-
-def test_dft_settlement_same_source_rejects_count_by_candidate_id():
-    row = DFTResult(
-        id=uuid4(),
-        paper_id=uuid4(),
-        property_type="adsorption_energy",
-        adsorbate="H",
-        value=0.42,
-        unit="eV",
-    )
-    service = object.__new__(VerificationSessionService)
-    service.session = MagicMock()
-    service._apply_reject_all = MagicMock(return_value={"action": "reject", "result": "rejected"})
-    candidate_1 = MagicMock(status="candidate")
-    candidate_2 = MagicMock(status="candidate")
-    base = {
-        "status": "candidate",
-        "source_identity": "same_ai",
-        "source_label": "same_ai",
-        "decision": "REJECT",
-        "evidence_payload": {"page": 4, "quoted_text": "The candidate duplicates the retained row."},
-    }
-
-    result = service._settle_dft_row_from_existing_audits(
-        row=row,
-        audits=[
-            {**base, "candidate_id": "submission-1", "candidate": candidate_1},
-            {**base, "candidate_id": "submission-2", "candidate": candidate_2},
-        ],
-        reviewer="test",
-        write_lock_tokens=None,
-    )
-
-    assert result["status"] == "auto_applied"
-    service._apply_reject_all.assert_called_once()
-
-
-def test_imported_dft_review_settlement_counts_same_source_candidate_submissions():
-    paper_id = uuid4()
-    target_id = str(uuid4())
-    run = MagicMock(source="ide_ai", source_label="same_ai")
-    candidates = []
-    for candidate_id in (uuid4(), uuid4()):
-        candidate = MagicMock()
-        candidate.id = candidate_id
-        candidate.paper_id = paper_id
-        candidate.status = "candidate"
-        candidate.normalized_payload = {
-            "target_type": "dft_results",
-            "target_id": target_id,
-            "field_name": "value",
-            "decision": "REJECT",
-            "value": 0.42,
-            "material": "Fe-N4",
-            "evidence_location": {"page": 4, "quoted_text": "The reported value is 0.42 eV."},
-        }
-        candidates.append(candidate)
-
-    service = object.__new__(VerificationSessionService)
-    service.session = MagicMock()
-    service.session.execute.return_value.all.return_value = [(candidate, run) for candidate in candidates]
-    service._dft_has_material_identity = MagicMock(return_value=False)
-    service._apply_selected_opinion = MagicMock(
-        return_value={
-            "action": "reject",
-            "target_type": "dft_results",
-            "target_id": target_id,
-        }
-    )
-
-    result = service._auto_apply_object_review_candidates(
-        paper_id=paper_id,
-        reviewer="test",
-        include_target_types={"dft_results"},
-    )
-
-    assert result["applied_count"] == 1
-    assert result["pending_count"] == 0
-    service._apply_selected_opinion.assert_called_once()
-    assert all(candidate.status == "ai_reviewed" for candidate in candidates)
 
 
 def test_pending_third_ai_adjudication_reopens_an_already_settled_dft_row():
@@ -1261,7 +1028,7 @@ def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_
         assert {review.reviewer_status for review in reviews} == {"verified"}
 
 
-def test_paper_detail_keeps_materialized_new_candidate_submissions(verification_env):
+def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env):
     Session = verification_env
     with Session() as session:
         paper = Paper(title="Detail dedupe paper", pdf_path="detail-dedupe.pdf", workflow_status="Initial_Parsed")
@@ -1359,9 +1126,8 @@ def test_paper_detail_keeps_materialized_new_candidate_submissions(verification_
     assert detail.status_code == 200
     items = detail.json()["dft_results_items"]
     target = next(item for item in items if item["id"] == str(row_id))
-    assert target["object_review_audit_count"] == 2
-    assert [audit["decision"] for audit in target["object_review_audits"]] == ["new_candidate", "new_candidate"]
-    assert target["valid_ai_opinion_count"] == 0
+    assert target["object_review_audit_count"] == 1
+    assert [audit["decision"] for audit in target["object_review_audits"]] == ["new_candidate"]
 
 
 def test_dft_review_queue_includes_materialized_new_candidate_audits(verification_env):
@@ -1473,72 +1239,6 @@ def test_dft_review_queue_includes_materialized_new_candidate_audits(verificatio
     sources = {audit["source_label"] for audit in target["object_review_audits"]}
     assert {"new_candidate", "REJECT"} <= decisions
     assert {"ai-new-source", "ai-reject-source"} <= sources
-
-
-def test_dft_queue_and_detail_keep_same_source_candidate_submissions(verification_env):
-    Session = verification_env
-    with Session() as session:
-        paper = Paper(title="Same source submissions", pdf_path="same-source.pdf", workflow_status="Initial_Parsed")
-        session.add(paper)
-        session.flush()
-        row = DFTResult(
-            paper_id=paper.id,
-            property_type="adsorption_energy",
-            adsorbate="H",
-            value=0.42,
-            unit="eV",
-            evidence_text="The reported value is 0.42 eV.",
-            candidate_status="new_candidate",
-        )
-        run = ExternalAnalysisRun(
-            paper_id=paper.id,
-            source="ide_ai",
-            source_label="same-ai",
-            raw_payload={},
-            normalized_payload={},
-            mapping_status="mapped",
-        )
-        session.add_all([row, run])
-        session.flush()
-        candidates = []
-        for decision in ("PASS", "PASS", "REJECT"):
-            candidate = ExternalAnalysisCandidate(
-                run_id=run.id,
-                paper_id=paper.id,
-                candidate_type="object_review_audit",
-                normalized_payload={
-                    "target_type": "dft_results",
-                    "target_id": str(row.id),
-                    "field_name": "dft_results",
-                    "decision": decision,
-                    "evidence_location": {
-                        "page": 4,
-                        "quoted_text": "The reported value is 0.42 eV.",
-                    },
-                },
-                status="candidate",
-            )
-            candidates.append(candidate)
-        session.add_all(candidates)
-        session.commit()
-        paper_id = paper.id
-        row_id = row.id
-        candidate_ids = {str(candidate.id) for candidate in candidates}
-
-    client = TestClient(app)
-    queue_response = client.get(
-        f"/api/papers/export/dft-review-queue?paper_id={paper_id}&limit=10&status=needs_review"
-    )
-    detail_response = client.get(f"/api/papers/{paper_id}")
-
-    assert queue_response.status_code == 200
-    assert detail_response.status_code == 200
-    queue_row = next(item for item in queue_response.json()["rows"] if item["record_id"] == str(row_id))
-    detail_row = next(item for item in detail_response.json()["dft_results_items"] if item["id"] == str(row_id))
-    assert {item["candidate_id"] for item in queue_row["object_review_audits"]} == candidate_ids
-    assert {item["candidate_id"] for item in detail_row["object_review_audits"]} == candidate_ids
-    assert queue_row["valid_ai_opinion_count"] == 3
-    assert detail_row["valid_ai_opinion_count"] == 3
 
 
 def test_field_level_proposal_can_settle_with_independent_value_pass(verification_env):
@@ -1781,3 +1481,257 @@ def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):
         stored = session.get(DFTResult, UUID(row_id))
         assert stored.value == pytest.approx(-1.35)
         assert session.scalar(select(AuditLog).where(AuditLog.action == "manual_conflict_resolution")) is not None
+
+
+# ---------------------------------------------------------------------------
+# Characterization tests for _settle_dft_row_from_existing_audits branch
+# priority.  Each test pins which branch fires for a given opinion
+# configuration, so future refactors cannot silently reorder the priority
+# ladder.
+# ---------------------------------------------------------------------------
+
+
+def _make_settle_service() -> VerificationSessionService:
+    """Build a VerificationSessionService with a MagicMock session, matching
+    the existing characterization-test pattern in this file."""
+    service = object.__new__(VerificationSessionService)
+    service.session = MagicMock()
+    service.session.get.return_value = None  # _dft_identity_key looks up row
+    return service
+
+
+def _make_audit(
+    *,
+    source_identity: str,
+    decision: str,
+    field_name: str = "dft_results",
+    corrected_value: dict | None = None,
+    evidence_payload: dict | None = None,
+    adjudication_role: str = "",
+    confidence: float = 0.8,
+    material: str | None = None,
+    candidate_id: str | None = None,
+) -> dict:
+    """Build a minimal audit dict accepted by _settle_dft_row_from_existing_audits."""
+    audit: dict = {
+        "source_identity": source_identity,
+        "candidate_id": candidate_id or f"cand-{source_identity}",
+        "status": "materialized",
+        "decision": decision,
+        "field_name": field_name,
+        "corrected_value": corrected_value or {},
+        "evidence_payload": evidence_payload if evidence_payload is not None else {"page": 1, "quoted_text": "evidence"},
+        "confidence": confidence,
+        "candidate": MagicMock(),
+    }
+    if adjudication_role:
+        audit["adjudication_role"] = adjudication_role
+    if material:
+        audit["material"] = material
+    return audit
+
+
+def test_settle_third_ai_priority_over_pass_reject_conflict():
+    """When PASS + REJECT conflict AND a third_ai adjudication exists, the
+    third_ai branch must fire — NOT the has_reject+has_positive → need_third_ai
+    branch.  The third_ai check sits above the decision-conflict check in the
+    priority ladder."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=-0.95,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV"},
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="REJECT",
+            corrected_value={"value": -0.95, "unit": "eV"},
+        ),
+        _make_audit(
+            source_identity="adjudicator",
+            decision="REJECT",
+            adjudication_role="third_ai",
+            corrected_value={"value": -0.95, "unit": "eV"},
+            confidence=0.95,
+        ),
+    ]
+
+    service = _make_settle_service()
+    # Mock the reject-all path so we don't need a real DFTResultReviewService.
+    service._apply_reject_all = MagicMock(
+        return_value={"action": "reject", "target_type": "dft_results", "result": {"status": "rejected"}}
+    )
+
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "auto_applied"
+    assert result.get("reason") != "decision_conflict"
+    service._apply_reject_all.assert_called_once()
+
+
+def test_settle_missing_evidence_anchor_priority_over_waiting_second_ai():
+    """When opinions exist but NONE have an evidence anchor, the settle
+    function must return need_repair / missing_evidence_anchor — NOT
+    waiting_second_ai (which would fire if anchored < 2 but the anchor
+    check comes first in the priority ladder)."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=-0.95,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV"},
+            evidence_payload={},  # no anchor keys
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV"},
+            evidence_payload={},  # no anchor keys either
+        ),
+    ]
+
+    service = _make_settle_service()
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "need_repair"
+    assert result["reason"] == "missing_evidence_anchor"
+
+
+def test_settle_whole_row_proposal_without_supporting_pass_returns_value_conflict():
+    """A whole-row PROPOSED opinion with no supporting PASS (values differ)
+    must return need_third_ai / value_conflict.  It must NOT fall through to
+    the same_field_consensus branch, because the whole_row check returns
+    early."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=0.75,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PROPOSED",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": 0.95,
+                "unit": "eV",
+            },
+            confidence=0.9,
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="PASS",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": 0.80,  # different value → no supporting pass
+                "unit": "eV",
+            },
+            confidence=0.85,
+        ),
+    ]
+
+    service = _make_settle_service()
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "need_third_ai"
+    assert result["reason"] == "value_conflict"
+
+
+def test_settle_incompatible_material_identity_returns_need_repair_not_auto_apply():
+    """Two anchored PASS opinions with matching values but incompatible
+    material identities must return need_repair / material_identity_conflict
+    — NOT auto_applied.  The material-identity check sits inside the
+    pass-consensus branch and short-circuits before any apply call."""
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="H",
+        value=-0.95,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="ai_a",
+            decision="PASS",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": -0.95,
+                "unit": "eV",
+                "material_identity": "CoN3",
+            },
+            material="CoN3",
+            confidence=0.9,
+        ),
+        _make_audit(
+            source_identity="ai_b",
+            decision="PASS",
+            field_name="dft_results",
+            corrected_value={
+                "property_type": "adsorption_energy",
+                "adsorbate": "H",
+                "value": -0.95,
+                "unit": "eV",
+                "material_identity": "FeN4",
+            },
+            material="FeN4",  # incompatible with CoN3
+            confidence=0.88,
+        ),
+    ]
+
+    service = _make_settle_service()
+    # If the material-identity guard fails, _apply_dft_consensus_outcome
+    # would be called.  Wire it to fail the test if reached.
+    service._apply_dft_consensus_outcome = MagicMock(
+        side_effect=AssertionError("material_identity_conflict should short-circuit before apply")
+    )
+
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "need_repair"
+    assert result["reason"] == "material_identity_conflict"
+    service._apply_dft_consensus_outcome.assert_not_called()
