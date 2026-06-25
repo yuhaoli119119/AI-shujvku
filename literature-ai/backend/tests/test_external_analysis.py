@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db.models import AuditLog, Base, CatalystSample, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.main import app
@@ -3200,5 +3201,93 @@ def test_dft_results_create_correction_returns_clear_error_message():
                     assert "DFT results cannot be created via PaperCorrection" in str(exc)
                     assert "import_analysis" in str(exc)
                     assert "object_review_audit" in str(exc)
+        finally:
+            engine.dispose()
+
+
+def test_apply_review_rules_logs_auto_lock_release_failure_when_apply_rolls_back(monkeypatch, caplog):
+    """Release failures must remain observable even when the outer apply later rolls back."""
+
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="DFT release log paper", pdf_path="release-log.pdf", authors=["A"])
+                session.add(paper)
+                session.flush()
+                run = ExternalAnalysisRun(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    source_label="release_log",
+                    raw_payload={},
+                    normalized_payload={},
+                    mapping_status="mapped",
+                )
+                session.add(run)
+                session.flush()
+                session.add(
+                    ExternalAnalysisCandidate(
+                        run_id=run.id,
+                        paper_id=paper.id,
+                        candidate_type="object_review_audit",
+                        status="candidate",
+                        normalized_payload={
+                            "target_type": "dft_results",
+                            "target_id": "new",
+                            "field_name": "dft_results",
+                            "decision": "new_candidate",
+                            "corrected_value": {
+                                "material_identity": "Fe-N4",
+                                "property_type": "adsorption_energy",
+                                "value": -1.23,
+                                "unit": "eV",
+                                "adsorbate": "Li2S4",
+                                "reaction_step": "adsorption",
+                            },
+                            "evidence_location": {
+                                "page": 3,
+                                "quoted_text": "Fe-N4 -1.23 eV",
+                            },
+                            "confidence": 0.9,
+                        },
+                    )
+                )
+                session.commit()
+                run_id = run.id
+
+            from app.services.module_write_lock_service import ModuleWriteLockService
+
+            def fail_apply_import_rules(self, **kwargs):
+                raise RuntimeError("apply boom")
+
+            def fail_release(self, **kwargs):
+                raise RuntimeError("release boom")
+
+            monkeypatch.setattr(
+                VerificationSessionService,
+                "apply_import_rules_for_paper",
+                fail_apply_import_rules,
+            )
+            monkeypatch.setattr(ModuleWriteLockService, "release", fail_release)
+            caplog.set_level(logging.ERROR, logger="app.services.external_analysis_service")
+
+            with Session(engine) as session:
+                service = ExternalAnalysisService(session, Settings(storage_root=Path(tmpdir)))
+                try:
+                    service.apply_review_rules_for_run(run_id, reviewer="ide_ai")
+                    raise AssertionError("Expected apply_review_rules_for_run to raise")
+                except RuntimeError as exc:
+                    assert str(exc) == "apply boom"
+                session.rollback()
+
+            assert any(
+                record.name == "app.services.external_analysis_service"
+                and "Failed to release auto-acquired DFT module write lock" in record.getMessage()
+                and record.exc_info
+                and str(record.exc_info[1]) == "release boom"
+                for record in caplog.records
+            )
         finally:
             engine.dispose()
