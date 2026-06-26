@@ -375,6 +375,18 @@ def _manual_verification_required(row: DFTResult) -> bool:
     return decision_status in {"ambiguous", "needs_user_decision", "manual_verification_required"}
 
 
+def _generated_instance_key_lacks_binding_evidence(prop: dict[str, Any], *, instance_source: str) -> bool:
+    if instance_source == "evidence_payload":
+        return False
+    active_site_ref = prop.get("active_site_ref") if isinstance(prop.get("active_site_ref"), dict) else {}
+    setting_ref = active_site_ref.get("dft_setting_ref") if isinstance(active_site_ref.get("dft_setting_ref"), dict) else {}
+    return not (
+        active_site_ref.get("paper_id")
+        and active_site_ref.get("catalyst_sample_id")
+        and setting_ref.get("dft_setting_id")
+    )
+
+
 def _record_blockers(prop: dict[str, Any], *, instance_source: str, instance_blockers: list[str]) -> list[str]:
     blockers = list(instance_blockers)
     if not prop["safety_gate_passed"]:
@@ -391,7 +403,7 @@ def _record_blockers(prop: dict[str, Any], *, instance_source: str, instance_blo
         blockers.append("unknown_energy_kind")
     if prop["canonical_property_type"] == "adsorption_energy" and not prop["canonical_adsorbate"]:
         blockers.append("missing_adsorbate")
-    if instance_source != "evidence_payload":
+    if _generated_instance_key_lacks_binding_evidence(prop, instance_source=instance_source):
         blockers.append("generated_active_site_instance_key")
     return sorted(set(blockers))
 

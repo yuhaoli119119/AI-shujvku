@@ -404,6 +404,60 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
     assert rows[0]["energy_kind"] == "activation_barrier"
 
 
+def test_project_library_v4_allows_generated_key_when_setting_binding_is_unambiguous(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S generated key ready", library_name="锂硫双原子", parsed=True)
+        ready_row = _seed_dft(
+            session,
+            paper=paper,
+            complete=True,
+            adsorbate="Li2S",
+            evidence_text="Li2S adsorption energy is -1.10 eV on the catalyst.",
+            value=-1.10,
+            evidence_payload={"source_text": "Li2S adsorption energy is -1.10 eV on the catalyst."},
+        )
+        missing_setting_paper = _seed_paper(
+            session,
+            title="Li-S generated key missing setting",
+            library_name="锂硫双原子",
+            parsed=True,
+        )
+        blocked_row = _seed_dft(
+            session,
+            paper=missing_setting_paper,
+            complete=True,
+            adsorbate="Li2S",
+            evidence_text="Li2S adsorption energy is -1.35 eV on the catalyst.",
+            value=-1.35,
+            evidence_payload={"source_text": "Li2S adsorption energy is -1.35 eV on the catalyst."},
+            with_setting=False,
+        )
+        session.commit()
+        ready_row_id = str(ready_row.id)
+        blocked_row_id = str(blocked_row.id)
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "adsorption_energy", "ready_only": "false"},
+    )
+    assert response.status_code == 200, response.text
+    records = {record["record_id"]: record for record in response.json()["records"]}
+
+    ready_record = records[ready_row_id]
+    assert ready_record["active_site_instance_key"].startswith("paper:")
+    assert ready_record["active_site_ref"]["binding_source"] == "generated_read_only_bundle_key"
+    assert ready_record["active_site_ref"]["dft_setting_ref"]["source"] == "singleton_paper_setting"
+    assert ready_record["ml_ready"] is True
+    assert "generated_active_site_instance_key" not in ready_record["blockers"]
+
+    blocked_record = records[blocked_row_id]
+    assert blocked_record["ml_ready"] is False
+    assert "missing_result_setting_link" in blocked_record["blockers"]
+    assert "generated_active_site_instance_key" in blocked_record["blockers"]
+
+
 def test_project_library_v4_export_excludes_user_decision_candidates_from_ml_ready(setup_test_db):
     SessionLocal = sessionmaker(bind=setup_test_db, future=True)
     with SessionLocal() as session:
