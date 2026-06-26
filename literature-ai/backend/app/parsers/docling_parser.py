@@ -39,12 +39,28 @@ class DoclingParser:
             or (ocr_required and self.settings.docling_auto_ocr)
         )
 
-    async def parse_pdf(self, pdf_path: Path, *, ocr_required: bool = False) -> DoclingParseResult:
+    async def parse_pdf(
+        self,
+        pdf_path: Path,
+        *,
+        ocr_required: bool = False,
+        document_timeout: float | None = None,
+    ) -> DoclingParseResult:
         effective_ocr_required = bool(ocr_required or self.ocr_required)
         self.ocr_required = False
-        return self.parse_pdf_sync(pdf_path, ocr_required=effective_ocr_required)
+        return self.parse_pdf_sync(
+            pdf_path,
+            ocr_required=effective_ocr_required,
+            document_timeout=document_timeout,
+        )
 
-    def parse_pdf_sync(self, pdf_path: Path, *, ocr_required: bool = False) -> DoclingParseResult:
+    def parse_pdf_sync(
+        self,
+        pdf_path: Path,
+        *,
+        ocr_required: bool = False,
+        document_timeout: float | None = None,
+    ) -> DoclingParseResult:
         try:
             if not self.settings.docling_enabled:
                 return self._fallback_parse(pdf_path)
@@ -57,7 +73,11 @@ class DoclingParser:
 
             os.environ.setdefault("OMP_NUM_THREADS", str(self.settings.docling_num_threads))
             pipeline_kwargs: dict[str, Any] = {
-                "document_timeout": self.settings.docling_document_timeout,
+                "document_timeout": (
+                    document_timeout
+                    if document_timeout is not None
+                    else self.settings.docling_document_timeout
+                ),
                 "accelerator_options": AcceleratorOptions(
                     num_threads=self.settings.docling_num_threads,
                     device=AcceleratorDevice.CPU,

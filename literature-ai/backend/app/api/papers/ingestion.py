@@ -314,6 +314,89 @@ async def queue_ingest_upload(
     return data
 
 
+@router.post("/{paper_id}/supplementary/upload", response_model=IngestResponse)
+async def upload_supplementary_pdf(
+    paper_id: UUID,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> IngestResponse:
+    target = session.get(Paper, paper_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    _validate_upload_request(file)
+
+    service = PaperIngestionService(session=session, settings=settings)
+    job = create_job(
+        session=session,
+        job_type="supplementary_pdf_upload",
+        library_name=target.library_name,
+        payload={"filename": file.filename, "supplementary_for_paper_id": str(target.id)},
+        runtime_context=build_job_runtime_context(settings),
+        progress={"phase": "running", "message": "正在上传支撑文献 PDF"},
+    )
+
+    try:
+        paper = await service.ingest_upload(
+            file=file,
+            external_metadata=None,
+            library_name=target.library_name,
+            supplementary_for_paper_id=target.id,
+        )
+        update_job(session, job.job_id, status="completed", progress={"phase": "completed", "message": "支撑文献上传成功", "ingested": 1})
+    except Exception as exc:
+        err_str = str(exc)
+        update_job(session, job.job_id, status="failed", error=err_str)
+        raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
+    return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
+
+
+@router.post("/{paper_id}/supplementary/upload/jobs")
+async def queue_upload_supplementary_pdf(
+    paper_id: UUID,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    target = session.get(Paper, paper_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    _validate_upload_request(file)
+
+    staged_pdf = await _stage_uploaded_pdf(file, settings)
+    job_payload = {
+        "pdf_path": str(staged_pdf.resolve()),
+        "library_name": target.library_name,
+        "original_filename": file.filename,
+        "trusted_staged_upload": True,
+        "supplementary_for_paper_id": str(target.id),
+    }
+
+    job = create_job(
+        session=session,
+        job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
+        library_name=target.library_name,
+        payload=job_payload,
+        runtime_context=build_job_runtime_context(settings),
+        progress={
+            "phase": "queued",
+            "message": "Supplementary PDF upload is queued for background parsing.",
+            "source_path": str(staged_pdf.resolve()),
+            "supplementary_for_paper_id": str(target.id),
+        },
+    )
+
+    db_url = session.bind.url.render_as_string(hide_password=False) if session.bind is not None else settings.database_url
+    dispatch_mode = dispatch_job(job.job_id, background_tasks, control_database_url=db_url)
+    if dispatch_mode != "celery":
+        session.refresh(job)
+
+    data = serialize_job(job)
+    data["dispatch_mode"] = dispatch_mode
+    return data
+
+
 @router.post("/{paper_id}/attach-pdf", response_model=IngestResponse)
 async def attach_pdf_to_existing_paper(
     paper_id: UUID,

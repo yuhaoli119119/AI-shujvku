@@ -210,6 +210,8 @@ async function pollWorkflowIngestJob(jobId, context) {
             if (result.status === "already_exists") {
                 showToast("文献已在库中：" + (result.title || ""), "info");
                 if (result.paper_id) showAlreadyExistsPrompt(result.paper_id, result.title || "已存在的文献");
+            } else if (result.status === "already_linked") {
+                showToast("相同的 SI 已经绑定到当前主文献。", "info");
             } else if (result.status === "needs_confirmation") {
                 if (context && context.paperId && context.file) {
                     showIdentityConfirmationPrompt(context.paperId, context.file, result);
@@ -309,6 +311,26 @@ function renderWorkflowList(title, items, formatter) {
     return items.map(function(item) {
         return '<div class="section-card"><h3>' + esc(title) + " - " + esc(item.title || item.identifier || "未命名") + "</h3>" + formatter(item) + "</div>";
     }).join("");
+}
+
+function getSelectedPaperForSupplementaryUpload() {
+    if (state.selectedPaper && state.selectedPaperId) {
+        const selectedStableId = stablePaperIdOf(state.selectedPaper);
+        const canonicalSelectedId = canonicalPaperId(state.selectedPaperId);
+        if (selectedStableId && canonicalSelectedId && selectedStableId !== canonicalSelectedId) {
+            state.selectedPaperId = selectedStableId;
+        }
+        return state.selectedPaper;
+    }
+    if (!state.selectedPaperId) {
+        return null;
+    }
+    const selected = resolvePaperFromState(state.selectedPaperId);
+    if (selected) {
+        state.selectedPaper = selected;
+        state.selectedPaperId = stablePaperIdOf(selected) || canonicalPaperId(state.selectedPaperId);
+    }
+    return selected;
 }
 
 async function openExtractionJobCenter() {
@@ -700,6 +722,65 @@ async function uploadPDF(input) {
     }
 }
 
+function triggerSupplementaryUpload() {
+    closeDropdowns();
+    const selectedPaper = getSelectedPaperForSupplementaryUpload();
+    if (!selectedPaper || !state.selectedPaperId) {
+        showToast("请先点击左侧主文献行，打开主文献详情后再上传 SI。", "error");
+        return;
+    }
+    if (isSupplementaryPaperType(selectedPaper.paper_type)) {
+        showToast("当前选中的是 SI，请选择它对应的主文献后再上传支撑文献。", "error");
+        return;
+    }
+    const input = $("supplementaryPdfUpload");
+    if (input) input.click();
+}
+
+async function uploadSupplementaryPDF(input) {
+    if (!input.files || !input.files.length) return;
+    const selectedPaper = getSelectedPaperForSupplementaryUpload();
+    if (!selectedPaper || !state.selectedPaperId) {
+        input.value = "";
+        showToast("请先点击左侧主文献行，打开主文献详情后再上传 SI。", "error");
+        return;
+    }
+    if (isSupplementaryPaperType(selectedPaper.paper_type)) {
+        input.value = "";
+        showToast("当前选中的是 SI，请选择它对应的主文献后再上传支撑文献。", "error");
+        return;
+    }
+    const file = input.files[0];
+    const mainPaperId = stablePaperIdOf(selectedPaper) || canonicalPaperId(state.selectedPaperId);
+    if (!mainPaperId) {
+        input.value = "";
+        showToast("请先点击左侧主文献行，打开主文献详情后再上传 SI。", "error");
+        return;
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    showProgress("正在上传支撑文献 / SI：" + file.name);
+    try {
+        const job = await fetchJSON(API_BASE + "/" + encodeURIComponent(mainPaperId) + "/supplementary/upload/jobs", {
+            method: "POST",
+            body: formData
+        });
+        showToast("SI 上传成功，已进入后台解析队列。", "success");
+        renderQueuedIngestJob(job);
+        pollWorkflowIngestJob(job.job_id, { mainPaperId: mainPaperId });
+    } catch (error) {
+        const detailText = typeof error.message === "string" ? error.message : "";
+        if (detailText === "Paper not found" || detailText.indexOf("uuid") >= 0) {
+            showToast("当前主文献引用已失效，请重新点击左侧主文献行，打开主文献详情后再上传 SI。", "error");
+        } else {
+            showToast("SI 上传失败：" + error.message, "error");
+        }
+    } finally {
+        input.value = "";
+        hideProgress();
+    }
+}
+
 async function rerunExtraction() {
     if (!state.selectedPaperId) return;
     showProgress("正在刷新当前文献的 AI 解析材料...");
@@ -1031,6 +1112,8 @@ Object.assign(window, {
     setJobCenterType: setJobCenterType,
     retryWorkflowJob: retryWorkflowJob,
     retryExtractionJob: retryWorkflowJob,
+    triggerSupplementaryUpload: triggerSupplementaryUpload,
+    uploadSupplementaryPDF: uploadSupplementaryPDF,
     triggerAttachPDF: triggerAttachPDF,
     uploadAttachPDFModal: uploadAttachPDFModal,
     attachPDFToPaperDetail: attachPDFToPaperDetail,

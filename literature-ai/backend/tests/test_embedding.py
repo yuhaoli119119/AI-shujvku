@@ -1,11 +1,55 @@
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 
+from app.config import Settings, get_settings
+from app.db.models import EMBEDDING_DIMENSION
 from app.services.embedding import (
     DeterministicEmbeddingService,
     EmbeddingUnavailableError,
     OpenAICompatibleEmbeddingService,
     get_embedding_service,
 )
+
+
+def test_default_embedding_config_is_database_v1_contract():
+    settings = Settings()
+
+    assert settings.embedding_model == "BAAI/bge-m3"
+    assert settings.embedding_dimension == 1024
+    assert EMBEDDING_DIMENSION == 1024
+
+
+def test_non_1024_embedding_dimension_fails_startup(monkeypatch):
+    monkeypatch.setenv("LITAI_EMBEDDING_DIMENSION", "768")
+    get_settings.cache_clear()
+
+    with pytest.raises(RuntimeError, match="embedding_dimension=1024"):
+        get_settings()
+
+    get_settings.cache_clear()
+
+
+def test_models_ignore_embedding_dimension_environment_override():
+    env = os.environ.copy()
+    env["LITAI_EMBEDDING_DIMENSION"] = "768"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from app.db.models import EMBEDDING_DIMENSION; print(EMBEDDING_DIMENSION)",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "1024"
 
 
 def test_embedding_is_stable():

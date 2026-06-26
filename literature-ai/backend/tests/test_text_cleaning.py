@@ -4,7 +4,7 @@ from app.config import Settings
 from app.parsers.docling_parser import DoclingParser
 from app.services.discovery_service import DiscoveryService
 from app.services.paper_query import PaperQueryService
-from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
+from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text, repair_repeated_journal_title
 
 
 def test_repair_mojibake_text_fixes_common_utf8_latin1_damage():
@@ -24,6 +24,25 @@ def test_normalize_text_tree_repairs_nested_values():
     assert normalized["title"] == "Café"
     assert normalized["authors"] == ["Guang‐Jie Xia"]
     assert normalized["nested"]["abstract"] == "François"
+
+
+def test_repair_repeated_journal_title_collapses_exact_adjacent_duplicate():
+    assert repair_repeated_journal_title("ACS Omega ACS Omega") == "ACS Omega"
+    assert repair_repeated_journal_title("  Journal   of Energy Storage   Journal of Energy Storage  ") == "Journal of Energy Storage"
+
+
+def test_normalize_text_tree_only_collapses_repeated_journal_field():
+    payload = {
+        "title": "Small Small catalyst",
+        "journal": "Small Small",
+        "nested": {"journal": "Energy Storage Materials Energy Storage Materials"},
+    }
+
+    normalized = normalize_text_tree(payload)
+
+    assert normalized["title"] == "Small Small catalyst"
+    assert normalized["journal"] == "Small"
+    assert normalized["nested"]["journal"] == "Energy Storage Materials"
 
 
 def test_repair_mojibake_text_repairs_shifted_digit_block():

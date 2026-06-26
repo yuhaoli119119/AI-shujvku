@@ -2312,6 +2312,73 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#evidenceDetail')).toContainText('后文');
   });
 
+  test('business flow: DFT database shows subtype-first Chinese energy labels', async ({ page }) => {
+    await page.route('**/api/papers/compare**', route => jsonResponse(route, {
+      items: [
+        {
+          paper_id: 'paper-migration',
+          title: 'Migration Barrier Paper',
+          adsorbate: 'Li+',
+          property_type: 'migration_barrier',
+          normalized_property_type: 'migration_barrier',
+          canonical_property_type: 'reaction_barrier',
+          property_subtype: 'migration_barrier',
+          value: 0.18,
+          unit: 'eV',
+          confidence: 0.9,
+          evidence_text: 'The Li+ migration barrier is 0.18 eV.',
+          source_section: 'Kinetics',
+          validation_status: 'validated',
+          is_exportable: true,
+        },
+        {
+          paper_id: 'paper-li2s',
+          title: 'Li2S Decomposition Paper',
+          adsorbate: 'Li2S',
+          property_type: 'li2s_decomposition_barrier',
+          normalized_property_type: 'li2s_decomposition_barrier',
+          canonical_property_type: 'reaction_barrier',
+          property_subtype: 'li2s_decomposition_barrier',
+          value: 0.42,
+          unit: 'eV',
+          confidence: 0.92,
+          evidence_text: 'The Li2S decomposition barrier is 0.42 eV.',
+          source_section: 'Results',
+          validation_status: 'validated',
+          is_exportable: true,
+        },
+        {
+          paper_id: 'paper-rds',
+          title: 'RDS Gibbs Free Energy Paper',
+          adsorbate: 'Li2S4',
+          property_type: 'RDS Gibbs free energy',
+          normalized_property_type: 'gibbs_free_energy_change',
+          canonical_property_type: 'gibbs_free_energy_change',
+          property_subtype: 'gibbs_free_energy_change',
+          value: 0.11,
+          unit: 'eV',
+          confidence: 0.88,
+          evidence_text: 'The RDS Gibbs free energy is 0.11 eV.',
+          source_section: 'Free-energy analysis',
+          validation_status: 'validated',
+          is_exportable: true,
+        },
+      ],
+      stats: { count: 3, min: 0.11, max: 0.42, mean: 0.2367, unit: 'eV' },
+      total: 3,
+      has_more: false,
+    }));
+
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#dftList')).toContainText('迁移能垒');
+    await expect(page.locator('#dftList')).toContainText('Li2S 分解能垒');
+    await expect(page.locator('#dftList')).toContainText('自由能变化');
+    await expect(page.locator('#dftList')).not.toContainText('大类: reaction_barrier');
+    await expect(page.locator('#dftList .cell-primary[title*="reaction_barrier"]').first()).toBeVisible();
+  });
+
   test('business flow: DFT export displays safety headers', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
@@ -2828,7 +2895,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         twoAi: dftBlockedReasonText(['missing_review'], { ...base, object_review_audits: [first, second] }),
       };
     });
-    expect(missingReviewLabels.oneAi).toBe('仅有一个 AI 意见，等待第二 AI');
+    expect(missingReviewLabels.oneAi).toBe('仅有一个审核提交，等待下一轮');
     expect(missingReviewLabels.twoAi).toBe('双 AI 一致，待系统写回');
     const dftConflictClassification = await page.evaluate(() => {
       const rejectAudit = {
@@ -2978,6 +3045,16 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           value: -2.83,
           unit: 'eV',
           candidate_status: 'new_candidate',
+          dft_workflow_state: 'missing_evidence_anchor',
+          dft_workflow_label: '第二意见缺证据定位',
+          dft_workflow_reason: '不能入库：已有多个 AI 审核记录，但带 page 和 quoted_text 的有效证据定位不足 2 条。',
+          valid_ai_opinion_count: 1,
+          raw_ai_opinion_count: 2,
+          effective_ai_opinions: [
+            { source_label: 'reasonix_dft', decision: 'REJECT', has_anchor: false, anchor_summary: '', reason_short: 'Missing quoted text.' },
+            { source_label: 'gemini_dft_review', decision: 'REJECT', has_anchor: true, anchor_summary: 'p.5 | reported value', reason_short: 'Duplicate row.' },
+          ],
+          next_required_action: 'provide_evidence_anchor',
           extraction_protocol_version: 'ide_ai_new_candidate_v1',
           evidence_payload: {
             source: 'gemini_dft_review',
@@ -3048,11 +3125,75 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('#dftContent button:has-text("重新检查写回")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
+      await expect(page.locator('#dftContent')).toContainText('同一 AI/模型可以重复审核');
+      await expect(page.locator('#dftContent')).toContainText('按独立 candidate_id 计一票');
+      await expect(page.locator('#dftContent')).toContainText('page 和 quoted_text');
+      await expect(page.locator('#dftContent')).not.toContainText('尚未审核这些记录的 AI');
 
       const cards = page.locator('#dftContent details.readable-card');
     await expect(cards.filter({ hasText: 'd_band_center' }).first()).toContainText('AI 确认字段');
     await expect(cards.filter({ hasText: 'charge_transfer' }).first()).toContainText('已采纳 AI 修正');
-    await expect(cards.filter({ hasText: 'free_energy' }).first()).toContainText('待对象审核');
+    await expect(cards.filter({ hasText: 'free_energy' }).first()).toContainText('第二意见缺证据定位');
+    await expect(page.locator('#dftContent button:has-text("取消入库")')).toHaveCount(0);
+    const authoritativeAiDisplay = await page.evaluate(() => dftAiOpinionMeta({
+      ai_review_display_status: 'exportable_with_historical_reject',
+      ai_review_display_label: 'AI 意见已收敛',
+      ai_review_display_class: 'ok',
+      ai_review_display_reason: 'Authoritative backend display status.',
+      object_review_audits: [{ source_label: 'older-ai', decision: 'REJECT' }],
+    }));
+    expect(authoritativeAiDisplay.label).toBe('AI 意见已收敛');
+    expect(authoritativeAiDisplay.className).toBe('ok');
+    const submissionVoteBehavior = await page.evaluate(() => {
+      const anchor = { page: 5, quoted_text: 'reported value' };
+      const sameAiRejects = [
+        { candidate_id: 'submission-1', source_label: 'same-ai', decision: 'REJECT', evidence_location: anchor },
+        { candidate_id: 'submission-2', source_label: 'same-ai', decision: 'REJECT', evidence_location: anchor },
+      ];
+      const classified = classifyDftAutomationRows([{
+        id: 'same-ai-review-row',
+        blocked_reasons: ['missing_review'],
+        object_review_audits: sameAiRejects,
+      }]);
+      const rejected = {
+        id: 'rejected-row',
+        candidate_status: 'Rejected',
+        dft_workflow_state: 'rejected',
+        dft_workflow_label: '已拒绝',
+        export_safety: {
+          is_exportable: false,
+          review_status: 'rejected',
+          blocked_reasons: ['missing_material_identity'],
+        },
+      };
+      const mlReadyWithoutSafety = {
+        id: 'ml-ready-row',
+        candidate_status: 'ML_Ready',
+        dft_workflow_state: 'exportable',
+        dft_workflow_label: '可导出',
+      };
+      return {
+        consensusCount: classified.consensus.length,
+        rejectedActions: renderDftDecisionActions(rejected, false),
+        mlReadyActions: renderDftDecisionActions(mlReadyWithoutSafety, false),
+        rejectedStatus: dftItemStatusMeta(rejected).label,
+      };
+    });
+    expect(submissionVoteBehavior.consensusCount).toBe(1);
+    expect(submissionVoteBehavior.rejectedActions).toBe('');
+    expect(submissionVoteBehavior.mlReadyActions).toBe('');
+    expect(submissionVoteBehavior.rejectedStatus).toBe('已拒绝');
+    const exportableFallbackDisplay = await page.evaluate(() => dftAiOpinionMeta({
+      is_exportable: true,
+      conflict_count: 1,
+      field_conflicts: [{ field_name: 'dft_results', conflict_types: ['decision_conflict'] }],
+      object_review_audits: [
+        { source_label: 'older-ai', decision: 'REJECT' },
+        { source_label: 'newer-ai', decision: 'PASS' },
+      ],
+    }));
+    expect(exportableFallbackDisplay.label).toBe('AI 意见已收敛');
+    expect(exportableFallbackDisplay.className).toBe('ok');
     await expect(page.locator('#dftContent')).not.toContainText('AI 意见待判定');
     await expect(page.locator('#dftContent')).not.toContainText('无 AI 意见');
   });
@@ -4783,6 +4924,300 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(mismatchModal).not.toBeVisible();
   });
 
+  test('business flow: supporting SI upload uses dedicated flow and refreshes detail', async ({ page }) => {
+    let uploadCalled = false;
+    let uploadCompleted = false;
+    let detailRequests = 0;
+    let listRequests = 0;
+
+    await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+      if (route.request().method() !== 'GET') {
+        return route.fallback();
+      }
+      listRequests += 1;
+      const rows = [
+        {
+          id: 'paper-1',
+          paper_id: 'paper-1',
+          title: 'Main Paper For SI Upload',
+          doi: '10.1000/main-doi',
+          year: 2025,
+          journal: 'Journal of Testing',
+          paper_type: 'B',
+          paper_code: 'B0095',
+          library_name: 'Default Library',
+          pdf_path: 'main.pdf',
+          oa_status: 'uploaded',
+          counts: { sections: 8, figures: 2, dft_results: 1, writing_cards: 1 }
+        }
+      ];
+      if (uploadCompleted) {
+        rows.push({
+          id: 'paper-si-1',
+          paper_id: 'paper-si-1',
+          title: 'Supporting Information for Main Paper For SI Upload',
+          doi: null,
+          year: 2025,
+          journal: 'Journal of Testing',
+          paper_type: 'supplementary',
+          paper_code: 'S0095',
+          library_name: 'Default Library',
+          pdf_path: 'si.pdf',
+          oa_status: 'uploaded',
+          counts: { sections: 2, figures: 0, dft_results: 0, writing_cards: 0 }
+        });
+      }
+      return jsonResponse(route, rows);
+    });
+
+    await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => {
+      detailRequests += 1;
+      const detail = cloneJson(PAPER_DETAIL);
+      detail.id = 'paper-1';
+      detail.paper_id = 'paper-1';
+      detail.title = 'Main Paper For SI Upload';
+      detail.doi = '10.1000/main-doi';
+      detail.paper_type = 'B';
+      detail.paper_code = 'B0095';
+      detail.library_name = 'Default Library';
+      detail.outgoing_relationships = uploadCompleted ? [
+        {
+          id: 'rel-si-1',
+          source_paper_id: 'paper-1',
+          target_paper_id: 'paper-si-1',
+          relationship_type: 'supplementary',
+          related_paper_title: 'Supporting Information for Main Paper For SI Upload'
+        }
+      ] : [];
+      detail.incoming_relationships = [];
+      return jsonResponse(route, detail);
+    });
+
+    await page.route(/\/api\/papers\/paper-1\/supplementary\/upload\/jobs$/, route => {
+      uploadCalled = true;
+      return jsonResponse(route, { job_id: 'si-upload-job', status: 'queued' });
+    });
+    await page.route(/\/api\/jobs\/si-upload-job$/, route => {
+      uploadCompleted = true;
+      return jsonResponse(route, {
+        job_id: 'si-upload-job',
+        status: 'completed',
+        result: {
+          paper_id: 'paper-si-1',
+          title: 'Supporting Information for Main Paper For SI Upload',
+          status: 'completed'
+        }
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&library_name=${encodeURIComponent('Default Library')}`);
+    await page.waitForTimeout(500);
+    await page.locator('.paper-row[data-id="paper-1"]').click();
+    await expect(page.locator('#paperTitle')).toContainText('Main Paper For SI Upload');
+
+    await expect(page.locator('#paperMoreMenu button:has-text("上传支撑文献 / 上传 SI")')).toHaveCount(1);
+    await page.evaluate(async () => {
+      const formData = new FormData();
+      formData.append(
+        'file',
+        new File(['%PDF-1.4 supporting information'], 'supporting-information.pdf', { type: 'application/pdf' })
+      );
+      const response = await fetch('/api/papers/paper-1/supplementary/upload/jobs', {
+        method: 'POST',
+        body: formData
+      });
+      const job = await response.json();
+      await window.pollWorkflowIngestJob(job.job_id, { mainPaperId: 'paper-1' });
+    });
+
+    await expect.poll(() => uploadCalled).toBe(true);
+    await expect.poll(() => listRequests).toBeGreaterThan(1);
+    await expect(page.locator('.paper-row[data-id="paper-si-1"] .paper-type-si-chip')).toBeVisible();
+    await expect(page.locator('body')).toContainText('S0095');
+  });
+
+  test('business flow: literature library keeps main selection on repeated click and blocks SI-as-main upload', async ({ page }) => {
+    await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+      if (route.request().method() !== 'GET') {
+        return route.fallback();
+      }
+      return jsonResponse(route, [
+        {
+          id: 'paper-1',
+          paper_id: 'paper-1',
+          title: 'Main Paper For Selection Stability',
+          doi: '10.1000/main-stable',
+          year: 2025,
+          journal: 'Journal of Testing',
+          paper_type: 'B',
+          paper_code: 'B0095',
+          library_name: 'Default Library',
+          pdf_path: 'main.pdf',
+          oa_status: 'uploaded',
+          counts: { sections: 8, figures: 2, dft_results: 1, writing_cards: 1 }
+        },
+        {
+          id: 'paper-si-1',
+          paper_id: 'paper-si-1',
+          title: 'Supporting Information for Main Paper For Selection Stability',
+          doi: null,
+          year: 2025,
+          journal: 'Journal of Testing',
+          paper_type: 'supplementary',
+          paper_code: 'S0095',
+          library_name: 'Default Library',
+          pdf_path: 'si.pdf',
+          oa_status: 'uploaded',
+          counts: { sections: 2, figures: 0, dft_results: 0, writing_cards: 0 }
+        }
+      ]);
+    });
+    await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => {
+      const detail = cloneJson(PAPER_DETAIL);
+      detail.id = 'paper-1';
+      detail.paper_id = 'paper-1';
+      detail.title = 'Main Paper For Selection Stability';
+      detail.doi = '10.1000/main-stable';
+      detail.paper_type = 'B';
+      detail.paper_code = 'B0095';
+      detail.library_name = 'Default Library';
+      detail.outgoing_relationships = [
+        {
+          id: 'rel-si-1',
+          source_paper_id: 'paper-1',
+          target_paper_id: 'paper-si-1',
+          relationship_type: 'supplementary',
+          related_paper_code: 'S0095',
+          related_paper_title: 'Supporting Information for Main Paper For Selection Stability'
+        }
+      ];
+      return jsonResponse(route, detail);
+    });
+    await page.route(/\/api\/papers\/paper-si-1(?:\?.*)?$/, route => {
+      const detail = cloneJson(PAPER_DETAIL);
+      detail.id = 'paper-si-1';
+      detail.paper_id = 'paper-si-1';
+      detail.title = 'Supporting Information for Main Paper For Selection Stability';
+      detail.doi = null;
+      detail.paper_type = 'supplementary';
+      detail.paper_code = 'S0095';
+      detail.library_name = 'Default Library';
+      detail.outgoing_relationships = [];
+      detail.incoming_relationships = [
+        {
+          id: 'rel-si-1',
+          source_paper_id: 'paper-1',
+          target_paper_id: 'paper-si-1',
+          relationship_type: 'supplementary',
+          related_paper_code: 'B0095',
+          related_paper_title: 'Main Paper For Selection Stability',
+          related_manual_review_progress: {
+            content: { completed: true, updated_by: 'main-paper' },
+            figures: { completed: true, updated_by: 'main-paper' },
+            dft: { completed: true, updated_by: 'main-paper' }
+          }
+        }
+      ];
+      return jsonResponse(route, detail);
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}`);
+    await page.waitForTimeout(500);
+
+    const mainRow = page.locator('.paper-row[data-id="paper-1"]');
+    await mainRow.click();
+    await expect(page.locator('#paperTitle')).toContainText('Main Paper For Selection Stability');
+    await mainRow.click();
+    await expect(page.locator('#paperTitle')).toContainText('Main Paper For Selection Stability');
+    await expect(page.locator('#workspaceEmpty')).not.toBeVisible();
+
+    await page.locator('#paperMoreDropdown > button:has-text("更多操作")').click();
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.locator('#paperMoreMenu button:has-text("上传支撑文献 / 上传 SI")').click();
+    await fileChooserPromise;
+
+    const siRow = page.locator('.paper-row[data-id="paper-si-1"]');
+    await siRow.click();
+    await expect(page.locator('#paperTitle')).toContainText('Supporting Information for Main Paper For Selection Stability');
+    const inheritedProgress = await page.evaluate(() => manualReviewProgress(window.state.selectedPaper));
+    expect(inheritedProgress.figures.completed).toBe(true);
+    expect(inheritedProgress.figures.inherited).toBe(true);
+    expect(inheritedProgress.dft.completed).toBe(true);
+    expect(inheritedProgress.dft.inherited_from_code).toBe('B0095');
+    await page.locator('#paperMoreDropdown > button:has-text("更多操作")').click();
+    await page.locator('#paperMoreMenu button:has-text("上传支撑文献 / 上传 SI")').click();
+    await expect(page.locator('.toast')).toContainText('当前选中的是 SI，请选择它对应的主文献后再上传支撑文献。');
+  });
+
+  test('business flow: literature library resolves paper code to UUID before supplementary upload', async ({ page }) => {
+    let uploadPath = '';
+
+    await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+      if (route.request().method() !== 'GET') {
+        return route.fallback();
+      }
+      return jsonResponse(route, [
+        {
+          id: 'paper-uuid-1',
+          paper_id: 'paper-uuid-1',
+          title: 'Main Paper Resolved From Code',
+          doi: '10.1000/main-resolved',
+          year: 2025,
+          journal: 'Journal of Testing',
+          paper_type: 'B',
+          paper_code: 'B0095',
+          library_name: 'Default Library',
+          pdf_path: 'main.pdf',
+          oa_status: 'uploaded',
+          counts: { sections: 8, figures: 2, dft_results: 1, writing_cards: 1 }
+        }
+      ]);
+    });
+    await page.route(/\/api\/papers\/paper-uuid-1(?:\?.*)?$/, route => {
+      const detail = cloneJson(PAPER_DETAIL);
+      detail.id = 'paper-uuid-1';
+      detail.paper_id = 'paper-uuid-1';
+      detail.title = 'Main Paper Resolved From Code';
+      detail.doi = '10.1000/main-resolved';
+      detail.paper_type = 'B';
+      detail.paper_code = 'B0095';
+      detail.library_name = 'Default Library';
+      detail.outgoing_relationships = [];
+      detail.incoming_relationships = [];
+      return jsonResponse(route, detail);
+    });
+    await page.route(/\/api\/papers\/paper-uuid-1\/supplementary\/upload\/jobs$/, route => {
+      uploadPath = new URL(route.request().url()).pathname;
+      return jsonResponse(route, { job_id: 'si-upload-job-uuid', status: 'queued' });
+    });
+    await page.route(/\/api\/jobs\/si-upload-job-uuid$/, route => {
+      return jsonResponse(route, {
+        job_id: 'si-upload-job-uuid',
+        status: 'completed',
+        result: {
+          paper_id: 'paper-si-uuid-1',
+          title: 'Supporting Information for Main Paper Resolved From Code',
+          status: 'completed'
+        }
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=B0095&library_name=${encodeURIComponent('Default Library')}`);
+    await expect(page.locator('#paperTitle')).toContainText('Main Paper Resolved From Code');
+    await expect.poll(() => page.evaluate(() => window.state.selectedPaperId)).toBe('paper-uuid-1');
+    await page.locator('#paperMoreDropdown > button:has-text("更多操作")').click();
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.locator('#paperMoreMenu button:has-text("上传支撑文献 / 上传 SI")').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: 'supporting-information.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4 supporting information'),
+    });
+
+    await expect.poll(() => uploadPath).toBe('/api/papers/paper-uuid-1/supplementary/upload/jobs');
+  });
+
   test('business flow: attach-pdf identity verification - already_exists', async ({ page }) => {
     await page.route(/\/api\/papers\/?(?:\?|$)/, route => {
       if (route.request().method() === 'GET') {
@@ -5702,10 +6137,26 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       const highlight = page.locator('#pdfHighlightOverlay');
       await expect(highlight.locator('div')).toHaveCount(0);
 
-      // Close the viewer
+      // A running progress notice must not cover the PDF modal close button.
+      await page.evaluate(() => {
+        showProgress('正在基于当前 PDF 重新解析文献...');
+      });
+      const progressBox = page.locator('#progressBox');
+      await expect(progressBox).toBeVisible();
+      await expect(progressBox.locator('.progress-close')).toBeVisible();
+      const progressPosition = await progressBox.evaluate(el => {
+        const style = window.getComputedStyle(el);
+        return { top: style.top, bottom: style.bottom };
+      });
+      expect(progressPosition.top).not.toBe('72px');
+      expect(progressPosition.bottom).toBe('18px');
+
+      // Close the viewer while progress is visible.
       await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
       await page.waitForTimeout(300);
       await expect(overlay).not.toBeVisible();
+      await progressBox.locator('.progress-close').click();
+      await expect(progressBox).toHaveCount(0);
     });
 
     test('D. Exact_page without bbox opens PDF viewer without fake box', async ({ page }) => {

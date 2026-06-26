@@ -433,6 +433,11 @@ CREATE TABLE dft_results (
 	value FLOAT, 
 	unit VARCHAR(64), 
 	reaction_step TEXT, 
+	reaction_type VARCHAR(32),
+	reaction_type_source VARCHAR(32),
+	reaction_type_confidence FLOAT,
+	reaction_profile_version VARCHAR(64),
+	reaction_validation_status VARCHAR(32),
 	source_section VARCHAR(255), 
 	source_figure VARCHAR(255), 
 	evidence_text TEXT, 
@@ -681,6 +686,7 @@ CREATE INDEX ix_writing_cards_paper_id ON writing_cards (paper_id);
 
 CREATE INDEX ix_dft_results_paper_id ON dft_results (paper_id);
 CREATE INDEX ix_dft_results_candidate_status ON dft_results (candidate_status);
+CREATE INDEX ix_dft_results_reaction_type ON dft_results (reaction_type);
 
 CREATE INDEX ix_electrochemical_performance_paper_id ON electrochemical_performance (paper_id);
 

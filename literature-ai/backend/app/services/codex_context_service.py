@@ -8,10 +8,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, PaperCorrection, PaperNote
+from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
+from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.evidence_anchors import (
     first_evidence_anchor,
     first_material_correction_anchor,
@@ -75,6 +76,7 @@ class CodexContextService:
         max_figures: int = 12,
         max_tables: int = 8,
         max_candidates: int = 20,
+        include_supplementary_figures: bool = False,
     ) -> CodexContextResponse | None:
         detail = PaperQueryService(self.session).get_paper_detail(paper_id, compact=True)
         if detail is None:
@@ -93,6 +95,7 @@ class CodexContextService:
             max_figures=max_figures,
             max_tables=max_tables,
             max_candidates=max_candidates,
+            include_supplementary_figures=include_supplementary_figures,
         )
         markdown = self._build_markdown(context)
         return CodexContextResponse(
@@ -259,6 +262,7 @@ class CodexContextService:
         max_figures: int,
         max_tables: int,
         max_candidates: int,
+        include_supplementary_figures: bool,
     ) -> dict[str, Any]:
         counts = detail.counts.model_dump(mode="json") if detail.counts else {}
         dft_export_readiness = self._build_dft_export_readiness(detail, limit=max_candidates)
@@ -290,6 +294,16 @@ class CodexContextService:
             if not item.get("catalyst_sample_id")
             and "missing_material_identity" in ((item.get("export_safety") or {}).get("blocked_reasons") or [])
         ]
+        supplementary_figure_payload = self._load_supplementary_figure_payloads(detail)
+        figure_review_scope = "main_plus_supplementary" if include_supplementary_figures else "main_only"
+        figure_items = self._figure_context_items(
+            detail.figures or [],
+            detail.id,
+            source_document_type="main_text",
+            writeback_paper_id=detail.id,
+        )
+        if include_supplementary_figures:
+            figure_items.extend(supplementary_figure_payload)
 
         context: dict[str, Any] = {
             "schema_version": self.schema_version,
@@ -297,8 +311,28 @@ class CodexContextService:
             "reliability_policy": {
                 "automatic_outputs_are_candidates": True,
                 "figure_crops_are_candidates": True,
+                "figure_review_scope": figure_review_scope,
+                "include_supplementary_figures": include_supplementary_figures,
+                "supplementary_figures_available_count": len(supplementary_figure_payload),
                 "requires_human_or_codex_review": True,
                 "do_not_treat_as_verified": True,
+            },
+            "review_scope": {
+                "table_review_scope": "main_plus_supplementary",
+                "figure_review_scope": figure_review_scope,
+                "include_supplementary_figures": include_supplementary_figures,
+                "supplementary_figures_available_count": len(supplementary_figure_payload),
+                "supplementary_figures_policy": (
+                    "Figure review defaults to main paper only. SI figures are opt-in and should be requested only "
+                    "when include_supplementary_figures=true, a task explicitly cites Figure Sxx, or an evidence "
+                    "anchor points to an SI figure."
+                ),
+                "figure_derived_dft_policy": (
+                    "Figure-derived DFT values become DFT candidates/object_review_audits with figure_id/label, "
+                    "page, quoted text or readable annotation, value, unit, property_type, adsorbate or reaction_step, "
+                    "and material_identity when available. They must pass the existing DFT second review/export safety "
+                    "gate before ML export."
+                ),
             },
             "paper": {
                 "id": str(detail.id),
@@ -334,6 +368,7 @@ class CodexContextService:
                 ).get("markdown_trust") if isinstance(detail.pdf_quality_report, dict) else None,
                 "full_translation_available": bool(detail.full_translation_zh),
             },
+            "source_documents": self._build_source_documents(detail, artifact_status),
             "artifact_status": artifact_status,
             "external_audit_precondition": {
                 "status": "ready"
@@ -358,27 +393,7 @@ class CodexContextService:
                     }
                     for section in (detail.sections or [])[:max_sections]
                 ],
-                "figures": [
-                    {
-                        "id": str(figure.id),
-                        "caption": self._clip(figure.caption, 1200),
-                        "page": figure.page,
-                        "image_path": figure.image_path,
-                        "asset_url": f"/api/papers/assets/{figure.image_path}" if figure.image_path else None,
-                        "prov": figure.prov,
-                        "image_review": self._build_figure_image_review(figure, paper_id=detail.id),
-                        "figure_label": figure.figure_label,
-                        "figure_role": figure.figure_role,
-                        "role_confidence": figure.role_confidence,
-                        "content_summary": figure.content_summary,
-                        "key_elements": figure.key_elements,
-                        "crop_status": figure.crop_status,
-                        "crop_confidence": figure.crop_confidence,
-                        "crop_source": figure.crop_source,
-                        "candidate_status": "candidate_unverified",
-                    }
-                    for figure in (detail.figures or [])[:max_figures]
-                ],
+                "figures": figure_items[:max_figures],
                 "tables": [
                     {
                         "id": str(table.id),
@@ -429,6 +444,149 @@ class CodexContextService:
             "recommended_next_actions": self._next_actions(detail, warnings, locator_status_counts),
         }
         return context
+
+    def _build_source_documents(
+        self,
+        detail: PaperDetailResponse,
+        main_artifact_status: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        main_id = str(detail.id)
+        documents = [
+            {
+                "source_document_type": "main_text",
+                "label": "Main PDF",
+                "paper_id": main_id,
+                "human_ref": detail.paper_code,
+                "title": detail.title,
+                "available": bool(main_artifact_status.get("pdf_exists")),
+                "pdf_url": f"/api/papers/{detail.id}/pdf",
+                "pdf_path": detail.pdf_path,
+                "read_paper_page_paper_id": main_id,
+                "writeback_paper_id": main_id,
+            }
+        ]
+        supplementary_types = {"supplementary", "supplementary_information", "si"}
+        seen_target_ids: set[str] = set()
+        for relationship in detail.outgoing_relationships or []:
+            relationship_type = str(relationship.relationship_type or "").strip().lower()
+            if relationship_type not in supplementary_types:
+                continue
+            target_id = str(relationship.target_paper_id)
+            if target_id in seen_target_ids:
+                continue
+            seen_target_ids.add(target_id)
+            target = self.session.get(Paper, relationship.target_paper_id)
+            if target is None:
+                continue
+            target_status = build_paper_artifact_status(target, settings=self.settings)
+            documents.append(
+                {
+                    "source_document_type": "supplementary_information",
+                    "label": target.title or "SI",
+                    "paper_id": main_id,
+                    "related_paper_id": target_id,
+                    "related_human_ref": target.paper_code,
+                    "relationship_id": str(relationship.id),
+                    "relationship_type": relationship_type,
+                    "title": target.title,
+                    "available": bool(target_status.get("pdf_exists")),
+                    "pdf_url": f"/api/papers/{target.id}/pdf",
+                    "pdf_path": target.pdf_path,
+                    "read_paper_page_paper_id": target_id,
+                    "writeback_paper_id": main_id,
+                    "note": "Read as SI evidence for the main paper; do not review or cite it as an independent paper.",
+                }
+            )
+        return documents
+
+    def _load_supplementary_figure_payloads(self, detail: PaperDetailResponse) -> list[dict[str, Any]]:
+        supplementary_types = {"supplementary", "supplementary_information", "supporting_information", "si"}
+        target_ids = [
+            relationship.target_paper_id
+            for relationship in (detail.outgoing_relationships or [])
+            if str(relationship.relationship_type or "").strip().lower() in supplementary_types
+        ]
+        if not target_ids:
+            return []
+        target_papers = {
+            paper.id: paper
+            for paper in self.session.scalars(select(Paper).where(Paper.id.in_(target_ids))).all()
+        }
+        figures = self.session.scalars(
+            select(PaperFigure)
+            .where(PaperFigure.paper_id.in_(target_ids))
+            .order_by(PaperFigure.paper_id.asc(), PaperFigure.page.asc().nulls_last())
+        ).all()
+        payloads: list[dict[str, Any]] = []
+        for figure in figures:
+            source_paper = target_papers.get(figure.paper_id)
+            payloads.extend(
+                self._figure_context_items(
+                    [figure],
+                    detail.id,
+                    source_document_type="supplementary_information",
+                    related_paper_id=figure.paper_id,
+                    related_paper_code=source_paper.paper_code if source_paper else None,
+                    related_paper_title=source_paper.title if source_paper else None,
+                    writeback_paper_id=detail.id,
+                )
+            )
+        return payloads
+
+    def _figure_context_items(
+        self,
+        figures: list[PaperFigure | PaperFigureResponse],
+        paper_id: UUID,
+        *,
+        source_document_type: str,
+        writeback_paper_id: UUID,
+        related_paper_id: UUID | None = None,
+        related_paper_code: str | None = None,
+        related_paper_title: str | None = None,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for figure in figures:
+            image_path = getattr(figure, "image_path", None)
+            review_payload = {
+                "id": str(figure.id),
+                "image_path": image_path,
+                "caption": getattr(figure, "caption", None),
+                "page": getattr(figure, "page", None),
+                "figure_label": getattr(figure, "figure_label", None),
+                "prov": getattr(figure, "prov", None),
+                "crop_status": getattr(figure, "crop_status", None),
+                "crop_confidence": getattr(figure, "crop_confidence", None),
+                "crop_source": getattr(figure, "crop_source", None),
+            }
+            items.append(
+                {
+                    "id": str(figure.id),
+                    "caption": self._clip(getattr(figure, "caption", None), 1200),
+                    "page": getattr(figure, "page", None),
+                    "image_path": image_path,
+                    "asset_url": f"/api/papers/assets/{image_path}" if image_path else None,
+                    "prov": getattr(figure, "prov", None),
+                    "image_review": self._build_figure_image_review(
+                        review_payload,
+                        paper_id=getattr(figure, "paper_id", paper_id),
+                    ),
+                    "figure_label": getattr(figure, "figure_label", None),
+                    "figure_role": getattr(figure, "figure_role", None),
+                    "role_confidence": getattr(figure, "role_confidence", None),
+                    "content_summary": getattr(figure, "content_summary", None),
+                    "key_elements": getattr(figure, "key_elements", None),
+                    "crop_status": getattr(figure, "crop_status", None),
+                    "crop_confidence": getattr(figure, "crop_confidence", None),
+                    "crop_source": getattr(figure, "crop_source", None),
+                    "source_document_type": source_document_type,
+                    "related_paper_id": str(related_paper_id) if related_paper_id else None,
+                    "related_paper_code": related_paper_code,
+                    "related_paper_title": related_paper_title,
+                    "writeback_paper_id": str(writeback_paper_id),
+                    "candidate_status": "candidate_unverified",
+                }
+            )
+        return items
 
     def _build_warnings(
         self,
@@ -566,6 +724,18 @@ class CodexContextService:
             lines.extend(f"- `{item['code']}`: {item['message']}" for item in context["warnings"])
             lines.append("")
 
+        review_scope = context.get("review_scope") or {}
+        lines.extend(
+            [
+                "## Review Scope",
+                f"- Table review scope: `{review_scope.get('table_review_scope') or 'main_plus_supplementary'}`",
+                f"- Figure review scope: `{review_scope.get('figure_review_scope') or 'main_only'}`",
+                f"- Include supplementary figures: {review_scope.get('include_supplementary_figures') is True}; available SI figures: {review_scope.get('supplementary_figures_available_count') or 0}",
+                f"- Figure-derived DFT policy: {review_scope.get('figure_derived_dft_policy')}",
+                "",
+            ]
+        )
+
         abstract = context["content"].get("abstract") or context["content"].get("abstract_zh")
         if abstract:
             lines.extend(["## Abstract", abstract, ""])
@@ -691,7 +861,10 @@ class CodexContextService:
             "- Write conclusions back through import_analysis as structured review/correction candidates. After import, read back the target item or review coverage before claiming success.",
             "- auto_apply_review_rules=false is candidate-only. It may record an unverified audit, but it does not mean PASS/completed/applied and must not be described as a finished review.",
             "- For missing DFT rows that should enter the system candidate queue, use object_review_audits with decision=new_candidate, a structured corrected_value, and auto_apply_review_rules=true. This materializes an unverified DFTResult candidate; it does not mark the row final or exportable.",
-            "- Directly applying non-DFT fixes or [AI_REVIEWED] status uses import_analysis(auto_apply_review_rules=true); non-DFT AI writes are last-writer-wins and do not require module write locks.",
+            "- Directly applying non-DFT text/object fixes or [AI_REVIEWED] status generally uses import_analysis(auto_apply_review_rules=true); non-DFT AI writes are last-writer-wins and do not require module write locks.",
+            "- Table object lifecycle is direct-tool-only: use update_table for caption/markdown/page/prov fixes, create_table for missing tables, merge_table for split/continued/duplicate table fragments, and delete_table for invalid table objects. Do not only write a note or submit table deletion/merge through import_analysis.",
+            "- For tables shown from supplementary_information, call table tools with the table object's real paper_id (often related_paper_id/read_paper_page_paper_id), not the main paper_id. Scientific candidates extracted from SI still use the main writeback_paper_id.",
+            "- Table tool calls require structured evidence_payload with page/table/quoted_text/table_id/bbox evidence. After calling a table tool, read back get_paper or get_codex_item and confirm table count, markdown_content, table_review_status, and audit/correction records.",
             "- When submitting object_review_audits with decision=approve_correction, evidence_location MUST contain structured anchor keys (page, table, figure, quoted_text, etc.) or the auto-apply will skip with missing_evidence_anchor. A plain string (even a descriptive one like \"PDF page 13, Table 5\") is treated as quoted_text and works, but a structured dict like {\"page\": 13, \"table\": \"Table 5\", \"quoted_text\": \"...\"} is preferred for reliable page/section-level evidence tracing.",
             "- Figure image creation/recropping is direct-tool-only: use recrop_figure or create_figure_from_bbox through MCP/API, never import_analysis bbox/crop payloads.",
             "",

@@ -20,11 +20,13 @@ from app.db.models import DFTResult as DR
 from app.db.models import DFTSetting as DS
 from app.db.models import Paper as P
 from app.db.session import get_db_session
+from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_export_service import (
     _extract_evidence_context,
     _dft_quality_row_payload,
     _dft_rows_statement,
+    _normalized_property_type,
     _optional_int_filter,
     _optional_text_filter,
     build_dft_csv_rows,
@@ -270,9 +272,11 @@ async def compare_dft_results(
     compact: bool = Query(default=False, description="Return a lighter payload optimized for list/table rendering"),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
+    sort: str = Query(default="value", description="value or property_mix"),
     session: Session = Depends(get_db_session),
 ):
     normalized_status = (status or "all").strip().lower()
+    normalized_sort = (sort or "value").strip().lower()
     base_stmt = (
         select(DR, P)
         .join(P, DR.paper_id == P.id)
@@ -314,12 +318,17 @@ async def compare_dft_results(
     def _row_payload(dr: Any, paper: Any, catalysts: list[dict[str, Any]], gate: Any) -> dict[str, Any]:
         pid = str(paper.id)
         display_value, display_unit = normalize_dft_display_value(dr.value, dr.unit)
+        normalized_property_type = _normalized_property_type(dr.property_type)
+        taxonomy = get_property_taxonomy(dr.property_type)
         item = {
             "record_id": str(dr.id),
             "paper_id": pid,
             "title": paper.title,
             "doi": paper.doi,
             "property_type": dr.property_type,
+            "normalized_property_type": normalized_property_type,
+            "canonical_property_type": taxonomy["canonical_property_type"],
+            "property_subtype": taxonomy["property_subtype"],
             "adsorbate": dr.adsorbate,
             "value": display_value,
             "unit": display_unit,
@@ -364,7 +373,57 @@ async def compare_dft_results(
     has_more = False
     stats = {"count": 0}
 
-    if compact:
+    def _interleave_by_property(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for item in sorted(
+            items,
+            key=lambda row: (
+                str(row.get("property_type") or ""),
+                row.get("value") is None,
+                row.get("value") if row.get("value") is not None else 0,
+                str(row.get("record_id") or ""),
+            ),
+        ):
+            grouped[str(item.get("property_type") or "unknown")].append(item)
+        ordered: list[dict[str, Any]] = []
+        property_keys = sorted(grouped)
+        while any(grouped[key] for key in property_keys):
+            for key in property_keys:
+                if grouped[key]:
+                    ordered.append(grouped[key].pop(0))
+        return ordered
+
+    if compact and normalized_sort in {"property_mix", "mixed", "property"} and not property_type:
+        fetch_limit = 2500
+        rows = session.execute(base_stmt.limit(fetch_limit)).all()
+        catalyst_by_id = _catalyst_map(rows)
+        gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
+        all_items: list[dict[str, Any]] = []
+
+        for dr, paper in rows:
+            linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
+            catalysts = [linked_catalyst] if linked_catalyst else []
+            if catalyst_type:
+                catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
+                if not catalysts:
+                    continue
+            gate = gate_by_id[str(dr.id)]
+            if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
+                continue
+            if normalized_status in {"needs_review", "candidate", "blocked"} and gate.eligible:
+                continue
+            all_items.append(_row_payload(dr, paper, catalysts, gate))
+
+        mixed_items = _interleave_by_property(all_items)
+        total = len(mixed_items)
+        page_end = offset + limit
+        items = mixed_items[offset:page_end]
+        has_more = total > page_end
+        stats = {
+            "count": total,
+            "property_type_counts": dict(Counter(item["property_type"] for item in all_items if item.get("property_type"))),
+        }
+    elif compact:
         chunk_size = min(300, max(120, limit * 4))
         scanned = 0
         filtered_total = 0
@@ -446,6 +505,7 @@ async def compare_dft_results(
             "compact": compact,
             "offset": offset,
             "limit": limit,
+            "sort": normalized_sort,
         },
         "stats": stats,
         "total": total,

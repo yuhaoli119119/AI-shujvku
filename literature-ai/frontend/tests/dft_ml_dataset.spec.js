@@ -57,8 +57,8 @@ const DATASET_PAYLOAD = {
       missing_review: 1,
     },
     total_candidates: 6,
-    numeric_record_count: 4,
-    numeric_ml_ready_count: 2,
+    numeric_record_count: 5,
+    numeric_ml_ready_count: 3,
     numeric_blocked_count: 2,
     lm_record_count: 1,
     history_backfill_mode: 'export_time_enrichment',
@@ -180,7 +180,7 @@ const DATASET_PAYLOAD = {
       },
       target: {
         property_type: 'li2s_decomposition_barrier',
-        normalized_property_type: 'reaction_barrier',
+        normalized_property_type: 'li2s_decomposition_barrier',
         canonical_property_type: 'reaction_barrier',
         property_family: 'kinetics',
         property_subtype: 'li2s_decomposition_barrier',
@@ -273,18 +273,18 @@ const DATASET_PAYLOAD = {
         authors: ['C. Basis'],
       },
       target: {
-        property_type: 'adsorption_energy',
-        normalized_property_type: 'adsorption_energy',
-        canonical_property_type: 'adsorption_energy',
-        property_family: 'energetics',
-        property_subtype: 'adsorption_energy',
+        property_type: 'gibbs_free_energy_change',
+        normalized_property_type: 'gibbs_free_energy_change',
+        canonical_property_type: 'gibbs_free_energy_change',
+        property_family: 'thermodynamics',
+        property_subtype: 'gibbs_free_energy_change',
         physical_dimension: 'energy',
         ml_role: 'target',
-        adsorbate: 'H*',
-        canonical_adsorbate: 'H*',
+        adsorbate: 'Li2S4',
+        canonical_adsorbate: 'Li2S4',
         value: -0.38,
         unit: 'eV/atom',
-        reaction_step: 'H adsorption',
+        reaction_step: 'RDS',
         normalized_value: null,
         normalized_unit: null,
         normalization_status: 'basis_qualified',
@@ -312,7 +312,7 @@ const DATASET_PAYLOAD = {
       provenance: {
         source_section: 'Supplementary Results',
         source_figure: null,
-        evidence_text: 'The H adsorption energy is reported as -0.38 eV/atom.',
+        evidence_text: 'The RDS Gibbs free energy is reported as -0.38 eV/atom.',
         confidence: 0.88,
         review_status: 'verified',
         review_gate_status: 'safe_verified',
@@ -432,6 +432,92 @@ const DATASET_PAYLOAD = {
       ml_readiness_score: 95,
       is_ml_ready: true,
     },
+    {
+      record_id: 'record-migration-ready',
+      paper: {
+        paper_id: 'paper-migration',
+        title: 'Migration Barrier Paper',
+        doi: '10.1000/migration',
+        journal: 'Transport Chemistry',
+        year: 2024,
+        authors: ['M. Migration'],
+      },
+      target: {
+        property_type: 'migration_barrier',
+        normalized_property_type: 'migration_barrier',
+        canonical_property_type: 'reaction_barrier',
+        property_family: 'kinetics',
+        property_subtype: 'migration_barrier',
+        physical_dimension: 'energy',
+        ml_role: 'target',
+        adsorbate: 'Li+',
+        canonical_adsorbate: 'Li+',
+        value: 0.18,
+        unit: 'eV',
+        reaction_step: 'Li+ migration',
+        normalized_value: 0.18,
+        normalized_unit: 'eV',
+        normalization_status: 'normalized',
+        normalization_blockers: [],
+        normalization_basis: null,
+      },
+      catalyst: {
+        catalyst_sample_id: 'cat-migration',
+        name: 'Co-N-C',
+        catalyst_type: 'single_atom',
+        metal_centers: ['Co'],
+        coordination: 'Co-N4',
+        support: 'carbon',
+        synthesis_method: null,
+        evidence_strength: 'verified',
+      },
+      catalyst_candidates: [],
+      dft_settings: [PBE_SETTING],
+      paper_level_dft_settings: [PBE_SETTING],
+      linked_dft_setting: PBE_SETTING,
+      setting_link_status: 'clear_primary',
+      setting_link_reason: 'single_result_level_match',
+      setting_link_candidates: [PBE_SETTING],
+      recommended_ml_setting_field: 'linked_dft_setting',
+      provenance: {
+        source_section: 'Kinetics',
+        source_figure: 'Fig. 3',
+        evidence_text: 'The Li+ migration barrier is 0.18 eV on Co-N-C.',
+        confidence: 0.91,
+        review_status: 'verified',
+        review_gate_status: 'safe_verified',
+        provenance_level: 'exact_pdf_page',
+        locator_status: 'exact_page',
+        gate_reasons: ['verified_review', 'exact_page_locator'],
+        safety_gate: 'safe_verified_with_required_evidence',
+        evidence_payload: {
+          material_identity: 'Co-N-C',
+          surface_facet: '(100)',
+        },
+      },
+      descriptor_fields: {},
+      sample_context: {
+        sample_key: 'instance:migration',
+        instance_key: 'instance:migration',
+        instance_anchor_key: 'anchor:migration',
+        material_scope_key: 'material:migration',
+        target_context_key: 'reaction_barrier',
+        instance_scope_level: 'target_context',
+        instance_components: {
+          material_identity: 'Co-N-C',
+          surface_facet: '(100)',
+        },
+        history_backfill_applied: true,
+        numeric_record_count: 1,
+        target_record_count: 1,
+        descriptor_record_count: 0,
+        material_scope_count: 1,
+        descriptor_instance_ambiguous: false,
+      },
+      ml_blockers: [],
+      ml_readiness_score: 92,
+      is_ml_ready: true,
+    },
   ],
   lm_records: [
     {
@@ -511,14 +597,96 @@ const DATASET_PAYLOAD = {
   ],
 };
 
+function makeV3Manifest(task) {
+  if (task === 'reaction_barrier') {
+    return {
+      schema: 'dft_results_ml_v3',
+      version: 'dft-ml-dataset-v0.3',
+      task: 'reaction_barrier',
+      profile: 'SRR_LiS',
+      source_candidate_count: 8,
+      candidate_count: 3,
+      task_candidate_count: 2,
+      returned_count: 1,
+      label_ready_count: 1,
+      tabular_ready_count: 1,
+      excluded_counts: {
+        unknown_reaction_type: 4,
+        feature_blocked: 1,
+      },
+    };
+  }
+  if (task === 'rds_gibbs_free_energy') {
+    return {
+      schema: 'dft_results_ml_v3',
+      version: 'dft-ml-dataset-v0.3',
+      task: 'SRR_LiS:rds_gibbs_free_energy',
+      profile: 'SRR_LiS',
+      source_candidate_count: 8,
+      candidate_count: 2,
+      task_candidate_count: 1,
+      returned_count: 1,
+      label_ready_count: 1,
+      tabular_ready_count: 1,
+      excluded_counts: {
+        missing_rds_semantics: 1,
+      },
+    };
+  }
+  return {
+    schema: 'dft_results_ml_v3',
+    version: 'dft-ml-dataset-v0.3',
+    task: 'adsorption_energy',
+    profile: 'SRR_LiS',
+    source_candidate_count: 8,
+    candidate_count: 3,
+    task_candidate_count: 1,
+    returned_count: 0,
+    label_ready_count: 0,
+    tabular_ready_count: 0,
+    excluded_counts: {
+      unknown_reaction_type: 4,
+      missing_safe_review: 1,
+    },
+  };
+}
+
 async function installMockApi(page) {
   let lastDatasetUrl = '';
+  let lastV3ManifestUrl = '';
+  let lastV3JsonUrl = '';
+  let lastV3CsvUrl = '';
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.route(/\/api\/libraries$/, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify([ACTIVE_LIBRARY, ALT_LIBRARY]),
   }));
+  await page.route(/\/api\/dft\/ml-dataset-v3\/manifest.*/, route => {
+    lastV3ManifestUrl = route.request().url();
+    const task = new URL(lastV3ManifestUrl).searchParams.get('task') || 'adsorption_energy';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(makeV3Manifest(task)),
+    });
+  });
+  await page.route(/\/api\/dft\/ml-dataset-v3\.csv.*/, route => {
+    lastV3CsvUrl = route.request().url();
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/csv',
+      body: 'record_id,task\nv3-record-1,reaction_barrier\n',
+    });
+  });
+  await page.route(/\/api\/dft\/ml-dataset-v3\?.*/, route => {
+    lastV3JsonUrl = route.request().url();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ metadata: makeV3Manifest(new URL(lastV3JsonUrl).searchParams.get('task')) || {}, records: [] }),
+    });
+  });
   await page.route(/\/api\/papers\/export\/dft-dataset.*/, route => {
     lastDatasetUrl = route.request().url();
     return route.fulfill({
@@ -529,6 +697,9 @@ async function installMockApi(page) {
   });
   return {
     getLastDatasetUrl: () => lastDatasetUrl,
+    getLastV3ManifestUrl: () => lastV3ManifestUrl,
+    getLastV3JsonUrl: () => lastV3JsonUrl,
+    getLastV3CsvUrl: () => lastV3CsvUrl,
   };
 }
 
@@ -540,10 +711,12 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('h1')).toContainText('DFT 机器学习数据集');
     await expect(page.locator('#schemaVersionBadge')).toContainText('dft_results_ml_v2');
     await expect(page.locator('#statTotalCandidates')).toContainText('6');
-    await expect(page.locator('#statNumericReadyCount')).toContainText('2');
+    await expect(page.locator('#statNumericReadyCount')).toContainText('3');
     await expect(page.locator('#resultsMeta')).toContainText('LM 辅助记录 1 条');
-    await expect(page.locator('#recordsTableBody')).toContainText('反应势垒（reaction_barrier）');
-    await expect(page.locator('#recordsTableBody')).toContainText('li2s_decomposition_barrier');
+    await expect(page.locator('#recordsTableBody')).toContainText('反应能垒（reaction_barrier）');
+    await expect(page.locator('#recordsTableBody')).toContainText('Li2S 分解能垒（li2s_decomposition_barrier）');
+    await expect(page.locator('#recordsTableBody')).toContainText('迁移能垒（migration_barrier）');
+    await expect(page.locator('#recordsTableBody')).toContainText('自由能变化（gibbs_free_energy_change）');
     await expect(page.locator('#recordsTableBody')).toContainText('-1.75 eV');
     await expect(page.locator('#recordsTableBody')).toContainText('精确页码（exact_page） / 安全通过（safe_verified）');
 
@@ -551,6 +724,37 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('.detail-row')).toContainText('surface_facet');
     await expect(page.locator('.detail-row')).toContainText('(104)');
     await expect(page.locator('.detail-row')).toContainText('paper_level_dft_settings / dft_settings 仅供审计与兼容');
+  });
+
+  test('renders v3 SRR_LiS manifest, empty state, and task switching', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+
+    await expect(page.locator('#v3PanelTitle')).toContainText('SRR_LiS 任务级导出入口');
+    await expect(page.locator('#v3SchemaValue')).toContainText('dft_results_ml_v3');
+    await expect(page.locator('#v3TaskValue')).toContainText('吸附能任务');
+    await expect(page.locator('#v3TaskValue')).toContainText('adsorption_energy');
+    await expect(page.locator('#v3ReturnedCount')).toContainText('0');
+    await expect(page.locator('#v3TabularReadyCount')).toContainText('0');
+    await expect(page.locator('#v3ExcludedCounts')).toContainText('unknown_reaction_type');
+    await expect(page.locator('#v3StatusPanel')).toContainText('当前没有可直接训练的 SRR_LiS 记录');
+    await expect(page.locator('#v3StatusPanel')).toContainText('不是导出接口失败');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=adsorption_energy');
+
+    await page.selectOption('#v3TaskSelect', 'reaction_barrier');
+    await expect(page.locator('#v3TaskValue')).toContainText('反应能垒任务');
+    await expect(page.locator('#v3TaskValue')).toContainText('reaction_barrier');
+    await expect(page.locator('#v3ReturnedCount')).toContainText('1');
+    await expect(page.locator('#v3TabularReadyCount')).toContainText('1');
+    await expect(page.locator('#v3StatusPanel')).toContainText('v3 manifest 已加载');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=reaction_barrier');
+
+    await page.selectOption('#v3TaskSelect', 'rds_gibbs_free_energy');
+    await expect(page.locator('#v3TaskValue')).toContainText('RDS 自由能 / 决速步骤自由能任务');
+    await expect(page.locator('#v3TaskValue')).toContainText('rds_gibbs_free_energy');
+    await expect(page.locator('#v3ExcludedCounts')).toContainText('missing_rds_semantics');
+    await expect(page.locator('#v3TaskValue')).not.toContainText('反应能垒');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=rds_gibbs_free_energy');
   });
 
   test('supports blocker filtering and server-side year/library refresh params', async ({ page }) => {
@@ -571,6 +775,76 @@ test.describe('DFT ML-ready dataset page', () => {
     await page.click('#applyServerFiltersButton');
     await expect.poll(() => mockState.getLastDatasetUrl()).toContain('library_name=Active+Library');
     await expect.poll(() => mockState.getLastDatasetUrl()).toContain('year_min=2024');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('library_name=Active+Library');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('year_min=2024');
+  });
+
+  test('passes shared filters to v3 JSON and CSV downloads', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.addInitScript(() => {
+      window.URL.createObjectURL = () => 'blob:mock-download';
+      window.URL.revokeObjectURL = () => {};
+      HTMLAnchorElement.prototype.click = function noopClick() {};
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+    await page.selectOption('#v3TaskSelect', 'reaction_barrier');
+    await page.fill('#yearMinFilter', '2021');
+    await page.fill('#yearMaxFilter', '2025');
+    await page.selectOption('#libraryFilter', 'Archive Library');
+    await page.click('#applyServerFiltersButton');
+
+    await page.click('#v3JsonButton');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('/api/dft/ml-dataset-v3?');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('task=reaction_barrier');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('ready_only=true');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('library_name=Archive+Library');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('year_min=2021');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('year_max=2025');
+
+    await page.click('#v3CsvButton');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('/api/dft/ml-dataset-v3.csv?');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('task=reaction_barrier');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('library_name=Archive+Library');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_min=2021');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_max=2025');
+  });
+
+  test('uses current DOM year and library filters for direct v3 refresh and downloads', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.addInitScript(() => {
+      window.URL.createObjectURL = () => 'blob:mock-download';
+      window.URL.revokeObjectURL = () => {};
+      HTMLAnchorElement.prototype.click = function noopClick() {};
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+    await page.selectOption('#v3TaskSelect', 'reaction_barrier');
+    await page.fill('#yearMinFilter', '2020');
+    await page.fill('#yearMaxFilter', '2024');
+    await page.selectOption('#libraryFilter', 'Archive Library');
+
+    await page.click('#v3RefreshButton');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=reaction_barrier');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('library_name=Archive+Library');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('year_min=2020');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('year_max=2024');
+
+    await page.fill('#yearMinFilter', '2022');
+    await page.fill('#yearMaxFilter', '2026');
+    await page.click('#v3JsonButton');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('task=reaction_barrier');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('ready_only=true');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('library_name=Archive+Library');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('year_min=2022');
+    await expect.poll(() => mockState.getLastV3JsonUrl()).toContain('year_max=2026');
+
+    await page.selectOption('#libraryFilter', 'Active Library');
+    await page.click('#v3CsvButton');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('task=reaction_barrier');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('library_name=Active+Library');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_min=2022');
+    await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_max=2026');
   });
 
   test('reuses the shared stored library selection before falling back to the active library', async ({ page }) => {
@@ -633,6 +907,9 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('#applyServerFiltersButton')).toBeDisabled();
     await expect(page.locator('#exportCsvButton')).toBeDisabled();
     await expect(page.locator('#exportJsonButton')).toBeDisabled();
+    await expect(page.locator('#v3RefreshButton')).toBeDisabled();
+    await expect(page.locator('#v3JsonButton')).toBeDisabled();
+    await expect(page.locator('#v3CsvButton')).toBeDisabled();
     await expect(page.locator('#toastContainer')).not.toContainText('读取失败：Exports are disabled by server policy');
   });
 });

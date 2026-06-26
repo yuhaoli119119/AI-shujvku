@@ -100,6 +100,7 @@ def test_create_relationship_success(setup_test_db):
         assert rel is not None
         assert rel.relationship_type == "supplementary"
         assert rel.created_by == "user_manual"
+        assert session.get(Paper, target.id).paper_type == "supplementary"
 
 
 def test_create_relationship_source_not_found(setup_test_db):
@@ -119,7 +120,7 @@ def test_create_relationship_source_not_found(setup_test_db):
         f"/api/papers/{fake_source_id}/relationships",
         json={
             "target_paper_id": target_id,
-            "relationship_type": "citation",
+            "relationship_type": "supplementary",
         },
     )
     assert response.status_code == 404
@@ -142,14 +143,14 @@ def test_create_relationship_target_not_found(setup_test_db):
         f"/api/papers/{source_id}/relationships",
         json={
             "target_paper_id": fake_target_id,
-            "relationship_type": "citation",
+            "relationship_type": "supplementary",
         },
     )
     assert response.status_code == 404
 
 
-def test_create_relationship_type_citation(setup_test_db):
-    """支持 citation 类型关联。"""
+def test_create_relationship_rejects_non_supplementary_type(setup_test_db):
+    """手动关系入口只支持支撑文献关系。"""
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
 
@@ -169,6 +170,38 @@ def test_create_relationship_type_citation(setup_test_db):
             "relationship_type": "citation",
         },
     )
+    assert response.status_code == 400
+
+    with Session() as session:
+        rel = session.scalar(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == source.id
+            )
+        )
+        assert rel is None
+
+
+def test_create_relationship_normalizes_si_alias(setup_test_db):
+    """SI 同义词应统一保存为 supplementary。"""
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        source = Paper(title="主文献", pdf_path="main.pdf")
+        target = Paper(title="Supporting Information", pdf_path="si.pdf")
+        session.add_all([source, target])
+        session.commit()
+        source_id = str(source.id)
+        target_id = str(target.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{source_id}/relationships",
+        json={
+            "target_paper_id": target_id,
+            "relationship_type": "si",
+        },
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "created"
 
@@ -178,7 +211,9 @@ def test_create_relationship_type_citation(setup_test_db):
                 PaperRelationship.source_paper_id == source.id
             )
         )
-        assert rel.relationship_type == "citation"
+        assert rel is not None
+        assert rel.relationship_type == "supplementary"
+        assert session.get(Paper, target.id).paper_type == "supplementary"
 
 
 def test_create_relationship_without_note(setup_test_db):
@@ -213,6 +248,78 @@ def test_create_relationship_without_note(setup_test_db):
             )
         )
         assert rel.note is None
+
+
+def test_create_relationship_accepts_target_paper_code_in_same_library(setup_test_db):
+    """前端可用短号把主文献关联到同库 SI。"""
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        source = Paper(title="主文献", pdf_path="main.pdf", paper_code="B0090", library_name="锂硫双原子")
+        target = Paper(title="补充材料 SI", pdf_path="si.pdf", paper_code="B0093", library_name="锂硫双原子")
+        other = Paper(title="其它库其它短号", pdf_path="other.pdf", paper_code="B0094", library_name="其它库")
+        session.add_all([source, target, other])
+        session.commit()
+        source_id = str(source.id)
+        target_id = str(target.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{source_id}/relationships",
+        json={
+            "target_paper_id": "b0093",
+            "relationship_type": "supplementary",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "created"
+
+    with Session() as session:
+        rel = session.scalar(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == source.id,
+            )
+        )
+        assert rel is not None
+        assert str(rel.target_paper_id) == target_id
+
+
+def test_create_relationship_is_idempotent(setup_test_db):
+    """重复点击不应重复创建关系，但应确保目标仍被标记为 SI。"""
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+
+    with Session() as session:
+        source = Paper(title="主文献", pdf_path="main.pdf", paper_code="B0093")
+        target = Paper(title="支撑信息", pdf_path="si.pdf", paper_code="U0094", paper_type="Unknown")
+        session.add_all([source, target])
+        session.commit()
+        source_id = str(source.id)
+        target_id = str(target.id)
+
+    client = TestClient(app)
+    payload = {"target_paper_id": "U0094", "relationship_type": "supplementary"}
+    first = client.post(f"/api/papers/{source_id}/relationships", json=payload)
+    second = client.post(f"/api/papers/{source_id}/relationships", json=payload)
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "created"
+    assert second.status_code == 200
+    assert second.json()["status"] == "existing"
+    assert second.json()["id"] == first.json()["id"]
+
+    with Session() as session:
+        relationships = session.scalars(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == source.id,
+                PaperRelationship.target_paper_id == target.id,
+            )
+        ).all()
+        assert len(relationships) == 1
+        stored_target = session.get(Paper, target.id)
+        assert stored_target.paper_type == "supplementary"
+        assert stored_target.paper_code == "S0093"
 
 
 def test_create_multiple_relationships(setup_test_db):

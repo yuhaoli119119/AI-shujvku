@@ -61,6 +61,37 @@ def test_property_taxonomy_maps_li2s_barriers_to_reaction_barrier_with_subtype()
     assert taxonomy["physical_dimension"] == "energy"
 
 
+def test_property_taxonomy_distinguishes_li2s_dissociation_and_deposition():
+    dissociation = get_property_taxonomy("Li2S dissociation energy")
+    deposition = get_property_taxonomy("Li2S deposition barrier")
+
+    assert dissociation["canonical_property_type"] == "reaction_energy"
+    assert dissociation["property_subtype"] == "li2s_dissociation_energy"
+    assert deposition["canonical_property_type"] == "reaction_barrier"
+    assert deposition["property_subtype"] == "li2s_deposition_barrier"
+
+
+def test_chemistry_normalizer_keeps_rds_gibbs_free_energy_out_of_reaction_barrier():
+    normalizer = ChemistryNormalizer()
+    normalized = normalizer.normalize(
+        {"property_type": "RDS Gibbs free energy", "reaction_step": "RDS"}
+    )
+    taxonomy = normalized["_normalized"]["property_taxonomy"]
+    assert normalized["property_type"] == "gibbs_free_energy_change"
+    assert taxonomy["canonical_property_type"] == "gibbs_free_energy_change"
+    assert taxonomy["property_subtype"] == "gibbs_free_energy_change"
+
+
+def test_chemistry_normalizer_distinguishes_activation_and_migration_barriers():
+    activation = ChemistryNormalizer().normalize({"property_type": "ΔG‡"})
+    migration = ChemistryNormalizer().normalize({"property_type": "Li diffusion barrier"})
+    assert activation["property_type"] == "activation_energy"
+    assert activation["_normalized"]["property_taxonomy"]["canonical_property_type"] == "reaction_barrier"
+    assert activation["_normalized"]["property_taxonomy"]["property_subtype"] == "activation_energy"
+    assert migration["property_type"] == "migration_barrier"
+    assert migration["_normalized"]["property_taxonomy"]["property_subtype"] == "migration_barrier"
+
+
 def test_chemistry_normalizer_canonicalizes_common_electrocatalysis_adsorbates():
     normalizer = ChemistryNormalizer()
     normalized = normalizer.normalize({"adsorbate": "OH*"})

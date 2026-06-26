@@ -1,6 +1,9 @@
 (function setupDftMlDatasetPage(global) {
     const API_URL = "/api/papers/export/dft-dataset";
     const LIBRARIES_URL = "/api/libraries";
+    const V3_API_URL = "/api/dft/ml-dataset-v3";
+    const V3_MANIFEST_URL = "/api/dft/ml-dataset-v3/manifest";
+    const V3_CSV_URL = "/api/dft/ml-dataset-v3.csv";
     const DATASET_SCHEMA = "dft_results_ml_v2";
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     const EXPORTS_DISABLED_MESSAGE = "当前服务器策略已关闭导出接口；DFT ML 数据集页面暂不可用。如需恢复，请由 Owner 在设置中显式开启导出。";
@@ -11,6 +14,8 @@
         libraries: [],
         expandedRecordIds: new Set(),
         exportsPolicyDisabled: false,
+        v3Manifest: null,
+        v3Task: "adsorption_energy",
         serverFilters: {
             library_name: "",
             year_min: "",
@@ -42,11 +47,21 @@
 
     const PROPERTY_LABELS = {
         adsorption_energy: "吸附能",
-        reaction_barrier: "反应势垒",
+        reaction_barrier: "反应能垒",
+        activation_energy: "反应能垒",
+        migration_barrier: "迁移能垒",
+        li2s_decomposition_barrier: "Li2S 分解能垒",
         d_band_center: "d 带中心",
         band_gap: "带隙",
-        gibbs_free_energy_change: "吉布斯自由能变化",
+        gibbs_free_energy_change: "自由能变化",
         permeance: "渗透率",
+        formation_energy: "形成能",
+        charge_transfer: "电荷转移",
+    };
+    const TASK_LABELS = {
+        adsorption_energy: "吸附能任务",
+        reaction_barrier: "反应能垒任务",
+        rds_gibbs_free_energy: "RDS 自由能 / 决速步骤自由能任务",
     };
 
     const SETTING_STATUS_LABELS = {
@@ -178,6 +193,10 @@
             "applyServerFiltersButton",
             "exportCsvButton",
             "exportJsonButton",
+            "v3RefreshButton",
+            "v3JsonButton",
+            "v3CsvButton",
+            "v3TaskSelect",
         ].forEach(id => {
             const node = qs(id);
             if (node) {
@@ -190,10 +209,13 @@
         state.payload = null;
         state.filteredRecords = [];
         state.filteredLmRecords = [];
+        state.v3Manifest = null;
         renderSummary();
         renderTable();
+        renderV3Manifest();
         qs("resultsMeta").textContent = "导出策略关闭中，当前页不加载 dft_results_ml_v2。";
         setStatus(EXPORTS_DISABLED_MESSAGE, "policy");
+        setV3Status(EXPORTS_DISABLED_MESSAGE, "policy");
     }
 
     function formatDateTime(value) {
@@ -256,6 +278,23 @@
         }
         const mapped = labelMap[raw];
         return mapped ? (mapped + "（" + raw + "）") : raw;
+    }
+
+    function formatPropertySubtypeCell(target) {
+        const subtypeKey = normalizeText(target && (target.property_subtype || target.normalized_property_type || target.property_type));
+        const rawKey = normalizeText(target && target.property_type);
+        const normalizedKey = normalizeText(target && target.normalized_property_type);
+        const lines = [];
+        if (rawKey) {
+            lines.push("原始: " + rawKey);
+        }
+        if (normalizedKey && normalizedKey !== rawKey) {
+            lines.push("规范化: " + normalizedKey);
+        }
+        return {
+            primary: readableLabel(subtypeKey || "—", PROPERTY_LABELS),
+            secondary: lines.join(" / "),
+        };
     }
 
     function getRecordTarget(record) {
@@ -445,6 +484,8 @@
         const readyRecords = (Array.isArray(records) ? records : []).filter(record => record && record.is_ml_ready);
         const headers = [
             "record_id",
+            "property_type",
+            "normalized_property_type",
             "canonical_property_type",
             "property_subtype",
             "canonical_adsorbate",
@@ -466,6 +507,8 @@
             const linkedSetting = getPreferredMlSetting(record) || {};
             const row = [
                 record.record_id,
+                target.property_type || "",
+                target.normalized_property_type || "",
                 target.canonical_property_type || "",
                 target.property_subtype || "",
                 target.canonical_adsorbate || "",
@@ -502,6 +545,22 @@
         if (el) {
             el.textContent = value == null ? "-" : String(value);
         }
+    }
+
+    function setV3Status(message, type) {
+        const panel = qs("v3StatusPanel");
+        if (!panel) {
+            return;
+        }
+        if (!message) {
+            panel.hidden = true;
+            panel.textContent = "";
+            panel.className = "v3-status";
+            return;
+        }
+        panel.hidden = false;
+        panel.textContent = message;
+        panel.className = "v3-status " + (type || "info");
     }
 
     function renderSummary() {
@@ -565,6 +624,70 @@
         });
         select.innerHTML = options.join("");
         select.value = current || "";
+    }
+
+    function v3ManifestValue(manifest, keys, fallback) {
+        const source = manifest || {};
+        for (const key of keys) {
+            if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+                return source[key];
+            }
+        }
+        return fallback == null ? "-" : fallback;
+    }
+
+    function formatV3TaskLabel(value) {
+        const raw = normalizeText(value);
+        if (!raw) {
+            return "—";
+        }
+        const shortKey = raw.includes(":") ? raw.split(":").pop() : raw;
+        const label = TASK_LABELS[shortKey];
+        return label ? (label + "（" + shortKey + "）") : raw;
+    }
+
+    function renderExcludedCounts(excludedCounts) {
+        const container = qs("v3ExcludedCounts");
+        if (!container) {
+            return;
+        }
+        const entries = Object.entries(excludedCounts || {}).filter(([, value]) => value !== null && value !== undefined);
+        if (!entries.length) {
+            container.innerHTML = '<span class="pill">无</span>';
+            return;
+        }
+        container.innerHTML = entries.map(([key, value]) => (
+            '<span class="pill"><strong>' + escapeHtml(key) + ":</strong> " + escapeHtml(formatNumber(value)) + "</span>"
+        )).join("");
+    }
+
+    function renderV3Manifest() {
+        const manifest = state.v3Manifest || {};
+        setCardValue("v3SchemaValue", v3ManifestValue(manifest, ["schema", "schema_version"], "-"));
+        setCardValue("v3VersionValue", v3ManifestValue(manifest, ["version", "dataset_version"], "-"));
+        setCardValue("v3TaskValue", formatV3TaskLabel(v3ManifestValue(manifest, ["task"], state.v3Task)));
+        setCardValue("v3ProfileValue", v3ManifestValue(manifest, ["profile", "reaction_profile", "profile_version"], "SRR_LiS"));
+        setCardValue("v3SourceCandidateCount", v3ManifestValue(manifest, ["source_candidate_count"], "-"));
+        setCardValue("v3CandidateCount", v3ManifestValue(manifest, ["candidate_count"], "-"));
+        setCardValue("v3TaskCandidateCount", v3ManifestValue(manifest, ["task_candidate_count"], "-"));
+        setCardValue("v3ReturnedCount", v3ManifestValue(manifest, ["returned_count"], "-"));
+        setCardValue("v3LabelReadyCount", v3ManifestValue(manifest, ["label_ready_count"], "-"));
+        setCardValue("v3TabularReadyCount", v3ManifestValue(manifest, ["tabular_ready_count"], "-"));
+        renderExcludedCounts(manifest.excluded_counts);
+
+        if (!state.v3Manifest || state.exportsPolicyDisabled) {
+            return;
+        }
+        const returnedCount = Number(manifest.returned_count || 0);
+        const tabularReadyCount = Number(manifest.tabular_ready_count || 0);
+        if (returnedCount === 0 || tabularReadyCount === 0) {
+            setV3Status("当前没有可直接训练的 SRR_LiS 记录；这是数据不足或尚未复核导致，不是导出接口失败。", "empty");
+            return;
+        }
+        setV3Status(
+            "v3 manifest 已加载，当前任务可直接训练记录 " + formatNumber(tabularReadyCount) + " 条。",
+            "info"
+        );
     }
 
     function materialLabel(record) {
@@ -693,13 +816,14 @@
             const paper = record.paper || {};
             const provenance = record.provenance || {};
             const isExpanded = state.expandedRecordIds.has(record.record_id);
+            const subtypeCell = formatPropertySubtypeCell(target);
             rows.push(
                 "<tr>" +
                     "<td>" + readinessBadge(record) + "</td>" +
                     '<td class="mono">' + escapeHtml(String(record.ml_readiness_score)) + "</td>" +
                     "<td>" + blockersHtml(record.ml_blockers) + "</td>" +
                     "<td><strong>" + escapeHtml(readableLabel(target.canonical_property_type || "—", PROPERTY_LABELS)) + "</strong></td>" +
-                    "<td>" + escapeHtml(readableLabel(target.property_subtype || "—", PROPERTY_LABELS)) + "</td>" +
+                    "<td><strong>" + escapeHtml(subtypeCell.primary) + "</strong>" + (subtypeCell.secondary ? '<div class=\"muted\">' + escapeHtml(subtypeCell.secondary) + "</div>" : "") + "</td>" +
                     "<td>" + escapeHtml(target.canonical_adsorbate || "—") + "</td>" +
                     '<td class="mono">' + escapeHtml(formatValueWithUnit(target.value, target.unit)) + "</td>" +
                     '<td class="mono">' + escapeHtml(formatValueWithUnit(target.normalized_value, target.normalized_unit)) + "</td>" +
@@ -754,6 +878,11 @@
             year_max: normalizeText(qs("yearMaxFilter").value),
         };
         rememberLibraryName(state.serverFilters.library_name);
+    }
+
+    function readV3RequestStateFromDom() {
+        readServerFiltersFromDom();
+        state.v3Task = qs("v3TaskSelect").value;
     }
 
     function renderResultsMeta() {
@@ -812,6 +941,52 @@
         return query ? (API_URL + "?" + query) : API_URL;
     }
 
+    function buildV3Params(options) {
+        const params = new URLSearchParams();
+        params.set("task", state.v3Task);
+        if (options && options.readyOnly) {
+            params.set("ready_only", "true");
+        }
+        if (state.serverFilters.library_name) {
+            params.set("library_name", state.serverFilters.library_name);
+        }
+        if (state.serverFilters.year_min) {
+            params.set("year_min", state.serverFilters.year_min);
+        }
+        if (state.serverFilters.year_max) {
+            params.set("year_max", state.serverFilters.year_max);
+        }
+        return params;
+    }
+
+    function buildV3Url(baseUrl, options) {
+        return baseUrl + "?" + buildV3Params(options).toString();
+    }
+
+    async function refreshV3Manifest() {
+        if (state.exportsPolicyDisabled) {
+            renderV3Manifest();
+            return;
+        }
+        readV3RequestStateFromDom();
+        setV3Status("正在读取 SRR_LiS v3 manifest...", "loading");
+        try {
+            const manifest = await fetchJSON(buildV3Url(V3_MANIFEST_URL));
+            setExportsPolicyDisabled(false);
+            state.v3Manifest = manifest || {};
+            renderV3Manifest();
+        } catch (error) {
+            if (isExportsDisabledError(error)) {
+                setExportsPolicyDisabled(true);
+                renderPolicyDisabledState();
+                return;
+            }
+            state.v3Manifest = null;
+            renderV3Manifest();
+            setV3Status("读取 SRR_LiS v3 manifest 失败：" + error.message, "error");
+        }
+    }
+
     async function refreshDataset() {
         if (state.exportsPolicyDisabled) {
             renderPolicyDisabledState();
@@ -829,6 +1004,7 @@
             renderSummary();
             renderFilterOptions();
             applyClientFilters();
+            await refreshV3Manifest();
             setStatus(
                 "已实时加载 " + payload.records.length + " 条数值记录与 " + payload.lm_records.length +
                 " 条 LM 辅助记录；推荐训练 setting 固定为 linked_dft_setting。",
@@ -843,8 +1019,10 @@
             state.payload = null;
             state.filteredRecords = [];
             state.filteredLmRecords = [];
+            state.v3Manifest = null;
             renderSummary();
             renderTable();
+            renderV3Manifest();
             qs("resultsMeta").textContent = "加载失败。";
             setStatus("读取 DFT ML 数据集失败：" + error.message, "error");
             showToast("读取失败：" + error.message, "error");
@@ -899,12 +1077,74 @@
         showToast("已导出当前筛选后的 V2 JSON。");
     }
 
+    async function exportV3Json() {
+        if (state.exportsPolicyDisabled) {
+            showToast("当前服务器策略已关闭导出功能。", "error");
+            return;
+        }
+        readV3RequestStateFromDom();
+        try {
+            const payload = await fetchJSON(buildV3Url(V3_API_URL, { readyOnly: true }));
+            const task = state.v3Task;
+            downloadText("dft_results_ml_v3." + task + ".json", JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+            showToast("已下载 SRR_LiS v3 JSON。");
+        } catch (error) {
+            if (isExportsDisabledError(error)) {
+                setExportsPolicyDisabled(true);
+                renderPolicyDisabledState();
+                return;
+            }
+            setV3Status("下载 SRR_LiS v3 JSON 失败：" + error.message, "error");
+        }
+    }
+
+    async function exportV3Csv() {
+        if (state.exportsPolicyDisabled) {
+            showToast("当前服务器策略已关闭导出功能。", "error");
+            return;
+        }
+        readV3RequestStateFromDom();
+        const url = buildV3Url(V3_CSV_URL);
+        const requestOptions = { headers: {} };
+        const token = readSettingsToken();
+        if (token) {
+            requestOptions.headers["X-Settings-Token"] = token;
+        }
+        try {
+            const response = await fetch(url, requestOptions);
+            const text = await response.text();
+            if (!response.ok) {
+                let detail = text || ("HTTP " + response.status);
+                try {
+                    const data = text ? JSON.parse(text) : null;
+                    detail = data && data.detail ? data.detail : detail;
+                } catch (_) {
+                    // Keep the raw server response for non-JSON CSV errors.
+                }
+                throw new Error(detail);
+            }
+            downloadText("dft_results_ml_v3." + state.v3Task + ".csv", text, "text/csv;charset=utf-8");
+            showToast("已下载 SRR_LiS v3 CSV。");
+        } catch (error) {
+            if (isExportsDisabledError(error)) {
+                setExportsPolicyDisabled(true);
+                renderPolicyDisabledState();
+                return;
+            }
+            setV3Status("下载 SRR_LiS v3 CSV 失败：" + error.message, "error");
+        }
+    }
+
     function bindEvents() {
         qs("refreshButton").addEventListener("click", refreshDataset);
         qs("applyServerFiltersButton").addEventListener("click", refreshDataset);
         qs("clearFiltersButton").addEventListener("click", clearFilters);
         qs("exportCsvButton").addEventListener("click", exportMlReadyCsv);
         qs("exportJsonButton").addEventListener("click", exportV2Json);
+        qs("v3RefreshButton").addEventListener("click", refreshV3Manifest);
+        qs("v3JsonButton").addEventListener("click", exportV3Json);
+        qs("v3CsvButton").addEventListener("click", exportV3Csv);
+        qs("v3TaskSelect").addEventListener("change", refreshV3Manifest);
 
         [
             "readinessFilter",

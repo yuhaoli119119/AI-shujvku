@@ -133,6 +133,40 @@ def init_db(database_url: str, *, force: bool = False) -> None:
             )
             return False
 
+    if "dft_results" in table_names:
+        with engine.begin() as connection:
+            execute_migration_step(
+                "dft_results",
+                "reaction_type",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_type VARCHAR(32)",
+            )
+            execute_migration_step(
+                "dft_results",
+                "reaction_type_source",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_type_source VARCHAR(32)",
+            )
+            execute_migration_step(
+                "dft_results",
+                "reaction_type_confidence",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_type_confidence FLOAT",
+            )
+            execute_migration_step(
+                "dft_results",
+                "reaction_profile_version",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_profile_version VARCHAR(64)",
+            )
+            execute_migration_step(
+                "dft_results",
+                "reaction_validation_status",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_validation_status VARCHAR(32)",
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_dft_results_reaction_type "
+                    "ON dft_results (reaction_type)"
+                )
+            )
+
     should_backfill_paper_codes = False
 
     if "papers" in table_names:

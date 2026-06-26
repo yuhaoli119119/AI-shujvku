@@ -261,6 +261,31 @@ class PaperQueryService:
             summary = relationship_summary_map[row.source_paper_id]
             summary[row.relationship_type] = summary.get(row.relationship_type, 0) + 1
 
+        incoming_supplementary_rows = [
+            row
+            for row in self.session.scalars(
+                select(PaperRelationship).where(PaperRelationship.target_paper_id.in_(paper_ids))
+            ).all()
+            if self._is_supplementary_relationship(row.relationship_type)
+        ]
+        supplementary_main_ids = {row.source_paper_id for row in incoming_supplementary_rows}
+        supplementary_main_papers = {}
+        if supplementary_main_ids:
+            supplementary_main_papers = {
+                item.id: item
+                for item in self.session.scalars(
+                    select(Paper).where(Paper.id.in_(list(supplementary_main_ids)))
+                ).all()
+            }
+        supplementary_review_progress_map: dict[UUID, dict[str, Any]] = {}
+        for row in incoming_supplementary_rows:
+            main_paper = supplementary_main_papers.get(row.source_paper_id)
+            if main_paper is None:
+                continue
+            supplementary_review_progress_map[row.target_paper_id] = self._manual_review_progress(
+                main_paper.comprehensive_analysis
+            )
+
         impact_metadata_map = {
             row.paper_id: row
             for row in self.session.scalars(
@@ -268,15 +293,21 @@ class PaperQueryService:
             ).all()
         }
 
-        return [
-            self._build_list_item_with_counts(
-                paper, 
-                {**counts_map[paper.id], "comprehensive_analysis": 1 if paper.comprehensive_analysis else 0},
-                relationship_summary_map.get(paper.id, {}),
-                impact_metadata=impact_metadata_map.get(paper.id),
-                review_status=workbench_status_map.get(str(paper.id)),
-            ) for paper in papers
-        ]
+        items: list[PaperListItemResponse] = []
+        for paper in papers:
+            review_status = dict(workbench_status_map.get(str(paper.id)) or {})
+            if paper.id in supplementary_review_progress_map:
+                review_status["manual_review_progress"] = supplementary_review_progress_map[paper.id]
+            items.append(
+                self._build_list_item_with_counts(
+                    paper,
+                    {**counts_map[paper.id], "comprehensive_analysis": 1 if paper.comprehensive_analysis else 0},
+                    relationship_summary_map.get(paper.id, {}),
+                    impact_metadata=impact_metadata_map.get(paper.id),
+                    review_status=review_status,
+                )
+            )
+        return items
 
     @staticmethod
     def _list_ordering(filters: PaperListFilterParams) -> tuple:
@@ -389,6 +420,53 @@ class PaperQueryService:
         incoming_relationships = self.session.scalars(
             select(PaperRelationship).where(PaperRelationship.target_paper_id == paper_id)
         ).all()
+        related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {
+            row.source_paper_id for row in incoming_relationships
+        }
+        related_papers = {}
+        if related_paper_ids:
+            related_papers = {
+                item.id: item
+                for item in self.session.scalars(select(Paper).where(Paper.id.in_(list(related_paper_ids)))).all()
+            }
+        outgoing_supplementary_relationships = [
+            row for row in outgoing_relationships if self._is_supplementary_relationship(row.relationship_type)
+        ]
+        incoming_supplementary_relationships = [
+            row for row in incoming_relationships if self._is_supplementary_relationship(row.relationship_type)
+        ]
+        tables_for_response = list(tables)
+        table_source_metadata: dict[str, dict[str, Any]] = {}
+        table_review_paper_id = paper_id
+
+        if outgoing_supplementary_relationships:
+            supplementary_paper_ids = [row.target_paper_id for row in outgoing_supplementary_relationships]
+            supplementary_tables = self.session.scalars(
+                select(PaperTable)
+                .where(PaperTable.paper_id.in_(supplementary_paper_ids))
+                .order_by(PaperTable.paper_id.asc(), PaperTable.page.asc().nulls_last())
+            ).all()
+            tables_for_response.extend(supplementary_tables)
+            for table in supplementary_tables:
+                source_paper = related_papers.get(table.paper_id)
+                table_source_metadata[str(table.id)] = {
+                    "source_document_type": "supplementary_information",
+                    "related_paper_id": table.paper_id,
+                    "related_paper_code": source_paper.paper_code if source_paper is not None else None,
+                    "related_paper_title": source_paper.title if source_paper is not None else None,
+                    "writeback_paper_id": paper_id,
+                }
+        elif incoming_supplementary_relationships:
+            main_relationship = incoming_supplementary_relationships[0]
+            table_review_paper_id = main_relationship.source_paper_id
+            for table in tables:
+                table_source_metadata[str(table.id)] = {
+                    "source_document_type": "supplementary_information",
+                    "related_paper_id": paper_id,
+                    "related_paper_code": paper.paper_code,
+                    "related_paper_title": paper.title,
+                    "writeback_paper_id": main_relationship.source_paper_id,
+                }
 
         if compact:
             references = []
@@ -424,13 +502,13 @@ class PaperQueryService:
             ).all()
             full_translation = self._latest_full_translation(paper_id)
             figure_ids = {str(figure.id) for figure in figures}
-            table_ids = {str(table.id) for table in tables}
+            table_ids = {str(table.id) for table in tables_for_response}
             table_audits = self._object_review_audits_by_target(
-                paper_id,
+                table_review_paper_id,
                 table_ids,
                 target_types={"table", "tables", "paper_table", "paper_tables"},
             )
-            table_corrections = self._table_corrections_by_target(paper_id, table_ids)
+            table_corrections = self._table_corrections_by_target(table_review_paper_id, table_ids)
             figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
             figure_approved_corrections = self._figure_approved_corrections(paper_id, figure_ids)
             figure_pending_corrections = self._figure_pending_corrections(paper_id, figure_ids)
@@ -497,18 +575,6 @@ class PaperQueryService:
             impact_metadata=self.session.get(PaperImpactMetadata, paper.id),
             include_heavy=True,
         )
-        if compact:
-            outgoing_relationships = []
-            incoming_relationships = []
-            related_titles = {}
-        else:
-            related_paper_ids = {row.target_paper_id for row in outgoing_relationships} | {row.source_paper_id for row in incoming_relationships}
-            related_titles = {}
-            if related_paper_ids:
-                related_titles = {
-                    item.id: item.title
-                    for item in self.session.scalars(select(Paper).where(Paper.id.in_(list(related_paper_ids)))).all()
-                }
         base_payload = base.model_dump()
         base_payload["full_translation_zh"] = full_translation
         review_status = self._paper_detail_review_status(
@@ -534,8 +600,9 @@ class PaperQueryService:
                     item,
                     object_review_audits=table_audits.get(str(item.id), []),
                     corrections=table_corrections.get(str(item.id), []),
+                    source_metadata=table_source_metadata.get(str(item.id)),
                 )
-                for item in tables
+                for item in tables_for_response
             ],
             figures=[
                 self._serialize_figure(
@@ -580,10 +647,12 @@ class PaperQueryService:
                 for item in writing_cards
             ],
             outgoing_relationships=[
-                self._serialize_relationship(item, related_titles.get(item.target_paper_id)) for item in outgoing_relationships
+                self._serialize_relationship(item, related_papers.get(item.target_paper_id))
+                for item in outgoing_relationships
             ],
             incoming_relationships=[
-                self._serialize_relationship(item, related_titles.get(item.source_paper_id)) for item in incoming_relationships
+                self._serialize_relationship(item, related_papers.get(item.source_paper_id))
+                for item in incoming_relationships
             ],
             references=[ReferenceEntryResponse.model_validate(item) for item in references],
             figure_data_points_items=[FigureDataPointResponse.model_validate(item) for item in figure_data_points],
@@ -1015,19 +1084,23 @@ class PaperQueryService:
         *,
         object_review_audits: list[dict[str, Any]] | None = None,
         corrections: list[dict[str, Any]] | None = None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> PaperTableResponse:
         payload = PaperTableResponse.model_validate(item)
         audits = object_review_audits or []
         table_corrections = corrections or []
+        updates = {
+            "caption": cls._clean_pdf_text(payload.caption),
+            "markdown_content": cls._clean_pdf_layout_text(payload.markdown_content),
+            "table_review_status": cls._table_review_status(audits, table_corrections),
+            "object_review_audit_count": len(audits),
+            "object_review_audits": audits[:5],
+            "latest_object_review_audit": audits[0] if audits else None,
+        }
+        if source_metadata:
+            updates.update(source_metadata)
         return payload.model_copy(
-            update={
-                "caption": cls._clean_pdf_text(payload.caption),
-                "markdown_content": cls._clean_pdf_layout_text(payload.markdown_content),
-                "table_review_status": cls._table_review_status(audits, table_corrections),
-                "object_review_audit_count": len(audits),
-                "object_review_audits": audits[:5],
-                "latest_object_review_audit": audits[0] if audits else None,
-            }
+            update=updates
         )
 
     @staticmethod
@@ -1782,14 +1855,51 @@ class PaperQueryService:
         )
 
     @staticmethod
-    def _serialize_relationship(item: PaperRelationship, related_paper_title: str | None) -> PaperRelationshipItemResponse:
+    def _is_supplementary_relationship(relationship_type: Any) -> bool:
+        normalized = str(relationship_type or "").strip().lower()
+        return normalized in {"supplementary", "supplementary_information", "supporting_information", "si"}
+
+    @staticmethod
+    def _manual_review_progress(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+        source = data if isinstance(data, dict) else {}
+        progress = source.get("manual_review_progress") if isinstance(source.get("manual_review_progress"), dict) else {}
+
+        def normalize_entry(module: str) -> dict[str, Any]:
+            raw = progress.get(module)
+            if isinstance(raw, dict):
+                return {
+                    "completed": bool(raw.get("completed")),
+                    "updated_at": raw.get("updated_at"),
+                    "updated_by": raw.get("updated_by"),
+                }
+            return {
+                "completed": bool(raw),
+                "updated_at": None,
+                "updated_by": None,
+            }
+
+        return {
+            "content": normalize_entry("content"),
+            "figures": normalize_entry("figures"),
+            "dft": normalize_entry("dft"),
+        }
+
+    @staticmethod
+    def _serialize_relationship(item: PaperRelationship, related_paper: Paper | None) -> PaperRelationshipItemResponse:
         return PaperRelationshipItemResponse(
             id=item.id,
             source_paper_id=item.source_paper_id,
             target_paper_id=item.target_paper_id,
             relationship_type=item.relationship_type,
             note=item.note,
+            confidence=getattr(item, "confidence", None),
             created_by=item.created_by,
             created_at=item.created_at,
-            related_paper_title=related_paper_title,
+            related_paper_code=related_paper.paper_code if related_paper is not None else None,
+            related_paper_title=related_paper.title if related_paper is not None else None,
+            related_manual_review_progress=(
+                PaperQueryService._manual_review_progress(related_paper.comprehensive_analysis)
+                if related_paper is not None
+                else {}
+            ),
         )

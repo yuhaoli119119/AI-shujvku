@@ -11,11 +11,11 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import AuditLog, Paper, PaperChunk, PaperFigure, PaperSection, PaperTable, FigureDataPoint, EvidenceSpan
+from app.db.models import AuditLog, Paper, PaperChunk, PaperFigure, PaperRelationship, PaperSection, PaperTable, FigureDataPoint, EvidenceSpan
 from app.parsers.body_boundary_cleaner import BodyBoundaryCleaner, BoundaryCleanupPlan
 from app.parsers.docling_parser import DoclingParser
 from app.parsers.grobid_parser import GrobidParseResult, GrobidParser
@@ -27,7 +27,7 @@ from app.services.embedding import EmbeddingUnavailableError, get_embedding_serv
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.paper_identity import PaperIdentityService
-from app.services.paper_codes import ensure_paper_codes
+from app.services.paper_codes import ensure_paper_codes, next_supplementary_paper_code
 from app.services.paper_serials import renumber_library_papers_by_year
 from app.services.parse_quality_auditor import ParseQualityAuditor
 from app.services.paper_workbench_service import PaperWorkbenchService
@@ -91,6 +91,7 @@ class PaperIngestionService:
         external_metadata: dict[str, Any] | None = None,
         library_name: str | None = None,
         attach_to_paper_id: UUID | None = None,
+        supplementary_for_paper_id: UUID | None = None,
         confirm_identity_mismatch: bool = False,
     ) -> Paper:
         target_name = f"{uuid.uuid4()}.pdf"
@@ -103,6 +104,7 @@ class PaperIngestionService:
             source_reference=None,
             library_name=library_name,
             attach_to_paper_id=attach_to_paper_id,
+            supplementary_for_paper_id=supplementary_for_paper_id,
             confirm_identity_mismatch=confirm_identity_mismatch,
             ingest_source="uploaded",
         )
@@ -116,9 +118,12 @@ class PaperIngestionService:
         source_reference: str | None = None,
         library_name: str | None = None,
         attach_to_paper_id: UUID | None = None,
+        supplementary_for_paper_id: UUID | None = None,
         confirm_identity_mismatch: bool = False,
         ingest_source: str | None = None,
     ) -> Paper:
+        if attach_to_paper_id is not None and supplementary_for_paper_id is not None:
+            raise ValueError("supplementary_upload_cannot_attach_to_existing_placeholder")
         if ingest_source == "local_pdf":
             source_path = validate_local_ingest_pdf(source_path, self.settings)
         if copy_pdf:
@@ -154,7 +159,12 @@ class PaperIngestionService:
                     tei_xml="",
                 )
             try:
-                docling_result = await self.docling_parser.parse_pdf(stored_pdf)
+                docling_result = await self.docling_parser.parse_pdf(
+                    stored_pdf,
+                    document_timeout=self._docling_document_timeout_for(
+                        supplementary=bool(supplementary_for_paper_id),
+                    ),
+                )
                 unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
             except Exception as exc:
                 logger.error("Docling parsing or unified building failed for %s: %s", original_filename, exc, exc_info=True)
@@ -265,6 +275,25 @@ class PaperIngestionService:
             setattr(paper, "_ingest_status", ingest_status)
             return paper
 
+        if supplementary_for_paper_id is not None:
+            main_paper = self.session.get(Paper, supplementary_for_paper_id)
+            if main_paper is None:
+                raise ValueError("Paper not found")
+            existing = self._find_existing_supplementary_by_hash(main_paper, stored_pdf)
+            if existing is not None:
+                setattr(existing, "_ingest_status", "already_linked")
+                return existing
+            paper = self._persist_supplementary(
+                main_paper=main_paper,
+                document=unified,
+                external_metadata=external_metadata,
+                source_reference=source_reference,
+                oa_status=oa_status,
+                quality_report=quality_report,
+            )
+            setattr(paper, "_ingest_status", "completed")
+            return paper
+
         placeholder = self.identity.find_metadata_placeholder(
             self.session,
             doi=doi,
@@ -357,7 +386,12 @@ class PaperIngestionService:
                     tei_xml="",
                 )
             try:
-                docling_result = await self.docling_parser.parse_pdf(stored_pdf)
+                docling_result = await self.docling_parser.parse_pdf(
+                    stored_pdf,
+                    document_timeout=self._docling_document_timeout_for(
+                        supplementary=self._is_supplementary_paper(paper),
+                    ),
+                )
                 unified = await self._build_unified_document(stored_pdf, grobid_result, docling_result)
             except Exception as exc:
                 logger.error("Docling reparse failed for %s: %s", paper_id, exc, exc_info=True)
@@ -791,6 +825,87 @@ class PaperIngestionService:
             logger.exception("Failed to prepare Codex workspace for paper %s", paper.id)
         return paper
 
+    def _persist_supplementary(
+        self,
+        *,
+        main_paper: Paper,
+        document: UnifiedPaperDocument,
+        external_metadata: dict[str, Any] | None = None,
+        source_reference: str | None = None,
+        oa_status: str | None = None,
+        quality_report: dict[str, Any] | None = None,
+    ) -> Paper:
+        ext = external_metadata or {}
+        paper = Paper(
+            library_name=main_paper.library_name,
+            doi=None,
+            title=ext.get("title") or document.metadata.get("title") or document.source_pdf_path.name,
+            year=ext.get("year") or document.metadata.get("year") or main_paper.year,
+            journal=ext.get("journal") or document.metadata.get("journal") or main_paper.journal,
+            authors=[],
+            abstract=ext.get("abstract") or document.abstract or None,
+            pdf_path=self._artifact_ref(document.source_pdf_path, category="pdf") or str(document.source_pdf_path),
+            source_path=source_reference,
+            oa_status=oa_status or ext.get("oa_status") or document.metadata.get("oa_status"),
+            license=ext.get("license") or document.metadata.get("license"),
+            tei_path=self._artifact_ref(document.tei_path, category="tei"),
+            docling_json_path=self._artifact_ref(document.docling_json_path, category="docling_json"),
+            markdown_path=self._artifact_ref(document.markdown_path, category="markdown"),
+            paper_type="supplementary",
+        )
+        self.session.add(paper)
+        self.session.flush()
+        if quality_report:
+            self.workbench.apply_quality_report(paper, quality_report)
+        paper.paper_code = next_supplementary_paper_code(
+            self.session,
+            main_paper_code=main_paper.paper_code,
+            serial_number=main_paper.serial_number,
+            exclude_paper_id=paper.id,
+        )
+
+        if quality_report and quality_report.get("needs_human_confirmation"):
+            self._ensure_supplementary_relationship(main_paper=main_paper, supplementary_paper=paper)
+            self.session.commit()
+            self.session.refresh(paper)
+            try:
+                self.workbench.prepare_paper_workspace(paper.id)
+            except Exception:
+                logger.exception("Failed to prepare Codex workspace for supplementary paper %s", paper.id)
+            return paper
+
+        self._persist_document_entities(paper, document)
+        if self.settings.auto_run_stage2_extraction:
+            summary = self.extraction_pipeline.run_stage2(paper, document)
+        else:
+            summary = {}
+            logger.info(
+                "Stage-2 extraction skipped for supplementary paper %s (auto_run_stage2_extraction=False)",
+                paper.id,
+            )
+            self.session.add(
+                AuditLog(
+                    paper_id=paper.id,
+                    action="stage2_skipped",
+                    source="paper_ingestion",
+                    target_type="paper",
+                    target_id=str(paper.id),
+                    payload={"reason": "auto_run_stage2_extraction disabled", "supplementary": True},
+                )
+            )
+        self.workbench.mark_parsed_ready(
+            paper,
+            candidate_count=self._stage2_candidate_count(summary),
+        )
+        self._ensure_supplementary_relationship(main_paper=main_paper, supplementary_paper=paper)
+        self.session.commit()
+        self.session.refresh(paper)
+        try:
+            self.workbench.prepare_paper_workspace(paper.id)
+        except Exception:
+            logger.exception("Failed to prepare Codex workspace for supplementary paper %s", paper.id)
+        return paper
+
     def _merge_into_existing_paper(
         self,
         paper: Paper,
@@ -801,7 +916,11 @@ class PaperIngestionService:
         quality_report: dict[str, Any] | None = None,
     ) -> Paper:
         ext = external_metadata or {}
-        paper.doi = self.identity.normalize_doi(ext.get("doi") or document.metadata.get("doi") or paper.doi)
+        is_supplementary = self._is_supplementary_paper(paper)
+        if is_supplementary:
+            paper.doi = None
+        else:
+            paper.doi = self.identity.normalize_doi(ext.get("doi") or document.metadata.get("doi") or paper.doi)
         paper.title = ext.get("title") or document.metadata.get("title") or paper.title
         paper.year = ext.get("year") or document.metadata.get("year") or paper.year
         paper.journal = ext.get("journal") or document.metadata.get("journal") or paper.journal
@@ -864,6 +983,20 @@ class PaperIngestionService:
         except Exception:
             logger.exception("Failed to prepare Codex workspace for paper %s", paper.id)
         return paper
+
+    @staticmethod
+    def _is_supplementary_paper(paper: Paper) -> bool:
+        return str(getattr(paper, "paper_type", "") or "").strip().lower() in {
+            "supplementary",
+            "supplementary_information",
+            "supporting_information",
+            "si",
+        }
+
+    def _docling_document_timeout_for(self, *, supplementary: bool = False) -> float | None:
+        if supplementary:
+            return self.settings.docling_supplementary_document_timeout
+        return self.settings.docling_document_timeout
 
     def _persist_quality_blocked(
         self,
@@ -1408,6 +1541,60 @@ class PaperIngestionService:
         if arxiv_id and candidate_arxiv == arxiv_id and candidate.pdf_path:
             return candidate
         return None
+
+    def _find_existing_supplementary_by_hash(self, main_paper: Paper, source_path: Path) -> Paper | None:
+        incoming_hash = self._file_sha256(source_path)
+        relationships = self.session.scalars(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == main_paper.id,
+                PaperRelationship.relationship_type == "supplementary",
+            )
+        ).all()
+        if not relationships:
+            return None
+        target_ids = [row.target_paper_id for row in relationships]
+        papers = self.session.scalars(select(Paper).where(Paper.id.in_(target_ids))).all()
+        for paper in papers:
+            resolved_pdf = resolve_persisted_artifact_path(
+                paper.pdf_path,
+                category="pdf",
+                settings=self.settings,
+                must_exist=False,
+                trusted_persisted_reference=True,
+            ) or Path(str(paper.pdf_path or ""))
+            if not resolved_pdf.exists():
+                continue
+            if self._file_sha256(resolved_pdf) == incoming_hash:
+                return paper
+        return None
+
+    def _ensure_supplementary_relationship(self, *, main_paper: Paper, supplementary_paper: Paper) -> None:
+        existing = self.session.scalar(
+            select(PaperRelationship).where(
+                PaperRelationship.source_paper_id == main_paper.id,
+                PaperRelationship.target_paper_id == supplementary_paper.id,
+                PaperRelationship.relationship_type == "supplementary",
+            )
+        )
+        if existing is not None:
+            return
+        self.session.add(
+            PaperRelationship(
+                source_paper_id=main_paper.id,
+                target_paper_id=supplementary_paper.id,
+                relationship_type="supplementary",
+                created_by="supplementary_upload",
+                note="Created by supplementary upload workflow.",
+            )
+        )
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest().upper()
 
     @staticmethod
     def _infer_oa_status(source_reference: str | None, copy_pdf: bool) -> str:

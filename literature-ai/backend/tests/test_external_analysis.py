@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db.models import AuditLog, Base, CatalystSample, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.main import app
@@ -58,6 +59,14 @@ def test_dual_ai_consensus_signature_accepts_structured_corrected_values():
     assert grouped[("REVISE", second)] == "accepted"
 
 
+def test_import_warning_decision_aliases_match_dft_queue_semantics():
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("confirmed_with_corrections") == "PROPOSED"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("corrected") == "PROPOSED"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("revision") == "PROPOSED"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("needs_user_decision") == "NEEDS_HUMAN"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("ambiguous") == "NEEDS_HUMAN"
+
+
 def test_heuristic_import_maps_legacy_candidates_notes():
     service = ExternalAnalysisService.__new__(ExternalAnalysisService)
 
@@ -83,6 +92,63 @@ def test_heuristic_import_maps_legacy_candidates_notes():
     assert normalized.review_notes[0].field_name == "figures"
     assert normalized.review_notes[0].quoted_text == "Fig. 1."
     assert len(normalized.unmapped_items) == 1
+
+
+def test_import_analysis_warns_on_unrecognized_dft_audit_container():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Container warning paper", pdf_path="warning.pdf", authors=["A"])
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+                paper_id = paper.id
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "legacy_dft_key",
+                    "raw_payload": {
+                        "dft_result_audits": [
+                            {
+                                "target_type": "dft_results",
+                                "target_id": "existing-row",
+                                "field_name": "value",
+                                "decision": "PROPOSED",
+                                "corrected_value": 1.23,
+                            }
+                        ]
+                    },
+                },
+            )
+
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["candidates"] == []
+            assert [warning["code"] for warning in body["warnings"]] == [
+                "unrecognized_object_review_container"
+            ]
+            assert body["warnings"][0]["key"] == "dft_result_audits"
+            assert body["warnings"][0]["expected_key"] == "object_review_audits"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
 
 
 def test_external_analysis_import_and_materialize_flow():
@@ -2898,3 +2964,395 @@ def test_internal_ai_parse_uses_persisted_writer_settings(monkeypatch):
             app.dependency_overrides.clear()
             engine.dispose()
             get_settings.cache_clear()
+
+
+def test_http_import_dft_new_candidate_auto_acquires_lock_without_token():
+    """Regression: HTTP /import with auto_apply_review_rules=True and no write_lock_token
+    must auto-acquire a dft_results lock, materialize the candidate, and release the lock.
+    This was the original bug report's core failure (module_write_lock_required:dft_results).
+    """
+    with TemporaryDirectory():
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="HTTP DFT auto-lock paper", pdf_path="dft.pdf", authors=["A"])
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+                paper_id = paper.id
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "codex_http_dft",
+                    "auto_apply_review_rules": True,
+                    "reviewer": "codex_http_dft",
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "target_type": "dft_results",
+                                "target_id": "new",
+                                "field_name": "dft_results",
+                                "decision": "new_candidate",
+                                "corrected_value": {
+                                    "material_identity": "Fe-N4",
+                                    "property_type": "adsorption_energy",
+                                    "value": -1.23,
+                                    "unit": "eV",
+                                    "adsorbate": "Li2S4",
+                                    "reaction_step": "adsorption",
+                                },
+                                "evidence_location": {
+                                    "page": 3,
+                                    "quoted_text": "Fe-N4 -1.23 eV",
+                                },
+                                "confidence": 0.9,
+                            }
+                        ]
+                    },
+                },
+            )
+
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["candidates"][0]["status"] == "materialized"
+            assert body["candidates"][0]["normalized_payload"]["target_type"] == "dft_results"
+
+            with Session(engine) as session:
+                dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+                assert len(dft_rows) == 1
+                assert dft_rows[0].candidate_status == "new_candidate"
+                assert dft_rows[0].value == -1.23
+                from app.db.models import ModuleWriteLock
+                active_locks = session.scalars(
+                    select(ModuleWriteLock).where(
+                        ModuleWriteLock.paper_id == paper_id,
+                        ModuleWriteLock.module_name == "dft_results",
+                        ModuleWriteLock.status == "active",
+                    )
+                ).all()
+                assert active_locks == [], "Auto-acquired dft_results lock was not released"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_http_apply_review_rules_endpoint_materializes_deferred_dft_candidates():
+    """Regression: a run imported with auto_apply_review_rules=False must be
+    materializable later via POST /runs/{run_id}/apply-review-rules.
+    """
+    with TemporaryDirectory():
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Deferred DFT paper", pdf_path="deferred.pdf", authors=["A"])
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+                paper_id = paper.id
+
+            client = TestClient(app)
+            import_response = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "deferred_dft",
+                    "auto_apply_review_rules": False,
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "target_type": "dft_results",
+                                "target_id": "new",
+                                "field_name": "dft_results",
+                                "decision": "new_candidate",
+                                "corrected_value": {
+                                    "material_identity": "Co-N3",
+                                    "property_type": "adsorption_energy",
+                                    "value": -0.95,
+                                    "unit": "eV",
+                                    "adsorbate": "H",
+                                    "reaction_step": "adsorption",
+                                },
+                                "evidence_location": {
+                                    "page": 5,
+                                    "quoted_text": "Co-N3 H -0.95 eV",
+                                },
+                                "confidence": 0.88,
+                            }
+                        ]
+                    },
+                },
+            )
+            assert import_response.status_code == 200, import_response.text
+            run_id = import_response.json()["id"]
+            assert import_response.json()["candidates"][0]["status"] == "candidate"
+            with Session(engine) as session:
+                dft_row = session.scalar(
+                    select(DFTResult).where(DFTResult.paper_id == paper_id)
+                )
+                assert dft_row is None
+
+            apply_response = client.post(
+                f"/api/external-analysis/runs/{run_id}/apply-review-rules",
+                json={"reviewer": "deferred_dft"},
+            )
+            assert apply_response.status_code == 200, apply_response.text
+            apply_body = apply_response.json()
+            assert apply_body["candidate_count"] == 1
+            assert apply_body["candidates"][0]["status"] == "materialized"
+            assert apply_body["candidates"][0]["materialized_target_type"] == "dft_results"
+
+            with Session(engine) as session:
+                dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+                assert len(dft_rows) == 1
+                assert dft_rows[0].candidate_status == "new_candidate"
+                assert dft_rows[0].value == -0.95
+                from app.db.models import ModuleWriteLock
+                active_locks = session.scalars(
+                    select(ModuleWriteLock).where(
+                        ModuleWriteLock.paper_id == paper_id,
+                        ModuleWriteLock.module_name == "dft_results",
+                        ModuleWriteLock.status == "active",
+                    )
+                ).all()
+                assert active_locks == [], "apply-review-rules leaked an active dft_results lock"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_materialize_endpoint_still_skips_object_review_audit():
+    """Regression: POST /runs/{run_id}/materialize must continue to skip
+    object_review_audit candidates (DFT must go through apply-review-rules).
+    """
+    with TemporaryDirectory():
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Materialize skip DFT paper", pdf_path="skip.pdf", authors=["A"])
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+                paper_id = paper.id
+
+            client = TestClient(app)
+            import_response = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "skip_dft",
+                    "auto_apply_review_rules": False,
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "target_type": "dft_results",
+                                "target_id": "new",
+                                "field_name": "dft_results",
+                                "decision": "new_candidate",
+                                "corrected_value": {
+                                    "material_identity": "Ni-S4",
+                                    "property_type": "reaction_barrier",
+                                    "value": 0.72,
+                                    "unit": "eV",
+                                    "adsorbate": "S",
+                                    "reaction_step": "migration",
+                                },
+                                "evidence_location": {"page": 2, "quoted_text": "Ni-S4 0.72 eV"},
+                                "confidence": 0.8,
+                            }
+                        ]
+                    },
+                },
+            )
+            assert import_response.status_code == 200
+            run_id = import_response.json()["id"]
+
+            materialize_response = client.post(
+                f"/api/external-analysis/runs/{run_id}/materialize",
+                json={"explicit_all": True, "created_by": "test"},
+            )
+            assert materialize_response.status_code == 200
+            body = materialize_response.json()
+            assert body["skipped_candidates"] >= 1
+            assert body["created_notes"] == 0
+            assert body["created_corrections"] == 0
+
+            with Session(engine) as session:
+                dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+                assert dft_rows == []
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_dft_results_create_correction_returns_clear_error_message():
+    """Regression: PaperCorrection with operation=create and field_name=dft_results
+    must return a clear error pointing to import_analysis, not the generic message.
+    """
+    from app.services.review_service import ReviewService
+
+    with TemporaryDirectory():
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="DFT create error paper", pdf_path="err.pdf", authors=["A"])
+                session.add(paper)
+                session.flush()
+                correction = PaperCorrection(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    field_name="dft_results",
+                    target_path="dft_results:new:create",
+                    operation="create",
+                    proposed_value={"value": -1.0},
+                    reason="attempting forbidden create path",
+                    status="pending",
+                )
+                session.add(correction)
+                session.flush()
+                correction_id = correction.id
+                session.commit()
+
+            with Session(engine) as session:
+                service = ReviewService(session)
+                try:
+                    service.approve_correction(correction_id, reviewer="ide_ai")
+                    raise AssertionError("Expected ValueError for dft_results:create")
+                except ValueError as exc:
+                    assert "DFT results cannot be created via PaperCorrection" in str(exc)
+                    assert "import_analysis" in str(exc)
+                    assert "object_review_audit" in str(exc)
+        finally:
+            engine.dispose()
+
+
+def test_apply_review_rules_logs_auto_lock_release_failure_when_apply_rolls_back(monkeypatch, caplog):
+    """Release failures must remain observable even when the outer apply later rolls back."""
+
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="DFT release log paper", pdf_path="release-log.pdf", authors=["A"])
+                session.add(paper)
+                session.flush()
+                run = ExternalAnalysisRun(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    source_label="release_log",
+                    raw_payload={},
+                    normalized_payload={},
+                    mapping_status="mapped",
+                )
+                session.add(run)
+                session.flush()
+                session.add(
+                    ExternalAnalysisCandidate(
+                        run_id=run.id,
+                        paper_id=paper.id,
+                        candidate_type="object_review_audit",
+                        status="candidate",
+                        normalized_payload={
+                            "target_type": "dft_results",
+                            "target_id": "new",
+                            "field_name": "dft_results",
+                            "decision": "new_candidate",
+                            "corrected_value": {
+                                "material_identity": "Fe-N4",
+                                "property_type": "adsorption_energy",
+                                "value": -1.23,
+                                "unit": "eV",
+                                "adsorbate": "Li2S4",
+                                "reaction_step": "adsorption",
+                            },
+                            "evidence_location": {
+                                "page": 3,
+                                "quoted_text": "Fe-N4 -1.23 eV",
+                            },
+                            "confidence": 0.9,
+                        },
+                    )
+                )
+                session.commit()
+                run_id = run.id
+
+            from app.services.module_write_lock_service import ModuleWriteLockService
+
+            def fail_apply_import_rules(self, **kwargs):
+                raise RuntimeError("apply boom")
+
+            def fail_release(self, **kwargs):
+                raise RuntimeError("release boom")
+
+            monkeypatch.setattr(
+                VerificationSessionService,
+                "apply_import_rules_for_paper",
+                fail_apply_import_rules,
+            )
+            monkeypatch.setattr(ModuleWriteLockService, "release", fail_release)
+            caplog.set_level(logging.ERROR, logger="app.services.external_analysis_service")
+
+            with Session(engine) as session:
+                service = ExternalAnalysisService(session, Settings(storage_root=Path(tmpdir)))
+                try:
+                    service.apply_review_rules_for_run(run_id, reviewer="ide_ai")
+                    raise AssertionError("Expected apply_review_rules_for_run to raise")
+                except RuntimeError as exc:
+                    assert str(exc) == "apply boom"
+                session.rollback()
+
+            assert any(
+                record.name == "app.services.external_analysis_service"
+                and "Failed to release auto-acquired DFT module write lock" in record.getMessage()
+                and record.exc_info
+                and str(record.exc_info[1]) == "release boom"
+                for record in caplog.records
+            )
+        finally:
+            engine.dispose()

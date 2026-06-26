@@ -553,6 +553,7 @@ def test_dft_ml_dataset_v2_aggregates_descriptors_and_special_barrier_taxonomy(t
             assert descriptor["target"]["ml_role"] == "descriptor"
             assert adsorption["sample_context"]["target_context_key"] == "adsorption_energy"
             assert barrier["target"]["canonical_property_type"] == "reaction_barrier"
+            assert barrier["target"]["normalized_property_type"] == "li2s_decomposition_barrier"
             assert barrier["target"]["property_subtype"] == "li2s_decomposition_barrier"
             assert barrier["target"]["physical_dimension"] == "energy"
     finally:

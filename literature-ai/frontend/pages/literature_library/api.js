@@ -40,6 +40,10 @@ function showToast(message, type) {
 }
 
 function showProgress(message, color) {
+    const pdfOverlay = $("pdfViewerOverlay");
+    if (pdfOverlay && pdfOverlay.style.display && pdfOverlay.style.display !== "none") {
+        document.body.classList.add("pdf-viewer-open");
+    }
     let el = $("progressBox");
     if (!el) {
         el = document.createElement("div");
@@ -47,7 +51,22 @@ function showProgress(message, color) {
         el.className = "progress-box";
         document.body.appendChild(el);
     }
-    el.textContent = message;
+    el.innerHTML = "";
+    const messageEl = document.createElement("span");
+    messageEl.className = "progress-message";
+    messageEl.textContent = message;
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "progress-close";
+    closeBtn.setAttribute("aria-label", "关闭进度提示");
+    closeBtn.textContent = "×";
+    closeBtn.onclick = function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        hideProgress(true);
+    };
+    el.appendChild(messageEl);
+    el.appendChild(closeBtn);
     el.style.background = color || "";
 }
 
@@ -75,16 +94,22 @@ async function fetchJSON(url, options) {
     }
 
     const resp = await fetch(url, options);
-    
-    // Error handling with dynamic administrative guidance if 403 occurs
-    if (resp.status === 403) {
-        showToast("无权访问该接口。请先在[设置]中配置管理员 Token 或确认是否为本地请求。", "error");
-        throw new Error("403 Forbidden: Admin Token Required");
-    }
-
     const text = await resp.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch (_) {}
+    if (resp.status === 403) {
+        const detailText = typeof (data && data.detail) === "string" ? data.detail : "";
+        const looksLikeOwnerAuth =
+            detailText.includes("Owner authentication is required") ||
+            detailText.includes("Invalid Owner token");
+        showToast(
+            looksLikeOwnerAuth
+                ? "无权访问该接口。请先在[设置]中配置管理员 Token 或确认是否为本地请求。"
+                : ("请求被拒绝：" + (detailText || "403 Forbidden")),
+            "error"
+        );
+        throw new Error(looksLikeOwnerAuth ? "403 Forbidden: Admin Token Required" : (detailText || "403 Forbidden"));
+    }
     if (!resp.ok) {
         const detail = (data && data.detail) ? data.detail : (data && (data.status || data.message) ? data : ("HTTP " + resp.status));
         const errStr = typeof detail === "object" ? (detail.message || detail.status || "请求失败") : detail;
@@ -163,8 +188,50 @@ const PAPER_TYPE_LABELS = {
     r: "综述",
     review: "综述",
     research: "研究论文",
+    supplementary: "SI",
+    supplementary_information: "SI",
+    supporting_information: "SI",
+    si: "SI",
     unknown: "未知类型"
 };
+
+function isSupplementaryPaperType(value) {
+    const key = String(value || "").trim().toLowerCase();
+    return ["supplementary", "supplementary_information", "supporting_information", "si"].includes(key);
+}
+
+function stablePaperIdOf(paper) {
+    if (!paper || typeof paper !== "object") return "";
+    return String(paper.paper_id || paper.id || "").trim();
+}
+
+function normalizedPaperCodeOf(paper) {
+    if (!paper || typeof paper !== "object") return "";
+    return String(paper.paper_code || "").trim().toUpperCase();
+}
+
+function resolvePaperFromState(ref) {
+    const raw = String(ref || "").trim();
+    if (!raw) return null;
+    const normalizedCode = raw.toUpperCase();
+    const papers = Array.isArray(state && state.papers) ? state.papers : [];
+    const selected = state && state.selectedPaper && typeof state.selectedPaper === "object" ? state.selectedPaper : null;
+    const selectedStableId = stablePaperIdOf(selected);
+    const selectedCode = normalizedPaperCodeOf(selected);
+    if (selected && (selectedStableId === raw || (selectedCode && selectedCode === normalizedCode))) {
+        return selected;
+    }
+    return papers.find(function(paper) {
+        const stableId = stablePaperIdOf(paper);
+        const paperCode = normalizedPaperCodeOf(paper);
+        return stableId === raw || (paperCode && paperCode === normalizedCode);
+    }) || null;
+}
+
+function canonicalPaperId(ref) {
+    const resolved = resolvePaperFromState(ref);
+    return stablePaperIdOf(resolved) || String(ref || "").trim();
+}
 
 function paperTypeLabel(value) {
     const raw = String(value || "").trim();
@@ -175,6 +242,13 @@ function paperTypeLabel(value) {
     if (/^r\d?$/i.test(raw)) return "综述";
     if (key === "null" || key === "none") return PAPER_TYPE_LABELS.unknown;
     return raw;
+}
+
+function paperTypeCellHtml(value) {
+    if (isSupplementaryPaperType(value)) {
+        return '<span class="paper-type-si-chip" title="支撑文献 / Supporting Information">SI</span>';
+    }
+    return esc(paperTypeLabel(value));
 }
 
 function paperTypeBadgeClass(value) {
@@ -645,96 +719,42 @@ async function fetchClaimEvidenceLocator(claimId) {
 
 loadLibraries = async function() {
     try {
+        const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
         const el = $("librarySelect");
+        const status = $("libStatus");
         const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
         const rememberedLibrary = requestedLibrary ? "" : getRememberedCurrentLibraryName();
-        const isInitialLoad = !requestedLibrary && !(state.currentLibrary && state.currentLibrary.name) && (!el || !el.value);
-        const previousSelection = isInitialLoad ? "" : (el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : "");
-        const quickLibraries = normalizeLibraryListResponse(await fetchJSON(API_BASE + "/libraries"));
-        const quickActive = (quickLibraries || []).find(function(item) { return item.is_active; });
-        const quickLargest = (quickLibraries || []).slice().sort(function(left, right) {
-            return Number(right.paper_count || 0) - Number(left.paper_count || 0);
-        })[0];
-        const selectedName = requestedLibrary && (quickLibraries || []).some(function(item) { return item.name === requestedLibrary; })
-            ? requestedLibrary
-            : (previousSelection && (quickLibraries || []).some(function(item) { return item.name === previousSelection; })
-                ? previousSelection
-                : (rememberedLibrary && (quickLibraries || []).some(function(item) { return item.name === rememberedLibrary; })
-                    ? rememberedLibrary
-                    : ((quickActive && quickActive.name) || (quickLargest && quickLargest.name) || ((quickLibraries || [])[0] ? quickLibraries[0].name : ""))));
-        if (el) {
-            el.innerHTML = (quickLibraries || []).map(function(item) {
-                return '<option value="' + esc(item.name) + '"' + (item.name === selectedName ? " selected" : "") + ">" +
-                    esc(item.name) + "（" + esc(item.paper_count || 0) + " 篇）" +
-                "</option>";
-            }).join("");
-        }
-        const selected = (quickLibraries || []).find(function(item) { return item.name === selectedName; });
-        state.currentLibrary = selected || null;
-        rememberCurrentLibraryName(state.currentLibrary ? state.currentLibrary.name : "");
-        state.currentLibraryTotal = selected ? Number(selected.paper_count || 0) : 0;
-        const status = $("libStatus");
-        if (status) status.textContent = selected ? (selected.name + " | " + selected.paper_count + " 篇文献") : "";
+        const previousSelection = el ? (el.value || (state.currentLibrary && state.currentLibrary.name) || "") : ((state.currentLibrary && state.currentLibrary.name) || "");
+        const active = (libraries || []).find(function(item) { return item.is_active; }) || null;
+        const fallback = (libraries && libraries.length) ? libraries[0] : null;
+        const selected = (requestedLibrary && (libraries || []).find(function(item) { return item.name === requestedLibrary; }))
+            || active
+            || (previousSelection && (libraries || []).find(function(item) { return item.name === previousSelection; }))
+            || (rememberedLibrary && (libraries || []).find(function(item) { return item.name === rememberedLibrary; }))
+            || fallback
+            || null;
 
-        const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
-        const fullEl = $("librarySelect");
-        const active = (libraries || []).find(function(item) { return item.is_active; });
-        const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
-            ? requestedLibrary
-            : (previousSelection && (libraries || []).some(function(item) { return item.name === previousSelection; })
-                ? previousSelection
-                : (rememberedLibrary && (libraries || []).some(function(item) { return item.name === rememberedLibrary; })
-                    ? rememberedLibrary
-                    : ((active && active.name) || (fullEl ? fullEl.value : selectedName) || selectedName)));
-        if (fullEl && libraries && libraries.length) {
-            fullEl.innerHTML = libraries.map(function(item) {
-                const isSelected = item.name === keepName;
+        if (el) {
+            el.innerHTML = (libraries || []).map(function(item) {
+                const isSelected = selected && item.name === selected.name;
+                const count = Number(item.paper_count || 0);
                 return '<option value="' + esc(item.name) + '"' + (isSelected ? " selected" : "") + ">" +
-                    esc(item.name) + (item.is_active ? "（当前）" : "") +
+                    esc(item.name) + "（" + count + " 篇）" + (item.is_active ? "（当前）" : "") +
                 "</option>";
             }).join("");
         }
-        const selectedFull = (libraries || []).find(function(item) { return item.name === keepName; }) || active;
-        if (selectedFull) {
-            state.currentLibrary = selectedFull;
-            rememberCurrentLibraryName(selectedFull.name || "");
-            state.currentLibraryTotal = Number(selectedFull.paper_count || state.currentLibraryTotal || 0);
-            if (status) status.textContent = (selectedFull.root_path || selectedFull.name) + " | " + state.currentLibraryTotal + " 篇文献";
+
+        state.currentLibrary = selected;
+        state.currentLibraryTotal = selected ? Number(selected.paper_count || 0) : 0;
+        rememberCurrentLibraryName(selected ? selected.name : "");
+        if (status) {
+            status.textContent = selected
+                ? ((selected.root_path || selected.name) + " | " + state.currentLibraryTotal + " 篇文献")
+                : "";
         }
         loadLibraryRuntimeInfo();
     } catch (error) {
         console.error("loadLibraries failed", error);
-        try {
-            const libraries = normalizeLibraryListResponse(await fetchJSON(LIB_API));
-            const el = $("librarySelect");
-            const requestedLibrary = new URLSearchParams(window.location.search).get("library_name") || "";
-            const rememberedLibrary = requestedLibrary ? "" : getRememberedCurrentLibraryName();
-            if (el) {
-                const active = (libraries || []).find(function(item) { return item.is_active; });
-                const keepName = requestedLibrary && (libraries || []).some(function(item) { return item.name === requestedLibrary; })
-                    ? requestedLibrary
-                    : (rememberedLibrary && (libraries || []).some(function(item) { return item.name === rememberedLibrary; })
-                        ? rememberedLibrary
-                        : ((active && active.name) || ""));
-                el.innerHTML = libraries.map(function(item) {
-                    return '<option value="' + esc(item.name) + '"' + (item.name === keepName ? " selected" : "") + ">" +
-                        esc(item.name) + (item.is_active ? "（当前）" : "") +
-                    "</option>";
-                }).join("");
-            }
-            const active = (libraries || []).find(function(item) { return item.is_active; });
-            const selected = (requestedLibrary && (libraries || []).find(function(item) { return item.name === requestedLibrary; }))
-                || (rememberedLibrary && (libraries || []).find(function(item) { return item.name === rememberedLibrary; }))
-                || active;
-            state.currentLibrary = selected || null;
-            rememberCurrentLibraryName(state.currentLibrary ? state.currentLibrary.name : "");
-            state.currentLibraryTotal = state.currentLibrary ? Number(state.currentLibrary.paper_count || 0) : 0;
-            const status = $("libStatus");
-            if (status) status.textContent = state.currentLibrary ? ((state.currentLibrary.root_path || state.currentLibrary.name) + " | " + state.currentLibraryTotal + " 篇文献") : "";
-            loadLibraryRuntimeInfo();
-        } catch (fallbackError) {
-            console.error("loadLibraries fallback failed", fallbackError);
-        }
     }
 };
 
@@ -824,15 +844,14 @@ submitCreateLibrary = async function() {
         return;
     }
     try {
-        await fetchJSON(LIB_API, {
+        const created = await fetchJSON(LIB_API, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: name, root_path: window._selectedPath_createLib || "" })
         });
         closeCreateLibraryDialog();
-        showToast("库创建成功。", "success");
-        await loadLibraries();
-        refreshCurrentPage();
+        const targetName = created && created.name ? created.name : name;
+        await activateLibraryByName(targetName);
     } catch (error) {
         if (String(error.message || "").includes("already exists")) {
             closeCreateLibraryDialog();
@@ -850,15 +869,20 @@ submitImportLibrary = async function() {
         return;
     }
     try {
-        await fetchJSON(LIB_API + "/import", {
+        const imported = await fetchJSON(LIB_API + "/import", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ root_path: window._selectedPath_importLib })
         });
         closeImportLibraryDialog();
-        showToast("库导入成功。", "success");
-        await loadLibraries();
-        refreshCurrentPage();
+        const targetName = imported && imported.name ? imported.name : "";
+        if (targetName) {
+            await activateLibraryByName(targetName);
+        } else {
+            await loadLibraries();
+            refreshCurrentPage();
+            showToast("库导入成功。", "success");
+        }
     } catch (error) {
         if (String(error.message || "").includes("already exists")) {
             const parts = String(window._selectedPath_importLib || "").replace(/\\/g, "/").split("/");

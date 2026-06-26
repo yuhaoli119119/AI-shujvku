@@ -276,8 +276,9 @@ function syncQueryParams() {
     const url = new URL(window.location.href);
     if (state.selectedPaperId) url.searchParams.set("paper_id", state.selectedPaperId);
     else url.searchParams.delete("paper_id");
+    const requestedLibrary = url.searchParams.get("library_name") || "";
     if (state.currentLibrary && state.currentLibrary.name) url.searchParams.set("library_name", state.currentLibrary.name);
-    else url.searchParams.delete("library_name");
+    else if (!requestedLibrary) url.searchParams.delete("library_name");
     url.searchParams.set("tab", state.currentTab);
     window.history.replaceState({}, "", url.toString());
 }
@@ -499,10 +500,15 @@ async function fetchPapers(options) {
         updatePager();
 
         if (state.selectedPaperId) {
-            const selectedStillListed = state.papers.some(function(paper) {
-                const stablePaperId = paper && (paper.paper_id || paper.id);
-                return stablePaperId && String(stablePaperId) === String(state.selectedPaperId);
-            });
+            const resolvedSelectedPaper = resolvePaperFromState(state.selectedPaperId);
+            if (resolvedSelectedPaper) {
+                const resolvedStableId = stablePaperIdOf(resolvedSelectedPaper);
+                if (resolvedStableId && resolvedStableId !== String(state.selectedPaperId)) {
+                    state.selectedPaperId = resolvedStableId;
+                }
+                state.selectedPaper = resolvedSelectedPaper;
+            }
+            const selectedStillListed = !!resolvePaperFromState(state.selectedPaperId);
             const selectedStableId = state.selectedPaper && (state.selectedPaper.paper_id || state.selectedPaper.id);
             if (selectedStableId && String(selectedStableId) === String(state.selectedPaperId)) {
                 if (!preserveDetail) {
@@ -586,7 +592,9 @@ async function refreshLibraryData(options) {
     if (opts.refreshSelectedDetail === true && state.selectedPaperId && typeof refreshSelectedPaperDetail === "function") {
         await refreshSelectedPaperDetail({
             reason: opts.reason || "database_sync",
-            mode: opts.detailMode
+            mode: opts.detailMode,
+            forceRefresh: true,
+            invalidateCache: true
         });
     }
 }
@@ -621,20 +629,16 @@ function updateRowSelectionUI() {
 
 function selectPaperById(paperId) {
     if (!paperId) return;
-    if (state.selectedPaperId === paperId) {
-        state.selectedPaperId = null;
-        state.selectedPaper = null;
+    const canonicalId = canonicalPaperId(paperId);
+    if (state.selectedPaperId === canonicalId) {
+        state.selectedPaper = resolvePaperFromState(canonicalId) || state.selectedPaper;
         updateRowSelectionUI();
-        if (typeof loadPaperDetail === "function") loadPaperDetail(null);
         return;
     }
-    state.selectedPaperId = paperId;
-    state.selectedPaper = state.papers.find(function(paper) {
-        const stablePaperId = paper && (paper.paper_id || paper.id);
-        return stablePaperId && String(stablePaperId) === String(paperId);
-    }) || state.selectedPaper;
+    state.selectedPaperId = canonicalId;
+    state.selectedPaper = resolvePaperFromState(canonicalId) || state.selectedPaper;
     updateRowSelectionUI();
-    if (typeof loadPaperDetail === "function") loadPaperDetail(paperId);
+    if (typeof loadPaperDetail === "function") loadPaperDetail(canonicalId);
 }
 
 function openWorkspaceForPaper(paperId) {
@@ -1165,6 +1169,7 @@ document.addEventListener("click", function(event) {
         event.target.closest(".toolbar") ||
         event.target.closest(".topnav") ||
         event.target.closest("button") ||
+        event.target.closest("input") ||
         event.target.closest(".modal-overlay") ||
         event.target.closest("a")) {
         return;

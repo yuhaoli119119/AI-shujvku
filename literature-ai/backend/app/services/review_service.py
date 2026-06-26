@@ -167,7 +167,7 @@ class ReviewService:
             allowed_fields=frozenset({"section_title", "section_type", "text", "page_start", "page_end"}),
         ),
     }
-    STRUCTURED_DELETE_TARGETS = frozenset({"figures"})
+    STRUCTURED_DELETE_TARGETS = frozenset({"figures", "tables"})
     STRUCTURED_CREATE_TARGETS = frozenset(
         {
             "figures",
@@ -219,7 +219,27 @@ class ReviewService:
         correction.status = "approved"
         correction.reviewed_by = reviewer
         correction.reviewed_at = datetime.utcnow()
-        self._apply_correction(correction)
+        try:
+            self._apply_correction(correction)
+        except Exception:
+            # Revert: _apply_correction failed, so the correction must NOT
+            # remain in the "approved" state.  If the inner method already
+            # set a more appropriate status (e.g. "requires_resolution" for
+            # ambiguous catalyst samples), preserve it.  Otherwise roll back
+            # to "failed" so that approve_corrections_batch (which catches
+            # the exception) reports it as skipped, and downstream queries
+            # do not see a false "approved" record with no materialized
+            # target.
+            if correction.status == "approved":
+                self.session.execute(
+                    update(PaperCorrection)
+                    .where(PaperCorrection.id == correction_id)
+                    .values(status="failed")
+                    .execution_options(synchronize_session=False)
+                )
+                correction.status = "failed"
+            self.session.flush()
+            raise
         self.session.add(correction)
         self.session.add(
             AuditLog(
@@ -443,7 +463,7 @@ class ReviewService:
         if correction.operation == "recrop_figure" and correction.field_name == "figures":
             self._apply_figure_recrop_correction(correction)
             return
-        if correction.operation == "delete" and correction.field_name == "figures":
+        if correction.operation == "delete" and correction.field_name in self.STRUCTURED_DELETE_TARGETS:
             self._apply_structured_delete(correction)
             return
         if correction.operation == "create" and correction.field_name == "catalyst_samples":
@@ -453,6 +473,11 @@ class ReviewService:
             self._apply_structured_create(correction)
             return
         if correction.operation != "replace":
+            if correction.operation == "create" and correction.field_name in {"dft_results", "dft_result"}:
+                raise ValueError(
+                    "DFT results cannot be created via PaperCorrection; use import_analysis with "
+                    "object_review_audit (target_type=dft_results, decision=new_candidate) instead."
+                )
             raise ValueError("Only replace corrections and approved structured creation are supported in the current review flow")
 
         if self._is_top_level_paper_correction(correction):
@@ -1284,6 +1309,16 @@ class ReviewService:
                 "figure_role": getattr(record, "figure_role", None),
                 "crop_status": getattr(record, "crop_status", None),
                 "image_path": getattr(record, "image_path", None),
+            }
+        if collection == "tables":
+            return {
+                "id": str(record.id),
+                "paper_id": str(getattr(record, "paper_id", "")),
+                "caption": getattr(record, "caption", None),
+                "markdown_content": getattr(record, "markdown_content", None),
+                "page": getattr(record, "page", None),
+                "extraction_source": getattr(record, "extraction_source", None),
+                "prov": getattr(record, "prov", None),
             }
         return {"id": str(getattr(record, "id", ""))}
 

@@ -525,21 +525,20 @@
     <section class="dashboard-panel" id="exportSafetyPanel">
       
       <div class="dashboard-body" id="dashboardBody">
-        <div class="dashboard-toolbar">
-          <div class="filter-grid">
-            <div class="filter-field"><label for="libraryFilter">文献库</label><select id="libraryFilter" onchange="handleLibraryChange()"><option value="">全部文献库</option></select></div>
-            <div class="filter-field"><label for="propertyType">能量类型</label><select id="propertyType" onchange="handleDftFilterChange()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option></select></div>
-            <div class="filter-field"><label for="adsorbate">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
-            <div class="filter-field"><label for="catalystType">催化剂</label><select id="catalystType" onchange="handleDftFilterChange()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
-            <div class="filter-field"><label for="minConfidence">最低提取置信度（未记录者保留）</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
+        <div class="dashboard-toolbar" style="flex-wrap: nowrap;">
+          <div class="filter-grid" style="flex-wrap: nowrap; flex: 1 1 auto; overflow-x: auto;">
+            <div class="filter-field"><label for="libraryFilter" style="white-space: nowrap;">文献库</label><select id="libraryFilter" onchange="handleLibraryChange()"><option value="">全部文献库</option></select></div>
+            <div class="filter-field"><label for="propertyType" style="white-space: nowrap;">能量类型</label><select id="propertyType" onchange="handleDftFilterChange()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="li2s_decomposition_barrier">li2s_decomposition_barrier</option><option value="migration_barrier">migration_barrier</option><option value="charge_transfer">charge_transfer</option><option value="formation_energy">formation_energy</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option><option value="overpotential">overpotential</option></select></div>
+            <div class="filter-field"><label for="adsorbate" style="white-space: nowrap;">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
+            <div class="filter-field"><label for="catalystType" style="white-space: nowrap;">催化剂</label><select id="catalystType" onchange="handleDftFilterChange()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
+            <div class="filter-field"><label for="minConfidence" style="white-space: nowrap;" title="未记录者保留">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
           </div>
-          <div class="export-panel">
+          <div class="export-panel" style="flex-wrap: nowrap; white-space: nowrap;">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
             <span id="exportSafetyStatus" class="export-status"></span>
             <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnToolbar">展开面板</button>
           </div>
         </div>
-        <div class="export-note">仅导出人工已确认、证据完整、定位准确的 DFT 记录；需要处理的记录不会导出。</div>
         <div class="quality-topbar">
           <div id="qualityDonuts"><div class="empty-state">正在加载导出安全概览...</div></div>
           <div class="stat-divider"></div>
@@ -707,14 +706,55 @@
       if (!gate || gate === "safe_verified_with_required_evidence") return "人工确认 + 必要证据 + 准确定位";
       return String(gate || "").replace(/_/g, " ");
     }
+    function dftPropertyLabel(code) {
+      const labels = {
+        adsorption: "吸附能",
+        adsorption_energy: "吸附能",
+        gibbs_free_energy_change: "自由能变化",
+        reaction_barrier: "反应能垒",
+        activation_energy: "反应能垒",
+        migration_barrier: "迁移能垒",
+        li2s_decomposition_barrier: "Li2S 分解能垒",
+        li2s_nucleation_barrier: "Li2S 成核能垒",
+        formation_energy: "形成能",
+        charge_transfer: "电荷转移",
+        band_gap: "带隙",
+        d_band_center: "d 带中心",
+        bader_charge: "Bader 电荷",
+      };
+      return labels[code] || String(code || "-");
+    }
+    function dftPropertyDisplay(row) {
+      const raw = row && row.property_type ? String(row.property_type) : "";
+      const normalized = row && row.normalized_property_type ? String(row.normalized_property_type) : "";
+      const canonical = row && row.canonical_property_type ? String(row.canonical_property_type) : "";
+      const subtype = row && row.property_subtype ? String(row.property_subtype) : "";
+      const primaryKey = subtype || normalized || raw || canonical;
+      const secondary = [];
+      if (primaryKey) secondary.push(primaryKey);
+      if (canonical && canonical !== primaryKey) secondary.push("大类: " + canonical);
+      return {
+        primary: dftPropertyLabel(primaryKey),
+        secondary: secondary.join(" / ") || "-",
+      };
+    }
     function applyReadableDftLabels() {
       const propertyLabels = {
         "": "全部",
+        adsorption: "吸附能",
         adsorption_energy: "吸附能",
-        gibbs_free_energy_change: "Gibbs 自由能变化",
+        gibbs_free_energy_change: "自由能变化",
         reaction_barrier: "反应能垒",
+        activation_energy: "反应能垒",
+        li2s_decomposition_barrier: "Li2S 分解能垒",
+        li2s_nucleation_barrier: "Li2S 成核能垒",
+        migration_barrier: "迁移能垒",
+        charge_transfer: "电荷转移",
+        formation_energy: "形成能",
         band_gap: "带隙",
         d_band_center: "d 带中心",
+        bader_charge: "Bader 电荷",
+        overpotential: "过电位",
       };
       const catalystLabels = {
         "": "全部",
@@ -1080,6 +1120,7 @@
       params.set("offset", String(offset));
       params.set("status", backendStatus);
       params.set("compact", "1");
+      params.set("sort", prop ? "value" : "property_mix");
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
       if (catalyst) params.set("catalyst_type", catalyst);
@@ -1423,6 +1464,7 @@
         return;
       }
       list.innerHTML = items.map((item, idx) => {
+        const property = dftPropertyDisplay(item);
         const catName = item.display_catalyst_name || (item.catalysts && item.catalysts[0] ? item.catalysts[0].name : "-");
         const hasConfidence = item.confidence != null && Number.isFinite(Number(item.confidence));
         const conf = hasConfidence ? Number(item.confidence) : null;
@@ -1435,7 +1477,7 @@
         return `<tr>
           <td><span class="cell-primary" title="${esc(catalystHint)}">${esc(catName)}</span></td>
           <td><span class="cell-primary">${esc(item.adsorbate || "-")}</span></td>
-          <td><span class="cell-primary">${esc(item.property_type || "-")}</span></td>
+          <td><span class="cell-primary" title="${esc(property.secondary)}">${esc(property.primary || "-")}</span></td>
           <td class="num-col"><span class="cell-primary num-text">${item.value != null ? Number(item.value).toFixed(4) : "-"}</span><span class="val-unit">${esc(item.unit || "")}</span></td>
           <td><span class="cell-primary">${esc(item.reaction_step || "-")}</span><div class="dft-table-muted">${esc(item.source_section || "-")}</div></td>
           <td><span class="status-text">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}" title="${hasConfidence ? '解析阶段记录的提取置信度' : '历史记录未保存提取置信度；导出资格以审核与证据安全门为准'}">${confidenceLabel}</span></td>
@@ -1460,6 +1502,7 @@
     function showEvidence(index) {
       const item = state.items[index];
       if (!item) return;
+      const property = dftPropertyDisplay(item);
       document.getElementById("evidenceDetail").innerHTML =
         renderFragmentLocationRows(item) +
         '<div class="quality-status-grid" style="margin-top:10px;">' +
@@ -1468,7 +1511,7 @@
         '</div>' +
         renderFragmentContext(item);
       document.getElementById("validationSummary").textContent = item.evidence_text ? "已显示文章片段证据。" : "这条记录缺少证据原文。";
-      setEvidenceModalHeader(item.property_type || "DFT 证据", (item.title || "文献") + (item.doi ? " | " + item.doi : ""));
+      setEvidenceModalHeader(property.primary || "DFT 证据", (item.title || "文献") + (item.doi ? " | " + item.doi : ""));
       revealEvidencePanel();
     }
     function setExportSafetyStatus(message) {

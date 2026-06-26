@@ -52,8 +52,7 @@ def _effective_active_library_response(
     configured_count = configured_counts.get(library_name) if configured_counts is not None else 0
 
     payload["paper_count"] = configured_count
-    if active_name and library_name == active_name:
-        payload["is_active"] = True
+    payload["is_active"] = bool(active_name and library_name == active_name)
     return LibraryInfoResponse(**payload)
 
 
@@ -177,7 +176,7 @@ async def create_library(payload: LibraryCreateRequest) -> LibraryInfoResponse:
         lib = mgr.create_library(
             name=payload.name,
             root_path=payload.root_path,
-            description=payload.description,
+            description=payload.description or "",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

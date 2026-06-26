@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
-    <link rel="stylesheet" href="./page.css?v=20260622-figure-stability1">
+    <link rel="stylesheet" href="./page.css?v=20260624-pdf-progress1">
     <script src="../../shared/topnav.js?v=20260606-ui3"></script>
     <script>ThemeManager.init();</script>
 </head>
@@ -66,6 +66,7 @@
                     <option value="B">B类 (计算+实验)</option>
                     <option value="C">C类 (实验)</option>
                     <option value="R">R类 (综述)</option>
+                    <option value="supplementary">SI</option>
                     <option value="Unknown">未知</option>
                 </select>
                 <select id="filterDFT" class="small-input">
@@ -130,6 +131,7 @@
                                     <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
                                     <div id="paperMoreMenu" class="dropdown-menu right">
                                         <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
+                                        <button type="button" onclick="triggerSupplementaryUpload()">上传支撑文献 / 上传 SI</button>
                                         <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
                                         <button type="button" onclick="openAggregateView()">查看聚合视图</button>
                                         <button type="button" onclick="promptAddRelationship(state.selectedPaperId)">添加关联文献</button>
@@ -202,6 +204,7 @@
     </div>
 
     <input id="pdfUpload" type="file" accept=".pdf" style="display:none" onchange="uploadPDF(this)">
+    <input id="supplementaryPdfUpload" type="file" accept=".pdf" style="display:none" onchange="uploadSupplementaryPDF(this)">
 
     <div id="addLiteratureDialog" class="modal-overlay">
         <div class="modal add-modal">
@@ -391,9 +394,9 @@
     </div>
 
     <script src="./state.js?v=20260622-figure-stability1" defer></script>
-    <script src="./api.js?v=20260619-pdf-fix2" defer></script>
-    <script src="./render-list.js?v=20260619-pdf-fix2" defer></script>
-    <script src="./render-detail.js?v=20260623-dft-conflict-label2" defer></script>
+    <script src="./api.js?v=20260624-pdf-progress1" defer></script>
+    <script src="./render-list.js?v=20260624-si-type-chip1" defer></script>
+    <script src="./render-detail.js?v=20260624-pdf-nonblocking1" defer></script>
     <script src="./jobs.js?v=20260603-zhfix1" defer></script>
     <script src="./writer.js?v=20260531-aiuxfix" defer></script>
     <script src="./review.js?v=20260614-review-ui1" defer></script>

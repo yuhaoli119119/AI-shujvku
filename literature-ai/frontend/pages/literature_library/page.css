@@ -452,6 +452,7 @@ body.resizing iframe {
     line-height: 1;
 }
 .serial-chip { padding: 3px 8px; background: var(--color-primary-bg); color: var(--color-primary); }
+.paper-type-si-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 3px 8px; background: var(--color-success-bg); color: var(--color-success); border: 1px solid rgba(22, 163, 74, 0.2); border-radius: var(--radius-pill); font-weight: 800; letter-spacing: 0; }
 .status-chip.full { padding: 3px 8px; background: var(--color-success-bg); color: var(--color-success); }
 .status-chip.meta { padding: 3px 8px; background: var(--color-warning-bg); color: var(--color-warning); border: 1px solid rgba(217, 119, 6, 0.2); }
 .status-chip.pdf-available { padding: 3px 8px; background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid rgba(100, 66, 214, 0.2); }
@@ -922,6 +923,36 @@ details.section-card:not([open]) summary {
     padding: 12px 16px;
     font-size: 14px;
     background: var(--color-primary);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(420px, calc(100vw - 36px));
+}
+.progress-message {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.progress-close {
+    width: 22px;
+    height: 22px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 20px;
+    flex: 0 0 auto;
+}
+.progress-close:hover {
+    background: rgba(255, 255, 255, 0.34);
+}
+body.pdf-viewer-open .progress-box {
+    top: auto;
+    bottom: 18px;
+    right: 28px;
 }
 .modal-overlay {
     display: none;

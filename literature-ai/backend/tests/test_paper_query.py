@@ -16,6 +16,7 @@ from app.db.models import (
     Paper,
     PaperCorrection,
     PaperFigure,
+    PaperRelationship,
     PaperNote,
     PaperSection,
     PaperTable,
@@ -72,6 +73,40 @@ def test_paper_query_service_returns_counts_and_detail_payload():
             assert isinstance(detail.writing_cards_items[0].figure_logic, list)
 
         engine.dispose()
+
+
+def test_detail_keeps_supplementary_tables_but_not_supplementary_figures_by_default():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        main = Paper(title="Main paper with SI", pdf_path="main.pdf", authors=["A"])
+        si = Paper(title="Supplementary information", pdf_path="si.pdf", authors=["A"], paper_type="supplementary")
+        session.add_all([main, si])
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=main.id,
+                target_paper_id=si.id,
+                relationship_type="supplementary",
+            )
+        )
+        session.add(PaperTable(paper_id=main.id, caption="Table 1. Main", markdown_content="| main |", page=2))
+        session.add(PaperTable(paper_id=si.id, caption="Table S1. SI", markdown_content="| si |", page=3))
+        session.add(PaperFigure(paper_id=main.id, caption="Figure 1. Main", image_path="figures/main.png", page=4))
+        session.add(PaperFigure(paper_id=si.id, caption="Figure S1. SI", image_path="figures/si.png", page=5))
+        session.commit()
+
+        detail = PaperQueryService(session).get_paper_detail(main.id, compact=True)
+
+        assert detail is not None
+        assert [table.caption for table in detail.tables] == ["Table 1. Main", "Table S1. SI"]
+        assert detail.tables[1].source_document_type == "supplementary_information"
+        assert detail.tables[1].related_paper_id == si.id
+        assert detail.tables[1].writeback_paper_id == main.id
+        assert [figure.caption for figure in detail.figures] == ["Figure 1. Main"]
+
+    engine.dispose()
 
 
 def test_detail_payload_cleans_pdf_text_without_flattening_table_markdown():
@@ -222,6 +257,118 @@ def test_table_review_status_treats_approved_style_object_audit_as_verified():
             assert detail is not None
             assert detail.tables[0].object_review_audit_count == 1
             assert detail.tables[0].table_review_status == "verified"
+
+        engine.dispose()
+
+
+def test_main_detail_uses_supplementary_table_owner_review_status():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            main_paper = Paper(title="B0095 Main", pdf_path="main.pdf", authors=["A"])
+            si_paper = Paper(title="S0095 SI", pdf_path="si.pdf", authors=["A"])
+            session.add_all([main_paper, si_paper])
+            session.flush()
+            session.add(
+                PaperRelationship(
+                    source_paper_id=main_paper.id,
+                    target_paper_id=si_paper.id,
+                    relationship_type="supplementary_information",
+                    created_by="test",
+                )
+            )
+            approved_table = PaperTable(
+                paper_id=si_paper.id,
+                caption="SI Table 1",
+                markdown_content="| a |\n| --- |\n| checked |",
+                page=2,
+                extraction_source="docling",
+            )
+            untouched_table = PaperTable(
+                paper_id=si_paper.id,
+                caption="SI Table 2",
+                markdown_content="| a |\n| --- |\n| raw |",
+                page=3,
+                extraction_source="docling",
+            )
+            session.add_all([approved_table, untouched_table])
+            session.flush()
+            session.add(
+                PaperCorrection(
+                    paper_id=si_paper.id,
+                    source="ide_ai",
+                    field_name="tables",
+                    target_path=f"tables:{approved_table.id}:markdown_content",
+                    operation="replace",
+                    proposed_value="| a |\n| --- |\n| checked |",
+                    reason="SI table markdown was checked.",
+                    status="approved",
+                    reviewed_by="ide_ai",
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(main_paper.id)
+
+            assert detail is not None
+            table_status = {str(item.id): item.table_review_status for item in detail.tables}
+            assert table_status[str(approved_table.id)] == "verified"
+            assert table_status[str(untouched_table.id)] == "unreviewed"
+
+        engine.dispose()
+
+
+def test_table_review_status_flags_reviewed_empty_markdown_content():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Empty Reviewed Table Paper", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            table = PaperTable(
+                paper_id=paper.id,
+                caption=None,
+                markdown_content=None,
+                page=None,
+                extraction_source="docling",
+            )
+            session.add(table)
+            session.flush()
+            run = ExternalAnalysisRun(
+                paper_id=paper.id,
+                source="ide_ai",
+                source_label="ide_empty_table_review",
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    status="ai_applied",
+                    normalized_payload={
+                        "paper_id": str(paper.id),
+                        "target_type": "tables",
+                        "target_id": str(table.id),
+                        "field_name": "markdown_content",
+                        "decision": "approve",
+                        "verification_status": "unverified",
+                        "evidence_location": {"page": 6, "table": "Table 1", "quoted_text": "Table 1 exists"},
+                    },
+                    evidence_payload={"page": 6, "table": "Table 1", "quoted_text": "Table 1 exists"},
+                )
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+            assert detail is not None
+            assert detail.tables[0].object_review_audit_count == 1
+            assert detail.tables[0].table_review_status == "reviewed_empty_content"
 
         engine.dispose()
 

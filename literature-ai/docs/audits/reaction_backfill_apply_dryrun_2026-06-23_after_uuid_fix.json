@@ -1,0 +1,537 @@
+{
+  "ambiguous": 628,
+  "applied_updates": 0,
+  "apply": false,
+  "dry_run": true,
+  "eligible_updates": 7,
+  "planned_updates": [
+    {
+      "after": {
+        "reaction_profile_version": "reaction_profiles_v1",
+        "reaction_type": "ORR",
+        "reaction_type_confidence": 0.9,
+        "reaction_type_source": "rule",
+        "reaction_validation_status": "valid"
+      },
+      "before": {
+        "reaction_profile_version": null,
+        "reaction_type": null,
+        "reaction_type_confidence": null,
+        "reaction_type_source": null,
+        "reaction_validation_status": null
+      },
+      "classification_reason": "reaction_context",
+      "classification_status": "classified",
+      "reaction_type": "ORR",
+      "record_id": "1bede738-eaf4-4659-a2e4-0bc1dcb6da83",
+      "validation_property_type": "gibbs_free_energy_change",
+      "validation_reasons": [],
+      "validation_status": "valid"
+    },
+    {
+      "after": {
+        "reaction_profile_version": "reaction_profiles_v1",
+        "reaction_type": "HER",
+        "reaction_type_confidence": 0.9,
+        "reaction_type_source": "rule",
+        "reaction_validation_status": "valid"
+      },
+      "before": {
+        "reaction_profile_version": null,
+        "reaction_type": null,
+        "reaction_type_confidence": null,
+        "reaction_type_source": null,
+        "reaction_validation_status": null
+      },
+      "classification_reason": "reaction_context",
+      "classification_status": "classified",
+      "reaction_type": "HER",
+      "record_id": "3aaa3264-72e3-42ee-b969-441b54a434d1",
+      "validation_property_type": "gibbs_free_energy_change",
+      "validation_reasons": [],
+      "validation_status": "valid"
+    },
+    {
+      "after": {
+        "reaction_profile_version": "reaction_profiles_v1",
+        "reaction_type": "ORR",
+        "reaction_type_confidence": 0.9,
+        "reaction_type_source": "rule",
+        "reaction_validation_status": "valid"
+      },
+      "before": {
+        "reaction_profile_version": null,
+        "reaction_type": null,
+        "reaction_type_confidence": null,
+        "reaction_type_source": null,
+        "reaction_validation_status": null
+      },
+      "classification_reason": "reaction_context",
+      "classification_status": "classified",
+      "reaction_type": "ORR",
+      "record_id": "632f645c-7e17-4fa1-bcfd-552d52271785",
+      "validation_property_type": "gibbs_free_energy_change",
+      "validation_reasons": [],
+      "validation_status": "valid"
+    },
+    {
+      "after": {
+        "reaction_profile_version": "reaction_profiles_v1",
+        "reaction_type": "SRR_LiS",
+        "reaction_type_confidence": 0.95,
+        "reaction_type_source": "rule",
+        "reaction_validation_status": "valid"
+      },
+      "before": {
+        "reaction_profile_version": null,
+        "reaction_type": null,
+        "reaction_type_confidence": null,
+        "reaction_type_source": null,
+        "reaction_validation_status": null
+      },
+      "classification_reason": "srr_specific_signal",
+      "classification_status": "classified",
+      "reaction_type": "SRR_LiS",
+      "record_id": "6fe590d8-4e0f-446d-89f4-af7a403d4b62",
+      "validation_property_type": "adsorption_energy",
+      "validation_reasons": [],
+      "validation_status": "valid"
+    },
+    {
+      "after": {
+        "reaction_profile_version": "reaction_profiles_v1",
+        "reaction_type": "HER",
+        "reaction_type_confidence": 0.9,
+        "reaction_type_source": "rule",
+        "reaction_validation_status": "valid"
+      },
+      "before": {
+        "reaction_profile_version": null,
+        "reaction_type": null,
+        "reaction_type_confidence": null,
+        "reaction_type_source": null,
+        "reaction_validation_status": null
+      },
+      "classification_reason": "reaction_context",
+      "classification_status": "classified",
+      "reaction_type": "HER",
+      "record_id": "75d2185a-dbea-4236-8583-31a5492940fd",
+      "validation_property_type": "gibbs_free_energy_change",
+      "validation_reasons": [],
+      "validation_status": "valid"
+    },
+    {
+      "after": {
+        "reaction_profile_version": "reaction_profiles_v1",
+        "reaction_type": "ORR",
+        "reaction_type_confidence": 0.9,
+        "reaction_type_source": "rule",
+        "reaction_validation_status": "valid"
+      },
+      "before": {
+        "reaction_profile_version": null,
+        "reaction_type": null,
+        "reaction_type_confidence": null,
+        "reaction_type_source": null,
+        "reaction_validation_status": null
+      },
+      "classification_reason": "reaction_context",
+      "classification_status": "classified",
+      "reaction_type": "ORR",
+      "record_id": "d5a7c670-c546-486f-8b4b-eb5b9f47fd17",
+      "validation_property_type": "gibbs_free_energy_change",
+      "validation_reasons": [],
+      "validation_status": "valid"
+    },
+    {
+      "after": {
+        "reaction_profile_version": "reaction_profiles_v1",
+        "reaction_type": "ORR",
+        "reaction_type_confidence": 0.9,
+        "reaction_type_source": "rule",
+        "reaction_validation_status": "valid"
+      },
+      "before": {
+        "reaction_profile_version": null,
+        "reaction_type": null,
+        "reaction_type_confidence": null,
+        "reaction_type_source": null,
+        "reaction_validation_status": null
+      },
+      "classification_reason": "reaction_context",
+      "classification_status": "classified",
+      "reaction_type": "ORR",
+      "record_id": "fabcba3d-4dc3-4c3e-b7c4-fde889c303c7",
+      "validation_property_type": "adsorption_energy",
+      "validation_reasons": [],
+      "validation_status": "valid"
+    }
+  ],
+  "profile_version": "reaction_profiles_v1",
+  "protected_human_labels": 0,
+  "sample_records": {
+    "ambiguous": [
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "003173c4-c5b3-4a61-a6bf-f9ce5081386d",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "008c54f7-0eca-4047-9596-6959ee6e2966",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "01a17e67-e12c-49a9-9ef7-ca365cb56da3",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "01e0ad21-08af-4013-a310-8dabfe9a973d",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "01e27905-1cc3-4b57-be2a-2d7e13c9ff39",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "02965e5d-ee93-4d57-b7c5-089f255cae90",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "034951b4-0c7a-4450-8b32-0dfa1f437dbf",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "036a6634-7289-43c3-b039-527bcaabbe65",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "04e5dfab-ec52-4017-9a8b-b58c07cbb537",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "052459ab-f705-46aa-bda7-11a196cd8f64",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "05f5af61-1ab5-49a4-9154-7bfd15865dec",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "0602684e-96cb-480c-a55d-496a378a36fc",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "061aa98f-1c30-4b03-9d34-35983da60974",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "06b968f2-feaa-4b07-a2a5-ebe63e3248b7",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "087fc1a1-343f-4c73-a87d-945ce9d208b8",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "08928d04-405b-4753-a095-7097d3b408fd",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "08ffeab2-3be8-49be-867d-00883d125427",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "09a88a26-80ce-4b51-b255-384179c144c3",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "0c06b3bb-2ccf-4bad-9a54-3a4346d0740e",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      },
+      {
+        "reaction_type": "UNKNOWN",
+        "reason": "insufficient_or_shared_context",
+        "record_id": "0d3e1f08-f8b1-4bfe-a545-7ca0dc1332fe",
+        "validation_reasons": [
+          "unknown_reaction_type"
+        ]
+      }
+    ],
+    "unsupported": [
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "missing_intermediate"
+        ],
+        "record_id": "0016c14f-95cc-4ceb-a6e7-c1c43f67e009",
+        "validation_property_type": "gibbs_free_energy_change"
+      },
+      {
+        "reaction_type": "HER",
+        "reasons": [
+          "missing_intermediate"
+        ],
+        "record_id": "017d3dc4-aecf-488b-9ecc-5f2885395bee",
+        "validation_property_type": "gibbs_free_energy_change"
+      },
+      {
+        "reaction_type": "HER",
+        "reasons": [
+          "intermediate_out_of_scope"
+        ],
+        "record_id": "02312016-70b1-4589-b2b1-0f17bca5ff84",
+        "validation_property_type": "adsorption_energy"
+      },
+      {
+        "reaction_type": "SRR_LiS",
+        "reasons": [
+          "intermediate_out_of_scope"
+        ],
+        "record_id": "11b5e80f-b252-49ef-bee1-c065bcc186f4",
+        "validation_property_type": "migration_barrier"
+      },
+      {
+        "reaction_type": "SRR_LiS",
+        "reasons": [
+          "intermediate_out_of_scope",
+          "property_out_of_scope"
+        ],
+        "record_id": "1540c09a-379f-4d1c-8a90-dff9e8e7b74c",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "SRR_LiS",
+        "reasons": [
+          "intermediate_out_of_scope",
+          "property_out_of_scope"
+        ],
+        "record_id": "1a64c80b-f2af-44aa-80c1-d3bd367c1a35",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "HER",
+        "reasons": [
+          "missing_intermediate"
+        ],
+        "record_id": "2026cbbb-cfa5-4964-a877-80ec62147618",
+        "validation_property_type": "gibbs_free_energy_change"
+      },
+      {
+        "reaction_type": "HER",
+        "reasons": [
+          "property_out_of_scope",
+          "missing_intermediate"
+        ],
+        "record_id": "22114805-388e-4a91-83f3-4b6980c95545",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "property_out_of_scope",
+          "missing_intermediate"
+        ],
+        "record_id": "28c2b848-87c0-4006-8aba-ae1c36647947",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "property_out_of_scope",
+          "missing_intermediate"
+        ],
+        "record_id": "2d202173-6504-4fd8-ad6a-0ad7d146c083",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "SRR_LiS",
+        "reasons": [
+          "intermediate_out_of_scope",
+          "property_out_of_scope"
+        ],
+        "record_id": "2e130508-1f2e-4521-9b53-90a10249ad8d",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "HER",
+        "reasons": [
+          "intermediate_out_of_scope",
+          "property_out_of_scope"
+        ],
+        "record_id": "33b25810-f495-436c-a609-9f1e85cc297e",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "missing_intermediate"
+        ],
+        "record_id": "39261afe-e374-4fde-9cad-3b711f3be0ec",
+        "validation_property_type": "gibbs_free_energy_change"
+      },
+      {
+        "reaction_type": "OER",
+        "reasons": [
+          "missing_intermediate"
+        ],
+        "record_id": "78027cb8-deae-427d-9c89-a29e3764fcff",
+        "validation_property_type": "gibbs_free_energy_change"
+      },
+      {
+        "reaction_type": "OER",
+        "reasons": [
+          "intermediate_out_of_scope"
+        ],
+        "record_id": "7ab5089b-b8fc-453f-927a-61f96334b9c0",
+        "validation_property_type": "adsorption_energy"
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "intermediate_out_of_scope",
+          "property_out_of_scope"
+        ],
+        "record_id": "7ea6d671-bb2c-4060-b2e9-eefbc2a4a060",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "property_out_of_scope",
+          "missing_intermediate"
+        ],
+        "record_id": "83653655-7082-4e50-8197-9b935baa9bd8",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "property_out_of_scope",
+          "missing_intermediate"
+        ],
+        "record_id": "8695337f-34c8-4140-b758-a4797b33cea8",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "property_out_of_scope",
+          "missing_intermediate"
+        ],
+        "record_id": "95f17786-1368-424b-9cfa-4a7f47963d51",
+        "validation_property_type": null
+      },
+      {
+        "reaction_type": "ORR",
+        "reasons": [
+          "property_out_of_scope",
+          "missing_intermediate"
+        ],
+        "record_id": "a38de2ae-15ba-40eb-a1d1-5e9fc4c16e83",
+        "validation_property_type": null
+      }
+    ]
+  },
+  "schema": {
+    "reaction_columns_missing": [],
+    "reaction_columns_present": [
+      "reaction_type",
+      "reaction_type_source",
+      "reaction_type_confidence",
+      "reaction_profile_version",
+      "reaction_validation_status"
+    ],
+    "selected_columns": [
+      "id",
+      "property_type",
+      "adsorbate",
+      "reaction_step",
+      "evidence_text",
+      "reaction_type",
+      "reaction_type_source",
+      "reaction_type_confidence",
+      "reaction_profile_version",
+      "reaction_validation_status"
+    ],
+    "table": "dft_results"
+  },
+  "skipped_existing": 0,
+  "total_records": 668,
+  "unsupported": 33,
+  "writes_performed": 0
+}

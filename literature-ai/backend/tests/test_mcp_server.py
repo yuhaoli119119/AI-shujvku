@@ -24,6 +24,7 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     MechanismClaim,
+    ModuleWriteLock,
     Paper,
     PaperCorrection,
     PaperFigure,
@@ -38,6 +39,7 @@ from app.mcp.context import MCPAuthInfo, mcp_auth_context
 from app.mcp.server import (
     append_note,
     approve_correction,
+    apply_analysis_review_rules,
     acquire_module_write_lock,
     get_correction_detail,
     get_codex_context,
@@ -54,11 +56,13 @@ from app.mcp.server import (
     propose_correction,
     propose_dft_result_correction,
     reject_dft_result,
+    release_module_write_lock,
     review_figure,
     query_papers,
     reject_correction,
     scan_local_pdfs,
     scan_duplicate_dois,
+    _mcp_review_identity,
 )
 from app.services.paper_query import PaperQueryService
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
@@ -644,6 +648,186 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
         assert stored_candidate.normalized_payload["writes_final_truth"] is False
 
 
+def test_mcp_import_analysis_warns_on_non_countable_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP DFT Decision Warning Paper", pdf_path="mcp-dft-warning.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "evidence_verified",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"][0]["code"] == "non_countable_dft_decision"
+    assert imported["warnings"][0]["decision"] == "evidence_verified"
+    assert "PROPOSED" in imported["warnings"][0]["allowed_decisions"]
+    assert "needs_user_decision" in imported["warnings"][0]["message"]
+    assert "manual adjudication" in imported["warnings"][0]["message"]
+
+
+def test_mcp_import_analysis_does_not_warn_on_countable_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP DFT Decision Clean Paper", pdf_path="mcp-dft-clean.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "PROPOSED",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"] == []
+
+
+def test_mcp_import_analysis_treats_needs_user_decision_as_manual_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Needs User Decision Paper", pdf_path="mcp-needs-user-decision.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "needs_user_decision",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"] == []
+
+
+def test_mcp_import_analysis_treats_ambiguous_as_manual_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Ambiguous DFT Decision Paper", pdf_path="mcp-ambiguous-dft-warning.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "ambiguous",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"] == []
+
+
 def test_mcp_codex_context_and_item_use_compact_detail_query(mcp_test_env, monkeypatch):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="Compact Codex Context Paper", pdf_path="compact-context.pdf", authors=[])
@@ -824,6 +1008,7 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
         )
 
     assert imported["reviewer"] == "codex_window_b"
+    assert imported["warnings"] == []
     assert imported["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
     with Session(mcp_test_env["engine"]) as session:
         rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()
@@ -1752,3 +1937,221 @@ def test_http_correction_review_api_requires_admin_and_applies_update(mcp_test_e
         paper = session.get(Paper, UUID(paper_id))
         assert paper is not None
         assert paper.abstract == "HTTP approved abstract"
+
+
+def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp_test_env):
+    """A run imported with auto_apply_review_rules=False must be materializable
+    later via the apply_analysis_review_rules MCP tool — the counterpart of
+    HTTP POST /runs/{run_id}/apply-review-rules.
+    """
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Deferred DFT Paper", pdf_path="mcp-deferred.pdf", authors=[])
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "Co-N3",
+                    "property_type": "adsorption_energy",
+                    "value": -0.95,
+                    "unit": "eV",
+                    "adsorbate": "H",
+                    "reaction_step": "adsorption",
+                },
+                "evidence_location": {
+                    "page": 5,
+                    "quoted_text": "Co-N3 H -0.95 eV",
+                },
+                "confidence": 0.88,
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit deferred",
+            raw_payload=payload,
+            auto_apply_review_rules=False,
+        )
+
+    run_id = imported["run_id"]
+    assert imported["auto_apply_summary"] is None
+    assert imported["candidate_count"] == 1
+
+    # Pre-condition: no DFTResult yet, candidate still in "candidate" status
+    with Session(mcp_test_env["engine"]) as session:
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
+        ).all()
+        assert len(dft_rows) == 0
+        candidate = session.scalar(
+            select(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.run_id == UUID(run_id)
+            )
+        )
+        assert candidate is not None
+        assert candidate.status == "candidate"
+
+    with mcp_auth_context(_auth()):
+        result = apply_analysis_review_rules(run_id=run_id)
+
+    assert result["run_id"] == run_id
+    assert result["paper_id"] == paper_id
+    assert result["reviewer"] == "claude"
+    assert result["candidate_count"] == 1
+    assert result["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+
+    candidate_payload = result["candidates"][0]
+    assert candidate_payload["status"] == "materialized"
+    assert candidate_payload["materialized_target_type"] == "dft_results"
+    assert candidate_payload["materialized_target_id"] is not None
+
+    with Session(mcp_test_env["engine"]) as session:
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
+        ).all()
+        assert len(dft_rows) == 1
+        assert dft_rows[0].candidate_status == "new_candidate"
+        assert dft_rows[0].value == pytest.approx(-0.95)
+        assert dft_rows[0].adsorbate == "H"
+
+        # No active dft_results lock leaked
+        active_locks = session.scalars(
+            select(ModuleWriteLock).where(
+                ModuleWriteLock.paper_id == UUID(paper_id),
+                ModuleWriteLock.module_name == "dft_results",
+                ModuleWriteLock.status == "active",
+            )
+        ).all()
+        assert active_locks == [], "apply_analysis_review_rules leaked an active dft_results lock"
+
+
+def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(mcp_test_env):
+    """When the MCP auth source_prefix differs from the reviewer, and a lock was
+    pre-acquired by auth.source_prefix, apply_analysis_review_rules must accept
+    the caller's token because effective_lock_owners includes both identities.
+    """
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(
+            title="MCP Owner Semantics DFT Paper", pdf_path="mcp-owner-semantics.pdf", authors=[]
+        )
+        session.add(paper)
+        session.commit()
+        paper_id = str(paper.id)
+
+    payload = {
+        "object_review_audits": [
+            {
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "Fe-N4",
+                    "property_type": "adsorption_energy",
+                    "value": -1.23,
+                    "unit": "eV",
+                    "adsorbate": "Li2S4",
+                    "reaction_step": "adsorption",
+                },
+                "evidence_location": {
+                    "page": 3,
+                    "table": "Table 1",
+                    "quoted_text": "The adsorption energy of Li2S4 is -1.23 eV on Fe-N4.",
+                },
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    with mcp_auth_context(_auth()):
+        # Import without auto-apply so candidates remain pending
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit owner semantics",
+            raw_payload=payload,
+            auto_apply_review_rules=False,
+        )
+        run_id = imported["run_id"]
+
+        # Pre-acquire a dft_results lock locked_by = auth.source_prefix ("claude")
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="dft_results",
+        )
+        assert lock["locked_by"] == "claude"
+
+        # Apply with reviewer="codex_window_b" and the pre-acquired token.
+        # effective_lock_owners = ["claude", "codex_window_b"], so the token
+        # locked_by="claude" should be accepted.
+        result = apply_analysis_review_rules(
+            run_id=run_id,
+            reviewer="codex_window_b",
+            write_lock_token=lock["lock_token"],
+        )
+
+        # The caller-provided lock is NOT auto-released by the apply step
+        # (only auto-acquired locks are). Release it explicitly.
+        release_module_write_lock(lock_token=lock["lock_token"])
+
+    assert result["reviewer"] == "codex_window_b"
+    assert result["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+
+    with Session(mcp_test_env["engine"]) as session:
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
+        ).all()
+        assert len(dft_rows) == 1
+        assert dft_rows[0].candidate_status == "new_candidate"
+        assert dft_rows[0].adsorbate == "Li2S4"
+
+        # No active dft_results lock leaked after explicit release
+        active_locks = session.scalars(
+            select(ModuleWriteLock).where(
+                ModuleWriteLock.paper_id == UUID(paper_id),
+                ModuleWriteLock.module_name == "dft_results",
+                ModuleWriteLock.status == "active",
+            )
+        ).all()
+        assert active_locks == [], "active dft_results lock remains after explicit release"
+
+
+def test_mcp_review_identity_helper_consistency():
+    """Unit test for the _mcp_review_identity helper shared by import_analysis
+    and apply_analysis_review_rules. Verifies the three documented identity
+    contracts without touching the database.
+    """
+    # Case 1: reviewer=None, source_prefix="claude" -> all collapse to "claude"
+    auth = MCPAuthInfo(
+        source_prefix="claude",
+        display_name="claude",
+        capabilities=frozenset(),
+        raw_key="",
+    )
+    reviewer, internal, owners = _mcp_review_identity(None, auth)
+    assert reviewer == "claude"
+    assert internal == "claude"
+    assert owners == ["claude"]
+
+    # Case 2: reviewer="codex_window_b", source_prefix="claude"
+    # -> reviewer=codex_window_b, internal=claude, owners=[claude, codex_window_b]
+    reviewer, internal, owners = _mcp_review_identity("codex_window_b", auth)
+    assert reviewer == "codex_window_b"
+    assert internal == "claude"
+    assert owners == ["claude", "codex_window_b"]
+
+    # Case 3: reviewer="claude" == source_prefix="claude" -> dedup to ["claude"]
+    reviewer, internal, owners = _mcp_review_identity("claude", auth)
+    assert reviewer == "claude"
+    assert internal == "claude"
+    assert owners == ["claude"]

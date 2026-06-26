@@ -39,10 +39,11 @@ from app.schemas.api import (
     PaperTranslationPreviewRequest,
     PaperTranslationPreviewResponse,
 )
+from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code
 from pydantic import BaseModel, Field
 
 class RelationshipCreateRequest(BaseModel):
-    target_paper_id: UUID
+    target_paper_id: str
     relationship_type: str
     note: str | None = None
 
@@ -502,6 +503,7 @@ async def get_paper_codex_context(
     max_figures: int = 12,
     max_tables: int = 8,
     max_candidates: int = 20,
+    include_supplementary_figures: bool = False,
     session: Session = Depends(get_db_session),
 ) -> CodexContextResponse:
     context = CodexContextService(session).build_context(
@@ -511,6 +513,7 @@ async def get_paper_codex_context(
         max_figures=max(0, min(max_figures, 40)),
         max_tables=max(0, min(max_tables, 30)),
         max_candidates=max(1, min(max_candidates, 100)),
+        include_supplementary_figures=include_supplementary_figures,
     )
     if context is None:
         raise HTTPException(status_code=404, detail="Paper not found")
@@ -1110,14 +1113,92 @@ async def create_paper_relationship(
 ):
     from app.db.models import PaperRelationship
     source = session.get(Paper, paper_id)
-    target = session.get(Paper, payload.target_paper_id)
-    if not source or not target:
+    if not source:
         raise HTTPException(status_code=404, detail="Paper not found")
-    
+
+    target_ref = payload.target_paper_id.strip()
+    target = None
+    try:
+        target = session.get(Paper, UUID(target_ref))
+    except ValueError:
+        target_codes = list({target_ref, target_ref.upper()})
+        target = session.scalar(
+            select(Paper).where(
+                Paper.paper_code.in_(target_codes),
+                Paper.library_name == source.library_name,
+            )
+        )
+        if target is None:
+            matches = session.scalars(select(Paper).where(Paper.paper_code.in_(target_codes))).all()
+            if len(matches) == 1:
+                target = matches[0]
+            elif len(matches) > 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Multiple papers match this paper_code; open the target paper and copy its UUID.",
+                )
+        if target is None and target_ref.upper().startswith("U"):
+            try:
+                migrated_code = supplementary_base_code(
+                    main_paper_code=source.paper_code,
+                    serial_number=source.serial_number,
+                )
+            except ValueError:
+                migrated_code = ""
+            if migrated_code:
+                target = session.scalar(
+                    select(Paper).where(
+                        Paper.paper_code == migrated_code,
+                        Paper.library_name == source.library_name,
+                    )
+                )
+    if target is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    if target.id == source.id:
+        raise HTTPException(status_code=400, detail="A paper cannot be related to itself")
+
+    relationship_type = payload.relationship_type.strip().lower()
+    if not relationship_type:
+        raise HTTPException(status_code=422, detail="relationship_type must not be empty")
+    supplementary_types = {"supplementary", "supplementary_information", "supporting_information", "si"}
+    if relationship_type not in supplementary_types:
+        raise HTTPException(status_code=400, detail="Only supplementary relationships are supported")
+    relationship_type = "supplementary"
+
+    existing = session.scalar(
+        select(PaperRelationship).where(
+            PaperRelationship.source_paper_id == paper_id,
+            PaperRelationship.target_paper_id == target.id,
+            PaperRelationship.relationship_type == relationship_type,
+        )
+    )
+
+    if target.paper_type != "supplementary":
+        target.paper_type = "supplementary"
+        session.add(target)
+    target_code = str(target.paper_code or "").strip().upper()
+    if not target_code.startswith("S"):
+        try:
+            target.paper_code = next_supplementary_paper_code(
+                session,
+                main_paper_code=source.paper_code,
+                serial_number=source.serial_number,
+                exclude_paper_id=target.id,
+            )
+            session.add(target)
+        except ValueError as exc:
+            if str(exc) != "supplementary_code_requires_main_code_or_serial":
+                raise
+
+    if existing is not None:
+        session.commit()
+        return RelationshipCreateResponse(status="existing", id=existing.id)
+
     rel = PaperRelationship(
         source_paper_id=paper_id,
-        target_paper_id=payload.target_paper_id,
-        relationship_type=payload.relationship_type,
+        target_paper_id=target.id,
+        relationship_type=relationship_type,
         note=payload.note,
         created_by="user_manual"
     )

@@ -921,6 +921,7 @@ def run_local_pdf_path_ingest_job(job_id: str, control_database_url: str | None 
                         source_reference=None if trusted_staged_upload else str(source_path.resolve()),
                         library_name=normalize_library_name(payload.get("library_name") or job_library_name),
                         attach_to_paper_id=UUID(str(payload["attach_to_paper_id"])) if payload.get("attach_to_paper_id") else None,
+                        supplementary_for_paper_id=UUID(str(payload["supplementary_for_paper_id"])) if payload.get("supplementary_for_paper_id") else None,
                         confirm_identity_mismatch=bool(payload.get("confirm_identity_mismatch")),
                         ingest_source="uploaded" if trusted_staged_upload else "local_pdf",
                     )

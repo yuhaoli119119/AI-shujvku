@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -33,6 +34,9 @@ from app.utils.evidence_anchors import has_evidence_anchor, has_material_correct
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalReviewNoteModel(BaseModel):
@@ -140,6 +144,23 @@ class MaterializationResult:
 
 
 class ExternalAnalysisService:
+    COUNTABLE_DFT_REVIEW_DECISIONS = {"PASS", "REJECT", "REJECTED", "PROPOSED", "REVISE", "NEEDS_HUMAN"}
+    DFT_REVIEW_DECISION_ALIASES = {
+        "CONFIRMED": "PASS",
+        "ACCEPT": "PASS",
+        "ACCEPTED": "PASS",
+        "APPROVED": "PASS",
+        "VERIFIED": "PASS",
+        "OK": "PASS",
+        "CONFIRMED_WITH_CORRECTIONS": "PROPOSED",
+        "CORRECTED": "PROPOSED",
+        "REVISION": "PROPOSED",
+        "NEEDS_USER_DECISION": "NEEDS_HUMAN",
+        "AMBIGUOUS": "NEEDS_HUMAN",
+    }
+    OBJECT_REVIEW_CONTAINER_KEYS = {"object_review_audits", "object_reviews", "field_reviews"}
+    GENERIC_OBJECT_REVIEW_CONTAINER_KEYS = {"reviews", "audits", "opinions", "items"}
+
     def __init__(self, session: Session, settings: Settings) -> None:
         self.session = session
         self.settings = settings
@@ -343,6 +364,90 @@ class ExternalAnalysisService:
             .where(ExternalAnalysisCandidate.run_id == run_id)
             .order_by(ExternalAnalysisCandidate.created_at.asc())
         ).all()
+
+    def diagnose_import_warnings(
+        self,
+        run: ExternalAnalysisRun,
+        *,
+        candidates: list[ExternalAnalysisCandidate] | None = None,
+        auto_apply_summary: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return non-fatal import diagnostics for silent no-op-prone payloads."""
+
+        warnings: list[dict[str, Any]] = []
+        raw_payload = run.raw_payload
+        if isinstance(raw_payload, dict):
+            for key, value in raw_payload.items():
+                if not self._is_unrecognized_object_review_container(key, value):
+                    continue
+                warnings.append(
+                    {
+                        "code": "unrecognized_object_review_container",
+                        "severity": "warning",
+                        "key": key,
+                        "message": (
+                            f"raw_payload.{key} looks like object-level review data but is not imported. "
+                            "Use raw_payload.object_review_audits."
+                        ),
+                        "expected_key": "object_review_audits",
+                    }
+                )
+
+        rows = candidates if candidates is not None else self.list_candidates(run.id)
+        for candidate in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            if candidate.candidate_type != "object_review_audit":
+                continue
+            target_type = self._normalize_dft_warning_target_type(payload.get("target_type"))
+            if target_type != "dft_results":
+                continue
+            decision = payload.get("decision") or payload.get("verdict")
+            normalized_decision = self._normalize_dft_review_decision_for_warning(decision)
+            target_id = str(payload.get("target_id") or "").strip()
+            if normalized_decision == "NEW_CANDIDATE" or target_id.lower() == "new":
+                continue
+            if not normalized_decision:
+                continue
+            if normalized_decision in self.COUNTABLE_DFT_REVIEW_DECISIONS:
+                continue
+            warnings.append(
+                {
+                    "code": "non_countable_dft_decision",
+                    "severity": "warning",
+                    "candidate_id": str(candidate.id),
+                    "target_type": payload.get("target_type"),
+                    "target_id": payload.get("target_id"),
+                    "field_name": payload.get("field_name"),
+                    "decision": decision,
+                    "normalized_decision": normalized_decision,
+                    "allowed_decisions": sorted(self.COUNTABLE_DFT_REVIEW_DECISIONS),
+                    "message": (
+                        f"DFT object review decision {decision!r} is not counted as a valid AI opinion. "
+                        "Use PASS, REJECT, REJECTED, PROPOSED, REVISE, or NEEDS_HUMAN for existing DFT rows. "
+                        "needs_user_decision and ambiguous are normalized to NEEDS_HUMAN and stay in manual adjudication; "
+                        "they are not auto-adoptable opinions."
+                    ),
+                }
+            )
+
+        new_dft_summary = (auto_apply_summary or {}).get("new_dft_candidates") if isinstance(auto_apply_summary, dict) else None
+        if isinstance(new_dft_summary, dict):
+            for item in new_dft_summary.get("skipped_items") or []:
+                if not isinstance(item, dict):
+                    continue
+                warnings.append(
+                    {
+                        "code": "new_dft_candidate_materialization_skipped",
+                        "severity": "warning",
+                        "candidate_id": item.get("candidate_id"),
+                        "reason": item.get("reason"),
+                        "message": (
+                            "A DFT new_candidate audit was imported but not materialized into dft_results: "
+                            f"{item.get('reason') or 'unknown'}."
+                        ),
+                    }
+                )
+        return warnings
 
     def backfill_paper_level_audit_candidates(self, *, source: str | None = None, limit: int | None = None) -> int:
         """Create missing external_audit_opinion candidates for already-imported paper-level audit runs."""
@@ -676,6 +781,146 @@ class ExternalAnalysisService:
         self.session.flush()
         return result
 
+    def apply_review_rules_for_run(
+        self,
+        run_id: UUID,
+        *,
+        reviewer: str,
+        write_lock_tokens: list[str] | None = None,
+        write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
+        auto_lock_owner: str | None = None,
+        lock_meta_source: str = "external_analysis_import",
+    ) -> dict[str, Any]:
+        """Apply IDE-AI review rules to an existing external analysis run.
+
+        This is the single shared pipeline used by both the MCP ``import_analysis``
+        tool and the HTTP ``POST /import`` endpoint.  It:
+
+        1. Detects whether the run contains DFT ``object_review_audit`` candidates.
+        2. When DFT candidates are present and no external ``write_lock_tokens``
+           were supplied, auto-acquires a ``dft_results`` module write lock so the
+           downstream ``apply_import_rules_for_paper`` gate does not reject the
+           write.  The lock is released in a ``finally`` block to guarantee it
+           never leaks on success or failure.
+        3. Runs the non-DFT auto-apply path (notes/corrections/relationships).
+        4. Runs the DFT settlement path (materialize new candidates + dual-AI
+           consensus state machine) via ``VerificationSessionService``.
+        5. Returns the combined ``auto_apply_summary`` mirroring the historical
+           MCP response shape.
+
+        Parameters
+        ----------
+        reviewer:
+            Reviewer label recorded on auto-applied outputs.  This is also used
+            as the ``write_lock_owner`` fallback when the caller does not pass
+            an explicit owner list.
+        write_lock_tokens:
+            Lock tokens supplied by the caller (e.g. previously acquired via
+            ``acquire_module_write_lock``).  When non-empty the auto-acquire
+            step is skipped.
+        write_lock_owner:
+            Owner(s) allowed to validate the supplied tokens.  MCP passes a
+            list ``[internal, reviewer]``; HTTP passes a single ``reviewer``.
+            This deliberately preserves the two entry points' identity
+            semantics rather than collapsing them.
+        auto_lock_owner:
+            ``locked_by`` to use when auto-acquiring a DFT lock.  MCP passes
+            ``effective_internal_reviewer``; HTTP passes ``effective_reviewer``.
+            Defaults to ``reviewer`` when not specified.
+        lock_meta_source:
+            Source tag recorded in the lock's metadata for audit traceability.
+        """
+
+        run = self.get_run(run_id)
+        candidates = self.list_candidates(run.id)
+        tokens: list[str] = [str(item).strip() for item in (write_lock_tokens or []) if str(item or "").strip()]
+        imports_dft = any(
+            str((c.normalized_payload or {}).get("target_type") or "").strip().lower()
+            in {"dft_result", "dft_results"}
+            for c in candidates
+            if isinstance(c.normalized_payload, dict)
+        )
+
+        lock_service = ModuleWriteLockService(self.session)
+        auto_lock = None
+        if imports_dft and not tokens:
+            acquire_owner = str(auto_lock_owner or reviewer or "ide_ai").strip() or "ide_ai"
+            auto_lock = lock_service.acquire(
+                paper_id=run.paper_id,
+                module_name="dft_results",
+                locked_by=acquire_owner,
+                meta={"source": lock_meta_source, "run_id": str(run.id)},
+            )
+            tokens.append(auto_lock.lock_token)
+
+        try:
+            non_dft_summary = self.auto_apply_non_dft_review_outputs(
+                run.id,
+                reviewer=reviewer,
+                write_lock_tokens=tokens or None,
+                write_lock_owner=write_lock_owner,
+            )
+            from app.services.verification_session_service import VerificationSessionService
+
+            dft_summary = VerificationSessionService(self.session, self.settings).apply_import_rules_for_paper(
+                paper_id=run.paper_id,
+                reviewer=reviewer,
+                candidate_run_id=run.id,
+                write_lock_tokens=tokens or None,
+                write_lock_owner=write_lock_owner,
+            )
+        finally:
+            if auto_lock is not None:
+                release_owner = str(auto_lock_owner or reviewer or "ide_ai").strip() or "ide_ai"
+                try:
+                    lock_service.release(
+                        lock_token=auto_lock.lock_token,
+                        released_by=release_owner,
+                    )
+                except Exception as release_exc:
+                    # Best-effort release; surface nothing that would mask the
+                    # original apply error.  But log an audit entry so that a
+                    # leaked lock is observable rather than silently lost.
+                    # Stale locks are also reaped by TTL as a backstop.
+                    logger.exception(
+                        "Failed to release auto-acquired DFT module write lock",
+                        extra={
+                            "paper_id": str(run.paper_id),
+                            "run_id": str(run.id),
+                            "module_name": "dft_results",
+                            "lock_token": auto_lock.lock_token,
+                        },
+                    )
+                    self.session.add(
+                        AuditLog(
+                            paper_id=run.paper_id,
+                            action="auto_lock_release_failed",
+                            source=release_owner,
+                            target_type="module_write_lock",
+                            target_id=auto_lock.lock_token,
+                            payload={
+                                "run_id": str(run.id),
+                                "module_name": "dft_results",
+                                "error": str(release_exc),
+                            },
+                        )
+                    )
+                    try:
+                        self.session.flush()
+                    except Exception:
+                        pass
+
+        return {
+            **(dft_summary or {}),
+            "non_dft_auto_apply": {
+                "created_notes": non_dft_summary.created_notes,
+                "created_corrections": non_dft_summary.created_corrections,
+                "created_relationships": non_dft_summary.created_relationships,
+                "auto_applied_corrections": non_dft_summary.auto_applied_corrections,
+                "skipped_candidates": non_dft_summary.skipped_candidates,
+            },
+        }
+
     def _required_auto_apply_modules(self, candidates: list[ExternalAnalysisCandidate]) -> list[str]:
         modules: set[str] = set()
         for candidate in candidates:
@@ -736,9 +981,9 @@ class ExternalAnalysisService:
         if operation == "delete":
             parts = [part.strip() for part in target_path.split(":")]
             return (
-                field_name == "figures"
+                field_name in {"figures", "tables"}
                 and len(parts) == 3
-                and parts[0] == "figures"
+                and parts[0] == field_name
                 and parts[1]
                 and parts[2] == "delete"
                 and has_evidence_anchor(evidence_payload)
@@ -1371,6 +1616,38 @@ class ExternalAnalysisService:
         if ExternalAnalysisService._is_object_review_item(payload):
             candidates.append(ExternalAnalysisService._normalize_object_review_item(payload))
         return candidates
+
+    @classmethod
+    def _is_unrecognized_object_review_container(cls, key: str, value: Any) -> bool:
+        normalized_key = str(key or "").strip().lower()
+        if normalized_key in cls.OBJECT_REVIEW_CONTAINER_KEYS | cls.GENERIC_OBJECT_REVIEW_CONTAINER_KEYS:
+            return False
+        if not isinstance(value, (dict, list)) or not value:
+            return False
+        suspicious = normalized_key in {
+            "dft_result_audits",
+            "dft_results_audits",
+            "dft_audits",
+            "dft_result_reviews",
+            "dft_results_reviews",
+            "dft_reviews",
+        } or normalized_key.endswith(("_audits", "_reviews"))
+        if not suspicious:
+            return False
+        items = value if isinstance(value, list) else [value]
+        return any(isinstance(item, dict) for item in items)
+
+    @staticmethod
+    def _normalize_dft_warning_target_type(value: Any) -> str:
+        target_type = str(value or "").strip().lower()
+        if target_type in {"dft_result", "dft_results", "dftresult"}:
+            return "dft_results"
+        return target_type
+
+    @classmethod
+    def _normalize_dft_review_decision_for_warning(cls, value: Any) -> str:
+        decision = str(value or "").strip().upper()
+        return cls.DFT_REVIEW_DECISION_ALIASES.get(decision, decision)
 
     @staticmethod
     def _is_object_review_item(item: dict[str, Any]) -> bool:

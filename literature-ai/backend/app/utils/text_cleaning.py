@@ -9,8 +9,29 @@ def normalize_text_tree(value: Any) -> Any:
     if isinstance(value, list):
         return [normalize_text_tree(item) for item in value]
     if isinstance(value, dict):
-        return {key: normalize_text_tree(item) for key, item in value.items()}
+        normalized = {key: normalize_text_tree(item) for key, item in value.items()}
+        journal = normalized.get("journal")
+        if isinstance(journal, str):
+            normalized["journal"] = repair_repeated_journal_title(journal)
+        return normalized
     return value
+
+
+def repair_repeated_journal_title(text: str | None) -> str | None:
+    if text is None or not isinstance(text, str):
+        return text
+    compact = " ".join(text.split())
+    if not compact:
+        return compact
+    words = compact.split(" ")
+    if len(words) < 2 or len(words) % 2:
+        return compact
+    midpoint = len(words) // 2
+    left = " ".join(words[:midpoint])
+    right = " ".join(words[midpoint:])
+    if left.casefold() == right.casefold():
+        return left
+    return compact
 
 
 def repair_mojibake_text(text: str | None) -> str | None:

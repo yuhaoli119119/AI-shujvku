@@ -44,7 +44,7 @@ function renderCandidatePayload(payload) {
 
 function renderInternalParseSummary(data) {
     return '<div class="section-card"><h3>网页端解析已停用</h3>' +
-        '<div class="subtle">请在 IDE 中优先使用 MCP 读取材料、核验证据，并通过 import_analysis 回写候选；如果当前会话没暴露 MCP 工具，可使用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 受控调用同一套公开 MCP 工具。禁止直接操作 service、session、model 或数据库。</div>' +
+        '<div class="subtle">请在 IDE 中优先使用 MCP 读取材料、核验证据。普通非 DFT 字段通过 import_analysis 回写；表格对象修改/新建/合并/删除必须直接调用 update_table、create_table、merge_table、delete_table。如果当前会话没暴露 MCP 工具，可使用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 受控调用同一套公开 MCP 工具。禁止直接操作 service、session、model 或数据库。</div>' +
     '</div>';
 }
 
@@ -153,6 +153,12 @@ async function importExternalAnalysis() {
 async function loadExternalRuns() {
     if (!state.selectedPaperId) return;
     const extRuns = $("externalRuns");
+    if (state.currentTab === "review" && state.selectedPaperId) {
+        state.externalRuns = [];
+        rerenderSelectedDetail(state.selectedPaperId);
+        if (extRuns) extRuns.innerHTML = "";
+        return;
+    }
     const reasonBanner = state.qualityReasonContext
         ? '<div class="section-card" style="border-color:var(--color-warning);"><h3>DFT 质量处理入口</h3><div class="subtle">来自 blocked reason：' + esc(state.qualityReasonContext) + '。请核对本论文的 review 状态、证据链和定位信息。</div></div>'
         : "";
@@ -171,7 +177,7 @@ async function loadExternalRuns() {
             return;
         }
         if (!state.externalRuns.length) {
-            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 IDE AI 回写记录。请在 IDE 中优先读取 MCP 材料并通过 import_analysis 回写候选；如果当前会话没暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。确认前不会写入正式数据。</div>';
+            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 IDE AI 回写记录。请在 IDE 中优先读取 MCP 材料；普通非 DFT 字段通过 import_analysis 回写，表格对象整理直接调用 update_table/create_table/merge_table/delete_table。如果当前会话没暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。确认前不会写入正式数据。</div>';
             return;
         }
         if (extRuns) {

@@ -5,13 +5,14 @@ from __future__ import annotations
 # Models target PostgreSQL and pgvector exclusively.
 
 import json
-import os
 import uuid
 from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.config import DATABASE_V1_EMBEDDING_DIMENSION
 
 
 def utcnow() -> datetime:
@@ -61,7 +62,7 @@ def json_type():
     return JSONB()
 
 
-EMBEDDING_DIMENSION = int(os.getenv("LITAI_EMBEDDING_DIMENSION", "1024"))
+EMBEDDING_DIMENSION = DATABASE_V1_EMBEDDING_DIMENSION
 
 
 class Paper(Base):
@@ -257,6 +258,11 @@ class DFTResult(Base):
     value: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
     unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     reaction_step: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    reaction_type: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
+    reaction_type_source: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    reaction_type_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    reaction_profile_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    reaction_validation_status: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     source_section: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     source_figure: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)

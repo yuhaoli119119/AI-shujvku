@@ -11,13 +11,13 @@ from app.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.schemas.api import InternalAIParseRequest, InternalAIParseResponse
 from app.schemas.external_analysis import (
+    ExternalAnalysisApplyReviewRulesRequest,
     ExternalAnalysisCandidateResponse,
     ExternalAnalysisImportRequest,
     ExternalAnalysisMaterializeRequest,
     ExternalAnalysisRunResponse,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
-from app.services.verification_session_service import VerificationSessionService
 
 router = APIRouter()
 
@@ -29,8 +29,9 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRunResponse:
-    base = ExternalAnalysisRunResponse.model_validate(run).model_dump(exclude={"candidates"})
+    base = ExternalAnalysisRunResponse.model_validate(run).model_dump(exclude={"candidates", "warnings"})
     candidates = service.list_candidates(run.id)
+    warnings = service.diagnose_import_warnings(run, candidates=candidates)
     return ExternalAnalysisRunResponse(
         **{**base, "created_at": _as_utc(run.created_at)},
         candidates=[
@@ -39,6 +40,7 @@ def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRun
             )
             for item in candidates
         ],
+        warnings=warnings,
     )
 
 
@@ -64,16 +66,13 @@ async def import_external_analysis(
             write_lock_tokens = [*payload.write_lock_tokens]
             if payload.write_lock_token:
                 write_lock_tokens.append(payload.write_lock_token)
-            service.auto_apply_non_dft_review_outputs(
+            service.apply_review_rules_for_run(
                 run.id,
                 reviewer=effective_reviewer,
-                write_lock_tokens=write_lock_tokens,
-            )
-            VerificationSessionService(session, settings).apply_import_rules_for_paper(
-                paper_id=payload.paper_id,
-                reviewer=effective_reviewer,
-                candidate_run_id=run.id,
-                write_lock_tokens=write_lock_tokens,
+                write_lock_tokens=write_lock_tokens or None,
+                write_lock_owner=effective_reviewer,
+                auto_lock_owner=effective_reviewer,
+                lock_meta_source="http_import_analysis",
             )
         session.commit()
         return _serialize_run(service, run)
@@ -159,6 +158,76 @@ async def materialize_external_analysis_run(
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/apply-review-rules")
+async def apply_review_rules_for_run(
+    run_id: UUID,
+    payload: ExternalAnalysisApplyReviewRulesRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Apply IDE-AI review rules to an existing external analysis run.
+
+    This is the follow-up entry point for runs that were imported with
+    ``auto_apply_review_rules=False``.  DFT ``object_review_audit`` candidates
+    that were left in the candidate pool can be materialized and settled
+    through this endpoint.  When the caller does not supply a write lock
+    token, the service auto-acquires a ``dft_results`` lock for the duration
+    of the apply step.
+    """
+    service = ExternalAnalysisService(session=session, settings=settings)
+    try:
+        run = service.get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        effective_reviewer = (
+            str(payload.reviewer or run.source_label or run.source or "ide_ai").strip() or "ide_ai"
+        )
+        write_lock_tokens = [*payload.write_lock_tokens]
+        if payload.write_lock_token:
+            write_lock_tokens.append(payload.write_lock_token)
+        auto_apply_summary = service.apply_review_rules_for_run(
+            run_id=run_id,
+            reviewer=effective_reviewer,
+            write_lock_tokens=write_lock_tokens or None,
+            write_lock_owner=effective_reviewer,
+            auto_lock_owner=effective_reviewer,
+            lock_meta_source="http_apply_review_rules",
+        )
+        session.commit()
+        candidates = service.list_candidates(run_id)
+        warnings = service.diagnose_import_warnings(
+            run,
+            candidates=candidates,
+            auto_apply_summary=auto_apply_summary,
+        )
+        return {
+            "run_id": str(run_id),
+            "reviewer": effective_reviewer,
+            "auto_apply_summary": auto_apply_summary,
+            "candidate_count": len(candidates),
+            "warnings": warnings,
+            "candidates": [
+                {
+                    "id": str(c.id),
+                    "type": c.candidate_type,
+                    "status": c.status,
+                    "target_type": (c.normalized_payload or {}).get("target_type"),
+                    "target_id": (c.normalized_payload or {}).get("target_id"),
+                    "field_name": (c.normalized_payload or {}).get("field_name"),
+                    "decision": (c.normalized_payload or {}).get("decision") or (c.normalized_payload or {}).get("verdict"),
+                    "materialized_target_type": c.materialized_target_type,
+                    "materialized_target_id": c.materialized_target_id,
+                }
+                for c in candidates
+            ],
+        }
+    except ValueError as exc:
+        session.rollback()
+        status_code = 409 if str(exc).startswith(("module_write_lock_required", "module_write_lock_conflict")) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.post("/papers/{paper_id}/internal-parse", response_model=InternalAIParseResponse)
