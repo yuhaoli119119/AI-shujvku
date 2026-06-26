@@ -651,11 +651,70 @@ function makeV3Manifest(task) {
   };
 }
 
+function makeV4Payload(task, readyOnly = true) {
+  if (task === 'li2s_barrier') {
+    return {
+      schema_version: 'project_library_ml_export_v4',
+      read_only: true,
+      auto_verification_applied: false,
+      status: 'ready',
+      manifest: {
+        schema_version: 'project_library_ml_export_v4',
+        dataset_version: 'project-library-ml-export-v4.0',
+        context_key: 'li_s_sac_dac',
+        library_name: 'Active Library',
+        task: 'li2s_barrier',
+        ready_only: readyOnly,
+        candidate_count: 3,
+        returned_count: readyOnly ? 1 : 3,
+        ml_ready_count: 1,
+        blocked_count: readyOnly ? 0 : 2,
+        blocker_counts: readyOnly ? {} : {
+          missing_reaction_step: 1,
+          energy_kind_task_mismatch: 1,
+        },
+        database_write_authority: 'user_submit_only',
+        ai_consensus_auto_adopt_allowed: false,
+      },
+      records: [],
+    };
+  }
+  return {
+    schema_version: 'project_library_ml_export_v4',
+    read_only: true,
+    auto_verification_applied: false,
+    status: 'not_ready',
+    manifest: {
+      schema_version: 'project_library_ml_export_v4',
+      dataset_version: 'project-library-ml-export-v4.0',
+      context_key: 'li_s_sac_dac',
+      library_name: 'Active Library',
+      task: task || 'adsorption_energy',
+      ready_only: readyOnly,
+      candidate_count: 2,
+      returned_count: readyOnly ? 0 : 2,
+      ml_ready_count: 0,
+      blocked_count: readyOnly ? 0 : 2,
+      blocker_counts: readyOnly ? {
+        missing_source_text: 2,
+      } : {
+        missing_source_text: 2,
+        generated_active_site_instance_key: 1,
+      },
+      database_write_authority: 'user_submit_only',
+      ai_consensus_auto_adopt_allowed: false,
+    },
+    records: [],
+  };
+}
+
 async function installMockApi(page) {
   let lastDatasetUrl = '';
   let lastV3ManifestUrl = '';
   let lastV3JsonUrl = '';
   let lastV3CsvUrl = '';
+  let lastV4JsonUrl = '';
+  let lastV4CsvUrl = '';
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.route(/\/api\/libraries$/, route => route.fulfill({
     status: 200,
@@ -687,6 +746,25 @@ async function installMockApi(page) {
       body: JSON.stringify({ metadata: makeV3Manifest(new URL(lastV3JsonUrl).searchParams.get('task')) || {}, records: [] }),
     });
   });
+  await page.route(/\/api\/dft\/project-library-ml-export-v4\.csv.*/, route => {
+    lastV4CsvUrl = route.request().url();
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/csv',
+      body: 'record_id,task\nv4-record-1,li2s_barrier\n',
+    });
+  });
+  await page.route(/\/api\/dft\/project-library-ml-export-v4\?.*/, route => {
+    lastV4JsonUrl = route.request().url();
+    const url = new URL(lastV4JsonUrl);
+    const task = url.searchParams.get('task') || 'adsorption_energy';
+    const readyOnly = url.searchParams.get('ready_only') !== 'false';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(makeV4Payload(task, readyOnly)),
+    });
+  });
   await page.route(/\/api\/papers\/export\/dft-dataset.*/, route => {
     lastDatasetUrl = route.request().url();
     return route.fulfill({
@@ -700,6 +778,8 @@ async function installMockApi(page) {
     getLastV3ManifestUrl: () => lastV3ManifestUrl,
     getLastV3JsonUrl: () => lastV3JsonUrl,
     getLastV3CsvUrl: () => lastV3CsvUrl,
+    getLastV4JsonUrl: () => lastV4JsonUrl,
+    getLastV4CsvUrl: () => lastV4CsvUrl,
   };
 }
 
@@ -757,6 +837,35 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=rds_gibbs_free_energy');
   });
 
+  test('renders v4 project-library manifest and blocked diagnostics scope', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+
+    await expect(page.locator('#v4PanelTitle')).toContainText('催化剂实例级 v4 导出入口');
+    await expect(page.locator('#v4SchemaValue')).toContainText('project_library_ml_export_v4');
+    await expect(page.locator('#v4TaskValue')).toContainText('吸附能任务');
+    await expect(page.locator('#v4CandidateCount')).toContainText('2');
+    await expect(page.locator('#v4ReadyCount')).toContainText('0');
+    await expect(page.locator('#v4StatusPanel')).toContainText('当前 v4 任务没有 ML-ready 记录');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('context_key=li_s_sac_dac');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=adsorption_energy');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=true');
+
+    await page.selectOption('#v4TaskSelect', 'li2s_barrier');
+    await expect(page.locator('#v4TaskValue')).toContainText('Li2S 能垒任务');
+    await expect(page.locator('#v4ReadyCount')).toContainText('1');
+    await expect(page.locator('#v4ReturnedCount')).toContainText('1');
+    await expect(page.locator('#v4StatusPanel')).toContainText('v4 manifest 已加载');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=li2s_barrier');
+
+    await page.selectOption('#v4ReadyOnlySelect', 'false');
+    await expect(page.locator('#v4ReturnedCount')).toContainText('3');
+    await expect(page.locator('#v4BlockedCount')).toContainText('2');
+    await expect(page.locator('#v4BlockerCounts')).toContainText('missing_reaction_step');
+    await expect(page.locator('#v4BlockerCounts')).toContainText('energy_kind_task_mismatch');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=false');
+  });
+
   test('supports blocker filtering and server-side year/library refresh params', async ({ page }) => {
     const mockState = await installMockApi(page);
     await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
@@ -808,6 +917,35 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('library_name=Archive+Library');
     await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_min=2021');
     await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_max=2025');
+  });
+
+  test('passes library and ready-only scope to v4 JSON and CSV downloads', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.addInitScript(() => {
+      window.URL.createObjectURL = () => 'blob:mock-download';
+      window.URL.revokeObjectURL = () => {};
+      HTMLAnchorElement.prototype.click = function noopClick() {};
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+    await page.selectOption('#v4TaskSelect', 'li2s_barrier');
+    await page.selectOption('#v4ReadyOnlySelect', 'false');
+    await page.selectOption('#libraryFilter', 'Archive Library');
+
+    await page.click('#v4JsonButton');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('/api/dft/project-library-ml-export-v4?');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('context_key=li_s_sac_dac');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=li2s_barrier');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=false');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('library_name=Archive+Library');
+
+    await page.selectOption('#v4ReadyOnlySelect', 'true');
+    await page.click('#v4CsvButton');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('/api/dft/project-library-ml-export-v4.csv?');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('context_key=li_s_sac_dac');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('task=li2s_barrier');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('ready_only=true');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('library_name=Archive+Library');
   });
 
   test('uses current DOM year and library filters for direct v3 refresh and downloads', async ({ page }) => {
@@ -910,6 +1048,9 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('#v3RefreshButton')).toBeDisabled();
     await expect(page.locator('#v3JsonButton')).toBeDisabled();
     await expect(page.locator('#v3CsvButton')).toBeDisabled();
+    await expect(page.locator('#v4RefreshButton')).toBeDisabled();
+    await expect(page.locator('#v4JsonButton')).toBeDisabled();
+    await expect(page.locator('#v4CsvButton')).toBeDisabled();
     await expect(page.locator('#toastContainer')).not.toContainText('读取失败：Exports are disabled by server policy');
   });
 });

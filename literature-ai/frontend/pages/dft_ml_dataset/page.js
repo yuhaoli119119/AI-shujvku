@@ -4,6 +4,8 @@
     const V3_API_URL = "/api/dft/ml-dataset-v3";
     const V3_MANIFEST_URL = "/api/dft/ml-dataset-v3/manifest";
     const V3_CSV_URL = "/api/dft/ml-dataset-v3.csv";
+    const V4_API_URL = "/api/dft/project-library-ml-export-v4";
+    const V4_CSV_URL = "/api/dft/project-library-ml-export-v4.csv";
     const DATASET_SCHEMA = "dft_results_ml_v2";
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     const EXPORTS_DISABLED_MESSAGE = "当前服务器策略已关闭导出接口；DFT ML 数据集页面暂不可用。如需恢复，请由 Owner 在设置中显式开启导出。";
@@ -16,6 +18,9 @@
         exportsPolicyDisabled: false,
         v3Manifest: null,
         v3Task: "adsorption_energy",
+        v4Manifest: null,
+        v4Task: "adsorption_energy",
+        v4ReadyOnly: true,
         serverFilters: {
             library_name: "",
             year_min: "",
@@ -62,6 +67,12 @@
         adsorption_energy: "吸附能任务",
         reaction_barrier: "反应能垒任务",
         rds_gibbs_free_energy: "RDS 自由能 / 决速步骤自由能任务",
+    };
+    const V4_TASK_LABELS = {
+        adsorption_energy: "吸附能任务",
+        li2s_reaction_energy: "Li2S 反应能任务",
+        li2s_barrier: "Li2S 能垒任务",
+        rds_srr_multitask: "RDS / SRR 多任务",
     };
 
     const SETTING_STATUS_LABELS = {
@@ -197,6 +208,11 @@
             "v3JsonButton",
             "v3CsvButton",
             "v3TaskSelect",
+            "v4RefreshButton",
+            "v4JsonButton",
+            "v4CsvButton",
+            "v4TaskSelect",
+            "v4ReadyOnlySelect",
         ].forEach(id => {
             const node = qs(id);
             if (node) {
@@ -210,12 +226,15 @@
         state.filteredRecords = [];
         state.filteredLmRecords = [];
         state.v3Manifest = null;
+        state.v4Manifest = null;
         renderSummary();
         renderTable();
         renderV3Manifest();
+        renderV4Manifest();
         qs("resultsMeta").textContent = "导出策略关闭中，当前页不加载 dft_results_ml_v2。";
         setStatus(EXPORTS_DISABLED_MESSAGE, "policy");
         setV3Status(EXPORTS_DISABLED_MESSAGE, "policy");
+        setV4Status(EXPORTS_DISABLED_MESSAGE, "policy");
     }
 
     function formatDateTime(value) {
@@ -563,6 +582,22 @@
         panel.className = "v3-status " + (type || "info");
     }
 
+    function setV4Status(message, type) {
+        const panel = qs("v4StatusPanel");
+        if (!panel) {
+            return;
+        }
+        if (!message) {
+            panel.hidden = true;
+            panel.textContent = "";
+            panel.className = "v3-status";
+            return;
+        }
+        panel.hidden = false;
+        panel.textContent = message;
+        panel.className = "v3-status " + (type || "info");
+    }
+
     function renderSummary() {
         const summary = buildSummary(state.payload);
         setCardValue("statTotalCandidates", summary.total_candidates);
@@ -686,6 +721,58 @@
         }
         setV3Status(
             "v3 manifest 已加载，当前任务可直接训练记录 " + formatNumber(tabularReadyCount) + " 条。",
+            "info"
+        );
+    }
+
+    function formatV4TaskLabel(value) {
+        const raw = normalizeText(value);
+        if (!raw) {
+            return "—";
+        }
+        const shortKey = raw.includes(":") ? raw.split(":").pop() : raw;
+        const label = V4_TASK_LABELS[shortKey];
+        return label ? (label + "（" + shortKey + "）") : raw;
+    }
+
+    function renderV4BlockerCounts(blockerCounts) {
+        const container = qs("v4BlockerCounts");
+        if (!container) {
+            return;
+        }
+        const entries = Object.entries(blockerCounts || {}).filter(([, value]) => value !== null && value !== undefined);
+        if (!entries.length) {
+            container.innerHTML = '<span class="pill">无</span>';
+            return;
+        }
+        container.innerHTML = entries.map(([key, value]) => (
+            '<span class="pill"><strong>' + escapeHtml(key) + ":</strong> " + escapeHtml(formatNumber(value)) + "</span>"
+        )).join("");
+    }
+
+    function renderV4Manifest() {
+        const manifest = state.v4Manifest || {};
+        setCardValue("v4SchemaValue", v3ManifestValue(manifest, ["schema", "schema_version"], "-"));
+        setCardValue("v4VersionValue", v3ManifestValue(manifest, ["version", "dataset_version"], "-"));
+        setCardValue("v4TaskValue", formatV4TaskLabel(v3ManifestValue(manifest, ["task"], state.v4Task)));
+        setCardValue("v4LibraryValue", v3ManifestValue(manifest, ["library_name"], state.serverFilters.library_name || "全部"));
+        setCardValue("v4CandidateCount", v3ManifestValue(manifest, ["candidate_count"], "-"));
+        setCardValue("v4ReturnedCount", v3ManifestValue(manifest, ["returned_count"], "-"));
+        setCardValue("v4ReadyCount", v3ManifestValue(manifest, ["ml_ready_count"], "-"));
+        setCardValue("v4BlockedCount", v3ManifestValue(manifest, ["blocked_count"], "-"));
+        renderV4BlockerCounts(manifest.blocker_counts);
+
+        if (!state.v4Manifest || state.exportsPolicyDisabled) {
+            return;
+        }
+        const returnedCount = Number(manifest.returned_count || 0);
+        const readyCount = Number(manifest.ml_ready_count || 0);
+        if (returnedCount === 0 || readyCount === 0) {
+            setV4Status("当前 v4 任务没有 ML-ready 记录；可切换到包含 blocked 诊断查看原因。", "empty");
+            return;
+        }
+        setV4Status(
+            "v4 manifest 已加载，当前任务 ML-ready 记录 " + formatNumber(readyCount) + " 条。",
             "info"
         );
     }
@@ -885,6 +972,12 @@
         state.v3Task = qs("v3TaskSelect").value;
     }
 
+    function readV4RequestStateFromDom() {
+        readServerFiltersFromDom();
+        state.v4Task = qs("v4TaskSelect").value;
+        state.v4ReadyOnly = qs("v4ReadyOnlySelect").value !== "false";
+    }
+
     function renderResultsMeta() {
         const counts = summarizeVisibleCounts(state.filteredRecords, state.filteredLmRecords);
         qs("resultsMeta").textContent =
@@ -963,6 +1056,21 @@
         return baseUrl + "?" + buildV3Params(options).toString();
     }
 
+    function buildV4Params(options) {
+        const params = new URLSearchParams();
+        params.set("context_key", "li_s_sac_dac");
+        params.set("task", state.v4Task);
+        params.set("ready_only", options && options.readyOnly !== undefined ? String(!!options.readyOnly) : String(!!state.v4ReadyOnly));
+        if (state.serverFilters.library_name) {
+            params.set("library_name", state.serverFilters.library_name);
+        }
+        return params;
+    }
+
+    function buildV4Url(baseUrl, options) {
+        return baseUrl + "?" + buildV4Params(options).toString();
+    }
+
     async function refreshV3Manifest() {
         if (state.exportsPolicyDisabled) {
             renderV3Manifest();
@@ -987,6 +1095,30 @@
         }
     }
 
+    async function refreshV4Manifest() {
+        if (state.exportsPolicyDisabled) {
+            renderV4Manifest();
+            return;
+        }
+        readV4RequestStateFromDom();
+        setV4Status("正在读取 Li-S SAC/DAC v4 manifest...", "loading");
+        try {
+            const payload = await fetchJSON(buildV4Url(V4_API_URL, { readyOnly: state.v4ReadyOnly }));
+            setExportsPolicyDisabled(false);
+            state.v4Manifest = payload && payload.manifest ? payload.manifest : {};
+            renderV4Manifest();
+        } catch (error) {
+            if (isExportsDisabledError(error)) {
+                setExportsPolicyDisabled(true);
+                renderPolicyDisabledState();
+                return;
+            }
+            state.v4Manifest = null;
+            renderV4Manifest();
+            setV4Status("读取 Li-S SAC/DAC v4 manifest 失败：" + error.message, "error");
+        }
+    }
+
     async function refreshDataset() {
         if (state.exportsPolicyDisabled) {
             renderPolicyDisabledState();
@@ -1005,6 +1137,7 @@
             renderFilterOptions();
             applyClientFilters();
             await refreshV3Manifest();
+            await refreshV4Manifest();
             setStatus(
                 "已实时加载 " + payload.records.length + " 条数值记录与 " + payload.lm_records.length +
                 " 条 LM 辅助记录；推荐训练 setting 固定为 linked_dft_setting。",
@@ -1020,9 +1153,11 @@
             state.filteredRecords = [];
             state.filteredLmRecords = [];
             state.v3Manifest = null;
+            state.v4Manifest = null;
             renderSummary();
             renderTable();
             renderV3Manifest();
+            renderV4Manifest();
             qs("resultsMeta").textContent = "加载失败。";
             setStatus("读取 DFT ML 数据集失败：" + error.message, "error");
             showToast("读取失败：" + error.message, "error");
@@ -1135,6 +1270,68 @@
         }
     }
 
+    async function exportV4Json() {
+        if (state.exportsPolicyDisabled) {
+            showToast("当前服务器策略已关闭导出功能。", "error");
+            return;
+        }
+        readV4RequestStateFromDom();
+        try {
+            const payload = await fetchJSON(buildV4Url(V4_API_URL, { readyOnly: state.v4ReadyOnly }));
+            const task = state.v4Task;
+            const scope = state.v4ReadyOnly ? "ready" : "diagnostic";
+            downloadText("project_library_ml_export_v4." + task + "." + scope + ".json", JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+            state.v4Manifest = payload && payload.manifest ? payload.manifest : {};
+            renderV4Manifest();
+            showToast("已下载 Li-S SAC/DAC v4 JSON。");
+        } catch (error) {
+            if (isExportsDisabledError(error)) {
+                setExportsPolicyDisabled(true);
+                renderPolicyDisabledState();
+                return;
+            }
+            setV4Status("下载 Li-S SAC/DAC v4 JSON 失败：" + error.message, "error");
+        }
+    }
+
+    async function exportV4Csv() {
+        if (state.exportsPolicyDisabled) {
+            showToast("当前服务器策略已关闭导出功能。", "error");
+            return;
+        }
+        readV4RequestStateFromDom();
+        const url = buildV4Url(V4_CSV_URL, { readyOnly: state.v4ReadyOnly });
+        const requestOptions = { headers: {} };
+        const token = readSettingsToken();
+        if (token) {
+            requestOptions.headers["X-Settings-Token"] = token;
+        }
+        try {
+            const response = await fetch(url, requestOptions);
+            const text = await response.text();
+            if (!response.ok) {
+                let detail = text || ("HTTP " + response.status);
+                try {
+                    const data = text ? JSON.parse(text) : null;
+                    detail = data && data.detail ? data.detail : detail;
+                } catch (_) {
+                    // Keep the raw server response for non-JSON CSV errors.
+                }
+                throw new Error(detail);
+            }
+            const scope = state.v4ReadyOnly ? "ready" : "diagnostic";
+            downloadText("project_library_ml_export_v4." + state.v4Task + "." + scope + ".csv", text, "text/csv;charset=utf-8");
+            showToast("已下载 Li-S SAC/DAC v4 CSV。");
+        } catch (error) {
+            if (isExportsDisabledError(error)) {
+                setExportsPolicyDisabled(true);
+                renderPolicyDisabledState();
+                return;
+            }
+            setV4Status("下载 Li-S SAC/DAC v4 CSV 失败：" + error.message, "error");
+        }
+    }
+
     function bindEvents() {
         qs("refreshButton").addEventListener("click", refreshDataset);
         qs("applyServerFiltersButton").addEventListener("click", refreshDataset);
@@ -1145,6 +1342,11 @@
         qs("v3JsonButton").addEventListener("click", exportV3Json);
         qs("v3CsvButton").addEventListener("click", exportV3Csv);
         qs("v3TaskSelect").addEventListener("change", refreshV3Manifest);
+        qs("v4RefreshButton").addEventListener("click", refreshV4Manifest);
+        qs("v4JsonButton").addEventListener("click", exportV4Json);
+        qs("v4CsvButton").addEventListener("click", exportV4Csv);
+        qs("v4TaskSelect").addEventListener("change", refreshV4Manifest);
+        qs("v4ReadyOnlySelect").addEventListener("change", refreshV4Manifest);
 
         [
             "readinessFilter",

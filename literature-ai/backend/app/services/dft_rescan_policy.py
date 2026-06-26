@@ -22,9 +22,56 @@ EXCLUDED_NUMERIC_SIGNAL_REASONS = {
     "unreadable_image_value",
 }
 
+DFT_METHOD_ONLY_REACTION_STEP_TOKENS = {
+    "bj",
+    "b3lyp",
+    "blyp",
+    "calculation",
+    "calculations",
+    "d2",
+    "d3",
+    "d4",
+    "dispersion",
+    "dft",
+    "dftd",
+    "functional",
+    "gga",
+    "grimme",
+    "hse06",
+    "lda",
+    "method",
+    "optb86b",
+    "optb88",
+    "optpbe",
+    "paw",
+    "pbe",
+    "pbe0",
+    "pbesol",
+    "pw91",
+    "revpbe",
+    "rpbe",
+    "u",
+    "vasp",
+    "vdw",
+}
+
 
 def _text(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def is_dft_method_only_reaction_step(value: Any) -> bool:
+    text = _text(value)
+    if not text:
+        return False
+    tokens = re.findall(r"[a-z0-9]+", text)
+    return bool(tokens) and all(token in DFT_METHOD_ONLY_REACTION_STEP_TOKENS for token in tokens)
+
+
+def normalize_dft_reaction_step_for_identity(value: Any) -> str:
+    if is_dft_method_only_reaction_step(value):
+        return ""
+    return _text(value)
 
 
 def normalize_source_document_type(value: Any) -> str:
@@ -119,7 +166,9 @@ def build_dft_dedupe_signature(payload: dict[str, Any]) -> str:
         "property_type": _text(
             _first_payload(payload, corrected, keys=("normalized_property_type", "property_type", "energy_type"))
         ),
-        "reaction_step": _text(_first_payload(payload, corrected, keys=("normalized_reaction_step", "reaction_step"))),
+        "reaction_step": normalize_dft_reaction_step_for_identity(
+            _first_payload(payload, corrected, keys=("normalized_reaction_step", "reaction_step"))
+        ),
         "value": normalize_numeric_value(_first_payload(payload, corrected, keys=("normalized_value", "value"))),
         "unit": normalize_unit(_first_payload(payload, corrected, keys=("normalized_unit", "unit"))),
     }

@@ -225,6 +225,84 @@
             </div>
         </section>
 
+        <section class="v3-card" aria-labelledby="v4PanelTitle">
+            <div class="v3-header">
+                <div>
+                    <p class="eyebrow">v4 Li-S SAC/DAC Project Library</p>
+                    <h2 id="v4PanelTitle">催化剂实例级 v4 导出入口</h2>
+                    <p>
+                        基于 <code>project_library_ml_export_v4</code>；只读导出，数据库写入仍必须走用户提交。
+                    </p>
+                </div>
+                <div class="v3-controls">
+                    <label class="field">
+                        <span>训练任务</span>
+                        <select id="v4TaskSelect">
+                            <option value="adsorption_energy">吸附能（adsorption_energy）</option>
+                            <option value="li2s_reaction_energy">Li2S 反应能（li2s_reaction_energy）</option>
+                            <option value="li2s_barrier">Li2S 能垒（li2s_barrier）</option>
+                            <option value="rds_srr_multitask">RDS / SRR 多任务（rds_srr_multitask）</option>
+                        </select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>导出范围</span>
+                        <select id="v4ReadyOnlySelect">
+                            <option value="true">只下载 ML-ready</option>
+                            <option value="false">包含 blocked 诊断</option>
+                        </select>
+                    </label>
+                    <div class="v3-actions">
+                        <button id="v4RefreshButton" type="button" class="btn btn-secondary">刷新 v4 manifest</button>
+                        <button id="v4JsonButton" type="button" class="btn btn-ghost">下载 v4 JSON</button>
+                        <button id="v4CsvButton" type="button" class="btn btn-ghost">下载 v4 CSV</button>
+                    </div>
+                </div>
+            </div>
+            <div id="v4StatusPanel" class="v3-status" hidden></div>
+            <div class="v3-meta-grid">
+                <div class="v3-meta-item">
+                    <span>schema</span>
+                    <strong id="v4SchemaValue">-</strong>
+                </div>
+                <div class="v3-meta-item">
+                    <span>version</span>
+                    <strong id="v4VersionValue">-</strong>
+                </div>
+                <div class="v3-meta-item">
+                    <span>task</span>
+                    <strong id="v4TaskValue">-</strong>
+                </div>
+                <div class="v3-meta-item">
+                    <span>library</span>
+                    <strong id="v4LibraryValue">-</strong>
+                </div>
+            </div>
+            <div class="v3-count-grid">
+                <article class="stat-card">
+                    <div class="stat-label">candidate_count</div>
+                    <div id="v4CandidateCount" class="stat-value">-</div>
+                </article>
+                <article class="stat-card success">
+                    <div class="stat-label">returned_count</div>
+                    <div id="v4ReturnedCount" class="stat-value">-</div>
+                </article>
+                <article class="stat-card success">
+                    <div class="stat-label">ml_ready_count</div>
+                    <div id="v4ReadyCount" class="stat-value">-</div>
+                </article>
+                <article class="stat-card danger">
+                    <div class="stat-label">blocked_count</div>
+                    <div id="v4BlockedCount" class="stat-value">-</div>
+                </article>
+            </div>
+            <div class="v3-exclusions">
+                <h3>blocker_counts</h3>
+                <div id="v4BlockerCounts" class="pill-list">
+                    <span class="pill">等待加载</span>
+                </div>
+            </div>
+        </section>
+
         <section class="table-card">
             <div class="table-card-header">
                 <div>

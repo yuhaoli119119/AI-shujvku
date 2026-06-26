@@ -256,6 +256,10 @@ body {
     min-width: 220px;
 }
 
+.v3-controls .compact-field {
+    min-width: 170px;
+}
+
 .v3-actions {
     display: flex;
     gap: 8px;
