@@ -192,6 +192,7 @@ class ProjectLibraryMLExportV4Payload(BaseModel):
     status: Literal["ready", "not_ready"]
     manifest: dict[str, Any]
     records: list[dict[str, Any]] = Field(default_factory=list)
+    sample_records: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProjectLibraryUserSubmitRequest(BaseModel):

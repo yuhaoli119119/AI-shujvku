@@ -565,6 +565,196 @@ def _export_record_for_task(
     }
 
 
+def _put_wide_value(target: dict[str, Any], key: str, value: Any) -> None:
+    if value in (None, "", []):
+        return
+    if key not in target:
+        target[key] = value
+        return
+    existing = target[key]
+    if isinstance(existing, list):
+        if value not in existing:
+            existing.append(value)
+        return
+    if existing != value:
+        target[key] = [existing, value]
+
+
+def _wide_property_key(prop: dict[str, Any]) -> str:
+    canonical = prop["canonical_property_type"]
+    subtype = prop["property_subtype"]
+    unit = _token(prop.get("unit")) or "value"
+    if canonical == "adsorption_energy":
+        adsorbate = _token(prop.get("canonical_adsorbate") or prop.get("adsorbate")) or "unknown_adsorbate"
+        return f"adsorption_energy_{adsorbate}_{unit}"
+    if subtype in _LI2S_TASK_SUBTYPES:
+        return f"{subtype}_{unit}"
+    if canonical in {"reaction_barrier", "reaction_energy", "gibbs_free_energy_change"}:
+        step = _token(prop.get("reaction_step")) or "unknown_step"
+        return f"{canonical}_{step}_{unit}"
+    if canonical in _ELECTRONIC_PROPERTIES:
+        adsorbate = _token(prop.get("canonical_adsorbate") or prop.get("adsorbate"))
+        suffix = f"_{adsorbate}" if adsorbate else ""
+        return f"{canonical}{suffix}_{unit}"
+    if subtype in _STRUCTURE_PROPERTIES or canonical in _STRUCTURE_PROPERTIES:
+        return f"{subtype or canonical}_{unit}"
+    return f"{canonical or subtype or 'property'}_{unit}"
+
+
+def _compact_property(prop: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": prop["record_id"],
+        "feature_scope": _feature_scope_for_property(prop),
+        "property_type": prop["property_type"],
+        "canonical_property_type": prop["canonical_property_type"],
+        "property_subtype": prop["property_subtype"],
+        "energy_kind": prop["energy_kind"],
+        "adsorbate": prop["canonical_adsorbate"] or prop["adsorbate"],
+        "reaction_step": prop["reaction_step"],
+        "reaction_type": prop["reaction_type"],
+        "value": prop["value"],
+        "unit": prop["unit"],
+        "source_text": prop["source_text"],
+        "source_location": prop["source_location"],
+        "confidence_level": prop["confidence_level"],
+        "ml_ready": prop["ml_ready"],
+        "blockers": prop["blockers"],
+        "manual_verification_required": prop["manual_verification_required"],
+    }
+
+
+def _instance_properties(instance: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        prop
+        for group_name in (
+            "adsorbate_properties",
+            "reaction_step_properties",
+            "electronic_properties",
+            "structure_properties",
+            "other_properties",
+        )
+        for prop in instance["properties"][group_name]
+    ]
+
+
+def _task_records_for_instance(
+    *,
+    bundle: dict[str, Any],
+    catalyst: dict[str, Any],
+    instance: dict[str, Any],
+    task: str,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for group_name in ("adsorbate_properties", "reaction_step_properties"):
+        for prop in instance["properties"][group_name]:
+            matches_task, _ = _task_match_reasons(prop, task)
+            if not matches_task:
+                continue
+            records.append(
+                _export_record_for_task(
+                    bundle=bundle,
+                    catalyst=catalyst,
+                    instance=instance,
+                    prop=prop,
+                    task=task,
+                )
+            )
+    return records
+
+
+def _export_sample_record_for_task(
+    *,
+    bundle: dict[str, Any],
+    catalyst: dict[str, Any],
+    instance: dict[str, Any],
+    task_records: list[dict[str, Any]],
+    task: str,
+) -> dict[str, Any]:
+    descriptor_payload = build_metal_descriptor_payload(catalyst["metal_centers"])
+    all_props = _instance_properties(instance)
+    property_groups = {
+        group_name: [_compact_property(prop) for prop in instance["properties"][group_name]]
+        for group_name in (
+            "adsorbate_properties",
+            "reaction_step_properties",
+            "electronic_properties",
+            "structure_properties",
+            "other_properties",
+        )
+    }
+    wide_properties: dict[str, Any] = {}
+    for prop in all_props:
+        _put_wide_value(wide_properties, _wide_property_key(prop), prop["value"])
+
+    task_labels: list[dict[str, Any]] = []
+    task_wide_labels: dict[str, Any] = {}
+    for record in task_records:
+        task_labels.append(
+            {
+                "record_id": record["record_id"],
+                "label_name": record["label_name"],
+                "label_value": record["label_value"],
+                "label_unit": record["label_unit"],
+                "label_energy_kind": record["label_energy_kind"],
+                "label_property_subtype": record["label_property_subtype"],
+                "adsorbate": record["adsorbate"],
+                "reaction_step": record["reaction_step"],
+                "ml_ready": record["ml_ready"],
+                "blockers": record["blockers"],
+            }
+        )
+        _put_wide_value(task_wide_labels, record["label_name"], record["label_value"])
+
+    blockers = sorted({blocker for record in task_records for blocker in record["blockers"]})
+    ml_ready = bool(task_records) and not blockers
+    first_record = task_records[0]
+    return {
+        "sample_id": instance["active_site_instance_key"],
+        "sample_unit": "active_site_instance",
+        "paper_id": bundle["paper_id"],
+        "title": bundle["paper_title"],
+        "task": _canonical_task(task),
+        "catalyst_sample_id": catalyst["catalyst_sample_id"],
+        "catalyst_name": catalyst["name"],
+        "catalyst_type": catalyst["catalyst_type"],
+        "metal_centers": catalyst["metal_centers"],
+        "coordination": catalyst["coordination"],
+        "support_raw": first_record.get("support_raw", catalyst["support_raw"]),
+        "support_normalized": first_record.get("support_normalized", catalyst["support_normalized"]),
+        "support_confidence": first_record.get("support_confidence", catalyst["support_confidence"]),
+        **descriptor_payload,
+        "active_site_instance_key": instance["active_site_instance_key"],
+        "active_site_ref": instance["active_site_ref"],
+        "dft_setting_ref": instance["dft_setting_ref"],
+        "binding_source": instance["binding_source"],
+        "task_record_ids": [record["record_id"] for record in task_records],
+        "source_record_ids": [prop["record_id"] for prop in all_props],
+        "task_labels": task_labels,
+        "task_wide_labels": task_wide_labels,
+        "wide_properties": dict(sorted(wide_properties.items())),
+        "property_group_counts": {
+            group_name: len(values)
+            for group_name, values in property_groups.items()
+        },
+        "property_groups": property_groups,
+        "metal_metal_distance_A": first_record.get("metal_metal_distance_A"),
+        "coordination_environment": first_record.get("coordination_environment"),
+        "metal_ligand_distance_A": first_record.get("metal_ligand_distance_A"),
+        "adsorption_site": first_record.get("adsorption_site"),
+        "adsorption_mode": first_record.get("adsorption_mode"),
+        "structure_field_sources": first_record.get("structure_field_sources", {}),
+        "structure_blockers": first_record.get("structure_blockers", []),
+        "descriptor_blockers": first_record.get("descriptor_blockers", []),
+        "ml_ready": ml_ready,
+        "blockers": blockers,
+        "manual_verification_required": any(record["manual_verification_required"] for record in task_records),
+        "database_write_authority": "user_submit_only",
+        "ai_consensus_auto_adopt_allowed": False,
+        "element_descriptor_source": ELEMENT_DESCRIPTOR_SOURCE,
+        "element_descriptor_source_version": ELEMENT_DESCRIPTOR_SOURCE_VERSION,
+    }
+
+
 class ProjectLibraryBundleService:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -746,31 +936,47 @@ class ProjectLibraryBundleService:
             paper_id=paper_id,
         )
         records = []
+        sample_records = []
         blocker_counts = Counter()
+        sample_blocker_counts = Counter()
+        candidate_sample_count = 0
         for bundle in bundle_payload["bundles"]:
             catalyst = bundle["catalyst_sample"]
             for instance in bundle["active_site_instances"]:
-                for group_name in ("adsorbate_properties", "reaction_step_properties"):
-                    for prop in instance["properties"][group_name]:
-                        matches_task, _ = _task_match_reasons(prop, canonical_task)
-                        if not matches_task:
-                            continue
-                        record = _export_record_for_task(
-                            bundle=bundle,
-                            catalyst=catalyst,
-                            instance=instance,
-                            prop=prop,
-                            task=canonical_task,
-                        )
-                        if ready_only and not record["ml_ready"]:
-                            for blocker in record["blockers"]:
-                                blocker_counts[blocker] += 1
-                            continue
-                        records.append(record)
+                instance_task_records = _task_records_for_instance(
+                    bundle=bundle,
+                    catalyst=catalyst,
+                    instance=instance,
+                    task=canonical_task,
+                )
+                if not instance_task_records:
+                    continue
+                candidate_sample_count += 1
+                sample_record = _export_sample_record_for_task(
+                    bundle=bundle,
+                    catalyst=catalyst,
+                    instance=instance,
+                    task_records=instance_task_records,
+                    task=canonical_task,
+                )
+                if not ready_only or sample_record["ml_ready"]:
+                    sample_records.append(sample_record)
+                for blocker in sample_record["blockers"]:
+                    sample_blocker_counts[blocker] += 1
+
+                for record in instance_task_records:
+                    if ready_only and not record["ml_ready"]:
                         for blocker in record["blockers"]:
                             blocker_counts[blocker] += 1
+                        continue
+                    records.append(record)
+                    for blocker in record["blockers"]:
+                        blocker_counts[blocker] += 1
 
         records.sort(key=lambda item: (item["paper_id"], item["catalyst_sample_id"], item["record_id"]))
+        sample_records.sort(
+            key=lambda item: (item["paper_id"], item["catalyst_sample_id"], item["active_site_instance_key"])
+        )
         manifest = {
             "schema_version": PROJECT_LIBRARY_ML_EXPORT_V4_SCHEMA_VERSION,
             "dataset_version": "project-library-ml-export-v4.0",
@@ -790,10 +996,17 @@ class ProjectLibraryBundleService:
                 for prop in instance["properties"][group]
                 if _task_match_reasons(prop, canonical_task)[0]
             ),
+            "candidate_sample_count": candidate_sample_count,
             "returned_count": len(records),
+            "returned_sample_count": len(sample_records),
             "ml_ready_count": sum(1 for record in records if record["ml_ready"]),
+            "sample_ml_ready_count": sum(1 for record in sample_records if record["ml_ready"]),
             "blocked_count": sum(1 for record in records if not record["ml_ready"]),
+            "sample_blocked_count": sum(1 for record in sample_records if not record["ml_ready"]),
             "blocker_counts": dict(sorted(blocker_counts.items())),
+            "sample_blocker_counts": dict(sorted(sample_blocker_counts.items())),
+            "sample_unit": "active_site_instance",
+            "sample_records_contract": "one row per CatalystSample/ActiveSiteInstance with grouped task labels and same-instance properties",
             "database_write_authority": "user_submit_only",
             "ai_consensus_auto_adopt_allowed": False,
             "element_descriptor_source": ELEMENT_DESCRIPTOR_SOURCE,
@@ -806,6 +1019,7 @@ class ProjectLibraryBundleService:
             "status": "ready" if records else "not_ready",
             "manifest": manifest,
             "records": records,
+            "sample_records": sample_records,
         }
 
     def build_ml_export_v4_csv(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:

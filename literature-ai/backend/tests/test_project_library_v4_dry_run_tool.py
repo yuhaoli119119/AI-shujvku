@@ -147,8 +147,47 @@ def test_dry_run_build_api_report_is_read_only_and_uses_server_api(monkeypatch):
                 "task": query["task"][0],
                 "ready_only": ready_only,
                 "record_count": len(records),
+                "returned_sample_count": 1 if ready_only else 2,
             },
             "records": records,
+            "sample_records": [
+                {
+                    "sample_id": "sample-1",
+                    "paper_id": "paper-1",
+                    "task": query["task"][0],
+                    "catalyst_sample_id": "cat-1",
+                    "catalyst_name": "Fe-N-C",
+                    "active_site_instance_key": "site-1",
+                    "task_record_ids": ["ready-1"],
+                    "source_record_ids": ["ready-1"],
+                    "task_wide_labels": {"adsorption_energy_eV": -1.2},
+                    "wide_properties": {"adsorption_energy_li2s_ev": -1.2},
+                    "property_group_counts": {"adsorbate_properties": 1},
+                    "ml_ready": True,
+                    "blockers": [],
+                },
+                *(
+                    []
+                    if ready_only
+                    else [
+                        {
+                            "sample_id": "sample-2",
+                            "paper_id": "paper-2",
+                            "task": query["task"][0],
+                            "catalyst_sample_id": "cat-2",
+                            "catalyst_name": "Co-N-C",
+                            "active_site_instance_key": "site-2",
+                            "task_record_ids": ["blocked-1"],
+                            "source_record_ids": ["blocked-1"],
+                            "task_wide_labels": {},
+                            "wide_properties": {},
+                            "property_group_counts": {"adsorbate_properties": 1},
+                            "ml_ready": False,
+                            "blockers": ["missing_descriptor"],
+                        }
+                    ]
+                ),
+            ],
         }
 
     monkeypatch.setattr(tool, "_fetch_json", fake_fetch_json)
@@ -173,6 +212,14 @@ def test_dry_run_build_api_report_is_read_only_and_uses_server_api(monkeypatch):
     assert report["tasks"][0]["ready_record_count"] == 1
     assert report["tasks"][0]["diagnostic_record_count"] == 2
     assert report["tasks"][0]["blocked_record_count"] == 1
+    assert report["tasks"][0]["ready_sample_record_count"] == 1
+    assert report["tasks"][0]["diagnostic_sample_record_count"] == 2
+    assert report["tasks"][0]["blocked_sample_record_count"] == 1
     assert report["tasks"][0]["blocker_counts_from_records"] == {"missing_descriptor": 1}
+    assert report["tasks"][0]["sample_blocker_counts_from_records"] == {"missing_descriptor": 1}
+    assert report["tasks"][0]["ready_sample_examples"][0]["sample_id"] == "sample-1"
+    assert report["tasks"][0]["ready_sample_examples"][0]["wide_properties"] == {
+        "adsorption_energy_li2s_ev": -1.2
+    }
     assert len(requested_urls) == 2
     assert all(parse_qs(urlparse(url).query)["library_name"] == ["锂硫双原子"] for url in requested_urls)

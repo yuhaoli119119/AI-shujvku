@@ -159,6 +159,25 @@ def _record_example(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sample_example(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sample_id": record.get("sample_id"),
+        "paper_id": record.get("paper_id"),
+        "title": record.get("title"),
+        "task": record.get("task"),
+        "catalyst_sample_id": record.get("catalyst_sample_id"),
+        "catalyst_name": record.get("catalyst_name"),
+        "active_site_instance_key": record.get("active_site_instance_key"),
+        "task_record_ids": record.get("task_record_ids") or [],
+        "source_record_ids": record.get("source_record_ids") or [],
+        "task_wide_labels": record.get("task_wide_labels") or {},
+        "wide_properties": record.get("wide_properties") or {},
+        "property_group_counts": record.get("property_group_counts") or {},
+        "ml_ready": record.get("ml_ready"),
+        "blockers": record.get("blockers") or [],
+    }
+
+
 def _task_report(
     service: ProjectLibraryBundleService,
     *,
@@ -180,14 +199,20 @@ def _task_report(
         ready_only=False,
     )
     diagnostic_records = diagnostic_payload.get("records") or []
+    ready_sample_records = ready_payload.get("sample_records") or []
+    diagnostic_sample_records = diagnostic_payload.get("sample_records") or []
     blocked_records = [record for record in diagnostic_records if not record.get("ml_ready")]
+    blocked_sample_records = [record for record in diagnostic_sample_records if not record.get("ml_ready")]
     blocker_counts = Counter()
+    sample_blocker_counts = Counter()
     descriptor_blocker_counts = Counter()
     structure_blocker_counts = Counter()
     for record in diagnostic_records:
         blocker_counts.update(record.get("blockers") or [])
         descriptor_blocker_counts.update(record.get("descriptor_blockers") or [])
         structure_blocker_counts.update(record.get("structure_blockers") or [])
+    for record in diagnostic_sample_records:
+        sample_blocker_counts.update(record.get("blockers") or [])
 
     return {
         "task": task,
@@ -196,11 +221,17 @@ def _task_report(
         "ready_record_count": len(ready_payload.get("records") or []),
         "diagnostic_record_count": len(diagnostic_records),
         "blocked_record_count": len(blocked_records),
+        "ready_sample_record_count": len(ready_sample_records),
+        "diagnostic_sample_record_count": len(diagnostic_sample_records),
+        "blocked_sample_record_count": len(blocked_sample_records),
         "blocker_counts_from_records": dict(sorted(blocker_counts.items())),
+        "sample_blocker_counts_from_records": dict(sorted(sample_blocker_counts.items())),
         "descriptor_blocker_counts_from_records": dict(sorted(descriptor_blocker_counts.items())),
         "structure_blocker_counts_from_records": dict(sorted(structure_blocker_counts.items())),
         "blocked_examples": [_record_example(record) for record in blocked_records[:example_limit]],
         "ready_examples": [_record_example(record) for record in (ready_payload.get("records") or [])[:example_limit]],
+        "blocked_sample_examples": [_sample_example(record) for record in blocked_sample_records[:example_limit]],
+        "ready_sample_examples": [_sample_example(record) for record in ready_sample_records[:example_limit]],
     }
 
 
@@ -234,14 +265,20 @@ def _task_report_from_api(
         timeout=connect_timeout,
     )
     diagnostic_records = diagnostic_payload.get("records") or []
+    ready_sample_records = ready_payload.get("sample_records") or []
+    diagnostic_sample_records = diagnostic_payload.get("sample_records") or []
     blocked_records = [record for record in diagnostic_records if not record.get("ml_ready")]
+    blocked_sample_records = [record for record in diagnostic_sample_records if not record.get("ml_ready")]
     blocker_counts = Counter()
+    sample_blocker_counts = Counter()
     descriptor_blocker_counts = Counter()
     structure_blocker_counts = Counter()
     for record in diagnostic_records:
         blocker_counts.update(record.get("blockers") or [])
         descriptor_blocker_counts.update(record.get("descriptor_blockers") or [])
         structure_blocker_counts.update(record.get("structure_blockers") or [])
+    for record in diagnostic_sample_records:
+        sample_blocker_counts.update(record.get("blockers") or [])
 
     return {
         "task": task,
@@ -250,11 +287,17 @@ def _task_report_from_api(
         "ready_record_count": len(ready_payload.get("records") or []),
         "diagnostic_record_count": len(diagnostic_records),
         "blocked_record_count": len(blocked_records),
+        "ready_sample_record_count": len(ready_sample_records),
+        "diagnostic_sample_record_count": len(diagnostic_sample_records),
+        "blocked_sample_record_count": len(blocked_sample_records),
         "blocker_counts_from_records": dict(sorted(blocker_counts.items())),
+        "sample_blocker_counts_from_records": dict(sorted(sample_blocker_counts.items())),
         "descriptor_blocker_counts_from_records": dict(sorted(descriptor_blocker_counts.items())),
         "structure_blocker_counts_from_records": dict(sorted(structure_blocker_counts.items())),
         "blocked_examples": [_record_example(record) for record in blocked_records[:example_limit]],
         "ready_examples": [_record_example(record) for record in (ready_payload.get("records") or [])[:example_limit]],
+        "blocked_sample_examples": [_sample_example(record) for record in blocked_sample_records[:example_limit]],
+        "ready_sample_examples": [_sample_example(record) for record in ready_sample_records[:example_limit]],
     }
 
 

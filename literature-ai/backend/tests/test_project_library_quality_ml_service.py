@@ -380,6 +380,9 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
     ]
     assert export_payload["manifest"]["task"] == "li2s_barrier"
     assert export_payload["manifest"]["ai_consensus_auto_adopt_allowed"] is False
+    assert export_payload["manifest"]["sample_unit"] == "active_site_instance"
+    assert export_payload["manifest"]["candidate_sample_count"] == 1
+    assert export_payload["manifest"]["returned_sample_count"] == 1
     assert [row["record_id"] for row in export_payload["records"]] == [barrier_id]
     record = export_payload["records"][0]
     assert record["task"] == "li2s_barrier"
@@ -396,6 +399,34 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
     assert record["support_normalized"] == "N-C"
     assert record["database_write_authority"] == "user_submit_only"
     assert record["ai_consensus_auto_adopt_allowed"] is False
+    sample_record = export_payload["sample_records"][0]
+    assert sample_record["sample_unit"] == "active_site_instance"
+    assert sample_record["sample_id"] == active_site_key
+    assert sample_record["active_site_instance_key"] == active_site_key
+    assert sample_record["task"] == "li2s_barrier"
+    assert sample_record["ml_ready"] is True
+    assert sample_record["task_record_ids"] == [barrier_id]
+    assert set(sample_record["source_record_ids"]) == {adsorption_id, barrier_id}
+    assert sample_record["wide_properties"]["adsorption_energy_li2s_ev"] == -1.10
+    assert sample_record["wide_properties"]["li2s_decomposition_barrier_ev"] == 0.65
+    assert sample_record["property_group_counts"]["adsorbate_properties"] == 1
+    assert sample_record["property_group_counts"]["reaction_step_properties"] == 1
+    assert sample_record["property_groups"]["adsorbate_properties"][0]["record_id"] == adsorption_id
+    assert sample_record["property_groups"]["reaction_step_properties"][0]["record_id"] == barrier_id
+    assert sample_record["task_labels"] == [
+        {
+            "record_id": barrier_id,
+            "label_name": "li2s_barrier_eV",
+            "label_value": 0.65,
+            "label_unit": "eV",
+            "label_energy_kind": "activation_barrier",
+            "label_property_subtype": "li2s_decomposition_barrier",
+            "adsorbate": "Li2S",
+            "reaction_step": "Li2S decomposition",
+            "ml_ready": True,
+            "blockers": [],
+        }
+    ]
 
     assert csv_response.status_code == 200
     rows = list(csv.DictReader(io.StringIO(csv_response.text)))
