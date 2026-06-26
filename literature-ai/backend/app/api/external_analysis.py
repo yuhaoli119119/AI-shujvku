@@ -29,8 +29,9 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRunResponse:
-    base = ExternalAnalysisRunResponse.model_validate(run).model_dump(exclude={"candidates"})
+    base = ExternalAnalysisRunResponse.model_validate(run).model_dump(exclude={"candidates", "warnings"})
     candidates = service.list_candidates(run.id)
+    warnings = service.diagnose_import_warnings(run, candidates=candidates)
     return ExternalAnalysisRunResponse(
         **{**base, "created_at": _as_utc(run.created_at)},
         candidates=[
@@ -39,6 +40,7 @@ def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRun
             )
             for item in candidates
         ],
+        warnings=warnings,
     )
 
 
@@ -196,11 +198,17 @@ async def apply_review_rules_for_run(
         )
         session.commit()
         candidates = service.list_candidates(run_id)
+        warnings = service.diagnose_import_warnings(
+            run,
+            candidates=candidates,
+            auto_apply_summary=auto_apply_summary,
+        )
         return {
             "run_id": str(run_id),
             "reviewer": effective_reviewer,
             "auto_apply_summary": auto_apply_summary,
             "candidate_count": len(candidates),
+            "warnings": warnings,
             "candidates": [
                 {
                     "id": str(c.id),

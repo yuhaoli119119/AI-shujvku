@@ -179,6 +179,95 @@ def test_new_dft_semantic_signature_ignores_locator_but_keeps_scientific_identit
     )
 
 
+def test_new_dft_materialization_merges_method_only_step_with_specific_adsorption_step(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Method-only DFT duplicate paper", pdf_path="method-only.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="method-step-test")
+        session.add(run)
+        session.flush()
+
+        method_payload = {
+            "target_type": "dft_results",
+            "target_id": "new",
+            "field_name": "dft_results",
+            "decision": "new_candidate",
+            "corrected_value": {
+                "material": "WN4@G/TiS2",
+                "adsorbate": "Li2S",
+                "property_type": "adsorption_energy",
+                "reaction_step": "DFT-D2 GGA-PBE",
+                "value": -5.21,
+                "unit": "eV",
+            },
+            "evidence_location": {
+                "source_document_type": "supplementary_information",
+                "page": 5,
+                "quoted_text": "WN4@G/TiS2 Li2S -5.21 eV",
+            },
+        }
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload=method_payload,
+                status="candidate",
+            )
+        )
+        session.flush()
+
+        specific_payload = {
+            **method_payload,
+            "corrected_value": {
+                **method_payload["corrected_value"],
+                "reaction_step": "Li2S adsorption on WN4@G side",
+            },
+        }
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload=specific_payload,
+                status="candidate",
+            )
+        )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id)
+        ).all()
+
+        assert [item["action"] for item in result["materialized_items"]] == ["created", "deduplicated"]
+        assert len(dft_rows) == 1
+        assert dft_rows[0].reaction_step == "Li2S adsorption on WN4@G side"
+        assert {candidate.materialized_target_id for candidate in candidates} == {str(dft_rows[0].id)}
+
+
+def test_method_only_step_match_does_not_merge_ambiguous_specific_steps():
+    candidate = {
+        "material_identity": "WN4@G/TiS2",
+        "property_type": "adsorption_energy",
+        "value": -5.21,
+        "unit": "eV",
+        "adsorbate": "Li2S",
+        "reaction_step": "DFT-D2 GGA-PBE",
+    }
+    rows = [
+        DFTResult(reaction_step="Li2S adsorption on WN4@G side"),
+        DFTResult(reaction_step="Li2S adsorption on TiS2 side"),
+    ]
+
+    assert VerificationSessionService._method_step_compatible_existing(candidate, rows) is None
+
+
 def test_borrowed_reference_new_candidate_is_retired_instead_of_left_pending():
     candidate = MagicMock()
     service = object.__new__(VerificationSessionService)
@@ -509,6 +598,97 @@ def test_settle_ai_dft_reviews_endpoint_is_idempotent(verification_env):
         reviews = session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == UUID(paper_id))).all()
         assert len(reviews) == 1
         assert {review.reviewer_status for review in reviews} == {"verified"}
+
+
+def test_li_s_project_library_v4_consensus_requires_user_submit(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Li-S v4 user submit paper", pdf_path="li-s-v4.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-N-C",
+            catalyst_type="single_atom",
+            metal_centers=["Fe"],
+            coordination="Fe-N4",
+            support="N-doped carbon",
+        )
+        session.add(catalyst)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports Li2S4 adsorption energy of -1.2 eV.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        for source_label in ("ai-1", "ai-2"):
+            run = ExternalAnalysisRun(
+                paper_id=paper.id,
+                source="ide_ai",
+                source_label=source_label,
+                raw_payload={},
+                normalized_payload={},
+                mapping_status="mapped",
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "schema_version": "project_library_ml_export_v4",
+                        "project_library_context": "li_s_sac_dac",
+                        "database_write_authority": "user_submit_only",
+                        "ai_consensus_auto_adopt_allowed": False,
+                        "target_type": "dft_results",
+                        "target_id": str(row.id),
+                        "field_name": "value",
+                        "decision": "PASS",
+                        "corrected_value": -1.2,
+                        "confidence": 0.93,
+                        "normalized_material": "Fe-N-C",
+                        "normalized_energy_type": "adsorption_energy",
+                        "evidence_location": {"page": 4, "quoted_text": "-1.2 eV"},
+                    },
+                    status="pending",
+                )
+            )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    response = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["auto_applied_count"] == 0
+    assert payload["need_repair_count"] == 1
+    assert payload["need_repair_items"][0]["reason"] == "project_library_v4_requires_user_submit"
+
+    with Session() as session:
+        stored = session.get(DFTResult, UUID(row_id))
+        assert stored.candidate_status == "system_candidate"
+        reviews = session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == UUID(paper_id),
+                ExtractionFieldReview.target_id == row_id,
+            )
+        ).all()
+        assert reviews == []
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == UUID(paper_id))
+        ).all()
+        assert {candidate.status for candidate in candidates} == {"pending"}
 
 
 def test_reset_dft_ai_reviews_clears_audits_and_returns_rows_to_pending(verification_env):

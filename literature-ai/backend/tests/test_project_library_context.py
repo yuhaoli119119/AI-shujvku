@@ -36,12 +36,25 @@ def test_li_s_topic_field_dictionary_covers_structure_dft_and_experiment() -> No
     fields = list_topic_field_definitions("li_s_sac_dac")
     field_map = {field.canonical_key: field for field in fields}
 
-    assert len(fields) >= 18
+    assert len(fields) >= 40
     assert field_map["metal_centers"].multi_value is True
+    assert field_map["active_site_instance_key"].category == "identity"
+    assert field_map["active_site_ref"].value_type == "object"
     assert field_map["catalyst_scope"].value_type == "enum"
     assert field_map["metal_metal_distance"].unit_suggestion == "angstrom"
+    assert field_map["support_raw"].category == "structure"
+    assert field_map["support_normalized"].category == "structure"
+    assert field_map["support_confidence"].value_type == "number"
     assert field_map["adsorption_energy"].unit_suggestion == "eV"
+    assert field_map["energy_kind"].value_type == "enum"
+    assert field_map["li2s_dissociation_energy"].unit_suggestion == "eV"
+    assert field_map["li2s_deposition_barrier"].unit_suggestion == "eV"
+    assert field_map["bader_charge_M1"].unit_suggestion == "e"
+    assert field_map["bader_charge_M2"].unit_suggestion == "e"
     assert field_map["d_band_center"].applies_to == ("DFT",)
+    assert field_map["source_text"].category == "provenance"
+    assert field_map["source_location"].value_type == "object"
+    assert field_map["element_descriptor_source_version"].category == "postprocess"
     assert field_map["specific_capacity"].unit_suggestion == "mAh g^-1"
     assert field_map["electrolyte_to_sulfur_ratio"].unit_suggestion == "uL mg^-1"
     assert all(field.unknown_strategy == "mark_unknown_when_evidence_is_ambiguous" for field in fields)

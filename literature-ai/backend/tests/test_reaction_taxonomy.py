@@ -29,6 +29,22 @@ def test_srr_li2s_decomposition_barrier_is_normalized_and_valid():
     assert result["property_type"] == "li2s_decomposition_barrier"
 
 
+def test_srr_li2s_dissociation_and_deposition_are_distinct():
+    dissociation = validate_reaction_record(
+        "SRR_LiS",
+        {"intermediate": "Li2S", "property": "Li2S dissociation energy"},
+    )
+    deposition = validate_reaction_record(
+        "SRR_LiS",
+        {"intermediate": "Li2S", "property": "Li2S deposition barrier"},
+    )
+
+    assert dissociation["valid"] is True
+    assert dissociation["property_type"] == "li2s_dissociation_energy"
+    assert deposition["valid"] is True
+    assert deposition["property_type"] == "li2s_deposition_barrier"
+
+
 def test_srr_rejects_intermediates_that_are_clearly_from_other_profiles():
     for intermediate, property_type in [
         ("ΔG_H*", "ΔG_H*"),

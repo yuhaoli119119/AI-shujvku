@@ -40,6 +40,10 @@ _SRR_PROPERTIES = {
     "li2s decomposition barrier": "li2s_decomposition_barrier",
     "li2s decomposition energy barrier": "li2s_decomposition_barrier",
     "decomposition barrier of li2s": "li2s_decomposition_barrier",
+    "li2s dissociation energy": "li2s_dissociation_energy",
+    "dissociation energy of li2s": "li2s_dissociation_energy",
+    "li2s deposition barrier": "li2s_deposition_barrier",
+    "deposition barrier of li2s": "li2s_deposition_barrier",
     "li2s nucleation barrier": "li2s_nucleation_barrier",
     "nucleation barrier of li2s": "li2s_nucleation_barrier",
     "migration barrier": "migration_barrier",
@@ -230,7 +234,12 @@ def classify_reaction_record(candidate: Any, paper_context: Any = None) -> dict[
     # "Figure S8"). Treat it as SRR-specific only when surrounding context also
     # mentions Li-S/SRR terms; Li2Sx species remain specific enough on their own.
     srr_specific_intermediates = {"Li2S8", "Li2S6", "Li2S4", "Li2S2", "Li2S"}
-    if srr_intermediate in srr_specific_intermediates or srr_property in {"li2s_decomposition_barrier", "li2s_nucleation_barrier"}:
+    if srr_intermediate in srr_specific_intermediates or srr_property in {
+        "li2s_decomposition_barrier",
+        "li2s_dissociation_energy",
+        "li2s_deposition_barrier",
+        "li2s_nucleation_barrier",
+    }:
         return {"reaction_type": "SRR_LiS", "status": "classified", "confidence": 0.95, "reason": "srr_specific_signal"}
 
     # Shared electrocatalytic intermediates are deliberately insufficient alone.

@@ -59,6 +59,14 @@ def test_dual_ai_consensus_signature_accepts_structured_corrected_values():
     assert grouped[("REVISE", second)] == "accepted"
 
 
+def test_import_warning_decision_aliases_match_dft_queue_semantics():
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("confirmed_with_corrections") == "PROPOSED"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("corrected") == "PROPOSED"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("revision") == "PROPOSED"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("needs_user_decision") == "NEEDS_HUMAN"
+    assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("ambiguous") == "NEEDS_HUMAN"
+
+
 def test_heuristic_import_maps_legacy_candidates_notes():
     service = ExternalAnalysisService.__new__(ExternalAnalysisService)
 
@@ -84,6 +92,63 @@ def test_heuristic_import_maps_legacy_candidates_notes():
     assert normalized.review_notes[0].field_name == "figures"
     assert normalized.review_notes[0].quoted_text == "Fig. 1."
     assert len(normalized.unmapped_items) == 1
+
+
+def test_import_analysis_warns_on_unrecognized_dft_audit_container():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Container warning paper", pdf_path="warning.pdf", authors=["A"])
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+                paper_id = paper.id
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper_id),
+                    "source": "ide_ai",
+                    "source_label": "legacy_dft_key",
+                    "raw_payload": {
+                        "dft_result_audits": [
+                            {
+                                "target_type": "dft_results",
+                                "target_id": "existing-row",
+                                "field_name": "value",
+                                "decision": "PROPOSED",
+                                "corrected_value": 1.23,
+                            }
+                        ]
+                    },
+                },
+            )
+
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["candidates"] == []
+            assert [warning["code"] for warning in body["warnings"]] == [
+                "unrecognized_object_review_container"
+            ]
+            assert body["warnings"][0]["key"] == "dft_result_audits"
+            assert body["warnings"][0]["expected_key"] == "object_review_audits"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
 
 
 def test_external_analysis_import_and_materialize_flow():

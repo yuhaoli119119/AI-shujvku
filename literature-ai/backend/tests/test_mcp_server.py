@@ -648,6 +648,186 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
         assert stored_candidate.normalized_payload["writes_final_truth"] is False
 
 
+def test_mcp_import_analysis_warns_on_non_countable_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP DFT Decision Warning Paper", pdf_path="mcp-dft-warning.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "evidence_verified",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"][0]["code"] == "non_countable_dft_decision"
+    assert imported["warnings"][0]["decision"] == "evidence_verified"
+    assert "PROPOSED" in imported["warnings"][0]["allowed_decisions"]
+    assert "needs_user_decision" in imported["warnings"][0]["message"]
+    assert "manual adjudication" in imported["warnings"][0]["message"]
+
+
+def test_mcp_import_analysis_does_not_warn_on_countable_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP DFT Decision Clean Paper", pdf_path="mcp-dft-clean.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "PROPOSED",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"] == []
+
+
+def test_mcp_import_analysis_treats_needs_user_decision_as_manual_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Needs User Decision Paper", pdf_path="mcp-needs-user-decision.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "needs_user_decision",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"] == []
+
+
+def test_mcp_import_analysis_treats_ambiguous_as_manual_dft_decision(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP Ambiguous DFT Decision Paper", pdf_path="mcp-ambiguous-dft-warning.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_auth()):
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit",
+            auto_apply_review_rules=False,
+            raw_payload={
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": row_id,
+                        "field_name": "value",
+                        "decision": "ambiguous",
+                        "evidence_location": {"page": 8, "table": "Table 1", "quoted_text": "-1.20 eV"},
+                        "corrected_value": -1.2,
+                        "confidence": 0.88,
+                    }
+                ]
+            },
+        )
+
+    assert imported["candidate_count"] == 1
+    assert imported["warnings"] == []
+
+
 def test_mcp_codex_context_and_item_use_compact_detail_query(mcp_test_env, monkeypatch):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="Compact Codex Context Paper", pdf_path="compact-context.pdf", authors=[])
@@ -828,6 +1008,7 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
         )
 
     assert imported["reviewer"] == "codex_window_b"
+    assert imported["warnings"] == []
     assert imported["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
     with Session(mcp_test_env["engine"]) as session:
         rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()

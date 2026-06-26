@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 
-LI_S_SAC_DAC_FIELD_DICTIONARY_VERSION = "li_s_sac_dac_field_dictionary_v2"
+LI_S_SAC_DAC_FIELD_DICTIONARY_VERSION = "li_s_sac_dac_field_dictionary_v3"
 
 
 @dataclass(frozen=True)
@@ -54,22 +54,46 @@ def _field(
 _FIELD_GROUPS = MappingProxyType(
     {
         "li_s_sac_dac": (
+            _field("catalyst_sample_id", "催化剂样本 ID", "catalyst sample id", "identity", "string", None, False, True, ("DFT", "experiment"), "CatalystSample 是材料身份主轴；跨 paper_id 的同名催化剂默认不合并。"),
+            _field("active_site_instance_key", "活性位点实例键", "active site instance key", "identity", "string", None, False, True, ("DFT",), "属性 bundle 必须绑定 active_site_instance_key 或 active_site_ref；无法确定时进入 ambiguous_records。"),
+            _field("active_site_ref", "活性位点引用", "active site ref", "identity", "object", None, False, True, ("DFT",), "记录 paper_id、catalyst_sample_id、dft_setting_id、instance_key 等引用，不只依赖自然语言 active_site_context。"),
             _field("metal_centers", "金属中心", "metal centers", "structure", "string_list", None, True, True, ("DFT", "experiment"), "用于记录单/双原子活性中心元素；未能唯一确认时保持 UNKNOWN，不从弱缩写猜测。"),
+            _field("metal_pair", "金属对原文顺序", "metal pair in source order", "structure", "string", None, False, True, ("DFT", "experiment"), "保留作者或原文顺序；不得因 canonical 排序交换 M1/M2 位点含义。"),
+            _field("metal_pair_canonical", "金属对标准形式", "canonical metal pair", "structure", "string", None, False, True, ("DFT", "experiment"), "仅用于检索和聚合；M1/M2 特异属性仍跟原文顺序。"),
+            _field("metal_center_order_source", "M1/M2 顺序来源", "metal center order source", "structure", "enum", None, False, True, ("DFT", "experiment"), "记录 author_defined、source_order、unknown；不明确时填 unknown。"),
             _field("catalyst_scope", "SAC/DAC 类型", "SAC/DAC scope", "structure", "enum", None, False, True, ("DFT", "experiment"), "仅接受 SAC、DAC 或 UNKNOWN；不把一般 atomically dispersed 表述强行映射到 DAC。"),
             _field("metal_pairing_type", "同核/异核", "homo-/heteronuclear type", "structure", "enum", None, False, True, ("DFT", "experiment"), "主要适用于 DAC；SAC 或证据不足时留空或 UNKNOWN。"),
-            _field("support_material", "载体", "support material", "structure", "string", None, False, True, ("DFT", "experiment"), "记录载体或基底名称，如 graphene、N-doped carbon；不要推断隐含载体。"),
+            _field("support_raw", "载体原文", "raw support", "structure", "string", None, False, True, ("DFT", "experiment"), "保留原文载体/基底表述；不得只保留 normalized 值。"),
+            _field("support_normalized", "载体标准化", "normalized support", "structure", "string", None, False, True, ("DFT", "experiment"), "可标准化为 N-C、graphene、C2N、g-C3N4 等；必须保留 support_confidence。"),
+            _field("support_confidence", "载体标准化置信度", "support normalization confidence", "structure", "number", None, False, True, ("DFT", "experiment"), "记录 support_raw 到 support_normalized 映射可信度；证据不足时保持 null。"),
+            _field("support_material", "载体", "support material", "structure", "string", None, False, True, ("DFT", "experiment"), "兼容旧字段；新 bundle/export 必须同时保留 support_raw、support_normalized、support_confidence。"),
             _field("coordination_environment", "配位环境", "coordination environment", "structure", "string", None, False, True, ("DFT",), "如 Fe-N4、CoN3S1；结构未定型或只见示意图时保持 UNKNOWN。"),
             _field("metal_metal_distance", "M-M 距离", "M-M distance", "structure", "number", "angstrom", False, True, ("DFT",), "仅在文中明确给出金属-金属距离时记录，单位建议 Angstrom。"),
             _field("srr_lis_intermediate", "LiPS/Li2S 中间体", "LiPS/Li2S intermediate", "dft_label", "enum", None, False, True, ("DFT",), "推荐使用 S8、Li2S8、Li2S6、Li2S4、Li2S2、Li2S；共享语境不足时不要强行归类。"),
             _field("adsorption_energy", "吸附能", "adsorption energy", "dft_label", "number", "eV", False, True, ("DFT",), "默认用于 LiPS/Li2S 吸附；若原文语义更接近 binding energy，应保留原 canonical property 再另行映射。"),
+            _field("energy_kind", "能量类型", "energy kind", "dft_label", "enum", None, False, True, ("DFT",), "区分 thermodynamic_energy、activation_barrier、free_energy_change；不得混成一个 ML 标签。"),
             _field("gibbs_free_energy_change", "自由能变化", "Gibbs free energy change", "dft_label", "number", "eV", False, True, ("DFT",), "用于反应步骤或转化过程的自由能变化；若原文写 RDS Gibbs free energy、ΔG of RDS、决速步骤自由能，仍归入本字段，并在 reaction_step 标明 RDS/决速步骤；不得与 reaction_barrier、migration_barrier、li2s_decomposition_barrier 混用。"),
             _field("reaction_barrier", "反应能垒", "reaction barrier", "dft_label", "number", "eV", False, True, ("DFT",), "仅在原文明确为 reaction barrier、activation energy、energy barrier、ΔG‡、活化能或反应能垒时使用；这是通用动力学能垒字段，不覆盖迁移能垒或 Li2S 分解能垒。"),
             _field("li2s_nucleation_barrier", "Li2S 成核能垒", "Li2S nucleation barrier", "dft_label", "number", "eV", False, True, ("DFT",), "仅在原文明确为 Li2S nucleation barrier 时使用，不与一般 reaction barrier 混用。"),
             _field("li2s_decomposition_barrier", "Li2S 分解能垒", "Li2S decomposition barrier", "dft_label", "number", "eV", False, True, ("DFT",), "仅在原文明确为 Li2S decomposition barrier 或 Li2S 分解能垒时使用；前端/导出必须保留这一小类，不能回落伪装成普通 reaction_barrier。"),
+            _field("li2s_dissociation_energy", "Li2S 解离能", "Li2S dissociation energy", "dft_label", "number", "eV", False, True, ("DFT",), "仅在原文明确为 Li2S dissociation energy 时使用，通常属于 thermodynamic_energy，不与 decomposition barrier 混用。"),
+            _field("li2s_deposition_barrier", "Li2S 沉积能垒", "Li2S deposition barrier", "dft_label", "number", "eV", False, True, ("DFT",), "仅在原文明确为 Li2S deposition barrier 时使用，通常属于 activation_barrier，不与 decomposition/dissociation 混用。"),
             _field("migration_barrier", "迁移能垒", "migration barrier", "dft_label", "number", "eV", False, True, ("DFT",), "适用于 Li+、LiPS 或扩散/迁移过程；迁移对象不清楚时应保留未知；前端/导出必须保留 migration_barrier 小类，不能回落成普通 reaction_barrier。"),
+            _field("RDS_step", "决速步骤", "RDS step", "dft_label", "string", None, False, True, ("DFT",), "记录原文的 rate-determining step；不要为了字段完整猜测。"),
+            _field("deltaG_RDS_eV", "RDS 自由能", "RDS Gibbs free energy", "dft_label", "number", "eV", False, True, ("DFT",), "如果 RDS 是自由能变化，存为 deltaG_RDS_eV / gibbs_free_energy_change 并保留 energy_kind=free_energy_change。"),
+            _field("RDS_barrier_eV", "RDS 能垒", "RDS barrier", "dft_label", "number", "eV", False, True, ("DFT",), "如果 RDS 是动力学势垒，存为 RDS_barrier_eV / reaction_barrier 并保留 energy_kind=activation_barrier。"),
+            _field("reaction_direction", "反应方向", "reaction direction", "dft_label", "enum", None, False, True, ("DFT",), "可为 reduction、oxidation、unknown；不明确时填 unknown。"),
             _field("d_band_center", "d 带中心", "d-band center", "dft_label", "number", "eV", False, True, ("DFT",), "材料级描述符，可在缺少具体中间体时存在，但仍需明确材料身份。"),
             _field("bader_charge", "Bader 电荷", "Bader charge", "dft_label", "number", "e", False, True, ("DFT",), "材料级或吸附态电荷分析字段；转移对象不明时不自动补充解释。"),
+            _field("bader_charge_M1", "M1 Bader 电荷", "Bader charge M1", "dft_label", "number", "e", False, True, ("DFT",), "跟 metal_center_1 / 原文 M1 顺序一致；不得因 metal_pair_canonical 排序交换。"),
+            _field("bader_charge_M2", "M2 Bader 电荷", "Bader charge M2", "dft_label", "number", "e", False, True, ("DFT",), "跟 metal_center_2 / 原文 M2 顺序一致；无法判断 M1/M2 时进入 ambiguous_records。"),
             _field("charge_transfer", "电荷转移", "charge transfer", "dft_label", "number", "e", False, True, ("DFT",), "建议保留数值和方向说明；若只有定性描述，可先保持 UNKNOWN。"),
+            _field("charge_transfer_direction", "电荷转移方向", "charge transfer direction", "dft_label", "enum", None, False, True, ("DFT",), "记录 catalyst_to_adsorbate、adsorbate_to_catalyst 或 unknown。"),
+            _field("source_text", "证据原文", "source text", "provenance", "string", None, False, True, ("DFT", "experiment"), "每条核心数据必须保留证据原文或等价 evidence_text。"),
+            _field("source_location", "证据位置", "source location", "provenance", "object", None, False, True, ("DFT", "experiment"), "记录 page、section、figure、table、locator 等来源信息。"),
+            _field("confidence_level", "置信度", "confidence level", "provenance", "number", None, False, True, ("DFT", "experiment"), "保留提取置信度；不能用缺省高置信度掩盖证据不足。"),
+            _field("element_descriptor_source", "元素描述符来源", "element descriptor source", "postprocess", "string", None, False, True, ("DFT",), "atomic_number、electronegativity、valence_electron_count 等只能由后处理生成并记录 source。"),
+            _field("element_descriptor_source_version", "元素描述符来源版本", "element descriptor source version", "postprocess", "string", None, False, True, ("DFT",), "元素描述符和 DAC 组合描述符必须记录 source_version。"),
             _field("specific_capacity", "比容量", "specific capacity", "experimental_performance", "number", "mAh g^-1", False, True, ("experiment",), "记录放电/充电容量时需结合原文语境；未说明倍率或循环节点时不做标准化推断。"),
             _field("rate_c_value", "倍率", "rate (C value)", "experimental_performance", "number", "C", False, True, ("experiment",), "仅在原文明确使用 C-rate 表述时记录；若使用 mA g^-1，应留给后续扩展字段，不在本批强转。"),
             _field("cycling_stability_cycles", "循环稳定性", "cycling stability", "experimental_performance", "number", "cycles", False, True, ("experiment",), "用于记录容量保持或稳定运行对应的循环数；若仅有定性描述则保持 UNKNOWN。"),

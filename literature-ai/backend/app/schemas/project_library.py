@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -103,6 +103,10 @@ class ProjectLibraryQualityCounts(BaseModel):
     label_ready_count: int
     training_ready_count: int
     feature_candidate_blocked_paper_count: int
+    catalyst_sample_count: int = 0
+    active_site_instance_count: int = 0
+    ambiguous_records_count: int = 0
+    manual_verification_required_count: int = 0
 
 
 class ProjectLibraryQualityPayload(BaseModel):
@@ -158,3 +162,108 @@ class ProjectLibraryMLExportPayload(BaseModel):
     candidate_manifest: dict[str, object]
     training_manifest: dict[str, object]
     baseline: ProjectLibraryBaselineSummary
+
+
+class ProjectLibraryBundlePayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    schema_version: Literal["project_library_bundles_v1"]
+    context_key: str
+    context_version: str
+    context_display_name_zh: str
+    library_name: str | None = None
+    read_only: bool
+    auto_verification_applied: bool
+    database_write_authority: Literal["user_submit_only"]
+    ai_review_policy: dict[str, Any]
+    element_descriptor_contract: dict[str, Any]
+    counts: dict[str, int] = Field(default_factory=dict)
+    ambiguous_records: list[dict[str, Any]] = Field(default_factory=list)
+    manual_verification_required: list[dict[str, Any]] = Field(default_factory=list)
+    bundles: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProjectLibraryMLExportV4Payload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["project_library_ml_export_v4"]
+    read_only: bool
+    auto_verification_applied: bool
+    status: Literal["ready", "not_ready"]
+    manifest: dict[str, Any]
+    records: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProjectLibraryUserSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["project_library_ml_export_v4"]
+    context_key: str
+    paper_id: str
+    record_id: str | None = None
+    database_write_authority: Literal["user_submit_only"]
+    ai_consensus_auto_adopt_allowed: bool = False
+    active_site_instance_key: str | None = None
+    active_site_ref: dict[str, Any] | None = None
+    catalyst_sample_id: str | None = None
+    property_type: str
+    adsorbate: str | None = None
+    reaction_step: str | None = None
+    energy_kind: str | None = None
+    value: float
+    unit: str
+    source_text: str | None = None
+    source_location: dict[str, Any] | None = None
+    submitted_by: str | None = None
+    user_id: str | None = None
+    user_edits: dict[str, Any] = Field(default_factory=dict)
+    resolved_conflicts: list[dict[str, Any]] = Field(default_factory=list)
+    source_candidate_ids: list[str] = Field(default_factory=list)
+    decision_status: str | None = None
+    confidence_level: float | None = None
+    support_raw: str | None = None
+    support_normalized: str | None = None
+    support_confidence: str | None = None
+    dft_setting_id: str | None = None
+
+
+class ProjectLibraryUserSubmitPreviewPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["project_library_v4_user_submit_preview_v1"]
+    context_key: str
+    paper_id: str
+    record_id: str | None = None
+    action: Literal["update_existing_dft_result", "create_new_dft_result"]
+    can_submit: bool
+    writes_to_database: bool
+    database_write_authority: Literal["user_submit_only"]
+    visible_in_v4_export: bool
+    ready_only_export_eligible: bool
+    hard_blockers: list[str] = Field(default_factory=list)
+    ml_blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    resolved_source_candidate_ids: list[str] = Field(default_factory=list)
+    persisted_field_targets: list[str] = Field(default_factory=list)
+    evidence_payload_fields: list[str] = Field(default_factory=list)
+    normalized_submission: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectLibraryUserSubmitResultPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["project_library_v4_user_submit_result_v1"]
+    context_key: str
+    paper_id: str
+    record_id: str
+    action: Literal["update_existing_dft_result", "create_new_dft_result"]
+    writes_to_database: bool
+    database_write_authority: Literal["user_submit_only"]
+    visible_in_v4_export: bool
+    ready_only_export_eligible: bool
+    candidate_status: str
+    audit_log_id: str
+    consumed_source_candidate_ids: list[str] = Field(default_factory=list)
+    persisted_field_targets: list[str] = Field(default_factory=list)
+    evidence_payload_fields: list[str] = Field(default_factory=list)
+    export_record: dict[str, Any] | None = None

@@ -10,6 +10,7 @@ from app.db.models import ExternalAnalysisCandidate, Paper
 from app.domain.project_library_context import get_project_library_context
 from app.services.dft_export_service import build_dft_ml_dataset_v3
 from app.services.lis_sac_dac_feature_service import LiSSacDacFeatureService
+from app.services.project_library_bundle_service import ProjectLibraryBundleService
 from app.services.project_library_queue_service import ProjectLibraryQueueService
 from app.utils.library_names import normalize_library_name
 
@@ -43,6 +44,11 @@ class ProjectLibraryQualityService:
         feature_paper_blockers, feature_blocker_counts = self._feature_candidate_blockers_by_paper(
             paper_ids=paper_ids
         )
+        bundle_payload = ProjectLibraryBundleService(self.session).build_bundles(
+            context_key=context.key,
+            library_name=effective_library_name,
+        )
+        bundle_counts = bundle_payload["counts"]
 
         task_summaries: list[dict[str, Any]] = []
         task_blocker_counts = Counter()
@@ -119,6 +125,10 @@ class ProjectLibraryQualityService:
                 "label_ready_count": total_label_ready,
                 "training_ready_count": total_training_ready,
                 "feature_candidate_blocked_paper_count": feature_candidate_blocked_paper_count,
+                "catalyst_sample_count": int(bundle_counts.get("catalyst_sample_count", 0)),
+                "active_site_instance_count": int(bundle_counts.get("active_site_instance_count", 0)),
+                "ambiguous_records_count": int(bundle_counts.get("ambiguous_records_count", 0)),
+                "manual_verification_required_count": int(bundle_counts.get("manual_verification_required_count", 0)),
             },
             "blocker_counts": dict(sorted(task_blocker_counts.items())),
             "feature_candidate_blocker_counts": dict(sorted(feature_blocker_counts.items())),
@@ -165,4 +175,3 @@ class ProjectLibraryQualityService:
                 overall[blocker] += 1
 
         return blockers_by_paper, overall
-

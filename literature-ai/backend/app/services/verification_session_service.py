@@ -29,6 +29,10 @@ from app.db.models import (
     VerificationSessionPaperClaim,
     utcnow,
 )
+from app.services.dft_rescan_policy import (
+    is_dft_method_only_reaction_step,
+    normalize_dft_reaction_step_for_identity,
+)
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.module_write_lock_service import ModuleWriteLockService
@@ -58,6 +62,7 @@ class VerificationSessionConflict(ValueError):
 
 class VerificationSessionService:
     HIGH_RISK_IDE_TARGET_TYPES = {"dft_results", "catalyst_samples"}
+    PROJECT_LIBRARY_V4_USER_SUBMIT_REASON = "project_library_v4_requires_user_submit"
     HIGH_RISK_SCOPES = {
         "all": {"dft_results", "mechanism_claims", "electrochemical_performance", "catalyst_samples", "dft_settings"},
         "dft_only": {"dft_results"},
@@ -494,6 +499,7 @@ class VerificationSessionService:
         ).all()
         existing_by_signature = self._existing_new_dft_signatures(paper_id)
         existing_by_semantic_signature = self._existing_new_dft_semantic_signatures(paper_id)
+        existing_by_method_step_signature = self._existing_new_dft_method_step_signatures(paper_id)
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for candidate, run in rows:
@@ -522,6 +528,13 @@ class VerificationSessionService:
                 if len(semantic_matches) == 1:
                     existing = semantic_matches[0]
             if existing is None:
+                method_step_signature = self._new_dft_method_step_compatible_signature(candidate_item)
+                if method_step_signature is not None:
+                    existing = self._method_step_compatible_existing(
+                        candidate_item,
+                        existing_by_method_step_signature.get(method_step_signature, []),
+                    )
+            if existing is None:
                 existing = self._insert_new_dft_candidate(
                     paper_id=paper_id,
                     candidate_item=candidate_item,
@@ -530,8 +543,12 @@ class VerificationSessionService:
                 existing_by_signature[signature] = existing
                 semantic_signature = self._new_dft_semantic_signature(candidate_item)
                 existing_by_semantic_signature.setdefault(semantic_signature, []).append(existing)
+                method_step_signature = self._new_dft_method_step_compatible_signature(candidate_item)
+                if method_step_signature is not None:
+                    existing_by_method_step_signature.setdefault(method_step_signature, []).append(existing)
                 action = "created"
             else:
+                self._maybe_upgrade_method_only_reaction_step(existing, candidate_item)
                 action = "deduplicated"
             candidate.status = "materialized"
             candidate.materialized_target_type = "dft_results"
@@ -777,6 +794,30 @@ class VerificationSessionService:
             signatures[signature].append(row)
         return signatures
 
+    def _existing_new_dft_method_step_signatures(self, paper_id: UUID) -> dict[tuple[str, ...], list[DFTResult]]:
+        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        signatures: dict[tuple[str, ...], list[DFTResult]] = defaultdict(list)
+        for row in rows:
+            evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+            material_identity = self._first_text(evidence_payload.get("material_identity"))
+            if row.catalyst_sample_id:
+                sample = self.session.get(CatalystSample, row.catalyst_sample_id)
+                if sample is not None and str(sample.name or "").strip():
+                    material_identity = str(sample.name).strip()
+            signature = self._new_dft_method_step_compatible_signature(
+                {
+                    "material_identity": material_identity,
+                    "property_type": row.property_type,
+                    "value": row.value,
+                    "unit": row.unit,
+                    "adsorbate": row.adsorbate,
+                    "reaction_step": row.reaction_step,
+                }
+            )
+            if signature is not None:
+                signatures[signature].append(row)
+        return signatures
+
     @staticmethod
     def _new_dft_semantic_signature(candidate_item: dict[str, Any]) -> tuple[str, ...]:
         value = candidate_item.get("value")
@@ -789,9 +830,54 @@ class VerificationSessionService:
                 value_part,
                 candidate_item.get("unit"),
                 candidate_item.get("adsorbate"),
-                candidate_item.get("reaction_step"),
+                normalize_dft_reaction_step_for_identity(candidate_item.get("reaction_step")),
             )
         )
+
+    @staticmethod
+    def _new_dft_method_step_compatible_signature(candidate_item: dict[str, Any]) -> tuple[str, ...] | None:
+        property_type = str(candidate_item.get("property_type") or "").strip().lower()
+        if property_type != "adsorption_energy":
+            return None
+        value = candidate_item.get("value")
+        value_part = "" if value is None else f"{float(value):.8g}"
+        return tuple(
+            str(part or "").strip().lower()
+            for part in (
+                "method_step_compatible",
+                candidate_item.get("material_identity"),
+                candidate_item.get("property_type"),
+                value_part,
+                candidate_item.get("unit"),
+                candidate_item.get("adsorbate"),
+            )
+        )
+
+    @staticmethod
+    def _method_step_compatible_existing(candidate_item: dict[str, Any], rows: list[DFTResult]) -> DFTResult | None:
+        if not rows:
+            return None
+        candidate_method_only = is_dft_method_only_reaction_step(candidate_item.get("reaction_step"))
+        if candidate_method_only:
+            specific_rows = [row for row in rows if not is_dft_method_only_reaction_step(row.reaction_step)]
+            candidates = specific_rows or rows
+            return candidates[0] if len(candidates) == 1 else None
+
+        method_only_rows = [row for row in rows if is_dft_method_only_reaction_step(row.reaction_step)]
+        return method_only_rows[0] if len(rows) == 1 and len(method_only_rows) == 1 else None
+
+    def _maybe_upgrade_method_only_reaction_step(self, row: DFTResult, candidate_item: dict[str, Any]) -> None:
+        candidate_step = self._first_text(candidate_item.get("reaction_step"))
+        if not candidate_step:
+            return
+        if is_dft_method_only_reaction_step(candidate_step):
+            return
+        if not is_dft_method_only_reaction_step(row.reaction_step):
+            return
+        if str(row.candidate_status or "").strip().lower() != "new_candidate":
+            return
+        row.reaction_step = candidate_step
+        self.session.add(row)
 
     @staticmethod
     def _new_dft_signature(
@@ -807,7 +893,15 @@ class VerificationSessionService:
         value_part = "" if value is None else f"{float(value):.8g}"
         return tuple(
             str(part or "").strip().lower()
-            for part in (material_identity, property_type, value_part, unit, reaction_step, source_figure, page)
+            for part in (
+                material_identity,
+                property_type,
+                value_part,
+                unit,
+                normalize_dft_reaction_step_for_identity(reaction_step),
+                source_figure,
+                page,
+            )
         )
 
     @staticmethod
@@ -1329,6 +1423,17 @@ class VerificationSessionService:
                     and all(self._is_negative_dft_decision(item.get("decision")) for item in eligible)
                 )
             )
+            if target_type == "dft_results" and any(self._is_project_library_v4_opinion(item) for item in eligible):
+                pending.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": self.PROJECT_LIBRARY_V4_USER_SUBMIT_REASON,
+                        "eligible_opinion_count": len(eligible),
+                    }
+                )
+                continue
             if target_type == "dft_results" and eligible and not all(
                 self._dft_has_material_identity(item, target_id=target_id, field_name=field_name)
                 for item in eligible
@@ -1560,6 +1665,12 @@ class VerificationSessionService:
         anchored = [audit for audit in opinions if self._opinion_has_anchor(audit)]
         if opinions and not anchored:
             row_ref["reason"] = "missing_evidence_anchor"
+            row_ref["status"] = "need_repair"
+            return row_ref
+
+        if any(self._is_project_library_v4_opinion(audit) for audit in anchored):
+            row_ref["reason"] = self.PROJECT_LIBRARY_V4_USER_SUBMIT_REASON
+            row_ref["eligible_opinion_count"] = len(anchored)
             row_ref["status"] = "need_repair"
             return row_ref
 
@@ -2929,6 +3040,38 @@ class VerificationSessionService:
     ) -> bool:
         identity = self._dft_identity_key(opinion, target_id=target_id, field_name=field_name)
         return len(identity) > 1 and bool(identity[1])
+
+    @classmethod
+    def _is_project_library_v4_opinion(cls, opinion: dict[str, Any]) -> bool:
+        markers = list(cls._iter_payload_markers(opinion))
+        text = " ".join(markers)
+        has_context = "li_s_sac_dac" in text
+        has_v4_contract = (
+            "project_library_ml_export_v4" in text
+            or "project_library_bundles_v1" in text
+            or "project_library_v4" in text
+        )
+        user_submit_only = "database_write_authority=user_submit_only" in text
+        auto_adopt_disabled = "ai_consensus_auto_adopt_allowed=false" in text
+        return has_context and (has_v4_contract or user_submit_only or auto_adopt_disabled)
+
+    @classmethod
+    def _iter_payload_markers(cls, value: Any, *, prefix: str = ""):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                key_text = str(key or "").strip().lower()
+                next_prefix = f"{prefix}.{key_text}" if prefix else key_text
+                if isinstance(nested, (dict, list, tuple)):
+                    yield from cls._iter_payload_markers(nested, prefix=next_prefix)
+                elif nested is not None:
+                    nested_text = str(nested).strip().lower()
+                    if nested_text:
+                        yield nested_text
+                        yield f"{key_text}={nested_text}"
+                        yield f"{next_prefix}={nested_text}"
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                yield from cls._iter_payload_markers(item, prefix=prefix)
 
     @staticmethod
     def _materialization_note(*, dual_ai_consensus: bool, adjudicated_by_third_ai: bool) -> str:

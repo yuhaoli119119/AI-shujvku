@@ -9,14 +9,24 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db_session
 from app.schemas.dft_export import DFTDatasetContractV3, DFTMLDatasetExportV3
 from app.schemas.project_library import (
+    ProjectLibraryBundlePayload,
+    ProjectLibraryMLExportV4Payload,
     ProjectLibraryMLExportPayload,
     ProjectLibraryQualityPayload,
     ProjectLibraryQueuePayload,
+    ProjectLibraryUserSubmitPreviewPayload,
+    ProjectLibraryUserSubmitRequest,
+    ProjectLibraryUserSubmitResultPayload,
 )
 from app.services.dft_export_service import build_dft_ml_dataset_v3, build_dft_ml_dataset_v3_csv
+from app.services.project_library_bundle_service import ProjectLibraryBundleService
 from app.services.project_library_ml_service import ProjectLibraryMLService
 from app.services.project_library_quality_service import ProjectLibraryQualityService
 from app.services.project_library_queue_service import ProjectLibraryQueueService
+from app.services.project_library_submission_service import (
+    ProjectLibrarySubmissionBlockedError,
+    ProjectLibrarySubmissionService,
+)
 
 
 router = APIRouter()
@@ -57,6 +67,23 @@ def get_project_library_quality(
         raise HTTPException(status_code=422, detail=str(exc.args[0])) from exc
 
 
+@router.get("/project-library-bundles", response_model=ProjectLibraryBundlePayload)
+def get_project_library_bundles(
+    context_key: str = Query(default="li_s_sac_dac", min_length=1),
+    library_name: str | None = Query(default=None),
+    paper_id: UUID | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        return ProjectLibraryBundleService(session).build_bundles(
+            context_key=context_key,
+            library_name=library_name,
+            paper_id=paper_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc.args[0])) from exc
+
+
 @router.get("/project-library-ml-export", response_model=ProjectLibraryMLExportPayload)
 def get_project_library_ml_export(
     context_key: str = Query(default="li_s_sac_dac", min_length=1),
@@ -69,6 +96,27 @@ def get_project_library_ml_export(
             context_key=context_key,
             task=task,
             library_name=library_name,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc.args[0])) from exc
+
+
+@router.get("/project-library-ml-export-v4", response_model=ProjectLibraryMLExportV4Payload)
+def get_project_library_ml_export_v4(
+    context_key: str = Query(default="li_s_sac_dac", min_length=1),
+    task: str = Query(default="adsorption_energy", min_length=1),
+    library_name: str | None = Query(default=None),
+    paper_id: UUID | None = Query(default=None),
+    ready_only: bool = Query(default=True),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        return ProjectLibraryBundleService(session).build_ml_export_v4(
+            context_key=context_key,
+            task=task,
+            library_name=library_name,
+            paper_id=paper_id,
+            ready_only=ready_only,
         )
     except KeyError as exc:
         raise HTTPException(status_code=422, detail=str(exc.args[0])) from exc
@@ -95,6 +143,63 @@ def get_project_library_ml_export_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/project-library-ml-export-v4.csv")
+def get_project_library_ml_export_v4_csv(
+    context_key: str = Query(default="li_s_sac_dac", min_length=1),
+    task: str = Query(default="adsorption_energy", min_length=1),
+    library_name: str | None = Query(default=None),
+    paper_id: UUID | None = Query(default=None),
+    ready_only: bool = Query(default=True),
+    session: Session = Depends(get_db_session),
+) -> Response:
+    try:
+        csv_text, _manifest = ProjectLibraryBundleService(session).build_ml_export_v4_csv(
+            context_key=context_key,
+            task=task,
+            library_name=library_name,
+            paper_id=paper_id,
+            ready_only=ready_only,
+        )
+        safe_task = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task).strip("_")
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc.args[0])) from exc
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="project_library_ml_export_v4_{safe_task or "task"}.csv"'},
+    )
+
+
+@router.post("/project-library-v4/user-submit/preview", response_model=ProjectLibraryUserSubmitPreviewPayload)
+def preview_project_library_v4_user_submit(
+    payload: ProjectLibraryUserSubmitRequest,
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        return ProjectLibrarySubmissionService(session).preview(payload)
+    except ProjectLibrarySubmissionBlockedError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc.args[0])) from exc
+    except (LookupError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/project-library-v4/user-submit", response_model=ProjectLibraryUserSubmitResultPayload)
+def submit_project_library_v4_user_submit(
+    payload: ProjectLibraryUserSubmitRequest,
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        return ProjectLibrarySubmissionService(session).submit(payload)
+    except ProjectLibrarySubmissionBlockedError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc.args[0])) from exc
+    except (LookupError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/ml-dataset-v3", response_model=DFTMLDatasetExportV3)

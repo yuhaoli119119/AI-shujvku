@@ -61,6 +61,16 @@ def test_property_taxonomy_maps_li2s_barriers_to_reaction_barrier_with_subtype()
     assert taxonomy["physical_dimension"] == "energy"
 
 
+def test_property_taxonomy_distinguishes_li2s_dissociation_and_deposition():
+    dissociation = get_property_taxonomy("Li2S dissociation energy")
+    deposition = get_property_taxonomy("Li2S deposition barrier")
+
+    assert dissociation["canonical_property_type"] == "reaction_energy"
+    assert dissociation["property_subtype"] == "li2s_dissociation_energy"
+    assert deposition["canonical_property_type"] == "reaction_barrier"
+    assert deposition["property_subtype"] == "li2s_deposition_barrier"
+
+
 def test_chemistry_normalizer_keeps_rds_gibbs_free_energy_out_of_reaction_barrier():
     normalizer = ChemistryNormalizer()
     normalized = normalizer.normalize(

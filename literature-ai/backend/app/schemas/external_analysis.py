@@ -140,5 +140,6 @@ class ExternalAnalysisRunResponse(BaseModel):
     mapping_error: str | None = None
     created_at: datetime
     candidates: list[ExternalAnalysisCandidateResponse] = Field(default_factory=list)
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

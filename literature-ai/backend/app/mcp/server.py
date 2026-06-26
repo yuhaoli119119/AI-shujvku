@@ -1116,6 +1116,11 @@ def import_analysis(
                 lock_meta_source="mcp_import_analysis",
             )
         candidates = service.list_candidates(run.id)
+        warnings = service.diagnose_import_warnings(
+            run,
+            candidates=candidates,
+            auto_apply_summary=auto_apply_summary,
+        )
         session.commit()
         return {
             "run_id": str(run.id),
@@ -1125,6 +1130,7 @@ def import_analysis(
             "reviewer": effective_reviewer,
             "auto_apply_summary": auto_apply_summary,
             "candidate_count": len(candidates),
+            "warnings": warnings,
             "candidates": [
                 {
                     "id": str(c.id),
@@ -1178,6 +1184,11 @@ def apply_analysis_review_rules(
             lock_meta_source="mcp_apply_review_rules",
         )
         candidates = service.list_candidates(run.id)
+        warnings = service.diagnose_import_warnings(
+            run,
+            candidates=candidates,
+            auto_apply_summary=auto_apply_summary,
+        )
         session.commit()
         return {
             "run_id": str(run.id),
@@ -1185,6 +1196,7 @@ def apply_analysis_review_rules(
             "reviewer": effective_reviewer,
             "auto_apply_summary": auto_apply_summary,
             "candidate_count": len(candidates),
+            "warnings": warnings,
             "candidates": [
                 {
                     "id": str(c.id),

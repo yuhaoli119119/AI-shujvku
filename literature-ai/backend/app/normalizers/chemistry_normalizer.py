@@ -134,6 +134,8 @@ _PROPERTY_TAXONOMY_MAP: dict[str, DFTPropertyTaxonomy] = {
     "migration_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "migration_barrier", "energy", "target"),
     "permeation_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "permeation_barrier", "energy", "target"),
     "li2s_decomposition_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "li2s_decomposition_barrier", "energy", "target"),
+    "li2s_dissociation_energy": DFTPropertyTaxonomy("reaction_energy", "thermodynamics", "li2s_dissociation_energy", "energy", "target"),
+    "li2s_deposition_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "li2s_deposition_barrier", "energy", "target"),
     "li2s_nucleation_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "li2s_nucleation_barrier", "energy", "target"),
     "d_band_center": DFTPropertyTaxonomy("d_band_center", "electronic_descriptor", "d_band_center", "energy", "descriptor"),
     "bader_charge": DFTPropertyTaxonomy("bader_charge", "electronic_descriptor", "bader_charge", "charge", "descriptor"),
@@ -342,6 +344,11 @@ class ChemistryNormalizer:
             "diffusion barrier": "migration_barrier",
             "permeation barrier": "permeation_barrier",
             "li2s decomposition barrier": "li2s_decomposition_barrier",
+            "li2s dissociation energy": "li2s_dissociation_energy",
+            "li2s dissociation": "li2s_dissociation_energy",
+            "dissociation energy of li2s": "li2s_dissociation_energy",
+            "li2s deposition barrier": "li2s_deposition_barrier",
+            "deposition barrier of li2s": "li2s_deposition_barrier",
             "li2s nucleation barrier": "li2s_nucleation_barrier",
             "reaction free energy": "gibbs_free_energy_change",
             "自由能变化": "gibbs_free_energy_change",
@@ -352,6 +359,8 @@ class ChemistryNormalizer:
             "迁移能垒": "migration_barrier",
             "扩散能垒": "migration_barrier",
             "li2s 分解能垒": "li2s_decomposition_barrier",
+            "li2s 解离能": "li2s_dissociation_energy",
+            "li2s 沉积能垒": "li2s_deposition_barrier",
             "d band center": "d_band_center",
             "d-band center": "d_band_center",
             "d_band_center": "d_band_center",
@@ -389,10 +398,18 @@ class ChemistryNormalizer:
             return underscored
         if "li2s" in lowered and "decom" in lowered:
             return "li2s_decomposition_barrier"
+        if "li2s" in lowered and "dissociat" in lowered:
+            return "li2s_dissociation_energy"
+        if "li2s" in lowered and "deposit" in lowered:
+            return "li2s_deposition_barrier"
         if "li2s" in lowered and "nucleat" in lowered:
             return "li2s_nucleation_barrier"
         if "li2s" in lowered and "分解" in lowered:
             return "li2s_decomposition_barrier"
+        if "li2s" in lowered and "解离" in lowered:
+            return "li2s_dissociation_energy"
+        if "li2s" in lowered and "沉积" in lowered:
+            return "li2s_deposition_barrier"
         if ("migration" in lowered or "diffus" in lowered or "迁移" in lowered or "扩散" in lowered) and (
             "barrier" in lowered or "能垒" in lowered or "屏障" in lowered
         ):
