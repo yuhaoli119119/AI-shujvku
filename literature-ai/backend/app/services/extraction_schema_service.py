@@ -16,6 +16,7 @@ from app.schemas.extraction import (
     EvidenceField,
     ExtractionResultsResponse,
     MechanismClaimSchema,
+    ProjectLibraryV4ExtractionSchema,
     ValidationWarning,
 )
 from app.services.extraction_review_service import ExtractionReviewService
@@ -28,6 +29,7 @@ SCHEMA_MODELS = {
     "CatalystSample": CatalystSampleSchema,
     "DFTSetting": DFTSettingSchema,
     "DFTResult": DFTResultSchema,
+    "ProjectLibraryV4Extraction": ProjectLibraryV4ExtractionSchema,
     "MechanismClaim": MechanismClaimSchema,
     "ElectrochemicalPerformance": ElectrochemicalPerformanceSchema,
 }
@@ -81,6 +83,7 @@ class ExtractionSchemaService:
                 self._with_reviews(paper_id, "dft_results", row.id, self._dft_result(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
             ],
+            "ProjectLibraryV4Extraction": [],
             "MechanismClaim": [
                 self._with_reviews(paper_id, "mechanism_claims", row.id, self._mechanism(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()

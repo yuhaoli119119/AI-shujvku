@@ -356,6 +356,114 @@ body {
     font-weight: 800;
 }
 
+.v4-quality-panel,
+.v4-submit-panel,
+.v4-sample-table {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border);
+}
+
+.v4-quality-panel .table-card-header h3,
+.v4-submit-panel .table-card-header h3,
+.v4-sample-table .table-card-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.sample-quality-counts {
+    margin-top: 12px;
+}
+
+.sample-quality-examples {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.sample-gap-group {
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-alt);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.sample-gap-group ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+}
+
+.compact-table-wrap {
+    margin-top: 12px;
+}
+
+.sample-records-table {
+    min-width: 1220px;
+}
+
+.sample-label-line + .sample-label-line {
+    margin-top: 8px;
+}
+
+.selected-sample {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-alt);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    word-break: break-word;
+}
+
+.submit-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.source-text-field {
+    margin-top: 12px;
+}
+
+.field textarea {
+    width: 100%;
+    min-height: 86px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+    padding: 10px 12px;
+    resize: vertical;
+}
+
+.field textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent 82%);
+}
+
+.submit-actions {
+    margin-top: 12px;
+}
+
+.submit-result {
+    margin-top: 12px;
+    max-height: 260px;
+    overflow: auto;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface-alt);
+    padding: 12px;
+    font-size: 12px;
+    white-space: pre-wrap;
+}
+
 .filters-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

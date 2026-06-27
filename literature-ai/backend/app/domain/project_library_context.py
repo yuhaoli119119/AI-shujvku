@@ -80,6 +80,9 @@ _CONTEXTS = MappingProxyType(
             ),
             prompt_hints=(
                 "优先保留 Li-S/SRR_LiS 语境，不把该项目库误解为全局唯一数据库模式。",
+                "ProjectLibraryV4Extraction 输出应包含 catalyst_samples、active_site_instances、adsorbate_properties、reaction_step_properties、electronic_properties、structure_properties、ambiguous_records 七段。",
+                "属性必须绑定 catalyst_sample_id 与 active_site_ref 或 active_site_instance_key；无法安全绑定时进入 ambiguous_records，不进入 ML-ready。",
+                "Bader charge、charge transfer、metal_metal_distance_A、coordination_environment、adsorption_site、adsorption_mode 原文明确给出时提取，缺失时保持 null。",
                 "遇到字段缺失或证据不足时保持 UNKNOWN/null，不自动升级 verified/safe_verified。",
                 "后续解析、审核、筛选、导出可复用本上下文，但本层仅提供只读配置。",
             ),

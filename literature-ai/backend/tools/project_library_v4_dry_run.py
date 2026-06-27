@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
         "--api-base-url",
         default="http://127.0.0.1:8000",
         help=(
-            "Backend API base URL. Defaults to the local SSH tunnel for the server backend. "
+            "Backend API base URL. Defaults to the local owner-gateway backend API. "
             "Use --local-db to bypass the API and read LITAI_DATABASE_URL directly."
         ),
     )
@@ -76,6 +76,18 @@ def parse_args() -> argparse.Namespace:
 
 def _normalize_api_base_url(value: str) -> str:
     return str(value or "http://127.0.0.1:8000").rstrip("/")
+
+
+def _api_execution_mode(api_base_url: str) -> str:
+    parsed = urllib.parse.urlparse(_normalize_api_base_url(api_base_url))
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"127.0.0.1", "localhost", "::1"}:
+        return "local_api"
+    return "server_api"
+
+
+def _api_database_label(execution_mode: str) -> str:
+    return "local_backend_api" if execution_mode == "local_api" else "server_backend_api"
 
 
 def _api_export_url(
@@ -311,6 +323,8 @@ def build_api_report(
     connect_timeout: int = 10,
 ) -> dict[str, Any]:
     normalized_base_url = _normalize_api_base_url(api_base_url)
+    execution_mode = _api_execution_mode(normalized_base_url)
+    database_label = _api_database_label(execution_mode)
     task_reports = [
         _task_report_from_api(
             api_base_url=normalized_base_url,
@@ -329,11 +343,11 @@ def build_api_report(
         "database_write_authority": "none",
         "submit_endpoint_called": False,
         "extraction_apply_called": False,
-        "execution_mode": "server_api",
+        "execution_mode": execution_mode,
         "api_base_url": normalized_base_url,
         "active_database": {
             "db_kind": "postgresql",
-            "db_url_masked": "server_backend_api",
+            "db_url_masked": database_label,
             "active_library": None,
             "active_library_root": None,
             "connection_checked_by": "project_library_v4_dry_run_api",
@@ -395,22 +409,24 @@ def build_failure_report(
     execution_mode: str = "local_db",
     api_base_url: str | None = None,
 ) -> dict[str, Any]:
-    status = "server_api_unavailable" if execution_mode == "server_api" else "database_unavailable"
-    settings = None if execution_mode == "server_api" else get_settings()
+    api_mode = execution_mode in {"local_api", "server_api"}
+    status = f"{execution_mode}_unavailable" if api_mode else "database_unavailable"
+    settings = None if api_mode else get_settings()
+    database_label = _api_database_label(execution_mode) if api_mode else None
     active_database = (
         {
             "db_kind": "postgresql",
-            "db_url_masked": "server_backend_api",
+            "db_url_masked": database_label,
             "active_library": None,
             "active_library_root": None,
             "connection_checked_by": "project_library_v4_dry_run_api",
         }
-        if execution_mode == "server_api"
+        if api_mode
         else _active_database_metadata(settings.database_url)
     )
     database_url_masked = (
-        "server_backend_api"
-        if execution_mode == "server_api"
+        database_label
+        if api_mode
         else _mask_database_url(settings.database_url)
     )
     return {
@@ -466,7 +482,7 @@ def main() -> int:
             tasks=tasks,
             connect_timeout=args.connect_timeout,
             error=exc,
-            execution_mode="local_db" if args.local_db else "server_api",
+            execution_mode="local_db" if args.local_db else _api_execution_mode(args.api_base_url),
             api_base_url=args.api_base_url if not args.local_db else None,
         )
         exit_code = 2

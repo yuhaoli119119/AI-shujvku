@@ -42,3 +42,33 @@ def test_migration_files_are_utf8_without_common_mojibake_markers():
         sql = path.read_text(encoding="utf-8")
         for marker in markers:
             assert marker not in sql, f"{path} contains mojibake marker {marker!r}"
+
+
+def test_project_library_v4_optional_physical_tables_migration_covers_core_entities():
+    sql = Path("app/migrations/003_project_library_v4_physical_tables.sql").read_text(encoding="utf-8")
+
+    for table in (
+        "project_library_active_site_instances",
+        "project_library_adsorbate_properties",
+        "project_library_reaction_step_properties",
+        "project_library_electronic_properties",
+        "project_library_structure_properties",
+        "project_library_ambiguous_records",
+    ):
+        assert re.search(rf"CREATE TABLE IF NOT EXISTS\s+{table}\b", sql, flags=re.IGNORECASE)
+
+    for field in (
+        "active_site_instance_key",
+        "adsorption_energy_eV",
+        "reaction_step",
+        "bader_charge_M1",
+        "bader_charge_M2",
+        "charge_transfer_e",
+        "metal_metal_distance_A",
+        "coordination_environment",
+        "resolution_status",
+    ):
+        assert field in sql
+
+    assert "UNIQUE (catalyst_sample_id, active_site_instance_key)" in sql
+    assert "needs_user_decision" in sql

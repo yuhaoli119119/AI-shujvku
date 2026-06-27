@@ -6,6 +6,9 @@
     const V3_CSV_URL = "/api/dft/ml-dataset-v3.csv";
     const V4_API_URL = "/api/dft/project-library-ml-export-v4";
     const V4_CSV_URL = "/api/dft/project-library-ml-export-v4.csv";
+    const PROJECT_LIBRARY_QUALITY_URL = "/api/dft/project-library-quality";
+    const PROJECT_LIBRARY_SUBMIT_PREVIEW_URL = "/api/dft/project-library-v4/user-submit/preview";
+    const PROJECT_LIBRARY_SUBMIT_URL = "/api/dft/project-library-v4/user-submit";
     const DATASET_SCHEMA = "dft_results_ml_v2";
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     const EXPORTS_DISABLED_MESSAGE = "当前服务器策略已关闭导出接口；DFT ML 数据集页面暂不可用。如需恢复，请由 Owner 在设置中显式开启导出。";
@@ -18,7 +21,11 @@
         exportsPolicyDisabled: false,
         v3Manifest: null,
         v3Task: "adsorption_energy",
+        v4Payload: null,
         v4Manifest: null,
+        v4SampleRecords: [],
+        v4SampleQuality: null,
+        v4SelectedSampleIndex: null,
         v4Task: "adsorption_energy",
         v4ReadyOnly: true,
         serverFilters: {
@@ -213,6 +220,8 @@
             "v4CsvButton",
             "v4TaskSelect",
             "v4ReadyOnlySelect",
+            "v4SubmitPreviewButton",
+            "v4SubmitButton",
         ].forEach(id => {
             const node = qs(id);
             if (node) {
@@ -226,7 +235,10 @@
         state.filteredRecords = [];
         state.filteredLmRecords = [];
         state.v3Manifest = null;
+        state.v4Payload = null;
         state.v4Manifest = null;
+        state.v4SampleRecords = [];
+        state.v4SampleQuality = null;
         renderSummary();
         renderTable();
         renderV3Manifest();
@@ -750,29 +762,129 @@
         )).join("");
     }
 
+    function objectEntries(value) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+            return [];
+        }
+        return Object.entries(value).filter(([, itemValue]) => itemValue !== null && itemValue !== undefined && itemValue !== "");
+    }
+
+    function renderKeyValuePills(value, emptyLabel) {
+        const entries = objectEntries(value);
+        if (!entries.length) {
+            return '<span class="muted">' + escapeHtml(emptyLabel || "—") + "</span>";
+        }
+        return '<div class="pill-list">' + entries.map(([key, itemValue]) => (
+            '<span class="pill"><strong>' + escapeHtml(key) + ":</strong> " + escapeHtml(formatNumber(itemValue)) + "</span>"
+        )).join("") + "</div>";
+    }
+
+    function renderTaskLabels(labels) {
+        const items = Array.isArray(labels) ? labels : [];
+        if (!items.length) {
+            return '<span class="muted">—</span>';
+        }
+        return items.map(label => {
+            const value = formatValueWithUnit(label.label_value, label.label_unit);
+            const context = [label.adsorbate, label.reaction_step].filter(Boolean).join(" / ");
+            return '<div class="sample-label-line"><strong>' + escapeHtml(label.label_name || "label") + "</strong>: " + escapeHtml(value) +
+                (context ? '<div class="muted">' + escapeHtml(context) + "</div>" : "") + "</div>";
+        }).join("");
+    }
+
+    function renderV4SampleRecords() {
+        const tbody = qs("v4SampleRecordsTableBody");
+        if (!tbody) {
+            return;
+        }
+        const records = state.v4SampleRecords || [];
+        if (state.exportsPolicyDisabled) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty-row">导出策略关闭中。</td></tr>';
+            return;
+        }
+        if (!records.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty-row">当前 v4 任务没有返回 sample_records。</td></tr>';
+            return;
+        }
+        tbody.innerHTML = records.map((record, index) => (
+            "<tr>" +
+                "<td>" + (record.ml_ready ? '<span class="pill ready">ML-ready</span>' : '<span class="pill blocked">blocked</span>') + "</td>" +
+                '<td><div class="mono">' + escapeHtml(record.active_site_instance_key || record.sample_id || "—") + "</div>" +
+                    '<div class="muted">' + escapeHtml(record.sample_unit || "active_site_instance") + "</div></td>" +
+                "<td><strong>" + escapeHtml(record.catalyst_name || "—") + "</strong>" +
+                    '<div class="muted">' + escapeHtml(record.catalyst_type || "—") + " / " + escapeHtml((record.metal_centers || []).join("-") || "—") + "</div></td>" +
+                "<td>" + renderTaskLabels(record.task_labels) + "</td>" +
+                "<td>" + renderKeyValuePills(record.wide_properties, "无宽表属性") + "</td>" +
+                "<td>" + renderKeyValuePills(record.property_group_counts, "无分组") + "</td>" +
+                "<td>" + blockersHtml(record.blockers) + "</td>" +
+                '<td><button type="button" class="btn btn-ghost select-v4-sample-btn" data-sample-index="' + String(index) + '">补字段</button></td>' +
+            "</tr>"
+        )).join("");
+        tbody.querySelectorAll(".select-v4-sample-btn").forEach(button => {
+            button.addEventListener("click", () => {
+                selectV4Sample(Number(button.getAttribute("data-sample-index")));
+            });
+        });
+    }
+
+    function renderV4SampleQuality() {
+        const countsContainer = qs("v4SampleQualityCounts");
+        const examplesContainer = qs("v4SampleQualityExamples");
+        if (!countsContainer || !examplesContainer) {
+            return;
+        }
+        const quality = state.v4SampleQuality || {};
+        const counts = quality.counts || {};
+        const examples = quality.gap_examples || {};
+        const entries = objectEntries(counts);
+        if (!entries.length) {
+            countsContainer.innerHTML = '<span class="pill">等待加载</span>';
+        } else {
+            countsContainer.innerHTML = entries.map(([key, value]) => (
+                '<span class="pill"><strong>' + escapeHtml(key) + ":</strong> " + escapeHtml(formatNumber(value)) + "</span>"
+            )).join("");
+        }
+
+        const exampleEntries = objectEntries(examples);
+        if (!exampleEntries.length) {
+            examplesContainer.innerHTML = '<span class="muted">暂无样本缺口示例。</span>';
+            return;
+        }
+        examplesContainer.innerHTML = exampleEntries.map(([key, rows]) => {
+            const items = (Array.isArray(rows) ? rows : []).slice(0, 3).map(row => (
+                '<li><span class="mono">' + escapeHtml(row.active_site_instance_key || "—") + "</span>" +
+                " / " + escapeHtml(row.catalyst_name || "—") +
+                '<div class="muted">' + escapeHtml(row.title || row.paper_id || "—") + "</div></li>"
+            )).join("");
+            return '<div class="sample-gap-group"><strong>' + escapeHtml(key) + "</strong><ul>" + items + "</ul></div>";
+        }).join("");
+    }
+
     function renderV4Manifest() {
         const manifest = state.v4Manifest || {};
         setCardValue("v4SchemaValue", v3ManifestValue(manifest, ["schema", "schema_version"], "-"));
         setCardValue("v4VersionValue", v3ManifestValue(manifest, ["version", "dataset_version"], "-"));
         setCardValue("v4TaskValue", formatV4TaskLabel(v3ManifestValue(manifest, ["task"], state.v4Task)));
         setCardValue("v4LibraryValue", v3ManifestValue(manifest, ["library_name"], state.serverFilters.library_name || "全部"));
-        setCardValue("v4CandidateCount", v3ManifestValue(manifest, ["candidate_count"], "-"));
-        setCardValue("v4ReturnedCount", v3ManifestValue(manifest, ["returned_count"], "-"));
-        setCardValue("v4ReadyCount", v3ManifestValue(manifest, ["ml_ready_count"], "-"));
-        setCardValue("v4BlockedCount", v3ManifestValue(manifest, ["blocked_count"], "-"));
-        renderV4BlockerCounts(manifest.blocker_counts);
+        setCardValue("v4CandidateCount", v3ManifestValue(manifest, ["candidate_sample_count", "candidate_count"], "-"));
+        setCardValue("v4ReturnedCount", v3ManifestValue(manifest, ["returned_sample_count", "returned_count"], "-"));
+        setCardValue("v4ReadyCount", v3ManifestValue(manifest, ["sample_ml_ready_count", "ml_ready_count"], "-"));
+        setCardValue("v4BlockedCount", v3ManifestValue(manifest, ["sample_blocked_count", "blocked_count"], "-"));
+        renderV4BlockerCounts(manifest.sample_blocker_counts || manifest.blocker_counts);
+        renderV4SampleRecords();
+        renderV4SampleQuality();
 
         if (!state.v4Manifest || state.exportsPolicyDisabled) {
             return;
         }
-        const returnedCount = Number(manifest.returned_count || 0);
-        const readyCount = Number(manifest.ml_ready_count || 0);
+        const returnedCount = Number(manifest.returned_sample_count ?? manifest.returned_count ?? 0);
+        const readyCount = Number(manifest.sample_ml_ready_count ?? manifest.ml_ready_count ?? 0);
         if (returnedCount === 0 || readyCount === 0) {
-            setV4Status("当前 v4 任务没有 ML-ready 记录；可切换到包含 blocked 诊断查看原因。", "empty");
+            setV4Status("当前 v4 任务没有 ML-ready 样本；可切换到包含 blocked 诊断查看原因。", "empty");
             return;
         }
         setV4Status(
-            "v4 manifest 已加载，当前任务 ML-ready 记录 " + formatNumber(readyCount) + " 条。",
+            "v4 manifest 已加载，当前任务 ML-ready 样本 " + formatNumber(readyCount) + " 个。",
             "info"
         );
     }
@@ -1061,6 +1173,9 @@
         params.set("context_key", "li_s_sac_dac");
         params.set("task", state.v4Task);
         params.set("ready_only", options && options.readyOnly !== undefined ? String(!!options.readyOnly) : String(!!state.v4ReadyOnly));
+        if (options && options.unit) {
+            params.set("unit", options.unit);
+        }
         if (state.serverFilters.library_name) {
             params.set("library_name", state.serverFilters.library_name);
         }
@@ -1069,6 +1184,15 @@
 
     function buildV4Url(baseUrl, options) {
         return baseUrl + "?" + buildV4Params(options).toString();
+    }
+
+    function buildProjectLibraryQualityUrl() {
+        const params = new URLSearchParams();
+        params.set("context_key", "li_s_sac_dac");
+        if (state.serverFilters.library_name) {
+            params.set("library_name", state.serverFilters.library_name);
+        }
+        return PROJECT_LIBRARY_QUALITY_URL + "?" + params.toString();
     }
 
     async function refreshV3Manifest() {
@@ -1104,8 +1228,12 @@
         setV4Status("正在读取 Li-S SAC/DAC v4 manifest...", "loading");
         try {
             const payload = await fetchJSON(buildV4Url(V4_API_URL, { readyOnly: state.v4ReadyOnly }));
+            const qualityPayload = await fetchJSON(buildProjectLibraryQualityUrl());
             setExportsPolicyDisabled(false);
+            state.v4Payload = payload || null;
             state.v4Manifest = payload && payload.manifest ? payload.manifest : {};
+            state.v4SampleRecords = payload && Array.isArray(payload.sample_records) ? payload.sample_records : [];
+            state.v4SampleQuality = qualityPayload && qualityPayload.sample_quality ? qualityPayload.sample_quality : null;
             renderV4Manifest();
         } catch (error) {
             if (isExportsDisabledError(error)) {
@@ -1113,9 +1241,184 @@
                 renderPolicyDisabledState();
                 return;
             }
+            state.v4Payload = null;
             state.v4Manifest = null;
+            state.v4SampleRecords = [];
+            state.v4SampleQuality = null;
+            state.v4SelectedSampleIndex = null;
             renderV4Manifest();
             setV4Status("读取 Li-S SAC/DAC v4 manifest 失败：" + error.message, "error");
+        }
+    }
+
+    function getSelectedV4Sample() {
+        const index = state.v4SelectedSampleIndex;
+        if (index === null || index === undefined) {
+            return null;
+        }
+        return (state.v4SampleRecords || [])[index] || null;
+    }
+
+    function firstTaskLabel(sample) {
+        const labels = sample && Array.isArray(sample.task_labels) ? sample.task_labels : [];
+        return labels[0] || {};
+    }
+
+    function setInputValue(id, value) {
+        const node = qs(id);
+        if (node) {
+            node.value = value == null ? "" : String(value);
+        }
+    }
+
+    function selectV4Sample(index) {
+        const sample = (state.v4SampleRecords || [])[index];
+        if (!sample) {
+            showToast("没有找到对应 sample_record。", "error");
+            return;
+        }
+        state.v4SelectedSampleIndex = index;
+        const label = firstTaskLabel(sample);
+        const selected = qs("v4SubmitSelectedSample");
+        selected.textContent = [
+            sample.active_site_instance_key || sample.sample_id || "—",
+            sample.catalyst_name || "—",
+            sample.title || sample.paper_id || "—",
+        ].join(" / ");
+        selected.classList.remove("muted");
+        setInputValue("v4SubmitRecordId", label.record_id || "");
+        setInputValue("v4SubmitPropertyType", label.label_name && label.label_name.includes("barrier") ? "reaction_barrier" : (sample.task === "adsorption_energy" ? "adsorption_energy" : "gibbs_free_energy_change"));
+        setInputValue("v4SubmitValue", label.label_value ?? "");
+        setInputValue("v4SubmitUnit", label.label_unit || "eV");
+        setInputValue("v4SubmitAdsorbate", label.adsorbate || "");
+        setInputValue("v4SubmitReactionStep", label.reaction_step || "");
+        setInputValue("v4SubmitEnergyKind", label.label_energy_kind || (sample.task === "li2s_barrier" ? "activation_barrier" : "thermodynamic_energy"));
+        setInputValue("v4SubmitBaderM1", sample.bader_charge_M1 ?? "");
+        setInputValue("v4SubmitBaderM2", sample.bader_charge_M2 ?? "");
+        setInputValue("v4SubmitChargeTransfer", sample.charge_transfer_e ?? "");
+        setInputValue("v4SubmitChargeDirection", sample.charge_transfer_direction || "");
+        setInputValue("v4SubmitStateContext", sample.state_context || "");
+        setInputValue("v4SubmitSiteLabel", sample.site_label || "");
+        setInputValue("v4SubmitMetalDistance", sample.metal_metal_distance_A ?? "");
+        setInputValue("v4SubmitCoordinationEnv", sample.coordination_environment || "");
+        setInputValue("v4SubmitAdsorptionSite", sample.adsorption_site || "");
+        setInputValue("v4SubmitAdsorptionMode", sample.adsorption_mode || "");
+        setInputValue("v4SubmitMetalLigandDistance", sample.metal_ligand_distance_A ?? "");
+        setInputValue("v4SubmitSourceText", "");
+        setInputValue("v4SubmitSourcePage", "");
+        const result = qs("v4SubmitResult");
+        result.hidden = true;
+        result.textContent = "";
+    }
+
+    function numberOrNull(id) {
+        const raw = normalizeText(qs(id).value);
+        if (!raw) {
+            return null;
+        }
+        const value = Number(raw);
+        if (Number.isNaN(value)) {
+            throw new Error(id + " 必须是数值。");
+        }
+        return value;
+    }
+
+    function textOrNull(id) {
+        const value = normalizeText(qs(id).value);
+        return value || null;
+    }
+
+    function buildV4SubmitPayload() {
+        const sample = getSelectedV4Sample();
+        if (!sample) {
+            throw new Error("请先在 sample_records 中选择一个样本。");
+        }
+        const sourceText = textOrNull("v4SubmitSourceText");
+        if (!sourceText) {
+            throw new Error("source_text 不能为空。");
+        }
+        const activeSiteRef = sample.active_site_ref && typeof sample.active_site_ref === "object"
+            ? sample.active_site_ref
+            : {
+                active_site_instance_key: sample.active_site_instance_key || sample.sample_id,
+                catalyst_sample_id: sample.catalyst_sample_id,
+            };
+        const sourcePage = textOrNull("v4SubmitSourcePage");
+        const payload = {
+            schema_version: "project_library_ml_export_v4",
+            context_key: "li_s_sac_dac",
+            paper_id: sample.paper_id,
+            record_id: textOrNull("v4SubmitRecordId"),
+            database_write_authority: "user_submit_only",
+            ai_consensus_auto_adopt_allowed: false,
+            active_site_instance_key: sample.active_site_instance_key || sample.sample_id,
+            active_site_ref: activeSiteRef,
+            catalyst_sample_id: sample.catalyst_sample_id,
+            property_type: qs("v4SubmitPropertyType").value,
+            adsorbate: textOrNull("v4SubmitAdsorbate"),
+            reaction_step: textOrNull("v4SubmitReactionStep"),
+            energy_kind: textOrNull("v4SubmitEnergyKind"),
+            value: numberOrNull("v4SubmitValue"),
+            unit: textOrNull("v4SubmitUnit") || "eV",
+            source_text: sourceText,
+            source_location: sourcePage ? { page: sourcePage } : {},
+            submitted_by: textOrNull("v4SubmitSubmittedBy") || "local_user",
+            bader_charge_M1: numberOrNull("v4SubmitBaderM1"),
+            bader_charge_M2: numberOrNull("v4SubmitBaderM2"),
+            charge_transfer_e: numberOrNull("v4SubmitChargeTransfer"),
+            charge_transfer_direction: textOrNull("v4SubmitChargeDirection"),
+            state_context: textOrNull("v4SubmitStateContext"),
+            site_label: textOrNull("v4SubmitSiteLabel"),
+            metal_metal_distance_A: numberOrNull("v4SubmitMetalDistance"),
+            coordination_environment: textOrNull("v4SubmitCoordinationEnv"),
+            adsorption_site: textOrNull("v4SubmitAdsorptionSite"),
+            adsorption_mode: textOrNull("v4SubmitAdsorptionMode"),
+            metal_ligand_distance_A: numberOrNull("v4SubmitMetalLigandDistance"),
+        };
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === null || payload[key] === undefined || payload[key] === "") {
+                delete payload[key];
+            }
+        });
+        return payload;
+    }
+
+    function renderSubmitResult(payload) {
+        const result = qs("v4SubmitResult");
+        result.hidden = false;
+        result.textContent = toPrettyJson(payload);
+    }
+
+    async function previewV4Submit() {
+        try {
+            const payload = buildV4SubmitPayload();
+            const preview = await fetchJSON(PROJECT_LIBRARY_SUBMIT_PREVIEW_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            renderSubmitResult(preview);
+            showToast(preview.can_submit ? "预览通过，可以提交。" : "预览返回阻止项。", preview.can_submit ? "info" : "error");
+        } catch (error) {
+            renderSubmitResult({ error: error.message });
+            showToast("预览失败：" + error.message, "error");
+        }
+    }
+
+    async function submitV4UserFields() {
+        try {
+            const payload = buildV4SubmitPayload();
+            const result = await fetchJSON(PROJECT_LIBRARY_SUBMIT_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            renderSubmitResult(result);
+            showToast("已提交样本级字段。");
+            await refreshV4Manifest();
+        } catch (error) {
+            renderSubmitResult({ error: error.message });
+            showToast("提交失败：" + error.message, "error");
         }
     }
 
@@ -1153,7 +1456,10 @@
             state.filteredRecords = [];
             state.filteredLmRecords = [];
             state.v3Manifest = null;
+            state.v4Payload = null;
             state.v4Manifest = null;
+            state.v4SampleRecords = [];
+            state.v4SampleQuality = null;
             renderSummary();
             renderTable();
             renderV3Manifest();
@@ -1300,7 +1606,7 @@
             return;
         }
         readV4RequestStateFromDom();
-        const url = buildV4Url(V4_CSV_URL, { readyOnly: state.v4ReadyOnly });
+        const url = buildV4Url(V4_CSV_URL, { readyOnly: state.v4ReadyOnly, unit: "sample" });
         const requestOptions = { headers: {} };
         const token = readSettingsToken();
         if (token) {
@@ -1347,6 +1653,8 @@
         qs("v4CsvButton").addEventListener("click", exportV4Csv);
         qs("v4TaskSelect").addEventListener("change", refreshV4Manifest);
         qs("v4ReadyOnlySelect").addEventListener("change", refreshV4Manifest);
+        qs("v4SubmitPreviewButton").addEventListener("click", previewV4Submit);
+        qs("v4SubmitButton").addEventListener("click", submitV4UserFields);
 
         [
             "readinessFilter",

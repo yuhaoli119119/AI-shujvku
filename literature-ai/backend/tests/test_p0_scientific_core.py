@@ -338,6 +338,18 @@ def test_extraction_schema_results_and_validator_warnings():
                 response = ExtractionSchemaService(session).results(paper.id)
 
                 assert "DFTResult" in response.schemas
+                assert "ProjectLibraryV4Extraction" in response.schemas
+                assert response.results["ProjectLibraryV4Extraction"] == []
+                project_schema = response.schemas["ProjectLibraryV4Extraction"]
+                assert set(project_schema["properties"]) >= {
+                    "catalyst_samples",
+                    "active_site_instances",
+                    "adsorbate_properties",
+                    "reaction_step_properties",
+                    "electronic_properties",
+                    "structure_properties",
+                    "ambiguous_records",
+                }
                 assert response.results["DFTResult"][0]["value"]["value"] == -1.23
                 assert response.results["DFTResult"][0]["value"]["evidence_text"]
 
@@ -366,3 +378,4 @@ def test_p0_api_routes_are_registered():
     schemas = client.get("/api/extraction/schemas")
     assert schemas.status_code == 200
     assert "DFTResult" in schemas.json()
+    assert "ProjectLibraryV4Extraction" in schemas.json()

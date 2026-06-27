@@ -87,6 +87,17 @@ class ProjectLibrarySubmissionService:
         "support_normalized",
         "support_confidence",
         "dft_setting_id",
+        "bader_charge_M1",
+        "bader_charge_M2",
+        "charge_transfer_e",
+        "charge_transfer_direction",
+        "state_context",
+        "site_label",
+        "metal_metal_distance_A",
+        "coordination_environment",
+        "adsorption_site",
+        "adsorption_mode",
+        "metal_ligand_distance_A",
     ]
 
     def __init__(self, session: Session) -> None:
@@ -279,6 +290,17 @@ class ProjectLibrarySubmissionService:
             "unit": payload.unit,
             "source_text": payload.source_text,
             "source_location": payload.source_location or {},
+            "bader_charge_M1": payload.bader_charge_M1,
+            "bader_charge_M2": payload.bader_charge_M2,
+            "charge_transfer_e": payload.charge_transfer_e,
+            "charge_transfer_direction": payload.charge_transfer_direction,
+            "state_context": payload.state_context,
+            "site_label": payload.site_label,
+            "metal_metal_distance_A": payload.metal_metal_distance_A,
+            "coordination_environment": payload.coordination_environment,
+            "adsorption_site": payload.adsorption_site,
+            "adsorption_mode": payload.adsorption_mode,
+            "metal_ligand_distance_A": payload.metal_ligand_distance_A,
             "submitted_by": submitted_by,
             "source_candidate_ids": [str(candidate.id) for candidate in source_candidates],
         }
@@ -471,6 +493,10 @@ class ProjectLibrarySubmissionService:
                 "active_site_instance_key": active_site_instance_key,
                 "binding_source": "user_submit",
             }
+            if payload.site_label:
+                active_site_ref["site_label"] = payload.site_label
+            if payload.adsorption_site:
+                active_site_ref["adsorption_site"] = payload.adsorption_site
         return active_site_instance_key, active_site_ref
 
     def _create_row(self, prepared: PreparedSubmission) -> DFTResult:
@@ -532,6 +558,17 @@ class ProjectLibrarySubmissionService:
                 "support_normalized": payload.support_normalized,
                 "support_confidence": payload.support_confidence,
                 "dft_setting_id": payload.dft_setting_id,
+                "bader_charge_M1": payload.bader_charge_M1,
+                "bader_charge_M2": payload.bader_charge_M2,
+                "charge_transfer_e": payload.charge_transfer_e,
+                "charge_transfer_direction": payload.charge_transfer_direction,
+                "state_context": payload.state_context,
+                "site_label": payload.site_label,
+                "metal_metal_distance_A": payload.metal_metal_distance_A,
+                "coordination_environment": payload.coordination_environment,
+                "adsorption_site": payload.adsorption_site,
+                "adsorption_mode": payload.adsorption_mode,
+                "metal_ligand_distance_A": payload.metal_ligand_distance_A,
             }
         )
         row.evidence_payload = merged_payload

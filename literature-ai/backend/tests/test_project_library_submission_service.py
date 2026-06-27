@@ -246,6 +246,62 @@ def test_project_library_v4_user_submit_writes_dft_result_and_audit_log(setup_te
         assert audit is not None
 
 
+def test_project_library_v4_user_submit_persists_sample_level_electronic_and_structure_fields(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        seeded = _seed_project_library_paper(session)
+        payload = _submit_payload(**seeded)
+        payload.update(
+            {
+                "bader_charge_M1": 0.31,
+                "charge_transfer_e": 0.44,
+                "charge_transfer_direction": "catalyst_to_adsorbate",
+                "state_context": "after_Li2S4_adsorption",
+                "site_label": "M1",
+                "metal_metal_distance_A": 2.21,
+                "coordination_environment": "Fe-N4",
+                "adsorption_site": "Fe-top",
+                "adsorption_mode": "end-on",
+                "metal_ligand_distance_A": 1.92,
+            }
+        )
+
+    client = TestClient(app)
+    preview = client.post("/api/dft/project-library-v4/user-submit/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    preview_payload = preview.json()
+    assert preview_payload["normalized_submission"]["bader_charge_M1"] == 0.31
+    assert preview_payload["normalized_submission"]["metal_metal_distance_A"] == 2.21
+
+    submit = client.post("/api/dft/project-library-v4/user-submit", json=payload)
+    assert submit.status_code == 200, submit.text
+
+    export_response = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"paper_id": seeded["paper_id"], "task": "adsorption_energy", "ready_only": "false"},
+    )
+    assert export_response.status_code == 200, export_response.text
+    export_payload = export_response.json()
+    export_record = next(item for item in export_payload["records"] if item["record_id"] == seeded["row_id"])
+    assert export_record["bader_charge_M1"] == 0.31
+    assert export_record["charge_transfer_e"] == 0.44
+    assert export_record["charge_transfer_direction"] == "catalyst_to_adsorbate"
+    assert export_record["metal_metal_distance_A"] == 2.21
+    assert export_record["structure_blockers"] == []
+
+    sample_record = export_payload["sample_records"][0]
+    assert sample_record["wide_properties"]["bader_charge_M1_e"] == 0.31
+    assert sample_record["wide_properties"]["charge_transfer_e"] == 0.44
+    assert sample_record["wide_properties"]["metal_metal_distance_A"] == 2.21
+
+    with SessionLocal() as session:
+        stored_row = session.get(DFTResult, UUID(seeded["row_id"]))
+        assert stored_row is not None
+        assert stored_row.evidence_payload["bader_charge_M1"] == 0.31
+        assert stored_row.evidence_payload["charge_transfer_direction"] == "catalyst_to_adsorbate"
+        assert stored_row.evidence_payload["metal_ligand_distance_A"] == 1.92
+
+
 def test_project_library_v4_user_submit_rejects_ambiguous_status(setup_test_db):
     SessionLocal = sessionmaker(bind=setup_test_db, future=True)
     with SessionLocal() as session:

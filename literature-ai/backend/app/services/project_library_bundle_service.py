@@ -177,6 +177,35 @@ def _structure_payload(
     }
 
 
+def _electronic_payload(
+    *,
+    row: DFTResult,
+    active_site_ref: dict[str, Any],
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    sources: dict[str, str | None] = {}
+
+    def assign(field: str, *keys: str) -> None:
+        value, source = _payload_source(row.evidence_payload, *keys)
+        if value in (None, "", []):
+            value, source = _dict_source(active_site_ref, "active_site_ref", *keys)
+        values[field] = value if value not in ("", []) else None
+        sources[field] = source
+
+    assign("bader_charge_M1", "bader_charge_M1", "bader_charge_m1")
+    assign("bader_charge_M2", "bader_charge_M2", "bader_charge_m2")
+    assign("charge_transfer_e", "charge_transfer_e", "charge_transfer")
+    assign("charge_transfer_direction", "charge_transfer_direction")
+    assign("state_context", "state_context")
+    assign("site_label", "site_label", "active_site", "adsorption_site")
+
+    return {
+        **values,
+        "electronic_field_sources": sources,
+        "electronic_source_version": "project_library_v4_electronic_fields_v1",
+    }
+
+
 def _dict_source(mapping: dict[str, Any], source_prefix: str, *keys: str) -> tuple[Any, str | None]:
     for key in keys:
         value = mapping.get(key)
@@ -542,6 +571,14 @@ def _export_record_for_task(
         "structure_field_sources": prop.get("structure_field_sources", {}),
         "structure_source_version": prop.get("structure_source_version"),
         "structure_blockers": prop.get("structure_blockers", []),
+        "bader_charge_M1": prop.get("bader_charge_M1"),
+        "bader_charge_M2": prop.get("bader_charge_M2"),
+        "charge_transfer_e": prop.get("charge_transfer_e"),
+        "charge_transfer_direction": prop.get("charge_transfer_direction"),
+        "state_context": prop.get("state_context"),
+        "site_label": prop.get("site_label"),
+        "electronic_field_sources": prop.get("electronic_field_sources", {}),
+        "electronic_source_version": prop.get("electronic_source_version"),
         "active_site_instance_key": instance["active_site_instance_key"],
         "active_site_ref": instance["active_site_ref"],
         "energy_kind": prop["energy_kind"],
@@ -580,6 +617,21 @@ def _put_wide_value(target: dict[str, Any], key: str, value: Any) -> None:
         target[key] = [existing, value]
 
 
+def _put_supplemental_wide_values(target: dict[str, Any], prop: dict[str, Any]) -> None:
+    supplemental_fields = {
+        "bader_charge_M1": "bader_charge_M1_e",
+        "bader_charge_M2": "bader_charge_M2_e",
+        "charge_transfer_e": "charge_transfer_e",
+        "metal_metal_distance_A": "metal_metal_distance_A",
+        "coordination_environment": "coordination_environment",
+        "metal_ligand_distance_A": "metal_ligand_distance_A",
+        "adsorption_site": "adsorption_site",
+        "adsorption_mode": "adsorption_mode",
+    }
+    for field, key in supplemental_fields.items():
+        _put_wide_value(target, key, prop.get(field))
+
+
 def _wide_property_key(prop: dict[str, Any]) -> str:
     canonical = prop["canonical_property_type"]
     subtype = prop["property_subtype"]
@@ -593,6 +645,9 @@ def _wide_property_key(prop: dict[str, Any]) -> str:
         step = _token(prop.get("reaction_step")) or "unknown_step"
         return f"{canonical}_{step}_{unit}"
     if canonical in _ELECTRONIC_PROPERTIES:
+        site_label = _token(prop.get("site_label"))
+        if canonical == "bader_charge" and site_label in {"m1", "m2"}:
+            return f"bader_charge_{site_label}_{unit}"
         adsorbate = _token(prop.get("canonical_adsorbate") or prop.get("adsorbate"))
         suffix = f"_{adsorbate}" if adsorbate else ""
         return f"{canonical}{suffix}_{unit}"
@@ -617,6 +672,13 @@ def _compact_property(prop: dict[str, Any]) -> dict[str, Any]:
         "source_text": prop["source_text"],
         "source_location": prop["source_location"],
         "confidence_level": prop["confidence_level"],
+        "bader_charge_M1": prop.get("bader_charge_M1"),
+        "bader_charge_M2": prop.get("bader_charge_M2"),
+        "charge_transfer_e": prop.get("charge_transfer_e"),
+        "charge_transfer_direction": prop.get("charge_transfer_direction"),
+        "state_context": prop.get("state_context"),
+        "site_label": prop.get("site_label"),
+        "electronic_field_sources": prop.get("electronic_field_sources", {}),
         "ml_ready": prop["ml_ready"],
         "blockers": prop["blockers"],
         "manual_verification_required": prop["manual_verification_required"],
@@ -685,6 +747,7 @@ def _export_sample_record_for_task(
     wide_properties: dict[str, Any] = {}
     for prop in all_props:
         _put_wide_value(wide_properties, _wide_property_key(prop), prop["value"])
+        _put_supplemental_wide_values(wide_properties, prop)
 
     task_labels: list[dict[str, Any]] = []
     task_wide_labels: dict[str, Any] = {}
@@ -744,6 +807,13 @@ def _export_sample_record_for_task(
         "adsorption_mode": first_record.get("adsorption_mode"),
         "structure_field_sources": first_record.get("structure_field_sources", {}),
         "structure_blockers": first_record.get("structure_blockers", []),
+        "bader_charge_M1": first_record.get("bader_charge_M1"),
+        "bader_charge_M2": first_record.get("bader_charge_M2"),
+        "charge_transfer_e": first_record.get("charge_transfer_e"),
+        "charge_transfer_direction": first_record.get("charge_transfer_direction"),
+        "state_context": first_record.get("state_context"),
+        "site_label": first_record.get("site_label"),
+        "electronic_field_sources": first_record.get("electronic_field_sources", {}),
         "descriptor_blockers": first_record.get("descriptor_blockers", []),
         "ml_ready": ml_ready,
         "blockers": blockers,
@@ -832,6 +902,7 @@ class ProjectLibraryBundleService:
             )
             prop.update(_support_payload(catalyst, row.evidence_payload))
             prop.update(_structure_payload(row=row, catalyst=catalyst, active_site_ref=active_site_ref))
+            prop.update(_electronic_payload(row=row, active_site_ref=active_site_ref))
             blockers = _record_blockers(
                 prop,
                 instance_source=instance_source,
@@ -1022,8 +1093,15 @@ class ProjectLibraryBundleService:
             "sample_records": sample_records,
         }
 
-    def build_ml_export_v4_csv(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+    def build_ml_export_v4_csv(self, *, unit: str = "sample", **kwargs: Any) -> tuple[str, dict[str, Any]]:
         payload = self.build_ml_export_v4(**kwargs)
+        if unit == "record":
+            return self._build_ml_export_v4_record_csv(payload)
+        if unit != "sample":
+            raise KeyError("unit must be one of: sample, record")
+        return self._build_ml_export_v4_sample_csv(payload)
+
+    def _build_ml_export_v4_record_csv(self, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         output = io.StringIO()
         fieldnames = [
             "record_id",
@@ -1052,6 +1130,13 @@ class ProjectLibraryBundleService:
             "adsorption_mode",
             "structure_field_sources",
             "structure_blockers",
+            "bader_charge_M1",
+            "bader_charge_M2",
+            "charge_transfer_e",
+            "charge_transfer_direction",
+            "state_context",
+            "site_label",
+            "electronic_field_sources",
             "active_site_instance_key",
             "energy_kind",
             "property_type",
@@ -1069,11 +1154,96 @@ class ProjectLibraryBundleService:
             "ml_ready",
             "blockers",
             "manual_verification_required",
+            "database_write_authority",
+            "ai_consensus_auto_adopt_allowed",
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for record in payload["records"]:
             writer.writerow({key: _csv_cell(record.get(key)) for key in fieldnames})
+        return output.getvalue(), payload["manifest"]
+
+    def _build_ml_export_v4_sample_csv(self, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        sample_records = payload["sample_records"]
+        output = io.StringIO()
+        base_fieldnames = [
+            "sample_id",
+            "sample_unit",
+            "paper_id",
+            "title",
+            "task",
+            "ml_ready",
+            "blockers",
+            "manual_verification_required",
+            "catalyst_sample_id",
+            "catalyst_name",
+            "catalyst_type",
+            "metal_centers",
+            "coordination",
+            "support_raw",
+            "support_normalized",
+            "support_confidence",
+            "active_site_instance_key",
+            "active_site_ref",
+            "dft_setting_ref",
+            "binding_source",
+            "task_record_ids",
+            "source_record_ids",
+            "task_labels",
+            "task_wide_labels",
+            "wide_properties",
+            "property_group_counts",
+            "property_groups",
+            "metal_descriptor_summary",
+            "metal_1_descriptors",
+            "metal_2_descriptors",
+            "dac_combined_descriptors",
+            "descriptor_blockers",
+            "metal_metal_distance_A",
+            "coordination_environment",
+            "metal_ligand_distance_A",
+            "adsorption_site",
+            "adsorption_mode",
+            "structure_field_sources",
+            "structure_blockers",
+            "bader_charge_M1",
+            "bader_charge_M2",
+            "charge_transfer_e",
+            "charge_transfer_direction",
+            "state_context",
+            "site_label",
+            "electronic_field_sources",
+            "database_write_authority",
+            "ai_consensus_auto_adopt_allowed",
+            "element_descriptor_source",
+            "element_descriptor_source_version",
+        ]
+        dynamic_label_fieldnames = sorted(
+            {
+                key
+                for sample in sample_records
+                for key in (sample.get("task_wide_labels") or {})
+                if key not in base_fieldnames
+            }
+        )
+        dynamic_wide_fieldnames = sorted(
+            {
+                key
+                for sample in sample_records
+                for key in (sample.get("wide_properties") or {})
+                if key not in base_fieldnames and key not in dynamic_label_fieldnames
+            }
+        )
+        fieldnames = base_fieldnames + dynamic_label_fieldnames + dynamic_wide_fieldnames
+        writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        for sample in sample_records:
+            task_wide_labels = sample.get("task_wide_labels") or {}
+            wide_properties = sample.get("wide_properties") or {}
+            row = {key: _csv_cell(sample.get(key)) for key in base_fieldnames}
+            row.update({key: _csv_cell(task_wide_labels.get(key)) for key in dynamic_label_fieldnames})
+            row.update({key: _csv_cell(wide_properties.get(key)) for key in dynamic_wide_fieldnames})
+            writer.writerow(row)
         return output.getvalue(), payload["manifest"]
 
     def _papers(self, *, effective_library_name: str | None, paper_id: UUID | None) -> list[Paper]:

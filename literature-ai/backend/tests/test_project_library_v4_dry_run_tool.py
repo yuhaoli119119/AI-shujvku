@@ -77,15 +77,15 @@ def test_dry_run_failure_report_can_target_server_api_without_local_db(monkeypat
         tasks=("adsorption_energy",),
         connect_timeout=5,
         error=OSError("connection refused"),
-        execution_mode="server_api",
+        execution_mode="local_api",
         api_base_url="http://127.0.0.1:8000/",
     )
 
-    assert report["status"] == "server_api_unavailable"
-    assert report["execution_mode"] == "server_api"
+    assert report["status"] == "local_api_unavailable"
+    assert report["execution_mode"] == "local_api"
     assert report["api_base_url"] == "http://127.0.0.1:8000"
-    assert report["database_url_masked"] == "server_backend_api"
-    assert report["active_database"]["db_url_masked"] == "server_backend_api"
+    assert report["database_url_masked"] == "local_backend_api"
+    assert report["active_database"]["db_url_masked"] == "local_backend_api"
     assert report["active_database"]["connection_checked_by"] == "project_library_v4_dry_run_api"
 
 
@@ -111,7 +111,7 @@ def test_dry_run_api_export_url_encodes_server_query_parameters():
     assert query["ready_only"] == ["true"]
 
 
-def test_dry_run_build_api_report_is_read_only_and_uses_server_api(monkeypatch):
+def test_dry_run_build_api_report_is_read_only_and_uses_local_api(monkeypatch):
     tool = _load_tool_module()
     requested_urls: list[str] = []
 
@@ -202,13 +202,13 @@ def test_dry_run_build_api_report_is_read_only_and_uses_server_api(monkeypatch):
     )
 
     assert json.loads(json.dumps(report, ensure_ascii=False)) == report
-    assert report["execution_mode"] == "server_api"
+    assert report["execution_mode"] == "local_api"
     assert report["api_base_url"] == "http://127.0.0.1:8000"
     assert report["read_only"] is True
     assert report["database_write_authority"] == "none"
     assert report["submit_endpoint_called"] is False
     assert report["extraction_apply_called"] is False
-    assert report["active_database"]["db_url_masked"] == "server_backend_api"
+    assert report["active_database"]["db_url_masked"] == "local_backend_api"
     assert report["tasks"][0]["ready_record_count"] == 1
     assert report["tasks"][0]["diagnostic_record_count"] == 2
     assert report["tasks"][0]["blocked_record_count"] == 1

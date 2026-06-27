@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,6 +46,7 @@ def _seed_dft(
     reaction_step: str = "Li2S4 adsorption",
     evidence_text: str = "Li2S4 adsorption is measured in the table.",
     value: float = -1.20,
+    unit: str = "eV",
     evidence_payload: dict | None = None,
     with_setting: bool = True,
 ) -> DFTResult:
@@ -65,7 +67,7 @@ def _seed_dft(
         adsorbate=adsorbate,
         property_type=property_type,
         value=value if complete else -1.35,
-        unit="eV",
+        unit=unit,
         reaction_step=reaction_step,
         evidence_text=evidence_text,
         evidence_payload=evidence_payload,
@@ -190,6 +192,13 @@ def test_project_library_quality_defaults_to_li_s_library_and_reports_blockers(s
     assert payload["blocker_counts"]["missing_coordination"] == 1
     assert payload["feature_candidate_blocker_counts"]["unsupported_specific_capacity_unit"] == 1
     assert payload["feature_candidate_blocker_counts"]["rate_requires_conversion"] == 1
+    assert payload["sample_quality"]["sample_unit"] == "active_site_instance"
+    assert payload["sample_quality"]["counts"]["total_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_li2s_adsorption_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_li2s_barrier_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_rds_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_bader_or_charge_transfer_sample_count"] == 2
+    assert "missing_li2s_adsorption_sample_count" in payload["sample_quality"]["gap_examples"]
     assert [item["title"] for item in payload["needs_fields_papers"]] == ["Li-S blocked"]
     assert payload["needs_fields_papers"][0]["feature_candidate_blocker_counts"]["unsupported_specific_capacity_unit"] == 1
 
@@ -343,6 +352,10 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
         "/api/dft/project-library-ml-export-v4.csv",
         params={"task": "li2s_barrier"},
     )
+    record_csv_response = client.get(
+        "/api/dft/project-library-ml-export-v4.csv",
+        params={"task": "li2s_barrier", "unit": "record"},
+    )
 
     with SessionLocal() as session:
         after = _row_counts(session)
@@ -430,9 +443,24 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
 
     assert csv_response.status_code == 200
     rows = list(csv.DictReader(io.StringIO(csv_response.text)))
-    assert rows[0]["record_id"] == barrier_id
+    assert rows[0]["sample_id"] == active_site_key
+    assert rows[0]["sample_unit"] == "active_site_instance"
     assert rows[0]["task"] == "li2s_barrier"
-    assert rows[0]["energy_kind"] == "activation_barrier"
+    assert json.loads(rows[0]["task_record_ids"]) == [barrier_id]
+    assert set(json.loads(rows[0]["source_record_ids"])) == {adsorption_id, barrier_id}
+    assert rows[0]["li2s_barrier_eV"] == "0.65"
+    assert rows[0]["adsorption_energy_li2s_ev"] == "-1.1"
+    assert rows[0]["li2s_decomposition_barrier_ev"] == "0.65"
+
+    assert record_csv_response.status_code == 200
+    record_rows = list(csv.DictReader(io.StringIO(record_csv_response.text)))
+    assert record_csv_response.headers["content-disposition"] == (
+        'attachment; filename="project_library_ml_export_v4_record_li2s_barrier.csv"'
+    )
+    assert [row["record_id"] for row in record_rows] == [barrier_id]
+    assert record_rows[0]["label_name"] == "li2s_barrier_eV"
+    assert record_rows[0]["label_value"] == "0.65"
+    assert "sample_id" not in record_rows[0]
 
 
 def test_project_library_v4_allows_generated_key_when_setting_binding_is_unambiguous(setup_test_db):
@@ -888,6 +916,47 @@ def test_project_library_v4_descriptors_and_structure_fields_are_postprocessed(s
             },
             with_setting=False,
         )
+        _seed_dft(
+            session,
+            paper=paper,
+            complete=True,
+            catalyst=fe_co_catalyst,
+            property_type="bader_charge",
+            adsorbate="Li2S",
+            reaction_step="Bader charge after Li2S adsorption",
+            evidence_text="Bader charges of Fe and Co are 0.21 e and 0.18 e after Li2S adsorption.",
+            value=0.21,
+            unit="e",
+            evidence_payload={
+                "active_site_instance_key": "descriptor:site:feco",
+                "source_text": "Bader charges of Fe and Co are 0.21 e and 0.18 e after Li2S adsorption.",
+                "bader_charge_M1": 0.21,
+                "bader_charge_M2": 0.18,
+                "state_context": "after_Li2S_adsorption",
+                "site_label": "M1",
+            },
+            with_setting=False,
+        )
+        _seed_dft(
+            session,
+            paper=paper,
+            complete=True,
+            catalyst=fe_co_catalyst,
+            property_type="charge_transfer",
+            adsorbate="Li2S",
+            reaction_step="Charge transfer after Li2S adsorption",
+            evidence_text="Charge transfer from catalyst to Li2S is 0.42 e.",
+            value=0.42,
+            unit="e",
+            evidence_payload={
+                "active_site_instance_key": "descriptor:site:feco",
+                "source_text": "Charge transfer from catalyst to Li2S is 0.42 e.",
+                "charge_transfer_e": 0.42,
+                "charge_transfer_direction": "catalyst_to_adsorbate",
+                "state_context": "after_Li2S_adsorption",
+            },
+            with_setting=False,
+        )
         unknown_catalyst = CatalystSample(
             paper_id=paper.id,
             name="Xx-N-C",
@@ -967,7 +1036,13 @@ def test_project_library_v4_descriptors_and_structure_fields_are_postprocessed(s
     assert barrier_record["adsorption_site"] == "bridge"
     assert barrier_record["adsorption_mode"] == "bidentate"
     assert barrier_record["structure_blockers"] == []
+    assert barrier_record["bader_charge_M1"] is None
     assert barrier_record["ml_ready"] is True
+    barrier_sample = barrier_response.json()["sample_records"][0]
+    assert barrier_sample["wide_properties"]["bader_charge_M1_e"] == 0.21
+    assert barrier_sample["wide_properties"]["bader_charge_M2_e"] == 0.18
+    assert barrier_sample["wide_properties"]["charge_transfer_e"] == 0.42
+    assert barrier_sample["property_group_counts"]["electronic_properties"] == 2
 
     v3_response = client.get(
         "/api/dft/ml-dataset-v3",
