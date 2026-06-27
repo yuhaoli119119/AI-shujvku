@@ -110,3 +110,51 @@ def test_backfill_plan_is_read_only_and_counts_sample_gaps():
     assert report["counts"]["missing_dac_metal_metal_distance_count"] == 0
     assert report["planned_sample_examples"][0]["active_site_instance_key"] == "site-2"
     assert report["planned_sample_examples"][0]["suggested_actions"][0]["requires_user_evidence"] is True
+
+    csv_rows = tool.backfill_plan_csv_rows(report)
+    assert [row["gap"] for row in csv_rows] == [
+        "li2s_adsorption",
+        "li2s_barrier",
+        "rds",
+        "bader_or_charge_transfer",
+    ]
+    assert csv_rows[0]["paper_id"] == "paper-2"
+    assert csv_rows[0]["property_type"] == "adsorption_energy"
+    assert csv_rows[0]["adsorbate"] == "Li2S"
+    assert csv_rows[0]["requires_user_evidence"] is True
+
+
+def test_backfill_plan_writes_utf8_csv_queue(tmp_path):
+    tool = _load_tool_module()
+    report = {
+        "planned_sample_examples": [
+            {
+                "paper_id": "paper-1",
+                "title": "锂硫样本",
+                "catalyst_sample_id": "cat-1",
+                "catalyst_name": "FeCo-NC",
+                "catalyst_scope": "DAC",
+                "active_site_instance_key": "site-1",
+                "binding_source": "evidence_payload",
+                "suggested_actions": [
+                    {
+                        "gap": "bader_or_charge_transfer",
+                        "submit_payload_hint": {
+                            "property_type": "charge_transfer",
+                            "energy_kind": "electronic_descriptor",
+                            "unit": "e",
+                        },
+                        "requires_user_evidence": True,
+                    }
+                ],
+            }
+        ]
+    }
+    output = tmp_path / "queue.csv"
+
+    tool.write_backfill_plan_csv(report, output)
+
+    text = output.read_text(encoding="utf-8-sig")
+    assert "锂硫样本" in text
+    assert "charge_transfer" in text
+    assert "bader_or_charge_transfer" in text

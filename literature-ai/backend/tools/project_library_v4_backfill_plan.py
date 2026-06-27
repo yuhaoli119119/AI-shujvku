@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 import urllib.parse
@@ -48,6 +49,12 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=PROJECT_ROOT / "outputs" / "exports" / "project_library_v4_backfill_plan.json",
+    )
+    parser.add_argument(
+        "--csv-output",
+        type=Path,
+        default=None,
+        help="Optional CSV queue path. One row is one sample gap/action for manual evidence-backed submit.",
     )
     return parser.parse_args()
 
@@ -261,6 +268,75 @@ def build_backfill_plan(
     }
 
 
+def backfill_plan_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for sample in report.get("planned_sample_examples") or []:
+        actions = sample.get("suggested_actions") or []
+        if not actions:
+            rows.append(
+                {
+                    "paper_id": sample.get("paper_id"),
+                    "title": sample.get("title"),
+                    "catalyst_sample_id": sample.get("catalyst_sample_id"),
+                    "catalyst_name": sample.get("catalyst_name"),
+                    "catalyst_scope": sample.get("catalyst_scope"),
+                    "active_site_instance_key": sample.get("active_site_instance_key"),
+                    "binding_source": sample.get("binding_source"),
+                    "gap": "",
+                    "property_type": "",
+                    "adsorbate": "",
+                    "energy_kind": "",
+                    "unit": "",
+                    "requires_user_evidence": "",
+                }
+            )
+            continue
+        for action in actions:
+            hint = action.get("submit_payload_hint") or {}
+            rows.append(
+                {
+                    "paper_id": sample.get("paper_id"),
+                    "title": sample.get("title"),
+                    "catalyst_sample_id": sample.get("catalyst_sample_id"),
+                    "catalyst_name": sample.get("catalyst_name"),
+                    "catalyst_scope": sample.get("catalyst_scope"),
+                    "active_site_instance_key": sample.get("active_site_instance_key"),
+                    "binding_source": sample.get("binding_source"),
+                    "gap": action.get("gap"),
+                    "property_type": hint.get("property_type"),
+                    "adsorbate": hint.get("adsorbate"),
+                    "energy_kind": hint.get("energy_kind"),
+                    "unit": hint.get("unit"),
+                    "requires_user_evidence": action.get("requires_user_evidence"),
+                }
+            )
+    return rows
+
+
+def write_backfill_plan_csv(report: dict[str, Any], path: Path) -> None:
+    fieldnames = [
+        "paper_id",
+        "title",
+        "catalyst_sample_id",
+        "catalyst_name",
+        "catalyst_scope",
+        "active_site_instance_key",
+        "binding_source",
+        "gap",
+        "property_type",
+        "adsorbate",
+        "energy_kind",
+        "unit",
+        "requires_user_evidence",
+    ]
+    rows = backfill_plan_csv_rows(report)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def main() -> int:
     args = parse_args()
     api_base_url = _normalize_api_base_url(args.api_base_url)
@@ -279,8 +355,12 @@ def main() -> int:
     payload = json.dumps(report, ensure_ascii=False, indent=2)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(payload, encoding="utf-8")
+    if args.csv_output is not None:
+        write_backfill_plan_csv(report, args.csv_output)
     print(payload)
     print(f"\nWrote read-only backfill plan to {args.output}")
+    if args.csv_output is not None:
+        print(f"Wrote read-only backfill CSV queue to {args.csv_output}")
     return 0
 
 
