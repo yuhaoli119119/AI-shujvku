@@ -25,6 +25,22 @@ The application does not treat any AI output as final truth by default.
 - `potential_determining_step` table labels are context, not numeric DFT results, and should not create `DFTResult` candidates with empty values.
 - Local generated artifacts under `outputs/tmp/`, `outputs/exports/`, `test-results/`, `.pytest_cache/`, and ad-hoc scratch scripts are not source code and should not be uploaded.
 
+## Backend Maintenance Status as of 2026-06-28
+
+- MCP `import_analysis` and HTTP `/api/external-analysis/import` share the `ExternalAnalysisService.apply_review_rules_for_run(...)` apply path. Tests should assert that shared service boundary, not direct MCP-layer calls into `VerificationSessionService.apply_import_rules_for_paper(...)`.
+- Large backend service splitting is in progress. Completed splits include `render-detail.js`, `verification_session_service.py`, `external_analysis_service.py`, `dft_review_service.py`, `page.js` / `jobs.js`, `paper_query.py`, `review_conflict_service.py`, and `paper_workbench_service.py`.
+- `review_conflict_service.py` now delegates DFT-specific comparison helpers to `app/services/review_conflict_dft.py`.
+- `paper_workbench_service.py` now delegates review-center status, sorting, supplementary-group, and lightweight DFT audit helpers to `app/services/paper_workbench_review_center.py`.
+- Remaining backend risk is concentrated in still-large orchestration services and integration paths. Future splits should keep public service method names stable and use focused pytest coverage before broad refactors.
+- Latest targeted verification for this refactor line passed:
+  - `python -m pytest tests/test_mcp_new_tools.py -q`
+  - `python -m pytest tests/test_mcp_server.py -q -k "import_analysis or apply_analysis_review_rules"`
+  - `python -m pytest tests/test_external_analysis.py -q -k "import_analysis or apply_review_rules"`
+  - `python -m pytest tests/test_review_adjudication_service.py -q`
+  - `python -m pytest tests/test_dft_conflict_settlement.py -q`
+  - `python -m pytest tests/test_codex_workbench_v1.py -q`
+  - `python -m pytest tests/test_papers_api.py -q -k "manual_review_progress or review_center or supplementary"`
+
 ## Main Components
 
 - `backend/`: FastAPI backend, parsing pipeline, extraction services, MCP server.

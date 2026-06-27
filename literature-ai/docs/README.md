@@ -20,6 +20,13 @@
 - `potential_determining_step` 是表格上下文，不作为无数值 DFTResult 候选入库。
 - `outputs/tmp/`、`outputs/exports/`、`test-results/`、`.pytest_cache/` 和 scratch 脚本默认不提交。
 
+## 2026-06-28 后端维护基线
+
+- MCP `import_analysis` 与 HTTP external-analysis import 共享 `ExternalAnalysisService.apply_review_rules_for_run(...)`，旧的 MCP 直连 `VerificationSessionService.apply_import_rules_for_paper(...)` 断言已更新为共享 service 边界断言。
+- 已完成的后端/前端拆分包括 `review_conflict_service.py` 的 DFT helper 拆分和 `paper_workbench_service.py` 的 review-center helper 拆分；当前仍应把大型 orchestration service 视为后续小步拆分对象。
+- 本轮仅改代码、测试和文档；未修改真实 `data/`、`artifacts/`、registry，也未执行 extraction apply。
+- 最近验证通过：`tests/test_mcp_new_tools.py`、MCP/import-analysis 相关 `test_mcp_server.py` 子集、external-analysis import/apply 子集、`tests/test_review_adjudication_service.py`、`tests/test_dft_conflict_settlement.py`、`tests/test_codex_workbench_v1.py`、以及 `tests/test_papers_api.py` 的 review-center/supplementary 子集。
+
 ## 历史与计划目录
 
 - `plans/`: 计划和路线图，有些内容是历史阶段记录。
