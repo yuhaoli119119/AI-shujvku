@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from typing import Any
+
+from app.utils.evidence_anchors import has_evidence_anchor
+
+
+def imported_evidence_payload(opinion: dict[str, Any]) -> dict[str, Any] | list[Any] | None:
+    payload = opinion.get("evidence_payload")
+    if isinstance(payload, (dict, list)) and has_evidence_anchor(payload):
+        return payload
+    location = opinion.get("evidence_location")
+    if isinstance(location, dict):
+        return location
+    return payload if isinstance(payload, (dict, list)) else None
+
+
+def first_anchor(payload: dict[str, Any] | list[Any] | None) -> dict[str, Any] | None:
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                return item
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def first_text(*values: Any) -> str | None:
+    for value in values:
+        if value in (None, "", []):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def normalized_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def numeric_key(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        return f"{float(value):.8g}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def normalize_imported_dft_value(
+    *,
+    value: Any,
+    unit: str | None,
+    property_type: Any = None,
+) -> tuple[float | None, str | None]:
+    if value in (None, ""):
+        return None, unit
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None, unit
+    unit_text = str(unit or "").strip()
+    unit_key = unit_text.lower().replace(" ", "")
+    if unit_key in {"mev"}:
+        return numeric_value / 1000.0, "eV"
+    if unit_key in {"ev"}:
+        return numeric_value, "eV"
+    if "gpu" in unit_key:
+        ascii_key = "".join(ch for ch in unit_key if ch.isascii())
+        if any(marker in ascii_key for marker in ("10^3", "x10^3", "103")) or (
+            ascii_key.startswith("10") and ascii_key != "gpu"
+        ):
+            return numeric_value * 1000.0, "GPU"
+        return numeric_value, "GPU"
+    return numeric_value, unit_text or unit

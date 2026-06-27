@@ -9,6 +9,14 @@ from sqlalchemy.orm import Session
 from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldReview, Paper, PaperCorrection, WorkflowJob
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
+from app.services.dft_review_helpers import (
+    first_anchor,
+    first_text,
+    imported_evidence_payload,
+    normalize_imported_dft_value,
+    normalized_text,
+    numeric_key,
+)
 from app.services.review_service import ReviewService
 from app.utils.evidence_anchors import has_evidence_anchor
 from app.utils.review_safety import is_export_eligible_extraction
@@ -986,45 +994,23 @@ class DFTResultReviewService:
 
     @staticmethod
     def _imported_evidence_payload(opinion: dict[str, Any]) -> dict[str, Any] | list[Any] | None:
-        payload = opinion.get("evidence_payload")
-        if isinstance(payload, (dict, list)) and has_evidence_anchor(payload):
-            return payload
-        location = opinion.get("evidence_location")
-        if isinstance(location, dict):
-            return location
-        return payload if isinstance(payload, (dict, list)) else None
+        return imported_evidence_payload(opinion)
 
     @staticmethod
     def _first_anchor(payload: dict[str, Any] | list[Any] | None) -> dict[str, Any] | None:
-        if isinstance(payload, list):
-            for item in payload:
-                if isinstance(item, dict):
-                    return item
-            return None
-        return payload if isinstance(payload, dict) else None
+        return first_anchor(payload)
 
     @staticmethod
     def _first_text(*values: Any) -> str | None:
-        for value in values:
-            if value in (None, "", []):
-                continue
-            text = str(value).strip()
-            if text:
-                return text
-        return None
+        return first_text(*values)
 
     @staticmethod
     def _normalized_text(value: Any) -> str:
-        return " ".join(str(value or "").strip().lower().split())
+        return normalized_text(value)
 
     @staticmethod
     def _numeric_key(value: Any) -> str:
-        if value in (None, ""):
-            return ""
-        try:
-            return f"{float(value):.8g}"
-        except (TypeError, ValueError):
-            return str(value)
+        return numeric_key(value)
 
     @staticmethod
     def _normalize_imported_dft_value(
@@ -1033,26 +1019,7 @@ class DFTResultReviewService:
         unit: str | None,
         property_type: Any = None,
     ) -> tuple[float | None, str | None]:
-        if value in (None, ""):
-            return None, unit
-        try:
-            numeric_value = float(value)
-        except (TypeError, ValueError):
-            return None, unit
-        unit_text = str(unit or "").strip()
-        unit_key = unit_text.lower().replace(" ", "")
-        if unit_key in {"mev"}:
-            return numeric_value / 1000.0, "eV"
-        if unit_key in {"ev"}:
-            return numeric_value, "eV"
-        if "gpu" in unit_key:
-            ascii_key = "".join(ch for ch in unit_key if ch.isascii())
-            if any(marker in ascii_key for marker in ("10^3", "x10^3", "103")) or (
-                ascii_key.startswith("10") and ascii_key != "gpu"
-            ):
-                return numeric_value * 1000.0, "GPU"
-            return numeric_value, "GPU"
-        return numeric_value, unit_text or unit
+        return normalize_imported_dft_value(value=value, unit=unit, property_type=property_type)
 
     def _select_review_fields(
         self,
