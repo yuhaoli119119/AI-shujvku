@@ -33,7 +33,11 @@ from app.services.dft_rescan_policy import (
     is_dft_method_only_reaction_step,
     normalize_dft_reaction_step_for_identity,
 )
-from app.services.dft_review_helpers import normalize_dft_value_for_comparison, same_normalized_dft_value
+from app.services.dft_review_helpers import (
+    material_identity_parts_compatible,
+    normalize_dft_value_for_comparison,
+    same_normalized_dft_value,
+)
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.module_write_lock_service import ModuleWriteLockService
@@ -2375,23 +2379,7 @@ class VerificationSessionService:
 
     @staticmethod
     def _material_identity_parts_compatible(left: str, right: str) -> bool:
-        left_normalized = str(left or "").strip().lower()
-        right_normalized = str(right or "").strip().lower()
-        if left_normalized == right_normalized:
-            return True
-        if left_normalized in right_normalized or right_normalized in left_normalized:
-            return True
-        left_tokens = {
-            token
-            for token in re.split(r"[^a-z0-9]+", left_normalized)
-            if len(token) >= 5
-        }
-        right_tokens = {
-            token
-            for token in re.split(r"[^a-z0-9]+", right_normalized)
-            if len(token) >= 5
-        }
-        return bool(left_tokens & right_tokens)
+        return material_identity_parts_compatible(left, right)
 
     @staticmethod
     def _normalized_dft_audit_target(row: DFTResult, audit: dict[str, Any]) -> dict[str, Any]:

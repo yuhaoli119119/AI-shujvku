@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.utils.evidence_anchors import has_evidence_anchor
@@ -95,3 +96,23 @@ def same_normalized_dft_value(left: dict[str, Any], right: dict[str, Any]) -> bo
         return False
     tolerance = max(1e-9, abs(float(left["value"])) * 1e-6)
     return abs(float(left["value"]) - float(right["value"])) <= tolerance
+
+
+def material_identity_parts_compatible(left: str, right: str) -> bool:
+    left_normalized = str(left or "").strip().lower()
+    right_normalized = str(right or "").strip().lower()
+    if left_normalized == right_normalized:
+        return True
+    if left_normalized in right_normalized or right_normalized in left_normalized:
+        return True
+    left_tokens = {
+        token
+        for token in re.split(r"[^a-z0-9]+", left_normalized)
+        if len(token) >= 5
+    }
+    right_tokens = {
+        token
+        for token in re.split(r"[^a-z0-9]+", right_normalized)
+        if len(token) >= 5
+    }
+    return bool(left_tokens & right_tokens)
