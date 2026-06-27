@@ -3711,6 +3711,81 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('.toast.error')).toContainText('切库失败：激活文献库失败：mock db switch failed');
     });
 
+    test('business flow: literature library supports repeated switching after URL state is synchronized', async ({ page }) => {
+      const libraryNames = ['默认文献库', '双原子催化剂', '锂硫项目库'];
+      let activeLibrary = libraryNames[0];
+      const activationSequence = [];
+
+      function libraryPayloads() {
+        return libraryNames.map((name, index) => ({
+          name,
+          paper_count: index + 1,
+          is_active: name === activeLibrary,
+          root_path: `/libraries/library-${index + 1}`,
+        }));
+      }
+
+      await page.route(/\/api\/papers\/libraries$/, route => jsonResponse(route, libraryPayloads()));
+      await page.route(/\/api\/libraries$/, route => jsonResponse(route, libraryPayloads()));
+      await page.route(/\/api\/libraries\/[^/]+\/activate$/, route => {
+        const match = route.request().url().match(/\/api\/libraries\/([^/]+)\/activate$/);
+        activeLibrary = decodeURIComponent(match ? match[1] : '');
+        activationSequence.push(activeLibrary);
+        const payload = libraryPayloads().find(item => item.name === activeLibrary);
+        return jsonResponse(route, payload);
+      });
+      await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+        const url = new URL(route.request().url());
+        if (route.request().method() !== 'GET' || !isPaperListPath(url.pathname)) {
+          return route.fallback();
+        }
+        const libraryName = url.searchParams.get('library_name') || '';
+        return jsonResponse(route, [{
+          id: `paper-${libraryNames.indexOf(libraryName) + 1}`,
+          title: `${libraryName} Paper`,
+          year: 2026,
+          journal: 'Switch Test Journal',
+          paper_type: 'research',
+          library_name: libraryName,
+          counts: { sections: 1, figures: 0, dft_results: 0, writing_cards: 0 },
+        }]);
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent(activeLibrary)}`);
+      await expect(page.locator('#librarySelect')).toHaveValue(activeLibrary);
+      await page.evaluate(() => {
+        state.selectedPaperId = 'stale-paper-from-previous-library';
+        state.selectedPaper = {
+          id: 'stale-paper-from-previous-library',
+          library_name: '默认文献库',
+        };
+        syncQueryParams();
+      });
+      await expect.poll(() => page.evaluate(() => new URL(window.location.href).searchParams.get('paper_id')))
+        .toBe('stale-paper-from-previous-library');
+
+      for (const targetLibrary of [libraryNames[1], libraryNames[2], libraryNames[0], libraryNames[1]]) {
+        await page.locator('#librarySelect').selectOption(targetLibrary);
+        await expect(page.locator('#librarySelect')).toBeEnabled();
+        await expect(page.locator('#librarySelect')).toHaveValue(targetLibrary);
+        await expect(page.locator('#paperList')).toContainText(`${targetLibrary} Paper`);
+        await expect.poll(() => page.evaluate(() => new URL(window.location.href).searchParams.get('library_name')))
+          .toBe(targetLibrary);
+        await expect.poll(() => page.evaluate(() => state.currentLibrary && state.currentLibrary.name))
+          .toBe(targetLibrary);
+        await expect.poll(() => page.evaluate(() => state.selectedPaperId)).toBe(null);
+        await expect.poll(() => page.evaluate(() => new URL(window.location.href).searchParams.get('paper_id')))
+          .toBe(null);
+      }
+
+      expect(activationSequence).toEqual([
+        libraryNames[1],
+        libraryNames[2],
+        libraryNames[0],
+        libraryNames[1],
+      ]);
+    });
+
     test('business flow: literature library initial load honors active library even when quick list lacks active flags', async ({ page }) => {
       const defaultLibrary = '默认文献库';
       const activeLibrary = '双原子催化剂';
