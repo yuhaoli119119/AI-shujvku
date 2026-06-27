@@ -280,18 +280,20 @@ function renderEvidenceLocators(locators) {
 
 async function loadEvidenceLocators(paperId, options) {
     const opts = options || {};
-    const result = await fetchPaperResource(
-        paperId,
-        "evidence/locators",
-        LOCATORS_VARIANT,
-        API_BASE + "/" + encodeURIComponent(paperId) + "/evidence/locators",
-        { forceRefresh: opts.forceRefresh === true }
-    ).then(function(entry) {
-        return entry.value;
-    }).catch(function(error) {
+    let result;
+    try {
+        const entry = await fetchPaperResource(
+            paperId,
+            "evidence/locators",
+            LOCATORS_VARIANT,
+            API_BASE + "/" + encodeURIComponent(paperId) + "/evidence/locators",
+            { forceRefresh: opts.forceRefresh === true }
+        );
+        result = entry.value;
+    } catch (error) {
         if (!opts.silent) console.warn("Evidence locators are not available:", error);
-        throw error;
-    });
+        result = { _error: true, message: error && error.message ? error.message : "Evidence locators unavailable" };
+    }
     if (state.selectedPaperId !== paperId) return result;
     state.selectedPaperEvidenceLocators = result;
     renderEvidenceLocators(result);

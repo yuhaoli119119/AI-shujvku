@@ -241,7 +241,7 @@ function renderDetail(detail, audit) {
     }
 
     const pdfEvidenceEntry =
-        '<details class="section-card pdf-evidence-entry"><summary><h3>PDF 证据定位</h3></summary>' +
+        '<details class="section-card pdf-evidence-entry" open><summary><h3>PDF 证据定位</h3></summary>' +
             '<div class="subtle" style="margin-bottom:12px;">' +
                 '当前只支持有精确页码的证据跳转到 PDF，请使用右上角的“' + (paperHasPdf(detail) ? '查看 PDF / 证据定位' : 'PDF 未上传') + '”入口。<br>' +
                 '如果下方仅显示文字，说明暂无精确的页码定位。' +
