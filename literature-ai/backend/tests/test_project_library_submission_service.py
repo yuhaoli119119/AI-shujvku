@@ -231,6 +231,8 @@ def test_project_library_v4_user_submit_writes_dft_result_and_audit_log(setup_te
         assert stored_row.evidence_payload["submitted_by_user"] is True
         assert stored_row.evidence_payload["schema_version"] == "project_library_ml_export_v4"
         assert stored_row.evidence_payload["database_write_authority"] == "user_submit_only"
+        assert stored_row.evidence_payload["material_identity"] == "Fe-N-C"
+        assert stored_row.evidence_payload["corrected_value"]["material_identity"] == "Fe-N-C"
         stored_candidate = session.get(ExternalAnalysisCandidate, UUID(candidate_id))
         assert stored_candidate is not None
         assert stored_candidate.status == "user_submitted"
@@ -244,6 +246,148 @@ def test_project_library_v4_user_submit_writes_dft_result_and_audit_log(setup_te
             )
         )
         assert audit is not None
+
+
+def test_project_library_v4_user_submit_persists_sample_level_electronic_and_structure_fields(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        seeded = _seed_project_library_paper(session)
+        payload = _submit_payload(**seeded)
+        payload.update(
+            {
+                "bader_charge_M1": 0.31,
+                "charge_transfer_e": 0.44,
+                "charge_transfer_direction": "catalyst_to_adsorbate",
+                "state_context": "after_Li2S4_adsorption",
+                "site_label": "M1",
+                "metal_metal_distance_A": 2.21,
+                "coordination_environment": "Fe-N4",
+                "adsorption_site": "Fe-top",
+                "adsorption_mode": "end-on",
+                "metal_ligand_distance_A": 1.92,
+            }
+        )
+
+    client = TestClient(app)
+    preview = client.post("/api/dft/project-library-v4/user-submit/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    preview_payload = preview.json()
+    assert preview_payload["normalized_submission"]["bader_charge_M1"] == 0.31
+    assert preview_payload["normalized_submission"]["metal_metal_distance_A"] == 2.21
+
+    submit = client.post("/api/dft/project-library-v4/user-submit", json=payload)
+    assert submit.status_code == 200, submit.text
+
+    export_response = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"paper_id": seeded["paper_id"], "task": "adsorption_energy", "ready_only": "false"},
+    )
+    assert export_response.status_code == 200, export_response.text
+    export_payload = export_response.json()
+    export_record = next(item for item in export_payload["records"] if item["record_id"] == seeded["row_id"])
+    assert export_record["bader_charge_M1"] == 0.31
+    assert export_record["charge_transfer_e"] == 0.44
+    assert export_record["charge_transfer_direction"] == "catalyst_to_adsorbate"
+    assert export_record["metal_metal_distance_A"] == 2.21
+    assert export_record["structure_blockers"] == []
+
+    sample_record = export_payload["sample_records"][0]
+    assert sample_record["wide_properties"] == {}
+    assert sample_record["excluded_unsafe_property_count"] == 1
+    diagnostic_property = sample_record["property_groups"]["adsorbate_properties"][0]
+    assert diagnostic_property["bader_charge_M1"] == 0.31
+    assert diagnostic_property["charge_transfer_e"] == 0.44
+
+    with SessionLocal() as session:
+        stored_row = session.get(DFTResult, UUID(seeded["row_id"]))
+        assert stored_row is not None
+        assert stored_row.evidence_payload["bader_charge_M1"] == 0.31
+        assert stored_row.evidence_payload["charge_transfer_direction"] == "catalyst_to_adsorbate"
+        assert stored_row.evidence_payload["metal_ligand_distance_A"] == 1.92
+
+
+def test_project_library_v4_user_submit_is_idempotent_for_consumed_source_candidate(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        seeded = _seed_project_library_paper(session)
+        before = _counts(session)
+
+    client = TestClient(app)
+    first = client.post(
+        "/api/dft/project-library-v4/user-submit",
+        json=_submit_payload(**seeded),
+    )
+    assert first.status_code == 200, first.text
+
+    second = client.post(
+        "/api/dft/project-library-v4/user-submit",
+        json=_submit_payload(**seeded),
+    )
+    assert second.status_code == 422, second.text
+    assert "source_candidate_already_consumed" in second.json()["detail"]["hard_blockers"]
+
+    with SessionLocal() as session:
+        after = _counts(session)
+        assert after["dft_results"] == before["dft_results"]
+        assert after["audit_logs"] == before["audit_logs"] + 1
+
+
+def test_project_library_v4_user_submit_rejects_duplicate_candidate_identity_for_new_rows(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        seeded = _seed_project_library_paper(session)
+        before = _counts(session)
+
+    payload = _submit_payload(**seeded)
+    payload["record_id"] = None
+    payload["source_candidate_ids"] = []
+
+    client = TestClient(app)
+    first = client.post("/api/dft/project-library-v4/user-submit", json=payload)
+    assert first.status_code == 200, first.text
+
+    second = client.post("/api/dft/project-library-v4/user-submit", json=payload)
+    assert second.status_code == 422, second.text
+    assert "duplicate_user_submission_requires_record_id" in second.json()["detail"]["hard_blockers"]
+
+    with SessionLocal() as session:
+        after = _counts(session)
+        assert after["dft_results"] == before["dft_results"] + 1
+        assert after["audit_logs"] == before["audit_logs"] + 1
+        inserted = session.scalar(
+            select(DFTResult).where(
+                DFTResult.paper_id == UUID(seeded["paper_id"]),
+                DFTResult.candidate_status == "final_user_submitted",
+            )
+        )
+        assert inserted is not None
+        assert inserted.candidate_identity
+
+
+def test_project_library_v4_user_submit_normalizes_mev_and_rejects_invalid_energy_kind(setup_test_db):
+    with sessionmaker(bind=setup_test_db, future=True)() as session:
+        seeded = _seed_project_library_paper(session)
+
+    payload = _submit_payload(**seeded)
+    payload["value"] = -1550
+    payload["unit"] = "meV"
+    preview = TestClient(app).post(
+        "/api/dft/project-library-v4/user-submit/preview",
+        json=payload,
+    )
+    assert preview.status_code == 200, preview.text
+    normalized = preview.json()["normalized_submission"]
+    assert normalized["value"] == -1.55
+    assert normalized["unit"] == "eV"
+    assert normalized["raw_value"] == -1550
+    assert normalized["raw_unit"] == "meV"
+
+    payload["energy_kind"] = "made_up_energy_kind"
+    invalid = TestClient(app).post(
+        "/api/dft/project-library-v4/user-submit/preview",
+        json=payload,
+    )
+    assert invalid.status_code == 422
 
 
 def test_project_library_v4_user_submit_rejects_ambiguous_status(setup_test_db):
@@ -275,7 +419,7 @@ def test_project_library_v4_user_submit_rejects_ambiguous_status(setup_test_db):
     assert before == after
 
 
-def test_project_library_v4_export_prefers_user_submitted_energy_kind(setup_test_db):
+def test_project_library_v4_user_submit_rejects_property_energy_kind_mismatch(setup_test_db):
     SessionLocal = sessionmaker(bind=setup_test_db, future=True)
     with SessionLocal() as session:
         seeded = _seed_project_library_paper(session)
@@ -292,18 +436,19 @@ def test_project_library_v4_export_prefers_user_submitted_energy_kind(setup_test
         payload["energy_kind"] = "activation_barrier"
 
     client = TestClient(app)
-    submit = client.post("/api/dft/project-library-v4/user-submit", json=payload)
-    assert submit.status_code == 200, submit.text
+    preview = client.post("/api/dft/project-library-v4/user-submit/preview", json=payload)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["can_submit"] is False
+    assert "energy_kind_property_mismatch" in preview.json()["hard_blockers"]
 
-    export_response = client.get(
-        "/api/dft/project-library-ml-export-v4",
-        params={"paper_id": seeded["paper_id"], "task": "srr_multitask", "ready_only": "false"},
-    )
-    assert export_response.status_code == 200, export_response.text
-    export_payload = export_response.json()
-    export_record = next(item for item in export_payload["records"] if item["record_id"] == seeded["row_id"])
-    assert export_record["property_type"] == "reaction_energy"
-    assert export_record["energy_kind"] == "activation_barrier"
+    submit = client.post("/api/dft/project-library-v4/user-submit", json=payload)
+    assert submit.status_code == 422, submit.text
+    assert "energy_kind_property_mismatch" in submit.json()["detail"]["hard_blockers"]
+
+    with SessionLocal() as session:
+        stored_row = session.get(DFTResult, UUID(seeded["row_id"]))
+        assert stored_row is not None
+        assert stored_row.candidate_status == "system_candidate"
 
 
 def test_project_library_v4_user_submit_rejects_invalid_source_candidate(setup_test_db):
@@ -359,7 +504,7 @@ def test_project_library_v4_user_submit_rejects_invalid_source_candidate(setup_t
     assert before == after
 
 
-def test_project_library_v4_user_submit_requires_source_text(setup_test_db):
+def test_project_library_v4_user_submit_allows_empty_source_text(setup_test_db):
     SessionLocal = sessionmaker(bind=setup_test_db, future=True)
     with SessionLocal() as session:
         seeded = _seed_project_library_paper(session)
@@ -371,17 +516,16 @@ def test_project_library_v4_user_submit_requires_source_text(setup_test_db):
     preview = client.post("/api/dft/project-library-v4/user-submit/preview", json=payload)
     assert preview.status_code == 200, preview.text
     preview_payload = preview.json()
-    assert preview_payload["can_submit"] is False
-    assert "missing_source_text" in preview_payload["hard_blockers"]
+    assert preview_payload["can_submit"] is True
+    assert "missing_source_text" not in preview_payload["hard_blockers"]
+    assert "missing_source_text" not in preview_payload["ml_blockers"]
 
     submit = client.post("/api/dft/project-library-v4/user-submit", json=payload)
-    assert submit.status_code == 422, submit.text
-    detail = submit.json()["detail"]
-    assert "missing_source_text" in detail["hard_blockers"]
+    assert submit.status_code == 200, submit.text
 
     with SessionLocal() as session:
         after = _counts(session)
         stored_row = session.get(DFTResult, UUID(seeded["row_id"]))
         assert stored_row is not None
         assert stored_row.evidence_text == "Table 1 reports Li2S4 adsorption energy of -1.20 eV."
-    assert before == after
+    assert after["audit_logs"] == before["audit_logs"] + 1

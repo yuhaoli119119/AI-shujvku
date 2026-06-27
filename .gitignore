@@ -23,6 +23,12 @@ literature-ai/test-results/
 literature-ai/backend/scratch/**
 !literature-ai/backend/scratch/
 !literature-ai/backend/scratch/.gitkeep
+literature-ai/outputs/tmp/**
+!literature-ai/outputs/tmp/
+!literature-ai/outputs/tmp/.gitkeep
+literature-ai/outputs/exports/**
+!literature-ai/outputs/exports/
+!literature-ai/outputs/exports/.gitkeep
 
 # Root-level ad-hoc analysis previews and temp outputs
 /_*.png

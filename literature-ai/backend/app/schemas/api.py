@@ -228,6 +228,15 @@ class CatalystSampleResponse(BaseModel):
     support: str | None = None
     synthesis_method: str | None = None
     evidence_strength: str | None = None
+    support_raw: str | None = None
+    support_normalized: str | None = None
+    catalyst_type_raw: str | None = None
+    normalization_source: str | None = None
+    metal_descriptor_summary: dict[str, Any] | None = None
+    metal_1_descriptors: dict[str, Any] | None = None
+    metal_2_descriptors: dict[str, Any] | None = None
+    dac_combined_descriptors: dict[str, Any] | None = None
+    descriptor_blockers: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

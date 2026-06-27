@@ -152,6 +152,7 @@ def get_project_library_ml_export_v4_csv(
     library_name: str | None = Query(default=None),
     paper_id: UUID | None = Query(default=None),
     ready_only: bool = Query(default=True),
+    unit: str = Query(default="sample", pattern="^(sample|record)$"),
     session: Session = Depends(get_db_session),
 ) -> Response:
     try:
@@ -161,6 +162,7 @@ def get_project_library_ml_export_v4_csv(
             library_name=library_name,
             paper_id=paper_id,
             ready_only=ready_only,
+            unit=unit,
         )
         safe_task = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task).strip("_")
     except KeyError as exc:
@@ -168,7 +170,11 @@ def get_project_library_ml_export_v4_csv(
     return Response(
         content=csv_text,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="project_library_ml_export_v4_{safe_task or "task"}.csv"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="project_library_ml_export_v4_{unit}_{safe_task or "task"}.csv"'
+            )
+        },
     )
 
 

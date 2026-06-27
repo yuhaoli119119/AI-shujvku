@@ -122,6 +122,7 @@ class ProjectLibraryQualityPayload(BaseModel):
     counts: ProjectLibraryQualityCounts
     blocker_counts: dict[str, int] = Field(default_factory=dict)
     feature_candidate_blocker_counts: dict[str, int] = Field(default_factory=dict)
+    sample_quality: dict[str, Any] = Field(default_factory=dict)
     tasks: list[ProjectLibraryTaskQualitySummary] = Field(default_factory=list)
     needs_fields_papers: list[ProjectLibraryNeedsFieldsPaper] = Field(default_factory=list)
 
@@ -192,6 +193,7 @@ class ProjectLibraryMLExportV4Payload(BaseModel):
     status: Literal["ready", "not_ready"]
     manifest: dict[str, Any]
     records: list[dict[str, Any]] = Field(default_factory=list)
+    sample_records: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProjectLibraryUserSubmitRequest(BaseModel):
@@ -209,7 +211,14 @@ class ProjectLibraryUserSubmitRequest(BaseModel):
     property_type: str
     adsorbate: str | None = None
     reaction_step: str | None = None
-    energy_kind: str | None = None
+    energy_kind: Literal[
+        "thermodynamic_energy",
+        "activation_barrier",
+        "free_energy_change",
+        "electronic_descriptor",
+        "structural_descriptor",
+        "unknown",
+    ] | None = None
     value: float
     unit: str
     source_text: str | None = None
@@ -225,6 +234,17 @@ class ProjectLibraryUserSubmitRequest(BaseModel):
     support_normalized: str | None = None
     support_confidence: str | None = None
     dft_setting_id: str | None = None
+    bader_charge_M1: float | None = None
+    bader_charge_M2: float | None = None
+    charge_transfer_e: float | None = None
+    charge_transfer_direction: str | None = None
+    state_context: str | None = None
+    site_label: str | None = None
+    metal_metal_distance_A: float | None = None
+    coordination_environment: str | None = None
+    adsorption_site: str | None = None
+    adsorption_mode: str | None = None
+    metal_ligand_distance_A: float | None = None
 
 
 class ProjectLibraryUserSubmitPreviewPayload(BaseModel):

@@ -66,6 +66,8 @@ def test_prompt_payload_builders_expose_read_only_project_library_metadata() -> 
 
     assert contexts["li_s_sac_dac"]["version"] == PROJECT_LIBRARY_CONTEXT_VERSION
     assert "prompt_hints" in contexts["li_s_sac_dac"]
+    assert any("ProjectLibraryV4Extraction" in hint for hint in contexts["li_s_sac_dac"]["prompt_hints"])
+    assert any("ambiguous_records" in hint for hint in contexts["li_s_sac_dac"]["prompt_hints"])
     assert dictionaries["li_s_sac_dac"]["version"] == LI_S_SAC_DAC_FIELD_DICTIONARY_VERSION
     assert any(
         item["canonical_key"] == "li2s_decomposition_barrier"

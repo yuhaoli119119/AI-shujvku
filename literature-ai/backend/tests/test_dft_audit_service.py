@@ -10,6 +10,8 @@ from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_rescan_policy import (
     build_dft_dedupe_signature,
     finalize_rescan_summary,
+    is_dft_method_only_reaction_step,
+    normalize_dft_reaction_step_for_identity,
     summarize_rescan_progress,
 )
 
@@ -235,6 +237,54 @@ def test_dft_dedupe_signature_merges_main_text_and_si_repeated_value():
 
     assert main == si
     assert supporting_ref != main
+
+
+def test_dft_dedupe_signature_does_not_treat_method_as_reaction_step_identity():
+    assert is_dft_method_only_reaction_step("DFT-D2 GGA-PBE") is True
+    assert normalize_dft_reaction_step_for_identity("DFT-D2 GGA-PBE") == ""
+    assert is_dft_method_only_reaction_step("Li2S adsorption on WN4@G side") is False
+
+    without_step = build_dft_dedupe_signature(
+        {
+            "paper_id": "paper-1",
+            "corrected_value": {
+                "material": "WN4@G/TiS2",
+                "adsorbate": "Li2S",
+                "property_type": "adsorption_energy",
+                "value": -5.21,
+                "unit": "eV",
+            },
+        }
+    )
+    method_step = build_dft_dedupe_signature(
+        {
+            "paper_id": "paper-1",
+            "corrected_value": {
+                "material": "WN4@G/TiS2",
+                "adsorbate": "Li2S",
+                "property_type": "adsorption_energy",
+                "reaction_step": "DFT-D2 GGA-PBE",
+                "value": -5.21,
+                "unit": "eV",
+            },
+        }
+    )
+    specific_step = build_dft_dedupe_signature(
+        {
+            "paper_id": "paper-1",
+            "corrected_value": {
+                "material": "WN4@G/TiS2",
+                "adsorbate": "Li2S",
+                "property_type": "adsorption_energy",
+                "reaction_step": "Li2S adsorption on WN4@G side",
+                "value": -5.21,
+                "unit": "eV",
+            },
+        }
+    )
+
+    assert method_step == without_step
+    assert specific_step != method_step
 
 
 def test_rescan_policy_stops_low_progress_and_marks_human_check():

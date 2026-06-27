@@ -34,6 +34,9 @@ class SourceLocation:
 @dataclass
 class DFTResultItem:
     category: str  # e.g. "adsorption_energy", "reaction_barrier"
+    catalyst_name: str | None = None
+    active_site_context: str | None = None
+    structure_context: str | None = None
     adsorbate: str | None = None  # e.g. "Li2S4", "Li2S", None for generic
     value: float | None = None
     unit: str | None = None
@@ -51,6 +54,18 @@ class SourceLocationModel(BaseModel):
 
 class DFTResultItemModel(BaseModel):
     category: str = Field(..., description="Category of DFT result (e.g., adsorption_energy, bader_charge, reaction_barrier)")
+    catalyst_name: str | None = Field(
+        None,
+        description="Exact paper-local catalyst/material/model name. Do not guess; leave null when the value cannot be bound.",
+    )
+    active_site_context: str | None = Field(
+        None,
+        description="Exact active-site label or coordination context associated with this value.",
+    )
+    structure_context: str | None = Field(
+        None,
+        description="Exact structure/configuration/model context associated with this value.",
+    )
     adsorbate: str | None = Field(None, description="The adsorbate molecule/atom if applicable (e.g., Li2S4, S8)")
     value: float | None = Field(None, description="The numerical value extracted")
     unit: str | None = Field(None, description="Unit of the value (e.g., eV, meV)")
@@ -724,13 +739,24 @@ def _parse_markdown_table(content: str) -> tuple[list[str], list[list[str]]]:
     return headers, rows
 
 
-def _infer_table_columns(headers: list[str]) -> tuple[dict[int, tuple[str, str | None]], int | None]:
+def _infer_table_columns(
+    headers: list[str],
+) -> tuple[dict[int, tuple[str, str | None]], int | None, int | None]:
     category_columns: dict[int, tuple[str, str | None]] = {}
     adsorbate_col: int | None = None
+    catalyst_col: int | None = None
     for idx, header in enumerate(headers):
         header_text = re.sub(r"\s+", " ", header or "").strip()
         lowered = header_text.lower()
-        if adsorbate_col is None and re.search(r"(adsorbate|intermediate|species|molecule|state|slurry|lips|li2sx|sample)", lowered):
+        if catalyst_col is None and re.search(
+            r"\b(catalyst|material|system|model|substrate)\b",
+            lowered,
+        ):
+            catalyst_col = idx
+        if adsorbate_col is None and re.search(
+            r"(adsorbate|intermediate|species|molecule|state|slurry|lips|li2sx)",
+            lowered,
+        ):
             adsorbate_col = idx
         if re.search(r"(migration|diffusion).*(barrier|energy)", lowered):
             category_columns[idx] = ("migration_barrier", "eV")
@@ -739,11 +765,11 @@ def _infer_table_columns(headers: list[str]) -> tuple[dict[int, tuple[str, str |
             if pattern.search(header_text):
                 category_columns[idx] = (category, unit)
                 break
-    if adsorbate_col is None and headers:
+    if adsorbate_col is None and catalyst_col is None and headers:
         first_header = headers[0].lower()
         if not any(pattern.search(first_header) for pattern, _, _ in TABLE_HEADER_CATEGORY_RULES):
             adsorbate_col = 0
-    return category_columns, adsorbate_col
+    return category_columns, adsorbate_col, catalyst_col
 
 
 def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
@@ -756,18 +782,23 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
         headers, rows = _parse_markdown_table(content)
         if not headers or not rows:
             continue
-        category_columns, adsorbate_col = _infer_table_columns(headers)
+        category_columns, adsorbate_col, catalyst_col = _infer_table_columns(headers)
         results.extend(_scan_metric_rows(headers, rows, caption, getattr(tbl, "page", None)))
         if not category_columns:
             continue
         for row in rows:
             row_text = " | ".join(row)
             adsorbate = None
+            catalyst_name = None
             if adsorbate_col is not None and adsorbate_col < len(row):
                 raw_adsorbate = row[adsorbate_col].strip()
                 adsorbate = _resolve_adsorbate(raw_adsorbate)
                 if adsorbate is None and _looks_like_safe_table_label(raw_adsorbate):
                     adsorbate = raw_adsorbate or None
+            if catalyst_col is not None and catalyst_col < len(row):
+                raw_catalyst = row[catalyst_col].strip()
+                if _looks_like_safe_table_label(raw_catalyst):
+                    catalyst_name = raw_catalyst
             for col_idx, (category, default_unit) in category_columns.items():
                 if col_idx >= len(row):
                     continue
@@ -804,6 +835,7 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                 results.append(
                     DFTResultItem(
                         category=category,
+                        catalyst_name=catalyst_name,
                         adsorbate=adsorbate_value,
                         value=value,
                         unit=unit,
@@ -868,18 +900,6 @@ def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, p
             context = " / ".join(part for part in [current_group, header] if part)
             evidence = f"{caption}; {context}; row: {row_text}" if caption else f"{context}; row: {row_text}"
             if category == "potential_determining_step":
-                results.append(
-                    DFTResultItem(
-                        category=category,
-                adsorbate=_resolve_adsorbate(cell) or _resolve_adsorbate(evidence),
-                        value=None,
-                        unit=None,
-                        reaction_step=(context + ": " + cell) if context else cell,
-                        evidence_text=evidence[:450],
-                        source_location=SourceLocation(table=caption[:80] if caption else "Table", page=page),
-                        confidence=0.78,
-                    )
-                )
                 continue
             # M4 修复：支持科学计数法
             value_match = re.search(
@@ -1068,6 +1088,9 @@ class DFTResultsExtractor:
                 "thermal_conductance, thermal_conductivity, carrier_mobility, optical_absorption_peak, dos_claim, "
                 "charge_density_difference_claim.\n"
                 "Only return claims that are directly supported by the provided text or tables.\n"
+                "Every result must preserve its paper-local catalyst/material/model identity, active-site context, and "
+                "structure/configuration context when explicitly stated. Leave these fields null rather than guessing. "
+                "Do not merge equal values from different catalysts, active sites, structures, or DFT settings.\n"
                 "Do not infer values from images, plots, graphical symbols, or figure-only content.\n"
                 "For numeric categories, keep the exact value and unit from the paper; do not infer missing numbers."
             )
@@ -1122,6 +1145,9 @@ class DFTResultsExtractor:
             normalized.append(
                 DFTResultItem(
                     category=clean["category"],
+                    catalyst_name=clean.get("catalyst_name"),
+                    active_site_context=clean.get("active_site_context"),
+                    structure_context=clean.get("structure_context"),
                     adsorbate=clean.get("adsorbate"),
                     value=clean.get("value"),
                     unit=clean.get("unit"),
@@ -1168,6 +1194,9 @@ class DFTResultsExtractor:
             source_location = {}
         return {
             "category": category,
+            "catalyst_name": payload.get("catalyst_name"),
+            "active_site_context": payload.get("active_site_context"),
+            "structure_context": payload.get("structure_context"),
             "adsorbate": adsorbate,
             "value": value,
             "unit": unit,
@@ -1300,7 +1329,11 @@ class DFTResultsExtractor:
         seen_keys: dict[str, DFTResultItem] = {}
         for item in items:
             evidence_key = re.sub(r"\s+", " ", (item.evidence_text or "").lower()).strip()[:180]
-            key = f"{item.category}:{item.value}:{item.unit or ''}:{item.adsorbate or ''}:{item.reaction_step or ''}:{evidence_key}"
+            key = (
+                f"{item.catalyst_name or ''}:{item.active_site_context or ''}:{item.structure_context or ''}:"
+                f"{item.category}:{item.value}:{item.unit or ''}:{item.adsorbate or ''}:"
+                f"{item.reaction_step or ''}:{evidence_key}"
+            )
             if key not in seen_keys or item.confidence > seen_keys[key].confidence:
                 seen_keys[key] = item
         return list(seen_keys.values())
@@ -1309,6 +1342,9 @@ class DFTResultsExtractor:
     def _item_to_dict(item: DFTResultItem) -> dict:
         return {
             "category": item.category,
+            "catalyst_name": item.catalyst_name,
+            "active_site_context": item.active_site_context,
+            "structure_context": item.structure_context,
             "adsorbate": item.adsorbate,
             "value": item.value,
             "unit": item.unit,

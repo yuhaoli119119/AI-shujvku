@@ -747,3 +747,149 @@ def test_dft_setting_schema_excludes_reproducibility_from_review_field():
     setting.convergence_settings = {"reproducibility": {"score": 0, "risk_level": "high"}}
     schema = service._dft_setting(setting)
     assert schema.convergence_settings.value is None
+
+
+def test_stage2_preserves_distinct_catalyst_identity_for_equal_dft_values():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(
+                title="Two catalyst comparison",
+                library_name="锂硫双原子",
+                pdf_path="two-catalysts.pdf",
+            )
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "adsorption_energy",
+                        "catalyst_name": "Fe-N4/C",
+                        "active_site_context": "Fe-N4",
+                        "structure_context": "relaxed Fe-N4 model",
+                        "adsorbate": "Li2S",
+                        "value": -1.20,
+                        "unit": "eV",
+                        "reaction_step": "Li2S adsorption",
+                        "evidence_text": "Fe-N4/C gives Li2S adsorption energy of -1.20 eV.",
+                        "confidence": 0.9,
+                    },
+                    {
+                        "category": "adsorption_energy",
+                        "catalyst_name": "Co-N4/C",
+                        "active_site_context": "Co-N4",
+                        "structure_context": "relaxed Co-N4 model",
+                        "adsorbate": "Li2S",
+                        "value": -1.20,
+                        "unit": "eV",
+                        "reaction_step": "Li2S adsorption",
+                        "evidence_text": "Co-N4/C gives Li2S adsorption energy of -1.20 eV.",
+                        "confidence": 0.9,
+                    },
+                    {
+                        "category": "adsorption_energy",
+                        "catalyst_name": "Fe-N4-CeO2",
+                        "active_site_context": "Fe-N4",
+                        "structure_context": "Fe-N4 on CeO2 support",
+                        "adsorbate": "Li2S",
+                        "value": -1.25,
+                        "unit": "eV",
+                        "reaction_step": "Li2S adsorption",
+                        "evidence_text": "Fe-N4-CeO2 gives Li2S adsorption energy of -1.25 eV.",
+                        "confidence": 0.9,
+                    },
+                ],
+            )
+
+            summary = service.run_stage2(paper, _minimal_document())
+            session.commit()
+
+            catalysts = session.scalars(
+                select(CatalystSample).where(CatalystSample.paper_id == paper.id)
+            ).all()
+            rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+            assert summary["catalyst_samples"] == 3
+            assert summary["dft_results"] == 3
+            assert {row.name for row in catalysts} == {"Fe-N4/C", "Co-N4/C", "Fe-N4-CeO2"}
+            assert len({row.catalyst_sample_id for row in rows}) == 3
+            assert all(row.catalyst_sample_id is not None for row in rows)
+            catalyst_by_name = {row.name: row for row in catalysts}
+            assert catalyst_by_name["Fe-N4-CeO2"].metal_centers == ["Fe"]
+            assert catalyst_by_name["Fe-N4-CeO2"].catalyst_type == "single_atom"
+            assert {
+                row.evidence_payload["active_site_context"] for row in rows
+            } == {"Fe-N4", "Co-N4"}
+            assert {
+                row.evidence_payload["structure_context"] for row in rows
+            } == {"relaxed Fe-N4 model", "relaxed Co-N4 model", "Fe-N4 on CeO2 support"}
+            project_result = ExtractionSchemaService(session).result_payload(paper.id)[
+                "ProjectLibraryV4Extraction"
+            ]
+            assert len(project_result) == 1
+            assert len(project_result[0]["catalyst_samples"]) == 3
+            assert len(project_result[0]["active_site_instances"]) == 3
+    finally:
+        engine.dispose()
+
+
+def test_stage2_merges_dft_catalyst_identity_with_extractor_basic_info():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(
+                title="Catalyst basic info merge",
+                library_name="锂硫单原子",
+                pdf_path="catalyst-basic-info.pdf",
+            )
+            session.add(paper)
+            session.flush()
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "adsorption_energy",
+                        "catalyst_name": "Fe-N4/C",
+                        "active_site_context": "Fe-N4",
+                        "structure_context": "Fe-N4 on nitrogen-doped carbon",
+                        "adsorbate": "Li2S4",
+                        "value": -1.36,
+                        "unit": "eV",
+                        "reaction_step": "Li2S4 adsorption",
+                        "evidence_text": "Fe-N4/C binds Li2S4 by -1.36 eV.",
+                        "confidence": 0.91,
+                    }
+                ],
+            )
+            service.catalyst_extractor.extract = lambda doc: {
+                "single atom / dual atom": [{"value": "single atom"}],
+                "metal centers": [{"value": "Fe"}],
+                "coordination": [{"value": "Fe-N4"}],
+                "support": [{"value": "nitrogen-doped carbon"}],
+                "synthesis method": [{"value": "pyrolysis"}],
+                "structural evidence: HAADF-STEM / XANES / EXAFS / XPS": [
+                    {"value": "EXAFS confirmed Fe-N4 coordination."}
+                ],
+            }
+
+            summary = service.run_stage2(paper, _minimal_document())
+            session.commit()
+
+            catalyst = session.scalars(
+                select(CatalystSample).where(CatalystSample.paper_id == paper.id)
+            ).one()
+            dft_row = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).one()
+
+            assert summary["catalyst_samples"] == 1
+            assert catalyst.name == "Fe-N4/C"
+            assert catalyst.catalyst_type == "single_atom"
+            assert catalyst.metal_centers == ["Fe"]
+            assert catalyst.coordination == "Fe-N4"
+            assert catalyst.support == "nitrogen-doped carbon"
+            assert catalyst.synthesis_method == "pyrolysis"
+            assert catalyst.evidence_strength == "EXAFS confirmed Fe-N4 coordination."
+            assert dft_row.catalyst_sample_id == catalyst.id
+    finally:
+        engine.dispose()

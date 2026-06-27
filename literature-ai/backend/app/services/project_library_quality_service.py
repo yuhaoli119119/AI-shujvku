@@ -7,12 +7,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import ExternalAnalysisCandidate, Paper
+from app.domain.element_descriptors import build_metal_descriptor_payload
 from app.domain.project_library_context import get_project_library_context
 from app.services.dft_export_service import build_dft_ml_dataset_v3
 from app.services.lis_sac_dac_feature_service import LiSSacDacFeatureService
 from app.services.project_library_bundle_service import ProjectLibraryBundleService
 from app.services.project_library_queue_service import ProjectLibraryQueueService
 from app.utils.library_names import normalize_library_name
+
+
+_LI2S_BARRIER_SUBTYPES = {
+    "li2s_decomposition_barrier",
+    "li2s_deposition_barrier",
+    "li2s_nucleation_barrier",
+    "migration_barrier",
+}
+
+
+def _token(value: Any) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in str(value or "").strip().lower()).strip("_")
 
 
 class ProjectLibraryQualityService:
@@ -49,6 +62,7 @@ class ProjectLibraryQualityService:
             library_name=effective_library_name,
         )
         bundle_counts = bundle_payload["counts"]
+        sample_quality = self._sample_quality_summary(bundle_payload)
 
         task_summaries: list[dict[str, Any]] = []
         task_blocker_counts = Counter()
@@ -132,8 +146,91 @@ class ProjectLibraryQualityService:
             },
             "blocker_counts": dict(sorted(task_blocker_counts.items())),
             "feature_candidate_blocker_counts": dict(sorted(feature_blocker_counts.items())),
+            "sample_quality": sample_quality,
             "tasks": task_summaries,
             "needs_fields_papers": needs_fields_papers,
+        }
+
+    def _sample_quality_summary(self, bundle_payload: dict[str, Any]) -> dict[str, Any]:
+        counts = Counter()
+        gap_examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+        def add_gap(name: str, *, bundle: dict[str, Any], catalyst: dict[str, Any], instance: dict[str, Any]) -> None:
+            counts[name] += 1
+            if len(gap_examples[name]) >= 5:
+                return
+            gap_examples[name].append(
+                {
+                    "paper_id": bundle.get("paper_id"),
+                    "title": bundle.get("paper_title"),
+                    "catalyst_sample_id": catalyst.get("catalyst_sample_id"),
+                    "catalyst_name": catalyst.get("name"),
+                    "active_site_instance_key": instance.get("active_site_instance_key"),
+                }
+            )
+
+        for bundle in bundle_payload.get("bundles", []):
+            catalyst = bundle.get("catalyst_sample") or {}
+            descriptor_payload = build_metal_descriptor_payload(catalyst.get("metal_centers") or [])
+            catalyst_scope = catalyst.get("catalyst_scope")
+            for instance in bundle.get("active_site_instances", []):
+                counts["total_sample_count"] += 1
+                props = [
+                    prop
+                    for group_name in (
+                        "adsorbate_properties",
+                        "reaction_step_properties",
+                        "electronic_properties",
+                        "structure_properties",
+                        "other_properties",
+                    )
+                    for prop in ((instance.get("properties") or {}).get(group_name) or [])
+                ]
+                safe_props = [prop for prop in props if prop.get("ml_ready")]
+                has_li2s_adsorption = any(
+                    prop.get("canonical_property_type") == "adsorption_energy"
+                    and prop.get("canonical_adsorbate") == "Li2S"
+                    for prop in safe_props
+                )
+                has_li2s_barrier = any(
+                    prop.get("property_subtype") in _LI2S_BARRIER_SUBTYPES for prop in safe_props
+                )
+                has_rds = any("rds" in _token(prop.get("reaction_step")) for prop in safe_props)
+                has_bader_or_charge = any(
+                    prop.get("canonical_property_type") in {"bader_charge", "charge_transfer"}
+                    or prop.get("bader_charge_M1") is not None
+                    or prop.get("bader_charge_M2") is not None
+                    or prop.get("charge_transfer_e") is not None
+                    for prop in safe_props
+                )
+                has_metal_metal_distance = any(
+                    prop.get("metal_metal_distance_A") is not None for prop in safe_props
+                )
+                has_unknown_descriptor = bool(descriptor_payload.get("descriptor_blockers"))
+
+                if not has_li2s_adsorption:
+                    add_gap("missing_li2s_adsorption_sample_count", bundle=bundle, catalyst=catalyst, instance=instance)
+                if not has_li2s_barrier:
+                    add_gap("missing_li2s_barrier_sample_count", bundle=bundle, catalyst=catalyst, instance=instance)
+                if not has_rds:
+                    add_gap("missing_rds_sample_count", bundle=bundle, catalyst=catalyst, instance=instance)
+                if not has_bader_or_charge:
+                    add_gap("missing_bader_or_charge_transfer_sample_count", bundle=bundle, catalyst=catalyst, instance=instance)
+                if catalyst_scope == "DAC":
+                    counts["dac_sample_count"] += 1
+                    if not has_metal_metal_distance:
+                        add_gap("dac_missing_metal_metal_distance_sample_count", bundle=bundle, catalyst=catalyst, instance=instance)
+                if has_unknown_descriptor:
+                    add_gap("unknown_metal_descriptor_sample_count", bundle=bundle, catalyst=catalyst, instance=instance)
+
+        return {
+            "sample_unit": "active_site_instance",
+            "counts": dict(sorted((key, int(value)) for key, value in counts.items())),
+            "gap_examples": {key: value for key, value in sorted(gap_examples.items())},
+            "notes": [
+                "Counts are sample-level diagnostics over CatalystSample/ActiveSiteInstance bundles.",
+                "Missing P1 structure/electronic fields do not automatically block P0 ML-ready labels.",
+            ],
         }
 
     def _feature_candidate_blockers_by_paper(

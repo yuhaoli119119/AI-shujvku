@@ -225,6 +225,243 @@
             </div>
         </section>
 
+        <section class="v3-card" aria-labelledby="v4PanelTitle">
+            <div class="v3-header">
+                <div>
+                    <p class="eyebrow">v4 Li-S SAC/DAC Project Library</p>
+                    <h2 id="v4PanelTitle">催化剂实例级 v4 导出入口</h2>
+                    <p>
+                        基于 <code>project_library_ml_export_v4</code>；导出可只取 ML-ready，人工回填默认查看 blocked 诊断样本并走用户提交。
+                    </p>
+                </div>
+                <div class="v3-controls">
+                    <label class="field">
+                        <span>训练任务</span>
+                        <select id="v4TaskSelect">
+                            <option value="adsorption_energy">吸附能（adsorption_energy）</option>
+                            <option value="li2s_reaction_energy">Li2S 反应能（li2s_reaction_energy）</option>
+                            <option value="li2s_barrier">Li2S 能垒（li2s_barrier）</option>
+                            <option value="rds_srr_multitask">RDS / SRR 多任务（rds_srr_multitask）</option>
+                        </select>
+                    </label>
+                    <label class="field compact-field">
+                        <span>导出范围</span>
+                        <select id="v4ReadyOnlySelect">
+                            <option value="false" selected>包含 blocked 诊断（回填/修改）</option>
+                            <option value="true">只下载 ML-ready（训练导出）</option>
+                        </select>
+                    </label>
+                    <div class="v3-actions">
+                        <button id="v4RefreshButton" type="button" class="btn btn-secondary">刷新 v4 manifest</button>
+                        <button id="v4JsonButton" type="button" class="btn btn-ghost">下载 v4 JSON</button>
+                        <button id="v4CsvButton" type="button" class="btn btn-ghost">下载 v4 CSV</button>
+                    </div>
+                </div>
+            </div>
+            <div id="v4StatusPanel" class="v3-status" hidden></div>
+            <div class="v3-meta-grid">
+                <div class="v3-meta-item">
+                    <span>schema</span>
+                    <strong id="v4SchemaValue">-</strong>
+                </div>
+                <div class="v3-meta-item">
+                    <span>version</span>
+                    <strong id="v4VersionValue">-</strong>
+                </div>
+                <div class="v3-meta-item">
+                    <span>task</span>
+                    <strong id="v4TaskValue">-</strong>
+                </div>
+                <div class="v3-meta-item">
+                    <span>library</span>
+                    <strong id="v4LibraryValue">-</strong>
+                </div>
+            </div>
+            <div class="v3-count-grid">
+                <article class="stat-card">
+                    <div class="stat-label">candidate_sample_count</div>
+                    <div id="v4CandidateCount" class="stat-value">-</div>
+                </article>
+                <article class="stat-card success">
+                    <div class="stat-label">returned_sample_count</div>
+                    <div id="v4ReturnedCount" class="stat-value">-</div>
+                </article>
+                <article class="stat-card success">
+                    <div class="stat-label">sample_ml_ready_count</div>
+                    <div id="v4ReadyCount" class="stat-value">-</div>
+                </article>
+                <article class="stat-card danger">
+                    <div class="stat-label">sample_blocked_count</div>
+                    <div id="v4BlockedCount" class="stat-value">-</div>
+                </article>
+            </div>
+            <div class="v3-exclusions">
+                <h3>blocker_counts</h3>
+                <div id="v4BlockerCounts" class="pill-list">
+                    <span class="pill">等待加载</span>
+                </div>
+            </div>
+            <div class="v4-quality-panel">
+                <div class="table-card-header">
+                    <div>
+                        <h3>样本级质量检查</h3>
+                        <p>按 ActiveSiteInstance 统计 Li2S 标签、RDS、电子描述符和 DAC 结构缺口。</p>
+                    </div>
+                </div>
+                <div id="v4SampleQualityCounts" class="pill-list sample-quality-counts">
+                    <span class="pill">等待加载</span>
+                </div>
+                <div id="v4SampleQualityExamples" class="sample-quality-examples">
+                    <span class="muted">等待加载样本缺口示例。</span>
+                </div>
+            </div>
+            <div class="v4-submit-panel" id="v4SubmitPanel">
+                <div class="table-card-header">
+                    <div>
+                        <h3>样本级人工补字段</h3>
+                        <p>先在 sample_records 选择“补字段”；若看不到待补样本，请保持导出范围为“包含 blocked 诊断”。</p>
+                    </div>
+                    <div class="table-legend">
+                        <span class="legend-chip">user_submit_only</span>
+                    </div>
+                </div>
+                <div id="v4SubmitSelectedSample" class="selected-sample muted">未选择 sample_record。</div>
+                <div class="submit-grid">
+                    <label class="field">
+                        <span>record_id</span>
+                        <input id="v4SubmitRecordId" type="text" placeholder="可选；留空则创建新 DFTResult">
+                    </label>
+                    <label class="field">
+                        <span>property_type</span>
+                        <select id="v4SubmitPropertyType">
+                            <option value="adsorption_energy">adsorption_energy</option>
+                            <option value="reaction_barrier">reaction_barrier</option>
+                            <option value="gibbs_free_energy_change">gibbs_free_energy_change</option>
+                            <option value="reaction_energy">reaction_energy</option>
+                            <option value="charge_transfer">charge_transfer</option>
+                            <option value="bader_charge">bader_charge</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>value</span>
+                        <input id="v4SubmitValue" type="number" step="any">
+                    </label>
+                    <label class="field">
+                        <span>unit</span>
+                        <input id="v4SubmitUnit" type="text" value="eV">
+                    </label>
+                    <label class="field">
+                        <span>adsorbate</span>
+                        <input id="v4SubmitAdsorbate" type="text" placeholder="Li2S">
+                    </label>
+                    <label class="field">
+                        <span>reaction_step</span>
+                        <input id="v4SubmitReactionStep" type="text" placeholder="Li2S decomposition">
+                    </label>
+                    <label class="field">
+                        <span>energy_kind</span>
+                        <select id="v4SubmitEnergyKind">
+                            <option value="thermodynamic_energy">thermodynamic_energy</option>
+                            <option value="activation_barrier">activation_barrier</option>
+                            <option value="free_energy_change">free_energy_change</option>
+                            <option value="reaction_energy">reaction_energy</option>
+                            <option value="electronic_descriptor">electronic_descriptor</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>submitted_by</span>
+                        <input id="v4SubmitSubmittedBy" type="text" value="local_user">
+                    </label>
+                    <label class="field">
+                        <span>bader_charge_M1</span>
+                        <input id="v4SubmitBaderM1" type="number" step="any">
+                    </label>
+                    <label class="field">
+                        <span>bader_charge_M2</span>
+                        <input id="v4SubmitBaderM2" type="number" step="any">
+                    </label>
+                    <label class="field">
+                        <span>charge_transfer_e</span>
+                        <input id="v4SubmitChargeTransfer" type="number" step="any">
+                    </label>
+                    <label class="field">
+                        <span>charge_transfer_direction</span>
+                        <input id="v4SubmitChargeDirection" type="text" placeholder="catalyst_to_adsorbate">
+                    </label>
+                    <label class="field">
+                        <span>state_context</span>
+                        <input id="v4SubmitStateContext" type="text" placeholder="after Li2S adsorption">
+                    </label>
+                    <label class="field">
+                        <span>site_label</span>
+                        <input id="v4SubmitSiteLabel" type="text" placeholder="M1 / M2">
+                    </label>
+                    <label class="field">
+                        <span>metal_metal_distance_A</span>
+                        <input id="v4SubmitMetalDistance" type="number" step="any">
+                    </label>
+                    <label class="field">
+                        <span>coordination_environment</span>
+                        <input id="v4SubmitCoordinationEnv" type="text" placeholder="Fe-N4 / TM-C3">
+                    </label>
+                    <label class="field">
+                        <span>adsorption_site</span>
+                        <input id="v4SubmitAdsorptionSite" type="text">
+                    </label>
+                    <label class="field">
+                        <span>adsorption_mode</span>
+                        <input id="v4SubmitAdsorptionMode" type="text">
+                    </label>
+                    <label class="field">
+                        <span>metal_ligand_distance_A</span>
+                        <input id="v4SubmitMetalLigandDistance" type="number" step="any">
+                    </label>
+                    <label class="field">
+                        <span>source_page</span>
+                        <input id="v4SubmitSourcePage" type="text" placeholder="可选">
+                    </label>
+                </div>
+                <label class="field source-text-field">
+                    <span>source_text（选填）</span>
+                    <textarea id="v4SubmitSourceText" rows="3" placeholder="可选：粘贴论文中的原文证据；留空也可提交"></textarea>
+                </label>
+                <div class="filter-actions submit-actions">
+                    <button id="v4SubmitPreviewButton" type="button" class="btn btn-secondary">预览</button>
+                    <button id="v4SubmitButton" type="button" class="btn btn-primary">提交入库</button>
+                </div>
+                <pre id="v4SubmitResult" class="submit-result" hidden></pre>
+            </div>
+            <div class="v4-sample-table">
+                <div class="table-card-header">
+                    <div>
+                        <h3>sample_records</h3>
+                        <p>一行代表一个 ActiveSiteInstance；宽表属性、任务标签和 blockers 均来自 v4 样本聚合。</p>
+                    </div>
+                </div>
+                <div class="table-wrap compact-table-wrap">
+                    <table class="records-table sample-records-table">
+                        <thead>
+                            <tr>
+                                <th>样本状态</th>
+                                <th>active_site_instance_key</th>
+                                <th>催化剂</th>
+                                <th>任务标签</th>
+                                <th>wide_properties</th>
+                                <th>property_groups</th>
+                                <th>blockers</th>
+                                <th>补字段</th>
+                            </tr>
+                        </thead>
+                        <tbody id="v4SampleRecordsTableBody">
+                            <tr>
+                                <td colspan="8" class="empty-row">等待加载 sample_records。</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
         <section class="table-card">
             <div class="table-card-header">
                 <div>

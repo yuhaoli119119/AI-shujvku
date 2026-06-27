@@ -464,23 +464,52 @@ async function loadWriterSettings() {
     };
 }
 
+function applyActivatedLibraryState(payload, fallbackName) {
+    const activeLibraryName = (payload && payload.name) ? payload.name : fallbackName;
+    const previousPaperId = state.selectedPaperId;
+    state.currentLibrary = Object.assign({}, payload || {}, {
+        name: activeLibraryName,
+        is_active: true,
+    });
+    state.currentLibraryTotal = Number((payload && payload.paper_count) || 0);
+    state.papers = [];
+    state.selectedPaperId = null;
+    state.selectedPaper = null;
+    state.selectedPaperAudit = null;
+    state.selectedPaperEvidenceLocators = undefined;
+    state.pendingNavigationTarget = null;
+    state.pendingPdfJump = null;
+    state.paperListRequestSeq = Number(state.paperListRequestSeq || 0) + 1;
+    state.detailLoadToken = Date.now() + ":library-switch:" + activeLibraryName;
+    state.detailRefreshToken = state.detailLoadToken;
+
+    if (previousPaperId && typeof clearPaperResourceCaches === "function") {
+        clearPaperResourceCaches(previousPaperId);
+    }
+    if (typeof disconnectSSE === "function") {
+        disconnectSSE();
+    }
+
+    const selector = $("librarySelect");
+    if (selector) selector.value = activeLibraryName;
+    rememberCurrentLibraryName(activeLibraryName);
+    if (typeof syncQueryParams === "function") {
+        syncQueryParams();
+    }
+    return activeLibraryName;
+}
+
 async function activateLibraryByName(name) {
     if (!name) return;
     const selector = $("librarySelect");
     const previousLibraryName = (state.currentLibrary && state.currentLibrary.name) || "";
     if (selector) selector.disabled = true;
+
+    let payload;
     try {
-        const payload = await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
-        const activeLibraryName = (payload && payload.name) ? payload.name : name;
-        rememberCurrentLibraryName(activeLibraryName);
-        showToast("已切换到：" + activeLibraryName, "success");
-        if (typeof resetLibraryPagination === "function") resetLibraryPagination();
-        else state.currentOffset = 0;
-        await refreshCurrentPage();
+        payload = await fetchJSON(LIB_API + "/" + encodeURIComponent(name) + "/activate", { method: "POST" });
     } catch (error) {
-        if (selector) {
-            selector.value = previousLibraryName;
-        }
+        if (selector) selector.value = previousLibraryName;
         rememberCurrentLibraryName(previousLibraryName);
         try {
             await loadLibraries();
@@ -488,6 +517,18 @@ async function activateLibraryByName(name) {
             // Keep the original activation error as the user-facing result.
         }
         showToast("切库失败：" + error.message, "error");
+        if (selector) selector.disabled = false;
+        return;
+    }
+
+    const activeLibraryName = applyActivatedLibraryState(payload, name);
+    showToast("已切换到：" + activeLibraryName, "success");
+    if (typeof resetLibraryPagination === "function") resetLibraryPagination();
+    else state.currentOffset = 0;
+    try {
+        await refreshCurrentPage();
+    } catch (error) {
+        showToast("已切换到 " + activeLibraryName + "，但页面刷新失败：" + error.message, "error");
     } finally {
         if (selector) selector.disabled = false;
     }

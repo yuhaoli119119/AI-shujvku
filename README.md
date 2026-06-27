@@ -6,13 +6,15 @@
 
 面向 Codex / IDE AI 的本地文献工具台，包含文献采集、PDF 解析、结构化抽取、外部解析导入和 MCP 协作接口。软件负责文献入库、PDF 转换、证据检索、候选结构化数据和导出；最终阅读、核对、归纳、写作和数据整理由 Codex 或人工完成。
 
-**当前基线**：
+**当前稳定基线（2026-06-27）**：
 - **数据库**：`PostgreSQL + pgvector` 是唯一且默认的活跃业务数据源（Docker Compose 中 `postgres` 容器必须启动）
 - **MCP 工具**：27 个，覆盖提取→裁切→审核→分享的完整闭环
 - **AI 后备路径**：IDE 会话如果没挂上 MCP 工具，可直接走 `literature-ai/backend` 里的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 本地后备实现
 - **权限体系**：6 级 capability（`read_papers` / `append_notes` / `propose_corrections` / `request_parse` / `review_corrections` / `review_dft`）
 - **多 AI 协作**：Blackboard 模式，AI 分析结果自动落盘为 PaperNote（"雁过留声"）
 - **只读分享**：通过 `create_share_token` 生成安全链接，外部用户可查看论文/图表/DFT/审阅记录，不可修改
+- **DFT / project-library**：主链路可用，但必须经过证据、人工审核和导出安全门；按催化剂样本分组时，DFT 数值归属和催化剂基础信息补全是两条需要合流的边界
+- **仓库减负规则**：不要提交本地 token、数据库连接串、临时探针脚本、`outputs/tmp/`、`outputs/exports/` 或 Playwright/pytest 产物
 
 ## 快速启动
 
@@ -31,6 +33,7 @@ curl http://localhost:8000/api/health
 | [literature-ai/AGENTS.md](./literature-ai/AGENTS.md) | AI 协作者规则与交付边界（新 AI 必读） |
 | [literature-ai/README.md](./literature-ai/README.md) | 子项目技术说明 |
 | [literature-ai/使用说明.md](./literature-ai/%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md) | 中文使用说明 |
+| [literature-ai/docs/README.md](./literature-ai/docs/README.md) | 当前文档索引、有效基线和历史文档边界 |
 
 ## 仓库结构
 
@@ -39,7 +42,8 @@ AI-shujvku/
   literature-ai/       ← 核心项目（FastAPI + PostgreSQL + MCP）
     backend/           ← FastAPI 后端、MCP 服务、解析管线
     frontend/          ← 静态工作台页面
-    docs/              ← 文档（mcp/ 有效，plans/ 当前计划）
+    docs/              ← 当前索引、MCP 文档、schema、plans/audits 历史记录
+    outputs/           ← 本地运行导出物，默认不提交
   .workbuddy/          ← 工作日志与记忆
 ```
 

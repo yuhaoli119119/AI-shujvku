@@ -18,7 +18,11 @@ if str(BACKEND_ROOT) not in sys.path:
 
 
 @pytest.fixture(autouse=True)
-def default_test_database_mode(monkeypatch):
+def default_test_database_mode(monkeypatch, request):
+    if request.node.get_closest_marker("no_test_database"):
+        yield
+        return
+
     from app.config import get_settings
     from app.db.session import _engines, _session_factories
 

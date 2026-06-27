@@ -207,6 +207,33 @@ def test_dft_results_extracts_structured_markdown_table_values():
     assert any(item["category"] == "bader_charge" and item["adsorbate"] == "S8" and item["value"] == 0.15 for item in results)
 
 
+def test_dft_results_preserves_catalyst_identity_from_comparison_table():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                caption="Table 1 Li2S adsorption on catalyst models",
+                markdown_content=(
+                    "| Catalyst | Li2S adsorption energy (eV) |\n"
+                    "| --- | --- |\n"
+                    "| Fe-N4/C | -1.20 |\n"
+                    "| Co-N4/C | -1.20 |\n"
+                ),
+                page=4,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+    adsorption = [item for item in results if item["category"] == "adsorption_energy"]
+
+    assert {item["catalyst_name"] for item in adsorption} == {"Fe-N4/C", "Co-N4/C"}
+    assert len(adsorption) == 2
+
+
 def test_dft_results_rejects_band_gap_candidates_that_are_dimension_rows():
     extractor = DFTResultsExtractor()
     document = {
@@ -346,7 +373,7 @@ def test_dft_results_extracts_metric_rows_from_orr_table():
 
     assert sum(1 for item in results if item["category"] == "limiting_potential") == 2
     assert any(item["category"] == "overpotential" and item["value"] == 0.45 for item in results)
-    assert any(item["category"] == "potential_determining_step" and item["reaction_step"].endswith("∗O → ∗OH (∆G3)") for item in results)
+    assert not any(item["category"] == "potential_determining_step" for item in results)
 
 
 def test_dft_results_skips_reference_table_artifacts_for_limiting_potential():

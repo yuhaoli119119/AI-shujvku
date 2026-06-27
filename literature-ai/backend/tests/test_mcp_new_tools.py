@@ -233,11 +233,10 @@ class TestImportAnalysis:
     @patch("app.mcp.server.get_settings")
     @patch("app.mcp.server.require_mcp_capability")
     @patch("app.mcp.server.ExternalAnalysisService")
-    @patch("app.mcp.server.VerificationSessionService")
-    def test_import_analysis_with_text(self, MockVerificationSessionService, MockService, mock_auth, mock_settings, mock_session_scope):
+    def test_import_analysis_with_text(self, MockService, mock_auth, mock_settings, mock_session_scope):
         from app.mcp.server import import_analysis
 
-        mock_auth.return_value = MagicMock()
+        mock_auth.return_value = MagicMock(source_prefix="cursor")
         mock_settings.return_value = _make_mock_settings()
 
         mock_session = MagicMock()
@@ -251,9 +250,10 @@ class TestImportAnalysis:
         mock_run.mapping_status = "normalized_with_llm"
         mock_run.mapping_error = None
         mock_service_instance.import_run.return_value = mock_run
+        mock_service_instance.apply_review_rules_for_run.return_value = {"paper_id": paper_id}
         mock_service_instance.list_candidates.return_value = []
+        mock_service_instance.diagnose_import_warnings.return_value = []
         MockService.return_value = mock_service_instance
-        MockVerificationSessionService.return_value.apply_import_rules_for_paper.return_value = {"paper_id": paper_id}
 
         result = import_analysis(
             paper_id=paper_id,
@@ -265,11 +265,15 @@ class TestImportAnalysis:
         assert result["mapping_status"] == "normalized_with_llm"
         assert result["candidate_count"] == 0
         assert result["auto_apply_review_rules"] is True
+        assert result["auto_apply_summary"] == {"paper_id": paper_id}
         mock_service_instance.import_run.assert_called_once()
-        MockVerificationSessionService.return_value.apply_import_rules_for_paper.assert_called_once()
-        assert (
-            MockVerificationSessionService.return_value.apply_import_rules_for_paper.call_args.kwargs["candidate_run_id"]
-            == mock_run.id
+        mock_service_instance.apply_review_rules_for_run.assert_called_once_with(
+            mock_run.id,
+            reviewer="cursor",
+            write_lock_tokens=None,
+            write_lock_owner=["cursor"],
+            auto_lock_owner="cursor",
+            lock_meta_source="mcp_import_analysis",
         )
         mock_session.commit.assert_called_once()
 
@@ -277,11 +281,10 @@ class TestImportAnalysis:
     @patch("app.mcp.server.get_settings")
     @patch("app.mcp.server.require_mcp_capability")
     @patch("app.mcp.server.ExternalAnalysisService")
-    @patch("app.mcp.server.VerificationSessionService")
-    def test_import_analysis_with_payload(self, MockVerificationSessionService, MockService, mock_auth, mock_settings, mock_session_scope):
+    def test_import_analysis_with_payload(self, MockService, mock_auth, mock_settings, mock_session_scope):
         from app.mcp.server import import_analysis
 
-        mock_auth.return_value = MagicMock()
+        mock_auth.return_value = MagicMock(source_prefix="deepseek-chat")
         mock_settings.return_value = _make_mock_settings()
 
         mock_session = MagicMock()
@@ -302,9 +305,10 @@ class TestImportAnalysis:
         mock_run.mapping_status = "normalized"
         mock_run.mapping_error = None
         mock_service_instance.import_run.return_value = mock_run
+        mock_service_instance.apply_review_rules_for_run.return_value = {"paper_id": paper_id}
         mock_service_instance.list_candidates.return_value = [candidate]
+        mock_service_instance.diagnose_import_warnings.return_value = []
         MockService.return_value = mock_service_instance
-        MockVerificationSessionService.return_value.apply_import_rules_for_paper.return_value = {"paper_id": paper_id}
 
         result = import_analysis(
             paper_id=paper_id,
@@ -314,10 +318,14 @@ class TestImportAnalysis:
 
         assert result["candidate_count"] == 1
         assert result["candidates"][0]["type"] == "note"
-        MockVerificationSessionService.return_value.apply_import_rules_for_paper.assert_called_once()
-        assert (
-            MockVerificationSessionService.return_value.apply_import_rules_for_paper.call_args.kwargs["candidate_run_id"]
-            == mock_run.id
+        assert result["auto_apply_summary"] == {"paper_id": paper_id}
+        mock_service_instance.apply_review_rules_for_run.assert_called_once_with(
+            mock_run.id,
+            reviewer="deepseek-chat",
+            write_lock_tokens=None,
+            write_lock_owner=["deepseek-chat"],
+            auto_lock_owner="deepseek-chat",
+            lock_meta_source="mcp_import_analysis",
         )
 
 

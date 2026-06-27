@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import io
+import json
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,6 +47,7 @@ def _seed_dft(
     reaction_step: str = "Li2S4 adsorption",
     evidence_text: str = "Li2S4 adsorption is measured in the table.",
     value: float = -1.20,
+    unit: str = "eV",
     evidence_payload: dict | None = None,
     with_setting: bool = True,
 ) -> DFTResult:
@@ -65,7 +68,7 @@ def _seed_dft(
         adsorbate=adsorbate,
         property_type=property_type,
         value=value if complete else -1.35,
-        unit="eV",
+        unit=unit,
         reaction_step=reaction_step,
         evidence_text=evidence_text,
         evidence_payload=evidence_payload,
@@ -190,6 +193,13 @@ def test_project_library_quality_defaults_to_li_s_library_and_reports_blockers(s
     assert payload["blocker_counts"]["missing_coordination"] == 1
     assert payload["feature_candidate_blocker_counts"]["unsupported_specific_capacity_unit"] == 1
     assert payload["feature_candidate_blocker_counts"]["rate_requires_conversion"] == 1
+    assert payload["sample_quality"]["sample_unit"] == "active_site_instance"
+    assert payload["sample_quality"]["counts"]["total_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_li2s_adsorption_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_li2s_barrier_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_rds_sample_count"] == 2
+    assert payload["sample_quality"]["counts"]["missing_bader_or_charge_transfer_sample_count"] == 2
+    assert "missing_li2s_adsorption_sample_count" in payload["sample_quality"]["gap_examples"]
     assert [item["title"] for item in payload["needs_fields_papers"]] == ["Li-S blocked"]
     assert payload["needs_fields_papers"][0]["feature_candidate_blocker_counts"]["unsupported_specific_capacity_unit"] == 1
 
@@ -343,6 +353,10 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
         "/api/dft/project-library-ml-export-v4.csv",
         params={"task": "li2s_barrier"},
     )
+    record_csv_response = client.get(
+        "/api/dft/project-library-ml-export-v4.csv",
+        params={"task": "li2s_barrier", "unit": "record"},
+    )
 
     with SessionLocal() as session:
         after = _row_counts(session)
@@ -380,6 +394,9 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
     ]
     assert export_payload["manifest"]["task"] == "li2s_barrier"
     assert export_payload["manifest"]["ai_consensus_auto_adopt_allowed"] is False
+    assert export_payload["manifest"]["sample_unit"] == "catalyst_setting_or_active_site_instance"
+    assert export_payload["manifest"]["candidate_sample_count"] == 1
+    assert export_payload["manifest"]["returned_sample_count"] == 1
     assert [row["record_id"] for row in export_payload["records"]] == [barrier_id]
     record = export_payload["records"][0]
     assert record["task"] == "li2s_barrier"
@@ -396,12 +413,153 @@ def test_project_library_bundles_and_v4_export_are_read_only_with_energy_kind(se
     assert record["support_normalized"] == "N-C"
     assert record["database_write_authority"] == "user_submit_only"
     assert record["ai_consensus_auto_adopt_allowed"] is False
+    sample_record = export_payload["sample_records"][0]
+    assert sample_record["sample_unit"] == "active_site_instance"
+    assert sample_record["sample_id"] == active_site_key
+    assert sample_record["active_site_instance_key"] == active_site_key
+    assert sample_record["task"] == "li2s_barrier"
+    assert sample_record["ml_ready"] is True
+    assert sample_record["task_record_ids"] == [barrier_id]
+    assert set(sample_record["source_record_ids"]) == {adsorption_id, barrier_id}
+    assert sample_record["wide_properties"]["adsorption_energy_li2s_ev"] == -1.10
+    assert sample_record["wide_properties"]["li2s_decomposition_barrier_ev"] == 0.65
+    assert sample_record["property_group_counts"]["adsorbate_properties"] == 1
+    assert sample_record["property_group_counts"]["reaction_step_properties"] == 1
+    assert sample_record["property_groups"]["adsorbate_properties"][0]["record_id"] == adsorption_id
+    assert sample_record["property_groups"]["reaction_step_properties"][0]["record_id"] == barrier_id
+    assert sample_record["task_labels"] == [
+        {
+            "record_id": barrier_id,
+            "label_name": "li2s_barrier_eV",
+            "label_value": 0.65,
+            "label_unit": "eV",
+            "label_energy_kind": "activation_barrier",
+            "label_property_subtype": "li2s_decomposition_barrier",
+            "adsorbate": "Li2S",
+            "reaction_step": "Li2S decomposition",
+            "ml_ready": True,
+            "blockers": [],
+        }
+    ]
 
     assert csv_response.status_code == 200
     rows = list(csv.DictReader(io.StringIO(csv_response.text)))
-    assert rows[0]["record_id"] == barrier_id
+    assert rows[0]["sample_id"] == active_site_key
+    assert rows[0]["sample_unit"] == "active_site_instance"
     assert rows[0]["task"] == "li2s_barrier"
-    assert rows[0]["energy_kind"] == "activation_barrier"
+    assert json.loads(rows[0]["task_record_ids"]) == [barrier_id]
+    assert set(json.loads(rows[0]["source_record_ids"])) == {adsorption_id, barrier_id}
+    assert rows[0]["li2s_barrier_eV"] == "0.65"
+    assert rows[0]["adsorption_energy_li2s_ev"] == "-1.1"
+    assert rows[0]["li2s_decomposition_barrier_ev"] == "0.65"
+
+    assert record_csv_response.status_code == 200
+    record_rows = list(csv.DictReader(io.StringIO(record_csv_response.text)))
+    assert record_csv_response.headers["content-disposition"] == (
+        'attachment; filename="project_library_ml_export_v4_record_li2s_barrier.csv"'
+    )
+    assert [row["record_id"] for row in record_rows] == [barrier_id]
+    assert record_rows[0]["label_name"] == "li2s_barrier_eV"
+    assert record_rows[0]["label_value"] == "0.65"
+    assert "sample_id" not in record_rows[0]
+
+
+def test_project_library_v4_allows_generated_key_when_setting_binding_is_unambiguous(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S generated key ready", library_name="锂硫双原子", parsed=True)
+        ready_row = _seed_dft(
+            session,
+            paper=paper,
+            complete=True,
+            adsorbate="Li2S",
+            evidence_text="Li2S adsorption energy is -1.10 eV on the catalyst.",
+            value=-1.10,
+            evidence_payload={"source_text": "Li2S adsorption energy is -1.10 eV on the catalyst."},
+        )
+        _seed_dft(
+            session,
+            paper=paper,
+            complete=True,
+            catalyst=session.get(CatalystSample, ready_row.catalyst_sample_id),
+            property_type="charge_transfer",
+            adsorbate="Li2S",
+            reaction_step="Charge transfer after Li2S adsorption",
+            evidence_text="Charge transfer after Li2S adsorption is 0.20 e.",
+            value=0.20,
+            unit="e",
+            evidence_payload={"source_text": "Charge transfer after Li2S adsorption is 0.20 e."},
+            with_setting=False,
+        )
+        missing_setting_paper = _seed_paper(
+            session,
+            title="Li-S generated key missing setting",
+            library_name="锂硫双原子",
+            parsed=True,
+        )
+        blocked_row = _seed_dft(
+            session,
+            paper=missing_setting_paper,
+            complete=True,
+            adsorbate="Li2S",
+            evidence_text="Li2S adsorption energy is -1.35 eV on the catalyst.",
+            value=-1.35,
+            evidence_payload={"source_text": "Li2S adsorption energy is -1.35 eV on the catalyst."},
+            with_setting=False,
+        )
+        session.commit()
+        ready_row_id = str(ready_row.id)
+        blocked_row_id = str(blocked_row.id)
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "adsorption_energy", "ready_only": "false"},
+    )
+    assert response.status_code == 200, response.text
+    records = {record["record_id"]: record for record in response.json()["records"]}
+
+    ready_record = records[ready_row_id]
+    assert ready_record["active_site_instance_key"].startswith("paper:")
+    assert ready_record["active_site_ref"]["binding_source"] == "generated_read_only_bundle_key"
+    assert ready_record["active_site_ref"]["dft_setting_ref"]["source"] == "singleton_paper_setting"
+    assert ready_record["ml_ready"] is True
+    assert "generated_active_site_instance_key" not in ready_record["blockers"]
+
+    blocked_record = records[blocked_row_id]
+    assert blocked_record["ml_ready"] is False
+    assert "missing_result_setting_link" in blocked_record["blockers"]
+    assert "generated_active_site_instance_key" in blocked_record["blockers"]
+
+
+def test_project_library_v4_blocks_single_fact_sample_from_ready_export(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S single fact", library_name="锂硫双原子")
+        row = _seed_dft(
+            session,
+            paper=paper,
+            value=-1.10,
+            evidence_payload={
+                "active_site_instance_key": "single-fact-site",
+                "source_text": "Li2S4 adsorption energy is -1.10 eV.",
+            },
+        )
+        session.commit()
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    ready = client.get("/api/dft/project-library-ml-export-v4")
+    diagnostic = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"ready_only": "false"},
+    )
+
+    assert ready.status_code == 200
+    assert ready.json()["records"] == []
+    record = next(item for item in diagnostic.json()["records"] if item["record_id"] == row_id)
+    assert record["ml_ready"] is False
+    assert "insufficient_bundle_completeness" in record["blockers"]
 
 
 def test_project_library_v4_export_excludes_user_decision_candidates_from_ml_ready(setup_test_db):
@@ -582,9 +740,7 @@ def test_project_library_v4_export_task_taxonomy_and_blockers(setup_test_db):
     )
     assert reaction_ready.status_code == 200
     reaction_ready_payload = reaction_ready.json()
-    assert [record["record_id"] for record in reaction_ready_payload["records"]] == [li2s_dissociation_id]
-    assert reaction_ready_payload["records"][0]["label_energy_kind"] == "thermodynamic_energy"
-    assert reaction_ready_payload["records"][0]["label_property_subtype"] == "li2s_dissociation_energy"
+    assert reaction_ready_payload["records"] == []
     reaction_all_payload = reaction_all.json()
     assert {record["record_id"] for record in reaction_all_payload["records"]} == {
         li2s_dissociation_id,
@@ -592,6 +748,12 @@ def test_project_library_v4_export_task_taxonomy_and_blockers(setup_test_db):
         li2s_reaction_missing_step_id,
         li2s_barrier_missing_step_id,
     }
+    dissociation_record = next(
+        record for record in reaction_all_payload["records"] if record["record_id"] == li2s_dissociation_id
+    )
+    assert dissociation_record["label_energy_kind"] == "thermodynamic_energy"
+    assert dissociation_record["label_property_subtype"] == "li2s_dissociation_energy"
+    assert "insufficient_bundle_completeness" in dissociation_record["blockers"]
     mismatch_record = next(record for record in reaction_all_payload["records"] if record["record_id"] == li2s_barrier_mismatch_id)
     assert mismatch_record["ml_ready"] is False
     assert "energy_kind_task_mismatch" in mismatch_record["blockers"]
@@ -658,7 +820,7 @@ def test_project_library_v4_export_task_taxonomy_and_blockers(setup_test_db):
     assert "missing_reaction_step" in rds_missing_step_record["blockers"]
 
 
-def test_project_library_v4_user_submit_record_respects_task_contract(setup_test_db):
+def test_project_library_v4_user_submit_blocks_task_contract_mismatch(setup_test_db):
     SessionLocal = sessionmaker(bind=setup_test_db, future=True)
     with SessionLocal() as session:
         paper = _seed_paper(session, title="Li-S submit task contract", library_name="锂硫双原子", parsed=True)
@@ -738,20 +900,16 @@ def test_project_library_v4_user_submit_record_respects_task_contract(setup_test
             "decision_status": "ready_for_submission",
         },
     )
-    assert submit_response.status_code == 200, submit_response.text
+    assert submit_response.status_code == 422, submit_response.text
+    assert "energy_kind_property_mismatch" in submit_response.json()["detail"]["hard_blockers"]
 
-    ready = client.get("/api/dft/project-library-ml-export-v4", params={"task": "li2s_reaction_energy", "paper_id": paper_id})
-    all_rows = client.get(
-        "/api/dft/project-library-ml-export-v4",
-        params={"task": "li2s_reaction_energy", "paper_id": paper_id, "ready_only": "false"},
-    )
-    assert ready.status_code == 200
-    assert ready.json()["records"] == []
-    assert all_rows.status_code == 200
-    payload = all_rows.json()
-    assert [record["record_id"] for record in payload["records"]] == [row_id]
-    assert payload["records"][0]["ml_ready"] is False
-    assert "energy_kind_task_mismatch" in payload["records"][0]["blockers"]
+    with SessionLocal() as session:
+        stored_row = session.get(DFTResult, UUID(row_id))
+        assert stored_row is not None
+        assert stored_row.candidate_status == "system_candidate"
+        stored_candidate = session.get(ExternalAnalysisCandidate, UUID(candidate_id))
+        assert stored_candidate is not None
+        assert stored_candidate.status == "pending"
 
 
 def test_project_library_v4_descriptors_and_structure_fields_are_postprocessed(setup_test_db):
@@ -800,6 +958,48 @@ def test_project_library_v4_descriptors_and_structure_fields_are_postprocessed(s
                 "coordination_environment": "Fe-Co-N6",
                 "adsorption_site": "bridge",
                 "adsorption_mode": "bidentate",
+            },
+            with_setting=False,
+        )
+        _seed_dft(
+            session,
+            paper=paper,
+            complete=True,
+            catalyst=fe_co_catalyst,
+            property_type="bader_charge",
+            adsorbate="Li2S",
+            reaction_step="Bader charge after Li2S adsorption",
+            evidence_text="Bader charges of Fe and Co are 0.21 e and 0.18 e after Li2S adsorption.",
+            value=0.21,
+            unit="e",
+            evidence_payload={
+                "active_site_instance_key": "descriptor:site:feco",
+                "source_text": "Bader charges of Fe and Co are 0.21 e and 0.18 e after Li2S adsorption.",
+                "bader_charge_M1": 0.21,
+                    "bader_charge_M2": 0.18,
+                    "metal_center_order_source": "source_text",
+                "state_context": "after_Li2S_adsorption",
+                "site_label": "M1",
+            },
+            with_setting=False,
+        )
+        _seed_dft(
+            session,
+            paper=paper,
+            complete=True,
+            catalyst=fe_co_catalyst,
+            property_type="charge_transfer",
+            adsorbate="Li2S",
+            reaction_step="Charge transfer after Li2S adsorption",
+            evidence_text="Charge transfer from catalyst to Li2S is 0.42 e.",
+            value=0.42,
+            unit="e",
+            evidence_payload={
+                "active_site_instance_key": "descriptor:site:feco",
+                "source_text": "Charge transfer from catalyst to Li2S is 0.42 e.",
+                "charge_transfer_e": 0.42,
+                "charge_transfer_direction": "catalyst_to_adsorbate",
+                "state_context": "after_Li2S_adsorption",
             },
             with_setting=False,
         )
@@ -882,7 +1082,13 @@ def test_project_library_v4_descriptors_and_structure_fields_are_postprocessed(s
     assert barrier_record["adsorption_site"] == "bridge"
     assert barrier_record["adsorption_mode"] == "bidentate"
     assert barrier_record["structure_blockers"] == []
+    assert barrier_record["bader_charge_M1"] is None
     assert barrier_record["ml_ready"] is True
+    barrier_sample = barrier_response.json()["sample_records"][0]
+    assert barrier_sample["wide_properties"]["bader_charge_M1_e"] == 0.21
+    assert barrier_sample["wide_properties"]["bader_charge_M2_e"] == 0.18
+    assert barrier_sample["wide_properties"]["charge_transfer_e"] == 0.42
+    assert barrier_sample["property_group_counts"]["electronic_properties"] == 2
 
     v3_response = client.get(
         "/api/dft/ml-dataset-v3",
@@ -890,3 +1096,353 @@ def test_project_library_v4_descriptors_and_structure_fields_are_postprocessed(s
     )
     assert v3_response.status_code == 200, v3_response.text
     assert v3_response.json()["manifest"]["schema_version"] == "dft_results_ml_v3"
+
+
+def test_project_library_v4_normalizes_units_and_blocks_negative_barriers(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    active_site_key = "unit-normalization:site-1"
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S unit normalization", library_name="锂硫双原子")
+        adsorption = _seed_dft(
+            session,
+            paper=paper,
+            value=-1100.0,
+            unit="meV",
+            evidence_text="Li2S4 adsorption energy is -1100 meV.",
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Li2S4 adsorption energy is -1100 meV.",
+            },
+        )
+        catalyst = session.get(CatalystSample, adsorption.catalyst_sample_id)
+        _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            property_type="charge_transfer",
+            reaction_step="Charge transfer",
+            value=0.2,
+            unit="e",
+            evidence_text="Charge transfer is 0.2 e.",
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Charge transfer is 0.2 e.",
+            },
+            with_setting=False,
+        )
+        negative_barrier = _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            property_type="li2s_decomposition_barrier",
+            adsorbate="Li2S",
+            reaction_step="Li2S decomposition",
+            value=-0.18,
+            evidence_text="The reported signed value is -0.18 eV.",
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "energy_kind": "activation_barrier",
+                "source_text": "The reported signed value is -0.18 eV.",
+            },
+            with_setting=False,
+        )
+        session.commit()
+        adsorption_id = str(adsorption.id)
+        barrier_id = str(negative_barrier.id)
+
+    client = TestClient(app)
+    adsorption_payload = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "adsorption_energy", "ready_only": "false"},
+    ).json()
+    adsorption_record = next(
+        record for record in adsorption_payload["records"] if record["record_id"] == adsorption_id
+    )
+    assert adsorption_record["raw_value"] == -1100.0
+    assert adsorption_record["raw_unit"] == "meV"
+    assert adsorption_record["label_value"] == -1.1
+    assert adsorption_record["label_unit"] == "eV"
+    assert adsorption_record["ml_ready"] is True
+
+    barrier_payload = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "li2s_barrier", "ready_only": "false"},
+    ).json()
+    barrier_record = next(
+        record for record in barrier_payload["records"] if record["record_id"] == barrier_id
+    )
+    assert barrier_record["ml_ready"] is False
+    assert "negative_activation_barrier" in barrier_record["blockers"]
+
+
+def test_project_library_v4_blocks_invalid_non_energy_units_and_material_conflicts(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S invalid descriptors", library_name="锂硫双原子")
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-N-C",
+            catalyst_type="single_atom",
+            metal_centers=["Fe"],
+            coordination="Fe-N4",
+        )
+        session.add(catalyst)
+        session.flush()
+        invalid_charge = _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            property_type="charge_transfer",
+            adsorbate="Li2S",
+            reaction_step="Charge transfer",
+            value=0.2,
+            unit="kg",
+            evidence_text="Charge transfer is incorrectly normalized as 0.2 kg.",
+            evidence_payload={
+                "active_site_instance_key": "invalid-descriptor:site",
+                "source_text": "Charge transfer is incorrectly normalized as 0.2 kg.",
+            },
+            with_setting=False,
+        )
+        material_conflict = _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            property_type="adsorption_energy",
+            adsorbate="Li2S",
+            reaction_step="Li2S adsorption",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Li2S adsorption of -1.2 eV belongs to Fe-N-C.",
+            evidence_payload={
+                "active_site_instance_key": "material-conflict:site",
+                "material_identity": "Co-N-C",
+                "source_text": "Li2S adsorption of -1.2 eV belongs to Fe-N-C.",
+            },
+            with_setting=False,
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        invalid_charge_id = str(invalid_charge.id)
+        material_conflict_id = str(material_conflict.id)
+
+    payload = TestClient(app).get(
+        "/api/dft/project-library-bundles",
+        params={"paper_id": paper_id},
+    ).json()
+    properties = [
+        prop
+        for bundle in payload["bundles"]
+        for instance in bundle["active_site_instances"]
+        for group in instance["properties"].values()
+        for prop in group
+    ]
+    invalid_charge_prop = next(prop for prop in properties if prop["record_id"] == invalid_charge_id)
+    assert invalid_charge_prop["ml_ready"] is False
+    assert "invalid_or_unsupported_charge_unit" in invalid_charge_prop["blockers"]
+    assert "invalid_or_unsupported_unit" in invalid_charge_prop["blockers"]
+
+    material_conflict_prop = next(prop for prop in properties if prop["record_id"] == material_conflict_id)
+    assert material_conflict_prop["ml_ready"] is False
+    assert "material_identity_conflict" in material_conflict_prop["blockers"]
+
+
+def test_project_library_v4_blocks_sample_when_safe_complementary_values_conflict(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    active_site_key = "wide-conflict:site"
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S wide conflict", library_name="锂硫双原子")
+        adsorption = _seed_dft(
+            session,
+            paper=paper,
+            adsorbate="Li2S",
+            reaction_step="Li2S adsorption",
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Li2S adsorption is -1.20 eV.",
+            },
+        )
+        catalyst = session.get(CatalystSample, adsorption.catalyst_sample_id)
+        _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            property_type="charge_transfer",
+            adsorbate="Li2S",
+            reaction_step="Charge transfer",
+            value=0.20,
+            unit="e",
+            evidence_text="Charge transfer is 0.20 e.",
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Charge transfer is 0.20 e.",
+                "charge_transfer_e": 0.20,
+            },
+            with_setting=False,
+        )
+        _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            property_type="charge_transfer",
+            adsorbate="Li2S",
+            reaction_step="Charge transfer",
+            value=0.30,
+            unit="e",
+            evidence_text="Charge transfer is 0.30 e.",
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Charge transfer is 0.30 e.",
+                "charge_transfer_e": 0.30,
+            },
+            with_setting=False,
+        )
+        session.commit()
+        adsorption_id = str(adsorption.id)
+
+    payload = TestClient(app).get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "adsorption_energy", "ready_only": "false"},
+    ).json()
+    record = next(item for item in payload["records"] if item["record_id"] == adsorption_id)
+    assert record["ml_ready"] is False
+    assert "conflicting_complementary_property_values" in record["blockers"]
+    sample = next(item for item in payload["sample_records"] if item["sample_id"] == active_site_key)
+    assert sample["ml_ready"] is False
+    assert sorted(sample["wide_properties"]["charge_transfer_e"]) == [0.2, 0.3]
+    assert "conflicting_complementary_property_values" in sample["blockers"]
+
+
+def test_project_library_v4_deduplicates_equal_facts_and_blocks_conflicts(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    active_site_key = "dedupe:site-1"
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S duplicate facts", library_name="锂硫双原子")
+        first = _seed_dft(
+            session,
+            paper=paper,
+            value=-1.20,
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Li2S4 adsorption energy is -1.20 eV.",
+            },
+        )
+        catalyst = session.get(CatalystSample, first.catalyst_sample_id)
+        duplicate = _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            value=-1.20,
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Table S1 repeats Li2S4 adsorption energy -1.20 eV.",
+            },
+            with_setting=False,
+        )
+        conflicting = _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            value=-1.35,
+            evidence_payload={
+                "active_site_instance_key": active_site_key,
+                "source_text": "Another source reports Li2S4 adsorption energy -1.35 eV.",
+            },
+            with_setting=False,
+        )
+        session.commit()
+        target_ids = {str(first.id), str(duplicate.id), str(conflicting.id)}
+        equal_value_ids = {str(first.id), str(duplicate.id)}
+
+    payload = TestClient(app).get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "adsorption_energy", "ready_only": "false"},
+    ).json()
+    records = [record for record in payload["records"] if record["record_id"] in target_ids]
+    assert len(records) == 2
+    repeated = next(record for record in records if record["label_value"] == -1.20)
+    assert {repeated["record_id"], *repeated["duplicate_record_ids"]} == equal_value_ids
+    assert all("conflicting_property_values" in record["blockers"] for record in records)
+    assert all(record["ml_ready"] is False for record in records)
+
+
+def test_project_library_v4_rejects_cross_paper_catalyst_binding(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper_a = _seed_paper(session, title="Li-S catalyst owner", library_name="锂硫双原子")
+        paper_b = _seed_paper(session, title="Li-S mismatched row", library_name="锂硫双原子")
+        catalyst = CatalystSample(
+            paper_id=paper_a.id,
+            name="Fe-N-C",
+            catalyst_type="single_atom",
+            metal_centers=["Fe"],
+        )
+        session.add(catalyst)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper_b.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S",
+            value=-1.2,
+            unit="eV",
+            reaction_type="SRR_LiS",
+            evidence_text="Li2S adsorption energy is -1.2 eV.",
+        )
+        session.add(row)
+        session.commit()
+        row_id = str(row.id)
+
+    payload = TestClient(app).get("/api/dft/project-library-bundles").json()
+    mismatch = next(item for item in payload["ambiguous_records"] if item["record_id"] == row_id)
+    assert mismatch["reason"] == "catalyst_sample_paper_mismatch"
+
+
+def test_project_library_v4_blocks_explicit_site_key_reused_across_settings(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S conflicting explicit key", library_name="锂硫双原子")
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-N-C",
+            catalyst_type="single_atom",
+            metal_centers=["Fe"],
+        )
+        first_setting = DFTSetting(paper_id=paper.id, software="VASP", functional="PBE")
+        second_setting = DFTSetting(paper_id=paper.id, software="VASP", functional="HSE06")
+        session.add_all([catalyst, first_setting, second_setting])
+        session.flush()
+        first = _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            evidence_payload={
+                "active_site_instance_key": "shared-site-key",
+                "dft_setting_id": str(first_setting.id),
+                "source_text": "PBE Li2S4 adsorption is -1.20 eV.",
+            },
+            with_setting=False,
+        )
+        second = _seed_dft(
+            session,
+            paper=paper,
+            catalyst=catalyst,
+            value=-1.30,
+            evidence_payload={
+                "active_site_instance_key": "shared-site-key",
+                "dft_setting_id": str(second_setting.id),
+                "source_text": "HSE06 Li2S4 adsorption is -1.30 eV.",
+            },
+            with_setting=False,
+        )
+        session.commit()
+        target_ids = {str(first.id), str(second.id)}
+
+    payload = TestClient(app).get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "adsorption_energy", "ready_only": "false"},
+    ).json()
+    records = [record for record in payload["records"] if record["record_id"] in target_ids]
+    assert len(records) == 2
+    assert all("conflicting_active_site_instance_key" in record["blockers"] for record in records)
+    assert payload["manifest"]["ml_ready_count"] == 0

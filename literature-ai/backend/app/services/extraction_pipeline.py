@@ -223,7 +223,11 @@ class ExtractionPipelineService:
         )
 
         settings_count = self._persist_dft_settings(paper.id, dft_settings, document)
-        catalyst_count = self._persist_catalyst_samples(paper.id, catalyst_data)
+        catalyst_count = self._persist_catalyst_samples(
+            paper.id,
+            catalyst_data,
+            dft_items=dft_results,
+        )
         dft_processing_report = self._persist_dft_results_with_report(
             paper.id,
             dft_results,
@@ -569,7 +573,113 @@ class ExtractionPipelineService:
                 )
         return 1
 
-    def _persist_catalyst_samples(self, paper_id: UUID, payload: dict[str, list[dict[str, Any]]]) -> int:
+    def _persist_catalyst_samples(
+        self,
+        paper_id: UUID,
+        payload: dict[str, list[dict[str, Any]]],
+        *,
+        dft_items: list[dict[str, Any]] | None = None,
+    ) -> int:
+        explicit_items: dict[str, list[dict[str, Any]]] = {}
+        explicit_names: dict[str, str] = {}
+        for item in dft_items or []:
+            raw_name = str(item.get("catalyst_name") or item.get("material_identity") or "").strip()
+            if not raw_name:
+                continue
+            normalized_name = str(
+                self.chemistry_normalizer.normalize({"name": raw_name}).get("name") or raw_name
+            ).strip()
+            key = re.sub(r"[^a-z0-9]+", "", normalized_name.lower())
+            if not key:
+                continue
+            explicit_names.setdefault(key, normalized_name)
+            explicit_items.setdefault(key, []).append(item)
+
+        if explicit_names:
+            support_values = self._payload_values(payload, "support") if payload else []
+            shared_support = support_values[0] if len(support_values) == 1 else None
+            single_explicit_catalyst = len(explicit_names) == 1
+            payload_catalyst_type = None
+            payload_metals: list[str] = []
+            payload_coordination = None
+            payload_support = None
+            payload_synthesis_method = None
+            payload_structural_evidence: list[str] = []
+            if single_explicit_catalyst and payload:
+                payload_catalyst_type = self._normalize_catalyst_type(
+                    self._first_payload_value(payload, "single atom / dual atom")
+                )
+                payload_metals = self._payload_values(payload, "metal centers")
+                payload_coordination = self._first_payload_value(payload, "coordination")
+                payload_support = self._first_payload_value(payload, "support")
+                payload_synthesis_method = self._first_payload_value(payload, "synthesis method")
+                payload_structural_evidence = self._payload_values(
+                    payload,
+                    "structural evidence: HAADF-STEM / XANES / EXAFS / XPS",
+                )
+            count = 0
+            for key, name in explicit_names.items():
+                identity_segment = re.split(r"[/@]", name, maxsplit=1)[0]
+                identity_segment = re.split(
+                    r"\b(?:on|supported|anchored|loaded|deposited)\b",
+                    identity_segment,
+                    maxsplit=1,
+                    flags=re.IGNORECASE,
+                )[0]
+                if re.search(r"[-_\s]?N\d", identity_segment, flags=re.IGNORECASE):
+                    identity_segment = re.sub(
+                        r"[-_\s]?(?:CeO2|TiO2|ZrO2|Al2O3|SiO2|MgO|ZnO|C3N4).*$",
+                        "",
+                        identity_segment,
+                        flags=re.IGNORECASE,
+                    )
+                metals = re.findall(
+                    r"(Fe|Co|Ni|Cu|Pt|Ru|Ir|Zn|Mn|Pd|Mo|W|V|Au|Ag|Ti|Zr|Cr|Ce|Sc|Tc|Cd)",
+                    identity_segment,
+                )
+                catalyst_type = (
+                    "dual_atom"
+                    if len(metals) == 2
+                    else ("single_atom" if len(metals) == 1 else None)
+                )
+                evidence_items = explicit_items[key]
+                record = CatalystSample(
+                    paper_id=paper_id,
+                    name=name,
+                    catalyst_type=payload_catalyst_type or catalyst_type,
+                    metal_centers=payload_metals or metals,
+                    coordination=payload_coordination,
+                    support=payload_support or shared_support,
+                    synthesis_method=payload_synthesis_method,
+                    evidence_strength=(
+                        ", ".join(payload_structural_evidence)
+                        if payload_structural_evidence
+                        else self._join_evidence(evidence_items)
+                    ),
+                )
+                self.session.add(record)
+                self.session.flush()
+                if single_explicit_catalyst and payload:
+                    for field_name, entries in payload.items():
+                        for entry in entries or []:
+                            self._persist_evidence_span(
+                                paper_id=paper_id,
+                                object_type="catalyst_sample",
+                                object_id=str(record.id),
+                                item=entry,
+                                fallback_section=field_name,
+                            )
+                for item in evidence_items:
+                    self._persist_evidence_span(
+                        paper_id=paper_id,
+                        object_type="catalyst_sample",
+                        object_id=str(record.id),
+                        item=item,
+                        fallback_section="DFT catalyst identity",
+                    )
+                count += 1
+            return count
+
         if not payload:
             return 0
 
@@ -630,6 +740,14 @@ class ExtractionPipelineService:
         }
         merged_items = self._merge_duplicate_dft_items(items)
         existing_by_key = self._existing_dft_results_by_key(paper_id)
+        catalyst_rows = self.session.scalars(
+            select(CatalystSample).where(CatalystSample.paper_id == paper_id)
+        ).all()
+        catalyst_by_name = {
+            re.sub(r"[^a-z0-9]+", "", str(row.name or "").strip().lower()): row
+            for row in catalyst_rows
+            if row.name
+        }
         for item in merged_items:
             key = self._normalized_dft_candidate_key(item)
             record: DFTResult | None = None
@@ -646,6 +764,25 @@ class ExtractionPipelineService:
                         target_reaction=target_profile.key,
                     )
                     evidence_payload = PaperWorkbenchService.dft_evidence_payload(item)
+                    catalyst_name = str(
+                        item.get("catalyst_name") or item.get("material_identity") or ""
+                    ).strip()
+                    catalyst = (
+                        catalyst_by_name.get(
+                            re.sub(r"[^a-z0-9]+", "", catalyst_name.lower())
+                        )
+                        if catalyst_name
+                        else None
+                    )
+                    evidence_payload.update(
+                        {
+                            "catalyst_name": catalyst_name or None,
+                            "material_identity": catalyst_name or None,
+                            "active_site_context": item.get("active_site_context"),
+                            "structure_context": item.get("structure_context"),
+                            "material_binding_status": "bound" if catalyst is not None else "unbound",
+                        }
+                    )
                     if item.get("evidence_sources"):
                         evidence_payload["evidence_sources"] = item.get("evidence_sources")
                         evidence_payload["duplicate_merge"] = {
@@ -655,6 +792,8 @@ class ExtractionPipelineService:
                         }
                     existing = existing_by_key.get(key)
                     if existing is not None:
+                        if existing.catalyst_sample_id is None and catalyst is not None:
+                            existing.catalyst_sample_id = catalyst.id
                         self._fill_missing_dft_reaction_fields(existing, reaction_fields)
                         self._merge_existing_dft_result(
                             existing,
@@ -667,6 +806,7 @@ class ExtractionPipelineService:
                     else:
                         record = DFTResult(
                             paper_id=paper_id,
+                            catalyst_sample_id=catalyst.id if catalyst is not None else None,
                             adsorbate=norm_item.get("adsorbate") or item.get("adsorbate"),
                             property_type=norm_item.get("property_type") or item.get("category"),
                             value=item.get("value"),
@@ -840,10 +980,28 @@ class ExtractionPipelineService:
 
     def _existing_dft_results_by_key(self, paper_id: UUID) -> dict[str, DFTResult]:
         rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        catalyst_ids = {row.catalyst_sample_id for row in rows if row.catalyst_sample_id}
+        catalyst_names = (
+            {
+                catalyst.id: catalyst.name
+                for catalyst in self.session.scalars(
+                    select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))
+                ).all()
+            }
+            if catalyst_ids
+            else {}
+        )
         existing: dict[str, DFTResult] = {}
         for row in rows:
+            evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
             key = self._normalized_dft_candidate_key(
                 {
+                    "catalyst_name": catalyst_names.get(row.catalyst_sample_id)
+                    or evidence_payload.get("catalyst_name")
+                    or evidence_payload.get("material_identity"),
+                    "active_site_context": evidence_payload.get("active_site_context"),
+                    "structure_context": evidence_payload.get("structure_context"),
+                    "dft_setting_id": evidence_payload.get("dft_setting_id"),
                     "adsorbate": row.adsorbate,
                     "category": row.property_type,
                     "value": row.value,
@@ -962,6 +1120,10 @@ class ExtractionPipelineService:
 
         return "|".join(
             [
+                clean(item.get("catalyst_name") or item.get("material_identity")),
+                clean(item.get("active_site_context")),
+                clean(item.get("structure_context")),
+                clean(item.get("dft_setting_id")),
                 clean(norm.get("adsorbate") or item.get("adsorbate")),
                 clean(norm.get("property_type") or item.get("category")),
                 value_key,

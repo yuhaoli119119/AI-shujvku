@@ -16,6 +16,32 @@ The application does not treat any AI output as final truth by default.
 - Bulk exports are disabled by default with `LITAI_EXPORTS_ENABLED=false`; export and share-link creation use independent MCP capabilities.
 - If the current IDE session does not expose MCP tools, the repository-native backend path in `backend/` may be used as the fallback execution route via `app.mcp.context.mcp_auth_context` and `app.mcp.server`.
 
+## Stable Scope as of 2026-06-27
+
+- The DFT extraction and review path is usable, but it is intentionally guarded: extracted DFT values are candidates until evidence, review state, material binding, and export safety checks agree.
+- Literature Library groups DFT candidate cards by catalyst sample / active-site identity. Existing per-row review actions still operate inside those groups.
+- Catalyst sample identity from DFT rows and catalyst basic information from the catalyst extractor now converge on the same `CatalystSample` record when a single explicit DFT catalyst is present.
+- Project-library v4 export remains conservative. Single-fact or conflicting sample records may be blocked even if individual DFT rows look valid.
+- `potential_determining_step` table labels are context, not numeric DFT results, and should not create `DFTResult` candidates with empty values.
+- Local generated artifacts under `outputs/tmp/`, `outputs/exports/`, `test-results/`, `.pytest_cache/`, and ad-hoc scratch scripts are not source code and should not be uploaded.
+
+## Backend Maintenance Status as of 2026-06-28
+
+- MCP `import_analysis` and HTTP `/api/external-analysis/import` share the `ExternalAnalysisService.apply_review_rules_for_run(...)` apply path. Tests should assert that shared service boundary, not direct MCP-layer calls into `VerificationSessionService.apply_import_rules_for_paper(...)`.
+- Large backend service splitting is in progress. Completed splits include `render-detail.js`, `verification_session_service.py`, `external_analysis_service.py`, `dft_review_service.py`, `page.js` / `jobs.js`, `paper_query.py`, `review_conflict_service.py`, and `paper_workbench_service.py`.
+- `review_conflict_service.py` now delegates DFT-specific comparison helpers to `app/services/review_conflict_dft.py`.
+- `paper_workbench_service.py` now delegates review-center status, sorting, supplementary-group, and lightweight DFT audit helpers to `app/services/paper_workbench_review_center.py`, workspace/source-document/audit/figure file helpers to `app/services/paper_workbench_workspace.py`, and AI reading package/content coverage/DFT evidence payload helpers to `app/services/paper_workbench_ai_package.py`.
+- Remaining backend risk is concentrated in still-large orchestration services and integration paths. Future splits should keep public service method names stable and use focused pytest coverage before broad refactors.
+- Latest targeted verification for this refactor line passed:
+  - `python -m pytest tests/test_mcp_new_tools.py -q`
+  - `python -m pytest tests/test_mcp_server.py -q -k "import_analysis or apply_analysis_review_rules"`
+  - `python -m pytest tests/test_external_analysis.py -q -k "import_analysis or apply_review_rules"`
+  - `python -m pytest tests/test_review_adjudication_service.py -q`
+  - `python -m pytest tests/test_dft_conflict_settlement.py -q`
+  - `python -m pytest tests/test_codex_workbench_v1.py -q`
+  - `python -m pytest tests/test_papers_api.py -q -k "manual_review_progress or review_center or supplementary"`
+  - `python -m pytest tests/test_storage_root_resolution.py -q`
+
 ## Main Components
 
 - `backend/`: FastAPI backend, parsing pipeline, extraction services, MCP server.
@@ -31,7 +57,6 @@ The application does not treat any AI output as final truth by default.
 - AI collaboration rules: [AGENTS.md](./AGENTS.md)
 - Chinese usage guide: [使用说明.md](./%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E.md)
 - Documentation index: [docs/README.md](./docs/README.md)
-- Current baseline: [docs/current_baseline.md](./docs/current_baseline.md)
 - MCP API: [docs/mcp/MCP_API.md](./docs/mcp/MCP_API.md)
 
 ## Quick Start
@@ -58,6 +83,20 @@ If MCP tools are unavailable in the current IDE session, use the backend-native 
 
 ## Documentation Rules
 
-- `docs/current_baseline.md`, `docs/mcp/`, this README, `AGENTS.md`, and `使用说明.md` describe the current architecture.
+- `docs/README.md`, `docs/mcp/`, this README, `AGENTS.md`, and `使用说明.md` describe the current architecture.
 - `docs/plans/` and `docs/audits/` contain mixed historical and current planning records. If they conflict with the current baseline, follow the baseline.
 - Files and code that still use names such as `GeminiAuditService`, `gemini_audit_protocol`, or `Codex context` may be compatibility names. They do not imply fixed model ownership.
+
+## Verification Gate for DFT / Project-Library Changes
+
+Use targeted tests before uploading changes:
+
+```powershell
+cd literature-ai/backend
+python -m pytest -q tests/test_dft_results_extractor.py tests/test_extraction_pipeline.py::test_stage2_preserves_distinct_catalyst_identity_for_equal_dft_values tests/test_extraction_pipeline.py::test_stage2_merges_dft_catalyst_identity_with_extractor_basic_info tests/test_catalyst_basic_info_api.py
+python -m compileall -q app tests
+
+cd ../frontend
+npx playwright test tests/smoke.spec.js -g "DFT|dft|project library|literature library DFT"
+npx playwright test tests/dft_ml_dataset.spec.js
+```

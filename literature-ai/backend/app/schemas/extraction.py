@@ -98,6 +98,37 @@ class DFTResultSchema(BaseModel):
     reaction_step: EvidenceField = Field(default_factory=EvidenceField)
 
 
+class ProjectLibraryV4ExtractionSchema(BaseModel):
+    catalyst_samples: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="CatalystSample identity records. Preserve paper-local catalyst identity, raw/normalized support, SAC/DAC scope, and M1/M2 source order.",
+    )
+    active_site_instances: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="ActiveSiteInstance records keyed by catalyst_sample_id plus active_site_context, structure_context, and dft_setting_id/ref.",
+    )
+    adsorbate_properties: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Adsorption properties bound to catalyst_sample_id and active_site_ref/key with adsorbate, value, unit, source_text, and source_location.",
+    )
+    reaction_step_properties: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Li2S reaction, barrier, migration, and RDS properties with reaction_type, reaction_step, reaction_species, energy_kind, value, and provenance.",
+    )
+    electronic_properties: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Bader charge, charge transfer, d-band, work function, and related electronic properties; do not swap M1/M2 by canonical metal-pair sorting.",
+    )
+    structure_properties: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Structure fields such as metal_metal_distance_A, coordination_environment, adsorption_site, adsorption_mode, and metal_ligand_distance_A.",
+    )
+    ambiguous_records: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Facts whose catalyst, active-site instance, property type, unit, value, or evidence binding is not safe enough for ML-ready export.",
+    )
+
+
 class MechanismClaimSchema(BaseModel):
     claim_type: EvidenceField = Field(default_factory=EvidenceField)
     claim_text: EvidenceField = Field(default_factory=EvidenceField)
@@ -119,6 +150,7 @@ ExtractionSchemaName = Literal[
     "CatalystSample",
     "DFTSetting",
     "DFTResult",
+    "ProjectLibraryV4Extraction",
     "MechanismClaim",
     "ElectrochemicalPerformance",
 ]
@@ -131,6 +163,7 @@ class ExtractionJobRequest(BaseModel):
             "CatalystSample",
             "DFTSetting",
             "DFTResult",
+            "ProjectLibraryV4Extraction",
             "MechanismClaim",
             "ElectrochemicalPerformance",
         ]

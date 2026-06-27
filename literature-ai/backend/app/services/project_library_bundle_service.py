@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -20,6 +21,8 @@ from app.domain.element_descriptors import (
 )
 from app.domain.project_library_context import get_project_library_context
 from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_property_taxonomy
+from app.normalizers.unit_normalizer import UnitNormalizer
+from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
 
@@ -41,6 +44,8 @@ _VALID_EXPLICIT_ENERGY_KINDS = {
     "thermodynamic_energy",
     "activation_barrier",
     "free_energy_change",
+    "electronic_descriptor",
+    "structural_descriptor",
 }
 _LI2S_TASK_SUBTYPES = {
     "li2s_decomposition_barrier",
@@ -94,6 +99,16 @@ def _payload_value(payload: Any, *keys: str) -> Any:
             value = item.get(key)
             if value not in (None, "", []):
                 return value
+    return None
+
+
+def _top_level_payload_value(payload: Any, *keys: str) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, "", []):
+            return value
     return None
 
 
@@ -158,7 +173,13 @@ def _structure_payload(
         values["coordination_environment"] = catalyst.coordination
         sources["coordination_environment"] = "catalyst_sample.coordination" if catalyst.coordination else None
     assign("metal_ligand_distance_A", "metal_ligand_distance_A", "metal_ligand_distance", "metal_ligand_distance_a")
-    assign("adsorption_site", "adsorption_site", "site_label", "active_site")
+    taxonomy = get_property_taxonomy(row.property_type)
+    adsorption_site_keys = (
+        ("adsorption_site", "active_site")
+        if taxonomy.get("property_family") == "electronic_descriptor"
+        else ("adsorption_site", "site_label", "active_site")
+    )
+    assign("adsorption_site", *adsorption_site_keys)
     assign("adsorption_mode", "adsorption_mode")
 
     blockers: list[str] = []
@@ -177,6 +198,36 @@ def _structure_payload(
     }
 
 
+def _electronic_payload(
+    *,
+    row: DFTResult,
+    active_site_ref: dict[str, Any],
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    sources: dict[str, str | None] = {}
+
+    def assign(field: str, *keys: str) -> None:
+        value, source = _payload_source(row.evidence_payload, *keys)
+        if value in (None, "", []):
+            value, source = _dict_source(active_site_ref, "active_site_ref", *keys)
+        values[field] = value if value not in ("", []) else None
+        sources[field] = source
+
+    assign("bader_charge_M1", "bader_charge_M1", "bader_charge_m1")
+    assign("bader_charge_M2", "bader_charge_M2", "bader_charge_m2")
+    assign("charge_transfer_e", "charge_transfer_e", "charge_transfer")
+    assign("charge_transfer_direction", "charge_transfer_direction")
+    assign("state_context", "state_context")
+    assign("site_label", "site_label", "active_site", "adsorption_site")
+    assign("metal_center_order_source", "metal_center_order_source")
+
+    return {
+        **values,
+        "electronic_field_sources": sources,
+        "electronic_source_version": "project_library_v4_electronic_fields_v1",
+    }
+
+
 def _dict_source(mapping: dict[str, Any], source_prefix: str, *keys: str) -> tuple[Any, str | None]:
     for key in keys:
         value = mapping.get(key)
@@ -187,9 +238,29 @@ def _dict_source(mapping: dict[str, Any], source_prefix: str, *keys: str) -> tup
 
 def _setting_ref(row: DFTResult, settings_by_paper: dict[str, list[DFTSetting]]) -> tuple[dict[str, Any] | None, str, list[str]]:
     explicit = _payload_value(row.evidence_payload, "dft_setting_id", "setting_id")
-    if explicit:
-        return ({"dft_setting_id": str(explicit), "source": "evidence_payload"}, "explicit_payload", [])
     settings = settings_by_paper.get(str(row.paper_id), [])
+    if explicit:
+        matched = next((setting for setting in settings if str(setting.id) == str(explicit)), None)
+        if matched is None:
+            return (
+                {"dft_setting_id": str(explicit), "source": "evidence_payload"},
+                "invalid_explicit_payload",
+                ["invalid_result_setting_link"],
+            )
+        return (
+            {
+                "dft_setting_id": str(matched.id),
+                "software": matched.software,
+                "functional": matched.functional,
+                "dispersion_correction": matched.dispersion_correction,
+                "pseudopotential": matched.pseudopotential,
+                "cutoff_energy_ev": matched.cutoff_energy_ev,
+                "k_points": matched.k_points,
+                "source": "evidence_payload",
+            },
+            "explicit_payload",
+            [],
+        )
     if len(settings) == 1:
         setting = settings[0]
         return (
@@ -222,33 +293,64 @@ def _instance_payload(
     explicit_ref = _payload_value(row.evidence_payload, "active_site_ref")
     source = "evidence_payload"
     blockers: list[str] = []
+    site_context = _payload_value(
+        row.evidence_payload,
+        "active_site_context",
+        "active_site",
+        "site_label",
+    )
+    structure_context = _payload_value(
+        row.evidence_payload,
+        "structure_context",
+        "structure_name",
+        "configuration",
+        "model_name",
+    )
     if explicit_key:
         key = _clean_text(explicit_key)
     else:
-        site_context = _payload_value(
-            row.evidence_payload,
-            "active_site_context",
-            "active_site",
-            "site_label",
-            "structure_name",
-        )
         setting_component = (
             f"dft_setting:{setting_ref['dft_setting_id']}"
             if setting_ref and setting_ref.get("dft_setting_id")
             else f"setting_status:{setting_status}"
         )
-        site_component = _token(site_context) or "default_site"
-        key = f"paper:{row.paper_id}|catalyst:{catalyst.id}|{setting_component}|site:{site_component}"
+        site_component = _token(site_context) or "unknown_site"
+        structure_component = _token(structure_context) or "unknown_structure"
+        key = (
+            f"paper:{row.paper_id}|catalyst:{catalyst.id}|{setting_component}"
+            f"|structure:{structure_component}|site:{site_component}"
+        )
         source = "generated_read_only_bundle_key"
     if setting_status == "ambiguous":
         blockers.append("ambiguous_result_setting_link")
     ref = explicit_ref if isinstance(explicit_ref, dict) else {}
+    if ref.get("paper_id") and str(ref.get("paper_id")) != str(row.paper_id):
+        blockers.append("active_site_ref_paper_mismatch")
+    if ref.get("catalyst_sample_id") and str(ref.get("catalyst_sample_id")) != str(catalyst.id):
+        blockers.append("active_site_ref_catalyst_mismatch")
+    ref_setting = ref.get("dft_setting_ref") if isinstance(ref.get("dft_setting_ref"), dict) else {}
+    ref_setting_id = ref_setting.get("dft_setting_id") or ref.get("dft_setting_id")
+    actual_setting_id = setting_ref.get("dft_setting_id") if setting_ref else None
+    if ref_setting_id and str(ref_setting_id) != str(actual_setting_id or ""):
+        blockers.append("active_site_ref_setting_mismatch")
     ref = {
         **ref,
         "paper_id": str(row.paper_id),
         "catalyst_sample_id": str(catalyst.id),
         "active_site_instance_key": key,
         "dft_setting_ref": setting_ref,
+        "active_site_context": site_context,
+        "structure_context": structure_context,
+        "binding_granularity": (
+            "active_site_instance"
+            if site_context or structure_context or explicit_key
+            else "catalyst_setting"
+        ),
+        "binding_warnings": (
+            []
+            if site_context or structure_context or explicit_key
+            else ["missing_explicit_active_site_or_structure_context"]
+        ),
         "binding_source": source,
     }
     return key, ref, source, blockers
@@ -286,9 +388,33 @@ def _explicit_energy_kind(row: DFTResult) -> str | None:
     return None
 
 
+def _normalize_non_energy_unit(value: Any, unit: Any, physical_dimension: str) -> tuple[Any, Any, bool, list[str]]:
+    if physical_dimension == "charge":
+        canonical = _token(unit)
+        if value is None or canonical not in {"e", "electron", "electrons"}:
+            return value, unit, False, ["invalid_or_unsupported_charge_unit"]
+        return value, "e", True, []
+    if physical_dimension == "length":
+        normalized = UnitNormalizer().normalize_length(value, unit)
+        blockers = list(normalized.blockers)
+        if not normalized.is_valid or normalized.normalized_unit != "A":
+            blockers.append("invalid_or_unsupported_length_unit")
+        return normalized.normalized_value, normalized.normalized_unit, not blockers, sorted(set(blockers))
+    return value, unit, True, []
+
+
+def _material_identity_conflicts(payload_identity: Any, catalyst_name: Any) -> bool:
+    payload_token = _token(payload_identity)
+    catalyst_token = _token(catalyst_name)
+    if not payload_token or not catalyst_token:
+        return False
+    return payload_token not in catalyst_token and catalyst_token not in payload_token
+
+
 def _property_bundle(
     *,
     row: DFTResult,
+    catalyst: CatalystSample,
     active_site_instance_key: str,
     active_site_ref: dict[str, Any],
     pages_by_record: dict[str, list[int]],
@@ -296,22 +422,53 @@ def _property_bundle(
 ) -> dict[str, Any]:
     taxonomy = get_property_taxonomy(row.property_type)
     canonical_adsorbate = canonicalize_adsorbate(row.adsorbate) or row.adsorbate
+    explicit_energy_kind_raw = _clean_text(_payload_value(row.evidence_payload, "energy_kind"))
     energy_kind = _explicit_energy_kind(row) or energy_kind_for_property(row.property_type)
+    canonical_property_type = taxonomy["canonical_property_type"]
+    property_subtype = taxonomy["property_subtype"]
+    is_energy_property = taxonomy["physical_dimension"] == "energy"
+    normalized_energy = UnitNormalizer().normalize_energy(row.value, row.unit) if is_energy_property else None
+    non_energy_value, non_energy_unit, non_energy_valid, non_energy_blockers = _normalize_non_energy_unit(
+        row.value,
+        row.unit,
+        taxonomy["physical_dimension"],
+    )
     source_text = _payload_value(row.evidence_payload, "source_text", "quoted_text", "evidence_text") or row.evidence_text
+    payload_material_identity = _top_level_payload_value(
+        row.evidence_payload,
+        "material_identity",
+        "catalyst_name",
+        "material",
+        "normalized_material",
+    )
     return {
         "record_id": str(row.id),
         "active_site_instance_key": active_site_instance_key,
         "active_site_ref": active_site_ref,
+        "catalyst_sample_name": catalyst.name,
+        "payload_material_identity": payload_material_identity,
+        "material_identity_conflict": _material_identity_conflicts(payload_material_identity, catalyst.name),
         "property_type": row.property_type,
-        "canonical_property_type": taxonomy["canonical_property_type"],
-        "property_subtype": taxonomy["property_subtype"],
+        "canonical_property_type": canonical_property_type,
+        "property_subtype": property_subtype,
         "energy_kind": energy_kind,
+        "invalid_explicit_energy_kind": bool(
+            explicit_energy_kind_raw
+            and explicit_energy_kind_raw not in _VALID_EXPLICIT_ENERGY_KINDS
+        ),
         "adsorbate": row.adsorbate,
         "canonical_adsorbate": canonical_adsorbate,
         "reaction_step": row.reaction_step,
         "reaction_type": row.reaction_type,
+        "reaction_validation_status": row.reaction_validation_status,
         "value": row.value,
         "unit": row.unit,
+        "is_energy_property": is_energy_property,
+        "physical_dimension": taxonomy["physical_dimension"],
+        "normalized_value": normalized_energy.normalized_value if normalized_energy else non_energy_value,
+        "normalized_unit": normalized_energy.normalized_unit if normalized_energy else non_energy_unit,
+        "unit_normalization_blockers": list(normalized_energy.blockers) if normalized_energy else non_energy_blockers,
+        "unit_normalization_valid": normalized_energy.is_valid if normalized_energy else non_energy_valid,
         "source_text": source_text,
         "source_location": _source_location(row, pages_by_record),
         "confidence_level": row.confidence,
@@ -375,23 +532,76 @@ def _manual_verification_required(row: DFTResult) -> bool:
     return decision_status in {"ambiguous", "needs_user_decision", "manual_verification_required"}
 
 
+def _generated_instance_key_lacks_binding_evidence(prop: dict[str, Any], *, instance_source: str) -> bool:
+    if instance_source == "evidence_payload":
+        return False
+    active_site_ref = prop.get("active_site_ref") if isinstance(prop.get("active_site_ref"), dict) else {}
+    setting_ref = active_site_ref.get("dft_setting_ref") if isinstance(active_site_ref.get("dft_setting_ref"), dict) else {}
+    return not (
+        active_site_ref.get("paper_id")
+        and active_site_ref.get("catalyst_sample_id")
+        and setting_ref.get("dft_setting_id")
+    )
+
+
 def _record_blockers(prop: dict[str, Any], *, instance_source: str, instance_blockers: list[str]) -> list[str]:
     blockers = list(instance_blockers)
     if not prop["safety_gate_passed"]:
         blockers.append("safety_gate_failed")
-    if not prop["source_text"]:
-        blockers.append("missing_source_text")
     if prop["manual_verification_required"]:
         blockers.append("needs_user_decision")
+    value = prop.get("normalized_value")
+    if value is None or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        blockers.append("missing_or_invalid_numeric_value")
+    if (
+        prop.get("energy_kind") == "activation_barrier"
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        and float(value) < 0
+    ):
+        blockers.append("negative_activation_barrier")
+    if prop.get("is_energy_property") and (
+        prop.get("normalized_unit") != "eV" or not prop.get("unit_normalization_valid")
+    ):
+        blockers.append("invalid_or_unsupported_energy_unit")
+    if not prop.get("is_energy_property") and not prop.get("unit_normalization_valid"):
+        blockers.append("invalid_or_unsupported_unit")
+    if prop.get("material_identity_conflict"):
+        blockers.append("material_identity_conflict")
+    blockers.extend(prop.get("unit_normalization_blockers") or [])
+    reaction_status = _token(prop.get("reaction_validation_status"))
+    if reaction_status in {"ambiguous", "out_of_scope", "unsupported", "error"}:
+        blockers.append(f"reaction_validation_{reaction_status}")
     if prop["energy_kind"] == "unknown" and prop["canonical_property_type"] in {
         "reaction_barrier",
         "gibbs_free_energy_change",
         "reaction_energy",
     }:
         blockers.append("unknown_energy_kind")
+    if prop.get("is_energy_property") and prop.get("invalid_explicit_energy_kind"):
+        blockers.append("invalid_energy_kind")
+    canonical = prop.get("canonical_property_type")
+    family = get_property_taxonomy(prop.get("property_type")).get("property_family")
+    expected_energy_kind = (
+        "activation_barrier"
+        if canonical == "reaction_barrier"
+        else "free_energy_change"
+        if canonical == "gibbs_free_energy_change"
+        else "electronic_descriptor"
+        if family in {"electronic_descriptor", "optical_descriptor"}
+        else "thermodynamic_energy"
+    )
+    if prop.get("is_energy_property") and prop.get("energy_kind") != expected_energy_kind:
+        blockers.append("energy_kind_property_mismatch")
+    if (
+        prop.get("catalyst_scope") == "DAC"
+        and (prop.get("bader_charge_M1") is not None or prop.get("bader_charge_M2") is not None)
+        and _token(prop.get("metal_center_order_source")) in {"", "unknown"}
+    ):
+        blockers.append("unknown_metal_center_order")
     if prop["canonical_property_type"] == "adsorption_energy" and not prop["canonical_adsorbate"]:
         blockers.append("missing_adsorbate")
-    if instance_source != "evidence_payload":
+    if _generated_instance_key_lacks_binding_evidence(prop, instance_source=instance_source):
         blockers.append("generated_active_site_instance_key")
     return sorted(set(blockers))
 
@@ -508,8 +718,8 @@ def _export_record_for_task(
         "title": bundle["paper_title"],
         "task": contract["task"],
         "label_name": contract["label_name"],
-        "label_value": prop["value"],
-        "label_unit": prop["unit"],
+        "label_value": prop["normalized_value"],
+        "label_unit": prop["normalized_unit"],
         "label_energy_kind": prop["energy_kind"],
         "label_property_subtype": prop["property_subtype"],
         "feature_scope": contract["feature_scope"],
@@ -530,6 +740,14 @@ def _export_record_for_task(
         "structure_field_sources": prop.get("structure_field_sources", {}),
         "structure_source_version": prop.get("structure_source_version"),
         "structure_blockers": prop.get("structure_blockers", []),
+        "bader_charge_M1": prop.get("bader_charge_M1"),
+        "bader_charge_M2": prop.get("bader_charge_M2"),
+        "charge_transfer_e": prop.get("charge_transfer_e"),
+        "charge_transfer_direction": prop.get("charge_transfer_direction"),
+        "state_context": prop.get("state_context"),
+        "site_label": prop.get("site_label"),
+        "electronic_field_sources": prop.get("electronic_field_sources", {}),
+        "electronic_source_version": prop.get("electronic_source_version"),
         "active_site_instance_key": instance["active_site_instance_key"],
         "active_site_ref": instance["active_site_ref"],
         "energy_kind": prop["energy_kind"],
@@ -538,14 +756,335 @@ def _export_record_for_task(
         "property_subtype": prop["property_subtype"],
         "adsorbate": prop["canonical_adsorbate"] or prop["adsorbate"],
         "reaction_step": prop["reaction_step"],
-        "value": prop["value"],
-        "unit": prop["unit"],
+        "value": prop["normalized_value"],
+        "unit": prop["normalized_unit"],
+        "raw_value": prop["value"],
+        "raw_unit": prop["unit"],
         "source_text": prop["source_text"],
         "source_location": prop["source_location"],
         "confidence_level": prop["confidence_level"],
         "ml_ready": ml_ready,
         "blockers": blockers,
         "manual_verification_required": prop["manual_verification_required"],
+        "database_write_authority": "user_submit_only",
+        "ai_consensus_auto_adopt_allowed": False,
+        "element_descriptor_source": ELEMENT_DESCRIPTOR_SOURCE,
+        "element_descriptor_source_version": ELEMENT_DESCRIPTOR_SOURCE_VERSION,
+    }
+
+
+def _put_wide_value(target: dict[str, Any], key: str, value: Any) -> None:
+    if value in (None, "", []):
+        return
+    if key not in target:
+        target[key] = value
+        return
+    existing = target[key]
+    if isinstance(existing, list):
+        if value not in existing:
+            existing.append(value)
+        return
+    if existing != value:
+        target[key] = [existing, value]
+
+
+def _put_supplemental_wide_values(target: dict[str, Any], prop: dict[str, Any]) -> None:
+    supplemental_fields = {
+        "bader_charge_M1": "bader_charge_M1_e",
+        "bader_charge_M2": "bader_charge_M2_e",
+        "charge_transfer_e": "charge_transfer_e",
+        "metal_metal_distance_A": "metal_metal_distance_A",
+        "coordination_environment": "coordination_environment",
+        "metal_ligand_distance_A": "metal_ligand_distance_A",
+        "adsorption_site": "adsorption_site",
+        "adsorption_mode": "adsorption_mode",
+    }
+    for field, key in supplemental_fields.items():
+        _put_wide_value(target, key, prop.get(field))
+
+
+def _wide_property_key(prop: dict[str, Any]) -> str:
+    canonical = prop["canonical_property_type"]
+    subtype = prop["property_subtype"]
+    unit = _token(prop.get("normalized_unit") or prop.get("unit")) or "value"
+    if canonical == "adsorption_energy":
+        adsorbate = _token(prop.get("canonical_adsorbate") or prop.get("adsorbate")) or "unknown_adsorbate"
+        return f"adsorption_energy_{adsorbate}_{unit}"
+    if subtype in _LI2S_TASK_SUBTYPES:
+        return f"{subtype}_{unit}"
+    if canonical in {"reaction_barrier", "reaction_energy", "gibbs_free_energy_change"}:
+        step = _token(prop.get("reaction_step")) or "unknown_step"
+        return f"{canonical}_{step}_{unit}"
+    if canonical in _ELECTRONIC_PROPERTIES:
+        site_label = _token(prop.get("site_label"))
+        if canonical == "bader_charge" and site_label in {"m1", "m2"}:
+            return f"bader_charge_{site_label}_{unit}"
+        adsorbate = _token(prop.get("canonical_adsorbate") or prop.get("adsorbate"))
+        suffix = f"_{adsorbate}" if adsorbate else ""
+        return f"{canonical}{suffix}_{unit}"
+    if subtype in _STRUCTURE_PROPERTIES or canonical in _STRUCTURE_PROPERTIES:
+        return f"{subtype or canonical}_{unit}"
+    return f"{canonical or subtype or 'property'}_{unit}"
+
+
+def _compact_property(prop: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": prop["record_id"],
+        "feature_scope": _feature_scope_for_property(prop),
+        "property_type": prop["property_type"],
+        "canonical_property_type": prop["canonical_property_type"],
+        "property_subtype": prop["property_subtype"],
+        "energy_kind": prop["energy_kind"],
+        "adsorbate": prop["canonical_adsorbate"] or prop["adsorbate"],
+        "reaction_step": prop["reaction_step"],
+        "reaction_type": prop["reaction_type"],
+        "reaction_validation_status": prop.get("reaction_validation_status"),
+        "value": prop["normalized_value"],
+        "unit": prop["normalized_unit"],
+        "raw_value": prop["value"],
+        "raw_unit": prop["unit"],
+        "source_text": prop["source_text"],
+        "source_location": prop["source_location"],
+        "confidence_level": prop["confidence_level"],
+        "bader_charge_M1": prop.get("bader_charge_M1"),
+        "bader_charge_M2": prop.get("bader_charge_M2"),
+        "charge_transfer_e": prop.get("charge_transfer_e"),
+        "charge_transfer_direction": prop.get("charge_transfer_direction"),
+        "state_context": prop.get("state_context"),
+        "site_label": prop.get("site_label"),
+        "electronic_field_sources": prop.get("electronic_field_sources", {}),
+        "ml_ready": prop["ml_ready"],
+        "blockers": prop["blockers"],
+        "manual_verification_required": prop["manual_verification_required"],
+    }
+
+
+def _instance_properties(instance: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        prop
+        for group_name in (
+            "adsorbate_properties",
+            "reaction_step_properties",
+            "electronic_properties",
+            "structure_properties",
+            "other_properties",
+        )
+        for prop in instance["properties"][group_name]
+    ]
+
+
+def _task_records_for_instance(
+    *,
+    bundle: dict[str, Any],
+    catalyst: dict[str, Any],
+    instance: dict[str, Any],
+    task: str,
+) -> list[dict[str, Any]]:
+    candidates_by_semantic_key: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for group_name in ("adsorbate_properties", "reaction_step_properties"):
+        for prop in instance["properties"][group_name]:
+            matches_task, _ = _task_match_reasons(prop, task)
+            if not matches_task:
+                continue
+            record = _export_record_for_task(
+                bundle=bundle,
+                catalyst=catalyst,
+                instance=instance,
+                prop=prop,
+                task=task,
+            )
+            semantic_key = (
+                record["canonical_property_type"],
+                record["label_property_subtype"],
+                record["adsorbate"],
+                ""
+                if record["canonical_property_type"] == "adsorption_energy"
+                else _token(normalize_dft_reaction_step_for_identity(record["reaction_step"])),
+                record["label_energy_kind"],
+            )
+            candidates_by_semantic_key[semantic_key].append(record)
+
+    records: list[dict[str, Any]] = []
+    for semantic_key in sorted(candidates_by_semantic_key, key=lambda item: tuple(map(str, item))):
+        value_groups: dict[tuple[Any, Any], list[dict[str, Any]]] = defaultdict(list)
+        for record in candidates_by_semantic_key[semantic_key]:
+            value_groups[(record["label_value"], record["label_unit"])].append(record)
+
+        representatives: list[dict[str, Any]] = []
+        for value_key in sorted(value_groups, key=lambda item: tuple(map(str, item))):
+            equivalent = sorted(
+                value_groups[value_key],
+                key=lambda item: (
+                    not bool(item["ml_ready"]),
+                    len(item["blockers"]),
+                    item["record_id"],
+                ),
+            )
+            representative = equivalent[0]
+            representative["duplicate_record_ids"] = sorted(
+                item["record_id"] for item in equivalent[1:]
+            )
+            representatives.append(representative)
+
+        if len(representatives) > 1:
+            for representative in representatives:
+                representative["blockers"] = sorted(
+                    set(representative["blockers"] + ["conflicting_property_values"])
+                )
+                representative["ml_ready"] = False
+        records.extend(representatives)
+    return records
+
+
+def _export_sample_record_for_task(
+    *,
+    bundle: dict[str, Any],
+    catalyst: dict[str, Any],
+    instance: dict[str, Any],
+    task_records: list[dict[str, Any]],
+    task: str,
+) -> dict[str, Any]:
+    descriptor_payload = build_metal_descriptor_payload(catalyst["metal_centers"])
+    all_props = _instance_properties(instance)
+    safe_props = [prop for prop in all_props if prop.get("ml_ready")]
+    property_groups = {
+        group_name: [_compact_property(prop) for prop in instance["properties"][group_name]]
+        for group_name in (
+            "adsorbate_properties",
+            "reaction_step_properties",
+            "electronic_properties",
+            "structure_properties",
+            "other_properties",
+        )
+    }
+    wide_properties: dict[str, Any] = {}
+    for prop in safe_props:
+        _put_wide_value(wide_properties, _wide_property_key(prop), prop["normalized_value"])
+        _put_supplemental_wide_values(wide_properties, prop)
+    conflicting_wide_keys = sorted(
+        key
+        for key, value in wide_properties.items()
+        if isinstance(value, list) and len({json.dumps(item, sort_keys=True, ensure_ascii=False) for item in value}) > 1
+    )
+
+    distinct_safe_facts = {
+        (
+            prop.get("canonical_property_type"),
+            prop.get("property_subtype"),
+            prop.get("canonical_adsorbate") or prop.get("adsorbate"),
+            prop.get("reaction_step"),
+            prop.get("normalized_value"),
+            prop.get("normalized_unit"),
+        )
+        for prop in safe_props
+    }
+    for prop in safe_props:
+        electronic_sources = prop.get("electronic_field_sources") or {}
+        structure_sources = prop.get("structure_field_sources") or {}
+        source_by_field = {
+            "bader_charge_M1": electronic_sources.get("bader_charge_M1"),
+            "bader_charge_M2": electronic_sources.get("bader_charge_M2"),
+            "charge_transfer_e": electronic_sources.get("charge_transfer_e"),
+            "metal_metal_distance_A": structure_sources.get("metal_metal_distance_A"),
+            "coordination_environment": structure_sources.get("coordination_environment"),
+            "metal_ligand_distance_A": structure_sources.get("metal_ligand_distance_A"),
+            "adsorption_site": structure_sources.get("adsorption_site"),
+            "adsorption_mode": structure_sources.get("adsorption_mode"),
+        }
+        for field, source in source_by_field.items():
+            value = prop.get(field)
+            if value not in (None, "", []) and source and not str(source).startswith("catalyst_sample."):
+                distinct_safe_facts.add(
+                    ("supplemental", field, prop.get("state_context"), value, None, None)
+                )
+    blockers = sorted({blocker for record in task_records for blocker in record["blockers"]})
+    if conflicting_wide_keys:
+        blockers = sorted(set(blockers + ["conflicting_complementary_property_values"]))
+        for record in task_records:
+            record["blockers"] = sorted(
+                set(record["blockers"] + ["conflicting_complementary_property_values"])
+            )
+            record["ml_ready"] = False
+    if len(distinct_safe_facts) < 2:
+        blockers = sorted(set(blockers + ["insufficient_bundle_completeness"]))
+        for record in task_records:
+            record["blockers"] = sorted(
+                set(record["blockers"] + ["insufficient_bundle_completeness"])
+            )
+            record["ml_ready"] = False
+    task_labels: list[dict[str, Any]] = []
+    task_wide_labels: dict[str, Any] = {}
+    for record in task_records:
+        task_labels.append(
+            {
+                "record_id": record["record_id"],
+                "label_name": record["label_name"],
+                "label_value": record["label_value"],
+                "label_unit": record["label_unit"],
+                "label_energy_kind": record["label_energy_kind"],
+                "label_property_subtype": record["label_property_subtype"],
+                "adsorbate": record["adsorbate"],
+                "reaction_step": record["reaction_step"],
+                "ml_ready": record["ml_ready"],
+                "blockers": record["blockers"],
+            }
+        )
+        _put_wide_value(task_wide_labels, record["label_name"], record["label_value"])
+    ml_ready = bool(task_records) and not blockers
+    first_record = task_records[0]
+    return {
+        "sample_id": instance["active_site_instance_key"],
+        "sample_unit": (instance.get("active_site_ref") or {}).get(
+            "binding_granularity",
+            "active_site_instance",
+        ),
+        "paper_id": bundle["paper_id"],
+        "title": bundle["paper_title"],
+        "task": _canonical_task(task),
+        "catalyst_sample_id": catalyst["catalyst_sample_id"],
+        "catalyst_name": catalyst["name"],
+        "catalyst_type": catalyst["catalyst_type"],
+        "metal_centers": catalyst["metal_centers"],
+        "coordination": catalyst["coordination"],
+        "support_raw": first_record.get("support_raw", catalyst["support_raw"]),
+        "support_normalized": first_record.get("support_normalized", catalyst["support_normalized"]),
+        "support_confidence": first_record.get("support_confidence", catalyst["support_confidence"]),
+        **descriptor_payload,
+        "active_site_instance_key": instance["active_site_instance_key"],
+        "active_site_ref": instance["active_site_ref"],
+        "dft_setting_ref": instance["dft_setting_ref"],
+        "binding_source": instance["binding_source"],
+        "task_record_ids": [record["record_id"] for record in task_records],
+        "source_record_ids": [prop["record_id"] for prop in all_props],
+        "safe_source_record_ids": [prop["record_id"] for prop in safe_props],
+        "distinct_safe_property_count": len(distinct_safe_facts),
+        "excluded_unsafe_property_count": len(all_props) - len(safe_props),
+        "task_labels": task_labels,
+        "task_wide_labels": task_wide_labels,
+        "wide_properties": dict(sorted(wide_properties.items())),
+        "property_group_counts": {
+            group_name: len(values)
+            for group_name, values in property_groups.items()
+        },
+        "property_groups": property_groups,
+        "metal_metal_distance_A": first_record.get("metal_metal_distance_A"),
+        "coordination_environment": first_record.get("coordination_environment"),
+        "metal_ligand_distance_A": first_record.get("metal_ligand_distance_A"),
+        "adsorption_site": first_record.get("adsorption_site"),
+        "adsorption_mode": first_record.get("adsorption_mode"),
+        "structure_field_sources": first_record.get("structure_field_sources", {}),
+        "structure_blockers": first_record.get("structure_blockers", []),
+        "bader_charge_M1": first_record.get("bader_charge_M1"),
+        "bader_charge_M2": first_record.get("bader_charge_M2"),
+        "charge_transfer_e": first_record.get("charge_transfer_e"),
+        "charge_transfer_direction": first_record.get("charge_transfer_direction"),
+        "state_context": first_record.get("state_context"),
+        "site_label": first_record.get("site_label"),
+        "electronic_field_sources": first_record.get("electronic_field_sources", {}),
+        "descriptor_blockers": first_record.get("descriptor_blockers", []),
+        "ml_ready": ml_ready,
+        "blockers": blockers,
+        "manual_verification_required": any(record["manual_verification_required"] for record in task_records),
         "database_write_authority": "user_submit_only",
         "ai_consensus_auto_adopt_allowed": False,
         "element_descriptor_source": ELEMENT_DESCRIPTOR_SOURCE,
@@ -580,7 +1119,7 @@ class ProjectLibraryBundleService:
         ambiguous_records: list[dict[str, Any]] = []
         manual_required: list[dict[str, Any]] = []
         counts = Counter()
-        explicit_key_owners: dict[str, set[str]] = defaultdict(set)
+        explicit_key_owners: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
 
         for catalyst in catalysts_by_id.values():
             paper = papers_by_id.get(str(catalyst.paper_id))
@@ -608,6 +1147,19 @@ class ProjectLibraryBundleService:
                 )
                 counts["ambiguous_records_count"] += 1
                 continue
+            if catalyst.paper_id != row.paper_id:
+                ambiguous_records.append(
+                    {
+                        "record_id": str(row.id),
+                        "paper_id": str(row.paper_id),
+                        "catalyst_sample_id": str(catalyst.id),
+                        "reason": "catalyst_sample_paper_mismatch",
+                        "property_type": row.property_type,
+                        "adsorbate": row.adsorbate,
+                    }
+                )
+                counts["ambiguous_records_count"] += 1
+                continue
             bundle = bundles_by_catalyst.setdefault(
                 str(catalyst.id),
                 self._empty_catalyst_bundle(catalyst=catalyst, paper=papers_by_id.get(str(row.paper_id))),
@@ -620,9 +1172,15 @@ class ProjectLibraryBundleService:
                 setting_status=setting_status,
             )
             if instance_source == "evidence_payload":
-                explicit_key_owners[instance_key].add(str(catalyst.id))
+                explicit_key_owners[(str(row.paper_id), instance_key)].add(
+                    (
+                        str(catalyst.id),
+                        str(setting_ref.get("dft_setting_id")) if setting_ref else "",
+                    )
+                )
             prop = _property_bundle(
                 row=row,
+                catalyst=catalyst,
                 active_site_instance_key=instance_key,
                 active_site_ref=active_site_ref,
                 pages_by_record=pages_by_record,
@@ -630,6 +1188,8 @@ class ProjectLibraryBundleService:
             )
             prop.update(_support_payload(catalyst, row.evidence_payload))
             prop.update(_structure_payload(row=row, catalyst=catalyst, active_site_ref=active_site_ref))
+            prop.update(_electronic_payload(row=row, active_site_ref=active_site_ref))
+            prop["catalyst_scope"] = _catalyst_scope(catalyst.catalyst_type)
             blockers = _record_blockers(
                 prop,
                 instance_source=instance_source,
@@ -674,15 +1234,27 @@ class ProjectLibraryBundleService:
             )
             self._update_counts(counts, prop, catalyst_scope=_catalyst_scope(catalyst.catalyst_type))
 
+        conflicting_explicit_keys = {
+            scoped_key for scoped_key, owners in explicit_key_owners.items() if len(owners) > 1
+        }
+        for instance in active_instances.values():
+            ref = instance.get("active_site_ref") if isinstance(instance.get("active_site_ref"), dict) else {}
+            scoped_key = (str(ref.get("paper_id") or ""), instance["active_site_instance_key"])
+            if scoped_key not in conflicting_explicit_keys:
+                continue
+            conflict_blocker = "conflicting_active_site_instance_key"
+            instance["blockers"] = sorted(set(instance["blockers"] + [conflict_blocker]))
+            for prop in _instance_properties(instance):
+                prop["blockers"] = sorted(set(prop["blockers"] + [conflict_blocker]))
+                prop["ml_ready"] = False
+
         counts["active_site_instance_key_missing_or_generated_count"] = sum(
             1
             for _bundle in bundles_by_catalyst.values()
             for instance in _bundle["active_site_instances"]
             if instance["binding_source"] != "evidence_payload"
         )
-        counts["active_site_instance_key_conflict_count"] = sum(
-            1 for owners in explicit_key_owners.values() if len(owners) > 1
-        )
+        counts["active_site_instance_key_conflict_count"] = len(conflicting_explicit_keys)
         counts["manual_verification_required_count"] = len(manual_required)
         counts.setdefault("ambiguous_records_count", len(ambiguous_records))
         public_counts = self._finalize_counts(counts)
@@ -734,31 +1306,47 @@ class ProjectLibraryBundleService:
             paper_id=paper_id,
         )
         records = []
+        sample_records = []
         blocker_counts = Counter()
+        sample_blocker_counts = Counter()
+        candidate_sample_count = 0
         for bundle in bundle_payload["bundles"]:
             catalyst = bundle["catalyst_sample"]
             for instance in bundle["active_site_instances"]:
-                for group_name in ("adsorbate_properties", "reaction_step_properties"):
-                    for prop in instance["properties"][group_name]:
-                        matches_task, _ = _task_match_reasons(prop, canonical_task)
-                        if not matches_task:
-                            continue
-                        record = _export_record_for_task(
-                            bundle=bundle,
-                            catalyst=catalyst,
-                            instance=instance,
-                            prop=prop,
-                            task=canonical_task,
-                        )
-                        if ready_only and not record["ml_ready"]:
-                            for blocker in record["blockers"]:
-                                blocker_counts[blocker] += 1
-                            continue
-                        records.append(record)
+                instance_task_records = _task_records_for_instance(
+                    bundle=bundle,
+                    catalyst=catalyst,
+                    instance=instance,
+                    task=canonical_task,
+                )
+                if not instance_task_records:
+                    continue
+                candidate_sample_count += 1
+                sample_record = _export_sample_record_for_task(
+                    bundle=bundle,
+                    catalyst=catalyst,
+                    instance=instance,
+                    task_records=instance_task_records,
+                    task=canonical_task,
+                )
+                if not ready_only or sample_record["ml_ready"]:
+                    sample_records.append(sample_record)
+                for blocker in sample_record["blockers"]:
+                    sample_blocker_counts[blocker] += 1
+
+                for record in instance_task_records:
+                    if ready_only and not record["ml_ready"]:
                         for blocker in record["blockers"]:
                             blocker_counts[blocker] += 1
+                        continue
+                    records.append(record)
+                    for blocker in record["blockers"]:
+                        blocker_counts[blocker] += 1
 
         records.sort(key=lambda item: (item["paper_id"], item["catalyst_sample_id"], item["record_id"]))
+        sample_records.sort(
+            key=lambda item: (item["paper_id"], item["catalyst_sample_id"], item["active_site_instance_key"])
+        )
         manifest = {
             "schema_version": PROJECT_LIBRARY_ML_EXPORT_V4_SCHEMA_VERSION,
             "dataset_version": "project-library-ml-export-v4.0",
@@ -778,10 +1366,17 @@ class ProjectLibraryBundleService:
                 for prop in instance["properties"][group]
                 if _task_match_reasons(prop, canonical_task)[0]
             ),
+            "candidate_sample_count": candidate_sample_count,
             "returned_count": len(records),
+            "returned_sample_count": len(sample_records),
             "ml_ready_count": sum(1 for record in records if record["ml_ready"]),
+            "sample_ml_ready_count": sum(1 for record in sample_records if record["ml_ready"]),
             "blocked_count": sum(1 for record in records if not record["ml_ready"]),
+            "sample_blocked_count": sum(1 for record in sample_records if not record["ml_ready"]),
             "blocker_counts": dict(sorted(blocker_counts.items())),
+            "sample_blocker_counts": dict(sorted(sample_blocker_counts.items())),
+            "sample_unit": "catalyst_setting_or_active_site_instance",
+            "sample_records_contract": "one row per CatalystSample/setting or explicit ActiveSiteInstance with grouped task labels and same-instance properties",
             "database_write_authority": "user_submit_only",
             "ai_consensus_auto_adopt_allowed": False,
             "element_descriptor_source": ELEMENT_DESCRIPTOR_SOURCE,
@@ -794,10 +1389,18 @@ class ProjectLibraryBundleService:
             "status": "ready" if records else "not_ready",
             "manifest": manifest,
             "records": records,
+            "sample_records": sample_records,
         }
 
-    def build_ml_export_v4_csv(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+    def build_ml_export_v4_csv(self, *, unit: str = "sample", **kwargs: Any) -> tuple[str, dict[str, Any]]:
         payload = self.build_ml_export_v4(**kwargs)
+        if unit == "record":
+            return self._build_ml_export_v4_record_csv(payload)
+        if unit != "sample":
+            raise KeyError("unit must be one of: sample, record")
+        return self._build_ml_export_v4_sample_csv(payload)
+
+    def _build_ml_export_v4_record_csv(self, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         output = io.StringIO()
         fieldnames = [
             "record_id",
@@ -826,6 +1429,13 @@ class ProjectLibraryBundleService:
             "adsorption_mode",
             "structure_field_sources",
             "structure_blockers",
+            "bader_charge_M1",
+            "bader_charge_M2",
+            "charge_transfer_e",
+            "charge_transfer_direction",
+            "state_context",
+            "site_label",
+            "electronic_field_sources",
             "active_site_instance_key",
             "energy_kind",
             "property_type",
@@ -843,11 +1453,96 @@ class ProjectLibraryBundleService:
             "ml_ready",
             "blockers",
             "manual_verification_required",
+            "database_write_authority",
+            "ai_consensus_auto_adopt_allowed",
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for record in payload["records"]:
             writer.writerow({key: _csv_cell(record.get(key)) for key in fieldnames})
+        return output.getvalue(), payload["manifest"]
+
+    def _build_ml_export_v4_sample_csv(self, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        sample_records = payload["sample_records"]
+        output = io.StringIO()
+        base_fieldnames = [
+            "sample_id",
+            "sample_unit",
+            "paper_id",
+            "title",
+            "task",
+            "ml_ready",
+            "blockers",
+            "manual_verification_required",
+            "catalyst_sample_id",
+            "catalyst_name",
+            "catalyst_type",
+            "metal_centers",
+            "coordination",
+            "support_raw",
+            "support_normalized",
+            "support_confidence",
+            "active_site_instance_key",
+            "active_site_ref",
+            "dft_setting_ref",
+            "binding_source",
+            "task_record_ids",
+            "source_record_ids",
+            "task_labels",
+            "task_wide_labels",
+            "wide_properties",
+            "property_group_counts",
+            "property_groups",
+            "metal_descriptor_summary",
+            "metal_1_descriptors",
+            "metal_2_descriptors",
+            "dac_combined_descriptors",
+            "descriptor_blockers",
+            "metal_metal_distance_A",
+            "coordination_environment",
+            "metal_ligand_distance_A",
+            "adsorption_site",
+            "adsorption_mode",
+            "structure_field_sources",
+            "structure_blockers",
+            "bader_charge_M1",
+            "bader_charge_M2",
+            "charge_transfer_e",
+            "charge_transfer_direction",
+            "state_context",
+            "site_label",
+            "electronic_field_sources",
+            "database_write_authority",
+            "ai_consensus_auto_adopt_allowed",
+            "element_descriptor_source",
+            "element_descriptor_source_version",
+        ]
+        dynamic_label_fieldnames = sorted(
+            {
+                key
+                for sample in sample_records
+                for key in (sample.get("task_wide_labels") or {})
+                if key not in base_fieldnames
+            }
+        )
+        dynamic_wide_fieldnames = sorted(
+            {
+                key
+                for sample in sample_records
+                for key in (sample.get("wide_properties") or {})
+                if key not in base_fieldnames and key not in dynamic_label_fieldnames
+            }
+        )
+        fieldnames = base_fieldnames + dynamic_label_fieldnames + dynamic_wide_fieldnames
+        writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        for sample in sample_records:
+            task_wide_labels = sample.get("task_wide_labels") or {}
+            wide_properties = sample.get("wide_properties") or {}
+            row = {key: _csv_cell(sample.get(key)) for key in base_fieldnames}
+            row.update({key: _csv_cell(task_wide_labels.get(key)) for key in dynamic_label_fieldnames})
+            row.update({key: _csv_cell(wide_properties.get(key)) for key in dynamic_wide_fieldnames})
+            writer.writerow(row)
         return output.getvalue(), payload["manifest"]
 
     def _papers(self, *, effective_library_name: str | None, paper_id: UUID | None) -> list[Paper]:
@@ -957,11 +1652,11 @@ class ProjectLibraryBundleService:
             counts[f"dac_sample_with_metal_metal_distance:{active_key}"] = 1
         if prop["ml_ready"]:
             if canonical == "adsorption_energy":
-                counts["eads_ml_ready_record_count"] += 1
+                counts["adsorption_property_gate_passed_record_count"] += 1
             if subtype in _LI2S_REACTION_SUBTYPES:
-                counts["li2s_barrier_ml_ready_record_count"] += 1
+                counts["li2s_reaction_property_gate_passed_record_count"] += 1
             if canonical in {"adsorption_energy", "reaction_barrier", "gibbs_free_energy_change", "reaction_energy"}:
-                counts["srr_multitask_ml_ready_record_count"] += 1
+                counts["srr_property_gate_passed_record_count"] += 1
 
     @staticmethod
     def _finalize_counts(counts: Counter) -> dict[str, int]:

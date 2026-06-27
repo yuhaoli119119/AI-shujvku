@@ -651,11 +651,229 @@ function makeV3Manifest(task) {
   };
 }
 
+function makeV4Payload(task, readyOnly = true) {
+  if (task === 'li2s_barrier') {
+    return {
+      schema_version: 'project_library_ml_export_v4',
+      read_only: true,
+      auto_verification_applied: false,
+      status: 'ready',
+      manifest: {
+        schema_version: 'project_library_ml_export_v4',
+        dataset_version: 'project-library-ml-export-v4.0',
+        context_key: 'li_s_sac_dac',
+        library_name: 'Active Library',
+        task: 'li2s_barrier',
+        ready_only: readyOnly,
+        candidate_count: 3,
+        candidate_sample_count: 2,
+        returned_count: readyOnly ? 1 : 3,
+        returned_sample_count: readyOnly ? 1 : 2,
+        ml_ready_count: 1,
+        sample_ml_ready_count: 1,
+        blocked_count: readyOnly ? 0 : 2,
+        sample_blocked_count: readyOnly ? 0 : 1,
+        blocker_counts: readyOnly ? {} : {
+          missing_reaction_step: 1,
+          energy_kind_task_mismatch: 1,
+        },
+        sample_blocker_counts: readyOnly ? {} : {
+          missing_reaction_step: 1,
+          energy_kind_task_mismatch: 1,
+        },
+        database_write_authority: 'user_submit_only',
+        ai_consensus_auto_adopt_allowed: false,
+      },
+      records: [],
+      sample_records: [
+        {
+          sample_id: 'paper:p1|catalyst:c1|site:li2s',
+          sample_unit: 'active_site_instance',
+          paper_id: 'p1',
+          title: 'Li-S Barrier Paper',
+          task: 'li2s_barrier',
+          catalyst_sample_id: 'c1',
+          catalyst_name: 'FeCo-NC',
+          catalyst_type: 'DAC',
+          metal_centers: ['Fe', 'Co'],
+          active_site_instance_key: 'paper:p1|catalyst:c1|site:li2s',
+          task_labels: [
+            {
+              record_id: 'v4-record-1',
+              label_name: 'li2s_barrier_eV',
+              label_value: 0.65,
+              label_unit: 'eV',
+              adsorbate: 'Li2S',
+              reaction_step: 'Li2S decomposition',
+              ml_ready: true,
+              blockers: [],
+            },
+          ],
+          wide_properties: {
+            adsorption_energy_li2s_ev: -1.1,
+            li2s_decomposition_barrier_ev: 0.65,
+            bader_charge_li2s_e: 0.21,
+          },
+          property_group_counts: {
+            adsorbate_properties: 1,
+            reaction_step_properties: 1,
+            electronic_properties: 1,
+          },
+          blockers: [],
+          ml_ready: true,
+        },
+        ...(readyOnly ? [] : [{
+          sample_id: 'paper:p1|catalyst:c2|site:unknown',
+          sample_unit: 'active_site_instance',
+          paper_id: 'p1',
+          title: 'Li-S Barrier Paper',
+          task: 'li2s_barrier',
+          catalyst_sample_id: 'c2',
+          catalyst_name: 'Fe-NC',
+          catalyst_type: 'SAC',
+          metal_centers: ['Fe'],
+          active_site_instance_key: 'paper:p1|catalyst:c2|site:unknown',
+          task_labels: [
+            {
+              record_id: 'v4-record-2',
+              label_name: 'li2s_barrier_eV',
+              label_value: 0.72,
+              label_unit: 'eV',
+              adsorbate: 'Li2S',
+              reaction_step: '',
+              ml_ready: false,
+              blockers: ['missing_reaction_step'],
+            },
+          ],
+          wide_properties: {
+            li2s_decomposition_barrier_ev: 0.72,
+          },
+          property_group_counts: {
+            reaction_step_properties: 1,
+          },
+          blockers: ['missing_reaction_step', 'energy_kind_task_mismatch'],
+          ml_ready: false,
+        }]),
+      ],
+    };
+  }
+  return {
+    schema_version: 'project_library_ml_export_v4',
+    read_only: true,
+    auto_verification_applied: false,
+    status: 'not_ready',
+    manifest: {
+      schema_version: 'project_library_ml_export_v4',
+      dataset_version: 'project-library-ml-export-v4.0',
+      context_key: 'li_s_sac_dac',
+      library_name: 'Active Library',
+      task: task || 'adsorption_energy',
+      ready_only: readyOnly,
+      candidate_count: 2,
+      candidate_sample_count: 2,
+      returned_count: readyOnly ? 0 : 2,
+      returned_sample_count: readyOnly ? 0 : 2,
+      ml_ready_count: 0,
+      sample_ml_ready_count: 0,
+      blocked_count: readyOnly ? 0 : 2,
+      sample_blocked_count: readyOnly ? 0 : 2,
+      blocker_counts: readyOnly ? {
+        missing_source_text: 2,
+      } : {
+        missing_source_text: 2,
+        generated_active_site_instance_key: 1,
+      },
+      sample_blocker_counts: readyOnly ? {
+        missing_source_text: 2,
+      } : {
+        missing_source_text: 2,
+        generated_active_site_instance_key: 1,
+      },
+      database_write_authority: 'user_submit_only',
+      ai_consensus_auto_adopt_allowed: false,
+    },
+    records: [],
+    sample_records: readyOnly ? [] : [
+      {
+        sample_id: 'paper:p2|catalyst:c3|site:default',
+        sample_unit: 'active_site_instance',
+        catalyst_name: 'Co-NC',
+        catalyst_type: 'SAC',
+        metal_centers: ['Co'],
+        active_site_instance_key: 'paper:p2|catalyst:c3|site:default',
+        task_labels: [],
+        wide_properties: {},
+        property_group_counts: {},
+        blockers: ['missing_source_text'],
+        ml_ready: false,
+      },
+    ],
+  };
+}
+
+function makeProjectLibraryQualityPayload() {
+  return {
+    schema_version: 'project_library_quality_v1',
+    context_key: 'li_s_sac_dac',
+    context_version: 'project_library_contexts_v1',
+    context_display_name_zh: '锂硫双原子',
+    library_name: 'Active Library',
+    read_only: true,
+    auto_verification_applied: false,
+    counts: {
+      paper_count: 2,
+      parsed_count: 2,
+      with_dft_count: 2,
+      needs_fields_count: 1,
+      srr_lis_task_candidate_count: 3,
+      label_ready_count: 1,
+      training_ready_count: 1,
+      feature_candidate_blocked_paper_count: 1,
+      catalyst_sample_count: 2,
+      active_site_instance_count: 2,
+      ambiguous_records_count: 0,
+      manual_verification_required_count: 0,
+    },
+    blocker_counts: {},
+    feature_candidate_blocker_counts: {},
+    sample_quality: {
+      sample_unit: 'active_site_instance',
+      counts: {
+        total_sample_count: 2,
+        missing_li2s_adsorption_sample_count: 1,
+        missing_li2s_barrier_sample_count: 1,
+        missing_rds_sample_count: 2,
+        missing_bader_or_charge_transfer_sample_count: 1,
+        dac_missing_metal_metal_distance_sample_count: 1,
+        unknown_metal_descriptor_sample_count: 1,
+      },
+      gap_examples: {
+        missing_bader_or_charge_transfer_sample_count: [
+          {
+            paper_id: 'paper-1',
+            title: 'Li-S Barrier Paper',
+            catalyst_sample_id: 'c2',
+            catalyst_name: 'Fe-NC',
+            active_site_instance_key: 'paper:p1|catalyst:c2|site:unknown',
+          },
+        ],
+      },
+      notes: [],
+    },
+    tasks: [],
+    needs_fields_papers: [],
+  };
+}
+
 async function installMockApi(page) {
   let lastDatasetUrl = '';
   let lastV3ManifestUrl = '';
   let lastV3JsonUrl = '';
   let lastV3CsvUrl = '';
+  let lastV4JsonUrl = '';
+  let lastV4CsvUrl = '';
+  let lastV4PreviewPayload = null;
+  let lastV4SubmitPayload = null;
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.route(/\/api\/libraries$/, route => route.fulfill({
     status: 200,
@@ -687,6 +905,80 @@ async function installMockApi(page) {
       body: JSON.stringify({ metadata: makeV3Manifest(new URL(lastV3JsonUrl).searchParams.get('task')) || {}, records: [] }),
     });
   });
+  await page.route(/\/api\/dft\/project-library-ml-export-v4\.csv.*/, route => {
+    lastV4CsvUrl = route.request().url();
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/csv',
+      body: 'sample_id,task,active_site_instance_key,li2s_barrier_eV\nsite-1,li2s_barrier,site-1,0.65\n',
+    });
+  });
+  await page.route(/\/api\/dft\/project-library-ml-export-v4\?.*/, route => {
+    lastV4JsonUrl = route.request().url();
+    const url = new URL(lastV4JsonUrl);
+    const task = url.searchParams.get('task') || 'adsorption_energy';
+    const readyOnly = url.searchParams.get('ready_only') !== 'false';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(makeV4Payload(task, readyOnly)),
+    });
+  });
+  await page.route(/\/api\/dft\/project-library-quality.*/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(makeProjectLibraryQualityPayload()),
+  }));
+  await page.route(/\/api\/dft\/project-library-v4\/user-submit\/preview$/, async route => {
+    lastV4PreviewPayload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema_version: 'project_library_v4_user_submit_preview_v1',
+        context_key: 'li_s_sac_dac',
+        paper_id: lastV4PreviewPayload.paper_id,
+        record_id: lastV4PreviewPayload.record_id || null,
+        action: lastV4PreviewPayload.record_id ? 'update_existing_dft_result' : 'create_new_dft_result',
+        can_submit: true,
+        writes_to_database: false,
+        database_write_authority: 'user_submit_only',
+        visible_in_v4_export: true,
+        ready_only_export_eligible: false,
+        hard_blockers: [],
+        ml_blockers: [],
+        warnings: [],
+        resolved_source_candidate_ids: [],
+        persisted_field_targets: ['value', 'unit'],
+        evidence_payload_fields: ['bader_charge_M1', 'charge_transfer_e'],
+        normalized_submission: lastV4PreviewPayload,
+      }),
+    });
+  });
+  await page.route(/\/api\/dft\/project-library-v4\/user-submit$/, async route => {
+    lastV4SubmitPayload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema_version: 'project_library_v4_user_submit_result_v1',
+        context_key: 'li_s_sac_dac',
+        paper_id: lastV4SubmitPayload.paper_id,
+        record_id: lastV4SubmitPayload.record_id || 'new-record-1',
+        action: lastV4SubmitPayload.record_id ? 'update_existing_dft_result' : 'create_new_dft_result',
+        writes_to_database: true,
+        database_write_authority: 'user_submit_only',
+        visible_in_v4_export: true,
+        ready_only_export_eligible: true,
+        candidate_status: 'final_user_submitted',
+        audit_log_id: 'audit-1',
+        consumed_source_candidate_ids: [],
+        persisted_field_targets: ['value', 'unit'],
+        evidence_payload_fields: ['bader_charge_M1', 'charge_transfer_e'],
+        export_record: { record_id: lastV4SubmitPayload.record_id || 'new-record-1' },
+      }),
+    });
+  });
   await page.route(/\/api\/papers\/export\/dft-dataset.*/, route => {
     lastDatasetUrl = route.request().url();
     return route.fulfill({
@@ -700,6 +992,10 @@ async function installMockApi(page) {
     getLastV3ManifestUrl: () => lastV3ManifestUrl,
     getLastV3JsonUrl: () => lastV3JsonUrl,
     getLastV3CsvUrl: () => lastV3CsvUrl,
+    getLastV4JsonUrl: () => lastV4JsonUrl,
+    getLastV4CsvUrl: () => lastV4CsvUrl,
+    getLastV4PreviewPayload: () => lastV4PreviewPayload,
+    getLastV4SubmitPayload: () => lastV4SubmitPayload,
   };
 }
 
@@ -757,6 +1053,43 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=rds_gibbs_free_energy');
   });
 
+  test('renders v4 project-library manifest and blocked diagnostics scope', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+
+    await expect(page.locator('#v4PanelTitle')).toContainText('催化剂实例级 v4 导出入口');
+    await expect(page.locator('#v4SchemaValue')).toContainText('project_library_ml_export_v4');
+    await expect(page.locator('#v4TaskValue')).toContainText('吸附能任务');
+    await expect(page.locator('#v4CandidateCount')).toContainText('2');
+    await expect(page.locator('#v4ReadyCount')).toContainText('0');
+    await expect(page.locator('#v4StatusPanel')).toContainText('当前 v4 任务没有 ML-ready 样本');
+    await expect(page.locator('#v4SampleQualityCounts')).toContainText('missing_li2s_adsorption_sample_count');
+    await expect(page.locator('#v4SampleQualityCounts')).toContainText('dac_missing_metal_metal_distance_sample_count');
+    await expect(page.locator('#v4SampleQualityExamples')).toContainText('paper:p1|catalyst:c2|site:unknown');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('context_key=li_s_sac_dac');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=adsorption_energy');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=false');
+
+    await page.selectOption('#v4TaskSelect', 'li2s_barrier');
+    await expect(page.locator('#v4TaskValue')).toContainText('Li2S 能垒任务');
+    await expect(page.locator('#v4ReadyCount')).toContainText('1');
+    await expect(page.locator('#v4ReturnedCount')).toContainText('2');
+    await expect(page.locator('#v4StatusPanel')).toContainText('v4 manifest 已加载');
+    await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('paper:p1|catalyst:c1|site:li2s');
+    await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('FeCo-NC');
+    await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('li2s_decomposition_barrier_ev');
+    await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('bader_charge_li2s_e');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=li2s_barrier');
+
+    await expect(page.locator('#v4ReturnedCount')).toContainText('2');
+    await expect(page.locator('#v4BlockedCount')).toContainText('1');
+    await expect(page.locator('#v4BlockerCounts')).toContainText('missing_reaction_step');
+    await expect(page.locator('#v4BlockerCounts')).toContainText('energy_kind_task_mismatch');
+    await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('Fe-NC');
+    await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('blocked');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=false');
+  });
+
   test('supports blocker filtering and server-side year/library refresh params', async ({ page }) => {
     const mockState = await installMockApi(page);
     await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
@@ -808,6 +1141,85 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('library_name=Archive+Library');
     await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_min=2021');
     await expect.poll(() => mockState.getLastV3CsvUrl()).toContain('year_max=2025');
+  });
+
+  test('passes library and ready-only scope to v4 JSON and CSV downloads', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.addInitScript(() => {
+      window.URL.createObjectURL = () => 'blob:mock-download';
+      window.URL.revokeObjectURL = () => {};
+      HTMLAnchorElement.prototype.click = function noopClick() {};
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+    await page.selectOption('#v4TaskSelect', 'li2s_barrier');
+    await page.selectOption('#v4ReadyOnlySelect', 'false');
+    await page.selectOption('#libraryFilter', 'Archive Library');
+
+    await page.click('#v4JsonButton');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('/api/dft/project-library-ml-export-v4?');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('context_key=li_s_sac_dac');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=li2s_barrier');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=false');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('library_name=Archive+Library');
+
+    await page.selectOption('#v4ReadyOnlySelect', 'true');
+    await page.click('#v4CsvButton');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('/api/dft/project-library-ml-export-v4.csv?');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('context_key=li_s_sac_dac');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('task=li2s_barrier');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('ready_only=true');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('unit=sample');
+    await expect.poll(() => mockState.getLastV4CsvUrl()).toContain('library_name=Archive+Library');
+  });
+
+  test('previews and submits project-library v4 sample-level user fields', async ({ page }) => {
+    const mockState = await installMockApi(page);
+    await page.goto(`${BASE_URL}/pages/dft_ml_dataset/index.html`);
+
+    await page.selectOption('#v4TaskSelect', 'li2s_barrier');
+    await page.locator('.select-v4-sample-btn').first().click();
+    await expect(page.locator('#v4SubmitSelectedSample')).toContainText('paper:p1|catalyst:c1|site:li2s');
+    await expect(page.locator('#v4SubmitRecordId')).toHaveValue('v4-record-1');
+    await expect(page.locator('#v4SubmitValue')).toHaveValue('0.65');
+
+    await page.fill('#v4SubmitSourceText', 'Bader charge and charge transfer were reported after Li2S adsorption.');
+    await page.fill('#v4SubmitBaderM1', '0.12');
+    await page.fill('#v4SubmitBaderM2', '-0.08');
+    await page.fill('#v4SubmitChargeTransfer', '-1.11');
+    await page.fill('#v4SubmitChargeDirection', 'adsorbate_to_catalyst');
+    await page.fill('#v4SubmitMetalDistance', '2.41');
+    await page.fill('#v4SubmitCoordinationEnv', 'Fe-Co-N6');
+    await page.fill('#v4SubmitSourcePage', '7');
+
+    await page.click('#v4SubmitPreviewButton');
+    await expect.poll(() => mockState.getLastV4PreviewPayload()).toMatchObject({
+      schema_version: 'project_library_ml_export_v4',
+      context_key: 'li_s_sac_dac',
+      paper_id: 'p1',
+      record_id: 'v4-record-1',
+      database_write_authority: 'user_submit_only',
+      ai_consensus_auto_adopt_allowed: false,
+      active_site_instance_key: 'paper:p1|catalyst:c1|site:li2s',
+      catalyst_sample_id: 'c1',
+      bader_charge_M1: 0.12,
+      bader_charge_M2: -0.08,
+      charge_transfer_e: -1.11,
+      charge_transfer_direction: 'adsorbate_to_catalyst',
+      metal_metal_distance_A: 2.41,
+      coordination_environment: 'Fe-Co-N6',
+    });
+    await expect(page.locator('#v4SubmitResult')).toContainText('project_library_v4_user_submit_preview_v1');
+
+    await page.click('#v4SubmitButton');
+    await expect.poll(() => mockState.getLastV4SubmitPayload()).toMatchObject({
+      paper_id: 'p1',
+      record_id: 'v4-record-1',
+      source_location: { page: '7' },
+      source_text: 'Bader charge and charge transfer were reported after Li2S adsorption.',
+    });
+    await expect(page.locator('#v4SubmitResult')).toContainText('project_library_v4_user_submit_result_v1');
+    await expect(page.locator('#toastContainer')).toContainText('已提交样本级字段');
   });
 
   test('uses current DOM year and library filters for direct v3 refresh and downloads', async ({ page }) => {
@@ -910,6 +1322,9 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('#v3RefreshButton')).toBeDisabled();
     await expect(page.locator('#v3JsonButton')).toBeDisabled();
     await expect(page.locator('#v3CsvButton')).toBeDisabled();
+    await expect(page.locator('#v4RefreshButton')).toBeDisabled();
+    await expect(page.locator('#v4JsonButton')).toBeDisabled();
+    await expect(page.locator('#v4CsvButton')).toBeDisabled();
     await expect(page.locator('#toastContainer')).not.toContainText('读取失败：Exports are disabled by server policy');
   });
 });
