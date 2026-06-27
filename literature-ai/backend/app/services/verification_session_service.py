@@ -33,6 +33,7 @@ from app.services.dft_rescan_policy import (
     is_dft_method_only_reaction_step,
     normalize_dft_reaction_step_for_identity,
 )
+from app.services.dft_review_helpers import normalize_dft_value_for_comparison, same_normalized_dft_value
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.module_write_lock_service import ModuleWriteLockService
@@ -2408,25 +2409,11 @@ class VerificationSessionService:
         else:
             value = None
             unit = row.unit
-        try:
-            numeric = float(value) if value is not None else None
-        except (TypeError, ValueError):
-            numeric = None
-        normalized_unit = str(unit or "").strip().lower().replace(" ", "")
-        if normalized_unit in {"e", "|e|", "electron", "electrons"}:
-            normalized_unit = "e"
-        if normalized_unit == "mev" and numeric is not None:
-            return {"value": numeric / 1000.0, "unit": "ev"}
-        return {"value": numeric, "unit": normalized_unit}
+        return normalize_dft_value_for_comparison(value, unit)
 
     @staticmethod
     def _same_normalized_dft_value(left: dict[str, Any], right: dict[str, Any]) -> bool:
-        if left.get("value") is None or right.get("value") is None:
-            return False
-        if str(left.get("unit") or "") != str(right.get("unit") or ""):
-            return False
-        tolerance = max(1e-9, abs(float(left["value"])) * 1e-6)
-        return abs(float(left["value"]) - float(right["value"])) <= tolerance
+        return same_normalized_dft_value(left, right)
 
     def _settle_high_risk_targets(
         self,
