@@ -116,3 +116,15 @@ def material_identity_parts_compatible(left: str, right: str) -> bool:
         if len(token) >= 5
     }
     return bool(left_tokens & right_tokens)
+
+
+def existing_material_binding_name_matches(current_name: Any, material_identity: Any) -> bool:
+    current_normalized = normalized_text(current_name)
+    expected_normalized = normalized_text(material_identity)
+    if not current_normalized or not expected_normalized:
+        return False
+    return (
+        current_normalized == expected_normalized
+        or current_normalized in expected_normalized
+        or expected_normalized in current_normalized
+    )

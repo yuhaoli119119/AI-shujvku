@@ -10,6 +10,7 @@ from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldRe
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.dft_review_helpers import (
+    existing_material_binding_name_matches,
     first_anchor,
     first_text,
     imported_evidence_payload,
@@ -755,11 +756,7 @@ class DFTResultReviewService:
         sample = self.session.get(CatalystSample, row.catalyst_sample_id)
         if sample is None:
             return False
-        current_name = self._normalized_text(sample.name)
-        expected_name = self._normalized_text(material_identity)
-        if not current_name or not expected_name:
-            return False
-        return current_name == expected_name or current_name in expected_name or expected_name in current_name
+        return existing_material_binding_name_matches(sample.name, material_identity)
 
     def _resolve_or_create_catalyst_sample_id(
         self,
