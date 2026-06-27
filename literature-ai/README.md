@@ -29,16 +29,18 @@ The application does not treat any AI output as final truth by default.
 
 - MCP `import_analysis` and HTTP `/api/external-analysis/import` share the `ExternalAnalysisService.apply_review_rules_for_run(...)` apply path. Tests should assert that shared service boundary, not direct MCP-layer calls into `VerificationSessionService.apply_import_rules_for_paper(...)`.
 - Large backend service splitting is in progress. Completed splits include `render-detail.js`, `verification_session_service.py`, `external_analysis_service.py`, `dft_review_service.py`, `page.js` / `jobs.js`, `paper_query.py`, `review_conflict_service.py`, and `paper_workbench_service.py`.
-- `review_conflict_service.py` now delegates DFT-specific comparison helpers to `app/services/review_conflict_dft.py`.
-- `paper_workbench_service.py` now delegates review-center status, sorting, supplementary-group, and lightweight DFT audit helpers to `app/services/paper_workbench_review_center.py`, workspace/source-document/audit/figure file helpers to `app/services/paper_workbench_workspace.py`, and AI reading package/content coverage/DFT evidence payload helpers to `app/services/paper_workbench_ai_package.py`.
+- `review_conflict_service.py` now delegates DFT-specific comparison helpers to `app/services/review_conflict_dft.py`, opinion collection to `app/services/review_conflict_opinions.py`, target loading/summary helpers to `app/services/review_conflict_targets.py`, and active/settlement/collapse/conflict-type helpers to `app/services/review_conflict_resolution.py`.
+- `paper_workbench_service.py` now delegates review-center status, sorting, supplementary-group, and lightweight DFT audit helpers to `app/services/paper_workbench_review_center.py`, workspace/source-document/audit/figure file helpers to `app/services/paper_workbench_workspace.py`, AI reading package/content coverage/DFT evidence payload helpers to `app/services/paper_workbench_ai_package.py`, and PDF quality helpers to `app/services/paper_workbench_quality.py`.
 - Remaining backend risk is concentrated in still-large orchestration services and integration paths. Future splits should keep public service method names stable and use focused pytest coverage before broad refactors.
 - Latest targeted verification for this refactor line passed:
+  - `python -m compileall -q app/services`
   - `python -m pytest tests/test_mcp_new_tools.py -q`
   - `python -m pytest tests/test_mcp_server.py -q -k "import_analysis or apply_analysis_review_rules"`
   - `python -m pytest tests/test_external_analysis.py -q -k "import_analysis or apply_review_rules"`
   - `python -m pytest tests/test_review_adjudication_service.py -q`
   - `python -m pytest tests/test_dft_conflict_settlement.py -q`
   - `python -m pytest tests/test_codex_workbench_v1.py -q`
+  - `python -m pytest tests/test_pdf_pipeline_hardening.py -q -k "quality"`
   - `python -m pytest tests/test_papers_api.py -q -k "manual_review_progress or review_center or supplementary"`
   - `python -m pytest tests/test_storage_root_resolution.py -q`
 
