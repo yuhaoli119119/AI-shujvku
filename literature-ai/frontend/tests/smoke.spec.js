@@ -109,7 +109,16 @@ const PAPER_DETAIL = {
   tables: [],
   dft_settings_items: [{ id: 'setting-1', code: 'PBE', kpoints: '3x3x1' }],
   catalyst_samples_items: [{ id: 'catalyst-1', name: 'Pt(111)', catalyst_type: 'surface', support: 'Pt support' }],
-  dft_results_items: [{ id: 'dft-1', property_type: 'adsorption_energy', value: -1.23, unit: 'eV', evidence_text: 'The adsorption energy is -1.23 eV.' }],
+  dft_results_items: [{
+    id: 'dft-1',
+    catalyst_sample_id: 'catalyst-1',
+    active_site_instance_key: 'Pt(111)::surface',
+    catalyst: 'Pt(111)',
+    property_type: 'adsorption_energy',
+    value: -1.23,
+    unit: 'eV',
+    evidence_text: 'The adsorption energy is -1.23 eV.',
+  }],
   electrochemical_performance_items: [{ id: 'electro-1', metric: 'onset_potential', value: 0.71, unit: 'V' }],
   mechanism_claims_items: [{
     id: 'mechanism-claim-1',
@@ -2921,6 +2930,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(dftConflictClassification.conflicts).toHaveLength(1);
     expect(dftConflictClassification.newReview).toHaveLength(0);
     await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(5);
+    const dftSampleGroups = page.locator('#dftContent [data-role="dft-sample-group"]');
+    await expect(dftSampleGroups).toHaveCount(1);
+    await expect(dftSampleGroups.first()).toContainText('Pt(111)');
+    await expect(dftSampleGroups.first()).toContainText('Pt(111)::surface');
+    await expect(dftSampleGroups.first()).toContainText('DFT 1 条');
     const dftCandidateCard = page.locator('#dftContent details.readable-card').filter({ hasText: 'adsorption_energy' }).first();
     await dftCandidateCard.locator('summary').click();
     await expect(dftCandidateCard.locator('button:has-text("接受入库")')).toBeVisible();

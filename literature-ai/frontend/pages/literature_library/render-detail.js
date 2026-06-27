@@ -589,6 +589,117 @@ function renderReadableFields(item, keys) {
     return fields.length ? '<div class="readable-grid">' + fields.join("") + '</div>' : '<div class="muted">暂无可读字段。</div>';
 }
 
+function isDftCandidateCardTitle(title) {
+    return title === "候选 DFT 数据" || title === "DFT 候选结果";
+}
+
+function nestedReadableValue(item, path) {
+    const parts = String(path || "").split(".");
+    let value = item;
+    for (let i = 0; i < parts.length; i += 1) {
+        if (!value || typeof value !== "object") return "";
+        value = value[parts[i]];
+    }
+    if (value && typeof value === "object" && !Array.isArray(value) && value.value !== undefined) {
+        value = value.value;
+    }
+    const text = readableValue(value);
+    return text && text !== "-" ? text : "";
+}
+
+function firstNestedReadableValue(item, paths) {
+    for (let i = 0; i < paths.length; i += 1) {
+        const value = nestedReadableValue(item, paths[i]);
+        if (value) return value;
+    }
+    return "";
+}
+
+function dftSampleGroupMeta(item) {
+    item = item || {};
+    const catalystSampleId = firstNestedReadableValue(item, [
+        "catalyst_sample_id",
+        "active_site_ref.catalyst_sample_id",
+        "evidence_payload.catalyst_sample_id",
+        "evidence_payload.active_site_ref.catalyst_sample_id"
+    ]);
+    const catalystLabel = firstNestedReadableValue(item, [
+        "catalyst",
+        "catalyst_name",
+        "material_identity",
+        "material",
+        "normalized_material",
+        "structure_name",
+        "evidence_payload.material_identity",
+        "evidence_payload.material",
+        "evidence_payload.normalized_material",
+        "active_site_ref.material_identity",
+        "active_site_ref.material",
+        "active_site_ref.structure_name"
+    ]);
+    const activeSiteKey = firstNestedReadableValue(item, [
+        "active_site_instance_key",
+        "active_site_ref.active_site_instance_key",
+        "active_site_ref.instance_key",
+        "evidence_payload.active_site_instance_key",
+        "evidence_payload.active_site_ref.active_site_instance_key",
+        "evidence_payload.active_site_ref.instance_key"
+    ]);
+    const sampleKey = catalystSampleId || catalystLabel || "unbound-catalyst";
+    const siteKey = activeSiteKey || "unbound-active-site";
+    return {
+        key: sampleKey + "|" + siteKey,
+        catalystLabel: catalystLabel || (catalystSampleId ? ("CatalystSample " + catalystSampleId) : "未绑定催化剂"),
+        activeSiteLabel: activeSiteKey || "未绑定 ActiveSiteInstance",
+        catalystSampleId: catalystSampleId
+    };
+}
+
+function isDftItemExportable(item) {
+    const safety = item && item.export_safety || {};
+    const candidateStatus = String(item && item.candidate_status || "").trim().toLowerCase();
+    const workflowState = String(item && item.dft_workflow_state || "").trim().toLowerCase();
+    return safety.is_exportable === true ||
+        safety.eligible === true ||
+        candidateStatus === "ml_ready" ||
+        workflowState === "exportable";
+}
+
+function renderDftSampleGroups(items, renderItem) {
+    const groups = [];
+    const byKey = {};
+    items.forEach(function(item, index) {
+        const meta = dftSampleGroupMeta(item);
+        if (!byKey[meta.key]) {
+            byKey[meta.key] = {
+                key: meta.key,
+                meta: meta,
+                entries: []
+            };
+            groups.push(byKey[meta.key]);
+        }
+        byKey[meta.key].entries.push({ item: item, index: index });
+    });
+    return groups.map(function(group, groupIndex) {
+        const readyCount = group.entries.filter(function(entry) { return isDftItemExportable(entry.item); }).length;
+        const body = group.entries.map(function(entry) {
+            return renderItem(entry.item, entry.index);
+        }).join("");
+        const groupTitle = groups.length > 1 ? ("催化剂组 " + (groupIndex + 1)) : "催化剂组";
+        return '<details class="section-card dft-sample-group" data-role="dft-sample-group" data-dft-sample-key="' + escAttr(group.key) + '" open>' +
+            '<summary><div class="dft-sample-summary">' +
+                '<div><h3>' + esc(groupTitle) + '</h3><div class="subtle">' + esc(group.meta.catalystLabel) + ' / ' + esc(group.meta.activeSiteLabel) + '</div></div>' +
+                '<div class="dft-sample-meta">' +
+                    '<span class="status-chip">DFT ' + group.entries.length + ' 条</span>' +
+                    '<span class="status-chip ' + (readyCount ? 'ok' : 'meta') + '">可导出 ' + readyCount + '</span>' +
+                    (group.meta.catalystSampleId ? '<span class="status-chip none">sample_id</span>' : '<span class="status-chip meta">待绑定样本</span>') +
+                '</div>' +
+            '</div></summary>' +
+            '<div class="dft-sample-group-body">' + body + '</div>' +
+        '</details>';
+    }).join("");
+}
+
 const CODEX_ITEM_TYPE_BY_CARD_TITLE = {
     "DFT 设置": "dft_setting",
     "催化剂样本": "catalyst_sample",
@@ -1733,8 +1844,8 @@ function renderReadableCards(title, items) {
         "DFT 设置": ["software", "functional", "dispersion_correction", "pseudopotential", "cutoff_energy_ev", "cutoff_energy", "k_points", "convergence_settings", "vacuum_thickness_a", "vacuum_thickness"],
         "催化剂样本": ["name", "catalyst_type", "metal_centers", "coordination", "support", "synthesis_method", "evidence_text", "confidence"],
         "DFT 结果": ["catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "evidence_text", "confidence"],
-        "候选 DFT 数据": ["candidate_status", "catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
-        "DFT 候选结果": ["candidate_status", "catalyst", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
+        "候选 DFT 数据": ["candidate_status", "catalyst_sample_id", "active_site_instance_key", "catalyst", "material_identity", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
+        "DFT 候选结果": ["candidate_status", "catalyst_sample_id", "active_site_instance_key", "catalyst", "material_identity", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
         "电化学性能": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
         "机理声明": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
         "写作卡片": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
@@ -1751,7 +1862,7 @@ function renderReadableCards(title, items) {
         const bLong = longFields.includes(b) ? 1 : 0;
         return aLong - bLong;
     });
-    return items.map(function(item, index) {
+    function renderReadableCardItem(item, index) {
         const heading = title + (items.length > 1 ? " " + (index + 1) : "");
         const itemType = CODEX_ITEM_TYPE_BY_CARD_TITLE[title];
         const action = codexItemActionHtml(itemType, item);
@@ -1776,7 +1887,11 @@ function renderReadableCards(title, items) {
             safety +
             '</div>' +
         '</details>';
-    }).join("");
+    }
+    if (isDftCandidateCardTitle(title)) {
+        return renderDftSampleGroups(items, renderReadableCardItem);
+    }
+    return items.map(renderReadableCardItem).join("");
 }
 
 function renderComprehensiveAnalysis(data) {
