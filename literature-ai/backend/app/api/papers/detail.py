@@ -15,6 +15,7 @@ from app.config import Settings, get_settings
 from app.db.models import (
     AuditLog,
     Base,
+    CatalystSample,
     DFTResult,
     ExternalAnalysisCandidate,
     ExtractionFieldReview,
@@ -85,6 +86,24 @@ class DFTAIReviewResetRequest(BaseModel):
     reviewer: str | None = None
     keep_dft_candidates: bool = True
 
+
+class CatalystBasicInfoUpdateRequest(BaseModel):
+    name: str | None = None
+    catalyst_type: str | None = None
+    metal_centers: list[str] | None = None
+    coordination: str | None = None
+    support: str | None = None
+    synthesis_method: str | None = None
+    evidence_strength: str | None = None
+    source: str | None = None
+    reviewer: str | None = None
+    evidence_payload: dict[str, Any] | None = None
+    note: str | None = None
+
+
+class CatalystBasicInfoCreateFromDFTRequest(CatalystBasicInfoUpdateRequest):
+    dft_result_ids: list[UUID] = Field(min_length=1)
+
 from app.services.codex_context_service import CodexContextService
 from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
@@ -98,6 +117,7 @@ from app.services.pdf_image_extractor import PdfImageExtractor
 from app.services.review_service import ReviewService
 from app.services.verification_session_service import VerificationSessionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.domain.catalyst_basic_info import catalyst_basic_info_payload
 
 router = APIRouter()
 
@@ -492,6 +512,246 @@ async def set_manual_review_progress(
     return {
         "paper_id": str(paper_id),
         "manual_review_progress": progress,
+    }
+
+
+@router.post("/{paper_id}/catalyst-samples/{sample_id}/basic-info")
+async def update_catalyst_sample_basic_info(
+    paper_id: UUID,
+    sample_id: UUID,
+    payload: CatalystBasicInfoUpdateRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    sample = session.get(CatalystSample, sample_id)
+    if sample is None or sample.paper_id != paper_id:
+        raise HTTPException(status_code=404, detail="Catalyst sample not found for this paper")
+
+    provided = set(getattr(payload, "model_fields_set", set()) or set())
+    merged = {
+        "name": payload.name if "name" in provided else sample.name,
+        "catalyst_type": payload.catalyst_type if "catalyst_type" in provided else sample.catalyst_type,
+        "metal_centers": payload.metal_centers if "metal_centers" in provided else (sample.metal_centers or []),
+        "coordination": payload.coordination if "coordination" in provided else sample.coordination,
+        "support": payload.support if "support" in provided else sample.support,
+        "synthesis_method": payload.synthesis_method if "synthesis_method" in provided else sample.synthesis_method,
+        "evidence_strength": payload.evidence_strength if "evidence_strength" in provided else sample.evidence_strength,
+    }
+    normalized = catalyst_basic_info_payload(**merged)
+    fields = normalized["fields"]
+    before = {
+        "name": sample.name,
+        "catalyst_type": sample.catalyst_type,
+        "metal_centers": sample.metal_centers or [],
+        "coordination": sample.coordination,
+        "support": sample.support,
+        "synthesis_method": sample.synthesis_method,
+        "evidence_strength": sample.evidence_strength,
+    }
+
+    if "name" in provided:
+        sample.name = fields["name"]
+    if "catalyst_type" in provided:
+        sample.catalyst_type = fields["catalyst_type"]
+    if "metal_centers" in provided:
+        sample.metal_centers = fields["metal_centers"]
+    if "coordination" in provided:
+        sample.coordination = fields["coordination"]
+    if "support" in provided:
+        sample.support = fields["support"]
+    if "synthesis_method" in provided:
+        sample.synthesis_method = fields["synthesis_method"]
+    if "evidence_strength" in provided:
+        sample.evidence_strength = fields["evidence_strength"]
+
+    source = str(payload.source or payload.reviewer or "literature_library_basic_info").strip() or "literature_library_basic_info"
+    after = {
+        "name": sample.name,
+        "catalyst_type": sample.catalyst_type,
+        "metal_centers": sample.metal_centers or [],
+        "coordination": sample.coordination,
+        "support": sample.support,
+        "synthesis_method": sample.synthesis_method,
+        "evidence_strength": sample.evidence_strength,
+    }
+    session.add(sample)
+    session.add(
+        AuditLog(
+            paper_id=paper_id,
+            action="update_catalyst_basic_info",
+            source=source,
+            target_type="catalyst_samples",
+            target_id=str(sample_id),
+            payload={
+                "schema_version": normalized["schema_version"],
+                "before": before,
+                "after": after,
+                "provided_fields": sorted(provided),
+                "normalization": {
+                    "raw": normalized["raw"],
+                    "allowed_values": normalized["allowed_values"],
+                    "normalization_source": normalized["normalization_source"],
+                },
+                "metal_descriptors": normalized["metal_descriptors"],
+                "evidence_payload": payload.evidence_payload or {},
+                "note": payload.note,
+            },
+        )
+    )
+    session.commit()
+    session.refresh(sample)
+    detail_payload = catalyst_basic_info_payload(
+        name=sample.name,
+        catalyst_type=sample.catalyst_type,
+        metal_centers=sample.metal_centers or [],
+        coordination=sample.coordination,
+        support=sample.support,
+        synthesis_method=sample.synthesis_method,
+        evidence_strength=sample.evidence_strength,
+    )
+    return {
+        "status": "updated",
+        "paper_id": str(paper_id),
+        "catalyst_sample_id": str(sample_id),
+        "catalyst_sample": {
+            "id": str(sample.id),
+            **detail_payload["fields"],
+            "support_raw": detail_payload["raw"]["support"],
+            "support_normalized": detail_payload["fields"]["support"],
+            "catalyst_type_raw": detail_payload["raw"]["catalyst_type"],
+            "normalization_source": detail_payload["normalization_source"],
+            **detail_payload["metal_descriptors"],
+        },
+        "allowed_values": detail_payload["allowed_values"],
+    }
+
+
+@router.post("/{paper_id}/catalyst-samples/from-dft-group")
+async def create_or_bind_catalyst_sample_from_dft_group(
+    paper_id: UUID,
+    payload: CatalystBasicInfoCreateFromDFTRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    paper = session.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    requested_ids = list(dict.fromkeys(payload.dft_result_ids))
+    rows = session.scalars(
+        select(DFTResult).where(
+            DFTResult.paper_id == paper_id,
+            DFTResult.id.in_(requested_ids),
+        )
+    ).all()
+    rows_by_id = {row.id: row for row in rows}
+    missing_ids = [str(row_id) for row_id in requested_ids if row_id not in rows_by_id]
+    if missing_ids:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": "DFT results not found for this paper", "dft_result_ids": missing_ids},
+        )
+    already_bound = [str(row.id) for row in rows if row.catalyst_sample_id is not None]
+    if already_bound:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Some DFT results are already bound", "dft_result_ids": already_bound},
+        )
+
+    normalized = catalyst_basic_info_payload(
+        name=payload.name,
+        catalyst_type=payload.catalyst_type,
+        metal_centers=payload.metal_centers or [],
+        coordination=payload.coordination,
+        support=payload.support,
+        synthesis_method=payload.synthesis_method,
+        evidence_strength=payload.evidence_strength,
+    )
+    fields = normalized["fields"]
+    sample_name = str(fields.get("name") or "").strip()
+    if not sample_name:
+        raise HTTPException(status_code=422, detail="Catalyst name is required")
+
+    exact_matches = [
+        item
+        for item in session.scalars(
+            select(CatalystSample).where(CatalystSample.paper_id == paper_id)
+        ).all()
+        if str(item.name or "").strip().casefold() == sample_name.casefold()
+    ]
+    if len(exact_matches) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Multiple catalyst samples have the same name; edit the duplicate samples first",
+        )
+
+    created = not exact_matches
+    sample = exact_matches[0] if exact_matches else CatalystSample(paper_id=paper_id)
+    before = None if created else {
+        "name": sample.name,
+        "catalyst_type": sample.catalyst_type,
+        "metal_centers": sample.metal_centers or [],
+        "coordination": sample.coordination,
+        "support": sample.support,
+        "synthesis_method": sample.synthesis_method,
+        "evidence_strength": sample.evidence_strength,
+    }
+    sample.name = fields["name"]
+    sample.catalyst_type = fields["catalyst_type"]
+    sample.metal_centers = fields["metal_centers"]
+    sample.coordination = fields["coordination"]
+    sample.support = fields["support"]
+    sample.synthesis_method = fields["synthesis_method"]
+    sample.evidence_strength = fields["evidence_strength"]
+    session.add(sample)
+    session.flush()
+
+    for row in rows:
+        row.catalyst_sample_id = sample.id
+        session.add(row)
+
+    source = str(payload.source or payload.reviewer or "literature_library_basic_info").strip() or "literature_library_basic_info"
+    after = {
+        "name": sample.name,
+        "catalyst_type": sample.catalyst_type,
+        "metal_centers": sample.metal_centers or [],
+        "coordination": sample.coordination,
+        "support": sample.support,
+        "synthesis_method": sample.synthesis_method,
+        "evidence_strength": sample.evidence_strength,
+    }
+    session.add(
+        AuditLog(
+            paper_id=paper_id,
+            action="create_or_bind_catalyst_sample",
+            source=source,
+            target_type="catalyst_samples",
+            target_id=str(sample.id),
+            payload={
+                "schema_version": normalized["schema_version"],
+                "created": created,
+                "before": before,
+                "after": after,
+                "bound_dft_result_ids": [str(row.id) for row in rows],
+                "normalization": {
+                    "raw": normalized["raw"],
+                    "allowed_values": normalized["allowed_values"],
+                    "normalization_source": normalized["normalization_source"],
+                },
+                "metal_descriptors": normalized["metal_descriptors"],
+                "evidence_payload": payload.evidence_payload or {},
+                "note": payload.note,
+            },
+        )
+    )
+    session.commit()
+    return {
+        "status": "created_and_bound" if created else "bound_existing",
+        "paper_id": str(paper_id),
+        "catalyst_sample_id": str(sample.id),
+        "bound_dft_result_ids": [str(row.id) for row in rows],
+        "created": created,
     }
 
 

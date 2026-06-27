@@ -38,7 +38,10 @@ def test_backfill_plan_is_read_only_and_counts_sample_gaps():
                 "active_site_instances": [
                     {
                         "active_site_instance_key": "site-1",
-                        "active_site_ref": {"site_label": "M1-M2"},
+                        "active_site_ref": {
+                            "site_label": "M1-M2",
+                            "structure_context": "FeCo-N6 relaxed structure",
+                        },
                         "binding_source": "evidence_payload",
                         "properties": {
                             "adsorbate_properties": [
@@ -103,6 +106,8 @@ def test_backfill_plan_is_read_only_and_counts_sample_gaps():
     assert report["extraction_apply_called"] is False
     assert report["counts"]["sample_count"] == 2
     assert report["counts"]["samples_with_any_gap"] == 1
+    assert report["counts"]["missing_active_site_binding_count"] == 1
+    assert report["counts"]["missing_structure_context_count"] == 1
     assert report["counts"]["missing_li2s_adsorption_count"] == 1
     assert report["counts"]["missing_li2s_barrier_count"] == 1
     assert report["counts"]["missing_rds_count"] == 1
@@ -113,14 +118,24 @@ def test_backfill_plan_is_read_only_and_counts_sample_gaps():
 
     csv_rows = tool.backfill_plan_csv_rows(report)
     assert [row["gap"] for row in csv_rows] == [
+        "active_site_binding",
+        "structure_context",
         "li2s_adsorption",
         "li2s_barrier",
         "rds",
         "bader_or_charge_transfer",
     ]
     assert csv_rows[0]["paper_id"] == "paper-2"
-    assert csv_rows[0]["property_type"] == "adsorption_energy"
-    assert csv_rows[0]["adsorbate"] == "Li2S"
+    assert csv_rows[0]["review_action"] == "bind_existing_dft_records"
+    assert csv_rows[0]["active_site_context"]
+    assert json.loads(csv_rows[0]["active_site_ref_patch"]) == {
+        "active_site_context": "<evidence-backed active-site label>"
+    }
+    assert json.loads(csv_rows[1]["active_site_ref_patch"]) == {
+        "structure_context": "<evidence-backed structure/model label>"
+    }
+    assert csv_rows[2]["property_type"] == "adsorption_energy"
+    assert csv_rows[2]["adsorbate"] == "Li2S"
     assert csv_rows[0]["requires_user_evidence"] is True
 
 

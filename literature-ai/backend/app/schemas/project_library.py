@@ -211,7 +211,14 @@ class ProjectLibraryUserSubmitRequest(BaseModel):
     property_type: str
     adsorbate: str | None = None
     reaction_step: str | None = None
-    energy_kind: str | None = None
+    energy_kind: Literal[
+        "thermodynamic_energy",
+        "activation_barrier",
+        "free_energy_change",
+        "electronic_descriptor",
+        "structural_descriptor",
+        "unknown",
+    ] | None = None
     value: float
     unit: str
     source_text: str | None = None

@@ -186,21 +186,26 @@ class ProjectLibraryQualityService:
                     )
                     for prop in ((instance.get("properties") or {}).get(group_name) or [])
                 ]
+                safe_props = [prop for prop in props if prop.get("ml_ready")]
                 has_li2s_adsorption = any(
                     prop.get("canonical_property_type") == "adsorption_energy"
                     and prop.get("canonical_adsorbate") == "Li2S"
-                    for prop in props
+                    for prop in safe_props
                 )
-                has_li2s_barrier = any(prop.get("property_subtype") in _LI2S_BARRIER_SUBTYPES for prop in props)
-                has_rds = any("rds" in _token(prop.get("reaction_step")) for prop in props)
+                has_li2s_barrier = any(
+                    prop.get("property_subtype") in _LI2S_BARRIER_SUBTYPES for prop in safe_props
+                )
+                has_rds = any("rds" in _token(prop.get("reaction_step")) for prop in safe_props)
                 has_bader_or_charge = any(
                     prop.get("canonical_property_type") in {"bader_charge", "charge_transfer"}
                     or prop.get("bader_charge_M1") is not None
                     or prop.get("bader_charge_M2") is not None
                     or prop.get("charge_transfer_e") is not None
-                    for prop in props
+                    for prop in safe_props
                 )
-                has_metal_metal_distance = any(prop.get("metal_metal_distance_A") is not None for prop in props)
+                has_metal_metal_distance = any(
+                    prop.get("metal_metal_distance_A") is not None for prop in safe_props
+                )
                 has_unknown_descriptor = bool(descriptor_payload.get("descriptor_blockers"))
 
                 if not has_li2s_adsorption:

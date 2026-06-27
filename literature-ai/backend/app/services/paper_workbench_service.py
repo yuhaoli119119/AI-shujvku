@@ -2055,6 +2055,11 @@ class PaperWorkbenchService:
             "table": location.get("table"),
             "section": location.get("section"),
             "quoted_text": item.get("quoted_text") or item.get("evidence_text"),
+            "catalyst_name": item.get("catalyst_name") or item.get("material_identity"),
+            "material_identity": item.get("material_identity") or item.get("catalyst_name"),
+            "active_site_context": item.get("active_site_context"),
+            "structure_context": item.get("structure_context"),
+            "dft_setting_id": item.get("dft_setting_id"),
             "supporting_evidence": item.get("supporting_evidence") or [],
             "field_sources": [
                 {

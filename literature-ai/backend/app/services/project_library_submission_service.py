@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTResult, ExternalAnalysisCandidate, Paper
+from app.db.models import AuditLog, CatalystSample, DFTResult, DFTSetting, ExternalAnalysisCandidate, Paper
 from app.domain.project_library_context import get_project_library_context
 from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_property_taxonomy
+from app.normalizers.unit_normalizer import UnitNormalizer
 from app.schemas.project_library import ProjectLibraryUserSubmitRequest
 from app.services.project_library_bundle_service import ProjectLibraryBundleService
+from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity
 
 
 class ProjectLibrarySubmissionBlockedError(ValueError):
@@ -43,6 +48,67 @@ def _clean_text(value: Any) -> str:
 
 def _token(value: Any) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in _clean_text(value).lower()).strip("_")
+
+
+def _expected_energy_kind(taxonomy: dict[str, Any]) -> str:
+    canonical = taxonomy["canonical_property_type"]
+    family = taxonomy["property_family"]
+    if canonical == "reaction_barrier":
+        return "activation_barrier"
+    if canonical == "gibbs_free_energy_change":
+        return "free_energy_change"
+    if family in {"electronic_descriptor", "optical_descriptor"}:
+        return "electronic_descriptor"
+    if family == "structural_descriptor":
+        return "structural_descriptor"
+    return "thermodynamic_energy"
+
+
+def _normalize_non_energy_unit(value: Any, unit: Any, physical_dimension: str) -> tuple[Any, Any, list[str]]:
+    if physical_dimension == "charge":
+        canonical = _token(unit)
+        if value is None or canonical not in {"e", "electron", "electrons"}:
+            return value, unit, ["invalid_or_unsupported_charge_unit"]
+        return value, "e", []
+    if physical_dimension == "length":
+        normalized = UnitNormalizer().normalize_length(value, unit)
+        blockers = list(normalized.blockers)
+        if not normalized.is_valid or normalized.normalized_unit != "A":
+            blockers.append("invalid_or_unsupported_length_unit")
+        return normalized.normalized_value, normalized.normalized_unit, sorted(set(blockers))
+    return value, unit, []
+
+
+def _candidate_identity_payload(
+    *,
+    paper_id: UUID,
+    catalyst_id: UUID,
+    active_site_instance_key: str,
+    dft_setting_id: str,
+    canonical_property_type: str,
+    property_subtype: str,
+    adsorbate: Any,
+    reaction_step: Any,
+    value: Any,
+    unit: Any,
+) -> dict[str, Any]:
+    return {
+        "paper_id": str(paper_id),
+        "catalyst_sample_id": str(catalyst_id),
+        "active_site_instance_key": active_site_instance_key,
+        "dft_setting_id": dft_setting_id or "",
+        "canonical_property_type": canonical_property_type,
+        "property_subtype": property_subtype,
+        "adsorbate": canonicalize_adsorbate(adsorbate) or adsorbate or "",
+        "reaction_step": normalize_dft_reaction_step_for_identity(reaction_step),
+        "value": value,
+        "unit": unit,
+    }
+
+
+def _candidate_identity(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class ProjectLibrarySubmissionService:
@@ -86,6 +152,7 @@ class ProjectLibrarySubmissionService:
         "support_raw",
         "support_normalized",
         "support_confidence",
+        "material_identity",
         "dft_setting_id",
         "bader_charge_M1",
         "bader_charge_M2",
@@ -140,7 +207,18 @@ class ProjectLibrarySubmissionService:
         row = prepared.record or self._create_row(prepared)
         row = self._apply_row_submission(row=row, prepared=prepared)
         self.session.add(row)
-        self.session.flush()
+        try:
+            self.session.flush()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise ProjectLibrarySubmissionBlockedError(
+                {
+                    "code": "project_library_v4_submit_blocked",
+                    "message": "An equivalent Li-S SAC/DAC v4 DFT submission already exists for this paper.",
+                    "hard_blockers": ["duplicate_user_submission_requires_record_id"],
+                    "ml_blockers": [],
+                }
+            ) from exc
 
         consumed_candidate_ids: list[str] = []
         for candidate in prepared.source_candidates:
@@ -171,16 +249,21 @@ class ProjectLibrarySubmissionService:
             },
         )
         self.session.add(audit)
+        self.session.flush()
+        try:
+            export_payload = ProjectLibraryBundleService(self.session).build_ml_export_v4(
+                context_key=payload.context_key,
+                library_name=prepared.paper.library_name,
+                paper_id=prepared.paper.id,
+                ready_only=False,
+            )
+        except Exception:
+            self.session.rollback()
+            raise
+        export_record = next((item for item in export_payload["records"] if item["record_id"] == str(row.id)), None)
         self.session.commit()
         self.session.refresh(row)
         self.session.refresh(audit)
-
-        export_payload = ProjectLibraryBundleService(self.session).build_ml_export_v4(
-            context_key=payload.context_key,
-            paper_id=prepared.paper.id,
-            ready_only=False,
-        )
-        export_record = next((item for item in export_payload["records"] if item["record_id"] == str(row.id)), None)
 
         return {
             "schema_version": self.RESULT_SCHEMA_VERSION,
@@ -257,20 +340,90 @@ class ProjectLibrarySubmissionService:
             hard_blockers.append("missing_active_site_instance_key")
         if not active_site_ref:
             hard_blockers.append("missing_active_site_ref")
+        ref_setting = active_site_ref.get("dft_setting_ref") if isinstance(active_site_ref, dict) else {}
+        ref_setting = ref_setting if isinstance(ref_setting, dict) else {}
+        payload_setting_id = _clean_text(payload.dft_setting_id)
+        ref_setting_id = _clean_text(ref_setting.get("dft_setting_id"))
+        if payload_setting_id and ref_setting_id and payload_setting_id != ref_setting_id:
+            hard_blockers.append("dft_setting_id_conflict")
+            ml_blockers.append("dft_setting_id_conflict")
+        requested_setting_id = payload_setting_id or ref_setting_id
+        if requested_setting_id:
+            try:
+                setting = self.session.get(DFTSetting, UUID(requested_setting_id))
+            except (TypeError, ValueError):
+                setting = None
+            if setting is None or setting.paper_id != paper.id:
+                hard_blockers.append("invalid_dft_setting_id")
+                ml_blockers.append("invalid_dft_setting_id")
 
         taxonomy = get_property_taxonomy(payload.property_type)
         canonical_property_type = taxonomy["canonical_property_type"]
+        property_subtype = taxonomy["property_subtype"]
         canonical_adsorbate = canonicalize_adsorbate(payload.adsorbate) or payload.adsorbate
         energy_kind = _token(payload.energy_kind)
+        is_energy_property = taxonomy["physical_dimension"] == "energy"
+        normalized_energy = (
+            UnitNormalizer().normalize_energy(payload.value, payload.unit)
+            if is_energy_property
+            else None
+        )
+        normalized_non_energy_value, normalized_non_energy_unit, non_energy_blockers = _normalize_non_energy_unit(
+            payload.value,
+            payload.unit,
+            taxonomy["physical_dimension"],
+        )
+        normalized_value = (
+            normalized_energy.normalized_value if normalized_energy is not None else normalized_non_energy_value
+        )
+        normalized_unit = (
+            normalized_energy.normalized_unit if normalized_energy is not None else normalized_non_energy_unit
+        )
+        if is_energy_property and (
+            normalized_energy is None
+            or not normalized_energy.is_valid
+            or normalized_value is None
+            or normalized_unit != "eV"
+            or normalized_energy.blockers
+        ):
+            hard_blockers.append("invalid_or_unsupported_energy_unit")
+            ml_blockers.append("invalid_or_unsupported_energy_unit")
+        for blocker in non_energy_blockers:
+            hard_blockers.append(blocker)
+            ml_blockers.append(blocker)
         if canonical_property_type == "adsorption_energy" and not canonical_adsorbate:
             ml_blockers.append("missing_adsorbate")
         if canonical_property_type in {"reaction_barrier", "gibbs_free_energy_change", "reaction_energy"} and energy_kind in {"", "unknown"}:
             ml_blockers.append("unknown_energy_kind")
+        if is_energy_property and energy_kind not in {"", "unknown"}:
+            expected_energy_kind = _expected_energy_kind(taxonomy)
+            if energy_kind != expected_energy_kind:
+                hard_blockers.append("energy_kind_property_mismatch")
+                ml_blockers.append("energy_kind_property_mismatch")
         if canonical_property_type in {"reaction_barrier", "gibbs_free_energy_change", "reaction_energy"} and not _clean_text(payload.reaction_step):
             ml_blockers.append("missing_reaction_step")
-        if not _clean_text(payload.source_text):
-            hard_blockers.append("missing_source_text")
-            ml_blockers.append("missing_source_text")
+        identity_payload = _candidate_identity_payload(
+            paper_id=paper.id,
+            catalyst_id=catalyst.id,
+            active_site_instance_key=active_site_instance_key,
+            dft_setting_id=requested_setting_id,
+            canonical_property_type=canonical_property_type,
+            property_subtype=property_subtype,
+            adsorbate=canonical_adsorbate,
+            reaction_step=payload.reaction_step,
+            value=normalized_value,
+            unit=normalized_unit,
+        )
+        candidate_identity = _candidate_identity(identity_payload)
+        duplicate_query = select(DFTResult).where(
+            DFTResult.paper_id == paper.id,
+            DFTResult.candidate_identity == candidate_identity,
+        )
+        if row is not None:
+            duplicate_query = duplicate_query.where(DFTResult.id != row.id)
+        duplicate = self.session.scalar(duplicate_query)
+        if duplicate is not None:
+            hard_blockers.append("duplicate_user_submission_requires_record_id")
         if row is None and not payload.record_id:
             warnings.append("No existing DFTResult record_id was provided; submit will create a new user-submitted DFTResult.")
 
@@ -282,12 +435,16 @@ class ProjectLibrarySubmissionService:
             "catalyst_sample_id": str(catalyst.id),
             "active_site_instance_key": active_site_instance_key,
             "active_site_ref": active_site_ref,
+            "candidate_identity": candidate_identity,
+            "candidate_identity_payload": identity_payload,
             "property_type": payload.property_type,
             "adsorbate": payload.adsorbate,
             "reaction_step": payload.reaction_step,
             "energy_kind": payload.energy_kind,
-            "value": payload.value,
-            "unit": payload.unit,
+            "value": normalized_value,
+            "unit": normalized_unit,
+            "raw_value": payload.value,
+            "raw_unit": payload.unit,
             "source_text": payload.source_text,
             "source_location": payload.source_location or {},
             "bader_charge_M1": payload.bader_charge_M1,
@@ -303,6 +460,7 @@ class ProjectLibrarySubmissionService:
             "metal_ligand_distance_A": payload.metal_ligand_distance_A,
             "submitted_by": submitted_by,
             "source_candidate_ids": [str(candidate.id) for candidate in source_candidates],
+            "dft_setting_id": requested_setting_id,
         }
 
         return PreparedSubmission(
@@ -329,7 +487,7 @@ class ProjectLibrarySubmissionService:
             select(ExternalAnalysisCandidate).where(
                 ExternalAnalysisCandidate.paper_id == paper_id,
                 ExternalAnalysisCandidate.id.in_(uuids),
-            )
+            ).with_for_update()
         ).all()
         found = {str(row.id) for row in rows}
         missing = [candidate_id for candidate_id in candidate_ids if candidate_id not in found]
@@ -348,6 +506,21 @@ class ProjectLibrarySubmissionService:
         return list(rows)
 
     def _validate_source_candidate_for_project_library_v4(self, candidate: ExternalAnalysisCandidate) -> None:
+        if candidate.materialized_target_id or _token(candidate.status) in {
+            "user_submitted",
+            "materialized",
+            "consumed",
+        }:
+            raise ProjectLibrarySubmissionBlockedError(
+                {
+                    "code": "project_library_v4_submit_blocked",
+                    "message": "This source candidate has already been consumed by an earlier submission.",
+                    "hard_blockers": ["source_candidate_already_consumed"],
+                    "ml_blockers": [],
+                    "candidate_id": str(candidate.id),
+                    "materialized_target_id": candidate.materialized_target_id,
+                }
+            )
         payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
         schema_markers = {
             _clean_text(payload.get("schema_version")),
@@ -501,19 +674,20 @@ class ProjectLibrarySubmissionService:
 
     def _create_row(self, prepared: PreparedSubmission) -> DFTResult:
         payload = prepared.request
+        normalized = prepared.normalized_submission
         source_location = payload.source_location or {}
         return DFTResult(
             paper_id=prepared.paper.id,
             catalyst_sample_id=prepared.catalyst.id,
             adsorbate=payload.adsorbate,
             property_type=payload.property_type,
-            value=payload.value,
-            unit=payload.unit,
+            value=normalized["value"],
+            unit=normalized["unit"],
             reaction_step=payload.reaction_step,
             reaction_type="SRR_LiS",
             source_section=_clean_text(source_location.get("section") or source_location.get("section_title")) or None,
             source_figure=_clean_text(source_location.get("figure") or source_location.get("figure_label")) or None,
-            evidence_text=payload.source_text,
+            evidence_text=payload.source_text or "",
             confidence=payload.confidence_level,
             candidate_status=self.FINAL_USER_SUBMITTED_STATUS,
             evidence_payload={},
@@ -521,20 +695,25 @@ class ProjectLibrarySubmissionService:
 
     def _apply_row_submission(self, *, row: DFTResult, prepared: PreparedSubmission) -> DFTResult:
         payload = prepared.request
+        normalized = prepared.normalized_submission
         row.catalyst_sample_id = prepared.catalyst.id
         row.adsorbate = payload.adsorbate
         row.property_type = payload.property_type
-        row.value = payload.value
-        row.unit = payload.unit
+        row.value = normalized["value"]
+        row.unit = normalized["unit"]
         row.reaction_step = payload.reaction_step
         row.reaction_type = "SRR_LiS"
+        row.candidate_identity = normalized["candidate_identity"]
         row.source_section = _clean_text((payload.source_location or {}).get("section") or (payload.source_location or {}).get("section_title")) or row.source_section
         row.source_figure = _clean_text((payload.source_location or {}).get("figure") or (payload.source_location or {}).get("figure_label")) or row.source_figure
-        row.evidence_text = payload.source_text
+        if _clean_text(payload.source_text):
+            row.evidence_text = payload.source_text
         row.confidence = payload.confidence_level
         row.candidate_status = self.FINAL_USER_SUBMITTED_STATUS
 
         merged_payload = dict(row.evidence_payload or {}) if isinstance(row.evidence_payload, dict) else {}
+        corrected_value = dict(merged_payload.get("corrected_value") or {}) if isinstance(merged_payload.get("corrected_value"), dict) else {}
+        corrected_value["material_identity"] = prepared.catalyst.name
         merged_payload.update(
             {
                 "schema_version": payload.schema_version,
@@ -551,13 +730,19 @@ class ProjectLibrarySubmissionService:
                 "source_candidate_ids": [str(candidate.id) for candidate in prepared.source_candidates],
                 "active_site_instance_key": prepared.active_site_instance_key,
                 "active_site_ref": prepared.active_site_ref,
+                "candidate_identity": normalized["candidate_identity"],
+                "candidate_identity_payload": normalized["candidate_identity_payload"],
                 "energy_kind": payload.energy_kind,
+                "raw_value": normalized["raw_value"],
+                "raw_unit": normalized["raw_unit"],
                 "source_text": payload.source_text,
                 "source_location": payload.source_location or {},
                 "support_raw": payload.support_raw,
                 "support_normalized": payload.support_normalized,
                 "support_confidence": payload.support_confidence,
-                "dft_setting_id": payload.dft_setting_id,
+                "material_identity": prepared.catalyst.name,
+                "corrected_value": corrected_value,
+                "dft_setting_id": normalized["dft_setting_id"],
                 "bader_charge_M1": payload.bader_charge_M1,
                 "bader_charge_M2": payload.bader_charge_M2,
                 "charge_transfer_e": payload.charge_transfer_e,

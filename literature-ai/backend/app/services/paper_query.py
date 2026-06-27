@@ -48,6 +48,7 @@ from app.schemas.api import (
     WritingCardResponse,
     FigureDataPointResponse,
 )
+from app.domain.catalyst_basic_info import catalyst_basic_info_payload
 from app.services.paper_codes import ensure_paper_codes
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.config import get_settings
@@ -617,7 +618,7 @@ class PaperQueryService:
             ],
             paper_notes=[self._serialize_paper_note(item) for item in paper_notes],
             dft_settings_items=[DFTSettingResponse.model_validate(item) for item in dft_settings],
-            catalyst_samples_items=[CatalystSampleResponse.model_validate(item) for item in catalyst_samples],
+            catalyst_samples_items=[self._serialize_catalyst_sample(item) for item in catalyst_samples],
             dft_results_items=[
                 self._serialize_dft_result(
                     item,
@@ -1520,6 +1521,38 @@ class PaperQueryService:
             target_field = parts[2] if len(parts) >= 3 and parts[2] else None
             return target_type, target_id, target_field
         return "", "", None
+
+    @staticmethod
+    def _serialize_catalyst_sample(item: CatalystSample) -> CatalystSampleResponse:
+        normalized = catalyst_basic_info_payload(
+            name=item.name,
+            catalyst_type=item.catalyst_type,
+            metal_centers=item.metal_centers or [],
+            coordination=item.coordination,
+            support=item.support,
+            synthesis_method=item.synthesis_method,
+            evidence_strength=item.evidence_strength,
+        )
+        descriptor_payload = normalized["metal_descriptors"]
+        return CatalystSampleResponse(
+            id=item.id,
+            name=item.name,
+            catalyst_type=normalized["fields"]["catalyst_type"] or item.catalyst_type,
+            metal_centers=normalized["fields"]["metal_centers"],
+            coordination=item.coordination,
+            support=normalized["fields"]["support"] or item.support,
+            synthesis_method=item.synthesis_method,
+            evidence_strength=item.evidence_strength,
+            support_raw=normalized["raw"]["support"],
+            support_normalized=normalized["fields"]["support"],
+            catalyst_type_raw=normalized["raw"]["catalyst_type"],
+            normalization_source=normalized["normalization_source"],
+            metal_descriptor_summary=descriptor_payload["metal_descriptor_summary"],
+            metal_1_descriptors=descriptor_payload["metal_1_descriptors"],
+            metal_2_descriptors=descriptor_payload["metal_2_descriptors"],
+            dac_combined_descriptors=descriptor_payload["dac_combined_descriptors"],
+            descriptor_blockers=descriptor_payload["descriptor_blockers"],
+        )
 
     @staticmethod
     def _catalyst_summary(item: CatalystSample) -> dict[str, Any]:

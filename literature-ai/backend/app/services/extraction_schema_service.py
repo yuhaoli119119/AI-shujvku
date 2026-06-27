@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import CatalystSample, DFTResult, DFTSetting, ElectrochemicalPerformance, MechanismClaim
+from app.db.models import CatalystSample, DFTResult, DFTSetting, ElectrochemicalPerformance, MechanismClaim, Paper
 from app.schemas.evidence import PageSpan
 from app.schemas.extraction import (
     CatalystSampleSchema,
@@ -23,6 +23,7 @@ from app.services.extraction_review_service import ExtractionReviewService
 from app.services.review_target_resolver import ACTIVE_REVIEW_STATUSES
 from app.services.evidence_locator_service import EvidenceLocatorService, LOCATOR_WARNING_CODES
 from app.services.extraction_validator import ExtractionValidator
+from app.domain.project_library_context import normalize_project_library_context
 
 
 SCHEMA_MODELS = {
@@ -70,6 +71,50 @@ class ExtractionSchemaService:
 
     def result_payload(self, paper_id: UUID) -> dict[str, list[dict[str, Any]]]:
         reviews = self.review_service.reviews_by_target(paper_id)
+        paper = self.session.get(Paper, paper_id)
+        project_library_v4_results: list[dict[str, Any]] = []
+        if paper is not None and normalize_project_library_context(paper.library_name) == "li_s_sac_dac":
+            from app.services.project_library_bundle_service import ProjectLibraryBundleService
+
+            bundle_payload = ProjectLibraryBundleService(self.session).build_bundles(
+                context_key="li_s_sac_dac",
+                library_name=paper.library_name,
+                paper_id=paper_id,
+            )
+            catalyst_samples: list[dict[str, Any]] = []
+            active_site_instances: list[dict[str, Any]] = []
+            property_groups = {
+                "adsorbate_properties": [],
+                "reaction_step_properties": [],
+                "electronic_properties": [],
+                "structure_properties": [],
+            }
+            for bundle in bundle_payload.get("bundles", []):
+                catalyst = bundle.get("catalyst_sample") or {}
+                catalyst_samples.append(catalyst)
+                for instance in bundle.get("active_site_instances", []):
+                    active_site_instances.append(
+                        {
+                            "paper_id": bundle.get("paper_id"),
+                            "catalyst_sample_id": catalyst.get("catalyst_sample_id"),
+                            "active_site_instance_key": instance.get("active_site_instance_key"),
+                            "active_site_ref": instance.get("active_site_ref") or {},
+                            "dft_setting_ref": instance.get("dft_setting_ref"),
+                            "binding_source": instance.get("binding_source"),
+                            "blockers": instance.get("blockers") or [],
+                        }
+                    )
+                    properties = instance.get("properties") or {}
+                    for group_name in property_groups:
+                        property_groups[group_name].extend(properties.get(group_name) or [])
+            project_library_v4_results.append(
+                ProjectLibraryV4ExtractionSchema(
+                    catalyst_samples=catalyst_samples,
+                    active_site_instances=active_site_instances,
+                    ambiguous_records=bundle_payload.get("ambiguous_records") or [],
+                    **property_groups,
+                ).model_dump(mode="json")
+            )
         results = {
             "CatalystSample": [
                 self._with_reviews(paper_id, "catalyst_samples", row.id, self._catalyst(row).model_dump(mode="json"), reviews)
@@ -83,7 +128,7 @@ class ExtractionSchemaService:
                 self._with_reviews(paper_id, "dft_results", row.id, self._dft_result(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
             ],
-            "ProjectLibraryV4Extraction": [],
+            "ProjectLibraryV4Extraction": project_library_v4_results,
             "MechanismClaim": [
                 self._with_reviews(paper_id, "mechanism_claims", row.id, self._mechanism(row).model_dump(mode="json"), reviews)
                 for row in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()

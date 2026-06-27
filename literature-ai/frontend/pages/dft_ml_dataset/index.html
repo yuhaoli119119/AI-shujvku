@@ -231,7 +231,7 @@
                     <p class="eyebrow">v4 Li-S SAC/DAC Project Library</p>
                     <h2 id="v4PanelTitle">催化剂实例级 v4 导出入口</h2>
                     <p>
-                        基于 <code>project_library_ml_export_v4</code>；只读导出，数据库写入仍必须走用户提交。
+                        基于 <code>project_library_ml_export_v4</code>；导出可只取 ML-ready，人工回填默认查看 blocked 诊断样本并走用户提交。
                     </p>
                 </div>
                 <div class="v3-controls">
@@ -247,8 +247,8 @@
                     <label class="field compact-field">
                         <span>导出范围</span>
                         <select id="v4ReadyOnlySelect">
-                            <option value="true">只下载 ML-ready</option>
-                            <option value="false">包含 blocked 诊断</option>
+                            <option value="false" selected>包含 blocked 诊断（回填/修改）</option>
+                            <option value="true">只下载 ML-ready（训练导出）</option>
                         </select>
                     </label>
                     <div class="v3-actions">
@@ -319,6 +319,7 @@
                 <div class="table-card-header">
                     <div>
                         <h3>样本级人工补字段</h3>
+                        <p>先在 sample_records 选择“补字段”；若看不到待补样本，请保持导出范围为“包含 blocked 诊断”。</p>
                     </div>
                     <div class="table-legend">
                         <span class="legend-chip">user_submit_only</span>
@@ -421,8 +422,8 @@
                     </label>
                 </div>
                 <label class="field source-text-field">
-                    <span>source_text</span>
-                    <textarea id="v4SubmitSourceText" rows="3" placeholder="粘贴论文中的原文证据"></textarea>
+                    <span>source_text（选填）</span>
+                    <textarea id="v4SubmitSourceText" rows="3" placeholder="可选：粘贴论文中的原文证据；留空也可提交"></textarea>
                 </label>
                 <div class="filter-actions submit-actions">
                     <button id="v4SubmitPreviewButton" type="button" class="btn btn-secondary">预览</button>

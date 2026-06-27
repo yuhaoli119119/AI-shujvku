@@ -1068,12 +1068,12 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('#v4SampleQualityExamples')).toContainText('paper:p1|catalyst:c2|site:unknown');
     await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('context_key=li_s_sac_dac');
     await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=adsorption_energy');
-    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=true');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=false');
 
     await page.selectOption('#v4TaskSelect', 'li2s_barrier');
     await expect(page.locator('#v4TaskValue')).toContainText('Li2S 能垒任务');
     await expect(page.locator('#v4ReadyCount')).toContainText('1');
-    await expect(page.locator('#v4ReturnedCount')).toContainText('1');
+    await expect(page.locator('#v4ReturnedCount')).toContainText('2');
     await expect(page.locator('#v4StatusPanel')).toContainText('v4 manifest 已加载');
     await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('paper:p1|catalyst:c1|site:li2s');
     await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('FeCo-NC');
@@ -1081,7 +1081,6 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('bader_charge_li2s_e');
     await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=li2s_barrier');
 
-    await page.selectOption('#v4ReadyOnlySelect', 'false');
     await expect(page.locator('#v4ReturnedCount')).toContainText('2');
     await expect(page.locator('#v4BlockedCount')).toContainText('1');
     await expect(page.locator('#v4BlockerCounts')).toContainText('missing_reaction_step');

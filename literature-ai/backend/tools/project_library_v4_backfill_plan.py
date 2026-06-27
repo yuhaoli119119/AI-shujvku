@@ -22,6 +22,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 REQUIRED_SAMPLE_FIELDS = (
+    "active_site_binding",
+    "structure_context",
     "li2s_adsorption",
     "li2s_barrier",
     "rds",
@@ -107,8 +109,25 @@ def _all_properties(instance: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _sample_gaps(*, catalyst: dict[str, Any], instance: dict[str, Any]) -> list[str]:
-    props = _all_properties(instance)
+    props = [
+        prop
+        for prop in _all_properties(instance)
+        if prop.get("ml_ready") is not False
+    ]
     gaps: list[str] = []
+    active_site_ref = (
+        instance.get("active_site_ref")
+        if isinstance(instance.get("active_site_ref"), dict)
+        else {}
+    )
+    if not (
+        active_site_ref.get("active_site_context")
+        or active_site_ref.get("site_label")
+        or active_site_ref.get("adsorption_site")
+    ):
+        gaps.append("active_site_binding")
+    if not active_site_ref.get("structure_context"):
+        gaps.append("structure_context")
     has_li2s_adsorption = any(
         prop.get("canonical_property_type") == "adsorption_energy"
         and prop.get("canonical_adsorbate") == "Li2S"
@@ -140,7 +159,33 @@ def _sample_gaps(*, catalyst: dict[str, Any], instance: dict[str, Any]) -> list[
 def _suggested_actions(gaps: list[str]) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     for gap in gaps:
-        if gap == "li2s_adsorption":
+        if gap == "active_site_binding":
+            actions.append(
+                {
+                    "gap": gap,
+                    "review_action": "bind_existing_dft_records",
+                    "submit_payload_hint": {
+                        "active_site_ref": {
+                            "active_site_context": "<evidence-backed active-site label>",
+                        },
+                    },
+                    "requires_user_evidence": True,
+                }
+            )
+        elif gap == "structure_context":
+            actions.append(
+                {
+                    "gap": gap,
+                    "review_action": "bind_existing_dft_records",
+                    "submit_payload_hint": {
+                        "active_site_ref": {
+                            "structure_context": "<evidence-backed structure/model label>",
+                        },
+                    },
+                    "requires_user_evidence": True,
+                }
+            )
+        elif gap == "li2s_adsorption":
             actions.append(
                 {
                     "gap": gap,
@@ -282,17 +327,22 @@ def backfill_plan_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
                     "catalyst_scope": sample.get("catalyst_scope"),
                     "active_site_instance_key": sample.get("active_site_instance_key"),
                     "binding_source": sample.get("binding_source"),
+                    "review_action": "",
                     "gap": "",
                     "property_type": "",
                     "adsorbate": "",
                     "energy_kind": "",
                     "unit": "",
+                    "active_site_context": "",
+                    "structure_context": "",
+                    "active_site_ref_patch": "",
                     "requires_user_evidence": "",
                 }
             )
             continue
         for action in actions:
             hint = action.get("submit_payload_hint") or {}
+            active_site_ref_hint = hint.get("active_site_ref") if isinstance(hint.get("active_site_ref"), dict) else {}
             rows.append(
                 {
                     "paper_id": sample.get("paper_id"),
@@ -302,11 +352,17 @@ def backfill_plan_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
                     "catalyst_scope": sample.get("catalyst_scope"),
                     "active_site_instance_key": sample.get("active_site_instance_key"),
                     "binding_source": sample.get("binding_source"),
+                    "review_action": action.get("review_action") or "submit_property",
                     "gap": action.get("gap"),
                     "property_type": hint.get("property_type"),
                     "adsorbate": hint.get("adsorbate"),
                     "energy_kind": hint.get("energy_kind"),
                     "unit": hint.get("unit"),
+                    "active_site_context": active_site_ref_hint.get("active_site_context"),
+                    "structure_context": active_site_ref_hint.get("structure_context"),
+                    "active_site_ref_patch": json.dumps(active_site_ref_hint, ensure_ascii=False, sort_keys=True)
+                    if active_site_ref_hint
+                    else "",
                     "requires_user_evidence": action.get("requires_user_evidence"),
                 }
             )
@@ -322,11 +378,15 @@ def write_backfill_plan_csv(report: dict[str, Any], path: Path) -> None:
         "catalyst_scope",
         "active_site_instance_key",
         "binding_source",
+        "review_action",
         "gap",
         "property_type",
         "adsorbate",
         "energy_kind",
         "unit",
+        "active_site_context",
+        "structure_context",
+        "active_site_ref_patch",
         "requires_user_evidence",
     ]
     rows = backfill_plan_csv_rows(report)

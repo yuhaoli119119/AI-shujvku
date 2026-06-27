@@ -163,6 +163,7 @@ class ExtractionJobRequest(BaseModel):
             "CatalystSample",
             "DFTSetting",
             "DFTResult",
+            "ProjectLibraryV4Extraction",
             "MechanismClaim",
             "ElectrochemicalPerformance",
         ]

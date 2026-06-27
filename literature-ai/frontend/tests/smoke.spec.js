@@ -2848,6 +2848,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
   test('business flow: literature library exposes DFT safety and Codex item actions', async ({ page }) => {
       let verifyPayload = null;
+      let catalystBasicInfoPayload = null;
       await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1\/verify$/, async route => {
         verifyPayload = JSON.parse(route.request().postData() || '{}');
         return jsonResponse(route, {
@@ -2866,6 +2867,22 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           locator_status: 'exact_page',
         },
         audit_log_id: 'audit-1',
+      });
+    });
+    await page.route(/\/api\/papers\/paper-1\/catalyst-samples\/catalyst-1\/basic-info$/, async route => {
+      catalystBasicInfoPayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        status: 'updated',
+        paper_id: 'paper-1',
+        catalyst_sample_id: 'catalyst-1',
+        catalyst_sample: {
+          id: 'catalyst-1',
+          name: 'Pt(111)',
+          catalyst_type: 'surface',
+          metal_centers: ['Pt'],
+          support: 'graphene',
+          support_normalized: 'graphene',
+        },
       });
     });
 
@@ -2929,12 +2946,33 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
     expect(dftConflictClassification.conflicts).toHaveLength(1);
     expect(dftConflictClassification.newReview).toHaveLength(0);
-    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(5);
+    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(4);
     const dftSampleGroups = page.locator('#dftContent [data-role="dft-sample-group"]');
     await expect(dftSampleGroups).toHaveCount(1);
+    await expect(dftSampleGroups.first()).toContainText('催化剂样本');
+    await expect(dftSampleGroups.first()).not.toContainText('催化剂组');
+    await expect(dftSampleGroups.first()).toContainText('催化剂基础信息');
     await expect(dftSampleGroups.first()).toContainText('Pt(111)');
+    await expect(dftSampleGroups.first()).toContainText('Pt support');
     await expect(dftSampleGroups.first()).toContainText('Pt(111)::surface');
     await expect(dftSampleGroups.first()).toContainText('DFT 1 条');
+    await expect(dftSampleGroups.first()).not.toHaveAttribute('open', '');
+    await dftSampleGroups.first().locator('summary').first().click();
+    await expect(dftSampleGroups.first()).toHaveAttribute('open', '');
+    await dftSampleGroups.first().locator('button:has-text("编辑基础信息")').click();
+    const basicInfoForm = page.locator('.dft-basic-info-form[data-catalyst-sample-id="catalyst-1"]');
+    await expect(basicInfoForm).toBeVisible();
+    await basicInfoForm.locator('[data-field="support"]').selectOption('graphene');
+    await basicInfoForm.locator('[data-field="metal_centers"]').fill('Pt');
+    await basicInfoForm.locator('button:has-text("保存基础信息")').click();
+    await expect.poll(() => catalystBasicInfoPayload).toMatchObject({
+      catalyst_type: 'surface',
+      metal_centers: ['Pt'],
+      support: 'graphene',
+      source: 'literature_library_frontend',
+    });
+    await expect(page.locator('#dftContent [data-role="dft-sample-group"]').first()).toBeVisible();
+    await page.locator('#dftContent [data-role="dft-sample-group"]').first().locator('summary').first().click();
     const dftCandidateCard = page.locator('#dftContent details.readable-card').filter({ hasText: 'adsorption_energy' }).first();
     await dftCandidateCard.locator('summary').click();
     await expect(dftCandidateCard.locator('button:has-text("接受入库")')).toBeVisible();
@@ -2947,6 +2985,67 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.click('button[data-tab="figures"]');
       await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
+    });
+
+    test('business flow: unbound DFT group can create and bind catalyst basic info', async ({ page }) => {
+      const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
+      detail.catalyst_samples_items = [];
+      detail.dft_results_items = [{
+        id: '7eb977a3-45cb-4d5c-9704-b1f9fece76e2',
+        catalyst_sample_id: null,
+        catalyst: 'Co-GeC',
+        property_type: 'adsorption_energy',
+        value: -1.23,
+        unit: 'eV',
+      }];
+      let createPayload = null;
+      await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => jsonResponse(route, detail));
+      await page.route(/\/api\/papers\/paper-1\/catalyst-samples\/from-dft-group$/, async route => {
+        createPayload = JSON.parse(route.request().postData() || '{}');
+        return jsonResponse(route, {
+          status: 'created_and_bound',
+          paper_id: 'paper-1',
+          catalyst_sample_id: 'created-sample-1',
+          bound_dft_result_ids: ['7eb977a3-45cb-4d5c-9704-b1f9fece76e2'],
+          created: true,
+        });
+      });
+
+      await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+      await page.waitForTimeout(500);
+      await page.click('.paper-row');
+      await page.click('button[data-tab="dft"]');
+
+      const group = page.locator('#dftContent [data-role="dft-sample-group"]').first();
+      await expect(group).toContainText('基础信息待补');
+      await expect(group).not.toContainText('待绑定样本');
+      await group.locator('summary').first().click();
+      await group.locator('button:has-text("补充基础信息")').click();
+      const form = group.locator('.dft-basic-info-form[data-mode="create"]');
+      await expect(form).toBeVisible();
+      await expect(form).toContainText('无需先去其他页面绑定');
+      await form.locator('[data-field="catalyst_type"]').selectOption('dual_atom');
+      await form.locator('[data-field="metal_centers"]').fill('Co, Ge');
+      await form.locator('[data-field="support"]').selectOption('GeC');
+      await form.locator('button:has-text("创建并关联")').click();
+
+      await expect.poll(() => createPayload).toMatchObject({
+        name: 'Co-GeC',
+        catalyst_type: 'dual_atom',
+        metal_centers: ['Co', 'Ge'],
+        support: 'GeC',
+        dft_result_ids: ['7eb977a3-45cb-4d5c-9704-b1f9fece76e2'],
+      });
+      const separatorParsing = await page.evaluate(() => ({
+        comma: parseCatalystMetalCenters('fe, co'),
+        space: parseCatalystMetalCenters('Fe Co'),
+        chineseComma: parseCatalystMetalCenters('Fe，Co'),
+        invalid: parseCatalystMetalCenters('铁、钴'),
+      }));
+      expect(separatorParsing.comma.values).toEqual(['Fe', 'Co']);
+      expect(separatorParsing.space.values).toEqual(['Fe', 'Co']);
+      expect(separatorParsing.chineseComma.values).toEqual(['Fe', 'Co']);
+      expect(separatorParsing.invalid.invalid).toEqual(['铁、钴']);
     });
 
     test('business flow: single DFT action settles and copies the next AI review task', async ({ page }) => {
@@ -3387,7 +3486,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(700);
 
       await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
-      const catalystCard = page.locator('#dftContent details.readable-card[data-codex-item-type="catalyst_sample"][data-target-id="catalyst-1"]').first();
+      const catalystCard = page.locator('#dftContent details.dft-sample-group[data-codex-item-type="catalyst_sample"][data-target-id="catalyst-1"]').first();
       await expect(catalystCard).toBeVisible();
       await expect(catalystCard).toHaveAttribute('open', '');
       await expect(catalystCard).toContainText('Pt(111)');
@@ -3877,6 +3976,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft`);
       await page.waitForTimeout(700);
       await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
+      await page.locator('#dftContent [data-role="dft-sample-group"]').evaluateAll(groups => {
+        groups.forEach(group => group.setAttribute('open', ''));
+      });
 
       const expectations = [
         ['1b6ddc19-aac3-4c96-999d-e8d060597378', 'Conflict fields: adsorbate, reaction_step'],

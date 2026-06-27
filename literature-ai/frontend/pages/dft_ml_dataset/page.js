@@ -27,7 +27,7 @@
         v4SampleQuality: null,
         v4SelectedSampleIndex: null,
         v4Task: "adsorption_energy",
-        v4ReadyOnly: true,
+        v4ReadyOnly: false,
         serverFilters: {
             library_name: "",
             year_min: "",
@@ -1334,9 +1334,6 @@
             throw new Error("请先在 sample_records 中选择一个样本。");
         }
         const sourceText = textOrNull("v4SubmitSourceText");
-        if (!sourceText) {
-            throw new Error("source_text 不能为空。");
-        }
         const activeSiteRef = sample.active_site_ref && typeof sample.active_site_ref === "object"
             ? sample.active_site_ref
             : {
