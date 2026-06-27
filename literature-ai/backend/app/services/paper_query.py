@@ -49,6 +49,7 @@ from app.schemas.api import (
     FigureDataPointResponse,
 )
 from app.domain.catalyst_basic_info import catalyst_basic_info_payload
+from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.paper_codes import ensure_paper_codes
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.config import get_settings
@@ -62,7 +63,7 @@ from app.utils.figure_reliability import build_figure_image_review
 from app.utils.text_cleaning import repair_mojibake_text
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import writing_card_gate
+from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
 from app.rag.quality import build_rag_quality_summary
 
 
@@ -625,6 +626,7 @@ class PaperQueryService:
                     catalyst_by_id=catalyst_by_id,
                     object_review_audits=dft_result_audits.get(str(item.id), []),
                     field_conflicts=dft_result_conflicts.get(str(item.id), []),
+                    review_gate=is_export_eligible_extraction(self.session, item, target_type="dft_results"),
                 )
                 for item in dft_results
             ],
@@ -1574,11 +1576,21 @@ class PaperQueryService:
         catalyst_by_id: dict[str, CatalystSample] | None = None,
         object_review_audits: list[dict[str, Any]] | None = None,
         field_conflicts: list[dict[str, Any]] | None = None,
+        review_gate: Any | None = None,
     ) -> DFTResultResponse:
         payload = DFTResultResponse.model_validate(item)
         audits = object_review_audits or []
         conflicts = field_conflicts or []
         conflict_field_names = cls._aggregate_conflict_field_names(conflicts)
+        ai_review_display = (
+            DFTReviewQueueService.build_ai_review_display_status(
+                gate=review_gate,
+                object_review_audits=audits,
+                conflicts=conflicts,
+            )
+            if review_gate is not None
+            else None
+        )
         linked_catalyst = (
             catalyst_by_id.get(str(item.catalyst_sample_id))
             if catalyst_by_id and item.catalyst_sample_id is not None
@@ -1622,6 +1634,10 @@ class PaperQueryService:
                 "field_conflicts": conflicts[:5],
                 "affected_field_names": conflict_field_names,
                 "conflict_field_names": conflict_field_names,
+                "ai_review_display_status": ai_review_display["status"] if ai_review_display else None,
+                "ai_review_display_label": ai_review_display["label"] if ai_review_display else None,
+                "ai_review_display_reason": ai_review_display["reason"] if ai_review_display else None,
+                "ai_review_display_class": ai_review_display["class_name"] if ai_review_display else None,
             }
         )
 
