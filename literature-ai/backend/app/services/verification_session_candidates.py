@@ -17,6 +17,7 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
 )
+from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_rescan_policy import (
     is_dft_method_only_reaction_step,
     normalize_dft_reaction_step_for_identity,
@@ -42,6 +43,7 @@ class VerificationSessionDFTCandidateMixin:
         existing_by_method_step_signature = self._existing_new_dft_method_step_signatures(paper_id)
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        issue_service = DFTAuditIssueService(self.session)
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_type = self._normalize_object_review_target_type(payload.get("target_type"))
@@ -49,6 +51,12 @@ class VerificationSessionDFTCandidateMixin:
             target_id = str(payload.get("target_id") or "").strip().lower()
             if target_type != "dft_results" or (decision != "new_candidate" and target_id != "new"):
                 continue
+            issue = issue_service.create_or_update_missing_issue(
+                paper_id=paper_id,
+                candidate=candidate,
+                run=run,
+                payload=payload,
+            )
             if bool(payload.get("borrowed_from_reference")):
                 skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
                 self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
@@ -103,6 +111,7 @@ class VerificationSessionDFTCandidateMixin:
                     "candidate_id": str(candidate.id),
                     "action": action,
                     "dft_result_id": str(existing.id),
+                    "issue_id": str(issue.id),
                     "property_type": existing.property_type,
                     "value": existing.value,
                     "unit": existing.unit,

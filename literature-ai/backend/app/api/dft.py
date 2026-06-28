@@ -19,6 +19,7 @@ from app.schemas.project_library import (
     ProjectLibraryUserSubmitResultPayload,
 )
 from app.services.dft_export_service import build_dft_ml_dataset_v3, build_dft_ml_dataset_v3_csv
+from app.services.dft_audit_issue_service import DFT_AUDIT_ISSUE_OPEN_STATUSES, DFTAuditIssueService
 from app.services.project_library_bundle_service import ProjectLibraryBundleService
 from app.services.project_library_ml_service import ProjectLibraryMLService
 from app.services.project_library_quality_service import ProjectLibraryQualityService
@@ -35,6 +36,36 @@ router = APIRouter()
 def _v3_filename(task: str, suffix: str) -> str:
     safe_task = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task).strip("_")
     return f"dft_ml_dataset_v3_{safe_task or 'task'}.{suffix}"
+
+
+@router.get("/audit-issues")
+def get_dft_audit_issues(
+    paper_id: UUID | None = Query(default=None),
+    status: list[str] | None = Query(default=None),
+    include_closed: bool = Query(default=False),
+    limit: int = Query(default=200, ge=1, le=1000),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    statuses = set(status or [])
+    if not statuses and not include_closed:
+        statuses = set(DFT_AUDIT_ISSUE_OPEN_STATUSES)
+    try:
+        rows = DFTAuditIssueService(session).list_issues(
+            paper_id=paper_id,
+            statuses=statuses or None,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "items": [DFTAuditIssueService.serialize_issue(row) for row in rows],
+        "count": len(rows),
+        "filters": {
+            "paper_id": str(paper_id) if paper_id else None,
+            "status": sorted(statuses) if statuses else None,
+            "include_closed": include_closed,
+        },
+    }
 
 
 @router.get("/project-library-queue", response_model=ProjectLibraryQueuePayload)

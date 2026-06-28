@@ -108,11 +108,11 @@ _MODULE_RULES = {
 - 硬规则：RDS 对应吉布斯自由能属于自由能变化（gibbs_free_energy_change），不属于反应能垒；如原文写 RDS Gibbs free energy、ΔG of RDS、决速步骤自由能等，property_type 记为 gibbs_free_energy_change，并在 reaction_step 标注 RDS/决速步骤。
 - 硬规则：自由能变化、反应能垒、迁移能垒、Li2S 分解能垒不得混用；只有原文明确为 barrier / activation energy / ΔG‡ / 活化能 / 反应能垒时才记为 reaction_barrier；migration 或 diffusion barrier 记为 migration_barrier；Li2S decomposition barrier 记为 li2s_decomposition_barrier。
 - 必须同时检查主文与已关联 SI 的 DFT 表格/文本；SI 候选仍归属主文 paper_id，并标记 source_document_type="supplementary_information"。
-- 漏提项使用 object_review_audits 的 new_candidate；希望形成未验证候选时必须 auto_apply_review_rules=true。
-- DFT object_review_audits / new_candidate 属于高风险写入；调用 import_analysis 时必须通过 MCP/HTTP 受控入口取得或传入 dft_results 模块写锁，缺锁返回 409 时不要绕过系统。
+- 漏提项使用 object_review_audits 的 new_candidate；后端会沉淀为 DFT audit issue / missing_dft_result 草案，供主 AI 或用户后续处理，不是最终真值。
+- DFT object_review_audits / new_candidate 属于高风险审核输入；调用 import_analysis 时必须通过 MCP/HTTP 受控入口取得或传入 dft_results 模块写锁，缺锁返回 409 时不要绕过系统。
 - 不从曲线估读精确数值；引用文献数据必须标记 borrowed_from_reference=true。
 - PASS 仍不等于 safe_verified；保持多 AI/人工审核与导出门禁。
-- 双 AI DFT consensus 只会被后端记录为审核意见/待处理事项；不要宣称已经自动应用、人工确认、verified、rejected 或 ML_Ready。
+- 双 AI DFT consensus 只会被后端记录为 DFT audit issue / 待处理事项；不要宣称已经自动应用、人工确认、verified、rejected 或 ML_Ready。
 - AI 不得向 review_payload.human_verification 写入或暗示人工确认；需要最终判断时交给主 AI 修复候选，无法判断再交前端人工处理。
 
 object_review_audits DFT new_candidate 结构规范（缺一不可）：
@@ -222,7 +222,7 @@ def _reaction_profile_context(target_reaction: Any = None) -> str:
 DFT new_candidate / PROPOSED corrected_value 额外要求：
 - 尽量包含 reaction_type、property_type、adsorbate、reaction_step、material_identity、value、unit、method 或 calculation_setting。
 - 面向表格型 ML 的候选还要说明是否能绑定结构/位点/材料身份、DFT setting、页码/表格/quoted_text 证据。
-- 缺 reaction_type、adsorbate/reaction_step、材料身份、setting 或证据定位时，不要 PASS；写 PROPOSED、NEEDS_HUMAN 或 new_candidate，并把缺口写进 reason。
+- 缺 reaction_type、adsorbate/reaction_step、材料身份、setting 或证据定位时，不要 PASS；写 PROPOSED、NEEDS_HUMAN 或 new_candidate，并把缺口写进 reason；这些输出是 DFT audit issue 草案，不是最终数据库真值。
 """
 
 

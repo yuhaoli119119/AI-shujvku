@@ -283,6 +283,41 @@ class DFTResult(Base):
     )
 
 
+class DFTAuditIssue(Base):
+    __tablename__ = "dft_audit_issues"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    target_type: Mapped[str] = mapped_column(sa.String(64), default="dft_results", server_default="dft_results", index=True)
+    target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    issue_type: Mapped[str] = mapped_column(sa.String(64), index=True)
+    severity: Mapped[str] = mapped_column(sa.String(16), default="medium", server_default="medium", index=True)
+    status: Mapped[str] = mapped_column(sa.String(32), default="open", server_default="open", index=True)
+    current_snapshot: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    suggested_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(json_type(), nullable=True)
+    suggested_dft: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    evidence_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
+    source_identities: Mapped[list] = mapped_column(json_type(), default=list)
+    source_candidate_ids: Mapped[list] = mapped_column(json_type(), default=list)
+    fingerprint: Mapped[str] = mapped_column(sa.String(128), index=True)
+    resolution_note: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "paper_id",
+            "target_type",
+            "target_id",
+            "issue_type",
+            "fingerprint",
+            name="uq_dft_audit_issue_identity",
+        ),
+    )
+
+
 class MechanismClaim(Base):
     __tablename__ = "mechanism_claims"
 

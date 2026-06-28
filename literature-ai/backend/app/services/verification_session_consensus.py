@@ -13,6 +13,7 @@ from app.db.models import (
     ExternalAnalysisRun,
     ExtractionFieldReview,
 )
+from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_review_helpers import (
     material_identity_parts_compatible,
     normalize_dft_value_for_comparison,
@@ -142,6 +143,7 @@ class VerificationSessionDFTConsensusMixin:
                     target_type="dft_results",
                     target_id=str(row.id),
                     reviewer=reviewer,
+                    opinion=adopted,
                 )
             else:
                 adopted = self._complete_dft_third_ai_adjudication(row, adopted, anchored)
@@ -154,6 +156,12 @@ class VerificationSessionDFTConsensusMixin:
             for audit in audits:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
+            self._merge_dft_issue_sources(
+                row=row,
+                audits=anchored,
+                result=result,
+                negative=result.get("action") == "audit_opinion_rejected",
+            )
             row_ref.update(result)
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
@@ -165,15 +173,18 @@ class VerificationSessionDFTConsensusMixin:
             return row_ref
 
         if all(self._is_negative_dft_decision(audit.get("decision")) for audit in anchored):
+            adopted = max(anchored, key=lambda item: item.get("confidence") or 0)
             result = self._apply_reject_all(
                 paper_id=row.paper_id,
                 target_type="dft_results",
                 target_id=str(row.id),
                 reviewer=reviewer,
+                opinion=adopted,
             )
             for audit in audits:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
+            self._merge_dft_issue_sources(row=row, audits=anchored, result=result, negative=True)
             row_ref.update(
                 {
                     "action": result.get("action"),
@@ -204,6 +215,7 @@ class VerificationSessionDFTConsensusMixin:
             for audit in audits:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
+            self._merge_dft_issue_sources(row=row, audits=anchored, result=result)
             row_ref.update(result)
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
@@ -228,6 +240,7 @@ class VerificationSessionDFTConsensusMixin:
             for audit in audits:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
+            self._merge_dft_issue_sources(row=row, audits=anchored, result=result)
             row_ref.update(result)
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
@@ -252,6 +265,7 @@ class VerificationSessionDFTConsensusMixin:
             for audit in audits:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
+            self._merge_dft_issue_sources(row=row, audits=anchored, result=result)
             row_ref.update(result)
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
@@ -296,6 +310,7 @@ class VerificationSessionDFTConsensusMixin:
             for audit in audits:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
+            self._merge_dft_issue_sources(row=row, audits=anchored, result=result)
             row_ref.update(result)
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
@@ -303,6 +318,30 @@ class VerificationSessionDFTConsensusMixin:
         row_ref["reason"] = "value_conflict"
         row_ref["status"] = "need_third_ai"
         return row_ref
+
+    def _merge_dft_issue_sources(
+        self,
+        *,
+        row: DFTResult,
+        audits: list[dict[str, Any]],
+        result: dict[str, Any],
+        negative: bool = False,
+    ) -> None:
+        if result.get("action") not in {"record_dft_audit_consensus", "audit_opinion_rejected"}:
+            return
+        issue_service = DFTAuditIssueService(self.session)
+        field_name = str(result.get("field_name") or "dft_results")
+        for audit in audits:
+            if negative and not self._is_negative_dft_decision(audit.get("decision")):
+                continue
+            issue_service.create_or_update_consensus_issue(
+                paper_id=row.paper_id,
+                row=row,
+                field_name=field_name,
+                opinion=audit,
+                negative=negative,
+                adjudicated_by_third_ai=str(audit.get("adjudication_role") or "").strip().lower() == "third_ai",
+            )
 
     def _apply_dft_consensus_outcome(
         self,
