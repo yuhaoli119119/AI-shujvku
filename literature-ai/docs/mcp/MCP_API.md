@@ -74,6 +74,14 @@ The DFT audit key may create issue/candidate evidence but must not receive `repa
 
 Runtime diagnostics expose MCP capability lint warnings in `/api/system/agent-guide` under `mcp.capability_warnings` and in `/api/settings/ide-prompts` under `mcp_capability_warnings`. Check these warnings after editing `LITAI_MCP_API_KEYS`. A warning means `repair_dft_issues` appears on a key whose source/display name is not a primary repair role. The warning includes source/display/capability only and does not include the raw API key.
 
+DFT audit/repair health can be checked with the read-only report endpoint:
+
+```text
+GET /api/dft/audit-report?paper_id=<optional-paper-uuid>&days=30&include_closed=false
+```
+
+The report groups DFT audit issues by status and issue type, groups `repair_dft_audit_issue` AuditLog rows by action and repair actor/capability, counts any `writes_final_truth=true` repair logs, returns suspect repair warnings, and includes the same MCP capability lint warnings. It does not modify DFT data and does not include raw API keys.
+
 ## Capabilities
 
 - `read_papers`: read paper metadata, parsed sections, candidates, evidence, Codex context, review coverage, and queues.

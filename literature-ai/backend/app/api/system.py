@@ -143,6 +143,12 @@ async def get_agent_guide() -> dict:
                 "purpose": "List DFT candidates that need evidence/locator/review work before ML export.",
             },
             {
+                "name": "get_dft_audit_report",
+                "method": "GET",
+                "path": "/api/dft/audit-report",
+                "purpose": "Read-only DFT audit/repair health report grouped by issue status, issue type, repair action, actor, and capability diagnostics.",
+            },
+            {
                 "name": "retrieval_search",
                 "method": "POST",
                 "path": "/api/retrieval/search",
@@ -294,6 +300,7 @@ async def get_agent_guide() -> dict:
             "Use create_figure_from_bbox when a figure is missing entirely: read the PDF page, choose a bbox or full_page strategy, crop from the original PDF, and create the figure object directly. "
             "Use review_figure when the task is to record a figure verdict such as verified, needs_repair, or rejected; use import_analysis when the task is to correct figure_role, content_summary, key_elements, page, or caption metadata. Figure-derived DFT data must be submitted as DFT candidates/object_review_audits with figure/page/text/value/unit/property/material anchors, not as final verified or ML_Ready data. "
             "DFT audit AI may submit object_review_audits, issues, and correction candidates only. Dual-AI DFT consensus is recorded as an audit opinion and must not auto-verify, auto-reject, write human_verification, or move a DFTResult to ML_Ready. get_dft_audit_issues remains read_papers for both audit and primary AI, but only a primary repair AI key with repair_dft_issues may repair exactly one issue_id through repair_dft_audit_issue; audit AI, ordinary IDE AI, and propose-only keys must not call that repair tool. Repair output remains AI-applied candidate data pending later review, not human_verified or ML_Ready. Use verify_dft_result/reject_dft_result only after explicit human/user-authorized evidence review, never as an automatic audit-consensus step. "
+            "Use GET /api/dft/audit-report for read-only DFT audit/repair health checks; it summarizes issue status/type counts, repair actor/capability counts, suspect repair warnings, and MCP capability lint warnings without exposing raw keys. "
             "Check mcp.capability_warnings in this agent guide; if repair_dft_issues appears on a non-primary-repair key, fix the key split before using repair_dft_audit_issue. "
             "Table object lifecycle is direct-tool-only: use update_table for caption/markdown/page/prov fixes, create_table for missing parsed tables, merge_table for split/continued/duplicate table fragments, and delete_table for invalid table objects. Do not only write a backend-request note, and do not submit table deletion/merge through import_analysis. Use the table object's real paper_id for table tools; SI table objects usually belong to the related SI paper_id even when their scientific evidence is used for the main paper. "
             "Use get_review_coverage only as a high-level coverage aid; for authoritative field readback, prefer get_paper or get_codex_item. "
