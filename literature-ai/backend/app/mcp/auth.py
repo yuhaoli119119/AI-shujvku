@@ -51,6 +51,31 @@ def parse_mcp_api_keys(raw: str) -> dict[str, MCPKeyConfig]:
     return configs
 
 
+def _is_primary_repair_key(config: MCPKeyConfig) -> bool:
+    identity = f"{config.source_prefix} {config.display_name}".lower()
+    return "dft_primary_repair" in identity or ("primary" in identity and "repair" in identity)
+
+
+def validate_mcp_capability_assignments(configs: dict[str, MCPKeyConfig]) -> list[dict[str, object]]:
+    warnings: list[dict[str, object]] = []
+    for config in configs.values():
+        if "repair_dft_issues" not in config.capabilities:
+            continue
+        if _is_primary_repair_key(config):
+            continue
+        warnings.append(
+            {
+                "code": "repair_dft_issues_non_primary_repair_key",
+                "severity": "warning",
+                "message": "repair_dft_issues should only be assigned to a DFT primary repair AI key",
+                "source_prefix": config.source_prefix,
+                "display_name": config.display_name,
+                "capability": "repair_dft_issues",
+            }
+        )
+    return warnings
+
+
 def _unauthenticated_mcp_allowed(request: Request) -> bool:
     # Kept as a compatibility seam for callers/tests. HTTP MCP never accepts
     # anonymous clients; in-process MCP uses mcp_auth_context instead.

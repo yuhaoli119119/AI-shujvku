@@ -72,6 +72,8 @@ human_reviewer|Human Reviewer|<strong-random-key>|read_papers,review_corrections
 
 The DFT audit key may create issue/candidate evidence but must not receive `repair_dft_issues`. The primary repair key is intentionally narrow: it can read the DFT audit issue queue and call `repair_dft_audit_issue`, but it does not need proposal or final-review capabilities. Human/admin review keys can keep explicit verify/reject capabilities without implicitly becoming DFT issue repair keys.
 
+Runtime diagnostics expose MCP capability lint warnings in `/api/system/agent-guide` under `mcp.capability_warnings` and in `/api/settings/ide-prompts` under `mcp_capability_warnings`. Check these warnings after editing `LITAI_MCP_API_KEYS`. A warning means `repair_dft_issues` appears on a key whose source/display name is not a primary repair role. The warning includes source/display/capability only and does not include the raw API key.
+
 ## Capabilities
 
 - `read_papers`: read paper metadata, parsed sections, candidates, evidence, Codex context, review coverage, and queues.
@@ -370,4 +372,5 @@ Reviewer and admin tools:
 - External audit imports must remain unverified until a human/final review step confirms them.
 - Do not grant `review_corrections` to external AI clients unless that client is intentionally acting as a trusted admin.
 - Do not grant `repair_dft_issues` to external audit/propose-only clients. Use a separate `dft_primary_repair` key with `read_papers,repair_dft_issues`.
+- Check `mcp.capability_warnings` / `mcp_capability_warnings` after deployment changes; fix any `repair_dft_issues_non_primary_repair_key` warning before running DFT issue repair.
 - DFT export remains gated by safe verified evidence and exact locators.

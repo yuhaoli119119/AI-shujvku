@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.mcp.auth import parse_mcp_api_keys, validate_mcp_capability_assignments
 from app.services.ide_prompt_service import (
     CANONICAL_MCP_PATH,
     PROMPT_SCHEMA_VERSION,
@@ -59,6 +60,7 @@ async def get_agent_guide() -> dict:
     from app.config import get_settings
 
     settings = get_settings()
+    mcp_capability_warnings = validate_mcp_capability_assignments(parse_mcp_api_keys(settings.mcp_api_keys))
     return {
         "system_name": "Literature AI",
         "positioning": (
@@ -181,6 +183,7 @@ async def get_agent_guide() -> dict:
             "url": CANONICAL_MCP_PATH,
             "transport": "streamable_http",
             "auth": "HTTP MCP requires Authorization: Bearer <mcp_api_key>. The in-process fallback uses mcp_auth_context instead of HTTP authentication.",
+            "capability_warnings": mcp_capability_warnings,
             "key_role_examples": [
                 {
                     "source_prefix": "ide_ai",
@@ -291,6 +294,7 @@ async def get_agent_guide() -> dict:
             "Use create_figure_from_bbox when a figure is missing entirely: read the PDF page, choose a bbox or full_page strategy, crop from the original PDF, and create the figure object directly. "
             "Use review_figure when the task is to record a figure verdict such as verified, needs_repair, or rejected; use import_analysis when the task is to correct figure_role, content_summary, key_elements, page, or caption metadata. Figure-derived DFT data must be submitted as DFT candidates/object_review_audits with figure/page/text/value/unit/property/material anchors, not as final verified or ML_Ready data. "
             "DFT audit AI may submit object_review_audits, issues, and correction candidates only. Dual-AI DFT consensus is recorded as an audit opinion and must not auto-verify, auto-reject, write human_verification, or move a DFTResult to ML_Ready. get_dft_audit_issues remains read_papers for both audit and primary AI, but only a primary repair AI key with repair_dft_issues may repair exactly one issue_id through repair_dft_audit_issue; audit AI, ordinary IDE AI, and propose-only keys must not call that repair tool. Repair output remains AI-applied candidate data pending later review, not human_verified or ML_Ready. Use verify_dft_result/reject_dft_result only after explicit human/user-authorized evidence review, never as an automatic audit-consensus step. "
+            "Check mcp.capability_warnings in this agent guide; if repair_dft_issues appears on a non-primary-repair key, fix the key split before using repair_dft_audit_issue. "
             "Table object lifecycle is direct-tool-only: use update_table for caption/markdown/page/prov fixes, create_table for missing parsed tables, merge_table for split/continued/duplicate table fragments, and delete_table for invalid table objects. Do not only write a backend-request note, and do not submit table deletion/merge through import_analysis. Use the table object's real paper_id for table tools; SI table objects usually belong to the related SI paper_id even when their scientific evidence is used for the main paper. "
             "Use get_review_coverage only as a high-level coverage aid; for authoritative field readback, prefer get_paper or get_codex_item. "
             "Use get_field_disputes to find conflicting values proposed by different AIs. Includes historically resolved disputes (status='resolved') so later AIs know what was already settled. "

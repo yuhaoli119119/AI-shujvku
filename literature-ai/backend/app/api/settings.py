@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import DATABASE_V1_EMBEDDING_DIMENSION, DATABASE_V1_EMBEDDING_MODEL, get_settings
+from app.mcp.auth import parse_mcp_api_keys, validate_mcp_capability_assignments
 from app.security.owner import require_owner_request
 from app.services.ide_prompt_service import (
     CANONICAL_MCP_PATH,
@@ -599,6 +600,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
     settings = get_settings()
     base_url = _advertised_base_url(request, fallback_host=local_ip, fallback_port=8000)
     mcp_url = f"{base_url}{CANONICAL_MCP_PATH}"
+    mcp_capability_warnings = validate_mcp_capability_assignments(parse_mcp_api_keys(settings.mcp_api_keys))
 
     sample_key = "litmcp_your_key"
     primary_repair_sample_key = "litmcp_dft_primary_repair"
@@ -676,6 +678,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "- For RAG-ready facts, preserve source_type, source_id, paper_code, page, evidence_text, review_status, and evidence_locator when available.\n"
         "- Raw parser sections and parser-derived writing cards are not trusted knowledge. They must not be shown as final content or used by RAG/writing until an IDE AI review writes back ai_reviewed/ai_applied content with PDF evidence.\n"
         "- DFT audit issue repair is a separate key role. Audit/propose-only keys may read get_dft_audit_issues and create candidates, but only a key with read_papers,repair_dft_issues should call repair_dft_audit_issue. Example primary repair key: dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues.\n"
+        "- Check mcp_capability_warnings in the settings diagnostics. If repair_dft_issues is reported on a non-primary-repair key, fix the key split before using repair_dft_audit_issue.\n"
         "- Catalyst samples must have a material identity and evidence anchor before being used for writing/RAG or linked to mechanism, electrochemical, or DFT records.\n"
         "- Writing support should use writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, figure cards, and verified DFT candidates where allowed by the safety gate.\n"
         "- Do not overwrite English evidence fields with Chinese translations. Put Chinese only in derived *_zh fields where available, writing cards, or review notes.\n"
@@ -695,6 +698,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "sample_key": sample_key,
         "primary_repair_sample_key": primary_repair_sample_key,
         "mcp_key_role_examples": mcp_key_role_examples,
+        "mcp_capability_warnings": mcp_capability_warnings,
         "auth_required": auth_required,
         "cursor_config": cursor_config,
         "cursor_config_json": json.dumps(cursor_config, indent=2, ensure_ascii=False),
@@ -712,6 +716,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             f"认证方式：Bearer {sample_key}\n"
             f"DFT 主修复 AI 示例 key（仅占位，不是真实密钥）：dft_primary_repair|DFT Primary Repair AI|{primary_repair_sample_key}|read_papers,repair_dft_issues\n"
             f"审核 AI / 普通 IDE AI / propose-only key 不应包含 repair_dft_issues；它们只能读取队列、创建 issue/候选或提交修订建议。\n"
+            f"请检查 mcp_capability_warnings；如果 repair_dft_issues 出现在非 primary repair key 上，先修正配置再使用 repair_dft_audit_issue。\n"
             f"配置 JSON（仅在用户明确要求手工配置时使用）：\n"
             f"```json\n{json.dumps(cursor_config, indent=2, ensure_ascii=False)}\n```\n\n"
             f"连接成功后，你可以使用以下工具：\n"

@@ -55,6 +55,8 @@ human_reviewer|Human Reviewer|<strong-random-key>|read_papers,review_corrections
 
 The audit key may submit `object_review_audits`, issues, and correction candidates. Only the primary repair key should have `repair_dft_issues`; ordinary IDE, audit, propose-only, and human-review/admin examples should not receive that capability unless they are intentionally being used as the primary repair role.
 
+Configuration lint diagnostics are available from `/api/system/agent-guide` as `mcp.capability_warnings` and from `/api/settings/ide-prompts` as `mcp_capability_warnings`. They warn when `repair_dft_issues` appears on a source/display name that is not a primary repair role. Diagnostics intentionally omit raw API keys.
+
 ## Dynamic AI Read And Audit Path
 
 For parsed-paper review, the AI assigned to the current task should use:
@@ -124,6 +126,7 @@ When the gate fails, the import records `artifact_precondition_failed` instead o
 - DFT export remains protected by review, evidence, and locator gates.
 - `review_corrections` should remain reserved for trusted admin or human-review keys.
 - `repair_dft_issues` should remain reserved for a separate primary DFT repair key, not ordinary audit/propose-only keys.
+- Deployment changes should check the MCP capability lint warnings before running DFT issue repair.
 
 ## Current Verification Snapshot
 

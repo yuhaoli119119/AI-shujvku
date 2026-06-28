@@ -130,6 +130,7 @@ def test_ide_prompts_never_return_real_mcp_key(monkeypatch):
 
     assert payload["sample_key"] == "litmcp_your_key"
     assert payload["primary_repair_sample_key"] == "litmcp_dft_primary_repair"
+    assert payload["mcp_capability_warnings"] == []
     assert "litmcp_real_secret" not in payload["cursor_config_json"]
     assert "litmcp_real_secret" not in payload["suggested_prompt"]
     assert "litmcp_real_secret" not in payload["legacy_english_suggested_prompt"]
@@ -161,6 +162,7 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
     assert "dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues" in payload["legacy_english_suggested_prompt"]
     assert "审核 AI / 普通 IDE AI / propose-only key 不应包含 repair_dft_issues" in payload["legacy_suggested_prompt"]
+    assert "请检查 mcp_capability_warnings" in payload["legacy_suggested_prompt"]
     assert "SRR_LiS" in payload["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["project_library_contexts"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["topic_field_dictionaries"]
@@ -168,6 +170,31 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert "app.mcp.context.mcp_auth_context" in payload["suggested_prompt"]
     assert "禁止直接导入 service/session/model" in payload["suggested_prompt"]
     assert "后写入的 AI 结果允许覆盖先前 AI 结果" in payload["suggested_prompt"]
+    get_settings.cache_clear()
+
+
+def test_ide_prompts_returns_repair_capability_warning_without_raw_key(monkeypatch):
+    import asyncio
+
+    from app.api import settings as settings_api
+
+    monkeypatch.setenv(
+        "LITAI_MCP_API_KEYS",
+        "assigned_dft_audit|Assigned DFT Audit|litmcp_audit_secret|read_papers,repair_dft_issues",
+    )
+    get_settings.cache_clear()
+    monkeypatch.setattr(settings_api, "_read_persisted_settings", lambda: {})
+
+    payload = asyncio.run(settings_api.get_ide_prompts(_make_request("127.0.0.1", {"host": "localhost:8000"})))
+
+    warnings = payload["mcp_capability_warnings"]
+    assert len(warnings) == 1
+    assert warnings[0]["source_prefix"] == "assigned_dft_audit"
+    assert warnings[0]["display_name"] == "Assigned DFT Audit"
+    assert warnings[0]["capability"] == "repair_dft_issues"
+    assert "litmcp_audit_secret" not in str(warnings)
+    assert "litmcp_audit_secret" not in payload["legacy_english_suggested_prompt"]
+    assert "litmcp_audit_secret" not in payload["legacy_suggested_prompt"]
     get_settings.cache_clear()
 
 

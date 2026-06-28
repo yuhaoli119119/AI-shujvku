@@ -34,7 +34,7 @@ from app.db.models import (
     WritingCard,
 )
 from app.main import app
-from app.mcp.auth import parse_mcp_api_keys
+from app.mcp.auth import parse_mcp_api_keys, validate_mcp_capability_assignments
 from app.mcp.context import MCPAuthInfo, mcp_auth_context
 from app.mcp.server import (
     append_note,
@@ -169,6 +169,7 @@ def _ai_reviewer_auth() -> MCPAuthInfo:
 def test_example_mcp_key_split_reserves_repair_for_primary_repair_key(mcp_test_env):
     configs = parse_mcp_api_keys(os.environ["LITAI_MCP_API_KEYS"])
 
+    assert validate_mcp_capability_assignments(configs) == []
     assert configs["litmcp_dft_primary_repair"].source_prefix == "dft_primary_repair"
     assert configs["litmcp_dft_primary_repair"].display_name == "DFT Primary Repair AI"
     assert configs["litmcp_dft_primary_repair"].capabilities == frozenset(
@@ -179,6 +180,43 @@ def test_example_mcp_key_split_reserves_repair_for_primary_repair_key(mcp_test_e
     assert "propose_corrections" not in configs["litmcp_dft_primary_repair"].capabilities
     assert "review_dft" not in configs["litmcp_dft_primary_repair"].capabilities
     assert "review_corrections" not in configs["litmcp_dft_primary_repair"].capabilities
+
+
+def test_repair_capability_lint_allows_primary_repair_keys():
+    configs = parse_mcp_api_keys(
+        "dft_primary_repair|DFT Primary Repair AI|litmcp_primary|read_papers,repair_dft_issues;"
+        "lab_primary_repair|Lab Primary Repair|litmcp_lab|read_papers,repair_dft_issues"
+    )
+
+    assert validate_mcp_capability_assignments(configs) == []
+
+
+@pytest.mark.parametrize(
+    ("raw_config", "source_prefix", "display_name"),
+    [
+        (
+            "assigned_dft_audit|Assigned DFT Audit|litmcp_audit_secret|read_papers,repair_dft_issues",
+            "assigned_dft_audit",
+            "Assigned DFT Audit",
+        ),
+        (
+            "admin|Admin|litmcp_admin_secret|read_papers,review_corrections,repair_dft_issues",
+            "admin",
+            "Admin",
+        ),
+    ],
+)
+def test_repair_capability_lint_warns_without_raw_key(raw_config, source_prefix, display_name):
+    warnings = validate_mcp_capability_assignments(parse_mcp_api_keys(raw_config))
+
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning["code"] == "repair_dft_issues_non_primary_repair_key"
+    assert warning["message"] == "repair_dft_issues should only be assigned to a DFT primary repair AI key"
+    assert warning["source_prefix"] == source_prefix
+    assert warning["display_name"] == display_name
+    assert warning["capability"] == "repair_dft_issues"
+    assert "litmcp_" not in str(warning)
 
 
 def test_agent_guide_documents_primary_repair_key_split():
@@ -195,6 +233,29 @@ def test_agent_guide_documents_primary_repair_key_split():
     assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
     assert "audit AI can create issue/candidate evidence but must not repair" in by_source["assigned_dft_audit"]["purpose"]
     assert "DFT issue repair remains separate" in by_source["human_reviewer"]["purpose"]
+    assert guide["mcp"]["capability_warnings"] == []
+
+
+def test_agent_guide_returns_repair_capability_lint_warning_without_raw_key(monkeypatch):
+    import asyncio
+
+    from app.api.system import get_agent_guide
+
+    monkeypatch.setenv(
+        "LITAI_MCP_API_KEYS",
+        "admin|Admin|litmcp_admin_secret|read_papers,review_corrections,repair_dft_issues",
+    )
+    get_settings.cache_clear()
+    try:
+        guide = asyncio.run(get_agent_guide())
+    finally:
+        get_settings.cache_clear()
+
+    warnings = guide["mcp"]["capability_warnings"]
+    assert len(warnings) == 1
+    assert warnings[0]["source_prefix"] == "admin"
+    assert warnings[0]["display_name"] == "Admin"
+    assert "litmcp_admin_secret" not in str(warnings)
 
 
 def _make_external_audit_ready(paper: Paper, root: Path) -> None:
