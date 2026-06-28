@@ -23,6 +23,8 @@ from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, 
 from app.services.discovery_service import DiscoveryService
 from app.services.embedding import get_embedding_service
 from app.services.codex_context_service import CodexContextService
+from app.services.dft_audit_issue_repair_service import DFTAuditIssueRepairService
+from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
@@ -570,6 +572,76 @@ def get_dft_review_queue(
             reason=reason,
             status=status,
             limit=max(1, min(limit, 200)),
+        )
+
+
+@mcp_server.tool(name="get_dft_audit_issues", description="Read DFT audit issue queue entries for one paper. This is read-only and does not repair or verify DFT data.")
+def get_dft_audit_issues(
+    paper_id: str,
+    statuses: list[str] | None = None,
+    issue_types: list[str] | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        rows = DFTAuditIssueService(session).list_issues(
+            paper_id=UUID(paper_id),
+            statuses=set(statuses or []) or None,
+            limit=max(1, min(limit, 200)),
+        )
+        allowed_issue_types = {str(item).strip() for item in issue_types or [] if str(item).strip()}
+        if allowed_issue_types:
+            rows = [row for row in rows if row.issue_type in allowed_issue_types]
+        return {
+            "paper_id": paper_id,
+            "count": len(rows),
+            "items": [
+                {
+                    "issue_id": str(row.id),
+                    "issue_type": row.issue_type,
+                    "status": row.status,
+                    "target_type": row.target_type,
+                    "target_id": row.target_id,
+                    "current_snapshot": row.current_snapshot,
+                    "suggested_dft": row.suggested_dft,
+                    "suggested_value": row.suggested_value,
+                    "evidence_payload": row.evidence_payload,
+                    "source_count": len(row.source_identities or []),
+                    "source_candidate_ids": row.source_candidate_ids or [],
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                }
+                for row in rows
+            ],
+        }
+
+
+@mcp_server.tool(
+    name="repair_dft_audit_issue",
+    description=(
+        "Repair exactly one DFT audit issue through a controlled primary-AI path. "
+        "Allowed actions: create_missing_dft, update_dft_fields, link_existing_duplicate, "
+        "mark_needs_user_decision, mark_false_positive. Audit AI must not call this tool."
+    ),
+)
+def repair_dft_audit_issue(
+    issue_id: str,
+    action: str,
+    repair_payload: dict[str, Any],
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any],
+) -> dict[str, Any]:
+    auth = require_mcp_capability_any("review_corrections", "review_dft")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTAuditIssueRepairService(session).repair_issue(
+            issue_id=UUID(issue_id),
+            action=action,
+            repair_payload=repair_payload,
+            reason=reason,
+            evidence_payload=evidence_payload,
+            repaired_by=auth.source_prefix,
         )
 
 
