@@ -273,7 +273,7 @@ def test_merge_table_atomically_updates_target_deletes_source_and_retries(
         session.commit()
         paper_id, source_id, target_id = paper.id, source.id, target.id
 
-    merged_markdown = "| A | 1 |\n| B | 2 |"
+    merged_markdown = "A+B"
     with mcp_auth_context(_review_auth()):
         first = merge_table(
             str(paper_id),
@@ -287,8 +287,8 @@ def test_merge_table_atomically_updates_target_deletes_source_and_retries(
             str(paper_id),
             str(source_id),
             str(target_id),
-            "The caller verified the target should contain both pages.",
-            EVIDENCE,
+            "A different reason must not affect idempotency.",
+            {**EVIDENCE, "quoted_text": "Different evidence for the same retry"},
             {"markdown_content": merged_markdown},
         )
 
@@ -296,12 +296,32 @@ def test_merge_table_atomically_updates_target_deletes_source_and_retries(
     assert retry["idempotent"] is True
     assert retry["correction_ids"] == first["correction_ids"]
     with Session(table_tool_env) as session:
+        correction_count = session.query(PaperCorrection).filter_by(paper_id=paper_id).count()
+        audit_count = session.query(AuditLog).filter_by(paper_id=paper_id).count()
+
+    with mcp_auth_context(_review_auth()):
+        with pytest.raises(
+            ValueError,
+            match="merge_table_conflict: source already merged with different target_updates",
+        ):
+            merge_table(
+                str(paper_id),
+                str(source_id),
+                str(target_id),
+                "This retry conflicts with the completed merge.",
+                EVIDENCE,
+                {"markdown_content": "DIFFERENT"},
+            )
+
+    with Session(table_tool_env) as session:
         assert session.get(PaperTable, source_id) is None
         assert session.get(PaperTable, target_id).markdown_content == merged_markdown
-        assert session.query(PaperCorrection).filter_by(paper_id=paper_id).count() == 2
+        assert session.query(PaperCorrection).filter_by(paper_id=paper_id).count() == correction_count == 2
+        assert session.query(AuditLog).filter_by(paper_id=paper_id).count() == audit_count
         audit = session.scalars(
             select(AuditLog).where(AuditLog.action == "merge_table")
         ).one()
+        assert audit.payload["target_updates"] == {"markdown_content": merged_markdown}
         assert audit.payload["source_before"]["id"] == str(source_id)
         assert audit.payload["target_before"]["id"] == str(target_id)
 

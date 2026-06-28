@@ -263,6 +263,15 @@ class TableCurationService:
                 raise ValueError("Source table not found for this paper.")
             if target is None or target.paper_id != paper_id:
                 raise ValueError("Target table not found for this paper.")
+            audit_payload = audit.payload if isinstance(audit.payload, dict) else {}
+            if "target_updates" not in audit_payload:
+                updates_match = not cleaned_updates
+            else:
+                updates_match = audit_payload.get("target_updates") == cleaned_updates
+            if not updates_match:
+                raise ValueError(
+                    "merge_table_conflict: source already merged with different target_updates"
+                )
             return self._result(
                 paper_id=paper_id,
                 action="merge_table",
@@ -311,6 +320,7 @@ class TableCurationService:
             payload={
                 "source_table_id": str(source_table_id),
                 "target_table_id": str(target_table_id),
+                "target_updates": cleaned_updates,
                 "reason": reason_text,
                 "source_before": source_before,
                 "target_before": target_before,
