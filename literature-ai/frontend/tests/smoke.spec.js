@@ -3015,6 +3015,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(500);
       await page.click('.paper-row');
       await page.click('button[data-tab="dft"]');
+      await page.waitForFunction(() => {
+        const selectedPaper = window.state && window.state.selectedPaper;
+        const isFullDetail = selectedPaper && selectedPaper._detailMode === 'full';
+        const fullDetailIdle = !(window.state && window.state.fullDetailLoadingFor);
+        const createButton = Array.from(document.querySelectorAll('#dftContent [data-role="dft-sample-group"] button'))
+          .find(button => button.textContent && button.textContent.includes('补充基础信息'));
+        return isFullDetail && fullDetailIdle && createButton && createButton.offsetParent !== null;
+      });
 
       const group = page.locator('#dftContent [data-role="dft-sample-group"]').first();
       await expect(group).toContainText('基础信息待补');
