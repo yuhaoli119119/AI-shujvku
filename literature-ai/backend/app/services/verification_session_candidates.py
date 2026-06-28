@@ -20,6 +20,7 @@ from app.db.models import (
 from app.services.dft_rescan_policy import (
     is_dft_method_only_reaction_step,
     normalize_dft_reaction_step_for_identity,
+    normalize_source_document_type,
 )
 from app.utils.evidence_anchors import has_evidence_anchor
 
@@ -49,6 +50,10 @@ class VerificationSessionDFTCandidateMixin:
             if target_type != "dft_results" or (decision != "new_candidate" and target_id != "new"):
                 continue
             if bool(payload.get("borrowed_from_reference")):
+                skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
+                self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
+                continue
+            if self._is_supporting_reference_dft_payload(payload):
                 skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
                 self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
                 continue
@@ -195,6 +200,7 @@ class VerificationSessionDFTCandidateMixin:
         signature = self._new_dft_signature(
             material_identity=material_identity,
             property_type=property_type,
+            adsorbate=adsorbate,
             value=value,
             unit=unit,
             reaction_step=reaction_step,
@@ -301,6 +307,7 @@ class VerificationSessionDFTCandidateMixin:
             signature = self._new_dft_signature(
                 material_identity=material_identity,
                 property_type=row.property_type,
+                adsorbate=row.adsorbate,
                 value=row.value,
                 unit=row.unit,
                 reaction_step=row.reaction_step,
@@ -369,7 +376,12 @@ class VerificationSessionDFTCandidateMixin:
                 value_part,
                 candidate_item.get("unit"),
                 candidate_item.get("adsorbate"),
-                normalize_dft_reaction_step_for_identity(candidate_item.get("reaction_step")),
+                normalize_dft_reaction_step_for_identity(
+                    candidate_item.get("reaction_step"),
+                    property_type=candidate_item.get("property_type"),
+                    adsorbate=candidate_item.get("adsorbate"),
+                    material=candidate_item.get("material_identity"),
+                ),
             )
         )
 
@@ -425,6 +437,7 @@ class VerificationSessionDFTCandidateMixin:
         property_type: Any,
         value: Any,
         unit: Any,
+        adsorbate: Any,
         reaction_step: Any,
         source_figure: Any,
         page: Any,
@@ -437,11 +450,32 @@ class VerificationSessionDFTCandidateMixin:
                 property_type,
                 value_part,
                 unit,
-                normalize_dft_reaction_step_for_identity(reaction_step),
+                adsorbate,
+                normalize_dft_reaction_step_for_identity(
+                    reaction_step,
+                    property_type=property_type,
+                    adsorbate=adsorbate,
+                    material=material_identity,
+                ),
                 source_figure,
                 page,
             )
         )
+
+    @staticmethod
+    def _is_supporting_reference_dft_payload(payload: dict[str, Any]) -> bool:
+        evidence = payload.get("evidence_location") or payload.get("evidence_payload")
+        evidence = evidence if isinstance(evidence, dict) else {}
+        corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
+        source_type = normalize_source_document_type(
+            payload.get("source_document_type")
+            or payload.get("source_type")
+            or evidence.get("source_document_type")
+            or evidence.get("source_type")
+            or corrected.get("source_document_type")
+            or corrected.get("source_type")
+        )
+        return source_type == "supporting_reference"
 
     @staticmethod
     def _normalize_dft_property(value: Any) -> str | None:

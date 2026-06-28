@@ -251,6 +251,220 @@ def test_new_dft_materialization_merges_method_only_step_with_specific_adsorptio
         assert {candidate.materialized_target_id for candidate in candidates} == {str(dft_rows[0].id)}
 
 
+def test_new_dft_materialization_merges_generic_adsorption_step_aliases(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Generic adsorption dedupe paper", pdf_path="generic-adsorption.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="generic-adsorption-test")
+        session.add(run)
+        session.flush()
+
+        for reaction_step in ("adsorption", "Li2S4 adsorption", "adsorption of Li2S4"):
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "corrected_value": {
+                            "material": "Fe-GDY",
+                            "adsorbate": "Li2S4",
+                            "property_type": "adsorption_energy",
+                            "reaction_step": reaction_step,
+                            "value": -1.1,
+                            "unit": "eV",
+                        },
+                        "evidence_location": {
+                            "source_document_type": "main_text",
+                            "page": 5,
+                            "quoted_text": "Fe-GDY Li2S4 adsorption -1.10 eV",
+                        },
+                    },
+                    status="candidate",
+                )
+            )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id)
+        ).all()
+
+        assert [item["action"] for item in result["materialized_items"]] == ["created", "deduplicated", "deduplicated"]
+        assert len(dft_rows) == 1
+        assert {candidate.materialized_target_id for candidate in candidates} == {str(dft_rows[0].id)}
+
+
+def test_new_dft_materialization_reuses_existing_generic_adsorption_row(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Existing generic adsorption row", pdf_path="existing-generic.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        existing = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            reaction_step="adsorption",
+            value=-1.1,
+            unit="eV",
+            evidence_payload={"material_identity": "Fe-GDY", "page": 5, "source_document_type": "main_text"},
+            candidate_status="new_candidate",
+        )
+        session.add(existing)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="existing-generic-test")
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material": "Fe-GDY",
+                        "adsorbate": "Li2S4",
+                        "property_type": "adsorption_energy",
+                        "reaction_step": "Li2S4 adsorption",
+                        "value": -1.1,
+                        "unit": "eV",
+                    },
+                    "evidence_location": {
+                        "source_document_type": "supplementary_information",
+                        "page": 12,
+                        "quoted_text": "Fe-GDY Li2S4 adsorption -1.10 eV",
+                    },
+                },
+                status="candidate",
+            )
+        )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        candidate = session.scalar(select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id))
+
+        assert [item["action"] for item in result["materialized_items"]] == ["deduplicated"]
+        assert len(dft_rows) == 1
+        assert candidate is not None
+        assert candidate.materialized_target_id == str(existing.id)
+
+
+def test_new_dft_materialization_keeps_distinct_active_site_steps(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Distinct active site adsorption paper", pdf_path="specific-sites.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="specific-site-test")
+        session.add(run)
+        session.flush()
+        for reaction_step in ("Li2S adsorption on WN4@G side", "Li2S adsorption on TiS2 side"):
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "corrected_value": {
+                            "material": "WN4@G/TiS2",
+                            "adsorbate": "Li2S",
+                            "property_type": "adsorption_energy",
+                            "reaction_step": reaction_step,
+                            "value": -5.21,
+                            "unit": "eV",
+                        },
+                        "evidence_location": {"page": 5, "quoted_text": reaction_step},
+                    },
+                    status="candidate",
+                )
+            )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == paper.id).order_by(DFTResult.reaction_step.asc())
+        ).all()
+
+        assert [item["action"] for item in result["materialized_items"]] == ["created", "created"]
+        assert [row.reaction_step for row in dft_rows] == [
+            "Li2S adsorption on TiS2 side",
+            "Li2S adsorption on WN4@G side",
+        ]
+
+
+def test_new_dft_materialization_skips_supporting_reference_candidates(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Supporting reference candidate paper", pdf_path="supporting-ref.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="supporting-ref-test")
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material": "Fe-GDY",
+                        "adsorbate": "Li2S4",
+                        "property_type": "adsorption_energy",
+                        "reaction_step": "Li2S4 adsorption",
+                        "value": -1.1,
+                        "unit": "eV",
+                    },
+                    "evidence_location": {
+                        "source_document_type": "supporting_reference",
+                        "page": 8,
+                        "quoted_text": "Cited reference reports -1.10 eV.",
+                    },
+                },
+                status="candidate",
+            )
+        )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        candidate = session.scalar(select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id))
+
+        assert result["materialized_count"] == 0
+        assert result["skipped_items"] == [{"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"}]
+        assert dft_rows == []
+        assert candidate.status == "ignored"
+
+
 def test_method_only_step_match_does_not_merge_ambiguous_specific_steps():
     candidate = {
         "material_identity": "WN4@G/TiS2",

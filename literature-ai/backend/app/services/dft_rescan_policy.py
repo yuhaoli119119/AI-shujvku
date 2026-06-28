@@ -68,8 +68,88 @@ def is_dft_method_only_reaction_step(value: Any) -> bool:
     return bool(tokens) and all(token in DFT_METHOD_ONLY_REACTION_STEP_TOKENS for token in tokens)
 
 
-def normalize_dft_reaction_step_for_identity(value: Any) -> str:
+DFT_ADSORPTION_SITE_TOKENS = {
+    "bridge",
+    "configuration",
+    "edge",
+    "facet",
+    "hollow",
+    "pathway",
+    "site",
+    "side",
+    "surface",
+    "top",
+}
+
+
+def _compact_identity_text(value: Any) -> str:
+    return "".join(re.findall(r"[a-z0-9]+", _text(value)))
+
+
+def _equal_identity_text(left: Any, right: Any) -> bool:
+    left_key = _compact_identity_text(left)
+    right_key = _compact_identity_text(right)
+    return bool(left_key and right_key and left_key == right_key)
+
+
+def _has_adsorption_site_specificity(text: str, *, material: Any = None) -> bool:
+    match = re.search(r"\badsorption\s+on\s+(.+)$", text)
+    if match and _equal_identity_text(match.group(1), material):
+        return False
+    tokens = set(re.findall(r"[a-z0-9]+", text))
+    return bool(tokens & DFT_ADSORPTION_SITE_TOKENS)
+
+
+def _is_generic_adsorption_reaction_step(
+    value: Any,
+    *,
+    property_type: Any = None,
+    adsorbate: Any = None,
+    material: Any = None,
+) -> bool:
+    property_token = _text(property_type).replace("-", "_").replace(" ", "_")
+    if property_token != "adsorption_energy":
+        return False
+    adsorbate_text = _text(adsorbate)
+    if not adsorbate_text:
+        return False
+    text = _text(value)
+    if not text:
+        return False
+    if _has_adsorption_site_specificity(text, material=material):
+        return False
+    if text == "adsorption":
+        return True
+    adsorbate_key = _compact_identity_text(adsorbate_text)
+    text_key = _compact_identity_text(text)
+    if text_key == f"{adsorbate_key}adsorption":
+        return True
+    if text_key == f"adsorptionof{adsorbate_key}":
+        return True
+    match = re.match(r"^(?:(?P<prefix>.+?)\s+)?adsorption\s+on\s+(?P<material>.+)$", text)
+    if not match:
+        return False
+    prefix = match.group("prefix")
+    if prefix and _compact_identity_text(prefix) not in {"", adsorbate_key}:
+        return False
+    return _equal_identity_text(match.group("material"), material)
+
+
+def normalize_dft_reaction_step_for_identity(
+    value: Any,
+    *,
+    property_type: Any = None,
+    adsorbate: Any = None,
+    material: Any = None,
+) -> str:
     if is_dft_method_only_reaction_step(value):
+        return ""
+    if _is_generic_adsorption_reaction_step(
+        value,
+        property_type=property_type,
+        adsorbate=adsorbate,
+        material=material,
+    ):
         return ""
     return _text(value)
 
@@ -152,22 +232,24 @@ def build_dft_dedupe_signature(payload: dict[str, Any]) -> str:
     source_type = normalize_source_document_type(
         _first_payload(payload, evidence, location, keys=("source_document_type", "source_type"))
     )
+    material = _first_payload(
+        payload,
+        corrected,
+        keys=("normalized_material_or_catalyst", "normalized_material", "material", "catalyst", "catalyst_name"),
+    )
+    adsorbate = _first_payload(payload, corrected, keys=("normalized_adsorbate", "adsorbate"))
+    property_type = _first_payload(payload, corrected, keys=("normalized_property_type", "property_type", "energy_type"))
     parts = {
         "paper_id": _text(payload.get("paper_id")),
         "source_bucket": _owned_source_bucket(source_type),
-        "material": _text(
-            _first_payload(
-                payload,
-                corrected,
-                keys=("normalized_material_or_catalyst", "normalized_material", "material", "catalyst", "catalyst_name"),
-            )
-        ),
-        "adsorbate": _text(_first_payload(payload, corrected, keys=("normalized_adsorbate", "adsorbate"))),
-        "property_type": _text(
-            _first_payload(payload, corrected, keys=("normalized_property_type", "property_type", "energy_type"))
-        ),
+        "material": _text(material),
+        "adsorbate": _text(adsorbate),
+        "property_type": _text(property_type),
         "reaction_step": normalize_dft_reaction_step_for_identity(
-            _first_payload(payload, corrected, keys=("normalized_reaction_step", "reaction_step"))
+            _first_payload(payload, corrected, keys=("normalized_reaction_step", "reaction_step")),
+            property_type=property_type,
+            adsorbate=adsorbate,
+            material=material,
         ),
         "value": normalize_numeric_value(_first_payload(payload, corrected, keys=("normalized_value", "value"))),
         "unit": normalize_unit(_first_payload(payload, corrected, keys=("normalized_unit", "unit"))),

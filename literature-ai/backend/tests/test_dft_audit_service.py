@@ -287,6 +287,42 @@ def test_dft_dedupe_signature_does_not_treat_method_as_reaction_step_identity():
     assert specific_step != method_step
 
 
+def test_dft_dedupe_signature_merges_generic_adsorption_step_aliases():
+    base = {
+        "paper_id": "paper-1",
+        "corrected_value": {
+            "material": "Fe-GDY",
+            "adsorbate": "Li2S4",
+            "property_type": "adsorption_energy",
+            "value": "-1.100",
+            "unit": "ev",
+        },
+    }
+
+    signatures = {
+        build_dft_dedupe_signature(
+            {**base, "corrected_value": {**base["corrected_value"], "reaction_step": reaction_step}}
+        )
+        for reaction_step in ("adsorption", "Li2S4 adsorption", "adsorption of Li2S4")
+    }
+    on_same_material = build_dft_dedupe_signature(
+        {**base, "corrected_value": {**base["corrected_value"], "reaction_step": "Li2S4 adsorption on Fe-GDY"}}
+    )
+    site_specific = build_dft_dedupe_signature(
+        {
+            **base,
+            "corrected_value": {
+                **base["corrected_value"],
+                "reaction_step": "Li2S4 adsorption on Fe-GDY bridge site",
+            },
+        }
+    )
+
+    assert len(signatures) == 1
+    assert on_same_material in signatures
+    assert site_specific not in signatures
+
+
 def test_rescan_policy_stops_low_progress_and_marks_human_check():
     previous = [
         {
