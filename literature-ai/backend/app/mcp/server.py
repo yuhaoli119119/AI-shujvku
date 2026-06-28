@@ -585,7 +585,8 @@ def get_dft_audit_issues(
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        rows = DFTAuditIssueService(session).list_issues(
+        service = DFTAuditIssueService(session)
+        rows = service.list_issues(
             paper_id=UUID(paper_id),
             statuses=set(statuses or []) or None,
             limit=max(1, min(limit, 200)),
@@ -598,19 +599,9 @@ def get_dft_audit_issues(
             "count": len(rows),
             "items": [
                 {
+                    **service.serialize_issue(row),
                     "issue_id": str(row.id),
-                    "issue_type": row.issue_type,
-                    "status": row.status,
-                    "target_type": row.target_type,
-                    "target_id": row.target_id,
-                    "current_snapshot": row.current_snapshot,
-                    "suggested_dft": row.suggested_dft,
-                    "suggested_value": row.suggested_value,
-                    "evidence_payload": row.evidence_payload,
                     "source_count": len(row.source_identities or []),
-                    "source_candidate_ids": row.source_candidate_ids or [],
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
                 }
                 for row in rows
             ],
@@ -622,7 +613,7 @@ def get_dft_audit_issues(
     description=(
         "Repair exactly one DFT audit issue through a controlled primary-AI path. "
         "Allowed actions: create_missing_dft, update_dft_fields, link_existing_duplicate, "
-        "mark_needs_user_decision, mark_false_positive. Audit AI must not call this tool."
+        "mark_needs_user_decision. Audit AI must not call this tool. False-positive closure is human-only."
     ),
 )
 def repair_dft_audit_issue(

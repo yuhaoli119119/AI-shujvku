@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, utcnow
+from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult
+from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_rescan_policy import build_dft_dedupe_signature, normalize_source_document_type
 from app.utils.evidence_anchors import has_evidence_anchor
@@ -24,7 +25,6 @@ class DFTAuditIssueRepairService:
         "update_dft_fields",
         "link_existing_duplicate",
         "mark_needs_user_decision",
-        "mark_false_positive",
     }
     AUTO_REPAIR_BLOCKED_ISSUE_TYPES = {
         "source_scope_error",
@@ -112,15 +112,6 @@ class DFTAuditIssueRepairService:
                 note=reason,
                 action_result="needs_user_decision",
             )
-        if action == "mark_false_positive":
-            self._require_reason(reason)
-            return self._mark_issue(
-                issue,
-                status="false_positive",
-                repaired_by=repaired_by,
-                note=reason,
-                action_result="false_positive",
-            )
         if issue.issue_type in self.AUTO_REPAIR_BLOCKED_ISSUE_TYPES:
             self._mark_issue(
                 issue,
@@ -195,12 +186,11 @@ class DFTAuditIssueRepairService:
             evidence=evidence,
         )
         if existing is not None:
-            self._mark_issue(
+            self._bind_missing_issue_to_result(
                 issue,
-                status="fixed_by_primary_ai",
+                row=existing,
                 repaired_by=repaired_by,
                 note=f"linked_existing_dft_result:{existing.id}; {reason}".strip("; "),
-                action_result="linked_existing",
             )
             return {
                 "status": "linked_existing",
@@ -244,12 +234,11 @@ class DFTAuditIssueRepairService:
             if winner is None:
                 raise
             row = winner
-        self._mark_issue(
+        self._bind_missing_issue_to_result(
             issue,
-            status="fixed_by_primary_ai",
+            row=row,
             repaired_by=repaired_by,
             note=f"created_dft_result:{row.id}; {reason}".strip("; "),
-            action_result="created",
         )
         return {
             "status": "created",
@@ -440,17 +429,35 @@ class DFTAuditIssueRepairService:
         note: str,
         action_result: str,
     ) -> dict[str, Any]:
-        issue.status = status
-        issue.resolved_by = repaired_by
-        issue.resolved_at = utcnow()
-        issue.resolution_note = note
-        issue.updated_at = utcnow()
-        self.session.add(issue)
+        if status in {"needs_primary_ai", "needs_user_decision", "fixed_by_primary_ai"}:
+            DFTAuditIssueLifecycleService(self.session).mark_pending(issue, status=status, note=note)
+        else:
+            DFTAuditIssueLifecycleService(self.session).close_issue(
+                issue,
+                status=status,
+                resolved_by=repaired_by,
+                resolution_note=note,
+            )
         return {
             "status": action_result,
             "issue_id": str(issue.id),
             "writes_final_truth": False,
         }
+
+    def _bind_missing_issue_to_result(
+        self,
+        issue: DFTAuditIssue,
+        *,
+        row: DFTResult,
+        repaired_by: str,
+        note: str,
+    ) -> None:
+        DFTAuditIssueLifecycleService(self.session).bind_missing_issue_to_result(
+            issue,
+            row,
+            repaired_by=repaired_by,
+            resolution_note=note,
+        )
 
     def _audit_repair(
         self,

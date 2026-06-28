@@ -200,6 +200,10 @@ def test_create_missing_dft_creates_sample_and_ai_candidate_without_human_verifi
         assert rows[0].evidence_payload["source_candidate_ids"] == ["candidate-1"]
         assert reviews == []
         assert issue.status == "fixed_by_primary_ai"
+        assert issue.target_type == "dft_results"
+        assert issue.target_id == str(rows[0].id)
+        assert issue.resolved_by is None
+        assert issue.resolved_at is None
         assert audit is not None
         assert audit.action == "repair_dft_audit_issue"
         assert audit.payload["writes_final_truth"] is False
@@ -333,6 +337,8 @@ def test_update_dft_fields_updates_whitelisted_fields_and_keeps_ai_status(setup_
         assert row.candidate_status == "ai_primary_applied"
         assert row.candidate_status not in {"ML_Ready", "human_verified"}
         assert issue.status == "fixed_by_primary_ai"
+        assert issue.resolved_by is None
+        assert issue.resolved_at is None
 
 
 def test_update_dft_fields_rejects_non_whitelisted_fields(setup_test_db):
@@ -437,17 +443,15 @@ def test_link_existing_duplicate_marks_issue_without_writing_dft_result(setup_te
         assert issue.status == "fixed_by_primary_ai"
 
 
-def test_mark_needs_user_decision_and_false_positive_do_not_write_dft_result(setup_test_db):
+def test_mark_needs_user_decision_does_not_write_resolved_metadata(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Mark issue")
         row = DFTResult(paper_id=paper.id, property_type="adsorption_energy", value=-1.0, unit="eV")
         session.add(row)
         session.flush()
         needs_user = _targeted_issue(session, paper, row, issue_type="uncertain")
-        false_positive = _targeted_issue(session, paper, row, issue_type="duplicate_suspected")
         session.commit()
         needs_user_id = str(needs_user.id)
-        false_positive_id = str(false_positive.id)
         row_id = str(row.id)
 
     with mcp_auth_context(_review_auth()):
@@ -458,20 +462,39 @@ def test_mark_needs_user_decision_and_false_positive_do_not_write_dft_result(set
             "Conflicting source scope needs user decision.",
             {},
         )
-        false_result = repair_dft_audit_issue(
-            false_positive_id,
-            "mark_false_positive",
-            {},
-            "The duplicate suspicion was caused by a repeated table caption.",
-            {},
-        )
 
     assert user_result["status"] == "needs_user_decision"
-    assert false_result["status"] == "false_positive"
     with Session(setup_test_db) as session:
         row = session.get(DFTResult, UUID(row_id))
         needs_user = session.get(DFTAuditIssue, UUID(needs_user_id))
-        false_positive = session.get(DFTAuditIssue, UUID(false_positive_id))
         assert row.candidate_status == "system_candidate"
         assert needs_user.status == "needs_user_decision"
-        assert false_positive.status == "false_positive"
+        assert needs_user.resolved_by is None
+        assert needs_user.resolved_at is None
+
+
+def test_primary_repair_ai_cannot_mark_false_positive(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "False positive human only")
+        row = DFTResult(paper_id=paper.id, property_type="adsorption_energy", value=-1.0, unit="eV")
+        session.add(row)
+        session.flush()
+        issue = _targeted_issue(session, paper, row, issue_type="duplicate_suspected")
+        session.commit()
+        issue_id = str(issue.id)
+
+    with mcp_auth_context(_review_auth()):
+        with pytest.raises(ValueError, match="Unsupported DFT audit issue repair action"):
+            repair_dft_audit_issue(
+                issue_id,
+                "mark_false_positive",
+                {},
+                "The duplicate suspicion was caused by a repeated table caption.",
+                {},
+            )
+
+    with Session(setup_test_db) as session:
+        issue = session.get(DFTAuditIssue, UUID(issue_id))
+        assert issue.status == "needs_primary_ai"
+        assert issue.resolved_by is None
+        assert issue.resolved_at is None

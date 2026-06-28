@@ -10,10 +10,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import DFTAuditIssue, DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, utcnow
+from app.services.dft_audit_issue_lifecycle_service import (
+    DFT_AUDIT_ISSUE_PENDING_STATUSES,
+    DFTAuditIssueLifecycleService,
+)
 from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity, normalize_source_document_type
 
 
-DFT_AUDIT_ISSUE_OPEN_STATUSES = {"open", "needs_primary_ai", "needs_user_decision"}
+DFT_AUDIT_ISSUE_OPEN_STATUSES = set(DFT_AUDIT_ISSUE_PENDING_STATUSES)
 
 
 class DFTAuditIssueService:
@@ -244,13 +248,19 @@ class DFTAuditIssueService:
         issue = self.session.get(DFTAuditIssue, issue_id)
         if issue is None:
             raise LookupError("DFT audit issue not found.")
-        issue.status = status
-        issue.resolved_by = resolved_by
-        issue.resolved_at = utcnow()
-        issue.resolution_note = resolution_note
-        issue.updated_at = utcnow()
-        self.session.add(issue)
-        self.session.flush()
+        if status == "fixed_by_primary_ai":
+            DFTAuditIssueLifecycleService(self.session).mark_pending(
+                issue,
+                status=status,
+                note=resolution_note,
+            )
+        else:
+            DFTAuditIssueLifecycleService(self.session).close_issue(
+                issue,
+                status=status,
+                resolved_by=resolved_by,
+                resolution_note=resolution_note or status,
+            )
         return issue
 
     def list_issues(
@@ -270,44 +280,12 @@ class DFTAuditIssueService:
             stmt = stmt.where(DFTAuditIssue.status.in_(sorted(statuses)))
         return list(self.session.scalars(stmt.limit(max(1, min(limit, 1000)))).all())
 
-    @classmethod
-    def serialize_issue(cls, issue: DFTAuditIssue) -> dict[str, Any]:
-        return {
-            "id": str(issue.id),
-            "paper_id": str(issue.paper_id),
-            "target_type": issue.target_type,
-            "target_id": issue.target_id,
-            "issue_type": issue.issue_type,
-            "severity": issue.severity,
-            "status": issue.status,
-            "current_snapshot": issue.current_snapshot,
-            "suggested_value": issue.suggested_value,
-            "suggested_dft": issue.suggested_dft,
-            "evidence_payload": issue.evidence_payload,
-            "source_identities": issue.source_identities or [],
-            "source_candidate_ids": issue.source_candidate_ids or [],
-            "fingerprint": issue.fingerprint,
-            "resolution_note": issue.resolution_note,
-            "resolved_by": issue.resolved_by,
-            "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
-            "created_at": issue.created_at.isoformat() if issue.created_at else None,
-            "updated_at": issue.updated_at.isoformat() if issue.updated_at else None,
-        }
+    def serialize_issue(self, issue: DFTAuditIssue) -> dict[str, Any]:
+        return DFTAuditIssueLifecycleService(self.session).serialize_issue(issue)
 
     @classmethod
     def snapshot_dft_result(cls, row: DFTResult) -> dict[str, Any]:
-        return {
-            "id": str(row.id),
-            "paper_id": str(row.paper_id),
-            "catalyst_sample_id": str(row.catalyst_sample_id) if row.catalyst_sample_id else None,
-            "adsorbate": row.adsorbate,
-            "property_type": row.property_type,
-            "value": row.value,
-            "unit": row.unit,
-            "reaction_step": row.reaction_step,
-            "candidate_status": row.candidate_status,
-            "evidence_payload": row.evidence_payload,
-        }
+        return DFTAuditIssueLifecycleService.snapshot_dft_result(row)
 
     def fingerprint_existing_result_issue(
         self,

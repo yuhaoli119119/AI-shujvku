@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldReview, Paper, PaperCorrection, WorkflowJob
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
+from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.dft_review_fields import DFT_CORRECTION_FIELD_ALIASES, DFT_REVIEW_FIELD_ALIASES
 from app.services.dft_review_imported import DFTImportedOpinionMixin
@@ -35,6 +36,7 @@ class DFTResultReviewService(
     def __init__(self, session: Session) -> None:
         self.session = session
         self.review_service = ExtractionReviewService(session)
+        self.issue_lifecycle = DFTAuditIssueLifecycleService(session)
 
     def verify_result(
         self,
@@ -74,7 +76,7 @@ class DFTResultReviewService(
                     reviewer=reviewer or "codex_review",
                     reviewer_note=reviewer_note or "Verified through the DFT candidate review workflow.",
                 ),
-                commit=commit,
+                commit=False,
             )
             if self._has_anchor(evidence_payload):
                 self._attach_imported_evidence_payload(
@@ -139,13 +141,19 @@ class DFTResultReviewService(
                 self.session.add(review)
                 self.session.flush()
                 reviews.append(self.review_service._serialize(review))
+        reviewer_name = reviewer or "codex_review"
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
         row.candidate_status = "ML_Ready" if gate.eligible else "human_reviewed_needs_evidence"
         self.session.add(row)
+        closed_issues = self.issue_lifecycle.apply_human_verify(
+            paper_id=paper_id,
+            result_id=result_id,
+            reviewer=reviewer_name,
+        )
         audit = AuditLog(
             paper_id=paper_id,
             action="verify_dft_result",
-            source=reviewer or "codex_review",
+            source=reviewer_name,
             target_type="dft_results",
             target_id=str(result_id),
             payload={
@@ -153,6 +161,7 @@ class DFTResultReviewService(
                 "review_ids": [str(item.id) for item in reviews],
                 "is_exportable": gate.eligible,
                 "blocked_reasons": list(gate.reasons),
+                "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
             },
         )
         self.session.add(audit)
@@ -177,6 +186,7 @@ class DFTResultReviewService(
             "field_names": selected_fields,
             "reviews": [item.model_dump(mode="json") for item in reviews],
             "export_safety": self._gate_payload(row, gate),
+            "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
             "audit_log_id": str(audit.id),
         }
 
@@ -257,15 +267,21 @@ class DFTResultReviewService(
                 )
                 for field_name in selected_fields
             ],
-            commit=commit,
+            commit=False,
         )
         row.candidate_status = "Rejected"
         self.session.add(row)
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+        reviewer_name = reviewer or "codex_review"
+        closed_issues = self.issue_lifecycle.apply_human_reject(
+            paper_id=paper_id,
+            result_id=result_id,
+            reviewer=reviewer_name,
+        )
         audit = AuditLog(
             paper_id=paper_id,
             action="reject_dft_result",
-            source=reviewer or "codex_review",
+            source=reviewer_name,
             target_type="dft_results",
             target_id=str(result_id),
             payload={
@@ -273,6 +289,7 @@ class DFTResultReviewService(
                 "review_ids": [str(item.id) for item in reviews],
                 "blocked_reasons": list(gate.reasons),
                 "review_status": gate.review_status,
+                "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
             },
         )
         self.session.add(audit)
@@ -296,6 +313,7 @@ class DFTResultReviewService(
             "field_names": selected_fields,
             "reviews": [item.model_dump(mode="json") for item in reviews],
             "export_safety": self._gate_payload(row, gate),
+            "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
             "audit_log_id": str(audit.id),
         }
 

@@ -70,7 +70,7 @@ dft_primary_repair|DFT Primary Repair AI|<strong-random-key>|read_papers,repair_
 human_reviewer|Human Reviewer|<strong-random-key>|read_papers,review_corrections,review_dft
 ```
 
-The DFT audit key may create issue/candidate evidence but must not receive `repair_dft_issues`. The primary repair key is intentionally narrow: it can read the DFT audit issue queue and call `repair_dft_audit_issue`, but it does not need proposal or final-review capabilities. Human/admin review keys can keep explicit verify/reject capabilities without implicitly becoming DFT issue repair keys.
+The DFT audit key may create issue/candidate evidence but must not receive `repair_dft_issues`. The primary repair key is intentionally narrow: it can read the DFT audit issue queue and call `repair_dft_audit_issue`, but it does not need proposal or final-review capabilities. Primary repair can mark `needs_user_decision`, but false-positive closure is reserved for an explicit human/admin action. Human/admin review keys can keep explicit verify/reject capabilities without implicitly becoming DFT issue repair keys.
 
 Runtime diagnostics expose MCP capability lint warnings in `/api/system/agent-guide` under `mcp.capability_warnings` and in `/api/settings/ide-prompts` under `mcp_capability_warnings`. Check these warnings after editing `LITAI_MCP_API_KEYS`. A warning means `repair_dft_issues` appears on a key whose source/display name is not a primary repair role. The warning includes source/display/capability only and does not include the raw API key.
 
@@ -90,7 +90,7 @@ The report groups DFT audit issues by status and issue type, groups `repair_dft_
 - `request_parse`: request local PDF scans, ingestion, or parsing.
 - `review_corrections`: approve or reject pending correction proposals; reserve this for an admin or human reviewer.
 - `review_dft`: optional narrower DFT review capability accepted by DFT verification tools.
-- `repair_dft_issues`: permits `repair_dft_audit_issue` for the primary DFT repair AI only. Do not grant it to ordinary IDE, audit, or propose-only keys.
+- `repair_dft_issues`: permits `repair_dft_audit_issue` for the primary DFT repair AI only. It does not permit false-positive closure. Do not grant it to ordinary IDE, audit, or propose-only keys.
 - `export_data`: permits Word/dataset exports only when `LITAI_EXPORTS_ENABLED=true`; `read_papers` no longer implies export.
 - `create_share_links`: permits `create_share_token`; this is independent from read, export, and review capabilities.
 

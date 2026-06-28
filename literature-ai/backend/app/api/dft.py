@@ -51,7 +51,8 @@ def get_dft_audit_issues(
     if not statuses and not include_closed:
         statuses = set(DFT_AUDIT_ISSUE_OPEN_STATUSES)
     try:
-        rows = DFTAuditIssueService(session).list_issues(
+        service = DFTAuditIssueService(session)
+        rows = service.list_issues(
             paper_id=paper_id,
             statuses=statuses or None,
             limit=limit,
@@ -59,7 +60,7 @@ def get_dft_audit_issues(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
-        "items": [DFTAuditIssueService.serialize_issue(row) for row in rows],
+        "items": [service.serialize_issue(row) for row in rows],
         "count": len(rows),
         "filters": {
             "paper_id": str(paper_id) if paper_id else None,

@@ -1036,6 +1036,7 @@ def test_dft_review_queue_api_exposes_object_review_audit_summary(workbench_env)
         )
         session.commit()
         paper_id = str(paper.id)
+        row_id = str(row.id)
         row_id = row.id
 
     client = TestClient(app)
@@ -2888,6 +2889,7 @@ def test_review_conflicts_auto_advance_batch_records_audit(workbench_env):
         )
         session.commit()
         paper_id = str(paper.id)
+        row_id = str(row.id)
 
     client = TestClient(app)
     response = client.post(
@@ -2897,17 +2899,18 @@ def test_review_conflicts_auto_advance_batch_records_audit(workbench_env):
     assert response.status_code == 200
     payload = response.json()
     assert payload["eligible"] == 1
-    assert payload["executed"] == 1
-    assert payload["executed_items"][0]["action"] == "verify"
+    assert payload["executed"] == 0
+    assert payload["skipped"] == 1
+    assert payload["skipped_items"][0]["status"] == "audit_only"
+    assert payload["skipped_items"][0]["reason"] == "dft_auto_advance_disabled"
 
     with Session() as session:
-        stored = session.get(DFTResult, UUID(payload["executed_items"][0]["target_id"]))
-        assert stored.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"}
-        assert session.scalar(select(AuditLog).where(AuditLog.action == "auto_apply_ai_adjudication")) is not None
+        stored = session.get(DFTResult, UUID(row_id))
+        assert stored.candidate_status == "system_candidate"
+        assert session.scalar(select(AuditLog).where(AuditLog.action == "auto_apply_ai_adjudication")) is None
         assert session.scalar(select(AuditLog).where(AuditLog.action == "auto_advance_review_adjudication_batch")) is not None
         jobs = session.scalars(select(WorkflowJob).where(WorkflowJob.type == "review_adjudication")).all()
-        assert jobs
-        assert {job.library_name for job in jobs} == {"活跃测试库"}
+        assert jobs == []
 
 
 def test_review_conflicts_auto_advance_batch_skips_object_review_targets(workbench_env):
@@ -2984,17 +2987,15 @@ def test_review_conflicts_auto_advance_batch_skips_object_review_targets(workben
     assert response.status_code == 200
     payload = response.json()
     assert payload["eligible"] == 1
-    assert payload["executed"] == 1
-    assert payload["skipped"] == 0
+    assert payload["executed"] == 0
+    assert payload["skipped"] == 1
+    assert payload["skipped_items"][0]["status"] == "audit_only"
 
     with Session() as session:
         stored = session.get(DFTResult, UUID(row_id))
-        assert stored.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"}
+        assert stored.candidate_status == "system_candidate"
         jobs = session.scalars(select(WorkflowJob).where(WorkflowJob.type == "review_adjudication")).all()
-        assert len(jobs) == 1
-        assert jobs[0].payload["target_type"] == "dft_results"
-        assert jobs[0].payload["target_id"] == row_id
-        assert jobs[0].library_name == "自动推进测试库"
+        assert jobs == []
         assert session.scalar(select(AuditLog).where(AuditLog.target_type == "writing_card").where(AuditLog.action == "auto_apply_ai_adjudication")) is None
 
 

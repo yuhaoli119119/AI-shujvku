@@ -7,9 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import DFTAuditIssue, DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper
+from app.db.models import AuditLog, DFTAuditIssue, DFTResult, EvidenceSpan, ExtractionFieldReview, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper
 from app.main import app
 from app.services.dft_audit_issue_service import DFTAuditIssueService
+from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 
 
@@ -45,6 +46,31 @@ def _candidate(session: Session, paper: Paper, run: ExternalAnalysisRun, payload
     session.add(candidate)
     session.flush()
     return candidate
+
+
+def _dft_row(session: Session, paper: Paper, *, status: str = "system_candidate") -> DFTResult:
+    row = DFTResult(
+        paper_id=paper.id,
+        property_type="adsorption_energy",
+        adsorbate="Li2S4",
+        value=-1.20,
+        unit="eV",
+        evidence_text="Table 1 reports -1.20 eV.",
+        candidate_status=status,
+    )
+    session.add(row)
+    session.flush()
+    session.add(
+        EvidenceSpan(
+            paper_id=paper.id,
+            object_type="dft_results",
+            object_id=str(row.id),
+            text=row.evidence_text,
+            page=4,
+        )
+    )
+    session.flush()
+    return row
 
 
 def test_dual_ai_dft_positive_consensus_creates_issue_without_verifying_result(setup_test_db):
@@ -262,6 +288,176 @@ def test_dft_audit_issues_api_filters_open_paper_issues(setup_test_db):
     assert payload["count"] == 1
     assert payload["items"][0]["issue_type"] == "missing_dft_result"
     assert payload["items"][0]["status"] == "needs_primary_ai"
+
+
+def test_human_verify_closes_eligible_issue_but_not_duplicate_suspected(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Human verify issue lifecycle")
+        row = _dft_row(session, paper)
+        service = DFTAuditIssueService(session)
+        wrong_value = service.upsert_issue(
+            paper_id=paper.id,
+            target_id=str(row.id),
+            issue_type="wrong_value",
+            status="needs_primary_ai",
+            fingerprint="verify-wrong-value",
+            current_snapshot=service.snapshot_dft_result(row),
+        )
+        duplicate = service.upsert_issue(
+            paper_id=paper.id,
+            target_id=str(row.id),
+            issue_type="duplicate_suspected",
+            status="needs_primary_ai",
+            fingerprint="verify-duplicate",
+            current_snapshot=service.snapshot_dft_result(row),
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+        wrong_value_id = wrong_value.id
+        duplicate_id = duplicate.id
+
+    with Session(setup_test_db) as session:
+        result = DFTResultReviewService(session).verify_result(
+            paper_id=paper_id,
+            result_id=row_id,
+            confirm_reviewed_against_pdf=True,
+            reviewer="human_reviewer",
+            field_names=["value"],
+        )
+
+    assert str(wrong_value_id) in result["closed_audit_issue_ids"]
+    assert str(duplicate_id) not in result["closed_audit_issue_ids"]
+    with Session(setup_test_db) as session:
+        wrong_value = session.get(DFTAuditIssue, wrong_value_id)
+        duplicate = session.get(DFTAuditIssue, duplicate_id)
+        assert wrong_value.status == "closed"
+        assert wrong_value.resolution_note == "human_verified"
+        assert wrong_value.resolved_by == "human_reviewer"
+        assert duplicate.status == "needs_primary_ai"
+        assert duplicate.resolved_at is None
+
+
+def test_human_reject_closes_target_issues_as_rejected(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Human reject issue lifecycle")
+        row = _dft_row(session, paper)
+        service = DFTAuditIssueService(session)
+        wrong_unit = service.upsert_issue(
+            paper_id=paper.id,
+            target_id=str(row.id),
+            issue_type="wrong_unit",
+            status="needs_primary_ai",
+            fingerprint="reject-wrong-unit",
+            current_snapshot=service.snapshot_dft_result(row),
+        )
+        uncertain = service.upsert_issue(
+            paper_id=paper.id,
+            target_id=str(row.id),
+            issue_type="uncertain",
+            status="needs_user_decision",
+            fingerprint="reject-uncertain",
+            current_snapshot=service.snapshot_dft_result(row),
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+        issue_ids = {wrong_unit.id, uncertain.id}
+
+    with Session(setup_test_db) as session:
+        result = DFTResultReviewService(session).reject_result(
+            paper_id=paper_id,
+            result_id=row_id,
+            confirm_reject_candidate=True,
+            reviewer="human_reviewer",
+            field_names=["value"],
+        )
+
+    assert set(result["closed_audit_issue_ids"]) == {str(issue_id) for issue_id in issue_ids}
+    with Session(setup_test_db) as session:
+        row = session.get(DFTResult, row_id)
+        assert row.candidate_status == "Rejected"
+        for issue_id in issue_ids:
+            issue = session.get(DFTAuditIssue, issue_id)
+            assert issue.status == "closed"
+            assert issue.resolution_note == "target_rejected"
+            assert issue.resolved_by == "human_reviewer"
+
+
+def test_audit_issue_list_returns_live_stale_snapshot(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Stale issue list")
+        row = _dft_row(session, paper)
+        service = DFTAuditIssueService(session)
+        issue = service.upsert_issue(
+            paper_id=paper.id,
+            target_id=str(row.id),
+            issue_type="wrong_value",
+            status="needs_primary_ai",
+            fingerprint="stale-live",
+            current_snapshot=service.snapshot_dft_result(row),
+        )
+        row.value = -0.95
+        session.add(row)
+        session.commit()
+        paper_id = str(paper.id)
+        issue_id = str(issue.id)
+
+    response = TestClient(app).get(f"/api/dft/audit-issues?paper_id={paper_id}")
+
+    assert response.status_code == 200
+    item = next(item for item in response.json()["items"] if item["id"] == issue_id)
+    assert item["is_stale"] is True
+    assert "value" in item["stale_fields"]
+    assert item["live_snapshot"]["value"] == -0.95
+
+
+def test_dft_review_transaction_rolls_back_review_status_audit_and_issue(monkeypatch, setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Rollback review lifecycle")
+        row = _dft_row(session, paper)
+        service = DFTAuditIssueService(session)
+        issue = service.upsert_issue(
+            paper_id=paper.id,
+            target_id=str(row.id),
+            issue_type="wrong_value",
+            status="needs_primary_ai",
+            fingerprint="rollback-wrong-value",
+            current_snapshot=service.snapshot_dft_result(row),
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+        issue_id = issue.id
+
+    def fail_workflow_job(self, *, paper_id, action, payload):
+        raise RuntimeError("workflow job write failed")
+
+    monkeypatch.setattr(DFTResultReviewService, "_add_workflow_job", fail_workflow_job)
+    with Session(setup_test_db) as session:
+        try:
+            DFTResultReviewService(session).verify_result(
+                paper_id=paper_id,
+                result_id=row_id,
+                confirm_reviewed_against_pdf=True,
+                reviewer="human_reviewer",
+                field_names=["value"],
+            )
+        except RuntimeError:
+            session.rollback()
+        else:
+            raise AssertionError("verify_result should fail")
+
+    with Session(setup_test_db) as session:
+        row = session.get(DFTResult, row_id)
+        issue = session.get(DFTAuditIssue, issue_id)
+        reviews = session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.target_id == str(row_id))).all()
+        audit = session.scalar(select(AuditLog).where(AuditLog.action == "verify_dft_result"))
+        assert row.candidate_status == "system_candidate"
+        assert issue.status == "needs_primary_ai"
+        assert issue.resolved_at is None
+        assert reviews == []
+        assert audit is None
 
 
 def test_dft_audit_issue_can_be_marked_false_positive(setup_test_db):

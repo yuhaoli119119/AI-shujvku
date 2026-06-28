@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.papers.aggregation import dft_dataset_quality, export_dft_dataset, export_dft_results_csv
 from app.db.models import Base, CatalystSample, DFTResult, DFTSetting, EvidenceSpan, ExtractionFieldReview, Paper
+from app.rag.eligibility import is_rag_eligible
 from app.schemas.dft_export import DFTMLDatasetExportV2, select_training_records_v2
-from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score
+from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score, build_dft_ml_dataset
 from app.services.dft_review_service import DFTResultReviewService
 
 
@@ -358,6 +359,31 @@ def test_dft_export_blocks_supporting_reference_rows_from_main_paper_export(tmp_
             assert rows == []
             assert response.headers["x-d1-exported-count"] == "0"
             assert "supporting_reference_not_main_paper_data" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
+def test_rejected_dft_with_historical_safe_review_is_not_export_or_rag_eligible(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            row.candidate_status = "Rejected"
+            _safe_review(session, paper, row)
+            _evidence_ref(session, paper, row, page=6)
+            session.commit()
+
+            response, rows = _export_rows(session)
+            payload = build_dft_ml_dataset(session)
+
+            assert rows == []
+            assert response.headers["x-d1-exported-count"] == "0"
+            assert "target_rejected" in response.headers["x-d1-blocked-reasons"]
+            assert payload["records"] == []
+            assert payload["metadata"]["eligible_count"] == 0
+            assert payload["metadata"]["blocked_reasons"]["target_rejected"] == 1
+            assert is_rag_eligible(session, row, "dft_result") is False
     finally:
         engine.dispose()
 
