@@ -1135,7 +1135,10 @@ class ReviewService:
                     return row
         if collection == "tables":
             for row in rows:
-                if normalized_caption and self._normalized_text(getattr(row, "caption", None)) == normalized_caption:
+                if all(
+                    getattr(row, field, None) == proposed.get(field)
+                    for field in ("caption", "markdown_content", "page", "extraction_source", "prov")
+                ):
                     return row
         if collection == "sections":
             for row in rows:

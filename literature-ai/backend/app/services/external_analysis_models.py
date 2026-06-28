@@ -107,4 +107,5 @@ class MaterializationResult:
     created_corrections: int = 0
     created_relationships: int = 0
     auto_applied_corrections: int = 0
+    idempotent_noops: int = 0
     skipped_candidates: int = 0

@@ -14,6 +14,7 @@ from app.db.models import (
     ExternalAnalysisRun,
     ExtractionFieldReview,
     PaperCorrection,
+    PaperTable,
 )
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.review_conflict_service import DECISION_NEGATIVE, DECISION_POSITIVE
@@ -207,13 +208,31 @@ class VerificationSessionReviewApplicationMixin:
             return {"action": "mark_reviewed", "target_type": target_type, "target_id": target_id}
         if decision in DECISION_NEGATIVE and opinion.get("corrected_value") in (None, ""):
             return {"action": "reject", "target_type": target_type, "target_id": target_id}
+        proposed_value = opinion.get("corrected_value", opinion.get("value"))
+        if target_type == "tables":
+            table = self.session.get(PaperTable, UUID(str(target_id)))
+            if (
+                table is not None
+                and table.paper_id == paper_id
+                and field_name in ReviewService.STRUCTURED_TARGETS["tables"].allowed_fields
+                and getattr(table, field_name) == proposed_value
+            ):
+                return {
+                    "action": "idempotent_noop",
+                    "target_type": "tables",
+                    "target_id": target_id,
+                    "field_name": field_name,
+                    "proposed_value": proposed_value,
+                    "idempotent": True,
+                    "candidate_status": "ai_applied",
+                }
         return self._apply_structured_correction(
             paper_id=paper_id,
             target_type=target_type,
             target_id=target_id,
             field_name=field_name,
             reviewer=reviewer,
-            proposed_value=opinion.get("corrected_value", opinion.get("value")),
+            proposed_value=proposed_value,
             evidence_payload=evidence_payload,
             dual_ai_consensus=dual_ai_consensus,
             adjudicated_by_third_ai=adjudicated_by_third_ai,
@@ -478,6 +497,9 @@ class VerificationSessionReviewApplicationMixin:
 
     @staticmethod
     def _object_review_candidate_status_for_result(result: dict[str, Any]) -> str:
+        explicit_status = str(result.get("candidate_status") or "").strip()
+        if explicit_status:
+            return explicit_status
         action = str(result.get("action") or "").strip().lower()
         if action == "approve_correction":
             return "ai_applied"

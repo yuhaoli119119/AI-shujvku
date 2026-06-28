@@ -34,6 +34,7 @@ from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.services.review_service import ReviewService
+from app.services.table_curation_service import TableCurationService
 from app.services.verification_session_service import VerificationSessionService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 from app.security.exports import require_mcp_exports_enabled
@@ -715,6 +716,108 @@ def propose_correction(
             )
         session.refresh(correction)
         return _serialize_correction(correction)
+
+
+@mcp_server.tool(
+    name="update_table",
+    description=(
+        "Update evidence-backed fields on one parsed table. Allowed update fields: "
+        "caption, markdown_content, page, extraction_source, and prov."
+    ),
+)
+def update_table(
+    paper_id: str,
+    table_id: str,
+    updates: dict[str, Any],
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any],
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return TableCurationService(session, reviewer=auth.source_prefix).update_table(
+            paper_id=UUID(paper_id),
+            table_id=UUID(table_id),
+            updates=updates,
+            reason=reason,
+            evidence_payload=evidence_payload,
+        )
+
+
+@mcp_server.tool(
+    name="create_table",
+    description=(
+        "Create one missing parsed table from explicit evidence. The table object may "
+        "contain caption, markdown_content, page, extraction_source, and prov."
+    ),
+)
+def create_table(
+    paper_id: str,
+    table: dict[str, Any],
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any],
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return TableCurationService(session, reviewer=auth.source_prefix).create_table(
+            paper_id=UUID(paper_id),
+            table_payload=table,
+            reason=reason,
+            evidence_payload=evidence_payload,
+        )
+
+
+@mcp_server.tool(
+    name="delete_table",
+    description=(
+        "Delete one invalid or duplicate parsed table with a structured evidence anchor. "
+        "The deletion and audit record are committed atomically."
+    ),
+)
+def delete_table(
+    paper_id: str,
+    table_id: str,
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any],
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return TableCurationService(session, reviewer=auth.source_prefix).delete_table(
+            paper_id=UUID(paper_id),
+            table_id=UUID(table_id),
+            reason=reason,
+            evidence_payload=evidence_payload,
+        )
+
+
+@mcp_server.tool(
+    name="merge_table",
+    description=(
+        "Merge a source table object into an already-complete target table. The source "
+        "is deleted; target fields change only when target_updates is explicitly supplied."
+    ),
+)
+def merge_table(
+    paper_id: str,
+    source_table_id: str,
+    target_table_id: str,
+    reason: str,
+    evidence_payload: dict[str, Any] | list[Any],
+    target_updates: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return TableCurationService(session, reviewer=auth.source_prefix).merge_table(
+            paper_id=UUID(paper_id),
+            source_table_id=UUID(source_table_id),
+            target_table_id=UUID(target_table_id),
+            target_updates=target_updates,
+            reason=reason,
+            evidence_payload=evidence_payload,
+        )
 
 
 @mcp_server.tool(name="get_parse_status", description="Check the status of a parse job.")

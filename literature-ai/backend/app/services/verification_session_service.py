@@ -287,6 +287,7 @@ class VerificationSessionService(
         low_risk_summary = self._auto_materialize_single_ai_candidates(
             paper_id=paper_id,
             reviewer=reviewer,
+            candidate_run_id=candidate_run_id,
             write_lock_tokens=write_lock_tokens,
             write_lock_owner=write_lock_owner,
         )
@@ -300,6 +301,7 @@ class VerificationSessionService(
         object_review_summary = self._auto_apply_object_review_candidates(
             paper_id=paper_id,
             reviewer=reviewer,
+            candidate_run_id=candidate_run_id,
             write_lock_tokens=write_lock_tokens,
             exclude_target_types={"dft_results"},
         )
@@ -804,17 +806,21 @@ class VerificationSessionService(
         *,
         paper_id: UUID,
         reviewer: str,
+        candidate_run_id: UUID | None = None,
         write_lock_tokens: list[str] | None = None,
         write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
-        candidates = self.session.scalars(
+        stmt = (
             select(ExternalAnalysisCandidate)
             .where(
                 ExternalAnalysisCandidate.paper_id == paper_id,
                 ExternalAnalysisCandidate.candidate_type.in_(("note", "correction")),
             )
             .order_by(ExternalAnalysisCandidate.created_at.asc())
-        ).all()
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        candidates = self.session.scalars(stmt).all()
         external_service = ExternalAnalysisService(self.session, self.settings)
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
@@ -867,11 +873,12 @@ class VerificationSessionService(
         *,
         paper_id: UUID,
         reviewer: str,
+        candidate_run_id: UUID | None = None,
         write_lock_tokens: list[str] | None = None,
         include_target_types: set[str] | None = None,
         exclude_target_types: set[str] | None = None,
     ) -> dict[str, Any]:
-        rows = self.session.execute(
+        stmt = (
             select(ExternalAnalysisCandidate, ExternalAnalysisRun)
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
@@ -879,7 +886,10 @@ class VerificationSessionService(
                 ExternalAnalysisCandidate.candidate_type == "object_review_audit",
             )
             .order_by(ExternalAnalysisCandidate.created_at.asc())
-        ).all()
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        rows = self.session.execute(stmt).all()
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}

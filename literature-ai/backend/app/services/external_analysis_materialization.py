@@ -21,6 +21,7 @@ from app.services.external_analysis_models import (
 )
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.review_service import ReviewService
+from app.services.table_curation_service import TableCurationService
 from app.utils.evidence_anchors import has_evidence_anchor, has_material_correction_anchor
 from app.utils.protocol_tracking import protocol_snapshot
 
@@ -104,6 +105,21 @@ class ExternalAnalysisMaterializationMixin:
                             "requires_human_confirmation": False,
                         }
                     )
+                table_noop, table = TableCurationService.table_correction_matches_current(
+                    self.session,
+                    paper_id=candidate.paper_id,
+                    target_path=payload.get("target_path", ""),
+                    operation=payload.get("operation", "replace"),
+                    proposed_value=payload.get("proposed_value"),
+                )
+                if auto_apply_non_dft and table_noop and table is not None:
+                    candidate.status = "ai_applied"
+                    candidate.materialized_target_type = "paper_table"
+                    candidate.materialized_target_id = str(table.id)
+                    candidate.mapping_reason = "idempotent_noop:table_value_already_current"
+                    result.idempotent_noops += 1
+                    self.session.add(candidate)
+                    continue
                 correction = PaperCorrection(
                     paper_id=candidate.paper_id,
                     source=run.source,
@@ -162,6 +178,7 @@ class ExternalAnalysisMaterializationMixin:
                     "created_corrections": result.created_corrections,
                     "created_relationships": result.created_relationships,
                     "auto_applied_corrections": result.auto_applied_corrections,
+                    "idempotent_noops": result.idempotent_noops,
                     "skipped_candidates": result.skipped_candidates,
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
@@ -228,6 +245,21 @@ class ExternalAnalysisMaterializationMixin:
                     candidate.status = "requires_resolution"
                     self.session.add(candidate)
                     result.skipped_candidates += 1
+                    continue
+                table_noop, table = TableCurationService.table_correction_matches_current(
+                    self.session,
+                    paper_id=candidate.paper_id,
+                    target_path=payload.get("target_path", ""),
+                    operation=payload.get("operation", "replace"),
+                    proposed_value=payload.get("proposed_value"),
+                )
+                if table_noop and table is not None:
+                    candidate.status = "ai_applied"
+                    candidate.materialized_target_type = "paper_table"
+                    candidate.materialized_target_id = str(table.id)
+                    candidate.mapping_reason = "idempotent_noop:table_value_already_current"
+                    result.idempotent_noops += 1
+                    self.session.add(candidate)
                     continue
                 correction = PaperCorrection(
                     paper_id=candidate.paper_id,
@@ -307,6 +339,7 @@ class ExternalAnalysisMaterializationMixin:
                     "created_corrections": result.created_corrections,
                     "created_relationships": result.created_relationships,
                     "auto_applied_corrections": result.auto_applied_corrections,
+                    "idempotent_noops": result.idempotent_noops,
                     "skipped_candidates": result.skipped_candidates,
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
@@ -461,6 +494,7 @@ class ExternalAnalysisMaterializationMixin:
                 "created_corrections": non_dft_summary.created_corrections,
                 "created_relationships": non_dft_summary.created_relationships,
                 "auto_applied_corrections": non_dft_summary.auto_applied_corrections,
+                "idempotent_noops": non_dft_summary.idempotent_noops,
                 "skipped_candidates": non_dft_summary.skipped_candidates,
             },
         }

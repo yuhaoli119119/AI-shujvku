@@ -153,6 +153,7 @@ async def materialize_external_analysis_run(
             "created_notes": result.created_notes,
             "created_corrections": result.created_corrections,
             "created_relationships": result.created_relationships,
+            "idempotent_noops": result.idempotent_noops,
             "skipped_candidates": result.skipped_candidates,
         }
     except ValueError as exc:
