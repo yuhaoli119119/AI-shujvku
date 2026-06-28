@@ -288,6 +288,8 @@ test.describe('Review Center Conflict Modal', () => {
 
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
 
+    await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveCount(0);
+    await expect(page.locator('#promptCopySelect')).not.toContainText('DFT 指令');
     const rows = page.locator('#rows tr');
     await expect(rows).toHaveCount(2);
 
@@ -304,20 +306,43 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(overlay).toContainText('自动推进 0');
     await expect(overlay).toContainText('建议裁定 1');
     await expect(overlay).toContainText('必须人工 1');
-    await expect(overlay).toContainText('接受 AI 裁定');
-    await expect(overlay).toContainText('生成修正草案');
-    await expect(overlay).toContainText('跳到对象审核');
+    await expect(overlay).not.toContainText('接受 AI 裁定');
+    await expect(overlay).not.toContainText('都不采用');
+    await expect(overlay).not.toContainText('生成修正草案');
+    await expect(overlay).toContainText('DFT final truth 请到详情页人工处理');
+    await expect(overlay).toContainText('前往 DFT 详情');
 
     const conflictItems = overlay.locator('.conflict-list-item');
     await expect(conflictItems).toHaveCount(2);
     await expect(conflictItems.nth(0)).toHaveClass(/is-active/);
     const selectedPanel = overlay.locator('#selectedConflictPanel');
     await expect(selectedPanel).toContainText('dft-paper-2-1');
+    const dftLink = selectedPanel.getByRole('link', { name: '前往 DFT 详情' }).first();
+    const dftHref = await dftLink.getAttribute('href');
+    const dftUrl = new URL(dftHref, `${BASE_URL}/pages/review_center/index.html`);
+    expect(dftUrl.pathname).toBe('/pages/paper_detail/index.html');
+    expect(dftUrl.searchParams.get('paper_id')).toBe('paper-2');
+    expect(dftUrl.searchParams.get('tab')).toBe('dft');
+    expect(dftUrl.searchParams.get('target_type')).toBe('dft_results');
+    expect(dftUrl.searchParams.get('target_id')).toBe('dft-paper-2-1');
     await conflictItems.nth(1).click();
     await expect(conflictItems.nth(1)).toHaveClass(/is-active/);
     await expect(selectedPanel).toContainText('Catalyst-sample conflicts should stay in object review.');
     await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The catalyst sample uses an Fe-N4 coordination environment.');
     await expect(selectedPanel).not.toContainText('接受 AI 裁定');
+    await expect(selectedPanel.getByRole('link', { name: '跳到对象审核' })).toBeVisible();
+    const jumpLink = overlay.getByRole('link', { name: '跳到对象审核' }).first();
+    const jumpHref = await jumpLink.getAttribute('href');
+    const jumpUrl = new URL(jumpHref, `${BASE_URL}/pages/review_center/index.html`);
+    expect(jumpUrl.pathname).toBe('/pages/literature_library/index.html');
+    expect(jumpUrl.searchParams.get('paper_id')).toBe('paper-2');
+    expect(jumpUrl.searchParams.get('tab')).toBe('dft');
+    expect(jumpUrl.searchParams.get('target_type')).toBe('catalyst_sample');
+    expect(jumpUrl.searchParams.get('target_id')).toBe('catalyst-sample-2');
+    expect(jumpUrl.searchParams.get('field_name')).toBe('coordination');
+    expect(jumpUrl.searchParams.get('pdf_page')).toBe('2');
+    expect(jumpUrl.searchParams.get('pdf_locator_status')).toBe('exact_page');
+    expect(jumpUrl.searchParams.get('pdf_evidence_text')).toContain('The catalyst sample uses an Fe-N4 coordination environment.');
     await conflictItems.nth(0).click();
     await expect(conflictItems.nth(0)).toHaveClass(/is-active/);
     await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
@@ -360,32 +385,7 @@ test.describe('Review Center Conflict Modal', () => {
     await expandReason.click();
     await expect(overlay.getByRole('button', { name: '收起理由' }).first()).toBeVisible();
 
-    await overlay.getByRole('button', { name: '接受 AI 裁定' }).click();
-    await expect(page.locator('#toast')).toContainText('AI 裁定已执行');
-    expect(writeCalls).toContainEqual({
-      method: 'POST',
-      pathname: '/api/workbench/review-conflicts/accept-ai',
-      body: {
-        paper_id: 'paper-2',
-        target_type: 'dft_results',
-        target_id: 'dft-paper-2-1',
-        field_name: 'value',
-        reviewer: 'review_center',
-      },
-    });
-
-    const jumpLink = overlay.getByRole('link', { name: '跳到对象审核' }).first();
-    const jumpHref = await jumpLink.getAttribute('href');
-    const jumpUrl = new URL(jumpHref, `${BASE_URL}/pages/review_center/index.html`);
-    expect(jumpUrl.pathname).toBe('/pages/literature_library/index.html');
-    expect(jumpUrl.searchParams.get('paper_id')).toBe('paper-2');
-    expect(jumpUrl.searchParams.get('tab')).toBe('dft');
-    expect(jumpUrl.searchParams.get('target_type')).toBe('dft_results');
-    expect(jumpUrl.searchParams.get('target_id')).toBe('dft-paper-2-1');
-    expect(jumpUrl.searchParams.get('field_name')).toBe('value');
-    expect(jumpUrl.searchParams.get('pdf_page')).toBe('5');
-    expect(jumpUrl.searchParams.get('pdf_locator_status')).toBe('exact_page');
-    expect(jumpUrl.searchParams.get('pdf_evidence_text')).toContain('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
+    expect(writeCalls).toEqual([]);
 
     await overlay.getByRole('button', { name: '关闭' }).first().click();
     await expect(overlay).toBeHidden();

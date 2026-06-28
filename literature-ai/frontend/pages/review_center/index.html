@@ -1221,9 +1221,8 @@
         <select class="btn btn-ghost" id="promptCopySelect" title="复制 IDE AI 指令" onchange="handlePromptCopySelect()">
           <option value="">复制指令</option>
           <option value="overall">总体指令</option>
-          <option value="dft">DFT 指令</option>
-          <option value="figure">图片审核指令</option>
-          <option value="table">表格审核指令</option>
+          <option value="figure">图表指令</option>
+          <option value="sections_writing">章节写作指令</option>
           <option value="text_review">文字审核指令</option>
         </select>
       </div>
@@ -1749,6 +1748,21 @@
       ensureValidPage(rows.length);
       const start = (state.pagination.page - 1) * pageSize;
       return rows.slice(start, start + pageSize);
+    }
+
+    function resolveVisualPromptKind() {
+      const rows = typeof window.currentVisibleRows === "function"
+        ? window.currentVisibleRows()
+        : currentVisibleRows();
+      const hasFigures = (rows || []).some(function (row) {
+        return toCount(row.figure_count) > 0;
+      });
+      const hasTables = (rows || []).some(function (row) {
+        return toCount(row.table_count) > 0;
+      });
+      if (hasFigures && hasTables) return "figure_table";
+      if (hasTables) return "table";
+      return "figure";
     }
 
     function goToPage(page) {
@@ -2397,22 +2411,25 @@
           params.set("pdf_locator_status", bestPdfLocator.locator_status || "exact_page");
           if (bestPdfLocator.evidence_text) params.set("pdf_evidence_text", clipText(bestPdfLocator.evidence_text, 240));
         }
-        return "../literature_library/index.html?" + params.toString();
+        return item && item.target_type === "dft_results"
+          ? "../paper_detail/index.html?" + params.toString()
+          : "../literature_library/index.html?" + params.toString();
       }
 
-    function canGenerateCorrectionDraft(item) {
-      return item && item.target_type === "dft_results" && ["value", "unit"].includes(item.field_name);
+    function isDftConflictItem(item) {
+      return item && item.target_type === "dft_results";
     }
 
     function canManualAdoptOpinion(item) {
-      return item && item.target_type === "dft_results";
+      return false;
     }
 
     function buildConflictActionButtons(item, row, index) {
       const buttons = [];
-      if (canManualAdoptOpinion(item)) {
-        buttons.push('<button class="btn btn-tinted btn-sm" type="button" data-action="accept-ai" data-group-index="' + esc(index) + '">接受 AI 裁定</button>');
-        buttons.push('<button class="btn btn-ghost btn-sm" type="button" data-action="reject-all-opinions" data-group-index="' + esc(index) + '">都不采用</button>');
+      if (isDftConflictItem(item)) {
+        buttons.push('<span class="chip warn" title="只关闭 AI 审核意见不会 verify/reject/edit DFT 数据，也不会产生 human_verified / safe_verified / ML_Ready。">DFT final truth 请到详情页人工处理</span>');
+        buttons.push('<a class="btn btn-tinted btn-sm" href="' + esc(buildReviewTargetHref(row, item)) + '">前往 DFT 详情</a>');
+        return buttons.join("");
       }
       buttons.push('<a class="btn btn-ghost btn-sm" href="' + esc(buildReviewTargetHref(row, item)) + '">跳到对象审核</a>');
       return buttons.join("");
@@ -2694,7 +2711,7 @@
       if (conflictCount > 0) {
         return {
           title: "这篇文献存在未收口冲突，先看“冲突详情”，不要直接凭候选数下结论。",
-          body: "这些冲突可能来自 DFT、图表或内容模块；应先对照原文证据，再决定是否接受 AI 裁定或人工确认。"
+          body: "DFT 冲突应从只读核验入口跳到 DFT 详情页人工处理；图表或内容模块也应先对照原文证据，再走对应审核入口。"
         };
       }
       if (suspectedMissing > 0) {
@@ -3631,6 +3648,7 @@
       const blockedReasons = Array.isArray(adjudication.blocked_reasons) ? adjudication.blocked_reasons : [];
       const summary = itemTargetSummary(item);
       const anchor = itemAnchorSummary(item);
+      const actionLabel = isDftConflictItem(item) ? "前往 DFT 详情人工处理" : adjudicationActionLabel(adjudication.recommended_action);
       return '<section class="conflict-card is-' + esc(severity) + '">' +
         '<div class="conflict-card-head">' +
         '<div class="conflict-card-left">' +
@@ -3651,7 +3669,7 @@
           '<div class="conflict-object-item"><div class="conflict-object-label">争议字段</div><div class="conflict-object-value">' + esc(formatTargetType(item.target_type) + " / " + (item.field_name || "-")) + '</div></div>' +
           '<div class="conflict-object-item"><div class="conflict-object-label">对象</div><div class="conflict-object-value">' + esc(targetSummaryLabel(item)) + '</div></div>' +
           '<div class="conflict-object-item"><div class="conflict-object-label">证据锚点</div><div class="conflict-object-value">' + esc(anchorSummaryText(anchor)) + '</div></div>' +
-          '<div class="conflict-object-item"><div class="conflict-object-label">建议动作</div><div class="conflict-object-value">' + esc(adjudicationActionLabel(adjudication.recommended_action)) + '</div></div>' +
+          '<div class="conflict-object-item"><div class="conflict-object-label">建议动作</div><div class="conflict-object-value">' + esc(actionLabel) + '</div></div>' +
           '<div class="conflict-object-item"><div class="conflict-object-label">能量类型</div><div class="conflict-object-value">' + esc(summary.property_type || summary.normalized_energy_type || "-") + '</div></div>' +
           '<div class="conflict-object-item"><div class="conflict-object-label">材料 / 结构</div><div class="conflict-object-value">' + esc(joinDisplayParts([summary.normalized_material, summary.structure_name]) || "-") + '</div></div>' +
           '<div class="conflict-object-item"><div class="conflict-object-label">吸附物 / 步骤</div><div class="conflict-object-value">' + esc(joinDisplayParts([summary.adsorbate, summary.reaction_step]) || "-") + '</div></div>' +
@@ -3835,6 +3853,10 @@
         if (!Number.isFinite(groupIndex)) return;
         const item = conflictState.groups[groupIndex];
         if (!item || !conflictState.activeRow) return;
+        if (isDftConflictItem(item)) {
+          showToast("DFT final truth 不在旧 AI 裁定入口处理；请前往 DFT 详情页人工 verify/reject。");
+          return;
+        }
         if (action === "accept-ai") {
           executeAcceptAiAdjudication(conflictState.activeRow, item);
           return;
@@ -4205,28 +4227,6 @@
       }
       if (action === "prepare_library") {
         prepareLibrary();
-      }
-    }
-
-    async function batchAutoAdvanceFiltered() {
-      const paperIds = Array.from(new Set(filteredPaperIds()));
-      if (!paperIds.length) {
-        showToast("当前筛选没有可自动推进的论文。");
-        return;
-      }
-      if (!window.confirm("将对当前筛选内的论文执行批量 AI 自动推进。\n\n只会执行 adjudication_mode=auto 的 DFT 项；object review / manual / suggest 不会自动落库。")) {
-        return;
-      }
-      try {
-        const result = await fetchJSON("/api/workbench/review-conflicts/auto-advance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paper_ids: paperIds, reviewer: "review_center", limit: 200 })
-        });
-        showToast("AI 自动推进完成：eligible " + Number(result.eligible || 0) + "，executed " + Number(result.executed || 0) + "，skipped " + Number(result.skipped || 0));
-        await loadReviewCenter();
-      } catch (error) {
-        showToast("批量 AI 自动推进失败：" + error.message);
       }
     }
 

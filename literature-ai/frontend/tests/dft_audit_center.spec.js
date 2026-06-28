@@ -137,6 +137,51 @@ test('copies serializer ids with real newlines and keeps API access readonly', a
   expect(requests.some(request => request.url.includes('repair_dft_audit_issue'))).toBe(false);
 });
 
+test('links real DFTResult issues to paper detail and hides fake targets', async ({ page }) => {
+  const requests = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) {
+      requests.push({ method: request.method(), url: request.url() });
+    }
+  });
+  await mockApis(page, {
+    issues: [
+      makeIssue({
+        id: '33333333-3333-4333-8333-333333333333',
+        paper_id: 'paper-link',
+        issue_type: 'wrong_value',
+        target_id: 'dft-result-42',
+      }),
+      makeIssue({
+        id: '44444444-4444-4444-8444-444444444444',
+        paper_id: 'paper-link',
+        target_id: 'new',
+      }),
+      makeIssue({
+        id: '55555555-5555-4555-8555-555555555555',
+        paper_id: 'paper-link',
+        issue_type: 'source_scope_error',
+        target_id: 'dft-result-out-of-scope',
+      }),
+    ],
+  });
+
+  await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html?paper_id=paper-link`);
+
+  const detailLink = page.getByRole('link', { name: '前往 DFT 详情' });
+  await expect(detailLink).toHaveCount(1);
+  const href = await detailLink.first().getAttribute('href');
+  const url = new URL(href, `${BASE_URL}/pages/dft_audit_center/index.html`);
+  expect(url.pathname).toBe('/pages/paper_detail/index.html');
+  expect(url.searchParams.get('paper_id')).toBe('paper-link');
+  expect(url.searchParams.get('tab')).toBe('dft');
+  expect(url.searchParams.get('target_type')).toBe('dft_results');
+  expect(url.searchParams.get('target_id')).toBe('dft-result-42');
+  expect(url.searchParams.get('issue_id')).toBe('33333333-3333-4333-8333-333333333333');
+  await expect(page.locator('#issueList')).toContainText('暂无绑定 DFT 条目');
+  expect(requests.every(request => request.method === 'GET')).toBe(true);
+});
+
 test('issue type filter covers the complete backend issue type contract', async ({ page }) => {
   await mockApis(page);
   await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html`);

@@ -82,6 +82,8 @@ GET /api/dft/audit-report?paper_id=<optional-paper-uuid>&days=30&include_closed=
 
 The report groups DFT audit issues by status and issue type, groups `repair_dft_audit_issue` AuditLog rows by action and repair actor/capability, counts any `writes_final_truth=true` repair logs, returns suspect repair warnings, and includes the same MCP capability lint warnings. It does not modify DFT data and does not include raw API keys.
 
+The DFT audit center UI is read-only: it is an issue queue, copy surface, and navigation entry to the paper DFT detail view. For issues bound to a real `dft_results` target, reviewers should open the DFT detail link and perform final human verify/reject there or through an equivalent explicit review tool. Issues with `target_id="new"`, missing targets, or source-scope errors must not show fake DFT detail links. Primary repair AI output remains pending review; it is not `human_verified`, `safe_verified`, or `ML_Ready`. Legacy AI adjudication and auto-advance controls are not valid DFT final-truth paths.
+
 ## Capabilities
 
 - `read_papers`: read paper metadata, parsed sections, candidates, evidence, Codex context, review coverage, and queues.
@@ -382,3 +384,4 @@ Reviewer and admin tools:
 - Do not grant `repair_dft_issues` to external audit/propose-only clients. Use a separate `dft_primary_repair` key with `read_papers,repair_dft_issues`.
 - Check `mcp.capability_warnings` / `mcp_capability_warnings` after deployment changes; fix any `repair_dft_issues_non_primary_repair_key` warning before running DFT issue repair.
 - DFT export remains gated by safe verified evidence and exact locators.
+- DFT final verify/reject must be a deliberate human/user-authorized action on the DFT detail path or equivalent review tool, not a legacy AI adjudication or auto-advance result.

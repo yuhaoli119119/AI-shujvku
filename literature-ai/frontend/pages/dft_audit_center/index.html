@@ -29,6 +29,7 @@
     .field.paper input { width: 100%; }
     .btn.local { height: 32px; border: 1px solid var(--color-border); background: var(--color-primary-bg); color: var(--color-primary); border-radius: var(--radius-sm); padding: 0 12px; font-weight: 850; cursor: pointer; }
     .btn.local.secondary { background: var(--color-surface-alt); color: var(--color-text-secondary); }
+    a.btn.local { display: inline-flex; align-items: center; text-decoration: none; }
     .main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; align-items: start; }
     .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
     .panel-title { font-size: 15px; font-weight: 900; }
@@ -46,6 +47,8 @@
     .issue-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 12px; }
     .issue-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
     .issue-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 900; }
+    .issue-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .issue-target-note { color: var(--color-text-secondary); font-size: 12px; line-height: 1.4; }
     .badge { display: inline-flex; align-items: center; border-radius: var(--radius-pill); padding: 3px 8px; font-size: 12px; font-weight: 850; background: var(--color-surface-alt); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
     .status-needs_primary_ai { background: rgba(37, 99, 235, 0.10); color: #1d4ed8; border-color: rgba(37, 99, 235, 0.20); }
     .status-needs_user_decision { background: var(--color-warning-bg); color: var(--color-warning); border-color: rgba(217,119,6,0.22); }
@@ -305,6 +308,7 @@
       const evidence = item.evidence_payload || {};
       const sourceCount = item.source_count != null ? item.source_count : (item.source_identities || []).length;
       const candidateCount = (item.source_candidate_ids || []).length;
+      const detailHref = dftDetailHref(item);
       return `
         <article class="issue-card">
           <div class="issue-top">
@@ -313,7 +317,12 @@
               <span class="badge status-${esc(item.status || "unknown")}">${esc(statusLabel(item.status))}</span>
               <span class="badge">${esc(item.severity || "medium")}</span>
             </div>
-            <button class="btn local secondary" type="button" onclick="copyIssueId('${esc(item.id)}')">复制 issue_id</button>
+            <div class="issue-actions">
+              ${detailHref
+                ? `<a class="btn local" href="${esc(detailHref)}">前往 DFT 详情</a>`
+                : '<span class="issue-target-note">暂无绑定 DFT 条目</span>'}
+              <button class="btn local secondary" type="button" onclick="copyIssueId('${esc(item.id)}')">复制 issue_id</button>
+            </div>
           </div>
           <div class="issue-grid">
             ${kv("target_id", item.target_id || "-")}
@@ -332,6 +341,38 @@
           </details>
         </article>
       `;
+    }
+
+    function hasRealDftTarget(item) {
+      const targetId = String(item && item.target_id || "").trim();
+      const issueType = String(item && item.issue_type || "").trim();
+      return item &&
+        item.target_type === "dft_results" &&
+        targetId &&
+        targetId.toLowerCase() !== "new" &&
+        issueType !== "source_scope_error";
+    }
+
+    function issuePaperId(item) {
+      return item && (
+        item.paper_id ||
+        (item.evidence_payload && item.evidence_payload.paper_id) ||
+        (item.current_snapshot && item.current_snapshot.paper_id) ||
+        (item.suggested_dft && item.suggested_dft.paper_id)
+      );
+    }
+
+    function dftDetailHref(item) {
+      if (!hasRealDftTarget(item)) return "";
+      const paperId = issuePaperId(item) || document.getElementById("paperIdInput").value.trim();
+      if (!paperId) return "";
+      const params = new URLSearchParams();
+      params.set("paper_id", paperId);
+      params.set("tab", "dft");
+      params.set("target_type", "dft_results");
+      params.set("target_id", item.target_id);
+      if (item.id) params.set("issue_id", item.id);
+      return "../paper_detail/index.html?" + params.toString();
     }
 
     function kv(label, value) {

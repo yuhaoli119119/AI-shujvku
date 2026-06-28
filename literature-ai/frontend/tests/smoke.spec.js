@@ -2899,7 +2899,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const dftActions = page.locator('#dftContent [data-role="dft-readiness-actions"]');
     await expect(dftActions).toHaveCount(1);
     await expect(dftActions.locator('button:has-text("生成下一轮 AI 审核任务")')).toBeVisible();
-    await expect(dftActions.locator('button:has-text("重新检查写回")')).toBeVisible();
+    await expect(dftActions.locator('button:has-text("刷新审核状态")')).toBeVisible();
     await expect(dftActions.locator('button:has-text("打开审核中心")')).toBeVisible();
     await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
     const missingReviewLabels = await page.evaluate(() => {
@@ -3235,7 +3235,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
       await expect(page.locator('#dftContent [data-role="dft-readiness-actions"]')).toHaveCount(1);
       await expect(page.locator('#dftContent button:has-text("生成下一轮 AI 审核任务")')).toBeVisible();
-      await expect(page.locator('#dftContent button:has-text("重新检查写回")')).toBeVisible();
+      await expect(page.locator('#dftContent button:has-text("刷新审核状态")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
       await expect(page.locator('#dftContent')).toContainText('同一 AI/模型可以重复审核');

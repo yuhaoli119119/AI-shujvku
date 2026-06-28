@@ -266,7 +266,7 @@ function renderDftExportReadiness(detail) {
                 : '<span class="status-chip meta">安全状态加载中</span>' +
                   '<span class="status-chip">候选总数 ' + fallbackTotal + '</span>') +
         '</div>' +
-        '<div class="subtle">处理方式：点击“生成下一轮 AI 审核任务”后导入下一轮审核结果；同一 AI/模型可以重复审核，每次成功回写按独立 candidate_id 计一票。每条有效意见仍必须提供 evidence_location.page 和 quoted_text。系统会先自动写回一致项，只把缺下一轮有效意见、缺证据或真正冲突的记录放进下一轮。审核全部收口后才允许标记完成。</div>' +
+        '<div class="subtle">处理方式：点击“生成下一轮 AI 审核任务”后导入下一轮审核结果；同一 AI/模型可以重复审核，每次成功回写按独立 candidate_id 计一票。每条有效意见仍必须提供 evidence_location.page 和 quoted_text。系统会先刷新审核状态，只把缺下一轮有效意见、缺证据或真正冲突的记录放进下一轮。最终 verify/reject 仍需人工处理。</div>' +
         (reasons ? '<div class="subtle" style="margin-top:6px;">当前阻断：' + esc(reasons) + '</div>' : '') +
     '</div>';
 }
