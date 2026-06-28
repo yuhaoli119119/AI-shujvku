@@ -313,12 +313,14 @@ class VerificationSessionService(
                 "applied_count": dft_settlement_summary["auto_applied_count"],
                 "applied_items": dft_settlement_summary["auto_applied_items"],
                 "pending_count": (
-                    dft_settlement_summary["waiting_second_ai_count"]
+                    dft_settlement_summary["audit_consensus_count"]
+                    + dft_settlement_summary["waiting_second_ai_count"]
                     + dft_settlement_summary["need_third_ai_count"]
                     + dft_settlement_summary["need_repair_count"]
                 ),
                 "pending_items": (
-                    dft_settlement_summary["waiting_second_ai_items"]
+                    dft_settlement_summary["audit_consensus_items"]
+                    + dft_settlement_summary["waiting_second_ai_items"]
                     + dft_settlement_summary["need_third_ai_items"]
                     + dft_settlement_summary["need_repair_items"]
                 ),
@@ -367,6 +369,7 @@ class VerificationSessionService(
         ).all()
         audits_by_target = self._paper_dft_audit_candidates(paper_id)
         auto_applied: list[dict[str, Any]] = []
+        audit_consensus_ready: list[dict[str, Any]] = []
         need_third_ai: list[dict[str, Any]] = []
         need_repair: list[dict[str, Any]] = []
         waiting_second_ai: list[dict[str, Any]] = []
@@ -399,6 +402,8 @@ class VerificationSessionService(
             status = row_summary.pop("status")
             if status == "auto_applied":
                 auto_applied.append(row_summary)
+            elif status == "audit_consensus_ready":
+                audit_consensus_ready.append(row_summary)
             elif status == "need_third_ai":
                 need_third_ai.append(row_summary)
             elif status == "need_repair":
@@ -414,6 +419,8 @@ class VerificationSessionService(
             "new_dft_candidates": new_dft_summary,
             "auto_applied_count": len(auto_applied),
             "auto_applied_items": auto_applied,
+            "audit_consensus_count": len(audit_consensus_ready),
+            "audit_consensus_items": audit_consensus_ready,
             "need_third_ai_count": len(need_third_ai),
             "need_third_ai_items": need_third_ai,
             "need_repair_count": len(need_repair),
@@ -443,6 +450,7 @@ class VerificationSessionService(
                 payload={
                     "paper_id": str(paper_id),
                     "auto_applied_count": summary["auto_applied_count"],
+                    "audit_consensus_count": summary["audit_consensus_count"],
                     "need_third_ai_count": summary["need_third_ai_count"],
                     "need_repair_count": summary["need_repair_count"],
                     "blocked_reason_counts": summary["blocked_reason_counts"],
@@ -467,6 +475,8 @@ class VerificationSessionService(
             "new_dft_candidates": empty_candidates,
             "auto_applied_count": 0,
             "auto_applied_items": [],
+            "audit_consensus_count": 0,
+            "audit_consensus_items": [],
             "need_third_ai_count": 0,
             "need_third_ai_items": [],
             "need_repair_count": 0,

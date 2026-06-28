@@ -446,13 +446,26 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
     )
     assert settled.status_code == 200
     settlement = settled.json()["settlement"]
-    assert settlement["high_risk"]["auto_applied_count"] == 1
+    assert settlement["high_risk"]["auto_applied_count"] == 0
     assert settlement["low_risk_notes"]["auto_materialized_count"] == 1
-    assert settlement["high_risk"]["manual_conflict_count"] == 0
+    assert settlement["high_risk"]["manual_conflict_count"] == 1
 
     with Session() as session:
         stored = session.get(DFTResult, UUID(row_id))
-        assert stored.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"}
+        assert stored.candidate_status == "system_candidate"
+        assert session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == UUID(paper_id),
+                ExtractionFieldReview.target_id == row_id,
+            )
+        ).all() == []
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.paper_id == UUID(paper_id),
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+            )
+        ).all()
+        assert {candidate.status for candidate in candidates} == {"requires_resolution"}
         note = session.scalar(select(PaperNote).where(PaperNote.paper_id == UUID(paper_id)))
         assert note is not None
         assert note.section_title == "Discussion"
@@ -591,13 +604,15 @@ def test_settle_ai_dft_reviews_endpoint_is_idempotent(verification_env):
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["auto_applied_count"] == 1
+    assert first.json()["auto_applied_count"] == 0
+    assert first.json()["audit_consensus_count"] == 1
     assert second.json()["auto_applied_count"] == 0
+    assert second.json()["audit_consensus_count"] == 1
 
     with Session() as session:
         reviews = session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == UUID(paper_id))).all()
         assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert {review.reviewer_status for review in reviews} == {"pending"}
 
 
 def test_li_s_project_library_v4_consensus_requires_user_submit(verification_env):
@@ -1058,11 +1073,12 @@ def test_materialized_new_candidate_can_settle_with_independent_value_pass(verif
     settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
     assert settled.status_code == 200
     payload = settled.json()
-    assert payload["auto_applied_count"] == 1
+    assert payload["auto_applied_count"] == 0
+    assert payload["audit_consensus_count"] == 1
 
     with Session() as session:
         stored = session.get(DFTResult, row_id)
-        assert stored.catalyst_sample_id is not None
+        assert stored.catalyst_sample_id is None
         reviews = session.scalars(
             select(ExtractionFieldReview).where(
                 ExtractionFieldReview.paper_id == paper_id,
@@ -1070,8 +1086,7 @@ def test_materialized_new_candidate_can_settle_with_independent_value_pass(verif
                 ExtractionFieldReview.target_id == str(row_id),
             )
         ).all()
-        assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert reviews == []
 
 
 def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_env):
@@ -1193,7 +1208,8 @@ def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_
     settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
     assert settled.status_code == 200
     payload = settled.json()
-    assert payload["auto_applied_count"] == 1
+    assert payload["auto_applied_count"] == 0
+    assert payload["audit_consensus_count"] == 1
     assert payload["need_third_ai_count"] == 0
 
     with Session() as session:
@@ -1204,8 +1220,7 @@ def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_
                 ExtractionFieldReview.target_id == str(row_id),
             )
         ).all()
-        assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert reviews == []
 
 
 def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env):
@@ -1535,12 +1550,13 @@ def test_field_level_proposal_can_settle_with_independent_value_pass(verificatio
     settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
     assert settled.status_code == 200
     payload = settled.json()
-    assert payload["auto_applied_count"] == 1
+    assert payload["auto_applied_count"] == 0
+    assert payload["audit_consensus_count"] == 1
     assert payload["need_repair_count"] == 0
 
     with Session() as session:
         stored = session.get(DFTResult, row_id)
-        assert stored.adsorbate == "OH*"
+        assert stored.adsorbate == "H"
         assert stored.catalyst_sample_id is not None
         reviews = session.scalars(
             select(ExtractionFieldReview).where(
@@ -1549,8 +1565,7 @@ def test_field_level_proposal_can_settle_with_independent_value_pass(verificatio
                 ExtractionFieldReview.target_id == str(row_id),
             )
         ).all()
-        assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert reviews == []
 
 
 def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):
@@ -1663,6 +1678,93 @@ def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):
         assert session.scalar(select(AuditLog).where(AuditLog.action == "manual_conflict_resolution")) is not None
 
 
+def test_manual_reject_all_dft_opinions_does_not_reject_underlying_result(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Manual reject-all DFT opinions", pdf_path="reject-all.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S6",
+            value=-1.1,
+            unit="eV",
+            evidence_text="Stored candidate remains unresolved.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="manual_conflict",
+            source_label="manual-conflict",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        for value, confidence in ((-1.35, 0.87), (-1.45, 0.82)):
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": str(row.id),
+                        "field_name": "value",
+                        "decision": "PASS",
+                        "corrected_value": value,
+                        "confidence": confidence,
+                        "evidence_location": {
+                            "page": 4,
+                            "table": "Table 1",
+                            "evidence_text": f"Table 1 supports {value} eV.",
+                        },
+                    },
+                    status="pending",
+                )
+            )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/workbench/review-conflicts/manual-decision",
+        json={
+            "paper_id": paper_id,
+            "target_type": "dft_results",
+            "target_id": row_id,
+            "field_name": "value",
+            "resolution": "reject_all",
+            "reviewer": "manual_test",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"] == "audit_opinion_rejected"
+    assert payload["writes_final_truth"] is False
+
+    with Session() as session:
+        stored = session.get(DFTResult, UUID(row_id))
+        assert stored.value == pytest.approx(-1.1)
+        assert stored.candidate_status == "system_candidate"
+        assert session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == UUID(paper_id),
+                ExtractionFieldReview.target_id == row_id,
+            )
+        ).all() == []
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == UUID(paper_id))
+        ).all()
+        assert {candidate.status for candidate in candidates} == {"ai_reviewed"}
+
+
 # ---------------------------------------------------------------------------
 # Characterization tests for _settle_dft_row_from_existing_audits branch
 # priority.  Each test pins which branch fires for a given opinion
@@ -1747,7 +1849,12 @@ def test_settle_third_ai_priority_over_pass_reject_conflict():
     service = _make_settle_service()
     # Mock the reject-all path so we don't need a real DFTResultReviewService.
     service._apply_reject_all = MagicMock(
-        return_value={"action": "reject", "target_type": "dft_results", "result": {"status": "rejected"}}
+        return_value={
+            "action": "audit_opinion_rejected",
+            "target_type": "dft_results",
+            "result": {"status": "audit_opinion_rejected"},
+            "writes_final_truth": False,
+        }
     )
 
     result = service._settle_dft_row_from_existing_audits(
@@ -1757,7 +1864,8 @@ def test_settle_third_ai_priority_over_pass_reject_conflict():
         write_lock_tokens=None,
     )
 
-    assert result["status"] == "auto_applied"
+    assert result["status"] == "audit_consensus_ready"
+    assert result["writes_final_truth"] is False
     assert result.get("reason") != "decision_conflict"
     service._apply_reject_all.assert_called_once()
 

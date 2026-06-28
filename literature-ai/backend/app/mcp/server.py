@@ -430,7 +430,7 @@ def insert_word_citation(
         return result
 
 
-@mcp_server.tool(name="verify_dft_result", description="Mark one evidence-backed DFT result candidate as reviewed after Codex/human PDF evidence verification.")
+@mcp_server.tool(name="verify_dft_result", description="Explicitly mark one evidence-backed DFT result candidate as reviewed after human or user-authorized PDF evidence verification; audit consensus must not call this automatically.")
 def verify_dft_result(
     paper_id: str,
     dft_result_id: str,
@@ -451,7 +451,7 @@ def verify_dft_result(
         )
 
 
-@mcp_server.tool(name="reject_dft_result", description="Mark one DFT result candidate as rejected so it stays blocked from ML export and leaves the active review queue.")
+@mcp_server.tool(name="reject_dft_result", description="Explicitly mark one DFT result candidate as rejected after human or user-authorized review so it stays blocked from ML export; audit consensus must not call this automatically.")
 def reject_dft_result(
     paper_id: str,
     dft_result_id: str,

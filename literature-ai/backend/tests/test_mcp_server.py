@@ -870,7 +870,7 @@ def test_mcp_codex_context_and_item_use_compact_detail_query(mcp_test_env, monke
     assert item["context"]["item"]["caption"] == "Figure 1. Compact detail figure."
 
 
-def test_mcp_import_analysis_auto_applies_dual_ai_dft_reviews(mcp_test_env):
+def test_mcp_import_analysis_records_dual_ai_dft_reviews_without_auto_apply(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="MCP Auto Apply DFT Paper", pdf_path="mcp-auto-apply.pdf", authors=[])
         session.add(paper)
@@ -947,17 +947,21 @@ def test_mcp_import_analysis_auto_applies_dual_ai_dft_reviews(mcp_test_env):
     assert first["candidate_count"] == 1
     assert second["candidate_count"] == 1
     assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
-    assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
+    assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 0
+    assert second["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
+    assert second["auto_apply_summary"]["dft_settlement"]["audit_consensus_count"] == 1
 
     with Session(mcp_test_env["engine"]) as session:
         stored_row = session.get(DFTResult, UUID(row_id))
         candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
         reviews = session.query(ExtractionFieldReview).all()
+        audit_logs = session.query(AuditLog).filter(AuditLog.action == "verify_dft_result").all()
 
     assert stored_row is not None
-    assert stored_row.candidate_status == "ML_Ready"
-    assert {candidate.status for candidate in candidates} == {"materialized"}
-    assert reviews
+    assert stored_row.candidate_status == "system_candidate"
+    assert {candidate.status for candidate in candidates} == {"requires_resolution"}
+    assert reviews == []
+    assert audit_logs == []
 
 
 def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer_and_mcp_lock_owner(mcp_test_env):

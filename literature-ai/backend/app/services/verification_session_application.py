@@ -116,7 +116,28 @@ class VerificationSessionReviewApplicationMixin:
                 candidate.materialized_target_type = materialized_target_type
                 candidate.materialized_target_id = materialized_target_id
                 self.session.add(candidate)
-            auto_applied.append(adopted)
+            if target_type == "dft_results":
+                for opinion in opinions:
+                    candidate = opinion.get("candidate")
+                    if candidate is None:
+                        continue
+                    candidate.status = self._object_review_candidate_status_for_result(adopted)
+                    candidate.materialized_target_type = None
+                    candidate.materialized_target_id = None
+                    self.session.add(candidate)
+                pending_conflicts.append(
+                    {
+                        "paper_id": paper_id_text,
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": "dual_ai_dft_audit_consensus_ready",
+                        "opinion_count": len(opinions),
+                        "result": adopted,
+                    }
+                )
+            else:
+                auto_applied.append(adopted)
         self.session.flush()
         missing_dual = max(0, len(grouped) - len(auto_applied) - len(pending_conflicts))
         if missing_dual:
@@ -193,6 +214,14 @@ class VerificationSessionReviewApplicationMixin:
         if target_type == "dft_results":
             if decision in {"REJECT", "REJECTED", "BLOCK"} and opinion.get("corrected_value") in (None, ""):
                 return self._apply_reject_all(paper_id=paper_id, target_type=target_type, target_id=target_id, reviewer=reviewer)
+            if dual_ai_consensus or adjudicated_by_third_ai:
+                return self._record_dft_audit_consensus(
+                    paper_id=paper_id,
+                    target_id=target_id,
+                    field_name=field_name,
+                    opinion=opinion,
+                    adjudicated_by_third_ai=adjudicated_by_third_ai,
+                )
             return self._apply_dft_opinion(
                 paper_id=paper_id,
                 target_id=target_id,
@@ -242,19 +271,78 @@ class VerificationSessionReviewApplicationMixin:
     def _apply_reject_all(self, *, paper_id: UUID, target_type: str, target_id: str, reviewer: str) -> dict[str, Any]:
         if target_type != "dft_results":
             raise ValueError("reject_all is currently only supported for DFT result candidates.")
-        result = DFTResultReviewService(self.session).reject_result(
+        self._mark_dft_audit_candidates(
             paper_id=paper_id,
-            result_id=UUID(str(target_id)),
-            confirm_reject_candidate=True,
-            reviewer=reviewer,
-            reviewer_note="Rejected after AI verification conflict adjudication.",
-            expected_write_versions=self._current_dft_review_versions(
-                paper_id=paper_id,
-                target_id=target_id,
-            ),
-            commit=False,
+            target_id=target_id,
+            status="ai_reviewed",
         )
-        return {"action": "reject", "target_type": target_type, "target_id": target_id, "result": result}
+        return {
+            "action": "audit_opinion_rejected",
+            "target_type": target_type,
+            "target_id": target_id,
+            "auto_applied": False,
+            "writes_final_truth": False,
+            "candidate_status": "ai_reviewed",
+            "result": {
+                "status": "audit_opinion_rejected",
+                "needs_user_decision": False,
+                "message": "Rejected AI audit opinions without changing the underlying DFT result.",
+            },
+        }
+
+    def _record_dft_audit_consensus(
+        self,
+        *,
+        paper_id: UUID,
+        target_id: str,
+        field_name: str,
+        opinion: dict[str, Any],
+        adjudicated_by_third_ai: bool = False,
+    ) -> dict[str, Any]:
+        row = self.session.get(DFTResult, UUID(str(target_id)))
+        if row is None or row.paper_id != paper_id:
+            raise LookupError("DFT result not found for adjudication.")
+        return {
+            "action": "record_dft_audit_consensus",
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_name": self.DFT_FIELD_ALIASES.get(field_name, field_name),
+            "proposed_value": opinion.get("corrected_value", opinion.get("value")),
+            "auto_applied": False,
+            "writes_final_truth": False,
+            "candidate_status": "requires_resolution",
+            "result": {
+                "status": "needs_user_decision",
+                "reason": "third_ai_audit_opinion" if adjudicated_by_third_ai else "dual_ai_dft_audit_consensus",
+                "message": "DFT AI audit consensus was recorded as an opinion only; it did not verify, reject, or edit the DFT result.",
+            },
+        }
+
+    def _mark_dft_audit_candidates(
+        self,
+        *,
+        paper_id: UUID,
+        target_id: str,
+        status: str,
+    ) -> None:
+        rows = self.session.scalars(
+            select(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+            )
+        ).all()
+        for candidate in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            if self._normalize_object_review_target_type(payload.get("target_type")) != "dft_results":
+                continue
+            payload_target_id = str(payload.get("target_id") or "").strip()
+            materialized_target_id = str(candidate.materialized_target_id or "").strip()
+            if payload_target_id != str(target_id) and materialized_target_id != str(target_id):
+                continue
+            if candidate.status not in {"candidate", "pending", "requires_resolution", "materialized"}:
+                continue
+            candidate.status = status
+            self.session.add(candidate)
 
     def _apply_dft_opinion(
         self,

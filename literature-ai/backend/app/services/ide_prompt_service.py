@@ -78,6 +78,8 @@ _COMMON_RULES = """你现在是 Literature AI 的 IDE AI。你的任务是依据
 - 仅提交候选审计时可使用 auto_apply_review_rules=false，但不得宣称已应用。
 - 图像裁剪只能直接调用 recrop_figure 或 create_figure_from_bbox，不能伪装成 import_analysis correction。
 - DFT 是硬安全边界：单个 AI 不得最终确认 DFT，不得解锁导出。
+- DFT 核验 AI 只能提交审核意见、问题或候选；即使双 AI 意见一致，也不得自动 verify/reject、不得把 DFTResult 推到 ML_Ready、不得写 human_verification。
+- DFTResult 的最终 verify/reject 只能来自显式人工确认或用户授权的专门审核工具；AI consensus 结果只是待处理审核意见，不能伪装成人工确认。
 - 图片中出现明确 DFT 数值或可读标注时，只能提取为 DFT 候选/object_review_audit，不得直接写成 ML_Ready；必须带 figure_id/figure_label、page、quoted_text 或图中可读标注、value、unit、property_type、adsorbate 或 reaction_step、material_identity（如能判断），并进入现有 DFT 二审/安全门。
 - 每次写入后必须通过 MCP/API 回读对象、审核状态和审计记录；优先用 get_paper 或 get_codex_item 回读字段值、object_review_audits、approved_corrections，get_review_coverage 只作辅助概览。
 
@@ -110,6 +112,8 @@ _MODULE_RULES = {
 - DFT object_review_audits / new_candidate 属于高风险写入；调用 import_analysis 时必须通过 MCP/HTTP 受控入口取得或传入 dft_results 模块写锁，缺锁返回 409 时不要绕过系统。
 - 不从曲线估读精确数值；引用文献数据必须标记 borrowed_from_reference=true。
 - PASS 仍不等于 safe_verified；保持多 AI/人工审核与导出门禁。
+- 双 AI DFT consensus 只会被后端记录为审核意见/待处理事项；不要宣称已经自动应用、人工确认、verified、rejected 或 ML_Ready。
+- AI 不得向 review_payload.human_verification 写入或暗示人工确认；需要最终判断时交给主 AI 修复候选，无法判断再交前端人工处理。
 
 object_review_audits DFT new_candidate 结构规范（缺一不可）：
 - target_type: "dft_results"（固定值）

@@ -155,7 +155,7 @@ class VerificationSessionDFTConsensusMixin:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
-            row_ref["status"] = "auto_applied"
+            row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
 
         if len(anchored) < 2:
@@ -178,9 +178,11 @@ class VerificationSessionDFTConsensusMixin:
                 {
                     "action": result.get("action"),
                     "review_result": result.get("result"),
+                    "auto_applied": False,
+                    "writes_final_truth": False,
                 }
             )
-            row_ref["status"] = "auto_applied"
+            row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
 
         has_reject = any(self._is_negative_dft_decision(audit.get("decision")) for audit in anchored)
@@ -203,7 +205,7 @@ class VerificationSessionDFTConsensusMixin:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
-            row_ref["status"] = "auto_applied"
+            row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
         if whole_row:
             row_ref["reason"] = "value_conflict"
@@ -227,7 +229,7 @@ class VerificationSessionDFTConsensusMixin:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
-            row_ref["status"] = "auto_applied"
+            row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
 
         pass_values = [audit for audit in anchored if str(audit.get("decision") or "").strip().upper() == "PASS"]
@@ -251,7 +253,7 @@ class VerificationSessionDFTConsensusMixin:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
-            row_ref["status"] = "auto_applied"
+            row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
 
         if any(not self._dft_has_material_identity(audit, target_id=str(row.id), field_name=str(audit.get("field_name") or "")) for audit in anchored):
@@ -295,7 +297,7 @@ class VerificationSessionDFTConsensusMixin:
                 audit["candidate"].status = self._object_review_candidate_status_for_result(result)
                 self.session.add(audit["candidate"])
             row_ref.update(result)
-            row_ref["status"] = "auto_applied"
+            row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
 
         row_ref["reason"] = "value_conflict"
@@ -318,20 +320,19 @@ class VerificationSessionDFTConsensusMixin:
                 reviewer=reviewer,
                 write_lock_tokens=write_lock_tokens,
             )
-        result = self._apply_dft_opinion(
+        result = self._record_dft_audit_consensus(
             paper_id=row.paper_id,
             target_id=str(row.id),
             field_name=field_name,
-            reviewer=reviewer,
             opinion=adopted,
-            dual_ai_consensus=True,
             adjudicated_by_third_ai=str(adopted.get("adjudication_role") or "").strip().lower() == "third_ai",
-            evidence_payload=self._materialize_evidence_payload(adopted),
-            write_lock_tokens=write_lock_tokens,
         )
         return {
             "action": result.get("action"),
             "review_result": result.get("result"),
+            "auto_applied": False,
+            "writes_final_truth": False,
+            "candidate_status": result.get("candidate_status"),
         }
 
     def _apply_dft_whole_row_consensus(
@@ -345,67 +346,27 @@ class VerificationSessionDFTConsensusMixin:
         corrected = proposal.get("corrected_value")
         if not isinstance(corrected, dict):
             raise ValueError("Whole-row DFT consensus is missing corrected_value.")
-        evidence_payload = self._materialize_evidence_payload(proposal)
-        self._apply_dft_material_binding_if_needed(
-            row=row,
-            opinion=proposal,
-            reviewer=reviewer,
-            evidence_payload=evidence_payload,
-            write_lock_tokens=write_lock_tokens,
-        )
-        self.session.flush()
-        self.session.refresh(row)
-        for source_field, target_field in (
-            ("property_type", "property_type"),
-            ("property", "property_type"),
-            ("energy_type", "property_type"),
-            ("adsorbate", "adsorbate"),
-            ("reaction_step", "reaction_step"),
-            ("unit", "unit"),
-            ("value", "value"),
-        ):
-            if source_field not in corrected:
-                continue
-            proposed_value = corrected.get(source_field)
-            current_value = getattr(row, target_field, None)
-            if self._value_key(proposed_value) == self._value_key(current_value):
-                continue
-            self._apply_structured_correction(
-                paper_id=row.paper_id,
-                target_type="dft_results",
-                target_id=str(row.id),
-                field_name=target_field,
-                reviewer=reviewer,
-                proposed_value=proposed_value,
-                evidence_payload=evidence_payload,
-                dual_ai_consensus=True,
-                adjudicated_by_third_ai=str(proposal.get("adjudication_role") or "").strip().lower() == "third_ai",
-                write_lock_tokens=write_lock_tokens,
-            )
-            self.session.flush()
-            self.session.refresh(row)
-        verify_value = corrected.get("value", row.value)
-        verify_opinion = {
-            **proposal,
-            "field_name": "value",
-            "decision": "PASS",
-            "corrected_value": verify_value,
-        }
-        result = self._apply_dft_opinion(
+        result = self._record_dft_audit_consensus(
             paper_id=row.paper_id,
             target_id=str(row.id),
-            field_name="value",
-            reviewer=reviewer,
-            opinion=verify_opinion,
-            dual_ai_consensus=True,
+            field_name="dft_results",
+            opinion=proposal,
             adjudicated_by_third_ai=str(proposal.get("adjudication_role") or "").strip().lower() == "third_ai",
-            evidence_payload=evidence_payload,
-            write_lock_tokens=write_lock_tokens,
         )
         return {
             "action": result.get("action"),
             "review_result": result.get("result"),
+            "auto_applied": False,
+            "writes_final_truth": False,
+            "candidate_status": result.get("candidate_status"),
         }
+
+    @staticmethod
+    def _dft_settlement_status_for_result(result: dict[str, Any]) -> str:
+        action = str(result.get("action") or "").strip()
+        if action in {"record_dft_audit_consensus", "audit_opinion_rejected"}:
+            return "audit_consensus_ready"
+        return "auto_applied"
 
     def _dft_settlement_counts(self, paper_id: UUID) -> dict[str, Any]:
         from app.services.dft_review_queue_service import DFTReviewQueueService
