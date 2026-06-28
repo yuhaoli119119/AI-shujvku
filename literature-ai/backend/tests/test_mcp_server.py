@@ -76,7 +76,7 @@ def mcp_test_env(monkeypatch):
         monkeypatch.setenv(
             "LITAI_MCP_API_KEYS",
             "claude|Claude Desktop|litmcp_claude|read_papers,append_notes,propose_corrections,request_parse;"
-            "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections",
+            "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections,repair_dft_issues",
         )
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", tmpdir)
@@ -133,7 +133,14 @@ def _admin_auth() -> MCPAuthInfo:
         source_prefix="admin",
         display_name="Admin",
         capabilities=frozenset(
-            {"read_papers", "append_notes", "propose_corrections", "request_parse", "review_corrections"}
+            {
+                "read_papers",
+                "append_notes",
+                "propose_corrections",
+                "request_parse",
+                "review_corrections",
+                "repair_dft_issues",
+            }
         ),
         raw_key="litmcp_admin",
     )

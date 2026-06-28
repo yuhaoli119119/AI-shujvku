@@ -64,6 +64,8 @@ class DFTAuditIssueRepairService:
         reason: str | None,
         evidence_payload: dict[str, Any] | list[Any] | None,
         repaired_by: str,
+        required_capability: str = "repair_dft_issues",
+        repair_actor_role: str = "primary_ai_repair",
     ) -> dict[str, Any]:
         action = str(action or "").strip()
         if action not in self.ACTIONS:
@@ -85,6 +87,8 @@ class DFTAuditIssueRepairService:
             action=action,
             result=result,
             repaired_by=repaired_by,
+            required_capability=required_capability,
+            repair_actor_role=repair_actor_role,
         )
         self.session.flush()
         return result
@@ -455,6 +459,8 @@ class DFTAuditIssueRepairService:
         action: str,
         result: dict[str, Any],
         repaired_by: str,
+        required_capability: str,
+        repair_actor_role: str,
     ) -> None:
         self.session.add(
             AuditLog(
@@ -469,6 +475,15 @@ class DFTAuditIssueRepairService:
                     "dft_result_id": result.get("dft_result_id"),
                     "changed_fields": result.get("changed_fields") or [],
                     "writes_final_truth": False,
+                    "repair_actor": {
+                        "source_prefix": repaired_by,
+                        "actor_role": repair_actor_role,
+                        "required_capability": required_capability,
+                    },
+                    "actor_role": repair_actor_role,
+                    "required_capability": required_capability,
+                    "capability_used": required_capability,
+                    "source_prefix": repaired_by,
                 },
             )
         )

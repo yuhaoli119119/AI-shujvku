@@ -632,7 +632,8 @@ def repair_dft_audit_issue(
     reason: str,
     evidence_payload: dict[str, Any] | list[Any],
 ) -> dict[str, Any]:
-    auth = require_mcp_capability_any("review_corrections", "review_dft")
+    required_capability = "repair_dft_issues"
+    auth = require_mcp_capability(required_capability)
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return DFTAuditIssueRepairService(session).repair_issue(
@@ -642,6 +643,8 @@ def repair_dft_audit_issue(
             reason=reason,
             evidence_payload=evidence_payload,
             repaired_by=auth.source_prefix,
+            required_capability=required_capability,
+            repair_actor_role="primary_ai_repair",
         )
 
 

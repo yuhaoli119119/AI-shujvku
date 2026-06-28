@@ -17,8 +17,26 @@ def _review_auth() -> MCPAuthInfo:
     return MCPAuthInfo(
         source_prefix="primary_ai",
         display_name="Primary AI",
-        capabilities=frozenset({"read_papers", "review_dft"}),
+        capabilities=frozenset({"read_papers", "repair_dft_issues"}),
         raw_key="test",
+    )
+
+
+def _review_dft_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="audit_ai",
+        display_name="Audit AI",
+        capabilities=frozenset({"read_papers", "review_dft"}),
+        raw_key="audit-only-key",
+    )
+
+
+def _review_corrections_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="correction_reviewer",
+        display_name="Correction Reviewer",
+        capabilities=frozenset({"read_papers", "review_corrections"}),
+        raw_key="correction-only-key",
     )
 
 
@@ -28,6 +46,15 @@ def _read_auth() -> MCPAuthInfo:
         display_name="Reader",
         capabilities=frozenset({"read_papers"}),
         raw_key="test",
+    )
+
+
+def _propose_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="ordinary_ide_ai",
+        display_name="Ordinary IDE AI",
+        capabilities=frozenset({"read_papers", "append_notes", "propose_corrections"}),
+        raw_key="propose-only-key",
     )
 
 
@@ -112,6 +139,33 @@ def test_get_dft_audit_issues_mcp_returns_read_only_issue_summary(setup_test_db)
     assert payload["items"][0]["source_count"] == 1
 
 
+@pytest.mark.parametrize(
+    "auth_factory",
+    [
+        _read_auth,
+        _review_dft_auth,
+        _review_corrections_auth,
+        _propose_auth,
+    ],
+)
+def test_repair_dft_audit_issue_requires_repair_capability(setup_test_db, auth_factory):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Repair capability denied")
+        issue = _missing_issue(session, paper)
+        session.commit()
+        issue_id = str(issue.id)
+
+    with mcp_auth_context(auth_factory()):
+        with pytest.raises(PermissionError, match="repair_dft_issues"):
+            repair_dft_audit_issue(
+                issue_id=issue_id,
+                action="create_missing_dft",
+                repair_payload={},
+                reason="should not be allowed",
+                evidence_payload={},
+            )
+
+
 def test_create_missing_dft_creates_sample_and_ai_candidate_without_human_verification(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Create missing DFT")
@@ -149,6 +203,16 @@ def test_create_missing_dft_creates_sample_and_ai_candidate_without_human_verifi
         assert audit is not None
         assert audit.action == "repair_dft_audit_issue"
         assert audit.payload["writes_final_truth"] is False
+        assert audit.payload["required_capability"] == "repair_dft_issues"
+        assert audit.payload["capability_used"] == "repair_dft_issues"
+        assert audit.payload["actor_role"] == "primary_ai_repair"
+        assert audit.payload["source_prefix"] == "primary_ai"
+        assert audit.payload["repair_actor"] == {
+            "source_prefix": "primary_ai",
+            "actor_role": "primary_ai_repair",
+            "required_capability": "repair_dft_issues",
+        }
+        assert "test" not in str(audit.payload)
 
 
 def test_create_missing_dft_is_idempotent_for_same_issue(setup_test_db):
@@ -333,6 +397,44 @@ def test_update_dft_fields_stale_snapshot_does_not_write(setup_test_db):
         assert row.value == -0.9
         assert row.candidate_status == "system_candidate"
         assert issue.status == "needs_user_decision"
+
+
+def test_link_existing_duplicate_marks_issue_without_writing_dft_result(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Link duplicate issue")
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            reaction_step="adsorption",
+            value=-1.0,
+            unit="eV",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        issue = _targeted_issue(session, paper, row, issue_type="duplicate_suspected")
+        session.commit()
+        issue_id = str(issue.id)
+        row_id = str(row.id)
+
+    with mcp_auth_context(_review_auth()):
+        result = repair_dft_audit_issue(
+            issue_id,
+            "link_existing_duplicate",
+            {"dft_result_id": row_id},
+            "Same row already exists.",
+            {},
+        )
+
+    assert result["status"] == "linked_duplicate"
+    assert result["dft_result_id"] == row_id
+    assert result["writes_final_truth"] is False
+    with Session(setup_test_db) as session:
+        row = session.get(DFTResult, UUID(row_id))
+        issue = session.get(DFTAuditIssue, UUID(issue_id))
+        assert row.candidate_status == "system_candidate"
+        assert issue.status == "fixed_by_primary_ai"
 
 
 def test_mark_needs_user_decision_and_false_positive_do_not_write_dft_result(setup_test_db):
