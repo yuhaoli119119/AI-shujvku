@@ -5330,6 +5330,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const siRow = page.locator('.paper-row[data-id="paper-si-1"]');
     await siRow.click();
     await expect(page.locator('#paperTitle')).toContainText('Supporting Information for Main Paper For Selection Stability');
+    await expect.poll(() => page.evaluate(() => ({
+      selectedPaperId: window.state.selectedPaperId,
+      incomingCount: (window.state.selectedPaper && window.state.selectedPaper.incoming_relationships || []).length
+    }))).toEqual({ selectedPaperId: 'paper-si-1', incomingCount: 1 });
     const inheritedProgress = await page.evaluate(() => manualReviewProgress(window.state.selectedPaper));
     expect(inheritedProgress.figures.completed).toBe(true);
     expect(inheritedProgress.figures.inherited).toBe(true);
