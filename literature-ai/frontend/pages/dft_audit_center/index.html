@@ -117,6 +117,9 @@
           <option value="wrong_property_type">wrong_property_type</option>
           <option value="missing_evidence">missing_evidence</option>
           <option value="duplicate_suspected">duplicate_suspected</option>
+          <option value="source_scope_error">source_scope_error</option>
+          <option value="consensus_ready">consensus_ready</option>
+          <option value="negative_consensus">negative_consensus</option>
           <option value="uncertain">uncertain</option>
         </select>
       </div>
@@ -310,7 +313,7 @@
               <span class="badge status-${esc(item.status || "unknown")}">${esc(statusLabel(item.status))}</span>
               <span class="badge">${esc(item.severity || "medium")}</span>
             </div>
-            <button class="btn local secondary" type="button" onclick="copyIssueId('${esc(item.issue_id)}')">复制 issue_id</button>
+            <button class="btn local secondary" type="button" onclick="copyIssueId('${esc(item.id)}')">复制 issue_id</button>
           </div>
           <div class="issue-grid">
             ${kv("target_id", item.target_id || "-")}
@@ -398,12 +401,12 @@
 
     async function copyQueueHint() {
       const visible = state.filteredIssues || [];
-      const ids = visible.map(item => item.issue_id).filter(Boolean).slice(0, 20);
+      const ids = visible.map(item => item.id).filter(Boolean).slice(0, 20);
       const text = [
         "请由带 repair_dft_issues 的 DFT Primary Repair AI 处理以下 issue_id。",
         "注意：repair 后仍不是 human_verified、safe_verified 或 ML_Ready。",
-        ids.join("\\n")
-      ].join("\\n\\n");
+        ids.join("\n")
+      ].join("\n\n");
       await navigator.clipboard.writeText(text);
       document.getElementById("reportMeta").textContent = "已复制主 AI 处理提示";
     }

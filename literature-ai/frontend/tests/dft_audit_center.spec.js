@@ -25,7 +25,7 @@ function makeReport(overrides = {}) {
 
 function makeIssue(overrides = {}) {
   return {
-    issue_id: 'issue-1',
+    id: '11111111-1111-4111-8111-111111111111',
     issue_type: 'missing_dft_result',
     status: 'needs_primary_ai',
     severity: 'high',
@@ -56,16 +56,20 @@ function makeIssue(overrides = {}) {
 
 async function mockApis(page, { issues = [makeIssue()], report = makeReport() } = {}) {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
-  await page.route(/\/api\/dft\/audit-issues.*/, route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ count: issues.length, items: issues, filters: {} }),
-  }));
-  await page.route(/\/api\/dft\/audit-report.*/, route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify(report),
-  }));
+  await page.route(/\/api\/dft\/audit-issues.*/, route => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ count: issues.length, items: issues, filters: {} }),
+    });
+  });
+  await page.route(/\/api\/dft\/audit-report.*/, route => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(report),
+    });
+  });
 }
 
 test('renders DFT audit report summary and issue list', async ({ page }) => {
@@ -80,6 +84,81 @@ test('renders DFT audit report summary and issue list', async ({ page }) => {
   await expect(page.locator('#issueList')).toContainText('Fe-GDY');
   await expect(page.locator('#issueList')).toContainText('Table 1');
   await expect(page.locator('#issueList')).toContainText('sources 2');
+});
+
+test('copies serializer ids with real newlines and keeps API access readonly', async ({ page }) => {
+  const requests = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) {
+      requests.push({ method: request.method(), url: request.url() });
+    }
+  });
+  const issues = [
+    makeIssue(),
+    makeIssue({
+      id: '22222222-2222-4222-8222-222222222222',
+      issue_type: 'wrong_value',
+      target_id: 'result-2',
+    }),
+  ];
+  await page.addInitScript(() => {
+    window.__clipboardText = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async text => {
+          window.__clipboardText = text;
+        },
+      },
+    });
+  });
+  await mockApis(page, { issues });
+  await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html`);
+
+  await page.getByRole('button', { name: '复制 issue_id' }).first().click();
+  await expect.poll(() => page.evaluate(() => window.__clipboardText))
+    .toBe('11111111-1111-4111-8111-111111111111');
+
+  await page.getByRole('button', { name: '复制主 AI 处理提示' }).click();
+  const queueText = await page.evaluate(() => window.__clipboardText);
+  expect(queueText).toContain('11111111-1111-4111-8111-111111111111');
+  expect(queueText).toContain('22222222-2222-4222-8222-222222222222');
+  expect(queueText).toContain('\n');
+  expect(queueText).not.toContain('\\n');
+  expect(queueText.split('\n')).toContain('11111111-1111-4111-8111-111111111111');
+  expect(queueText.split('\n')).toContain('22222222-2222-4222-8222-222222222222');
+
+  expect(requests).toHaveLength(2);
+  expect(requests.every(request => request.method === 'GET')).toBe(true);
+  expect(requests.map(request => new URL(request.url).pathname).sort()).toEqual([
+    '/api/dft/audit-issues',
+    '/api/dft/audit-report',
+  ]);
+  expect(requests.some(request => request.url.includes('repair_dft_audit_issue'))).toBe(false);
+});
+
+test('issue type filter covers the complete backend issue type contract', async ({ page }) => {
+  await mockApis(page);
+  await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html`);
+
+  const optionValues = await page.locator('#issueTypeFilter option').evaluateAll(
+    options => options.map(option => option.value).filter(Boolean),
+  );
+  expect(optionValues.sort()).toEqual([
+    'consensus_ready',
+    'duplicate_suspected',
+    'missing_dft_result',
+    'missing_evidence',
+    'negative_consensus',
+    'source_scope_error',
+    'uncertain',
+    'wrong_adsorbate',
+    'wrong_material',
+    'wrong_property_type',
+    'wrong_reaction_step',
+    'wrong_unit',
+    'wrong_value',
+  ].sort());
 });
 
 test('renders suspect and MCP warnings without write-action buttons', async ({ page }) => {
