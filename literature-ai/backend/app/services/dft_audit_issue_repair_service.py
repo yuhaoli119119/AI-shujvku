@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult
+from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, EvidenceSpan
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_rescan_policy import build_dft_dedupe_signature, normalize_source_document_type
@@ -240,6 +240,7 @@ class DFTAuditIssueRepairService:
             repaired_by=repaired_by,
             note=f"created_dft_result:{row.id}; {reason}".strip("; "),
         )
+        self._ensure_evidence_span_for_created_result(issue=issue, row=row, evidence=evidence)
         return {
             "status": "created",
             "issue_id": str(issue.id),
@@ -248,6 +249,47 @@ class DFTAuditIssueRepairService:
             "changed_fields": ["dft_results"],
             "writes_final_truth": False,
         }
+
+    def _ensure_evidence_span_for_created_result(
+        self,
+        *,
+        issue: DFTAuditIssue,
+        row: DFTResult,
+        evidence: dict[str, Any],
+    ) -> None:
+        evidence_text = self._first_text(
+            evidence.get("quoted_text"),
+            evidence.get("evidence_text"),
+            row.evidence_text,
+        )
+        if not evidence_text:
+            return
+        existing = self.session.scalar(
+            select(EvidenceSpan.id)
+            .where(
+                EvidenceSpan.paper_id == issue.paper_id,
+                EvidenceSpan.object_type == "dft_results",
+                EvidenceSpan.object_id == str(row.id),
+                EvidenceSpan.text == evidence_text,
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            return
+        self.session.add(
+            EvidenceSpan(
+                paper_id=issue.paper_id,
+                object_type="dft_results",
+                object_id=str(row.id),
+                text=evidence_text,
+                page=self._page_or_none(evidence.get("page")),
+                section=self._first_text(evidence.get("section"), evidence.get("source_section")),
+                figure=self._first_text(evidence.get("figure")),
+                table=self._first_text(evidence.get("table")),
+                confidence=0.75 if has_evidence_anchor(evidence) else None,
+            )
+        )
+        self.session.flush()
 
     def _update_dft_fields(
         self,
@@ -668,6 +710,14 @@ class DFTAuditIssueRepairService:
             return float(value)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{field} must be numeric.") from exc
+
+    @staticmethod
+    def _page_or_none(value: Any) -> int | None:
+        try:
+            page = int(value)
+        except (TypeError, ValueError):
+            return None
+        return page if page > 0 else None
 
     @staticmethod
     def _source_section_from_evidence(evidence: dict[str, Any]) -> str | None:
