@@ -32,12 +32,20 @@ read_papers,append_notes,propose_corrections,request_parse
 ```
 
 不要给普通外部 AI `review_corrections`，除非它被明确指定为可信管理员。
+不要给普通外部 AI、DFT 审核 AI 或 propose-only key `repair_dft_issues`。DFT audit issue 修复使用单独的主修复 key：
+
+```text
+dft_primary_repair|DFT Primary Repair AI|<key>|read_papers,repair_dft_issues
+```
+
+审核 AI 可使用 `read_papers,propose_corrections` 创建候选、issue 或审核意见；主修复 AI 才能调用 `repair_dft_audit_issue`，且修复结果仍不是人工确认或 ML_Ready。
 
 建议给不同电脑或不同 AI 使用不同 `source_prefix`，例如：
 
 ```text
 ai_pc_1|AI PC 1|<key>|read_papers,append_notes,propose_corrections,request_parse
 ai_pc_2|AI PC 2|<key>|read_papers,append_notes,propose_corrections,request_parse
+dft_primary_repair|DFT Primary Repair AI|<key>|read_papers,repair_dft_issues
 ```
 
 这样 `audit_logs`、`external_analysis_runs`、`workflow_jobs` 可以区分是谁做的。

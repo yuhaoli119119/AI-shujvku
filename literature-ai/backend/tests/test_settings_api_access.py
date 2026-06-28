@@ -129,8 +129,11 @@ def test_ide_prompts_never_return_real_mcp_key(monkeypatch):
     payload = asyncio.run(settings_api.get_ide_prompts(_make_request("127.0.0.1", {"host": "localhost:8000"})))
 
     assert payload["sample_key"] == "litmcp_your_key"
+    assert payload["primary_repair_sample_key"] == "litmcp_dft_primary_repair"
     assert "litmcp_real_secret" not in payload["cursor_config_json"]
     assert "litmcp_real_secret" not in payload["suggested_prompt"]
+    assert "litmcp_real_secret" not in payload["legacy_english_suggested_prompt"]
+    assert "litmcp_real_secret" not in payload["legacy_suggested_prompt"]
     get_settings.cache_clear()
 
 
@@ -151,6 +154,13 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert payload["cursor_config"]["mcpServers"]["literature-ai"]["command"] in {"npx", "npx.cmd"}
     assert "--header" in payload["cursor_config"]["mcpServers"]["literature-ai"]["args"]
     assert payload["prompt_schema_version"] == "ide_review_prompt_v8"
+    by_source = {item["source_prefix"]: item for item in payload["mcp_key_role_examples"]}
+    assert by_source["dft_primary_repair"]["capabilities"] == ["read_papers", "repair_dft_issues"]
+    assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]
+    assert "repair_dft_issues" not in by_source["assigned_dft_audit"]["capabilities"]
+    assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
+    assert "dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues" in payload["legacy_english_suggested_prompt"]
+    assert "审核 AI / 普通 IDE AI / propose-only key 不应包含 repair_dft_issues" in payload["legacy_suggested_prompt"]
     assert "SRR_LiS" in payload["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["project_library_contexts"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["topic_field_dictionaries"]

@@ -76,7 +76,8 @@ def mcp_test_env(monkeypatch):
         monkeypatch.setenv(
             "LITAI_MCP_API_KEYS",
             "claude|Claude Desktop|litmcp_claude|read_papers,append_notes,propose_corrections,request_parse;"
-            "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections,repair_dft_issues",
+            "dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues;"
+            "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections",
         )
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", tmpdir)
@@ -139,10 +140,18 @@ def _admin_auth() -> MCPAuthInfo:
                 "propose_corrections",
                 "request_parse",
                 "review_corrections",
-                "repair_dft_issues",
             }
         ),
         raw_key="litmcp_admin",
+    )
+
+
+def _dft_primary_repair_auth() -> MCPAuthInfo:
+    return MCPAuthInfo(
+        source_prefix="dft_primary_repair",
+        display_name="DFT Primary Repair AI",
+        capabilities=frozenset({"read_papers", "repair_dft_issues"}),
+        raw_key="litmcp_dft_primary_repair",
     )
 
 
@@ -155,6 +164,37 @@ def _ai_reviewer_auth() -> MCPAuthInfo:
         ),
         raw_key="litmcp_ai_pc_1",
     )
+
+
+def test_example_mcp_key_split_reserves_repair_for_primary_repair_key(mcp_test_env):
+    configs = parse_mcp_api_keys(os.environ["LITAI_MCP_API_KEYS"])
+
+    assert configs["litmcp_dft_primary_repair"].source_prefix == "dft_primary_repair"
+    assert configs["litmcp_dft_primary_repair"].display_name == "DFT Primary Repair AI"
+    assert configs["litmcp_dft_primary_repair"].capabilities == frozenset(
+        {"read_papers", "repair_dft_issues"}
+    )
+    assert "repair_dft_issues" not in configs["litmcp_claude"].capabilities
+    assert "repair_dft_issues" not in configs["litmcp_admin"].capabilities
+    assert "propose_corrections" not in configs["litmcp_dft_primary_repair"].capabilities
+    assert "review_dft" not in configs["litmcp_dft_primary_repair"].capabilities
+    assert "review_corrections" not in configs["litmcp_dft_primary_repair"].capabilities
+
+
+def test_agent_guide_documents_primary_repair_key_split():
+    import asyncio
+
+    from app.api.system import get_agent_guide
+
+    guide = asyncio.run(get_agent_guide())
+    by_source = {item["source_prefix"]: item for item in guide["mcp"]["key_role_examples"]}
+
+    assert by_source["dft_primary_repair"]["capabilities"] == ["read_papers", "repair_dft_issues"]
+    assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]
+    assert "repair_dft_issues" not in by_source["assigned_dft_audit"]["capabilities"]
+    assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
+    assert "audit AI can create issue/candidate evidence but must not repair" in by_source["assigned_dft_audit"]["purpose"]
+    assert "DFT issue repair remains separate" in by_source["human_reviewer"]["purpose"]
 
 
 def _make_external_audit_ready(paper: Paper, root: Path) -> None:

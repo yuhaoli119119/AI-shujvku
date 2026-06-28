@@ -33,6 +33,7 @@ Capabilities are checked inside tool handlers:
 - `request_parse` for ingestion and parse requests.
 - `review_corrections` for approving or rejecting corrections.
 - `review_dft` as a narrower DFT review capability where accepted.
+- `repair_dft_issues` for the primary DFT repair AI to call `repair_dft_audit_issue`; it is not implied by audit, proposal, or review capabilities.
 - `export_data` for Word/dataset export operations; this is also subject to the global `LITAI_EXPORTS_ENABLED` policy, which defaults to `false`.
 - `create_share_links` for creating read-only share tokens; it is not implied by `read_papers` or review capabilities.
 
@@ -43,6 +44,16 @@ read_papers,append_notes,propose_corrections,request_parse
 ```
 
 This is enough for any IDE AI to read parsed context, request parsing, append notes, propose corrections, and import audit opinions. It is not enough to approve corrections or write final verified data.
+
+Recommended DFT issue roles:
+
+```text
+assigned_dft_audit|Assigned DFT Audit AI|<strong-random-key>|read_papers,propose_corrections
+dft_primary_repair|DFT Primary Repair AI|<strong-random-key>|read_papers,repair_dft_issues
+human_reviewer|Human Reviewer|<strong-random-key>|read_papers,review_corrections,review_dft
+```
+
+The audit key may submit `object_review_audits`, issues, and correction candidates. Only the primary repair key should have `repair_dft_issues`; ordinary IDE, audit, propose-only, and human-review/admin examples should not receive that capability unless they are intentionally being used as the primary repair role.
 
 ## Dynamic AI Read And Audit Path
 
@@ -112,6 +123,7 @@ When the gate fails, the import records `artifact_precondition_failed` instead o
 - External AI does not automatically mark papers, fields, DFT rows, or citations as final verified truth.
 - DFT export remains protected by review, evidence, and locator gates.
 - `review_corrections` should remain reserved for trusted admin or human-review keys.
+- `repair_dft_issues` should remain reserved for a separate primary DFT repair key, not ordinary audit/propose-only keys.
 
 ## Current Verification Snapshot
 

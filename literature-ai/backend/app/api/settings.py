@@ -601,6 +601,37 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
     mcp_url = f"{base_url}{CANONICAL_MCP_PATH}"
 
     sample_key = "litmcp_your_key"
+    primary_repair_sample_key = "litmcp_dft_primary_repair"
+    mcp_key_role_examples = [
+        {
+            "source_prefix": "ide_ai",
+            "display_name": "IDE AI",
+            "sample_key": "litmcp_ide_ai",
+            "capabilities": ["read_papers", "append_notes", "propose_corrections", "request_parse"],
+            "purpose": "ordinary IDE AI reads context and submits unverified notes/proposals/audit candidates",
+        },
+        {
+            "source_prefix": "assigned_dft_audit",
+            "display_name": "Assigned DFT Audit AI",
+            "sample_key": "litmcp_assigned_dft_audit",
+            "capabilities": ["read_papers", "propose_corrections"],
+            "purpose": "DFT audit AI creates issue/candidate evidence and must not repair DFT audit issues",
+        },
+        {
+            "source_prefix": "dft_primary_repair",
+            "display_name": "DFT Primary Repair AI",
+            "sample_key": primary_repair_sample_key,
+            "capabilities": ["read_papers", "repair_dft_issues"],
+            "purpose": "primary repair AI reads DFT audit issues and repairs one issue at a time",
+        },
+        {
+            "source_prefix": "human_reviewer",
+            "display_name": "Human Reviewer",
+            "sample_key": "litmcp_human_reviewer",
+            "capabilities": ["read_papers", "review_corrections", "review_dft"],
+            "purpose": "trusted human/admin reviewer may verify/reject through explicit review tools; DFT issue repair remains separate",
+        },
+    ]
     auth_required = True
 
     server_config: dict[str, Any] = {
@@ -644,6 +675,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "- For auto-apply, prefer structured evidence dicts. object_review_audits.evidence_location and correction_proposals.evidence_payload should include anchor keys such as page, table, figure, section, quoted_text, bbox, or evidence_text.\n"
         "- For RAG-ready facts, preserve source_type, source_id, paper_code, page, evidence_text, review_status, and evidence_locator when available.\n"
         "- Raw parser sections and parser-derived writing cards are not trusted knowledge. They must not be shown as final content or used by RAG/writing until an IDE AI review writes back ai_reviewed/ai_applied content with PDF evidence.\n"
+        "- DFT audit issue repair is a separate key role. Audit/propose-only keys may read get_dft_audit_issues and create candidates, but only a key with read_papers,repair_dft_issues should call repair_dft_audit_issue. Example primary repair key: dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues.\n"
         "- Catalyst samples must have a material identity and evidence anchor before being used for writing/RAG or linked to mechanism, electrochemical, or DFT records.\n"
         "- Writing support should use writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, figure cards, and verified DFT candidates where allowed by the safety gate.\n"
         "- Do not overwrite English evidence fields with Chinese translations. Put Chinese only in derived *_zh fields where available, writing cards, or review notes.\n"
@@ -661,6 +693,8 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "local_ip": local_ip,
         "hostname": hostname,
         "sample_key": sample_key,
+        "primary_repair_sample_key": primary_repair_sample_key,
+        "mcp_key_role_examples": mcp_key_role_examples,
         "auth_required": auth_required,
         "cursor_config": cursor_config,
         "cursor_config_json": json.dumps(cursor_config, indent=2, ensure_ascii=False),
@@ -676,6 +710,8 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             f"只有当用户明确要求手工配置 MCP 时，才使用下面的兜底信息：\n"
             f"服务地址：{mcp_url}\n"
             f"认证方式：Bearer {sample_key}\n"
+            f"DFT 主修复 AI 示例 key（仅占位，不是真实密钥）：dft_primary_repair|DFT Primary Repair AI|{primary_repair_sample_key}|read_papers,repair_dft_issues\n"
+            f"审核 AI / 普通 IDE AI / propose-only key 不应包含 repair_dft_issues；它们只能读取队列、创建 issue/候选或提交修订建议。\n"
             f"配置 JSON（仅在用户明确要求手工配置时使用）：\n"
             f"```json\n{json.dumps(cursor_config, indent=2, ensure_ascii=False)}\n```\n\n"
             f"连接成功后，你可以使用以下工具：\n"

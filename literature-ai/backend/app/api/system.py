@@ -181,6 +181,36 @@ async def get_agent_guide() -> dict:
             "url": CANONICAL_MCP_PATH,
             "transport": "streamable_http",
             "auth": "HTTP MCP requires Authorization: Bearer <mcp_api_key>. The in-process fallback uses mcp_auth_context instead of HTTP authentication.",
+            "key_role_examples": [
+                {
+                    "source_prefix": "ide_ai",
+                    "display_name": "IDE AI",
+                    "sample_key": "litmcp_ide_ai",
+                    "capabilities": ["read_papers", "append_notes", "propose_corrections", "request_parse"],
+                    "purpose": "ordinary IDE AI can read context and submit unverified notes/proposals/audit candidates",
+                },
+                {
+                    "source_prefix": "assigned_dft_audit",
+                    "display_name": "Assigned DFT Audit AI",
+                    "sample_key": "litmcp_assigned_dft_audit",
+                    "capabilities": ["read_papers", "propose_corrections"],
+                    "purpose": "DFT audit AI can create issue/candidate evidence but must not repair DFT audit issues",
+                },
+                {
+                    "source_prefix": "dft_primary_repair",
+                    "display_name": "DFT Primary Repair AI",
+                    "sample_key": "litmcp_dft_primary_repair",
+                    "capabilities": ["read_papers", "repair_dft_issues"],
+                    "purpose": "primary repair AI can read DFT audit issues and repair one issue at a time",
+                },
+                {
+                    "source_prefix": "human_reviewer",
+                    "display_name": "Human Reviewer",
+                    "sample_key": "litmcp_human_reviewer",
+                    "capabilities": ["read_papers", "review_corrections", "review_dft"],
+                    "purpose": "trusted human/admin reviewer may verify or reject through explicit review tools; DFT issue repair remains separate",
+                },
+            ],
             "recommended_when": "Use MCP as the primary Codex interface for interactive paper reading, evidence retrieval, note taking, imported analysis, comparison, and correction proposals.",
             "common_tools": [
                 "query_papers",
