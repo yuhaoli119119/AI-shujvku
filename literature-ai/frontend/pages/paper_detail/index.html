@@ -591,6 +591,7 @@
       document.getElementById("paperBadges").innerHTML = `
         <span class="tag">${esc(paperTypeLabel(paper.paper_type))}</span>
         <span class="tag">${paper.pdf_path ? "已关联 PDF" : "仅元数据"}</span>
+        <a class="tag" href="../dft_audit_center/index.html?paper_id=${encodeURIComponent(state.paperId)}">DFT 核验中心</a>
       `;
 
       document.getElementById("cntSections").textContent = paper.counts?.sections || (paper.sections || []).length || 0;

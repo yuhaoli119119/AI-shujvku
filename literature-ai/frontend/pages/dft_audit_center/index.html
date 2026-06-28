@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DFT 核验中心 - Literature AI</title>
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; color: var(--color-text); background: var(--color-bg); font-family: var(--font-body); }
+    .shell { width: min(1520px, 100%); margin: 0 auto; padding: 0 16px 24px; }
+    .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin: 12px 0; }
+    h1 { margin: 0; font-size: 22px; line-height: 1.25; }
+    .subtitle { margin: 6px 0 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
+    .notice-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .notice { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); padding: 10px 12px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.55; }
+    .notice strong { color: var(--color-text); }
+    .filter-panel, .panel { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); box-shadow: var(--shadow-card); }
+    .filter-panel { padding: 12px; margin-bottom: 12px; display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+    .field { display: grid; gap: 5px; min-width: 150px; }
+    .field label { color: var(--color-text-secondary); font-size: 12px; font-weight: 800; }
+    input, select { height: 32px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: 13px; padding: 0 8px; }
+    .field.paper { flex: 1 1 330px; }
+    .field.paper input { width: 100%; }
+    .btn.local { height: 32px; border: 1px solid var(--color-border); background: var(--color-primary-bg); color: var(--color-primary); border-radius: var(--radius-sm); padding: 0 12px; font-weight: 850; cursor: pointer; }
+    .btn.local.secondary { background: var(--color-surface-alt); color: var(--color-text-secondary); }
+    .main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; align-items: start; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
+    .panel-title { font-size: 15px; font-weight: 900; }
+    .panel-body { padding: 12px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .metric { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 10px; }
+    .metric .label { color: var(--color-text-secondary); font-size: 12px; line-height: 1.35; }
+    .metric .value { font-size: 24px; font-weight: 900; margin-top: 4px; }
+    .count-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .count-box { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 10px; background: var(--color-surface); }
+    .count-box h3 { margin: 0 0 8px; font-size: 13px; }
+    .count-row { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--color-border); padding: 6px 0; font-size: 12px; }
+    .count-row:first-of-type { border-top: 0; }
+    .issue-list { display: grid; gap: 10px; }
+    .issue-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 12px; }
+    .issue-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .issue-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 900; }
+    .badge { display: inline-flex; align-items: center; border-radius: var(--radius-pill); padding: 3px 8px; font-size: 12px; font-weight: 850; background: var(--color-surface-alt); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
+    .status-needs_primary_ai { background: rgba(37, 99, 235, 0.10); color: #1d4ed8; border-color: rgba(37, 99, 235, 0.20); }
+    .status-needs_user_decision { background: var(--color-warning-bg); color: var(--color-warning); border-color: rgba(217,119,6,0.22); }
+    .status-fixed_by_primary_ai { background: var(--color-primary-bg); color: var(--color-primary); border-color: rgba(100,66,214,0.22); }
+    .status-false_positive, .status-closed { color: var(--color-text-muted); }
+    .issue-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .kv { border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); padding: 8px; min-width: 0; }
+    .kv .k { color: var(--color-text-secondary); font-size: 11px; font-weight: 850; margin-bottom: 4px; }
+    .kv .v { font-size: 12px; line-height: 1.55; word-break: break-word; }
+    details { margin-top: 10px; border-top: 1px dashed var(--color-border-strong); padding-top: 8px; }
+    summary { cursor: pointer; color: var(--color-primary); font-weight: 850; font-size: 12px; }
+    pre { margin: 8px 0 0; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 12px; line-height: 1.55; background: var(--color-surface-alt); border-radius: var(--radius-sm); padding: 10px; }
+    .warning-list { display: grid; gap: 8px; }
+    .warning-card { border: 1px solid rgba(220,38,38,0.26); background: var(--color-danger-bg); border-radius: var(--radius); padding: 10px; font-size: 12px; line-height: 1.55; }
+    .empty, .error { padding: 28px 12px; text-align: center; color: var(--color-text-secondary); }
+    .error { color: var(--color-danger); font-weight: 800; }
+    .actor-row { border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 8px; margin-bottom: 8px; font-size: 12px; line-height: 1.55; background: var(--color-surface-alt); }
+    .copy-hint { color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
+    @media (max-width: 980px) {
+      .main-grid, .notice-row, .summary-grid, .issue-grid, .count-grid { grid-template-columns: 1fr; }
+      .page-head { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <div id="topnav-mount"></div>
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <h1>DFT 核验中心</h1>
+        <p class="subtitle">只读查看 DFT audit issue 队列、主 AI 修复状态和 repair 审计健康情况。</p>
+      </div>
+      <button class="btn local secondary" type="button" id="copyQueueHintBtn">复制主 AI 处理提示</button>
+    </header>
+
+    <section class="notice-row" aria-label="DFT safety notices">
+      <div class="notice"><strong>AI 修复 ≠ 人工确认。</strong>repair 后仍需复核或人工确认。</div>
+      <div class="notice"><strong>audit issue 是核验意见/待处理事项。</strong>它不是最终真值。</div>
+      <div class="notice"><strong>只读界面。</strong>本页只读取 GET 接口，不执行 DFT 修复或写库。</div>
+    </section>
+
+    <section class="filter-panel" aria-label="DFT audit filters">
+      <div class="field paper">
+        <label for="paperIdInput">paper_id</label>
+        <input id="paperIdInput" placeholder="可选，留空查看全部">
+      </div>
+      <div class="field">
+        <label for="statusFilter">status</label>
+        <select id="statusFilter">
+          <option value="">待处理/待复核</option>
+          <option value="open">open</option>
+          <option value="needs_primary_ai">needs_primary_ai</option>
+          <option value="needs_user_decision">needs_user_decision</option>
+          <option value="fixed_by_primary_ai">fixed_by_primary_ai</option>
+          <option value="false_positive">false_positive</option>
+          <option value="closed">closed</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="issueTypeFilter">issue_type</label>
+        <select id="issueTypeFilter">
+          <option value="">全部类型</option>
+          <option value="missing_dft_result">missing_dft_result</option>
+          <option value="wrong_value">wrong_value</option>
+          <option value="wrong_unit">wrong_unit</option>
+          <option value="wrong_material">wrong_material</option>
+          <option value="wrong_adsorbate">wrong_adsorbate</option>
+          <option value="wrong_reaction_step">wrong_reaction_step</option>
+          <option value="wrong_property_type">wrong_property_type</option>
+          <option value="missing_evidence">missing_evidence</option>
+          <option value="duplicate_suspected">duplicate_suspected</option>
+          <option value="uncertain">uncertain</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="daysInput">days</label>
+        <input id="daysInput" type="number" min="1" max="365" value="30">
+      </div>
+      <div class="field">
+        <label for="includeClosedInput">include_closed</label>
+        <select id="includeClosedInput">
+          <option value="false">false</option>
+          <option value="true">true</option>
+        </select>
+      </div>
+      <button class="btn local" type="button" id="refreshBtn">刷新</button>
+    </section>
+
+    <section class="panel" style="margin-bottom:12px;">
+      <div class="panel-head">
+        <div class="panel-title">Audit report summary</div>
+        <div class="copy-hint" id="reportMeta">等待加载</div>
+      </div>
+      <div class="panel-body" id="reportSummary"><div class="empty">正在加载报表...</div></div>
+    </section>
+
+    <section class="main-grid">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">DFT audit issues</div>
+          <div class="copy-hint" id="issueMeta">等待加载</div>
+        </div>
+        <div class="panel-body">
+          <div id="issueList" class="issue-list"><div class="empty">正在加载 issue...</div></div>
+        </div>
+      </section>
+      <aside class="panel">
+        <div class="panel-head"><div class="panel-title">Warnings</div></div>
+        <div class="panel-body">
+          <div id="warningList" class="warning-list"><div class="empty">暂无 warning。</div></div>
+          <div class="copy-hint" style="margin-top:12px;">下一步：复制 issue_id 给带 <strong>repair_dft_issues</strong> 的 primary repair AI。不要把 repair 输出描述为 human_verified 或 ML_Ready。</div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const state = { issues: [], filteredIssues: [], report: null, loading: false };
+
+    function esc(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    async function fetchJSON(url) {
+      const resp = await fetch(url);
+      const text = await resp.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+      return data;
+    }
+
+    function initialParams() {
+      const params = new URLSearchParams(window.location.search);
+      document.getElementById("paperIdInput").value = params.get("paper_id") || params.get("id") || "";
+      document.getElementById("statusFilter").value = params.get("status") || "";
+      document.getElementById("issueTypeFilter").value = params.get("issue_type") || "";
+      document.getElementById("daysInput").value = params.get("days") || "30";
+      document.getElementById("includeClosedInput").value = params.get("include_closed") || "false";
+    }
+
+    function buildIssueParams() {
+      const params = new URLSearchParams();
+      const paperId = document.getElementById("paperIdInput").value.trim();
+      const status = document.getElementById("statusFilter").value;
+      const includeClosed = document.getElementById("includeClosedInput").value;
+      if (paperId) params.set("paper_id", paperId);
+      if (status) params.append("status", status);
+      if (!status && includeClosed !== "true") {
+        ["open", "needs_primary_ai", "needs_user_decision", "fixed_by_primary_ai"].forEach(item => params.append("status", item));
+      }
+      params.set("include_closed", includeClosed);
+      params.set("limit", "500");
+      return params;
+    }
+
+    function buildReportParams() {
+      const params = new URLSearchParams();
+      const paperId = document.getElementById("paperIdInput").value.trim();
+      if (paperId) params.set("paper_id", paperId);
+      params.set("days", String(clampDays()));
+      params.set("include_closed", document.getElementById("includeClosedInput").value);
+      return params;
+    }
+
+    function clampDays() {
+      const value = Number(document.getElementById("daysInput").value || 30);
+      return Math.max(1, Math.min(365, Number.isFinite(value) ? value : 30));
+    }
+
+    async function loadData() {
+      state.loading = true;
+      document.getElementById("issueList").innerHTML = '<div class="empty">正在加载 issue...</div>';
+      document.getElementById("reportSummary").innerHTML = '<div class="empty">正在加载报表...</div>';
+      try {
+        const [issuesPayload, report] = await Promise.all([
+          fetchJSON("/api/dft/audit-issues?" + buildIssueParams().toString()),
+          fetchJSON("/api/dft/audit-report?" + buildReportParams().toString())
+        ]);
+        state.issues = issuesPayload.items || [];
+        state.report = report || {};
+        renderAll();
+      } catch (error) {
+        document.getElementById("issueList").innerHTML = '<div class="error">加载失败：' + esc(error.message) + '</div>';
+        document.getElementById("reportSummary").innerHTML = '<div class="error">报表加载失败：' + esc(error.message) + '</div>';
+        document.getElementById("warningList").innerHTML = '<div class="error">无法读取 warning。</div>';
+      } finally {
+        state.loading = false;
+      }
+    }
+
+    function renderAll() {
+      renderReport();
+      renderIssues();
+      renderWarnings();
+      syncUrl();
+    }
+
+    function renderReport() {
+      const report = state.report || {};
+      const filters = report.filters || {};
+      document.getElementById("reportMeta").textContent = "days " + (filters.days || clampDays()) + " · include_closed " + Boolean(filters.include_closed);
+      document.getElementById("reportSummary").innerHTML = `
+        <div class="summary-grid">
+          ${metric("待主 AI", report.open_needs_primary_ai_count)}
+          ${metric("需用户判断", report.open_needs_user_decision_count)}
+          ${metric("主 AI 修复待复核", report.fixed_by_primary_ai_pending_review_count)}
+        </div>
+        <div class="count-grid">
+          ${countBox("issue_status_counts", report.issue_status_counts)}
+          ${countBox("issue_type_counts", report.issue_type_counts)}
+          ${countBox("repair_action_counts", report.repair_action_counts)}
+          ${countBox("repair_issue_type_counts", report.repair_issue_type_counts)}
+        </div>
+        <div style="margin-top:12px;">
+          <div class="panel-title" style="margin-bottom:8px;">repair_actor_counts</div>
+          ${(report.repair_actor_counts || []).length ? (report.repair_actor_counts || []).map(actorRow).join("") : '<div class="empty" style="padding:12px;">暂无 repair actor 记录。</div>'}
+        </div>
+      `;
+    }
+
+    function metric(label, value) {
+      return '<div class="metric"><div class="label">' + esc(label) + '</div><div class="value">' + esc(value || 0) + '</div></div>';
+    }
+
+    function countBox(title, counts) {
+      const entries = Object.entries(counts || {});
+      const rows = entries.length
+        ? entries.map(([key, value]) => '<div class="count-row"><span>' + esc(key) + '</span><strong>' + esc(value) + '</strong></div>').join("")
+        : '<div class="empty" style="padding:10px;">无数据</div>';
+      return '<div class="count-box"><h3>' + esc(title) + '</h3>' + rows + '</div>';
+    }
+
+    function actorRow(item) {
+      return '<div class="actor-row"><strong>' + esc(item.source_prefix || "unknown") + '</strong><br>role: ' + esc(item.actor_role || "-") + '<br>capability: ' + esc(item.capability_used || "-") + '<br>count: ' + esc(item.count || 0) + '</div>';
+    }
+
+    function renderIssues() {
+      const issueType = document.getElementById("issueTypeFilter").value;
+      state.filteredIssues = state.issues.filter(item => !issueType || item.issue_type === issueType);
+      document.getElementById("issueMeta").textContent = state.filteredIssues.length + " / " + state.issues.length + " items";
+      if (!state.filteredIssues.length) {
+        document.getElementById("issueList").innerHTML = '<div class="empty">当前没有待处理 DFT audit issue。</div>';
+        return;
+      }
+      document.getElementById("issueList").innerHTML = state.filteredIssues.map(renderIssue).join("");
+    }
+
+    function renderIssue(item) {
+      const evidence = item.evidence_payload || {};
+      const sourceCount = item.source_count != null ? item.source_count : (item.source_identities || []).length;
+      const candidateCount = (item.source_candidate_ids || []).length;
+      return `
+        <article class="issue-card">
+          <div class="issue-top">
+            <div class="issue-title">
+              <span>${esc(item.issue_type || "-")}</span>
+              <span class="badge status-${esc(item.status || "unknown")}">${esc(statusLabel(item.status))}</span>
+              <span class="badge">${esc(item.severity || "medium")}</span>
+            </div>
+            <button class="btn local secondary" type="button" onclick="copyIssueId('${esc(item.issue_id)}')">复制 issue_id</button>
+          </div>
+          <div class="issue-grid">
+            ${kv("target_id", item.target_id || "-")}
+            ${kv("target_type", item.target_type || "-")}
+            ${kv("source counts", "sources " + sourceCount + " · candidates " + candidateCount)}
+            ${kv("evidence", evidenceSummary(evidence))}
+            ${kv("suggested_value", compactValue(item.suggested_value))}
+            ${kv("suggested_dft", compactValue(item.suggested_dft))}
+            ${kv("created_at", formatDate(item.created_at))}
+            ${kv("updated_at", formatDate(item.updated_at))}
+            ${kv("current_snapshot", compactValue(item.current_snapshot))}
+          </div>
+          <details>
+            <summary>展开完整 JSON</summary>
+            <pre>${esc(JSON.stringify(item, null, 2))}</pre>
+          </details>
+        </article>
+      `;
+    }
+
+    function kv(label, value) {
+      return '<div class="kv"><div class="k">' + esc(label) + '</div><div class="v">' + esc(value || "-") + '</div></div>';
+    }
+
+    function evidenceSummary(evidence) {
+      if (!evidence || typeof evidence !== "object") return "-";
+      const parts = [
+        evidence.source_document_type && "source: " + evidence.source_document_type,
+        evidence.page && "page: " + evidence.page,
+        evidence.table && "table: " + evidence.table,
+        evidence.figure && "figure: " + evidence.figure,
+        evidence.quoted_text && "quote: " + String(evidence.quoted_text).slice(0, 160)
+      ].filter(Boolean);
+      return parts.join(" · ") || compactValue(evidence);
+    }
+
+    function compactValue(value) {
+      if (value == null || value === "") return "-";
+      if (typeof value !== "object") return String(value);
+      const entries = Object.entries(value).filter(([, v]) => v != null && v !== "");
+      return entries.slice(0, 5).map(([k, v]) => k + ": " + (typeof v === "object" ? JSON.stringify(v) : String(v))).join(" · ") || "-";
+    }
+
+    function statusLabel(status) {
+      const labels = {
+        open: "open",
+        needs_primary_ai: "待主 AI",
+        needs_user_decision: "需用户判断",
+        fixed_by_primary_ai: "主 AI 修复待复核",
+        false_positive: "false_positive",
+        closed: "closed"
+      };
+      return labels[status] || status || "unknown";
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function renderWarnings() {
+      const report = state.report || {};
+      const warnings = [
+        ...(report.suspect_repair_actor_warnings || []).map(item => ({ group: "repair", item })),
+        ...(report.mcp_capability_warnings || []).map(item => ({ group: "mcp", item }))
+      ];
+      if (!warnings.length) {
+        document.getElementById("warningList").innerHTML = '<div class="empty">暂无 repair 或 capability warning。</div>';
+        return;
+      }
+      document.getElementById("warningList").innerHTML = warnings.map(({ group, item }) => `
+        <div class="warning-card">
+          <strong>${esc(group)} · ${esc(item.code || "warning")}</strong><br>
+          ${esc(item.message || "-")}<br>
+          source: ${esc(item.source_prefix || "-")} · role: ${esc(item.actor_role || "-")} · capability: ${esc(item.capability_used || item.capability || "-")}
+        </div>
+      `).join("");
+    }
+
+    async function copyIssueId(issueId) {
+      await navigator.clipboard.writeText(issueId || "");
+      document.getElementById("issueMeta").textContent = "已复制 issue_id";
+    }
+
+    async function copyQueueHint() {
+      const visible = state.filteredIssues || [];
+      const ids = visible.map(item => item.issue_id).filter(Boolean).slice(0, 20);
+      const text = [
+        "请由带 repair_dft_issues 的 DFT Primary Repair AI 处理以下 issue_id。",
+        "注意：repair 后仍不是 human_verified、safe_verified 或 ML_Ready。",
+        ids.join("\\n")
+      ].join("\\n\\n");
+      await navigator.clipboard.writeText(text);
+      document.getElementById("reportMeta").textContent = "已复制主 AI 处理提示";
+    }
+
+    function syncUrl() {
+      const params = buildReportParams();
+      const status = document.getElementById("statusFilter").value;
+      const issueType = document.getElementById("issueTypeFilter").value;
+      if (status) params.set("status", status);
+      if (issueType) params.set("issue_type", issueType);
+      history.replaceState(null, "", "?" + params.toString());
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", loadData);
+    document.getElementById("copyQueueHintBtn").addEventListener("click", copyQueueHint);
+    document.getElementById("issueTypeFilter").addEventListener("change", renderAll);
+    document.getElementById("statusFilter").addEventListener("change", loadData);
+    document.getElementById("includeClosedInput").addEventListener("change", loadData);
+    document.getElementById("daysInput").addEventListener("change", loadData);
+    document.getElementById("paperIdInput").addEventListener("keydown", event => {
+      if (event.key === "Enter") loadData();
+    });
+
+    TopNav.init({ currentPage: "dft-audit-center", mountId: "topnav-mount" });
+    initialParams();
+    loadData();
+  </script>
+</body>
+</html>
