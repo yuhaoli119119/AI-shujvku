@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings, get_settings
-from app.db.models import AuditLog, Base, CatalystSample, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
+from app.db.models import AuditLog, Base, CatalystSample, DFTAuditIssue, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel, ExternalAnalysisService
@@ -3144,6 +3144,114 @@ def test_http_apply_review_rules_endpoint_materializes_deferred_dft_candidates()
                     )
                 ).all()
                 assert active_locks == [], "apply-review-rules leaked an active dft_results lock"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_apply_review_rules_only_materializes_new_dft_candidates_from_requested_run():
+    with TemporaryDirectory():
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Run-isolated DFT paper", pdf_path="run-isolated.pdf", authors=["A"])
+                session.add(paper)
+                session.flush()
+                old_run = ExternalAnalysisRun(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    source_label="old-run",
+                    raw_payload={},
+                    normalized_payload={},
+                    mapping_status="mapped",
+                )
+                new_run = ExternalAnalysisRun(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    source_label="new-run",
+                    raw_payload={},
+                    normalized_payload={},
+                    mapping_status="mapped",
+                )
+                session.add_all([old_run, new_run])
+                session.flush()
+
+                def new_candidate(run: ExternalAnalysisRun, *, material: str, value: float) -> ExternalAnalysisCandidate:
+                    return ExternalAnalysisCandidate(
+                        run_id=run.id,
+                        paper_id=paper.id,
+                        candidate_type="object_review_audit",
+                        status="candidate",
+                        normalized_payload={
+                            "target_type": "dft_results",
+                            "target_id": "new",
+                            "field_name": "dft_results",
+                            "decision": "new_candidate",
+                            "corrected_value": {
+                                "material_identity": material,
+                                "property_type": "adsorption_energy",
+                                "value": value,
+                                "unit": "eV",
+                                "adsorbate": "H",
+                                "reaction_step": "adsorption",
+                            },
+                            "evidence_location": {
+                                "page": 3,
+                                "quoted_text": f"{material} H {value} eV",
+                            },
+                            "confidence": 0.9,
+                        },
+                    )
+
+                old_candidate = new_candidate(old_run, material="Fe-N4", value=-1.1)
+                current_candidate = new_candidate(new_run, material="Co-N3", value=-0.9)
+                session.add_all([old_candidate, current_candidate])
+                session.commit()
+                paper_id = paper.id
+                old_run_id = old_run.id
+                new_run_id = new_run.id
+                old_candidate_id = old_candidate.id
+                current_candidate_id = current_candidate.id
+
+            client = TestClient(app)
+            applied = client.post(
+                f"/api/external-analysis/runs/{new_run_id}/apply-review-rules",
+                json={"reviewer": "new-run"},
+            )
+            assert applied.status_code == 200, applied.text
+            assert applied.json()["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+
+            with Session(engine) as session:
+                assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "candidate"
+                assert session.get(ExternalAnalysisCandidate, current_candidate_id).status == "materialized"
+                rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+                assert len(rows) == 1
+                assert rows[0].value == -0.9
+                issues = session.scalars(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)).all()
+                assert len(issues) == 1
+                assert str(current_candidate_id) in issues[0].source_candidate_ids
+
+            applied_old = client.post(
+                f"/api/external-analysis/runs/{old_run_id}/apply-review-rules",
+                json={"reviewer": "old-run"},
+            )
+            assert applied_old.status_code == 200, applied_old.text
+            with Session(engine) as session:
+                assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "materialized"
+                assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 2
+                assert session.query(DFTAuditIssue).filter(DFTAuditIssue.paper_id == paper_id).count() == 2
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

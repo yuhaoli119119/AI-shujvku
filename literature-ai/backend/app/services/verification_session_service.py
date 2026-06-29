@@ -361,7 +361,11 @@ class VerificationSessionService(
             candidate_run_id=candidate_run_id,
         ):
             return self._empty_dft_settlement_summary(paper_id)
-        new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
+        new_dft_summary = self._materialize_new_dft_candidates(
+            paper_id=paper_id,
+            reviewer=reviewer,
+            candidate_run_id=candidate_run_id,
+        )
         rows = self.session.scalars(
             select(DFTResult)
             .where(DFTResult.paper_id == paper_id)

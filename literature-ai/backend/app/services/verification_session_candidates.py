@@ -27,8 +27,14 @@ from app.utils.evidence_anchors import has_evidence_anchor
 
 
 class VerificationSessionDFTCandidateMixin:
-    def _materialize_new_dft_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
-        rows = self.session.execute(
+    def _materialize_new_dft_candidates(
+        self,
+        *,
+        paper_id: UUID,
+        reviewer: str,
+        candidate_run_id: UUID | None = None,
+    ) -> dict[str, Any]:
+        stmt = (
             select(ExternalAnalysisCandidate, ExternalAnalysisRun)
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
@@ -37,7 +43,10 @@ class VerificationSessionDFTCandidateMixin:
                 ExternalAnalysisCandidate.status.in_(("candidate", "pending", "requires_resolution")),
             )
             .order_by(ExternalAnalysisCandidate.created_at.asc())
-        ).all()
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        rows = self.session.execute(stmt).all()
         existing_by_signature = self._existing_new_dft_signatures(paper_id)
         existing_by_semantic_signature = self._existing_new_dft_semantic_signatures(paper_id)
         existing_by_method_step_signature = self._existing_new_dft_method_step_signatures(paper_id)
