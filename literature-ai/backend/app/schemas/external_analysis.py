@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -123,6 +123,8 @@ class ExternalAnalysisCandidateResponse(BaseModel):
     status: str
     materialized_target_type: str | None = None
     materialized_target_id: str | None = None
+    action_mode: Literal["materialize", "apply_review_rules", "readonly"] = "readonly"
+    action_scope: Literal["candidate", "run"] = "candidate"
     created_at: datetime
 
     model_config = {"from_attributes": True}

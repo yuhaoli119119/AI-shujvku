@@ -3114,6 +3114,8 @@ def test_http_apply_review_rules_endpoint_materializes_deferred_dft_candidates()
             assert import_response.status_code == 200, import_response.text
             run_id = import_response.json()["id"]
             assert import_response.json()["candidates"][0]["status"] == "candidate"
+            assert import_response.json()["candidates"][0]["action_mode"] == "apply_review_rules"
+            assert import_response.json()["candidates"][0]["action_scope"] == "run"
             with Session(engine) as session:
                 dft_row = session.scalar(
                     select(DFTResult).where(DFTResult.paper_id == paper_id)
@@ -3257,9 +3259,9 @@ def test_apply_review_rules_only_materializes_new_dft_candidates_from_requested_
             engine.dispose()
 
 
-def test_materialize_endpoint_still_skips_object_review_audit():
-    """Regression: POST /runs/{run_id}/materialize must continue to skip
-    object_review_audit candidates (DFT must go through apply-review-rules).
+def test_materialize_endpoint_defers_object_review_audit_without_consuming_it():
+    """POST /materialize must preserve active object-review candidates so the
+    run-scoped apply-review-rules endpoint can process them later.
     """
     with TemporaryDirectory():
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
@@ -3315,6 +3317,17 @@ def test_materialize_endpoint_still_skips_object_review_audit():
             )
             assert import_response.status_code == 200
             run_id = import_response.json()["id"]
+            candidate_id = import_response.json()["candidates"][0]["id"]
+            assert import_response.json()["candidates"][0]["action_mode"] == "apply_review_rules"
+            assert import_response.json()["candidates"][0]["action_scope"] == "run"
+
+            # Exercise the legacy active status that previously fell through to
+            # the generic unsupported-candidate branch and became "skipped".
+            with Session(engine) as session:
+                candidate = session.get(ExternalAnalysisCandidate, UUID(candidate_id))
+                candidate.status = "pending"
+                session.add(candidate)
+                session.commit()
 
             materialize_response = client.post(
                 f"/api/external-analysis/runs/{run_id}/materialize",
@@ -3323,12 +3336,24 @@ def test_materialize_endpoint_still_skips_object_review_audit():
             assert materialize_response.status_code == 200
             body = materialize_response.json()
             assert body["skipped_candidates"] >= 1
+            assert body["deferred_review_candidates"] == 1
+            assert body["next_action"] == "apply-review-rules"
             assert body["created_notes"] == 0
             assert body["created_corrections"] == 0
 
             with Session(engine) as session:
                 dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
                 assert dft_rows == []
+                assert session.get(ExternalAnalysisCandidate, UUID(candidate_id)).status == "pending"
+
+            apply_response = client.post(
+                f"/api/external-analysis/runs/{run_id}/apply-review-rules",
+                json={"reviewer": "test"},
+            )
+            assert apply_response.status_code == 200, apply_response.text
+            with Session(engine) as session:
+                assert session.get(ExternalAnalysisCandidate, UUID(candidate_id)).status == "materialized"
+                assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 1
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

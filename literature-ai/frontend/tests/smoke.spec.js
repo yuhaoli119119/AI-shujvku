@@ -2796,7 +2796,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       return jsonResponse(route, { ok: true });
     });
     page.on('dialog', async dialog => {
-      expect(dialog.message()).toContain('这不是人工 verified');
+      expect(dialog.message()).toContain('非 DFT');
       materializeDialogs.push(dialog.message());
       await dialog.accept();
     });
@@ -2815,9 +2815,70 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.evaluate(() => materializeRun('run-1'));
     await expect.poll(() => materializePayloads.length).toBe(2);
-    expect(materializePayloads[1]).toEqual({ explicit_all: true, created_by: 'web_user' });
-    expect(materializePayloads[1]).not.toHaveProperty('candidate_ids');
+    expect(materializePayloads[1]).toEqual({ candidate_ids: ['candidate-1'], created_by: 'web_user' });
     expect(materializeDialogs).toHaveLength(2);
+  });
+
+  test('business flow: deferred DFT candidate uses run-scoped review rules', async ({ page }) => {
+    const runPayload = {
+      id: 'dft-run-1',
+      source: 'ide_ai',
+      source_label: 'DFT deferred review',
+      created_at: '2026-05-26T12:00:00',
+      mapping_status: 'normalized',
+      candidates: [
+        {
+          id: 'dft-candidate-1',
+          candidate_type: 'object_review_audit',
+          status: 'candidate',
+          action_mode: 'apply_review_rules',
+          action_scope: 'run',
+          confidence: 0.9,
+          normalized_payload: {
+            target_type: 'dft_results',
+            target_id: 'new',
+            decision: 'new_candidate',
+          },
+        },
+      ],
+    };
+    const applyPayloads = [];
+    let materializeCalls = 0;
+
+    await page.route(/\/api\/external-analysis\/runs(\?|$)/, route => jsonResponse(route, [runPayload]));
+    await page.route(/\/api\/external-analysis\/runs\/dft-run-1\/apply-review-rules$/, async route => {
+      applyPayloads.push(JSON.parse(route.request().postData() || '{}'));
+      return jsonResponse(route, {
+        run_id: 'dft-run-1',
+        auto_apply_summary: { new_dft_candidates: { materialized_count: 1 } },
+        candidates: [{ id: 'dft-candidate-1', status: 'materialized' }],
+      });
+    });
+    await page.route(/\/api\/external-analysis\/runs\/dft-run-1\/materialize$/, async route => {
+      materializeCalls += 1;
+      return jsonResponse(route, { ok: true });
+    });
+    page.on('dialog', async dialog => {
+      expect(dialog.message()).toContain('整 run 操作');
+      expect(dialog.message()).toContain('不会自动变成人工 verified');
+      await dialog.accept();
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-row');
+    await page.click('button[data-tab="review"]');
+
+    const rendered = await page.evaluate(() => renderCandidates('dft-run-1', state.externalRuns[0].candidates));
+    expect(rendered).toContain('待按审核规则处理');
+    expect(rendered).toContain('按本 run 审核规则处理');
+    expect(rendered).not.toContain('candidate-select');
+    expect(rendered).not.toContain('已处理');
+
+    await page.evaluate(() => applyReviewRulesForRun('dft-run-1'));
+    await expect.poll(() => applyPayloads.length).toBe(1);
+    expect(applyPayloads[0]).toEqual({ reviewer: 'web_user' });
+    expect(materializeCalls).toBe(0);
   });
 
   test('business flow: literature library opens extraction job center', async ({ page }) => {

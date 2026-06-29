@@ -51,6 +51,13 @@ class ExternalAnalysisMaterializationMixin:
         result = MaterializationResult()
         review_service = ReviewService(self.session)
         for candidate in candidates:
+            if (
+                candidate.candidate_type == "object_review_audit"
+                and candidate.status in {"candidate", "pending", "requires_resolution"}
+            ):
+                result.skipped_candidates += 1
+                result.deferred_review_candidates += 1
+                continue
             if candidate.status not in {"pending", "requires_resolution"}:
                 result.skipped_candidates += 1
                 continue
@@ -180,6 +187,7 @@ class ExternalAnalysisMaterializationMixin:
                     "auto_applied_corrections": result.auto_applied_corrections,
                     "idempotent_noops": result.idempotent_noops,
                     "skipped_candidates": result.skipped_candidates,
+                    "deferred_review_candidates": result.deferred_review_candidates,
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
                     "writes_final_truth": result.auto_applied_corrections > 0,

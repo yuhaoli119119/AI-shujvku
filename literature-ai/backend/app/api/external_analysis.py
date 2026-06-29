@@ -21,11 +21,24 @@ from app.services.external_analysis_service import ExternalAnalysisService
 
 router = APIRouter()
 
+ACTIVE_REVIEW_RULE_STATUSES = {"candidate", "pending", "requires_resolution"}
+MATERIALIZABLE_CANDIDATE_TYPES = {"note", "correction", "relationship"}
+
 
 def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _candidate_action(candidate) -> tuple[str, str]:
+    candidate_type = str(candidate.candidate_type or "").strip().lower()
+    status = str(candidate.status or "").strip().lower()
+    if candidate_type == "object_review_audit" and status in ACTIVE_REVIEW_RULE_STATUSES:
+        return "apply_review_rules", "run"
+    if candidate_type in MATERIALIZABLE_CANDIDATE_TYPES and status == "pending":
+        return "materialize", "candidate"
+    return "readonly", "candidate"
 
 
 def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRunResponse:
@@ -35,9 +48,11 @@ def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRun
     return ExternalAnalysisRunResponse(
         **{**base, "created_at": _as_utc(run.created_at)},
         candidates=[
-            ExternalAnalysisCandidateResponse.model_validate(item).model_copy(
-                update={"created_at": _as_utc(item.created_at)}
-            )
+            ExternalAnalysisCandidateResponse.model_validate(item).model_copy(update={
+                "created_at": _as_utc(item.created_at),
+                "action_mode": _candidate_action(item)[0],
+                "action_scope": _candidate_action(item)[1],
+            })
             for item in candidates
         ],
         warnings=warnings,
@@ -148,14 +163,18 @@ async def materialize_external_analysis_run(
             created_by=payload.created_by,
         )
         session.commit()
-        return {
+        response = {
             "run_id": str(run_id),
             "created_notes": result.created_notes,
             "created_corrections": result.created_corrections,
             "created_relationships": result.created_relationships,
             "idempotent_noops": result.idempotent_noops,
             "skipped_candidates": result.skipped_candidates,
+            "deferred_review_candidates": result.deferred_review_candidates,
         }
+        if result.deferred_review_candidates > 0:
+            response["next_action"] = "apply-review-rules"
+        return response
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
