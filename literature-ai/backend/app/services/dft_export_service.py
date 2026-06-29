@@ -439,7 +439,12 @@ def _effective_export_catalyst(
         "name": evidence_context.get("material_identity") or evidence_context.get("material"),
         "structure_name": evidence_context.get("structure_name"),
     }
-    resolution = resolve_sample_identity(session, paper_id=row.paper_id, proposed_value=proposed_value)
+    resolution = resolve_sample_identity(
+        session,
+        paper_id=row.paper_id,
+        proposed_value=proposed_value,
+        samples=paper_catalysts,
+    )
     if resolution.status == "reuse" and resolution.sample is not None:
         return resolution.sample, "auto_bound"
 
@@ -793,6 +798,10 @@ def build_dft_ml_dataset(
     min_confidence: float | None = None,
     paper_id: UUID | None = None,
     limit: int | None = None,
+    _source_rows: list[tuple[DR, P]] | None = None,
+    _gate_by_id: dict[str, Any] | None = None,
+    _catalysts: list[CS] | None = None,
+    _settings: list[DS] | None = None,
 ) -> dict:
     """Build a structured ML-ready DFT dataset with safety gates, catalyst info, and normalized units.
 
@@ -816,13 +825,17 @@ def build_dft_ml_dataset(
     if paper_id is not None:
         stmt = stmt.where(DR.paper_id == paper_id)
 
-    rows = session.execute(stmt).all()
+    rows = _source_rows if _source_rows is not None else session.execute(stmt).all()
     gate_results = []
     eligible_rows = []
     paper_ids = set()
     catalyst_sample_ids = set()
 
-    gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
+    gate_by_id = (
+        _gate_by_id
+        if _gate_by_id is not None
+        else bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
+    )
     for dr, paper in rows:
         gate = gate_by_id.get(str(dr.id))
         if gate is None:
@@ -842,16 +855,24 @@ def build_dft_ml_dataset(
     settings_by_paper: dict[str, list[DS]] = defaultdict(list)
 
     if paper_ids:
-        catalysts = session.scalars(select(CS).where(CS.paper_id.in_(paper_ids))).all()
+        catalysts = (
+            _catalysts
+            if _catalysts is not None
+            else session.scalars(select(CS).where(CS.paper_id.in_(paper_ids))).all()
+        )
         for catalyst in catalysts:
             catalyst_by_id[str(catalyst.id)] = catalyst
             catalysts_by_paper[str(catalyst.paper_id)].append(catalyst)
 
-        settings = session.scalars(select(DS).where(DS.paper_id.in_(paper_ids))).all()
+        settings = (
+            _settings
+            if _settings is not None
+            else session.scalars(select(DS).where(DS.paper_id.in_(paper_ids))).all()
+        )
         for setting in settings:
             settings_by_paper[str(setting.paper_id)].append(setting)
 
-    if catalyst_sample_ids:
+    if catalyst_sample_ids and _catalysts is None:
         direct_catalysts = session.scalars(select(CS).where(CS.id.in_(catalyst_sample_ids))).all()
         for catalyst in direct_catalysts:
             catalyst_by_id[str(catalyst.id)] = catalyst

@@ -1509,8 +1509,32 @@ async function mockApi(route) {
   }
 
   if (pathname === '/api/visuals/overview') {
-    return jsonResponse(route, {
+    const section = requestUrl.searchParams.get('sections');
+    const base = {
       library_name: 'Default Library',
+      included_sections: section ? [section] : ['overview', 'matrix', 'correlation'],
+    };
+    if (section === 'matrix') {
+      return jsonResponse(route, {
+        ...base,
+        paper_lookup: {},
+        dft_matrix: [{ catalyst: 'Fe / graphdiyne', catalyst_key: 'fegraphdiyne', adsorbate: 'Li2S4', adsorbate_key: 'li2s4', reaction_category: '电池/离子', count: 1, paper_count: 1, paper_ids: [], property_types: [], match_scope_counts: {} }],
+        dft_matrix_meta: { included_results: 1, category_counts: [{ category: '电池/离子', count: 1 }] },
+      });
+    }
+    if (section === 'correlation') {
+      return jsonResponse(route, {
+        ...base,
+        descriptor_correlation: {
+          target_properties: ['adsorption_energy'],
+          descriptor_properties: ['band_gap'],
+          reviewed_numeric_points: 3,
+          cells: [{ target_property: 'adsorption_energy', descriptor: 'band_gap', n: 3, pearson_r: -1, spearman_rho: -1, status: 'ready', color: 'negative', source: 'reviewed_exportable' }],
+        },
+      });
+    }
+    return jsonResponse(route, {
+      ...base,
       summary: {
         papers: 1,
         pdf_available: 1,
@@ -1524,9 +1548,29 @@ async function mockApi(route) {
       years: [{ year: 2025, count: 1 }],
       journals: [{ journal: 'Journal of Testing', count: 1 }],
       paper_types: [{ type: 'research', count: 1 }],
-      dft_matrix: [{ property_type: 'adsorption_energy', adsorbate: 'Li2S4', count: 1, avg_confidence: 0.9 }],
+      dft_overview_meta: { included_results: 1, category_counts: [{ category: '电池/离子', count: 1 }] },
       dft_status: [{ status: 'Codex_Candidate', count: 1 }],
       recent_tasks: [{ job_id: 'job-1', type: 'agent_activity', status: 'completed', title: 'Mock activity', created_at: '2026-06-01T00:00:00' }],
+    });
+  }
+
+  if (pathname === '/api/visuals/correlation-pairs') {
+    return jsonResponse(route, {
+      target_property: 'adsorption_energy',
+      descriptor: 'band_gap',
+      min_n: 3,
+      n: 3,
+      ready: true,
+      source: 'reviewed_exportable',
+      pearson_r: -1,
+      spearman_rho: -1,
+      slope: -1,
+      intercept: 0,
+      points: [
+        { x: 1, y: -1, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
+        { x: 2, y: -2, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
+        { x: 3, y: -3, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
+      ],
     });
   }
 
@@ -1735,6 +1779,42 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     page.on('pageerror', err => {
       consoleErrors.push(err.message);
     });
+  });
+
+  test('visuals lazy-loads expensive sections and scatter data', async ({ page }) => {
+    const visualRequests = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/visuals/')) visualRequests.push(request.url());
+    });
+
+    const overviewResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=overview'));
+    await page.goto(`${BASE_URL}/pages/visuals/index.html`);
+    await overviewResponse;
+    expect(visualRequests.filter(url => url.includes('sections=overview'))).toHaveLength(1);
+    expect(visualRequests.some(url => url.includes('correlation-pairs'))).toBe(false);
+
+    const matrixResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=matrix'));
+    await page.click('.tab-btn[data-view="matrix"]');
+    await matrixResponse;
+    expect(visualRequests.filter(url => url.includes('sections=matrix'))).toHaveLength(1);
+
+    const correlationResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=correlation'));
+    await page.click('.tab-btn[data-view="correlation"]');
+    await correlationResponse;
+    expect(visualRequests.filter(url => url.includes('sections=correlation'))).toHaveLength(1);
+    expect(visualRequests.some(url => url.includes('correlation-pairs'))).toBe(false);
+
+    const filteredResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=correlation') && response.url().includes('corr_min_n=5'));
+    await page.fill('#corrMinN', '5');
+    await page.dispatchEvent('#corrMinN', 'change');
+    await filteredResponse;
+    expect(visualRequests.filter(url => url.includes('sections=overview'))).toHaveLength(1);
+    expect(visualRequests.filter(url => url.includes('sections=correlation'))).toHaveLength(2);
+
+    const scatterResponse = page.waitForResponse(response => response.url().includes('/api/visuals/correlation-pairs'));
+    await page.click('.correlation-cell');
+    await scatterResponse;
+    expect(visualRequests.filter(url => url.includes('correlation-pairs'))).toHaveLength(1);
   });
 
   for (const pageInfo of PAGES) {

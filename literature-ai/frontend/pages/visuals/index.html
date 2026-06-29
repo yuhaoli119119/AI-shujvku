@@ -952,7 +952,7 @@
         <div class="panel-head">
           <div>
             <div class="panel-title">描述符相关性矩阵</div>
-            <div class="muted" id="correlationHeadMeta">只在同一反应类型、吸附物、材料家族和审核状态下计算；样本数不足时不显示相关系数。</div>
+            <div class="muted" id="correlationHeadMeta">默认只使用已审核可导出配对；样本数不足时不显示相关系数。</div>
           </div>
           <div class="pill" id="correlationCount">n = 0</div>
         </div>
@@ -1026,6 +1026,7 @@
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     let currentLibrary = "";
     let latestData = null;
+    let loadedSections = new Set();
     let matrixCategory = "all";
     let paperLookup = {};
     let matrixMode = "count";
@@ -1266,13 +1267,16 @@
     function switchView(name) {
       document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.view === name));
       document.querySelectorAll(".view").forEach(view => view.classList.toggle("active", view.id === "view-" + name));
+      if (name === "matrix" || name === "correlation") {
+        loadVisualSection(name).catch(error => showToast("加载" + (name === "matrix" ? "DFT 矩阵" : "相关性") + "失败：" + error.message));
+      }
     }
     function metric(label, value, sub) {
       return '<div class="metric"><div class="value">' + esc(value) + '</div><div class="label">' + esc(label) + '</div><div class="sub">' + esc(sub || "") + '</div></div>';
     }
     function renderMetrics(data) {
       const summary = data.summary || {};
-      const matrixMeta = data.dft_matrix_meta || {};
+      const matrixMeta = data.dft_matrix_meta || data.dft_overview_meta || {};
       const blocked = summary.candidate_dft_results || matrixMeta.blocked_candidate_results || 0;
       const reviewed = summary.reviewed_exportable_dft_results || matrixMeta.reviewed_exportable_results || 0;
       const qualityWarnings = Number(blocked || 0) + Number(matrixMeta.excluded_results || 0);
@@ -1482,12 +1486,6 @@
       });
       html += '</div></div>';
       target.innerHTML = html;
-      if (selectedCorrelationKey && lookup.has(selectedCorrelationKey)) {
-        const selectedCell = lookup.get(selectedCorrelationKey);
-        if (selectedCell && selectedCell.status === "ready" && selectedCell.pearson_r != null) {
-          showCorrelationScatter(selectedCell.target_property, selectedCell.descriptor, { preserveSelection: true });
-        }
-      }
     }
     function corrFilters() {
       return {
@@ -1576,7 +1574,7 @@
       box.innerHTML =
         '<div class="scatter-shell">' +
           '<div class="scatter-head">' +
-            '<div><div class="scatter-title">' + esc(formatCorrelationLabel(payload.target_property)) + ' x ' + esc(formatCorrelationLabel(payload.descriptor)) + '</div><div class="muted">优先使用已审核可导出配对；若严格配对为空，则使用同样本非 Rejected 探索性配对。虚线为线性拟合。</div></div>' +
+            '<div><div class="scatter-title">' + esc(formatCorrelationLabel(payload.target_property)) + ' x ' + esc(formatCorrelationLabel(payload.descriptor)) + '</div><div class="muted">仅使用已审核可导出配对；虚线为线性拟合。</div></div>' +
             '<span class="pill">点击矩阵可切换组合</span>' +
           '</div>' +
           '<div class="scatter-meta">' +
@@ -1609,13 +1607,14 @@
       paperLookup = data.paper_lookup || {};
       const summary = data.summary || {};
       renderMetrics(data);
-      const reactionItems = ((data.dft_matrix_meta || {}).category_counts || []).map(item => ({ type: item.category, count: item.count }));
-      renderTypeDonut(reactionItems, (data.dft_matrix_meta || {}).included_results || 0);
+      const overviewMeta = data.dft_overview_meta || data.dft_matrix_meta || {};
+      const reactionItems = (overviewMeta.category_counts || []).map(item => ({ type: item.category, count: item.count }));
+      renderTypeDonut(reactionItems, overviewMeta.included_results || 0);
       renderCoverage(summary);
       renderBars("yearBars", (data.years || []).map(row => ({ label: row.year || "未知年份", value: row.count })), "label", "value", 0);
       renderBars("journalBars", data.journals || [], "journal", "count", 1);
-      renderMatrix(data.dft_matrix || [], data.dft_matrix_meta || {});
-      renderCorrelation(data.descriptor_correlation || {});
+      if (data.dft_matrix) renderMatrix(data.dft_matrix, data.dft_matrix_meta || {});
+      if (data.descriptor_correlation) renderCorrelation(data.descriptor_correlation);
       renderStatus(data.dft_status || []);
       renderTasks(data.recent_tasks || []);
     }
@@ -1753,29 +1752,69 @@
       if (currentLibrary) rememberLibraryName(currentLibrary);
       document.getElementById("libraryMeta").textContent = selected ? ("当前文献库：" + selected.name + " · " + (selected.paper_count || 0) + " 篇") : "未找到文献库";
     }
-    async function loadVisuals() {
+    function mergeVisualData(data) {
+      latestData = {
+        ...(latestData || {}),
+        ...data,
+        summary: { ...((latestData || {}).summary || {}), ...(data.summary || {}) }
+      };
+      paperLookup = latestData.paper_lookup || {};
+    }
+    function activeVisualView() {
+      const active = document.querySelector(".view.active");
+      return active && active.id ? active.id.replace("view-", "") : "overview";
+    }
+    async function loadVisualSection(section, options = {}) {
       if (!currentLibrary) return;
+      if (!options.force && loadedSections.has(section)) return;
       const filters = corrFilters();
       const params = new URLSearchParams();
       params.set("library_name", currentLibrary);
-      params.set("matrix_status", "reviewed");
-      params.set("corr_min_n", filters.minN);
-      if (filters.reaction) params.set("corr_reaction", filters.reaction);
-      if (filters.adsorbate) params.set("corr_adsorbate", filters.adsorbate);
-      if (filters.family) params.set("corr_family", filters.family);
+      params.set("sections", section);
+      if (section === "matrix") params.set("matrix_status", "reviewed");
+      if (section === "correlation") {
+        params.set("corr_min_n", filters.minN);
+        if (filters.reaction) params.set("corr_reaction", filters.reaction);
+        if (filters.adsorbate) params.set("corr_adsorbate", filters.adsorbate);
+        if (filters.family) params.set("corr_family", filters.family);
+      }
       const data = await fetchJSON("/api/visuals/overview?" + params.toString());
-      renderAll(data);
+      mergeVisualData(data);
+      loadedSections.add(section);
+      if (section === "overview") {
+        renderAll(latestData);
+      } else if (section === "matrix") {
+        renderMatrix(latestData.dft_matrix || [], latestData.dft_matrix_meta || {});
+      } else if (section === "correlation") {
+        selectedCorrelationKey = "";
+        renderCorrelation(latestData.descriptor_correlation || {});
+        document.getElementById("correlationScatter").innerHTML = '<div class="scatter-placeholder">点击上方矩阵中的任意方块，这里会显示对应的线性相关图、拟合线、Pearson r、Spearman ρ、样本数和证据摘要。</div>';
+      }
     }
     async function handleLibraryChange(name) {
+      const activeSection = activeVisualView();
       currentLibrary = name;
       rememberLibraryName(name);
+      latestData = null;
+      loadedSections = new Set();
+      selectedCorrelationKey = "";
+      matrixCategory = "all";
       document.getElementById("libraryMeta").textContent = "当前文献库：" + name;
-      await loadVisuals().catch(error => showToast("加载可视化失败：" + error.message));
+      await loadVisualSection("overview").catch(error => showToast("加载可视化失败：" + error.message));
+      if (activeSection === "matrix" || activeSection === "correlation") {
+        await loadVisualSection(activeSection).catch(error => showToast("加载当前标签失败：" + error.message));
+      }
     }
     async function reloadAll() {
       try {
+        const activeSection = activeVisualView();
         await loadLibraries();
-        await loadVisuals();
+        latestData = null;
+        loadedSections = new Set();
+        await loadVisualSection("overview");
+        if (activeSection === "matrix" || activeSection === "correlation") {
+          await loadVisualSection(activeSection);
+        }
       } catch (error) {
         showToast("刷新失败：" + error.message);
       }
@@ -1784,7 +1823,10 @@
       TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
       ["corrReaction", "corrAdsorbate", "corrFamily", "corrMinN"].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener("change", () => loadVisuals().catch(error => showToast("相关性刷新失败：" + error.message)));
+        if (el) el.addEventListener("change", () => {
+          loadedSections.delete("correlation");
+          loadVisualSection("correlation", { force: true }).catch(error => showToast("相关性刷新失败：" + error.message));
+        });
       });
       initMatrixInteractions();
       

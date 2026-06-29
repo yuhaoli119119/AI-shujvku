@@ -2510,9 +2510,9 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
         },
     )
     assert before_response.status_code == 200
-    assert before_response.json()["ready"] is True
-    assert before_response.json()["n"] == 3
-    assert before_response.json()["source"] == "exploratory_same_sample"
+    assert before_response.json()["ready"] is False
+    assert before_response.json()["n"] == 0
+    assert before_response.json()["source"] == "reviewed_exportable"
 
     for paper_id, row_id in rows_to_verify:
         verify_response = client.post(
@@ -2763,7 +2763,11 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
 
     overview_response = client.get(
         "/api/visuals/overview",
-        params={"library_name": "CorrelationLibrary", "matrix_status": "reviewed", "corr_min_n": 3},
+        params={
+            "library_name": "CorrelationLibrary",
+            "matrix_status": "reviewed",
+            "corr_min_n": 3,
+        },
     )
     assert overview_response.status_code == 200
     overview = overview_response.json()
@@ -2772,9 +2776,29 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
         for item in overview["descriptor_correlation"]["cells"]
         if item["target_property"] == "adsorption_energy" and item["descriptor"] == "bader_charge"
     )
-    assert cell["status"] == "ready"
-    assert cell["n"] == 3
-    assert cell["source"] == "exploratory_same_sample"
+    assert cell["status"] == "insufficient_paired_data"
+    assert cell["n"] == 0
+    assert cell["source"] == "reviewed_exportable"
+
+    exploratory_overview_response = client.get(
+        "/api/visuals/overview",
+        params={
+            "library_name": "CorrelationLibrary",
+            "matrix_status": "reviewed",
+            "corr_min_n": 3,
+            "corr_allow_exploratory": True,
+        },
+    )
+    assert exploratory_overview_response.status_code == 200
+    exploratory_overview = exploratory_overview_response.json()
+    exploratory_cell = next(
+        item
+        for item in exploratory_overview["descriptor_correlation"]["cells"]
+        if item["target_property"] == "adsorption_energy" and item["descriptor"] == "bader_charge"
+    )
+    assert exploratory_cell["status"] == "ready"
+    assert exploratory_cell["n"] == 3
+    assert exploratory_cell["source"] == "exploratory_same_sample"
 
     pairs_response = client.get(
         "/api/visuals/correlation-pairs",
@@ -2783,6 +2807,7 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
             "target_property": "adsorption_energy",
             "descriptor": "bader_charge",
             "min_n": 3,
+            "allow_exploratory": True,
         },
     )
     assert pairs_response.status_code == 200
@@ -2792,6 +2817,104 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
     assert pairs["source"] == "exploratory_same_sample"
     assert len(pairs["points"]) == 3
     assert {point["match_scope"] for point in pairs["points"]} == {"exploratory_same_sample"}
+
+
+def test_visuals_correlation_summary_prefetches_exploratory_dft_once(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Bulk exploratory correlation paper",
+            year=2026,
+            journal="Codex Test Journal",
+            library_name="BulkCorrelationLibrary",
+            pdf_path="bulk-correlation.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        for index in range(48):
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name=f"Fe-GDY-{index}",
+                metal_centers=["Fe"],
+                support="graphdiyne",
+            )
+            session.add(catalyst)
+            session.flush()
+            session.add_all(
+                [
+                    DFTResult(
+                        paper_id=paper.id,
+                        catalyst_sample_id=catalyst.id,
+                        property_type="adsorption_energy",
+                        adsorbate="H",
+                        value=-1.0 - index / 100,
+                        unit="eV",
+                        evidence_text="Exploratory target evidence.",
+                    ),
+                    DFTResult(
+                        paper_id=paper.id,
+                        catalyst_sample_id=catalyst.id,
+                        property_type="bader_charge",
+                        adsorbate=None,
+                        value=0.1 + index / 100,
+                        unit="e",
+                        evidence_text="Exploratory descriptor evidence.",
+                    ),
+                ]
+            )
+        session.commit()
+
+    statements = []
+
+    def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        response = TestClient(app).get(
+            "/api/visuals/overview",
+            params={
+                "library_name": "BulkCorrelationLibrary",
+                "sections": "correlation",
+                "corr_min_n": 3,
+                "corr_allow_exploratory": True,
+            },
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["included_sections"] == ["correlation"]
+    assert "summary" not in payload
+    assert "dft_matrix" not in payload
+    cell = next(
+        item
+        for item in payload["descriptor_correlation"]["cells"]
+        if item["target_property"] == "adsorption_energy" and item["descriptor"] == "bader_charge"
+    )
+    assert cell["source"] == "exploratory_same_sample"
+    assert cell["status"] == "ready"
+    assert cell["n"] == 48
+
+    dft_scans = [statement for statement in statements if statement.startswith("select") and " from dft_results " in statement]
+    assert len(dft_scans) == 1
+    assert len(statements) < 20
+
+
+def test_visuals_overview_section_omits_hidden_expensive_payloads(setup_test_db):
+    response = TestClient(app).get(
+        "/api/visuals/overview",
+        params={"sections": "overview"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["included_sections"] == ["overview"]
+    assert "summary" in payload
+    assert "dft_overview_meta" in payload
+    assert "dft_matrix" not in payload
+    assert "descriptor_correlation" not in payload
 
 
 def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, monkeypatch):
