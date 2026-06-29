@@ -36,6 +36,7 @@ from app.schemas.api import (
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.paper_query_storage import cached_pdf_size_for_storage
+from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
 from app.utils.evidence_anchors import first_evidence_anchor
 from app.utils.figure_delete_policy import direct_delete_eligibility, normalized_figure_identity
@@ -602,6 +603,9 @@ class PaperQuerySerializationMixin:
         c = PaperCountsResponse(**counts)
         localized = self._localized_metadata(paper)
         status = review_status if isinstance(review_status, dict) else {}
+        pdf_status = status.get("pdf_artifact_status")
+        if not isinstance(pdf_status, dict):
+            pdf_status = build_paper_pdf_status(paper)
         pdf_size = self._cached_pdf_size(paper.pdf_path)
 
         return PaperListItemResponse(
@@ -636,10 +640,10 @@ class PaperQuerySerializationMixin:
             pdf_quality_status=getattr(paper, "pdf_quality_status", None),
             pdf_quality_score=getattr(paper, "pdf_quality_score", None),
             pdf_quality_report=getattr(paper, "pdf_quality_report", None) if include_heavy else None,
-            pdf_artifact_status=status.get("pdf_artifact_status"),
-            pdf_exists=bool(status.get("pdf_exists", False)),
-            pdf_file_size=status.get("pdf_file_size"),
-            pdf_path_kind=status.get("pdf_path_kind"),
+            pdf_artifact_status=pdf_status,
+            pdf_exists=bool(status.get("pdf_exists", pdf_status.get("pdf_exists", False))),
+            pdf_file_size=status.get("pdf_file_size", pdf_status.get("pdf_file_size")),
+            pdf_path_kind=status.get("pdf_path_kind", pdf_status.get("pdf_path_kind")),
             has_parsed_content=bool(status.get("has_parsed_content", False)),
             manual_review_progress=(
                 status.get("manual_review_progress")
