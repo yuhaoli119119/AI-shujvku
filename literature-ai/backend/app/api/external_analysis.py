@@ -34,8 +34,14 @@ def _as_utc(value: datetime | None) -> datetime | None:
 def _candidate_action(candidate) -> tuple[str, str]:
     candidate_type = str(candidate.candidate_type or "").strip().lower()
     status = str(candidate.status or "").strip().lower()
+    payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
     if candidate_type == "object_review_audit" and status in ACTIVE_REVIEW_RULE_STATUSES:
         return "apply_review_rules", "run"
+    if candidate_type == "correction":
+        field_name = str(payload.get("field_name") or "").strip().lower()
+        target_path = str(payload.get("target_path") or "").strip().lower()
+        if field_name in {"table", "tables"} or target_path.startswith("tables:"):
+            return "readonly", "candidate"
     if candidate_type in MATERIALIZABLE_CANDIDATE_TYPES and status == "pending":
         return "materialize", "candidate"
     return "readonly", "candidate"

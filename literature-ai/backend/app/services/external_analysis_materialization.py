@@ -633,6 +633,8 @@ class ExternalAnalysisMaterializationMixin:
                     {
                         "create": "create_table",
                         "delete": "delete_table",
+                        "merge": "merge_table",
+                        "merge_table": "merge_table",
                     }.get(operation, "update_table")
                 )
                 continue

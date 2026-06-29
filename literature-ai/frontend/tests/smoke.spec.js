@@ -2881,6 +2881,90 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(materializeCalls).toBe(0);
   });
 
+  test('business flow: mixed DFT run applies once and legacy table correction stays readonly', async ({ page }) => {
+    const runPayload = {
+      id: 'mixed-run-1',
+      source: 'ide_ai',
+      source_label: 'Mixed deferred review',
+      created_at: '2026-05-26T12:00:00',
+      mapping_status: 'normalized',
+      candidates: [
+        {
+          id: 'mixed-dft-1',
+          candidate_type: 'object_review_audit',
+          status: 'candidate',
+          action_mode: 'apply_review_rules',
+          action_scope: 'run',
+          normalized_payload: { target_type: 'dft_results', target_id: 'new', decision: 'new_candidate' },
+        },
+        {
+          id: 'mixed-note-1',
+          candidate_type: 'note',
+          status: 'pending',
+          action_mode: 'materialize',
+          action_scope: 'candidate',
+          normalized_payload: { content: 'Anchored non-DFT note.' },
+        },
+        {
+          id: 'legacy-table-1',
+          candidate_type: 'correction',
+          status: 'pending',
+          action_mode: 'readonly',
+          action_scope: 'candidate',
+          normalized_payload: {
+            field_name: 'tables',
+            target_path: 'tables:table-1:caption',
+            operation: 'replace',
+            proposed_value: 'Blocked legacy caption',
+          },
+        },
+      ],
+    };
+    let applyCalls = 0;
+    let materializeCalls = 0;
+    let dialogCount = 0;
+
+    await page.route(/\/api\/external-analysis\/runs(\?|$)/, route => jsonResponse(route, [runPayload]));
+    await page.route(/\/api\/external-analysis\/runs\/mixed-run-1\/apply-review-rules$/, async route => {
+      applyCalls += 1;
+      return jsonResponse(route, {
+        run_id: 'mixed-run-1',
+        auto_apply_summary: { new_dft_candidates: { materialized_count: 1 } },
+      });
+    });
+    await page.route(/\/api\/external-analysis\/runs\/mixed-run-1\/materialize$/, async route => {
+      materializeCalls += 1;
+      return jsonResponse(route, { ok: true });
+    });
+    page.on('dialog', async dialog => {
+      dialogCount += 1;
+      expect(dialog.message()).toContain('整 run 操作');
+      await dialog.accept();
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-row');
+    await page.click('button[data-tab="review"]');
+
+    const legacyTable = await page.evaluate(() => {
+      const candidate = state.externalRuns[0].candidates.find(item => item.id === 'legacy-table-1');
+      return {
+        action: externalCandidateAction(candidate),
+        html: renderCandidates('mixed-run-1', [candidate]),
+      };
+    });
+    expect(legacyTable.action).toEqual({ mode: 'readonly', scope: 'candidate' });
+    expect(legacyTable.html).toContain('只读候选');
+    expect(legacyTable.html).not.toContain('应用/记录');
+    expect(legacyTable.html).not.toContain('candidate-select');
+
+    await page.evaluate(() => materializeRun('mixed-run-1'));
+    await expect.poll(() => applyCalls).toBe(1);
+    expect(materializeCalls).toBe(0);
+    expect(dialogCount).toBe(1);
+  });
+
   test('business flow: literature library opens extraction job center', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);

@@ -74,6 +74,8 @@ def test_import_warning_decision_aliases_match_dft_queue_semantics():
         ("replace", "tables:00000000-0000-0000-0000-000000000001:caption", "update_table"),
         ("create", "tables:new:create", "create_table"),
         ("delete", "tables:00000000-0000-0000-0000-000000000001:delete", "delete_table"),
+        ("merge", "tables:00000000-0000-0000-0000-000000000001:merge", "merge_table"),
+        ("merge_table", "tables:00000000-0000-0000-0000-000000000001:merge", "merge_table"),
     ],
 )
 def test_import_analysis_rejects_table_correction_operations(operation, target_path, expected_tool):
@@ -94,6 +96,60 @@ def test_import_analysis_rejects_table_correction_operations(operation, target_p
 
     with pytest.raises(ValueError, match=expected_tool):
         ExternalAnalysisService._reject_direct_tool_only_corrections(normalized)
+
+
+def test_historical_table_correction_api_action_is_readonly():
+    with TemporaryDirectory():
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Historical table action", pdf_path="table-action.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                run = ExternalAnalysisRun(
+                    paper_id=paper.id,
+                    source="ide_ai",
+                    source_label="legacy-table-action",
+                    mapping_status="mapped",
+                )
+                session.add(run)
+                session.flush()
+                session.add(
+                    ExternalAnalysisCandidate(
+                        run_id=run.id,
+                        paper_id=paper.id,
+                        candidate_type="correction",
+                        status="pending",
+                        normalized_payload={
+                            "field_name": "tables",
+                            "target_path": "tables:00000000-0000-0000-0000-000000000001:caption",
+                            "operation": "replace",
+                            "proposed_value": "Blocked legacy caption",
+                        },
+                    )
+                )
+                session.commit()
+                run_id = run.id
+
+            response = TestClient(app).get(f"/api/external-analysis/runs/{run_id}")
+            assert response.status_code == 200, response.text
+            candidate = response.json()["candidates"][0]
+            assert candidate["action_mode"] == "readonly"
+            assert candidate["action_scope"] == "candidate"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
 
 
 def test_heuristic_import_maps_legacy_candidates_notes():
