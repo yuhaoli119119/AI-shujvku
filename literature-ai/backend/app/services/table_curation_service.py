@@ -342,30 +342,6 @@ class TableCurationService:
             idempotent=False,
         )
 
-    @classmethod
-    def table_correction_matches_current(
-        cls,
-        session: Session,
-        *,
-        paper_id: UUID,
-        target_path: str,
-        operation: str,
-        proposed_value: Any,
-    ) -> tuple[bool, PaperTable | None]:
-        if str(operation or "replace").strip().lower() != "replace":
-            return False, None
-        parts = [part.strip() for part in str(target_path or "").split(":")]
-        if len(parts) != 3 or parts[0] != "tables" or parts[2] not in cls.ALLOWED_FIELDS:
-            return False, None
-        try:
-            table_id = UUID(parts[1])
-        except (TypeError, ValueError):
-            return False, None
-        table = session.get(PaperTable, table_id)
-        if table is None or table.paper_id != paper_id:
-            return False, table
-        return getattr(table, parts[2]) == proposed_value, table
-
     def _apply_updates(
         self,
         *,
@@ -414,6 +390,7 @@ class TableCurationService:
         return self.review_service.approve_correction(
             correction.id,
             reviewer=self.reviewer,
+            allow_internal_table_tool=True,
         )
 
     def _locked_paper(self, paper_id: UUID) -> Paper:

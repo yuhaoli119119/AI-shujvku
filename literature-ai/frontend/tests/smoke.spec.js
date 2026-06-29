@@ -4540,6 +4540,28 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(mixedPrompt).toContain('source_label=<agent_name>_figure_table_');
   });
 
+  test('business flow: review center legacy prompts keep table mutations on direct tools', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+    await page.waitForTimeout(500);
+
+    const prompts = await page.evaluate(() => ({
+      overall: legacyIdePromptTemplateV2('overall'),
+      figure: legacyIdePromptTemplateV2('figure'),
+      table: legacyIdePromptTemplateV2('table'),
+    }));
+
+    Object.values(prompts).forEach(prompt => {
+      expect(prompt).toContain('update_table');
+      expect(prompt).toContain('create_table');
+      expect(prompt).toContain('merge_table');
+      expect(prompt).toContain('delete_table');
+      expect(prompt).not.toContain('tables:new:create');
+      expect(prompt).not.toContain('"field_name":"tables"');
+    });
+    expect(prompts.table).toContain('corrected_value');
+    expect(prompts.table).toContain('不会修改表对象');
+  });
+
   test('business flow: delete current paper opens confirmation and clears selection', async ({ page }) => {
     let deleted = false;
 

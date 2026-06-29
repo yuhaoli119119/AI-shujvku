@@ -1096,6 +1096,25 @@ class VerificationSessionService(
                     }
                 )
                 continue
+            if target_type == "tables" and result.get("action") == "requires_direct_table_tool":
+                for opinion in opinions:
+                    opinion["candidate"].status = "requires_resolution"
+                    opinion["candidate"].materialized_target_type = None
+                    opinion["candidate"].materialized_target_id = None
+                    opinion["candidate"].mapping_reason = str(
+                        result.get("reason") or "requires_direct_table_tool"
+                    )
+                    self.session.add(opinion["candidate"])
+                pending.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": result.get("reason") or "requires_direct_table_tool",
+                        "recommended_tool": result.get("recommended_tool"),
+                    }
+                )
+                continue
             materialized_target_type, materialized_target_id = self._materialized_target_ref(result)
             for opinion in opinions:
                 opinion["candidate"].status = self._object_review_candidate_status_for_result(result)

@@ -191,6 +191,8 @@ def test_rerun_stage2_replaces_existing_outputs():
                 assert "First repair non-DFT content" in package["ai_task"]
                 assert package["llm_input_policy"]["web_llm_extract"] == "disabled"
                 assert "writing_cards" in package["non_dft_direct_write_policy"]["ai_can_apply_without_human_confirmation"]
+                assert "tables" not in package["non_dft_direct_write_policy"]["ai_can_apply_without_human_confirmation"]
+                assert "table object mutations through import_analysis" in package["non_dft_direct_write_policy"]["must_not_auto_apply"]
                 assert "dft_results" in package["non_dft_direct_write_policy"]["must_not_auto_apply"]
                 assert package["content_coverage"]["structured_counts"]["writing_cards"] == 1
                 assert package["content_coverage"]["structured_counts"]["mechanism_claims"] >= 1
@@ -236,4 +238,3 @@ def test_classify_single_paper_fallback():
                 assert db_paper.paper_code == "A0007"
         finally:
             engine.dispose()
-

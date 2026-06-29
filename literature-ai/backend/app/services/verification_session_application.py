@@ -14,7 +14,6 @@ from app.db.models import (
     ExternalAnalysisRun,
     ExtractionFieldReview,
     PaperCorrection,
-    PaperTable,
 )
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_review_service import DFTResultReviewService
@@ -108,6 +107,28 @@ class VerificationSessionReviewApplicationMixin:
                 opinion=decision["opinion"],
                 dual_ai_consensus=True,
             )
+            if target_type == "tables" and adopted.get("action") == "requires_direct_table_tool":
+                for opinion in opinions:
+                    candidate = opinion.get("candidate")
+                    if candidate is None:
+                        continue
+                    candidate.status = "requires_resolution"
+                    candidate.materialized_target_type = None
+                    candidate.materialized_target_id = None
+                    candidate.mapping_reason = str(adopted.get("reason") or "requires_direct_table_tool")
+                    self.session.add(candidate)
+                pending_conflicts.append(
+                    {
+                        "paper_id": paper_id_text,
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": adopted.get("reason") or "requires_direct_table_tool",
+                        "opinion_count": len(opinions),
+                        "result": adopted,
+                    }
+                )
+                continue
             materialized_target_type, materialized_target_id = self._materialized_target_ref(adopted)
             for opinion in opinions:
                 candidate = opinion.get("candidate")
@@ -246,22 +267,16 @@ class VerificationSessionReviewApplicationMixin:
             return {"action": "reject", "target_type": target_type, "target_id": target_id}
         proposed_value = opinion.get("corrected_value", opinion.get("value"))
         if target_type == "tables":
-            table = self.session.get(PaperTable, UUID(str(target_id)))
-            if (
-                table is not None
-                and table.paper_id == paper_id
-                and field_name in ReviewService.STRUCTURED_TARGETS["tables"].allowed_fields
-                and getattr(table, field_name) == proposed_value
-            ):
-                return {
-                    "action": "idempotent_noop",
-                    "target_type": "tables",
-                    "target_id": target_id,
-                    "field_name": field_name,
-                    "proposed_value": proposed_value,
-                    "idempotent": True,
-                    "candidate_status": "ai_applied",
-                }
+            return {
+                "action": "requires_direct_table_tool",
+                "target_type": "tables",
+                "target_id": target_id,
+                "field_name": field_name,
+                "proposed_value": proposed_value,
+                "candidate_status": "requires_resolution",
+                "reason": "table_audit_corrected_value_not_applied",
+                "recommended_tool": "update_table",
+            }
         return self._apply_structured_correction(
             paper_id=paper_id,
             target_type=target_type,

@@ -195,10 +195,16 @@ class ReviewService:
         reviewer: str,
         write_lock_tokens: list[str] | None = None,
         write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
+        allow_internal_table_tool: bool = False,
     ) -> PaperCorrection:
         correction = self._get_correction(correction_id)
         if correction.status != "pending":
             raise ValueError("write_conflict:correction_not_pending")
+        if self._is_table_object_correction(correction) and not allow_internal_table_tool:
+            raise ValueError(
+                "direct_mcp_tool_required:table_object_mutation must use "
+                "update_table/create_table/merge_table/delete_table"
+            )
         self._require_module_lock_for_direct_ai_write(
             correction,
             reviewer=reviewer,
@@ -258,6 +264,12 @@ class ReviewService:
         self.session.flush()
         self.session.refresh(correction)
         return correction
+
+    @staticmethod
+    def _is_table_object_correction(correction: PaperCorrection) -> bool:
+        field_name = str(correction.field_name or "").strip().lower()
+        target_path = str(correction.target_path or "").strip().lower()
+        return field_name in {"table", "tables"} or target_path.startswith("tables:")
 
     def get_correction_detail(self, correction_id: UUID) -> dict[str, Any]:
         correction = self._get_correction(correction_id)

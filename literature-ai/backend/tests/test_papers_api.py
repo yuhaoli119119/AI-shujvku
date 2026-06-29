@@ -503,6 +503,8 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "图片核验默认只核验主文 paper_id 的 figures" in data["suggested_client_prompt"]
     assert "Figure-derived DFT values become candidates and require second review/safety gate" in data["prompt_contract"]["templates"]["figure"]
     assert "Figure-derived DFT data must be submitted as DFT candidates" in data["legacy_suggested_client_prompt"]
+    assert "never table correction_proposals through import_analysis" in data["legacy_suggested_client_prompt"]
+    assert "table field corrections" not in data["legacy_suggested_client_prompt"]
     assert "section_level" in data["prompt_contract"]["templates"]["sections_writing"]
     ai_search = next(item for item in data["http_endpoints"] if item["name"] == "ai_search")
     assert "raw query" in ai_search["purpose"]

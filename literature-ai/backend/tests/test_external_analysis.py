@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -65,6 +66,34 @@ def test_import_warning_decision_aliases_match_dft_queue_semantics():
     assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("revision") == "PROPOSED"
     assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("needs_user_decision") == "NEEDS_HUMAN"
     assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("ambiguous") == "NEEDS_HUMAN"
+
+
+@pytest.mark.parametrize(
+    ("operation", "target_path", "expected_tool"),
+    [
+        ("replace", "tables:00000000-0000-0000-0000-000000000001:caption", "update_table"),
+        ("create", "tables:new:create", "create_table"),
+        ("delete", "tables:00000000-0000-0000-0000-000000000001:delete", "delete_table"),
+    ],
+)
+def test_import_analysis_rejects_table_correction_operations(operation, target_path, expected_tool):
+    normalized = ExternalAnalysisNormalizedModel.model_validate(
+        {
+            "correction_proposals": [
+                {
+                    "field_name": "tables",
+                    "target_path": target_path,
+                    "operation": operation,
+                    "proposed_value": {} if operation == "create" else "value",
+                    "reason": "Table mutations must use direct tools.",
+                    "evidence_payload": {"page": 1, "table": "Table 1"},
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match=expected_tool):
+        ExternalAnalysisService._reject_direct_tool_only_corrections(normalized)
 
 
 def test_heuristic_import_maps_legacy_candidates_notes():
@@ -237,6 +266,8 @@ def test_external_analysis_import_and_materialize_flow():
             assert materialized.json()["created_notes"] == 1
             assert materialized.json()["created_corrections"] == 1
             assert materialized.json()["created_relationships"] == 1
+            assert materialized.json()["deferred_review_candidates"] == 0
+            assert "next_action" not in materialized.json()
 
             detail = client.get(f"/api/papers/{main_paper.id}")
             assert detail.status_code == 200
@@ -367,7 +398,7 @@ def test_import_analysis_auto_applies_non_dft_corrections():
             engine.dispose()
 
 
-def test_import_analysis_auto_creates_non_dft_structured_objects():
+def test_import_analysis_auto_creates_non_table_structured_objects():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -447,23 +478,6 @@ def test_import_analysis_auto_creates_non_dft_structured_objects():
                                     "source_pdf": "paper.pdf",
                                 },
                             },
-                            {
-                                "field_name": "tables",
-                                "target_path": "tables:new:create",
-                                "operation": "create",
-                                "proposed_value": {
-                                    "caption": "Table 1. Computational parameters.",
-                                    "markdown_content": "| Parameter | Value |\n| --- | --- |\n| Functional | PBE |",
-                                    "page": 3,
-                                    "extraction_source": "ide_ai",
-                                },
-                                "reason": "The PDF contains a table that parser missed.",
-                                "evidence_payload": {
-                                    "page": 3,
-                                    "quoted_text": "Table 1. Computational parameters.",
-                                    "source_pdf": "paper.pdf",
-                                },
-                            },
                         ]
                     },
                 },
@@ -476,7 +490,6 @@ def test_import_analysis_auto_creates_non_dft_structured_objects():
             with Session(engine) as session:
                 figure = session.scalars(select(PaperFigure)).one()
                 section = session.scalars(select(PaperSection)).one()
-                table = session.scalars(select(PaperTable)).one()
                 corrections = session.scalars(select(PaperCorrection)).all()
 
                 assert figure.caption == "Fig. 2. Missing band structure."
@@ -484,9 +497,8 @@ def test_import_analysis_auto_creates_non_dft_structured_objects():
                 assert figure.crop_status == "needs_recrop"
                 assert section.section_title == "Methods"
                 assert section.text == "Methods section recovered from PDF text."
-                assert table.caption == "Table 1. Computational parameters."
-                assert "| Functional | PBE |" in (table.markdown_content or "")
-                assert len(corrections) == 3
+                assert session.scalars(select(PaperTable)).all() == []
+                assert len(corrections) == 2
                 assert {row.status for row in corrections} == {"approved"}
         finally:
             app.dependency_overrides.clear()
@@ -920,6 +932,8 @@ def test_external_analysis_relationship_resolution_blocks_ambiguous_same_library
             )
             assert imported.status_code == 200
             run_id = imported.json()["id"]
+            assert imported.json()["candidates"][0]["action_mode"] == "readonly"
+            assert imported.json()["candidates"][0]["action_scope"] == "candidate"
 
             with Session(engine) as session:
                 candidate = session.scalars(select(ExternalAnalysisCandidate)).one()
@@ -1571,7 +1585,6 @@ def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_dft():
                 "/api/external-analysis/import",
                 json={**base_payload, "source_label": "ide-ai-2"},
             )
-
             assert first.status_code == 200
             assert second.status_code == 200
             with Session(engine) as session:
@@ -2243,7 +2256,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_rejects_tables():
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_single_ai_revises_tables():
+def test_external_analysis_table_audit_corrected_value_requires_direct_tool():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2316,17 +2329,17 @@ def test_external_analysis_auto_apply_review_rules_single_ai_revises_tables():
             table_payload = detail.json()["tables"][0]
 
             assert stored_table is not None
-            assert stored_table.caption == "Table 2. Corrected full caption from the PDF"
-            assert len(corrections) == 1
-            assert corrections[0].status == "approved"
-            assert {candidate.status for candidate in candidates} == {"ai_applied"}
-            assert table_payload["table_review_status"] == "verified"
+            assert stored_table.caption == "Table 2. Truncated caption"
+            assert corrections == []
+            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
+            assert table_payload["table_review_status"] != "verified"
+            assert table_payload["object_review_audit_count"] == 1
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_normalizes_legacy_codex_item_table_correction():
+def test_import_analysis_rejects_legacy_codex_item_table_correction():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2384,24 +2397,18 @@ def test_external_analysis_auto_apply_review_rules_normalizes_legacy_codex_item_
                     },
                 },
             )
-            assert imported.status_code == 200
+            assert imported.status_code == 400
+            assert "direct_mcp_tool_required:update_table" in imported.text
 
             with Session(engine) as session:
                 stored_table = session.get(PaperTable, table_id)
                 corrections = session.query(PaperCorrection).all()
                 candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
 
-            detail = client.get(f"/api/papers/{paper_id}")
-            assert detail.status_code == 200
-            table_payload = detail.json()["tables"][0]
-
             assert stored_table is not None
-            assert stored_table.markdown_content == "fixed markdown table"
-            assert len(corrections) == 1
-            assert corrections[0].target_path == f"tables:{table_id}:markdown_content"
-            assert corrections[0].status == "approved"
-            assert {candidate.status for candidate in candidates} == {"ai_applied"}
-            assert table_payload["table_review_status"] == "verified"
+            assert stored_table.markdown_content == "broken markdown"
+            assert corrections == []
+            assert candidates == []
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

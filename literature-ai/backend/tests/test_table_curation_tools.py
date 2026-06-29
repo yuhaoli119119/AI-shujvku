@@ -25,6 +25,7 @@ from app.mcp.server import (
     update_table,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.review_service import ReviewService
 
 
 TABLE_TOOLS = {"update_table", "create_table", "delete_table", "merge_table"}
@@ -417,7 +418,7 @@ def test_si_table_requires_the_table_objects_real_paper_id(table_tool_env):
         assert session.get(PaperTable, table_id).paper_id == si_id
 
 
-def test_apply_review_rules_table_noop_does_not_create_correction(table_tool_env):
+def test_apply_review_rules_table_noop_still_requires_direct_tool(table_tool_env):
     with Session(table_tool_env) as session:
         paper = _paper(session, "table-noop-run")
         table = _table(
@@ -460,9 +461,9 @@ def test_apply_review_rules_table_noop_does_not_create_correction(table_tool_env
         second = service.apply_review_rules_for_run(run_id, reviewer="ide_ai")
         session.commit()
         stored_candidate = session.get(ExternalAnalysisCandidate, candidate_id)
-        assert first["non_dft_object_reviews"]["applied_items"][0]["action"] == "idempotent_noop"
+        assert first["non_dft_object_reviews"]["pending_items"][0]["reason"] == "table_audit_corrected_value_not_applied"
         assert second["non_dft_object_reviews"]["applied_count"] == 0
-        assert stored_candidate.status == "ai_applied"
+        assert stored_candidate.status == "requires_resolution"
         assert session.query(PaperCorrection).count() == 0
 
 
@@ -532,9 +533,145 @@ def test_new_run_does_not_replay_old_table_candidate(table_tool_env):
         service.apply_review_rules_for_run(new_run_id, reviewer="ide_ai")
         service.apply_review_rules_for_run(new_run_id, reviewer="ide_ai")
         session.commit()
-        assert session.get(PaperTable, table_id).caption == "New run value"
+        assert session.get(PaperTable, table_id).caption == "Original"
         assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "pending"
-        assert session.get(ExternalAnalysisCandidate, new_candidate_id).status == "ai_applied"
+        assert session.get(ExternalAnalysisCandidate, new_candidate_id).status == "requires_resolution"
         corrections = session.scalars(select(PaperCorrection)).all()
-        assert len(corrections) == 1
-        assert corrections[0].proposed_value == "New run value"
+        assert corrections == []
+
+
+def test_historical_table_correction_candidates_cannot_use_generic_write_paths(table_tool_env):
+    with Session(table_tool_env) as session:
+        paper = _paper(session, "historical-table-correction")
+        table = _table(session, paper, caption="Original", markdown_content="| original |", page=3)
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="legacy-table-run",
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        candidates = []
+        for caption in ("Generic materialize", "Apply review rules"):
+            candidates.append(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="correction",
+                    normalized_payload={
+                        "field_name": "tables",
+                        "target_path": f"tables:{table.id}:caption",
+                        "operation": "replace",
+                        "proposed_value": caption,
+                        "reason": "Legacy table correction.",
+                        "evidence_payload": EVIDENCE,
+                    },
+                    evidence_payload=EVIDENCE,
+                    status="pending",
+                )
+            )
+        session.add_all(candidates)
+        session.commit()
+        paper_id, table_id, run_id = paper.id, table.id, run.id
+        first_id, second_id = candidates[0].id, candidates[1].id
+
+    with Session(table_tool_env) as session:
+        service = ExternalAnalysisService(session, get_settings())
+        result = service.materialize_candidates(run_id, candidate_ids=[first_id])
+        assert result.created_corrections == 0
+        assert result.skipped_candidates == 1
+        service.apply_review_rules_for_run(run_id, reviewer="ide_ai")
+        session.commit()
+
+        assert session.get(PaperTable, table_id).caption == "Original"
+        assert session.get(ExternalAnalysisCandidate, first_id).status == "requires_resolution"
+        assert session.get(ExternalAnalysisCandidate, second_id).status == "requires_resolution"
+        assert session.query(PaperCorrection).filter(PaperCorrection.paper_id == paper_id).count() == 0
+
+
+def test_generic_correction_approval_cannot_mutate_table(table_tool_env):
+    with Session(table_tool_env) as session:
+        paper = _paper(session, "generic-table-approval")
+        table = _table(session, paper, caption="Original", markdown_content="| original |", page=3)
+        correction = PaperCorrection(
+            paper_id=paper.id,
+            source="legacy_import_analysis",
+            field_name="tables",
+            target_path=f"tables:{table.id}:caption",
+            operation="replace",
+            proposed_value="Blocked generic update",
+            reason="Historical pending table correction.",
+            evidence_payload=EVIDENCE,
+            status="pending",
+        )
+        session.add(correction)
+        session.commit()
+        correction_id, table_id = correction.id, table.id
+
+    with Session(table_tool_env) as session:
+        with pytest.raises(ValueError, match="direct_mcp_tool_required:table_object_mutation"):
+            ReviewService(session).approve_correction(correction_id, reviewer="web_user")
+        session.rollback()
+        assert session.get(PaperTable, table_id).caption == "Original"
+        assert session.get(PaperCorrection, correction_id).status == "pending"
+
+
+def test_table_audit_corrected_value_is_review_only_but_pass_remains_supported(table_tool_env):
+    with Session(table_tool_env) as session:
+        paper = _paper(session, "table-audit-review-only")
+        table = _table(session, paper, caption="Original", markdown_content="| original |", page=4)
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="table-audit-run",
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        revise = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "tables",
+                "target_id": str(table.id),
+                "field_name": "caption",
+                "decision": "REVISE",
+                "corrected_value": "Must use update_table",
+                "reason": "Caption differs from the PDF.",
+                "evidence_location": EVIDENCE,
+            },
+            status="candidate",
+        )
+        passed = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "tables",
+                "target_id": str(table.id),
+                "field_name": "table_review",
+                "decision": "PASS",
+                "reason": "The remaining table structure matches the PDF.",
+                "evidence_location": EVIDENCE,
+            },
+            status="candidate",
+        )
+        session.add_all([revise, passed])
+        session.commit()
+        run_id, table_id, revise_id, passed_id = run.id, table.id, revise.id, passed.id
+
+    with Session(table_tool_env) as session:
+        summary = ExternalAnalysisService(session, get_settings()).apply_review_rules_for_run(
+            run_id,
+            reviewer="ide_ai",
+        )
+        session.commit()
+
+        assert session.get(PaperTable, table_id).caption == "Original"
+        assert session.get(ExternalAnalysisCandidate, revise_id).status == "requires_resolution"
+        assert session.get(ExternalAnalysisCandidate, passed_id).status == "ai_reviewed"
+        assert session.query(PaperCorrection).count() == 0
+        assert summary["non_dft_object_reviews"]["pending_count"] == 1
+        assert summary["non_dft_object_reviews"]["applied_count"] == 1
