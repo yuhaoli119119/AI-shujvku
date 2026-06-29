@@ -117,7 +117,11 @@ git status --short
 
 The readiness branch that preceded this final integration had already reached:
 
-- `smoke.spec.js --workers=1`: 152 passed
-- DFT frontend focused tests: 23 passed
-- DFT backend lifecycle e2e: 3 passed
+- DFT backend lifecycle e2e (`tests/test_dft_lifecycle_e2e.py`): 3 passed
+- DFT audit/repair/report (`test_dft_audit_issue_service.py`, `test_dft_audit_issue_repair_service.py`, `test_dft_audit_report_service.py`): 32 passed
+- verification/MCP/settings/prompts (`test_verification_sessions.py`, `test_mcp_server.py`, `test_settings_api_access.py`, `test_ide_prompt_service.py`): 111 passed
+- export/display/boundary/writing/RAG (`test_export_safety_gate.py`, `test_dft_review_display_status.py`, `test_review_boundary_enforcement.py`, `test_writing_safety_gate.py`, `test_rag_eligibility.py`): 81 passed
 - backend `compileall`: passed
+- frontend smoke (`smoke.spec.js --workers=1`): 152 passed
+- DFT frontend focused tests (`dft_audit_center.spec.js`, `dft_detail_deeplink.spec.js`, `review_center_conflict_modal.spec.js`, `dft_ml_dataset.spec.js`): 23 passed
+- `git diff --check`: passed
