@@ -1486,26 +1486,22 @@
       return String(rel[key] || rel.paper_id || "").trim();
     }
 
-    async function loadFocusedSupportPairInfo(focusPaperId) {
+    async function loadFocusedSupportPairInfo(focusPaperId, rows) {
       const focusId = String(focusPaperId || "").trim();
       if (!focusId) return null;
       try {
-        const detail = await fetchJSON("/api/papers/" + encodeURIComponent(focusId));
-        const ids = new Set([focusId]);
-        let mainPaperId = focusId;
-        (detail.outgoing_relationships || []).forEach(function (rel) {
-          if (!isSupplementaryRelationshipType(rel.relationship_type)) return;
-          const relatedId = relationshipPaperId(rel, "outgoing");
-          if (relatedId) ids.add(relatedId);
+        const row = (rows || []).find(function (item) {
+          return String(item && item.paper_id || "") === focusId;
         });
-        (detail.incoming_relationships || []).forEach(function (rel) {
-          if (!isSupplementaryRelationshipType(rel.relationship_type)) return;
-          const relatedId = relationshipPaperId(rel, "incoming");
-          if (!relatedId) return;
-          ids.add(relatedId);
-          mainPaperId = relatedId;
-        });
-        return { ids: ids, mainPaperId: mainPaperId, focusPaperId: focusId };
+        const group = supplementaryGroup(row);
+        const memberIds = group && Array.isArray(group.member_paper_ids)
+          ? group.member_paper_ids
+          : [focusId];
+        return {
+          ids: new Set(memberIds.map(String)),
+          mainPaperId: String(group && group.main_paper_id || focusId),
+          focusPaperId: focusId
+        };
       } catch (_) {
         return { ids: new Set([focusId]), mainPaperId: focusId, focusPaperId: focusId };
       }
@@ -4040,6 +4036,8 @@
               summary_only: "true",
             });
             if (library) params.set("library_name", library);
+            const focusPaperId = getQueryPaperId();
+            if (focusPaperId) params.set("paper_id", focusPaperId);
             data = await fetchJSON("/api/workbench/review-center?" + params.toString());
             break;
           } catch (error) {
@@ -4054,7 +4052,7 @@
         }
         const focusPaperId = getQueryPaperId();
         const incomingRows = data.rows || [];
-        const focusPairInfo = focusPaperId ? await loadFocusedSupportPairInfo(focusPaperId) : null;
+        const focusPairInfo = focusPaperId ? await loadFocusedSupportPairInfo(focusPaperId, incomingRows) : null;
         const hiddenSupplementaryCount = focusPaperId
           ? 0
           : incomingRows.filter(isSupportingInformationRow).length;

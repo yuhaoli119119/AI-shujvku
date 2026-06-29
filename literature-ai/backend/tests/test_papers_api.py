@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 from fastapi import Request
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
@@ -74,8 +74,8 @@ def test_papers_status_and_stream(setup_test_db, monkeypatch):
                 lines.append(line)
             
         full_output = "\n".join(lines)
-        assert "event: papers_update" in full_output
-        assert "First Test Paper" in full_output
+        assert "event: heartbeat" in full_output
+        assert "event: papers_update" not in full_output
         assert "event: heartbeat" in full_output
 
 
@@ -177,7 +177,7 @@ def test_paper_api_exposes_stable_paper_id_on_list_and_detail(setup_test_db):
     assert detail_payload["paper_id"] == paper_id
 
 
-def test_light_paper_detail_keeps_verified_writing_cards(setup_test_db):
+def test_light_paper_detail_omits_verified_writing_card_payload(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     with Session() as session:
@@ -215,9 +215,67 @@ def test_light_paper_detail_keeps_verified_writing_cards(setup_test_db):
     assert response.status_code == 200
     payload = response.json()
     assert payload["sections"] == []
-    assert payload["writing_cards_review_status"] == "ai_verified"
-    assert len(payload["writing_cards_items"]) == 1
-    assert payload["writing_cards_items"][0]["research_gap"] == "AI reviewed writing card"
+    assert payload["counts"]["writing_cards"] == 1
+    assert payload["writing_cards_items"] == []
+
+
+def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Large DFT detail", pdf_path="large-dft.pdf")
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    adsorbate=f"Li2S{i}",
+                    property_type="adsorption_energy",
+                    value=-float(i) / 10,
+                    unit="eV",
+                    evidence_text=f"DFT evidence {i}",
+                )
+                for i in range(120)
+            ]
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    statements = []
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        client = TestClient(app)
+        light = client.get(f"/api/papers/{paper_id}", params={"mode": "light"})
+        assert light.status_code == 200
+        light_payload = light.json()
+        assert light_payload["counts"]["dft_results"] == 120
+        assert light_payload["dft_results_items"] == []
+        assert light_payload["catalyst_samples_items"] == []
+        assert light_payload["sections"] == []
+        assert light_payload["figures"] == []
+        assert len(light.content) < 200_000
+        assert len(statements) < 25
+
+        statements.clear()
+        full = client.get(f"/api/papers/{paper_id}", params={"mode": "full"})
+        assert full.status_code == 200
+        full_payload = full.json()
+        assert len(full_payload["dft_results_items"]) == 28
+        assert full_payload["dft_results_page"]["total"] == 120
+        assert full_payload["dft_results_page"]["has_more"] is True
+        assert len(statements) < 100
+
+        page = client.get(f"/api/papers/{paper_id}/dft-results", params={"offset": 50, "limit": 50})
+        assert page.status_code == 200
+        assert len(page.json()["items"]) == 50
+        assert page.json()["has_more"] is True
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
 
 
 def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):
@@ -1339,7 +1397,11 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     assert rejected_payload["dft_result_id"] == str(row_id)
     assert rejected_payload["export_safety"]["is_exportable"] is False
     assert rejected_payload["export_safety"]["review_status"] == "rejected"
-    assert rejected_payload["export_safety"]["blocked_reasons"] == ["missing_material_identity", "unsafe_review"]
+    assert rejected_payload["export_safety"]["blocked_reasons"] == [
+        "missing_material_identity",
+        "unsafe_review",
+        "target_rejected",
+    ]
     assert all(item["reviewer_status"] == "rejected" for item in rejected_payload["reviews"])
 
     active_queue = client.get("/api/papers/export/dft-review-queue")
@@ -1365,7 +1427,11 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     dataset = client.get("/api/papers/export/dft-dataset").json()
     assert dataset["metadata"]["eligible_count"] == 0
     assert dataset["metadata"]["blocked_count"] == 1
-    assert dataset["metadata"]["blocked_reasons"] == {"missing_material_identity": 1, "unsafe_review": 1}
+    assert dataset["metadata"]["blocked_reasons"] == {
+        "missing_material_identity": 1,
+        "unsafe_review": 1,
+        "target_rejected": 1,
+    }
 
     with Session() as session:
         saved_correction = session.scalar(select(PaperCorrection).where(PaperCorrection.target_path == f"dft_results:{row_id}:unit"))
@@ -1377,6 +1443,94 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         audit = session.scalar(select(AuditLog).where(AuditLog.action == "reject_dft_result"))
         assert audit is not None
         assert audit.target_id == str(row_id)
+
+
+def test_manual_dft_update_applies_audited_changes_and_invalidates_review(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Manual DFT edit paper", year=2026, pdf_path="manual-edit.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S4",
+            property_type="adsorption_energy",
+            value=-1.11,
+            unit="eV",
+            source_section="Results",
+            evidence_text="Table 2 reports -1.25 eV for Li2S4 adsorption.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        review = ExtractionFieldReview(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            field_name="value",
+            original_value=-1.11,
+            reviewed_value=-1.11,
+            unit="eV",
+            evidence_text=row.evidence_text,
+            reviewer_status="verified",
+            reviewer="human",
+            reviewer_note="Previously verified",
+        )
+        session.add(review)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+        review_id = str(review.id)
+
+    client = TestClient(app)
+    response = client.patch(
+        f"/api/papers/{paper_id}/dft-results/{row_id}",
+        json={
+            "confirm_manual_update": True,
+            "updates": {
+                "value": -1.25,
+                "unit": "eV",
+                "reaction_step": "Li2S4 adsorption",
+            },
+            "reason": "Corrected against Table 2 in the source PDF.",
+            "reviewer": "literature_library_user",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["changed_fields"] == ["value", "reaction_step"]
+    assert payload["invalidated_review_ids"] == [review_id]
+    assert payload["export_safety"]["is_exportable"] is False
+    assert "unsafe_review" in payload["export_safety"]["blocked_reasons"]
+    assert all(item["status"] == "approved" for item in payload["corrections"])
+
+    with Session() as session:
+        stored = session.get(DFTResult, UUID(row_id))
+        assert stored.value == -1.25
+        assert stored.reaction_step == "Li2S4 adsorption"
+        assert stored.candidate_status == "system_candidate"
+        stored_review = session.get(ExtractionFieldReview, UUID(review_id))
+        assert stored_review.reviewer_status == "pending"
+        assert stored_review.reviewed_value is None
+        correction_paths = set(
+            session.scalars(
+                select(PaperCorrection.target_path).where(PaperCorrection.paper_id == UUID(paper_id))
+            ).all()
+        )
+        assert correction_paths == {
+            f"dft_results:{row_id}:value",
+            f"dft_results:{row_id}:reaction_step",
+        }
+        audit = session.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "manual_update_dft_result",
+                AuditLog.target_id == row_id,
+            )
+        )
+        assert audit is not None
+        assert audit.payload["before"]["value"] == -1.11
+        assert audit.payload["after"]["value"] == -1.25
 
 
 def test_reject_dft_result_requires_and_accepts_existing_review_versions(setup_test_db):

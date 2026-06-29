@@ -470,6 +470,230 @@ function renderWritingCardsCompact(items) {
     }).join("");
 }
 
+function shortDftResultId(value) {
+    const text = String(value || "").trim();
+    if (text.length <= 18) return text;
+    return text.slice(0, 8) + "\u2026" + text.slice(-6);
+}
+
+function dftLocatorClipboardText(resultId, index) {
+    return "DFT #" + (Number(index) + 1) + "; dft_result_id=" + String(resultId || "").trim();
+}
+
+async function copyDftLocator(event, resultId, index) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const text = dftLocatorClipboardText(resultId, index);
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast("DFT 定位信息已复制。", "success");
+    } catch (error) {
+        showToast("复制 DFT 定位信息失败：" + error.message, "error");
+    }
+}
+
+function renderDftRecordLocator(item, index) {
+    const resultId = dftResultId(item);
+    if (!resultId) return "";
+    return '<div class="dft-record-locator" data-role="dft-record-locator" data-dft-result-id="' + escAttr(resultId) + '">' +
+        '<span class="dft-record-number" data-role="dft-record-number">DFT #' + (index + 1) + '</span>' +
+    '</div>';
+}
+
+function dftCompactReadableValue(value, fallback) {
+    const text = readableValue(value);
+    return text && text !== "-" ? text : (fallback || "-");
+}
+
+function dftCompactCatalystLabel(item) {
+    item = item || {};
+    const sample = item.bound_catalyst_sample || {};
+    return sample.name || sample.material_identity || item.catalyst || item.material_identity || "未绑定催化剂";
+}
+
+function dftCompactConfidenceLabel(value) {
+    if (value === null || value === undefined || value === "") return "";
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric) && numeric >= 0 && numeric <= 1) return Math.round(numeric * 100) + "%";
+    return String(value);
+}
+
+function dftCompactChip(label, className, title) {
+    if (!label) return "";
+    return '<span class="status-chip ' + escAttr(className || "meta") + '"' +
+        (title ? ' title="' + escAttr(title) + '"' : "") + '>' + esc(label) + '</span>';
+}
+
+function dftCompactEvidenceText(item) {
+    const text = compactText(item && item.evidence_text);
+    if (!text) return "";
+    return '<div class="dft-compact-detail-block"><div class="dft-compact-detail-title">证据原文</div>' +
+        '<div class="dft-compact-detail-text">' + esc(clipText(text, 360)) + '</div></div>';
+}
+
+function dftCompactAuditText(item) {
+    const latest = item && (item.latest_object_review_audit || ((item.object_review_audits || [])[0]));
+    if (!latest) return "";
+    const bits = [
+        latest.source_label || latest.source || "",
+        latest.decision ? ("decision=" + latest.decision) : "",
+        latest.reason || ""
+    ].filter(Boolean).join(" | ");
+    return '<div class="dft-compact-detail-block"><div class="dft-compact-detail-title">最新审核</div>' +
+        '<div class="dft-compact-detail-text">' + esc(clipText(bits, 260)) + '</div></div>';
+}
+
+function dftCompactMetaRows(item) {
+    const rows = [
+        ["样本 ID", item && item.catalyst_sample_id],
+        ["活性位点", item && item.active_site_instance_key],
+        ["来源章节", item && item.source_section],
+        ["来源图/表", item && item.source_figure],
+        ["候选状态", item && item.candidate_status]
+    ].filter(function(row) {
+        const value = dftCompactReadableValue(row[1], "");
+        return value && value !== "-";
+    });
+    if (!rows.length) return "";
+    return '<div class="dft-compact-meta-grid">' + rows.map(function(row) {
+        return '<div><span>' + esc(row[0]) + '</span><strong>' + esc(dftCompactReadableValue(row[1], "")) + '</strong></div>';
+    }).join("") + '</div>';
+}
+
+function closeDftDetailDialog() {
+    const dialog = document.getElementById("dftDetailDialog");
+    if (dialog) dialog.style.display = "none";
+    if (typeof activeDftEditItemId !== "undefined") activeDftEditItemId = null;
+}
+
+function dftDetailDialogRow(label, value, options) {
+    options = options || {};
+    const text = options.html ? value : esc(dftCompactReadableValue(value, ""));
+    if (!options.html && (!text || text === "-")) return "";
+    return '<div class="dft-detail-dialog-label">' + esc(label) + '</div>' +
+        '<div class="dft-detail-dialog-cell ' + escAttr(options.className || "") + '">' + (text || "-") + '</div>';
+}
+
+function dftDetailAuditSummary(item) {
+    const latest = item && (item.latest_object_review_audit || ((item.object_review_audits || [])[0]));
+    if (!latest) return "";
+    return [
+        latest.source_label || latest.source || "",
+        latest.decision ? ("decision=" + latest.decision) : "",
+        latest.confidence == null ? "" : ("confidence=" + latest.confidence),
+        latest.reason || ""
+    ].filter(Boolean).join(" | ");
+}
+
+function renderDftDetailDialogBody(item) {
+    const catalyst = dftCompactCatalystLabel(item);
+    const adsorbate = dftCompactReadableValue(item && item.adsorbate, "");
+    const propertyType = dftCompactReadableValue(item && (item.property_type || item.energy_type), "");
+    const value = dftCompactReadableValue(item && item.value, "");
+    const unit = dftCompactReadableValue(item && item.unit, "");
+    const reactionStep = dftCompactReadableValue(item && item.reaction_step, "");
+    const confidence = dftCompactConfidenceLabel(item && item.confidence);
+    const rows = [
+        dftDetailDialogRow("催化剂", catalyst, { className: "strong" }),
+        dftDetailDialogRow("吸附物", adsorbate),
+        dftDetailDialogRow("性质", propertyType),
+        dftDetailDialogRow("数值", '<span class="dft-table-value"><strong>' + esc(value || "-") + '</strong>' + (unit ? '<span>' + esc(unit) + '</span>' : '') + '</span>', { html: true }),
+        dftDetailDialogRow("反应步骤", reactionStep, { className: "wide" }),
+        dftDetailDialogRow("来源章节", item && item.source_section),
+        dftDetailDialogRow("来源图/表", item && item.source_figure),
+        dftDetailDialogRow("置信度", confidence),
+        dftDetailDialogRow("候选状态", item && item.candidate_status),
+        dftDetailDialogRow("关联样本", item && item.catalyst_sample_id, { className: "wide mono" }),
+        dftDetailDialogRow("证据原文", item && item.evidence_text, { className: "wide long" }),
+        dftDetailDialogRow("最新审核", dftDetailAuditSummary(item), { className: "wide long" })
+    ].filter(Boolean).join("");
+    return '<div class="dft-detail-dialog-grid">' + rows + '</div>' +
+        '<div class="dft-detail-dialog-section">' + renderDftEvidenceSource(item) + '</div>' +
+        '<div class="dft-detail-dialog-section">' + dftConflictSummaryHtml(item) + '</div>' +
+        '<div class="dft-detail-dialog-section">' + renderDftItemSafety(item) + '</div>';
+}
+
+function openDftDetailDialog(event, resultId, index) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const item = selectedDftItemById(resultId);
+    if (!item) {
+        showToast("未找到这条 DFT 数据。", "error");
+        return;
+    }
+    const dialog = document.getElementById("dftDetailDialog");
+    const title = document.getElementById("dftDetailTitle");
+    const locator = document.getElementById("dftDetailLocator");
+    const body = document.getElementById("dftDetailBody");
+    if (!dialog || !title || !locator || !body) return;
+    title.textContent = "DFT #" + (Number(index) + 1) + " 数据详情";
+    locator.textContent = "完整 ID 已隐藏，可在卡片表头使用“复制 ID”。";
+    body.innerHTML = renderDftDetailDialogBody(item);
+    dialog.style.display = "flex";
+}
+
+function dftCompactTableRow(label, value, options) {
+    options = options || {};
+    const content = options.html ? value : esc(value || "-");
+    return '<div class="dft-table-label">' + esc(label) + '</div>' +
+        '<div class="dft-table-cell ' + escAttr(options.className || "") + '">' + content + '</div>';
+}
+
+function renderDftCompactReadableCard(item, index, title, keys) {
+    const resultId = dftResultId(item);
+    const itemType = "dft_result";
+    const itemTypeAttr = ' data-codex-item-type="' + escAttr(itemType) + '"';
+    const targetIdAttr = resultId ? ' data-target-id="' + escAttr(resultId) + '"' : "";
+    const statusChip = renderDftItemStatusChip(item);
+    const aiChip = renderDftAiOpinionChip(item);
+    const copyButton = resultId
+        ? '<button class="btn ghost small" type="button" data-role="copy-dft-locator" onclick="copyDftLocator(event, \'' + escAttr(resultId) + '\', ' + index + ')">复制 ID</button>'
+        : "";
+    const action = codexItemActionHtml(itemType, item);
+    const catalyst = dftCompactCatalystLabel(item);
+    const adsorbate = dftCompactReadableValue(item && item.adsorbate, "吸附物未记录");
+    const propertyType = dftCompactReadableValue(item && (item.property_type || item.energy_type), "性质未记录");
+    const value = dftCompactReadableValue(item && item.value, "-");
+    const unit = dftCompactReadableValue(item && item.unit, "");
+    const reactionStep = dftCompactReadableValue(item && item.reaction_step, "反应步骤未记录");
+    const confidence = dftCompactConfidenceLabel(item && item.confidence);
+    const sourceLabel = dftCompactReadableValue(item && (item.source_figure || item.source_section), "");
+    const summaryChips = [
+        sourceLabel ? dftCompactChip("来源 " + sourceLabel, "meta", sourceLabel) : "",
+        confidence ? dftCompactChip("置信度 " + confidence, "meta") : "",
+        statusChip,
+        aiChip
+    ].filter(Boolean).join("");
+    const tableRows = [
+        dftCompactTableRow("催化剂", catalyst, { className: "dft-table-strong" }),
+        dftCompactTableRow("吸附物", adsorbate),
+        dftCompactTableRow("性质", propertyType),
+        dftCompactTableRow("反应步骤", reactionStep),
+        dftCompactTableRow(
+            "数值",
+            '<span class="dft-table-value" data-role="dft-core-value"><strong>' + esc(value) + '</strong>' +
+                (unit ? '<span>' + esc(unit) + '</span>' : '') + '</span>',
+            { html: true }
+        ),
+        dftCompactTableRow("状态", summaryChips || "-", { html: true, className: "dft-table-status" })
+    ].join("");
+    const focusClass = isPendingNavigationItem(itemType, item) ? " deep-link-focus" : "";
+    return '<div class="section-card readable-card dft-compact-card' + focusClass + '"' + itemTypeAttr + targetIdAttr + '>' +
+        '<div class="dft-compact-head">' +
+            '<button class="dft-compact-expand" type="button" onclick="openDftDetailDialog(event, \'' + escAttr(resultId) + '\', ' + index + ')">' +
+                renderDftRecordLocator(item, index) +
+                '<span class="dft-compact-expand-hint">详情</span>' +
+            '</button>' +
+            '<div class="dft-compact-actions">' + copyButton + action + '</div>' +
+        '</div>' +
+        '<div class="dft-record-table" data-role="dft-record-table">' + tableRows + '</div>' +
+    '</div>';
+}
+
 function renderReadableCards(title, items, options) {
     options = options || {};
     if (!items || !items.length) {
@@ -507,11 +731,17 @@ function renderReadableCards(title, items, options) {
         return aLong - bLong;
     });
     function renderReadableCardItem(item, index) {
-        const heading = title + (items.length > 1 ? " " + (index + 1) : "");
+        if (isDftCandidateCardTitle(title)) {
+            return renderDftCompactReadableCard(item, index, title, keys);
+        }
         const itemType = CODEX_ITEM_TYPE_BY_CARD_TITLE[title];
+        const heading = itemType === "dft_result"
+            ? title + " #" + (index + 1)
+            : title + (items.length > 1 ? " " + (index + 1) : "");
         const action = codexItemActionHtml(itemType, item);
         const dftStatusChip = itemType === "dft_result" ? renderDftItemStatusChip(item) : "";
         const dftAiChip = itemType === "dft_result" ? renderDftAiOpinionChip(item) : "";
+        const dftRecordLocator = itemType === "dft_result" ? renderDftRecordLocator(item, index) : "";
         const mechanismAuditSummary = itemType === "mechanism_claim" ? mechanismClaimAuditSummaryHtml(item || {}) : "";
         const dftEvidenceSource = itemType === "dft_result" ? renderDftEvidenceSource(item) : "";
         const dftConflictSummary = itemType === "dft_result" ? dftConflictSummaryHtml(item) : "";
@@ -522,9 +752,10 @@ function renderReadableCards(title, items, options) {
         const targetIdAttr = item && item.id ? ' data-target-id="' + escAttr(String(item.id)) + '"' : "";
         const openAttr = isPendingNavigationItem(itemType, item) ? " open" : "";
         return '<details class="section-card readable-card"' + itemTypeAttr + targetIdAttr + openAttr + '>' +
-            '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' + dftStatusChip + dftAiChip + tableSourceChip + tableReviewChip + action + '</div></div></summary>' +
-            '<div style="margin-top:10px;">' +
-            renderReadableFields(item || {}, keys) +
+             '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(heading) + '</h3><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' + dftStatusChip + dftAiChip + tableSourceChip + tableReviewChip + action + '</div></div></summary>' +
+             '<div style="margin-top:10px;">' +
+            dftRecordLocator +
+             renderReadableFields(item || {}, keys) +
             dftEvidenceSource +
             dftConflictSummary +
             mechanismAuditSummary +

@@ -274,10 +274,13 @@ function renderDftSampleGroups(items, renderItem, options) {
         }
         byKey[meta.key].entries.push({ item: item, index: index });
     });
+    let displayIndex = 0;
     return groups.map(function(group, groupIndex) {
         const readyCount = group.entries.filter(function(entry) { return isDftItemExportable(entry.item); }).length;
         const body = group.entries.map(function(entry) {
-            return renderItem(entry.item, entry.index);
+            const currentDisplayIndex = displayIndex;
+            displayIndex += 1;
+            return renderItem(entry.item, currentDisplayIndex);
         }).join("");
         const groupTitle = groups.length > 1 ? ("催化剂样本 " + (groupIndex + 1)) : "催化剂样本";
         const catalystSample = group.meta.catalystSampleId ? catalystSamplesById[String(group.meta.catalystSampleId)] : null;

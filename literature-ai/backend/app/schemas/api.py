@@ -447,6 +447,7 @@ class PaperDetailResponse(PaperListItemResponse):
     dft_settings_items: list[DFTSettingResponse] = Field(default_factory=list)
     catalyst_samples_items: list[CatalystSampleResponse] = Field(default_factory=list)
     dft_results_items: list[DFTResultResponse] = Field(default_factory=list)
+    dft_results_page: dict[str, Any] = Field(default_factory=dict)
     electrochemical_performance_items: list[ElectrochemicalPerformanceResponse] = Field(default_factory=list)
     mechanism_claims_items: list[MechanismClaimResponse] = Field(default_factory=list)
     writing_cards_items: list[WritingCardResponse] = Field(default_factory=list)
@@ -560,6 +561,24 @@ class DFTResultCorrectionProposalRequest(BaseModel):
 
 class DFTResultCorrectionProposalResponse(BaseModel):
     correction: dict[str, Any] = Field(default_factory=dict)
+
+
+class DFTResultManualUpdateRequest(BaseModel):
+    confirm_manual_update: bool = False
+    updates: dict[str, Any] = Field(default_factory=dict)
+    reason: str
+    reviewer: str | None = "literature_library_user"
+    evidence_payload: dict[str, Any] | list[Any] | None = None
+
+
+class DFTResultManualUpdateResponse(BaseModel):
+    paper_id: UUID
+    dft_result_id: UUID
+    changed_fields: list[str] = Field(default_factory=list)
+    corrections: list[dict[str, Any]] = Field(default_factory=list)
+    invalidated_review_ids: list[UUID] = Field(default_factory=list)
+    export_safety: dict[str, Any] = Field(default_factory=dict)
+    audit_log_id: UUID | None = None
 
 
 class RAGWriteResponse(BaseModel):

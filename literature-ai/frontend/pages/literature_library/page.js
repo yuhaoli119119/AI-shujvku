@@ -76,8 +76,8 @@ initSplitDrag();
 initActionMenus();
 ensureClassificationToolbarButton();
 TopNav.init({ currentPage: 'literature', mountId: 'topnav-mount' });
-loadLibraries().finally(function() {
-    fetchPapers();
+loadLibraries().finally(async function() {
+    await fetchPapers();
     initSSE();
 });
 switchTab(state.currentTab);

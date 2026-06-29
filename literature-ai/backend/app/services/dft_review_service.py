@@ -559,6 +559,193 @@ class DFTResultReviewService(
         self.session.refresh(correction)
         return self._correction_payload(correction)
 
+    def manually_update_result(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        confirm_manual_update: bool,
+        updates: dict[str, Any],
+        reason: str,
+        reviewer: str | None = None,
+        evidence_payload: dict[str, Any] | list[Any] | None = None,
+    ) -> dict[str, Any]:
+        if not confirm_manual_update:
+            raise ValueError("Explicit manual DFT update confirmation is required.")
+        if not str(reason or "").strip():
+            raise ValueError("A manual DFT update reason is required.")
+        if not isinstance(updates, dict) or not updates:
+            raise ValueError("At least one DFT result field update is required.")
+
+        row = self.session.get(DFTResult, result_id)
+        if row is None or row.paper_id != paper_id:
+            raise LookupError("DFT result not found for this paper.")
+
+        canonical_updates: dict[str, Any] = {}
+        for field_name, value in updates.items():
+            canonical_field = DFT_CORRECTION_FIELD_ALIASES.get(
+                str(field_name or "").strip(),
+                str(field_name or "").strip(),
+            )
+            if canonical_field not in ReviewService.ALLOWED_DFT_RESULT_FIELDS:
+                raise ValueError(f"Unsupported DFT result update field: {field_name}")
+            canonical_updates[canonical_field] = self._normalize_manual_update_value(
+                canonical_field,
+                value,
+            )
+
+        before = {
+            field_name: self._json_value(getattr(row, field_name))
+            for field_name in canonical_updates
+        }
+        changed_updates = {
+            field_name: value
+            for field_name, value in canonical_updates.items()
+            if self._json_value(getattr(row, field_name)) != self._json_value(value)
+        }
+        if not changed_updates:
+            raise ValueError("The submitted DFT values are unchanged.")
+
+        reviewer_name = str(reviewer or "literature_library_user").strip() or "literature_library_user"
+        correction_evidence = self._manual_update_evidence(row, evidence_payload)
+        corrections: list[PaperCorrection] = []
+        review_service = ReviewService(self.session)
+        for field_name, proposed_value in changed_updates.items():
+            correction = PaperCorrection(
+                paper_id=paper_id,
+                source=reviewer_name,
+                field_name="dft_results",
+                target_path=f"dft_results:{result_id}:{field_name}",
+                operation="replace",
+                proposed_value=self._json_value(proposed_value),
+                reason=str(reason).strip(),
+                evidence_payload=correction_evidence,
+                status="pending",
+            )
+            self.session.add(correction)
+            self.session.flush()
+            corrections.append(
+                review_service.approve_correction(
+                    correction.id,
+                    reviewer="human",
+                )
+            )
+
+        invalidated_reviews = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(result_id),
+            )
+        ).all()
+        for review in invalidated_reviews:
+            payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+            review.reviewer_status = "pending"
+            review.reviewed_value = None
+            review.reviewer = reviewer_name
+            review.reviewer_note = "Invalidated because the DFT row was manually edited and requires re-verification."
+            review.review_payload = {
+                **payload,
+                "human_verification": {
+                    "reviewer": reviewer_name,
+                    "reviewer_note": review.reviewer_note,
+                    "decision": "invalidated_by_manual_update",
+                    "writes_final_truth": False,
+                },
+            }
+            self.session.add(review)
+
+        row.candidate_status = "system_candidate"
+        self.session.add(row)
+        self.session.flush()
+        gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="manual_update_dft_result",
+            source=reviewer_name,
+            target_type="dft_results",
+            target_id=str(result_id),
+            payload={
+                "changed_fields": list(changed_updates),
+                "before": before,
+                "after": {
+                    field_name: self._json_value(getattr(row, field_name))
+                    for field_name in changed_updates
+                },
+                "reason": str(reason).strip(),
+                "correction_ids": [str(item.id) for item in corrections],
+                "invalidated_review_ids": [str(item.id) for item in invalidated_reviews],
+                "blocked_reasons": list(gate.reasons),
+            },
+        )
+        self.session.add(audit)
+        self._add_workflow_job(
+            paper_id=paper_id,
+            action="manual_update_dft_result",
+            payload={
+                "dft_result_id": str(result_id),
+                "changed_fields": list(changed_updates),
+                "correction_ids": [str(item.id) for item in corrections],
+                "invalidated_review_ids": [str(item.id) for item in invalidated_reviews],
+                "blocked_reasons": list(gate.reasons),
+            },
+        )
+        self.session.commit()
+        self.session.refresh(audit)
+        return {
+            "paper_id": str(paper_id),
+            "dft_result_id": str(result_id),
+            "changed_fields": list(changed_updates),
+            "corrections": [self._correction_payload(item) for item in corrections],
+            "invalidated_review_ids": [str(item.id) for item in invalidated_reviews],
+            "export_safety": self._gate_payload(row, gate),
+            "audit_log_id": str(audit.id),
+        }
+
+    @staticmethod
+    def _json_value(value: Any) -> Any:
+        return str(value) if isinstance(value, UUID) else value
+
+    @staticmethod
+    def _normalize_manual_update_value(field_name: str, value: Any) -> Any:
+        if field_name in {"value", "confidence"}:
+            if value in ("", None):
+                return None
+            try:
+                normalized = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"DFT field {field_name} requires a numeric value.") from exc
+            if field_name == "confidence" and not 0 <= normalized <= 1:
+                raise ValueError("DFT confidence must be between 0 and 1.")
+            return normalized
+        if field_name == "catalyst_sample_id":
+            if value in ("", None):
+                return None
+            try:
+                return UUID(str(value))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("DFT catalyst_sample_id must be a valid UUID.") from exc
+        if value is None:
+            return None
+        normalized_text = str(value).strip()
+        return normalized_text or None
+
+    @staticmethod
+    def _manual_update_evidence(
+        row: DFTResult,
+        evidence_payload: dict[str, Any] | list[Any] | None,
+    ) -> dict[str, Any] | list[Any] | None:
+        if evidence_payload:
+            return evidence_payload
+        base = dict(row.evidence_payload or {}) if isinstance(row.evidence_payload, dict) else {}
+        if row.source_section and not base.get("section"):
+            base["section"] = row.source_section
+        if row.source_figure and not base.get("figure"):
+            base["figure"] = row.source_figure
+        if row.evidence_text and not base.get("quoted_text"):
+            base["quoted_text"] = row.evidence_text
+        return base or None
+
     def _add_workflow_job(self, *, paper_id: UUID, action: str, payload: dict[str, Any]) -> None:
         paper = self.session.get(Paper, paper_id)
         self.session.add(

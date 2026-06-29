@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
-    <link rel="stylesheet" href="./page.css?v=20260624-pdf-progress1">
+    <link rel="stylesheet" href="./page.css?v=20260629-dft-unified1">
     <script src="../../shared/topnav.js?v=20260606-ui3"></script>
     <script>ThemeManager.init();</script>
 </head>
@@ -337,6 +337,19 @@
         </div>
     </div>
 
+    <div id="dftDetailDialog" class="modal-overlay" style="display:none;">
+        <div class="modal dft-detail-modal">
+            <div class="modal-title-row">
+                <div>
+                    <h3 id="dftDetailTitle" style="margin:0;">DFT 数据详情</h3>
+                    <div id="dftDetailLocator" class="subtle" style="margin-top:5px;"></div>
+                </div>
+                <button class="btn ghost small" type="button" onclick="closeDftDetailDialog()">关闭</button>
+            </div>
+            <div id="dftDetailBody"></div>
+        </div>
+    </div>
+
     <div id="metadataDiagnosticsDialog" class="modal-overlay" style="display:none;align-items:flex-start;padding-top:40px;">
         <div class="modal" style="width:80%;max-width:900px;max-height:80vh;display:flex;flex-direction:column;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -397,16 +410,16 @@
     <script src="./api.js?v=20260628-library-switch1" defer></script>
     <script src="./render-list.js?v=20260624-si-type-chip1" defer></script>
     <script src="./detail-content.js?v=20260628-detail-split1" defer></script>
-    <script src="./dft-sample-groups.js?v=20260628-detail-split1" defer></script>
-    <script src="./review-card-renderers.js?v=20260628-detail-split1" defer></script>
+    <script src="./dft-sample-groups.js?v=20260629-dft-locator1" defer></script>
+    <script src="./review-card-renderers.js?v=20260629-dft-unified1" defer></script>
     <script src="./evidence-viewer.js?v=20260628-detail-split1" defer></script>
     <script src="./review-status.js?v=20260628-detail-split1" defer></script>
     <script src="./render-detail.js?v=20260628-detail-split1" defer></script>
     <script src="./detail-loader.js?v=20260628-detail-split1" defer></script>
     <script src="./dft-workflow.js?v=20260628-detail-split1" defer></script>
-    <script src="./detail-actions.js?v=20260628-detail-split1" defer></script>
+    <script src="./detail-actions.js?v=20260629-dft-unified1" defer></script>
     <script src="./dft-review-logic.js?v=20260627-refactor1" defer></script>
-    <script src="./dft-card-ui.js?v=20260627-refactor1" defer></script>
+    <script src="./dft-card-ui.js?v=20260629-dft-edit1" defer></script>
     <script src="./catalyst-basic-info.js?v=20260627-refactor1" defer></script>
     <script src="./jobs-acquisition.js?v=20260628-jobs-split1" defer></script>
     <script src="./jobs-center.js?v=20260628-jobs-split1" defer></script>

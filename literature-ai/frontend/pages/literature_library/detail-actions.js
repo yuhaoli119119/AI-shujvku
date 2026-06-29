@@ -251,6 +251,185 @@ async function verifyDftResult(itemId) {
     }
 }
 
+var activeDftEditItemId = null;
+
+function dftEditValue(value) {
+    return value === null || value === undefined ? "" : String(value);
+}
+
+function dftEditComparable(value, numeric) {
+    if (value === null || value === undefined || value === "") return null;
+    return numeric ? Number(value) : String(value).trim();
+}
+
+function populateDftEditCatalystSamples(item) {
+    const select = document.getElementById("dftEditCatalystSample");
+    if (!select) return;
+    const samples = state.selectedPaper && Array.isArray(state.selectedPaper.catalyst_samples_items)
+        ? state.selectedPaper.catalyst_samples_items
+        : [];
+    const currentId = dftEditValue(item && item.catalyst_sample_id);
+    select.innerHTML = '<option value="">未关联催化剂样本</option>' + samples.map(function(sample) {
+        const sampleId = String(sample.id || "");
+        const label = sample.name || sample.catalyst || sample.material_identity || sampleId;
+        return '<option value="' + escAttr(sampleId) + '">' + esc(label) + '</option>';
+    }).join("");
+    select.value = currentId;
+    if (currentId && select.value !== currentId) {
+        select.insertAdjacentHTML("beforeend", '<option value="' + escAttr(currentId) + '">' + esc(currentId) + '</option>');
+        select.value = currentId;
+    }
+}
+
+function dftEditDisplayNumber(itemId) {
+    if (!state.selectedPaper || !itemId) return "";
+    const targetId = String(itemId);
+    const items = dftResultsWithSafety(state.selectedPaper);
+    for (var i = 0; i < items.length; i += 1) {
+        if (dftResultId(items[i]) === targetId) return String(i + 1);
+    }
+    return "";
+}
+
+function dftEditField(label, controlHtml, className) {
+    return '<label class="' + escAttr(className || "") + '"><span>' + esc(label) + '</span>' + controlHtml + '</label>';
+}
+
+function renderDftEditDialogBody(item) {
+    const fields = [
+        dftEditField("关联催化剂样本", '<select id="dftEditCatalystSample"></select>'),
+        dftEditField("吸附物", '<input id="dftEditAdsorbate" type="text" value="' + escAttr(dftEditValue(item.adsorbate)) + '">'),
+        dftEditField("性质/能量类型", '<input id="dftEditPropertyType" type="text" value="' + escAttr(dftEditValue(item.property_type || item.energy_type)) + '">'),
+        dftEditField("数值", '<input id="dftEditValue" type="number" step="any" value="' + escAttr(dftEditValue(item.value)) + '">'),
+        dftEditField("单位", '<input id="dftEditUnit" type="text" value="' + escAttr(dftEditValue(item.unit)) + '">'),
+        dftEditField("置信度", '<input id="dftEditConfidence" type="number" min="0" max="1" step="0.01" value="' + escAttr(dftEditValue(item.confidence)) + '">'),
+        dftEditField("反应步骤", '<input id="dftEditReactionStep" type="text" value="' + escAttr(dftEditValue(item.reaction_step)) + '">', "dft-edit-wide"),
+        dftEditField("来源章节", '<input id="dftEditSourceSection" type="text" value="' + escAttr(dftEditValue(item.source_section)) + '">'),
+        dftEditField("来源图/表", '<input id="dftEditSourceFigure" type="text" value="' + escAttr(dftEditValue(item.source_figure)) + '">'),
+        dftEditField("证据原文", '<textarea id="dftEditEvidenceText" rows="4">' + esc(dftEditValue(item.evidence_text)) + '</textarea>', "dft-edit-wide"),
+        dftEditField("修改原因", '<textarea id="dftEditReason" rows="3" placeholder="例如：对照原 PDF 表 2 后确认数值应为 -1.25 eV"></textarea>', "dft-edit-wide")
+    ].join("");
+    return '<div class="dft-detail-edit-grid dft-edit-grid">' + fields + '</div>' +
+        '<div class="dft-edit-note">保存会写入人工修正审计，并将这条数据退回待核验；需要再次“接受入库”后才能恢复可导出状态。</div>' +
+        '<div class="modal-actions">' +
+            '<button class="btn ghost" type="button" onclick="closeDftEditDialog()">取消编辑</button>' +
+            '<button id="dftEditSubmit" class="btn primary" type="button" onclick="submitDftEdit()">保存修改</button>' +
+        '</div>';
+}
+
+function openDftEditDialog(itemId) {
+    const item = selectedDftItemById(itemId);
+    if (!item) {
+        showToast("未找到要修改的 DFT 数据。", "error");
+        return;
+    }
+    activeDftEditItemId = String(itemId);
+    const dialog = document.getElementById("dftDetailDialog");
+    const title = document.getElementById("dftDetailTitle");
+    const locator = document.getElementById("dftDetailLocator");
+    const body = document.getElementById("dftDetailBody");
+    if (!dialog || !title || !locator || !body) return;
+    const displayNumber = dftEditDisplayNumber(activeDftEditItemId);
+    title.textContent = displayNumber ? ("修改 DFT #" + displayNumber + " 数据") : "修改 DFT 数据";
+    locator.textContent = "完整 ID 已隐藏，可在卡片表头使用“复制 ID”。";
+    body.innerHTML = renderDftEditDialogBody(item);
+    populateDftEditCatalystSamples(item);
+    dialog.style.display = "flex";
+}
+
+function closeDftEditDialog() {
+    const item = selectedDftItemById(activeDftEditItemId);
+    const title = document.getElementById("dftDetailTitle");
+    const locator = document.getElementById("dftDetailLocator");
+    const body = document.getElementById("dftDetailBody");
+    if (item && title && locator && body && typeof renderDftDetailDialogBody === "function") {
+        const displayNumber = dftEditDisplayNumber(activeDftEditItemId);
+        title.textContent = displayNumber ? ("DFT #" + displayNumber + " 数据详情") : "DFT 数据详情";
+        locator.textContent = "完整 ID 已隐藏，可在卡片表头使用“复制 ID”。";
+        body.innerHTML = renderDftDetailDialogBody(item);
+        activeDftEditItemId = null;
+        return;
+    }
+    if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
+    activeDftEditItemId = null;
+}
+
+async function submitDftEdit() {
+    const item = selectedDftItemById(activeDftEditItemId);
+    if (!item || !state.selectedPaperId) {
+        showToast("当前 DFT 数据已失效，请刷新后重试。", "error");
+        return;
+    }
+    const reason = document.getElementById("dftEditReason").value.trim();
+    if (!reason) {
+        showToast("请填写修改原因。", "error");
+        return;
+    }
+    const submitted = {
+        catalyst_sample_id: dftEditComparable(document.getElementById("dftEditCatalystSample").value, false),
+        adsorbate: dftEditComparable(document.getElementById("dftEditAdsorbate").value, false),
+        property_type: dftEditComparable(document.getElementById("dftEditPropertyType").value, false),
+        value: dftEditComparable(document.getElementById("dftEditValue").value, true),
+        unit: dftEditComparable(document.getElementById("dftEditUnit").value, false),
+        confidence: dftEditComparable(document.getElementById("dftEditConfidence").value, true),
+        reaction_step: dftEditComparable(document.getElementById("dftEditReactionStep").value, false),
+        source_section: dftEditComparable(document.getElementById("dftEditSourceSection").value, false),
+        source_figure: dftEditComparable(document.getElementById("dftEditSourceFigure").value, false),
+        evidence_text: dftEditComparable(document.getElementById("dftEditEvidenceText").value, false)
+    };
+    const current = {
+        catalyst_sample_id: dftEditComparable(item.catalyst_sample_id, false),
+        adsorbate: dftEditComparable(item.adsorbate, false),
+        property_type: dftEditComparable(item.property_type || item.energy_type, false),
+        value: dftEditComparable(item.value, true),
+        unit: dftEditComparable(item.unit, false),
+        confidence: dftEditComparable(item.confidence, true),
+        reaction_step: dftEditComparable(item.reaction_step, false),
+        source_section: dftEditComparable(item.source_section, false),
+        source_figure: dftEditComparable(item.source_figure, false),
+        evidence_text: dftEditComparable(item.evidence_text, false)
+    };
+    const updates = {};
+    Object.keys(submitted).forEach(function(field) {
+        if (submitted[field] !== current[field]) updates[field] = submitted[field];
+    });
+    if (!Object.keys(updates).length) {
+        showToast("没有检测到字段变化。", "info");
+        return;
+    }
+    const submitButton = document.getElementById("dftEditSubmit");
+    if (submitButton) submitButton.disabled = true;
+    try {
+        await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
+            "/dft-results/" + encodeURIComponent(activeDftEditItemId),
+            {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    confirm_manual_update: true,
+                    updates: updates,
+                    reason: reason,
+                    reviewer: "literature_library_user",
+                    evidence_payload: item.evidence_payload || {
+                        section: item.source_section || null,
+                        figure: item.source_figure || null,
+                        quoted_text: item.evidence_text || null
+                    }
+                })
+            }
+        );
+        if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
+        activeDftEditItemId = null;
+        showToast("DFT 数据已修改，并已退回待核验。", "success");
+        await refreshSelectedPaperDetail({ reason: "manual_update_dft_result", mode: "full" });
+    } catch (error) {
+        showToast("DFT 数据修改失败：" + error.message, "error");
+    } finally {
+        if (submitButton) submitButton.disabled = false;
+    }
+}
+
 async function acceptDftResult(itemId) {
     if (!state.selectedPaperId || !itemId) {
         showToast("当前 DFT 记录无法接受入库。", "error");
@@ -307,6 +486,7 @@ async function acceptDftResult(itemId) {
                 : "已应用接受结果，但这条 DFT 还有阻断项。",
             safety && safety.is_exportable ? "success" : "info"
         );
+        if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
         await refreshSelectedPaperDetail({ reason: "accept_dft_result", mode: "full" });
     } catch (error) {
         showToast("接受入库失败：" + error.message, "error");
@@ -349,6 +529,7 @@ async function rejectDftResult(itemId) {
         });
         rerenderSelectedDetail(state.selectedPaperId);
         showToast("这条 DFT 已拒绝。", "success");
+        if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
         await refreshSelectedPaperDetail({ reason: "reject_dft_result", mode: "full" });
     } catch (error) {
         showToast("拒绝失败：" + error.message, "error");

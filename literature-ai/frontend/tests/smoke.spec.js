@@ -2993,7 +2993,19 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
   test('business flow: literature library exposes DFT safety and Codex item actions', async ({ page }) => {
       let verifyPayload = null;
+      let manualUpdatePayload = null;
       let catalystBasicInfoPayload = null;
+      await page.addInitScript(() => {
+        window.__copiedDftLocator = '';
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: async text => {
+              window.__copiedDftLocator = String(text || '');
+            },
+          },
+        });
+      });
       await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1\/verify$/, async route => {
         verifyPayload = JSON.parse(route.request().postData() || '{}');
         return jsonResponse(route, {
@@ -3012,6 +3024,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           locator_status: 'exact_page',
         },
         audit_log_id: 'audit-1',
+      });
+    });
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1$/, async route => {
+      if (route.request().method() !== 'PATCH') return route.fallback();
+      manualUpdatePayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        paper_id: 'paper-1',
+        dft_result_id: 'dft-1',
+        changed_fields: ['value'],
+        corrections: [],
+        invalidated_review_ids: [],
+        export_safety: { is_exportable: false, blocked_reasons: ['unsafe_review'] },
       });
     });
     await page.route(/\/api\/papers\/paper-1\/catalyst-samples\/catalyst-1\/basic-info$/, async route => {
@@ -3118,15 +3142,65 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
     await expect(page.locator('#dftContent [data-role="dft-sample-group"]').first()).toBeVisible();
     await page.locator('#dftContent [data-role="dft-sample-group"]').first().locator('summary').first().click();
-    const dftCandidateCard = page.locator('#dftContent details.readable-card').filter({ hasText: 'adsorption_energy' }).first();
-    await dftCandidateCard.locator('summary').click();
-    await expect(dftCandidateCard.locator('button:has-text("接受入库")')).toBeVisible();
-
+    const dftCandidateCard = page.locator('#dftContent .dft-compact-card').filter({ hasText: 'adsorption_energy' }).first();
+    await expect(dftCandidateCard).toHaveClass(/dft-compact-card/);
+    await expect(dftCandidateCard.locator('[data-role="dft-record-table"]')).toBeVisible();
+    await expect.poll(() => dftCandidateCard.locator('[data-role="dft-record-table"]').evaluate(node => node.closest('summary') === null)).toBe(true);
+    await expect(dftCandidateCard.locator('[data-role="dft-record-number"]')).toHaveText('DFT #1');
+    await expect(dftCandidateCard.locator('[data-role="dft-record-locator"]')).toHaveText('DFT #1');
+    await expect(dftCandidateCard.locator('[data-role="dft-core-value"]')).toContainText('-1.23');
+    await expect(dftCandidateCard.locator('[data-role="dft-core-value"]')).toContainText('eV');
+    await dftCandidateCard.locator('[data-role="copy-dft-locator"]').click();
+    await expect.poll(() => page.evaluate(() => window.__copiedDftLocator)).toBe('DFT #1; dft_result_id=dft-1');
+    await dftCandidateCard.locator('[data-role="dft-record-table"]').click();
+    await expect(page.locator('#dftDetailDialog')).toBeHidden();
+    await dftCandidateCard.locator('.dft-compact-expand').click();
+    await expect(page.locator('#dftDetailDialog')).toBeVisible();
+    await expect(page.locator('#dftDetailBody')).toContainText('-1.23');
+    await expect(page.locator('#dftDetailBody')).toContainText('The adsorption energy is -1.23 eV.');
+    await expect(page.locator('#dftDetailBody button:has-text("接受入库")')).toBeVisible();
+    await expect(page.locator('#dftDetailBody button:has-text("修改数据")')).toBeVisible();
     page.once('dialog', dialog => dialog.accept());
-    await dftCandidateCard.locator('button:has-text("接受入库")').click();
+    await page.locator('#dftDetailBody button:has-text("接受入库")').click();
     await expect.poll(() => verifyPayload).not.toBeNull();
     expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
     expect(verifyPayload.reviewer).toBe('literature_library_dft');
+    await page.waitForFunction(() => {
+      const selectedPaper = window.state && window.state.selectedPaper;
+      return selectedPaper && selectedPaper._detailMode === 'full' && !(window.state && window.state.fullDetailLoadingFor);
+    });
+    await page.locator('#dftContent [data-role="dft-sample-group"]').first().evaluate(group => group.setAttribute('open', ''));
+    await expect(page.locator('#dftEditDialog')).toHaveCount(0);
+    await page.evaluate(() => openDftEditDialog('dft-1'));
+    await expect(page.locator('#dftDetailDialog')).toBeVisible();
+    await expect(page.locator('#dftDetailTitle')).toContainText('修改 DFT #1 数据');
+    await expect(page.locator('#dftDetailBody #dftEditValue')).toBeVisible();
+    await page.locator('#dftEditValue').fill('-1.31');
+    await page.locator('#dftEditReason').fill('对照原 PDF 表格修正数值。');
+    await page.locator('#dftEditSubmit').click();
+    await expect.poll(() => manualUpdatePayload).not.toBeNull();
+    expect(manualUpdatePayload).toMatchObject({
+      confirm_manual_update: true,
+      reviewer: 'literature_library_user',
+      reason: '对照原 PDF 表格修正数值。',
+      updates: { value: -1.31 },
+    });
+    expect(Object.keys(manualUpdatePayload.updates)).toEqual(['value']);
+    await expect(page.locator('#dftDetailDialog')).toBeHidden();
+    await page.waitForFunction(() => {
+      const selectedPaper = window.state && window.state.selectedPaper;
+      return selectedPaper && selectedPaper._detailMode === 'full' && !(window.state && window.state.fullDetailLoadingFor);
+    });
+    const groupedDftNumbers = await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.innerHTML = renderReadableCards('候选 DFT 数据', [
+        { id: 'dft-a', catalyst_sample_id: 'sample-a', property_type: 'adsorption_energy', value: -1, unit: 'eV' },
+        { id: 'dft-b', catalyst_sample_id: 'sample-b', property_type: 'reaction_barrier', value: 0.5, unit: 'eV' },
+        { id: 'dft-c', catalyst_sample_id: 'sample-a', property_type: 'binding_energy', value: -0.7, unit: 'eV' },
+      ]);
+      return Array.from(host.querySelectorAll('[data-role="dft-record-number"]')).map(node => node.textContent.trim());
+    });
+    expect(groupedDftNumbers).toEqual(['DFT #1', 'DFT #2', 'DFT #3']);
 
       await page.click('button[data-tab="figures"]');
       await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
@@ -3396,7 +3470,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('#dftContent')).toContainText('page 和 quoted_text');
       await expect(page.locator('#dftContent')).not.toContainText('尚未审核这些记录的 AI');
 
-      const cards = page.locator('#dftContent details.readable-card');
+      const cards = page.locator('#dftContent .dft-compact-card');
     await expect(cards.filter({ hasText: 'd_band_center' }).first()).toContainText('AI 确认字段');
     await expect(cards.filter({ hasText: 'charge_transfer' }).first()).toContainText('已采纳 AI 修正');
     await expect(cards.filter({ hasText: 'free_energy' }).first()).toContainText('第二意见缺证据定位');
@@ -3446,8 +3520,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       };
     });
     expect(submissionVoteBehavior.consensusCount).toBe(1);
-    expect(submissionVoteBehavior.rejectedActions).toBe('');
-    expect(submissionVoteBehavior.mlReadyActions).toBe('');
+    expect(submissionVoteBehavior.rejectedActions).toContain('修改数据');
+    expect(submissionVoteBehavior.mlReadyActions).toContain('修改数据');
+    expect(submissionVoteBehavior.rejectedActions).not.toContain('接受入库');
+    expect(submissionVoteBehavior.mlReadyActions).not.toContain('接受入库');
     expect(submissionVoteBehavior.rejectedStatus).toBe('已拒绝');
     const exportableFallbackDisplay = await page.evaluate(() => dftAiOpinionMeta({
       is_exportable: true,
@@ -3585,10 +3661,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft&library_name=${encodeURIComponent('Default Library')}`);
       await page.waitForTimeout(700);
 
-      const card = page.locator('#dftContent details.readable-card').filter({ hasText: 'binding_energy' }).first();
+      const card = page.locator('#dftContent .dft-compact-card').filter({ hasText: 'binding_energy' }).first();
       await expect(card).toContainText('AI 已提修正');
       await expect(card).not.toContainText('已采纳 AI 修正');
-      await expect(card).toContainText('Conflicts 1');
+      await page.locator('#dftContent [data-role="dft-sample-group"]').evaluateAll(groups => {
+        groups.forEach(group => group.setAttribute('open', ''));
+      });
+      await card.locator('.dft-compact-expand').click();
+      await expect(page.locator('#dftDetailBody')).toContainText('Conflicts 1');
     });
 
     test('business flow: literature library deep-links to the requested review object', async ({ page }) => {
@@ -3598,9 +3678,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
       await expect(page.locator('#workspaceBody')).toContainText('Test Paper for Smoke Validation');
 
-      const targetCard = page.locator('#dftContent details.readable-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
+      const targetCard = page.locator('#dftContent .dft-compact-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
       await expect(targetCard).toBeVisible();
-      await expect(targetCard).toHaveAttribute('open', '');
+      await expect(targetCard).toHaveClass(/deep-link-focus/);
       await expect(targetCard).toContainText('adsorption_energy');
       await expect(targetCard).toContainText('-1.23');
     });
@@ -3609,8 +3689,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}&paper_id=paper-1&tab=dft&target_type=dft_results&target_id=dft-1&field_name=value&pdf_page=5&pdf_locator_status=exact_page&pdf_evidence_text=${encodeURIComponent('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.')}`);
       await page.waitForTimeout(900);
 
-      const targetCard = page.locator('#dftContent details.readable-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
-      await expect(targetCard).toHaveAttribute('open', '');
+      const targetCard = page.locator('#dftContent .dft-compact-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
+      await expect(targetCard).toHaveClass(/deep-link-focus/);
 
       const overlay = page.locator('#pdfViewerOverlay');
       await expect(overlay).toBeVisible();
@@ -4216,12 +4296,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       ];
 
       for (const [targetId, expectedText] of expectations) {
-        const detailCard = page.locator(`#dftContent details.readable-card[data-target-id="${targetId}"]`);
+        const detailCard = page.locator(`#dftContent .dft-compact-card[data-target-id="${targetId}"]`);
         await expect(detailCard).toHaveCount(1);
-        await detailCard.locator('summary').click();
-        await expect(detailCard).toContainText('Conflicts 1');
-        await expect(detailCard).toContainText(expectedText);
-        await expect(detailCard).not.toContainText(/Conflict fields:\s*value\b/);
+        await detailCard.locator('.dft-compact-expand').click();
+        await expect(page.locator('#dftDetailBody')).toContainText('Conflicts 1');
+        await expect(page.locator('#dftDetailBody')).toContainText(expectedText);
+        await expect(page.locator('#dftDetailBody')).not.toContainText(/Conflict fields:\s*value\b/);
+        await page.evaluate(() => closeDftDetailDialog());
       }
     });
 

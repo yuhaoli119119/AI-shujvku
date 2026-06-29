@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 import re
 import shutil
 from typing import Any
@@ -215,6 +216,20 @@ class PaperWorkbenchService(
             paper_stmt = paper_stmt.where(build_library_name_clause(Paper.library_name, normalized_library))
         requested_paper_ids = [paper_id for paper_id in (paper_ids or []) if paper_id is not None]
         if requested_paper_ids:
+            requested_set = set(requested_paper_ids)
+            related_pairs = self.session.execute(
+                select(PaperRelationship.source_paper_id, PaperRelationship.target_paper_id).where(
+                    PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
+                    or_(
+                        PaperRelationship.source_paper_id.in_(requested_set),
+                        PaperRelationship.target_paper_id.in_(requested_set),
+                    ),
+                )
+            ).all()
+            for source_id, target_id in related_pairs:
+                requested_set.update({source_id, target_id})
+            requested_paper_ids = list(requested_set)
+        if requested_paper_ids:
             paper_stmt = paper_stmt.where(Paper.id.in_(requested_paper_ids))
         if summary_only and sort_by == "recent" and limit > 0 and not requested_paper_ids:
             paper_stmt = paper_stmt.order_by(Paper.created_at.desc()).limit(limit)
@@ -281,12 +296,11 @@ class PaperWorkbenchService(
             for paper_id in paper_ids
         }
         allowed_conflict_paper_ids = {str(paper_id) for paper_id in paper_ids}
+        conflict_payload: dict[str, Any] = {"rows": []}
         if paper_ids:
-            conflict_payload = conflict_service.list_conflicts(limit=1000)
+            conflict_payload = conflict_service.list_conflicts(paper_ids=paper_ids, limit=1000)
             for conflict_row in conflict_payload.get("rows") or []:
                 pid = str(conflict_row.get("paper_id") or "")
-                if pid not in allowed_conflict_paper_ids:
-                    continue
                 module = conflict_service._module_for_target_type(conflict_row.get("target_type"))
                 conflict_total_counts_by_module.setdefault(pid, {"dft": 0, "visual": 0, "content": 0, "other": 0})[module] += 1
         conflict_total_counts = {
@@ -299,10 +313,10 @@ class PaperWorkbenchService(
             for paper_id in paper_ids
         }
         if paper_ids:
-            adjudicated_payload = adjudication_service.list_with_adjudication(limit=1000)
-            for conflict_row in adjudicated_payload.get("rows") or []:
+            adjudicated_rows = adjudication_service.enrich_rows(conflict_payload.get("rows") or [])
+            for conflict_row in adjudicated_rows:
                 pid = str(conflict_row.get("paper_id") or "")
-                if pid not in allowed_conflict_paper_ids or not adjudication_service.is_actionable_conflict(conflict_row):
+                if not adjudication_service.is_actionable_conflict(conflict_row):
                     continue
                 module = adjudication_service._module_for_target_type(conflict_row.get("target_type"))
                 conflict_counts_by_module.setdefault(pid, {"dft": 0, "visual": 0, "content": 0, "other": 0})[module] += 1
@@ -642,7 +656,23 @@ class PaperWorkbenchService(
                 "issue_counts": {},
                 "top_issues": [],
             }
-            pdf_status = build_paper_pdf_status(paper, settings=self.settings)
+            if summary_only:
+                raw_pdf_path = str(paper.pdf_path or "").strip()
+                inferred_pdf_exists = bool(raw_pdf_path) and str(paper.oa_status or "").strip().lower() not in {
+                    "metadata_only",
+                    "needs_upload",
+                }
+                pdf_status = {
+                    "pdf_exists": inferred_pdf_exists,
+                    "pdf_file_size": None,
+                    "pdf_path_kind": "storage_relative" if raw_pdf_path and not Path(raw_pdf_path).is_absolute() else (
+                        "absolute" if raw_pdf_path else "missing"
+                    ),
+                    "blocking_errors": [] if inferred_pdf_exists else ["missing_pdf"],
+                    "warnings": [],
+                }
+            else:
+                pdf_status = build_paper_pdf_status(paper, settings=self.settings)
             manual_review_progress = self._manual_review_progress(paper.comprehensive_analysis)
             comprehensive_analysis = paper.comprehensive_analysis if isinstance(paper.comprehensive_analysis, dict) else {}
             parsed_analysis = {key: value for key, value in comprehensive_analysis.items() if key != "manual_review_progress"}

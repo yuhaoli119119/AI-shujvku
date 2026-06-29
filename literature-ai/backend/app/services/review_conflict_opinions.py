@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.orm import load_only
 
 from app.db.models import ExternalAnalysisCandidate, ExtractionFieldReview, PaperCorrection
 from app.services.review_target_resolver import canonical_target_type
@@ -21,19 +22,21 @@ class ReviewConflictOpinionMixin:
         self,
         *,
         paper_id: UUID | None,
+        paper_ids: set[UUID] | None,
         target_type: str | None,
         target_id: str | None,
         field_name: str | None,
     ) -> list[dict[str, Any]]:
         opinions: list[dict[str, Any]] = []
-        opinions.extend(self._review_opinions(paper_id, target_type, target_id, field_name))
-        opinions.extend(self._external_audit_opinions(paper_id, target_type, target_id, field_name))
-        opinions.extend(self._correction_opinions(paper_id, target_type, target_id, field_name))
+        opinions.extend(self._review_opinions(paper_id, paper_ids, target_type, target_id, field_name))
+        opinions.extend(self._external_audit_opinions(paper_id, paper_ids, target_type, target_id, field_name))
+        opinions.extend(self._correction_opinions(paper_id, paper_ids, target_type, target_id, field_name))
         return opinions
 
     def _review_opinions(
         self,
         paper_id: UUID | None,
+        paper_ids: set[UUID] | None,
         target_type: str | None,
         target_id: str | None,
         field_name: str | None,
@@ -41,12 +44,33 @@ class ReviewConflictOpinionMixin:
         stmt = select(ExtractionFieldReview)
         if paper_id:
             stmt = stmt.where(ExtractionFieldReview.paper_id == paper_id)
+        elif paper_ids:
+            stmt = stmt.where(ExtractionFieldReview.paper_id.in_(paper_ids))
         if target_type:
             stmt = stmt.where(ExtractionFieldReview.target_type == self._safe_canonical_target_type(target_type))
+        else:
+            stmt = stmt.where(ExtractionFieldReview.target_type.in_(self.DFT_TARGET_TYPES))
         if target_id:
             stmt = stmt.where(ExtractionFieldReview.target_id == str(target_id))
         if field_name:
             stmt = stmt.where(ExtractionFieldReview.field_name == field_name)
+        stmt = stmt.options(
+            load_only(
+                ExtractionFieldReview.id,
+                ExtractionFieldReview.paper_id,
+                ExtractionFieldReview.target_type,
+                ExtractionFieldReview.target_id,
+                ExtractionFieldReview.field_name,
+                ExtractionFieldReview.reviewed_value,
+                ExtractionFieldReview.unit,
+                ExtractionFieldReview.evidence_text,
+                ExtractionFieldReview.reviewer_status,
+                ExtractionFieldReview.reviewer,
+                ExtractionFieldReview.reviewer_note,
+                ExtractionFieldReview.review_payload,
+                ExtractionFieldReview.updated_at,
+            )
+        )
         rows = self.session.scalars(stmt).all()
         opinions: list[dict[str, Any]] = []
         for row in rows:
@@ -112,6 +136,7 @@ class ReviewConflictOpinionMixin:
     def _external_audit_opinions(
         self,
         paper_id: UUID | None,
+        paper_ids: set[UUID] | None,
         target_type: str | None,
         target_id: str | None,
         field_name: str | None,
@@ -121,6 +146,20 @@ class ReviewConflictOpinionMixin:
         )
         if paper_id:
             stmt = stmt.where(ExternalAnalysisCandidate.paper_id == paper_id)
+        elif paper_ids:
+            stmt = stmt.where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
+        stmt = stmt.options(
+            load_only(
+                ExternalAnalysisCandidate.id,
+                ExternalAnalysisCandidate.paper_id,
+                ExternalAnalysisCandidate.candidate_type,
+                ExternalAnalysisCandidate.normalized_payload,
+                ExternalAnalysisCandidate.confidence,
+                ExternalAnalysisCandidate.mapping_reason,
+                ExternalAnalysisCandidate.status,
+                ExternalAnalysisCandidate.created_at,
+            )
+        )
         rows = self.session.scalars(stmt).all()
         opinions: list[dict[str, Any]] = []
         for row in rows:
@@ -179,6 +218,7 @@ class ReviewConflictOpinionMixin:
     def _correction_opinions(
         self,
         paper_id: UUID | None,
+        paper_ids: set[UUID] | None,
         target_type: str | None,
         target_id: str | None,
         field_name: str | None,
@@ -186,6 +226,31 @@ class ReviewConflictOpinionMixin:
         stmt = select(PaperCorrection).where(PaperCorrection.status.in_(CORRECTION_STATUSES))
         if paper_id:
             stmt = stmt.where(PaperCorrection.paper_id == paper_id)
+        elif paper_ids:
+            stmt = stmt.where(PaperCorrection.paper_id.in_(paper_ids))
+        dft_prefixes = tuple(f"{target_type}:%" for target_type in self.DFT_TARGET_TYPES)
+        stmt = stmt.where(
+            or_(
+                PaperCorrection.field_name.in_(self.DFT_TARGET_TYPES),
+                *[PaperCorrection.target_path.like(prefix) for prefix in dft_prefixes],
+            )
+        )
+        stmt = stmt.options(
+            load_only(
+                PaperCorrection.id,
+                PaperCorrection.paper_id,
+                PaperCorrection.source,
+                PaperCorrection.field_name,
+                PaperCorrection.target_path,
+                PaperCorrection.operation,
+                PaperCorrection.proposed_value,
+                PaperCorrection.reason,
+                PaperCorrection.evidence_payload,
+                PaperCorrection.status,
+                PaperCorrection.reviewed_by,
+                PaperCorrection.created_at,
+            )
+        )
         rows = self._current_correction_rows(self.session.scalars(stmt).all())
         opinions: list[dict[str, Any]] = []
         for row in rows:

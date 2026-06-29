@@ -97,7 +97,7 @@ def test_detail_keeps_supplementary_tables_but_not_supplementary_figures_by_defa
         session.add(PaperFigure(paper_id=si.id, caption="Figure S1. SI", image_path="figures/si.png", page=5))
         session.commit()
 
-        detail = PaperQueryService(session).get_paper_detail(main.id, compact=True)
+        detail = PaperQueryService(session).get_paper_detail(main.id, compact=False)
 
         assert detail is not None
         assert [table.caption for table in detail.tables] == ["Table 1. Main", "Table S1. SI"]

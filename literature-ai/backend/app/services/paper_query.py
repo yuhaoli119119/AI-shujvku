@@ -4,7 +4,7 @@ import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Integer, String, and_, cast, func, or_, select
+from sqlalchemy import Integer, String, and_, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, load_only
 
 from app.db.models import (
@@ -35,17 +35,19 @@ from app.schemas.api import (
 )
 from app.services.paper_codes import ensure_paper_codes
 from app.services.paper_workbench_service import PaperWorkbenchService
-from app.config import get_settings
 from app.utils.artifact_status import build_paper_artifact_status
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import is_export_eligible_extraction
+from app.utils.review_safety import bulk_export_gate_results
+from app.utils.workbench_status import workflow_needs_human_confirmation
 from app.rag.quality import build_rag_quality_summary
 from app.services.paper_query_reviews import PaperQueryReviewMixin
 from app.services.paper_query_serializers import PaperQuerySerializationMixin
 from app.services.paper_query_storage import cached_pdf_size_for_storage as _cached_pdf_size_for_storage
 
 __all__ = ["PaperQueryService", "_cached_pdf_size_for_storage"]
+
+DFT_DETAIL_PAGE_SIZE = 28
 
 
 def _escape_like(value: str) -> str:
@@ -215,19 +217,27 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             self.session.commit()
 
         paper_ids = [p.id for p in papers]
-        normalized_library = normalize_library_name(filters.library_name) if filters.library_name else None
-        workbench_rows = PaperWorkbenchService(self.session, get_settings()).review_center(
-            limit=len(paper_ids),
-            sort_by="recent",
-            library_name=normalized_library,
-            summary_only=True,
-            paper_ids=paper_ids,
-        ).get("rows", [])
-        paper_id_set = {str(paper_id) for paper_id in paper_ids}
+        active_dft_counts: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        for paper_id, candidate_status, count in self.session.execute(
+            select(DFTResult.paper_id, DFTResult.candidate_status, func.count(DFTResult.id))
+            .where(DFTResult.paper_id.in_(paper_ids))
+            .group_by(DFTResult.paper_id, DFTResult.candidate_status)
+        ).all():
+            if PaperWorkbenchService._is_active_dft_candidate(candidate_status):
+                active_dft_counts[paper_id] += int(count or 0)
         workbench_status_map = {
-            str(row.get("paper_id")): row
-            for row in workbench_rows
-            if str(row.get("paper_id") or "") in paper_id_set
+            str(paper.id): {
+                "manual_review_progress": PaperWorkbenchService._manual_review_progress(
+                    paper.comprehensive_analysis
+                ),
+                "needs_human_confirmation": workflow_needs_human_confirmation(
+                    paper.workflow_status,
+                    paper.pdf_quality_report if isinstance(paper.pdf_quality_report, dict) else {},
+                ),
+                "has_active_dft_candidates": active_dft_counts.get(paper.id, 0) > 0,
+                "active_dft_candidate_count": active_dft_counts.get(paper.id, 0),
+            }
+            for paper in papers
         }
         from collections import defaultdict
 
@@ -390,6 +400,8 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             return None
         if ensure_paper_codes(self.session, [paper]):
             self.session.commit()
+        if compact:
+            return self._get_light_paper_detail(paper)
 
         all_sections = self.session.scalars(
             select(PaperSection)
@@ -424,7 +436,15 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         figures = sorted(figures, key=self._figure_display_sort_key)
         dft_settings = self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()
         catalyst_samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
-        dft_results = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        dft_result_count = int(
+            self.session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper_id)) or 0
+        )
+        dft_results = self.session.scalars(
+            select(DFTResult)
+            .where(DFTResult.paper_id == paper_id)
+            .order_by(DFTResult.id.asc())
+            .limit(DFT_DETAIL_PAGE_SIZE)
+        ).all()
         electrochemical_items = self.session.scalars(
             select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper_id)
         ).all()
@@ -570,6 +590,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                 target_type="dft_results",
                 target_ids=dft_result_ids,
             )
+        dft_gate_by_id = bulk_export_gate_results(self.session, dft_results, target_type="dft_results")
         catalyst_by_id = {str(item.id): item for item in catalyst_samples}
 
         base_counts = {
@@ -578,7 +599,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             "figures": len(figures),
             "dft_settings": len(dft_settings),
             "catalyst_samples": len(catalyst_samples),
-            "dft_results": len(dft_results),
+            "dft_results": dft_result_count,
             "electrochemical_performance": len(electrochemical_items),
             "mechanism_claims": len(mechanism_claims),
             "writing_cards": len(writing_cards),
@@ -644,10 +665,17 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                     catalyst_by_id=catalyst_by_id,
                     object_review_audits=dft_result_audits.get(str(item.id), []),
                     field_conflicts=dft_result_conflicts.get(str(item.id), []),
-                    review_gate=is_export_eligible_extraction(self.session, item, target_type="dft_results"),
+                    review_gate=dft_gate_by_id.get(str(item.id)),
                 )
                 for item in dft_results
             ],
+            dft_results_page={
+                "offset": 0,
+                "limit": DFT_DETAIL_PAGE_SIZE,
+                "returned": len(dft_results),
+                "total": dft_result_count,
+                "has_more": len(dft_results) < dft_result_count,
+            },
             electrochemical_performance_items=[
                 ElectrochemicalPerformanceResponse.model_validate(item) for item in electrochemical_items
             ],
@@ -678,18 +706,172 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             references=[ReferenceEntryResponse.model_validate(item) for item in references],
             figure_data_points_items=[FigureDataPointResponse.model_validate(item) for item in figure_data_points],
             artifact_status=build_paper_artifact_status(paper),
-            rag_quality=(
-                {}
-                if compact
-                else build_rag_quality_summary(
-                    self.session,
-                    figures=figures,
-                    dft_results=dft_results,
-                    writing_cards=writing_cards,
-                )
+            rag_quality=build_rag_quality_summary(
+                self.session,
+                figures=figures,
+                dft_results=dft_results,
+                writing_cards=writing_cards,
+                dft_gate_by_id=dft_gate_by_id,
             ),
             **review_status,
         )
+
+    def _get_light_paper_detail(self, paper: Paper) -> PaperDetailResponse:
+        paper_id = paper.id
+        count_models = (
+            ("sections", PaperSection),
+            ("tables", PaperTable),
+            ("figures", PaperFigure),
+            ("dft_settings", DFTSetting),
+            ("catalyst_samples", CatalystSample),
+            ("dft_results", DFTResult),
+            ("electrochemical_performance", ElectrochemicalPerformance),
+            ("mechanism_claims", MechanismClaim),
+            ("writing_cards", WritingCard),
+            ("figure_data_points", FigureDataPoint),
+        )
+        count_query = union_all(
+            *[
+                select(literal(name).label("name"), func.count(model.id).label("count"))
+                .select_from(model)
+                .where(model.paper_id == paper_id)
+                for name, model in count_models
+            ]
+        )
+        counts = {name: int(count or 0) for name, count in self.session.execute(count_query).all()}
+        counts["comprehensive_analysis"] = 1 if paper.comprehensive_analysis else 0
+        relationship_summary = {
+            relationship_type: int(count or 0)
+            for relationship_type, count in self.session.execute(
+                select(PaperRelationship.relationship_type, func.count(PaperRelationship.id))
+                .where(PaperRelationship.source_paper_id == paper_id)
+                .group_by(PaperRelationship.relationship_type)
+            ).all()
+        }
+        dft_status_counts = {
+            str(status or "system_candidate"): int(count or 0)
+            for status, count in self.session.execute(
+                select(DFTResult.candidate_status, func.count(DFTResult.id))
+                .where(DFTResult.paper_id == paper_id)
+                .group_by(DFTResult.candidate_status)
+            ).all()
+        }
+        active_dft_count = sum(
+            count
+            for status, count in dft_status_counts.items()
+            if PaperWorkbenchService._is_active_dft_candidate(status)
+        )
+        normalized_dft_statuses = {status.strip().lower() for status in dft_status_counts}
+        if not dft_status_counts:
+            dft_review_status = "missing"
+        elif "needs_human_confirmation" in normalized_dft_statuses:
+            dft_review_status = "conflict"
+        elif normalized_dft_statuses.intersection(
+            {"ml_ready", "human_reviewed_needs_evidence", "gemini_verified", "rejected", "verified", "human_verified"}
+        ):
+            dft_review_status = "reviewed"
+        else:
+            dft_review_status = "candidate"
+        review_status = {
+            "manual_review_progress": PaperWorkbenchService._manual_review_progress(paper.comprehensive_analysis),
+            "has_parsed_content": bool(
+                paper.abstract
+                or counts.get("sections")
+                or counts.get("tables")
+                or counts.get("figures")
+                or counts.get("dft_results")
+            ),
+            "has_active_dft_candidates": active_dft_count > 0,
+            "active_dft_candidate_count": active_dft_count,
+        }
+        base = self._build_list_item_with_counts(
+            paper,
+            counts,
+            relationship_summary,
+            impact_metadata=self.session.get(PaperImpactMetadata, paper_id),
+            review_status=review_status,
+            include_heavy=False,
+        )
+        return PaperDetailResponse(
+            **base.model_dump(),
+            artifact_status=build_paper_artifact_status(paper),
+            dft_review_status=dft_review_status,
+            dft_results_page={
+                "offset": 0,
+                "limit": DFT_DETAIL_PAGE_SIZE,
+                "returned": 0,
+                "total": counts.get("dft_results", 0),
+                "has_more": bool(counts.get("dft_results")),
+            },
+        )
+
+    def get_dft_results_page(
+        self,
+        paper_id: UUID,
+        *,
+        offset: int = 0,
+        limit: int = DFT_DETAIL_PAGE_SIZE,
+        result_id: UUID | None = None,
+    ) -> dict[str, Any] | None:
+        if self.session.get(Paper, paper_id) is None:
+            return None
+        total = int(self.session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper_id)) or 0)
+        stmt = select(DFTResult).where(DFTResult.paper_id == paper_id)
+        if result_id is not None:
+            stmt = stmt.where(DFTResult.id == result_id)
+        else:
+            stmt = stmt.order_by(DFTResult.id.asc()).offset(offset).limit(limit)
+        rows = list(self.session.scalars(stmt).all())
+        result_ids = {str(row.id) for row in rows}
+        catalyst_ids = {row.catalyst_sample_id for row in rows if row.catalyst_sample_id is not None}
+        catalyst_by_id = (
+            {
+                str(row.id): row
+                for row in self.session.scalars(
+                    select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))
+                ).all()
+            }
+            if catalyst_ids
+            else {}
+        )
+        audits = (
+            self._object_review_audits_by_target(
+                paper_id,
+                result_ids,
+                target_types={"dft_result", "dft_results"},
+            )
+            if result_ids
+            else {}
+        )
+        conflicts = (
+            ReviewConflictAggregationService(self.session).conflicts_by_target(
+                paper_ids={paper_id},
+                target_type="dft_results",
+                target_ids=result_ids,
+            )
+            if result_ids
+            else {}
+        )
+        gates = bulk_export_gate_results(self.session, rows, target_type="dft_results")
+        items = [
+            self._serialize_dft_result(
+                row,
+                catalyst_by_id=catalyst_by_id,
+                object_review_audits=audits.get(str(row.id), []),
+                field_conflicts=conflicts.get(str(row.id), []),
+                review_gate=gates.get(str(row.id)),
+            )
+            for row in rows
+        ]
+        return {
+            "paper_id": str(paper_id),
+            "items": items,
+            "offset": offset,
+            "limit": limit,
+            "returned": len(items),
+            "total": total,
+            "has_more": result_id is None and offset + len(items) < total,
+        }
 
     def _latest_full_translation(self, paper_id: UUID) -> str | None:
         note = self.session.scalars(

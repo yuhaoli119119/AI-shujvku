@@ -389,7 +389,9 @@ async function loadPaperDetail(paperId, options) {
             }, 0);
         }
         scheduleDetailEnrichment(state.selectedPaperId, loadToken);
-        loadEvidenceLocators(state.selectedPaperId, { forceRefresh: opts.forceRefresh === true });
+        if (state.currentTab === "summary" || state.currentTab === "sections") {
+            loadEvidenceLocators(state.selectedPaperId, { forceRefresh: opts.forceRefresh === true });
+        }
         if (state.currentTab === "review") loadExternalRuns();
         if (state.currentTab === "aggregate") loadAggregate();
         if (state.currentTab === "writer") ensureWriterStatus();

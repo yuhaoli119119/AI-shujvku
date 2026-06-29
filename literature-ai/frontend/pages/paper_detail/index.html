@@ -14,6 +14,7 @@
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
   <style>
+    .dft-pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin:16px 0; color:var(--color-text-secondary); }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
     .shell { max-width: 1360px; margin: 0 auto; padding: 20px 24px 36px; }
@@ -46,7 +47,55 @@
     .empty-state { text-align: center; color: var(--color-text-secondary); padding: 40px 12px; }
     .tag { display: inline-flex; align-items: center; border-radius: var(--radius-pill); background: var(--color-primary-bg); color: var(--color-primary); padding: 4px 9px; font-size: 12px; font-weight: 800; margin-right: 6px; margin-top: 10px; }
     .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); z-index: 2000; }
-    .structured-card-title { font-weight: 800; margin-bottom: 10px; }
+    .structured-card-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-weight: 800; margin-bottom: 10px; }
+    .dft-collection-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); }
+    .dft-collection-title { font-weight: 850; }
+    .dft-collection-metrics { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .dft-results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; align-items: start; }
+    .dft-compact-card { padding: 0; margin-bottom: 0; overflow: hidden; background: var(--color-surface); }
+    .dft-compact-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-alt); }
+    .dft-record-locator { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); }
+    .dft-compact-card .dft-record-locator { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+    .dft-record-locator code { min-width: 0; color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+    .dft-record-locator .btn { margin-left: auto; }
+    .dft-record-number { font-size: 12px; font-weight: 800; }
+    .dft-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .dft-mainline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px; align-items: center; }
+    .dft-material-name { min-width: 0; font-weight: 850; line-height: 1.35; overflow-wrap: anywhere; }
+    .dft-property-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; color: var(--color-text-secondary); font-size: 12px; }
+    .dft-reaction-step { margin-top: 7px; color: var(--color-text); font-size: 13px; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .dft-value-block { min-width: 86px; max-width: 128px; padding: 8px 10px; border-left: 3px solid var(--color-primary); border-radius: var(--radius-sm); background: var(--color-primary-bg); text-align: right; }
+    .dft-value-block strong { display: block; color: var(--color-primary); font-size: 20px; line-height: 1.05; overflow-wrap: anywhere; }
+    .dft-value-block span { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: 12px; }
+    .dft-meta-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 12px 12px; color: var(--color-text-secondary); font-size: 12px; }
+    .dft-status-chip { display: inline-flex; align-items: center; max-width: 100%; padding: 3px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-surface-alt); color: var(--color-text-secondary); font-size: 11px; font-weight: 750; line-height: 1.35; overflow-wrap: anywhere; }
+    .dft-status-chip.ok { border-color: rgba(22,163,74,0.22); background: var(--color-success-bg); color: var(--color-success); }
+    .dft-status-chip.warn { border-color: rgba(217,119,6,0.25); background: var(--color-warning-bg); color: var(--color-warning); }
+    .dft-status-chip.danger { border-color: rgba(220,38,38,0.22); background: var(--color-danger-bg); color: var(--color-danger); }
+    .dft-detail-toggle { border-top: 1px dashed var(--color-border); }
+    .dft-detail-toggle > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; color: var(--color-primary); font-size: 12px; font-weight: 800; list-style: none; }
+    .dft-detail-toggle > summary::-webkit-details-marker { display: none; }
+    .dft-detail-toggle > summary::after { content: "▼"; color: var(--color-text-muted); font-size: 10px; transition: transform 0.2s ease; }
+    .dft-detail-toggle:not([open]) > summary::after { transform: rotate(-90deg); }
+    .dft-detail-body { display: grid; gap: 10px; padding: 0 12px 12px; }
+    .dft-detail-block { border-left: 3px solid var(--color-border-strong); padding-left: 10px; min-width: 0; }
+    .dft-detail-label { margin-bottom: 4px; color: var(--color-text-secondary); font-size: 12px; font-weight: 800; }
+    .dft-detail-text { color: var(--color-text); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+    .dft-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 12px; margin: 0; }
+    .dft-detail-grid div { min-width: 0; }
+    .dft-detail-grid dt { color: var(--color-text-secondary); font-size: 11px; font-weight: 800; }
+    .dft-detail-grid dd { margin: 2px 0 0; color: var(--color-text); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+    .dft-compact-card .raw-data-toggle { margin-top: 0; padding-top: 8px; }
+    .dft-edit-overlay { position: fixed; inset: 0; z-index: 1800; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(15, 23, 42, 0.48); }
+    .dft-edit-modal { width: min(820px, 96vw); max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-elevated); padding: 20px; }
+    .dft-edit-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .dft-edit-title h3 { margin: 0; font-size: 18px; }
+    .dft-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; min-height: 0; overflow-y: auto; padding-right: 4px; }
+    .dft-edit-grid label { min-width: 0; color: var(--color-text-secondary); font-size: 13px; }
+    .dft-edit-grid input, .dft-edit-grid select, .dft-edit-grid textarea { width: 100%; margin-top: 6px; }
+    .dft-edit-wide { grid-column: 1 / -1; }
+    .dft-edit-note { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--color-warning); border-radius: var(--radius); background: var(--color-warning-bg); font-size: 13px; line-height: 1.6; }
+    .dft-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .deep-link-context { margin: 0 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-primary-bg); color: var(--color-primary); padding: 10px 12px; font-size: 13px; line-height: 1.5; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     .deep-link-context a { color: var(--color-primary); font-weight: 850; text-decoration: none; }
     .deep-link-warning { margin: 0 0 10px; border: 1px solid rgba(217,119,6,0.22); border-radius: var(--radius); background: var(--color-warning-bg); color: var(--color-warning); padding: 10px 12px; font-size: 13px; line-height: 1.5; }
@@ -78,6 +127,14 @@
     @media (max-width: 720px) {
       .translation-grid,
       .translation-control-grid { grid-template-columns: 1fr; }
+      .dft-results-grid { grid-template-columns: minmax(0, 1fr); }
+      .dft-compact-head { flex-direction: column; align-items: stretch; }
+      .dft-card-actions .btn { flex: 0 1 auto; }
+      .dft-mainline { grid-template-columns: 1fr; }
+      .dft-value-block { max-width: none; text-align: left; }
+      .dft-record-locator .btn { width: 100%; margin-left: 0; }
+      .dft-edit-grid { grid-template-columns: 1fr; }
+      .dft-edit-wide { grid-column: auto; }
     }
   </style>
 </head>
@@ -181,10 +238,49 @@
       </section>
     </div>
   </main>
+  <div id="dftEditOverlay" class="dft-edit-overlay">
+    <div class="dft-edit-modal">
+      <div class="dft-edit-title">
+        <div>
+          <h3>修改 DFT 数据</h3>
+          <div id="dftEditLocator" class="muted" style="margin-top:5px;"></div>
+        </div>
+        <button class="btn ghost small" type="button" onclick="closeDftEditDialog()">关闭</button>
+      </div>
+      <div class="dft-edit-grid">
+        <label>关联催化剂样本<select id="dftEditCatalystSample"></select></label>
+        <label>吸附物<input id="dftEditAdsorbate" type="text"></label>
+        <label>性质/能量类型<input id="dftEditPropertyType" type="text"></label>
+        <label>数值<input id="dftEditValue" type="number" step="any"></label>
+        <label>单位<input id="dftEditUnit" type="text"></label>
+        <label>置信度<input id="dftEditConfidence" type="number" min="0" max="1" step="0.01"></label>
+        <label class="dft-edit-wide">反应步骤<input id="dftEditReactionStep" type="text"></label>
+        <label>来源章节<input id="dftEditSourceSection" type="text"></label>
+        <label>来源图/表<input id="dftEditSourceFigure" type="text"></label>
+        <label class="dft-edit-wide">证据原文<textarea id="dftEditEvidenceText" rows="4"></textarea></label>
+        <label class="dft-edit-wide">修改原因<textarea id="dftEditReason" rows="3" placeholder="例如：对照原 PDF 表 2 后确认数值应为 -1.25 eV"></textarea></label>
+      </div>
+      <div class="dft-edit-note">保存会留下人工修正审计，并将这条数据退回待核验；重新接受入库后才能恢复可导出状态。</div>
+      <div class="dft-edit-actions">
+        <button class="btn ghost" type="button" onclick="closeDftEditDialog()">取消</button>
+        <button id="dftEditSubmit" class="btn primary" type="button" onclick="submitDftEdit()">保存修改</button>
+      </div>
+    </div>
+  </div>
   <div id="toast" class="toast"></div>
   <script>
     const API_BASE = "/api/papers";
-    const state = { paperId: null, paper: null, claims: [], translation: null, translationViewMode: "bilingual", deepLink: {} };
+    const state = {
+      paperId: null,
+      paper: null,
+      claims: [],
+      translation: null,
+      translationViewMode: "bilingual",
+      deepLink: {},
+      currentTab: "summary",
+      fullDetailLoaded: false,
+      fullDetailPromise: null
+    };
 
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
@@ -297,6 +393,15 @@
         metric: "指标",
         value: "数值",
         unit: "单位",
+        candidate_status: "候选状态",
+        catalyst_sample_id: "关联催化剂样本 ID",
+        adsorbate: "吸附物",
+        property_type: "性质/能量类型",
+        reaction_step: "反应步骤",
+        source_section: "来源章节",
+        source_figure: "来源图/表",
+        evidence_text: "证据原文",
+        confidence: "置信度",
         name: "名称",
         summary: "摘要",
         title: "标题",
@@ -334,12 +439,400 @@
       return raw;
     }
 
+    function shortDftResultId(value) {
+      const text = String(value || "").trim();
+      if (text.length <= 18) return text;
+      return text.slice(0, 8) + "\u2026" + text.slice(-6);
+    }
+
+    function dftLocatorClipboardText(resultId, index) {
+      return `DFT #${index + 1}; dft_result_id=${String(resultId || "").trim()}`;
+    }
+
+    async function copyDftLocator(event, resultId, index) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      try {
+        await navigator.clipboard.writeText(dftLocatorClipboardText(resultId, index));
+        showToast("DFT 定位信息已复制。");
+      } catch (error) {
+        showToast("复制 DFT 定位信息失败：" + error.message);
+      }
+    }
+
+    function dftReadableText(value, fallback) {
+      const text = formatValue(value);
+      return text && text !== "-" ? text : (fallback || "-");
+    }
+
+    function dftCatalystLabel(item) {
+      item = item || {};
+      const sample = item.bound_catalyst_sample || {};
+      return sample.name || sample.material_identity || item.catalyst || item.material_identity || "未绑定催化剂";
+    }
+
+    function dftConfidenceLabel(value) {
+      if (value === null || value === undefined || value === "") return "";
+      const numeric = Number(value);
+      if (!Number.isNaN(numeric)) {
+        if (numeric >= 0 && numeric <= 1) return Math.round(numeric * 100) + "%";
+        return String(numeric);
+      }
+      return String(value);
+    }
+
+    function dftCandidateStatusLabel(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      const labels = {
+        ml_ready: "ML Ready",
+        system_candidate: "系统候选",
+        new_candidate: "新候选",
+        candidate: "候选",
+        needs_review: "待复核",
+        review_candidate: "待复核",
+        rejected: "已拒绝"
+      };
+      return labels[raw.toLowerCase()] || raw;
+    }
+
+    function dftBindingLabel(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      const labels = {
+        bound_with_identity: "样本已绑定",
+        bound: "样本已绑定",
+        unresolved: "材料待绑定",
+        missing: "材料待绑定",
+        pending: "材料待绑定"
+      };
+      return labels[raw.toLowerCase()] || raw;
+    }
+
+    function dftStatusTone(value) {
+      const text = String(value || "").toLowerCase();
+      if (!text) return "";
+      if (/reject|fail|error|conflict|冲突|拒绝/.test(text)) return "danger";
+      if (/pending|review|candidate|missing|unsafe|unverified|待|缺/.test(text)) return "warn";
+      if (/ready|verified|eligible|pass|adopt|bound|supported|确认|支持|通过|采纳|绑定/.test(text)) return "ok";
+      return "";
+    }
+
+    function renderDftStatusChip(label, tone, title) {
+      if (!label) return "";
+      return '<span class="dft-status-chip ' + esc(tone || dftStatusTone(label)) + '"' +
+        (title ? ' title="' + esc(title) + '"' : "") + '>' + esc(label) + '</span>';
+    }
+
+    function renderDftRecordLocator(resultId, index) {
+      if (!resultId) return "";
+      return '<div class="dft-record-locator" data-role="dft-record-locator" data-dft-result-id="' + esc(resultId) + '">' +
+        '<span class="dft-record-number" data-role="dft-record-number">DFT #' + (index + 1) + '</span>' +
+      '</div>';
+    }
+
+    function renderDftDetailBlock(label, value) {
+      const text = dftReadableText(value, "");
+      if (!text) return "";
+      return '<div class="dft-detail-block"><div class="dft-detail-label">' + esc(label) + '</div><div class="dft-detail-text">' + esc(text) + '</div></div>';
+    }
+
+    function renderDftDetailGrid(item) {
+      item = item || {};
+      const rows = [
+        ["记录 ID", item.id],
+        ["候选状态", dftCandidateStatusLabel(item.candidate_status)],
+        ["AI 审核", item.ai_review_display_label],
+        ["关联样本 ID", item.catalyst_sample_id],
+        ["材料绑定", dftBindingLabel(item.material_binding_status)],
+        ["来源章节", item.source_section],
+        ["来源图/表", item.source_figure],
+        ["置信度", dftConfidenceLabel(item.confidence)],
+        ["对象审核数", item.object_review_audit_count],
+        ["冲突数", item.conflict_count],
+        ["提取协议", item.extraction_protocol_version]
+      ].filter(function(row) {
+        return row[1] !== null && row[1] !== undefined && row[1] !== "" && row[1] !== "-";
+      });
+      if (!rows.length) return "";
+      return '<dl class="dft-detail-grid">' + rows.map(function(row) {
+        return '<div><dt>' + esc(row[0]) + '</dt><dd>' + esc(formatValue(row[1])) + '</dd></div>';
+      }).join("") + '</dl>';
+    }
+
+    function dftAnchorSummary(anchor) {
+      if (!anchor || typeof anchor !== "object") return "";
+      return [
+        anchor.page ? ("Page " + anchor.page) : "",
+        anchor.section || "",
+        anchor.figure || "",
+        anchor.quoted_text || ""
+      ].filter(Boolean).join(" · ");
+    }
+
+    function renderDftCompactCard(item, index) {
+      item = item || {};
+      const resultId = String(item.id || "").trim();
+      const catalyst = dftCatalystLabel(item);
+      const adsorbate = dftReadableText(item.adsorbate, "吸附物未记录");
+      const propertyType = dftReadableText(item.property_type || item.energy_type, "性质未记录");
+      const value = dftReadableText(item.value, "-");
+      const unit = dftReadableText(item.unit, "");
+      const reactionStep = dftReadableText(item.reaction_step, "反应步骤未记录");
+      const source = item.source_figure || item.source_section || dftAnchorSummary(item.binding_evidence_anchor);
+      const confidence = dftConfidenceLabel(item.confidence);
+      const candidateLabel = dftCandidateStatusLabel(item.candidate_status);
+      const bindingLabel = dftBindingLabel(item.material_binding_status);
+      const copyAction = resultId
+        ? '<button class="btn ghost small" type="button" data-role="copy-dft-locator" onclick="copyDftLocator(event, \'' + esc(resultId) + '\', ' + index + ')">复制 ID</button>'
+        : "";
+      const editAction = resultId
+        ? '<button class="btn ghost small" type="button" onclick="openDftEditDialog(\'' + esc(resultId) + '\')">修改数据</button>'
+        : "";
+      const meta = [
+        source ? renderDftStatusChip("来源 " + source, "", source) : "",
+        confidence ? renderDftStatusChip("置信度 " + confidence, dftStatusTone(confidence)) : "",
+        bindingLabel ? renderDftStatusChip(bindingLabel, dftStatusTone(bindingLabel), item.material_binding_status) : "",
+        candidateLabel ? renderDftStatusChip(candidateLabel, dftStatusTone(candidateLabel), item.candidate_status) : "",
+        item.ai_review_display_label ? renderDftStatusChip(item.ai_review_display_label, item.ai_review_display_class || dftStatusTone(item.ai_review_display_label), item.ai_review_display_reason) : ""
+      ].filter(Boolean).join("");
+      const reviewReason = item.latest_object_review_audit && item.latest_object_review_audit.reason;
+      const anchorText = dftAnchorSummary(item.binding_evidence_anchor);
+      const rawJson = esc(JSON.stringify(item || {}, null, 2));
+      return `
+        <div class="structured-card dft-compact-card" data-collection="dft_results" data-record-id="${esc(resultId)}" data-record-index="${esc(index)}">
+          <div class="dft-compact-head">
+            ${renderDftRecordLocator(resultId, index)}
+            <div class="dft-card-actions">${copyAction}${editAction}</div>
+          </div>
+          <div class="dft-mainline">
+            <div>
+              <div class="dft-material-name">${esc(catalyst)}</div>
+              <div class="dft-property-line">
+                <span>${esc(adsorbate)}</span>
+                <span>·</span>
+                <span>${esc(propertyType)}</span>
+              </div>
+              <div class="dft-reaction-step" title="${esc(reactionStep)}">${esc(reactionStep)}</div>
+            </div>
+            <div class="dft-value-block" data-role="dft-core-value">
+              <strong>${esc(value)}</strong>
+              <span>${esc(unit)}</span>
+            </div>
+          </div>
+          <div class="dft-meta-strip">${meta}</div>
+          <details class="dft-detail-toggle">
+            <summary><span>证据与审核</span></summary>
+            <div class="dft-detail-body">
+              ${renderDftDetailBlock("证据原文", item.evidence_text)}
+              ${renderDftDetailBlock("绑定证据", anchorText)}
+              ${renderDftDetailBlock("最新审核意见", reviewReason)}
+              ${renderDftDetailGrid(item)}
+              <details class="raw-data-toggle">
+                <summary>查看原始 JSON</summary>
+                <div class="raw-data-title">原始数据</div>
+                <pre class="mono">${rawJson}</pre>
+              </details>
+            </div>
+          </details>
+        </div>
+      `;
+    }
+
+    function isDftItemReady(item) {
+      const candidateStatus = String(item && item.candidate_status || "").trim().toLowerCase();
+      const workflowState = String(item && item.dft_workflow_state || "").trim().toLowerCase();
+      return candidateStatus === "ml_ready" || workflowState === "exportable";
+    }
+
+    function renderDftCompactCollection(items) {
+      const readyCount = items.filter(isDftItemReady).length;
+      const reviewedCount = items.filter(item => Number(item && item.object_review_audit_count || 0) > 0).length;
+      const conflictCount = items.filter(item => Number(item && item.conflict_count || 0) > 0).length;
+      return `
+        <div class="dft-collection-summary">
+          <div class="dft-collection-title">${items.length} 条候选 DFT 数据</div>
+          <div class="dft-collection-metrics">
+            ${renderDftStatusChip("ML Ready " + readyCount, readyCount ? "ok" : "meta")}
+            ${renderDftStatusChip("已审核 " + reviewedCount, reviewedCount ? "ok" : "meta")}
+            ${renderDftStatusChip("冲突 " + conflictCount, conflictCount ? "danger" : "meta")}
+          </div>
+        </div>
+        <div class="dft-results-grid">${items.map(renderDftCompactCard).join("")}</div>
+        ${renderDftPagination()}
+      `;
+    }
+
+    function renderDftPagination() {
+      const page = state.paper && state.paper.dft_results_page || {};
+      const total = Number(page.total || (state.paper && state.paper.counts && state.paper.counts.dft_results) || 0);
+      const loaded = (state.paper && state.paper.dft_results_items || []).length;
+      if (!page.has_more && loaded >= total) return "";
+      return `<div class="dft-pagination" data-role="dft-pagination">
+        <span>已加载 ${loaded} / ${total} 条</span>
+        <button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">加载下一页</button>
+      </div>`;
+    }
+
+    async function loadMoreDftResults(button) {
+      if (!state.paper || !state.paperId) return;
+      const existing = state.paper.dft_results_items || [];
+      if (button) button.disabled = true;
+      try {
+        const page = await fetchJSON(
+          `${API_BASE}/${encodeURIComponent(state.paperId)}/dft-results?offset=${existing.length}&limit=50`
+        );
+        const seen = new Set(existing.map(item => String(item.id || "")));
+        const appended = (page.items || []).filter(item => !seen.has(String(item.id || "")));
+        state.paper.dft_results_items = existing.concat(appended);
+        state.paper.dft_results_page = page;
+        document.getElementById("dftResults").innerHTML =
+          deepLinkIssueContextHtml() +
+          renderStructuredCollection(state.paper.dft_results_items, "暂无 DFT 候选结果。", { collection: "dft_results" });
+      } catch (error) {
+        showToast("DFT 下一页加载失败：" + error.message);
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    let activeDftEditItemId = null;
+
+    function dftEditValue(value) {
+      return value === null || value === undefined ? "" : String(value);
+    }
+
+    function dftEditComparable(value, numeric) {
+      if (value === null || value === undefined || value === "") return null;
+      return numeric ? Number(value) : String(value).trim();
+    }
+
+    function findDftItem(itemId) {
+      return (state.paper && state.paper.dft_results_items || []).find(item => String(item.id || "") === String(itemId || ""));
+    }
+
+    function populateDftEditCatalystSamples(item) {
+      const select = document.getElementById("dftEditCatalystSample");
+      const samples = state.paper && Array.isArray(state.paper.catalyst_samples_items) ? state.paper.catalyst_samples_items : [];
+      const currentId = dftEditValue(item && item.catalyst_sample_id);
+      select.innerHTML = '<option value="">未关联催化剂样本</option>' + samples.map(sample => {
+        const sampleId = String(sample.id || "");
+        const label = sample.name || sample.catalyst || sample.material_identity || sampleId;
+        return `<option value="${esc(sampleId)}">${esc(label)}</option>`;
+      }).join("");
+      select.value = currentId;
+      if (currentId && select.value !== currentId) {
+        select.insertAdjacentHTML("beforeend", `<option value="${esc(currentId)}">${esc(currentId)}</option>`);
+        select.value = currentId;
+      }
+    }
+
+    function openDftEditDialog(itemId) {
+      const item = findDftItem(itemId);
+      if (!item) return showToast("未找到要修改的 DFT 数据。");
+      activeDftEditItemId = String(itemId);
+      document.getElementById("dftEditLocator").textContent = "dft_result_id=" + activeDftEditItemId;
+      populateDftEditCatalystSamples(item);
+      document.getElementById("dftEditAdsorbate").value = dftEditValue(item.adsorbate);
+      document.getElementById("dftEditPropertyType").value = dftEditValue(item.property_type || item.energy_type);
+      document.getElementById("dftEditValue").value = dftEditValue(item.value);
+      document.getElementById("dftEditUnit").value = dftEditValue(item.unit);
+      document.getElementById("dftEditConfidence").value = dftEditValue(item.confidence);
+      document.getElementById("dftEditReactionStep").value = dftEditValue(item.reaction_step);
+      document.getElementById("dftEditSourceSection").value = dftEditValue(item.source_section);
+      document.getElementById("dftEditSourceFigure").value = dftEditValue(item.source_figure);
+      document.getElementById("dftEditEvidenceText").value = dftEditValue(item.evidence_text);
+      document.getElementById("dftEditReason").value = "";
+      document.getElementById("dftEditOverlay").style.display = "flex";
+    }
+
+    function closeDftEditDialog() {
+      document.getElementById("dftEditOverlay").style.display = "none";
+      activeDftEditItemId = null;
+    }
+
+    async function submitDftEdit() {
+      const item = findDftItem(activeDftEditItemId);
+      if (!item || !state.paperId) return showToast("当前 DFT 数据已失效，请刷新后重试。");
+      const reason = document.getElementById("dftEditReason").value.trim();
+      if (!reason) return showToast("请填写修改原因。");
+      const submitted = {
+        catalyst_sample_id: dftEditComparable(document.getElementById("dftEditCatalystSample").value, false),
+        adsorbate: dftEditComparable(document.getElementById("dftEditAdsorbate").value, false),
+        property_type: dftEditComparable(document.getElementById("dftEditPropertyType").value, false),
+        value: dftEditComparable(document.getElementById("dftEditValue").value, true),
+        unit: dftEditComparable(document.getElementById("dftEditUnit").value, false),
+        confidence: dftEditComparable(document.getElementById("dftEditConfidence").value, true),
+        reaction_step: dftEditComparable(document.getElementById("dftEditReactionStep").value, false),
+        source_section: dftEditComparable(document.getElementById("dftEditSourceSection").value, false),
+        source_figure: dftEditComparable(document.getElementById("dftEditSourceFigure").value, false),
+        evidence_text: dftEditComparable(document.getElementById("dftEditEvidenceText").value, false)
+      };
+      const current = {
+        catalyst_sample_id: dftEditComparable(item.catalyst_sample_id, false),
+        adsorbate: dftEditComparable(item.adsorbate, false),
+        property_type: dftEditComparable(item.property_type || item.energy_type, false),
+        value: dftEditComparable(item.value, true),
+        unit: dftEditComparable(item.unit, false),
+        confidence: dftEditComparable(item.confidence, true),
+        reaction_step: dftEditComparable(item.reaction_step, false),
+        source_section: dftEditComparable(item.source_section, false),
+        source_figure: dftEditComparable(item.source_figure, false),
+        evidence_text: dftEditComparable(item.evidence_text, false)
+      };
+      const updates = {};
+      Object.keys(submitted).forEach(field => {
+        if (submitted[field] !== current[field]) updates[field] = submitted[field];
+      });
+      if (!Object.keys(updates).length) return showToast("没有检测到字段变化。");
+      const submitButton = document.getElementById("dftEditSubmit");
+      submitButton.disabled = true;
+      try {
+        await fetchJSON(`${API_BASE}/${encodeURIComponent(state.paperId)}/dft-results/${encodeURIComponent(activeDftEditItemId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirm_manual_update: true,
+            updates,
+            reason,
+            reviewer: "paper_detail_user",
+            evidence_payload: item.evidence_payload || {
+              section: item.source_section || null,
+              figure: item.source_figure || null,
+              quoted_text: item.evidence_text || null
+            }
+          })
+        });
+        closeDftEditDialog();
+        showToast("DFT 数据已修改，并已退回待核验。");
+        await loadPaperData();
+        switchDetailTab("dft");
+      } catch (error) {
+        showToast("DFT 数据修改失败：" + error.message);
+      } finally {
+        submitButton.disabled = false;
+      }
+    }
+
     function renderStructuredCollection(items, emptyText, options) {
       options = options || {};
       if (!items || !items.length) {
         return `<div class="empty-state">${esc(emptyText)}</div>`;
       }
+      if (options.collection === "dft_results") {
+        return renderDftCompactCollection(items);
+      }
       return items.map((item, index) => {
+        const isDftResult = options.collection === "dft_results";
+        const resultId = String(item && item.id || "").trim();
+        const locator = isDftResult && resultId
+          ? `<div class="dft-record-locator" data-role="dft-record-locator">
+               <span class="dft-record-number" data-role="dft-record-number">DFT #${index + 1}</span>
+               <button class="btn ghost small" type="button" data-role="copy-dft-locator" onclick="copyDftLocator(event, '${esc(resultId)}', ${index})">复制定位信息</button>
+             </div>`
+          : "";
         const entries = Object.entries(item || {}).filter(([key]) => key !== "raw_json");
         const grid = entries.length
           ? entries.map(([key, value]) => `
@@ -349,9 +842,16 @@
               </div>
             `).join("")
           : '<div class="empty-state">暂无可展示字段。</div>';
+        const editAction = isDftResult && resultId
+          ? `<button class="btn ghost small" type="button" onclick="openDftEditDialog('${esc(resultId)}')">修改数据</button>`
+          : "";
         return `
           <div class="structured-card" data-collection="${esc(options.collection || "")}" data-record-id="${esc(item && item.id || "")}" data-record-index="${esc(index)}">
-            <div class="structured-card-title">记录 ${index + 1}</div>
+            <div class="structured-card-title">
+              <span>${isDftResult ? `DFT #${index + 1}` : `记录 ${index + 1}`}</span>
+              <span class="dft-card-actions">${editAction}</span>
+            </div>
+            ${locator}
             <div class="kv-grid">${grid}</div>
             <details class="raw-data-toggle">
               <summary>查看原始 JSON</summary>
@@ -414,6 +914,8 @@
         return;
       }
       card.classList.add("deep-link-target");
+      const dftDetails = card.querySelector("details.dft-detail-toggle");
+      if (dftDetails) dftDetails.open = true;
       const details = card.querySelector("details.raw-data-toggle");
       if (details) details.open = true;
       card.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -635,12 +1137,44 @@
         return;
       }
       try {
-        state.paper = await fetchJSON(`${API_BASE}/${state.paperId}`);
+        state.paper = await fetchJSON(`${API_BASE}/${state.paperId}?mode=light`);
+        state.fullDetailLoaded = false;
+        state.currentTab = state.deepLink.tab || "summary";
         renderPaperDetails();
-        await loadEvidenceClaims();
+        switchDetailTab(state.currentTab);
+        loadEvidenceClaims();
       } catch (error) {
         showFallback("论文详情加载失败：" + error.message);
       }
+    }
+
+    async function ensureFullDetail(tab) {
+      if (!state.paperId || tab === "summary" || state.fullDetailLoaded) return;
+      if (!state.fullDetailPromise) {
+        state.fullDetailPromise = fetchJSON(`${API_BASE}/${state.paperId}?mode=full`)
+          .then(async detail => {
+            state.paper = detail;
+            state.fullDetailLoaded = true;
+            const link = state.deepLink || {};
+            const hasTarget = (detail.dft_results_items || []).some(
+              item => String(item.id || "") === String(link.targetId || "")
+            );
+            if (tab === "dft" && link.targetType === "dft_results" && link.targetId && !hasTarget) {
+              const targetPage = await fetchJSON(
+                `${API_BASE}/${encodeURIComponent(state.paperId)}/dft-results?result_id=${encodeURIComponent(link.targetId)}`
+              );
+              detail.dft_results_items = (detail.dft_results_items || []).concat(targetPage.items || []);
+            }
+            renderPaperDetails();
+          })
+          .catch(error => {
+            showToast("详情标签加载失败：" + error.message);
+          })
+          .finally(() => {
+            state.fullDetailPromise = null;
+          });
+      }
+      await state.fullDetailPromise;
     }
 
     async function loadEvidenceClaims() {
@@ -744,6 +1278,7 @@
     }
 
     function switchDetailTab(tab, event) {
+      state.currentTab = tab || "summary";
       document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
       document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.remove("active"));
       if (event && event.target) event.target.classList.add("active");
@@ -752,6 +1287,7 @@
         if (button) button.classList.add("active");
       }
       document.getElementById("tab-" + tab).classList.add("active");
+      ensureFullDetail(tab);
     }
 
     async function toggleCitationPreview(event) {

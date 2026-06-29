@@ -376,6 +376,7 @@ function renderDetail(detail, audit) {
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
             catalystSampleCards +
             renderJSONCards("候选 DFT 数据", dftCandidateItems, { catalystSamplesById: catalystSamplesById }) +
+            renderDftPageControls(detail) +
             renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
             renderJSONCards("机理声明", detail.mechanism_claims_items || []);
         decorateDftReadinessPanel(detail);
@@ -402,4 +403,40 @@ function renderDetail(detail, audit) {
             : renderPendingReviewCard("中文译文", "中文译文待 AI 核验或正式保存，不在详情页展示。");
     }
     if (aggregateEl) aggregateEl.innerHTML = "";
+}
+
+function renderDftPageControls(detail) {
+    const page = detail && detail.dft_results_page || {};
+    const loaded = Array.isArray(detail && detail.dft_results_items) ? detail.dft_results_items.length : 0;
+    const total = Number(page.total || (detail && detail.counts && detail.counts.dft_results) || loaded);
+    if (!page.has_more && loaded >= total) return "";
+    return '<div class="dft-pagination" data-role="dft-pagination">' +
+        '<span>已加载 ' + loaded + ' / ' + total + ' 条</span>' +
+        '<button class="btn primary small" type="button" data-role="load-more-dft" onclick="loadMoreSelectedDftResults(this)">加载下一页</button>' +
+    '</div>';
+}
+
+async function loadMoreSelectedDftResults(button) {
+    const detail = state.selectedPaper;
+    const paperId = state.selectedPaperId;
+    if (!detail || !paperId) return;
+    const existing = Array.isArray(detail.dft_results_items) ? detail.dft_results_items : [];
+    if (button) button.disabled = true;
+    try {
+        const page = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(paperId) +
+            "/dft-results?offset=" + existing.length + "&limit=50"
+        );
+        const seen = new Set(existing.map(function(item) { return String(item && item.id || ""); }));
+        const appended = (page.items || []).filter(function(item) {
+            return !seen.has(String(item && item.id || ""));
+        });
+        detail.dft_results_items = existing.concat(appended);
+        detail.dft_results_page = page;
+        rerenderSelectedDetail(paperId);
+    } catch (error) {
+        showToast("DFT 下一页加载失败：" + error.message, "error");
+    } finally {
+        if (button) button.disabled = false;
+    }
 }
