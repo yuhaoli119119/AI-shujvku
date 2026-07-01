@@ -7,6 +7,7 @@
 - [../../README.md](../../README.md): 仓库主 README，也是唯一项目入口。
 - [../AGENTS.md](../AGENTS.md): AI 协作者规则、数据安全边界和临时产物规则。
 - [../README.md](../README.md): `literature-ai/` 目录落点说明与入口跳转。
+- [SERVER_GITHUB_WORKFLOW.md](SERVER_GITHUB_WORKFLOW.md): 服务器优先改代码、SSH 推 GitHub、服务重启与验收步骤。
 - [mcp/MCP_API.md](mcp/MCP_API.md): MCP API 与工具说明。
 - [schema/dft_ml_dataset_schema.md](schema/dft_ml_dataset_schema.md): DFT ML dataset 导出契约。
 - [schemas/dft_results_ml_v1.md](schemas/dft_results_ml_v1.md): DFT results 相关 schema 说明。

@@ -22,6 +22,18 @@
 - 默认不删除真实 `data/`、`artifacts/`、shadow report。
 - **27-Tool MCP 系统** 已全面激活，涵盖提取、裁切、审核流程。
 
+## 0.2 服务器优先协作基线
+
+- 当前用户要求以后默认在**服务器**上改代码，再通过 GitHub 同步回本地。
+- 服务器 Git 仓库根目录是 `/opt/AI-shujvku`。
+- 服务器稳定工作入口是 `/opt/literature-ai`，它当前指向 `/opt/AI-shujvku/literature-ai`。
+- Git 远端 `origin` 已配置为 `git@github.com:yuhaoli119119/AI-shujvku.git`，默认不要改回 HTTPS。
+- 服务器到 GitHub 的稳定路径是 SSH over 443，依赖 `~/.ssh/config` 和 `~/.ssh/id_ed25519_github`。
+- GitHub 只同步代码与已跟踪文档；**不会**同步 PostgreSQL、`data/`、`outputs/`、`.env`。
+- 未经明确要求，不要用本地 Windows 副本覆盖服务器数据库、`data/`、`outputs/` 或 `.env`。
+- 服务器端 `literature-ai/docker-compose.override.yml` 是保留的本机运行配置，当前通过 `.git/info/exclude` 屏蔽状态噪音；不要随手删除。
+- 详细步骤见 `docs/SERVER_GITHUB_WORKFLOW.md`。
+
 ## 1. 每轮开始前必须执行
 
 每次进入任务前，先在仓库根目录执行并回报结果：
