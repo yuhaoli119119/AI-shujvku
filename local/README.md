@@ -10,6 +10,14 @@
 - `test-fixtures/`：可复用的测试样本、PDF 集合、保留的验收工作区。
 - `test-runs/`：一次性回归运行结果和临时验证输出。
 
+## 当前分类
+
+- `test-fixtures/backend/`：后端链路 smoke 用的本地 PDF 输入集合。
+- `test-fixtures/pdf-regression/new_real_papers/`：`run_new_real_papers_e2e.py` 使用的真实 PDF 回归输入。
+- `test-fixtures/pdf-eval/pdfs/`：保留的 pdf-eval 原始输入 PDF。
+- `test-runs/pdf-eval/legacy_snapshot/`：历史 pdf-eval 运行输出，包括 `storage/`、`eval.sqlite`、`ingestion_results.json`。
+- `test-runs/pdf-regression/`：新的 PDF 回归脚本运行结果目录。
+
 ## 使用约定
 
 - 新的本地备份、测试样本、回归结果优先放在 `local/`，不要再散落到仓库根目录。

@@ -14,9 +14,38 @@ ROOT = SYSTEM_ROOT.parent
 BACKEND = SYSTEM_ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-RUN_DIR = ROOT / "local" / "test-runs" / "pdf-regression" / f"new_real_{int(time.time())}"
+
+def load_env_file(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+def resolve_env_path(variable_name: str, default_path: Path) -> Path:
+    raw_value = os.getenv(variable_name)
+    if not raw_value:
+        return default_path
+    candidate = Path(raw_value).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return ROOT / candidate
+
+
+load_env_file(SYSTEM_ROOT / ".env")
+
+RUN_ROOT = resolve_env_path("LITAI_PDF_REGRESSION_RUN_ROOT", ROOT / "local" / "test-runs" / "pdf-regression")
+RUN_DIR = RUN_ROOT / f"new_real_{int(time.time())}"
 STORAGE_DIR = RUN_DIR / "storage"
-PDF_DIR = ROOT / "local" / "test-fixtures" / "pdf-regression" / "new_real_papers"
+PDF_DIR = resolve_env_path(
+    "LITAI_PDF_REGRESSION_FIXTURE_DIR",
+    ROOT / "local" / "test-fixtures" / "pdf-regression" / "new_real_papers",
+)
 
 PAPERS = [
     {
@@ -138,12 +167,21 @@ def mark_one_review_verified(session, paper_id: UUID, detail) -> dict:
     errors = []
     for target_type, target_id, fields in candidates:
         try:
+            review_versions = {
+                item.field_name: item.write_version
+                for item in review_service.list_reviews(paper_id)
+                if item.target_type == target_type and item.target_id == target_id and item.field_name in fields
+            }
+            if len(review_versions) != len(fields):
+                errors.append(f"{target_type}:{target_id}:{fields}:missing_review_versions")
+                continue
             marked = review_service.mark_verified(
                 paper_id,
                 ExtractionReviewMarkVerifiedRequest(
                     target_type=target_type,
                     target_id=target_id,
                     field_names=fields,
+                    expected_write_versions=review_versions,
                     reviewer="e2e_acceptance",
                     reviewer_note="controlled end-to-end acceptance check",
                 ),
@@ -171,7 +209,8 @@ async def run() -> dict:
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
     from app.config import get_settings
-    from app.db.session import init_db, session_scope
+    from app.db.models import Base
+    from app.db.session import get_engine, session_scope
     from app.schemas.api import PaperTranslationPreviewRequest
     from app.api.papers.detail import preview_paper_translation
     from app.services.extraction_review_service import ExtractionReviewService
@@ -179,11 +218,19 @@ async def run() -> dict:
     from app.services.paper_query import PaperQueryService
     from app.services.evidence_locator_service import EvidenceLocatorService
     from app.services.extraction_schema_service import ExtractionSchemaService
+    from fastapi import HTTPException
 
     get_settings.cache_clear()
     settings = get_settings()
     try:
-        init_db(settings.database_url)
+        engine = get_engine(settings.database_url)
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            for extension in ("vector", "pgcrypto", "pg_trgm"):
+                try:
+                    connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
+                except Exception:
+                    pass
+        Base.metadata.create_all(engine, checkfirst=False)
 
         summaries = []
         with session_scope(settings.database_url) as session:
@@ -203,12 +250,26 @@ async def run() -> dict:
                 detail = PaperQueryService(session).get_paper_detail(paper.id)
                 manual_verify = mark_one_review_verified(session, paper.id, detail)
                 detail = PaperQueryService(session).get_paper_detail(paper.id)
-                translation = await preview_paper_translation(
-                    paper.id,
-                    PaperTranslationPreviewRequest(include_abstract=True, max_sections=2, max_chars_per_item=1200),
-                    session=session,
-                    settings=settings,
-                )
+                translation_backend = ""
+                translation_status = "not_attempted"
+                translation_items = 0
+                translation_error = ""
+                try:
+                    translation = await preview_paper_translation(
+                        paper.id,
+                        PaperTranslationPreviewRequest(include_abstract=True, max_sections=2, max_chars_per_item=1200),
+                        session=session,
+                        settings=settings,
+                    )
+                    translation_backend = translation.backend_used
+                    translation_status = translation.llm_status
+                    translation_items = len(translation.items)
+                except HTTPException as exc:
+                    if exc.status_code != 400:
+                        raise
+                    translation_backend = "unavailable"
+                    translation_status = "no_translatable_content"
+                    translation_error = str(exc.detail)
                 locators = EvidenceLocatorService(session).list_locators_for_paper(paper.id)
                 schema_payload = ExtractionSchemaService(session).results(paper.id)
                 counts = counts_for(session, paper.id)
@@ -242,9 +303,10 @@ async def run() -> dict:
                         "safe_verified_reviews": sum(
                             1 for item in review_service.list_reviews(paper.id) if item.verified
                         ),
-                        "translation_backend": translation.backend_used,
-                        "translation_status": translation.llm_status,
-                        "translation_items": len(translation.items),
+                        "translation_backend": translation_backend,
+                        "translation_status": translation_status,
+                        "translation_items": translation_items,
+                        "translation_error": translation_error,
                         "locator_count_from_api": len(locators),
                         "schema_result_counts": {
                             key: len(value) for key, value in schema_payload.results.items()

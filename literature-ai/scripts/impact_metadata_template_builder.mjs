@@ -2,15 +2,24 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
-import { SpreadsheetFile, Workbook } from "@oai/artifact-tool";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const systemRoot = path.resolve(scriptDir, "..");
-const repoRoot = path.resolve(systemRoot, "..");
-const outputDir = path.join(systemRoot, "deliverables", "impact_metadata_20260621");
-const composeArgs = ["compose", "-f", path.join(systemRoot, "docker-compose.yml"), "exec", "-T", "postgres"];
+const defaultOutputDir = path.join(systemRoot, "deliverables", "impact_metadata_20260621");
+const outputDir = process.env.LITAI_IMPACT_METADATA_OUTPUT_DIR
+  ? path.resolve(process.env.LITAI_IMPACT_METADATA_OUTPUT_DIR)
+  : defaultOutputDir;
+const composeFile = path.join(systemRoot, "docker-compose.yml");
+const composeArgs = ["compose", "--project-directory", systemRoot, "-f", composeFile, "exec", "-T", "postgres"];
+const artifactToolSpecifier = process.env.LITAI_ARTIFACT_TOOL_MODULE?.trim() || "@oai/artifact-tool";
+const artifactToolImportTarget = artifactToolSpecifier.startsWith("file://")
+  ? artifactToolSpecifier
+  : artifactToolSpecifier.includes(path.sep) || artifactToolSpecifier.endsWith(".mjs")
+    ? pathToFileURL(path.resolve(artifactToolSpecifier)).href
+    : artifactToolSpecifier;
+const { SpreadsheetFile, Workbook } = await import(artifactToolImportTarget);
 
 const punctuationRegex = /[\s\.,;:!?'"]+|[()\[\]{}\-_/\\]+/g;
 
@@ -465,7 +474,7 @@ const recoveryImpactByJournal = {
 
 async function runSqlJson(sql) {
   const args = [...composeArgs, "psql", "-U", "literature_ai", "-d", "literature_ai", "-t", "-A", "-c", sql];
-  const { stdout, stderr } = await execFileAsync("docker", args, { cwd: repoRoot, maxBuffer: 8 * 1024 * 1024 });
+  const { stdout, stderr } = await execFileAsync("docker", args, { cwd: systemRoot, maxBuffer: 8 * 1024 * 1024 });
   if (stderr && stderr.trim()) {
     console.error(stderr);
   }
