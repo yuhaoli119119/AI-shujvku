@@ -29,6 +29,23 @@ logger = logging.getLogger("app.services.external_analysis_service")
 
 
 class ExternalAnalysisMaterializationMixin:
+    @staticmethod
+    def _is_dft_scoped_materialization_run(
+        run: ExternalAnalysisRun,
+        payload: dict[str, Any] | None = None,
+    ) -> bool:
+        payload = payload or {}
+        parts = [
+            run.source,
+            run.source_label,
+            payload.get("source"),
+            payload.get("source_label"),
+            payload.get("agent_role"),
+            payload.get("adjudication_scope"),
+        ]
+        text = " ".join(str(part or "") for part in parts).casefold()
+        return "dft" in text
+
     def materialize_candidates(
         self,
         run_id: UUID,
@@ -51,6 +68,17 @@ class ExternalAnalysisMaterializationMixin:
         review_service = ReviewService(self.session)
         for candidate in candidates:
             payload = candidate.normalized_payload or {}
+            if (
+                candidate.candidate_type in {"note", "correction", "relationship"}
+                and self._is_dft_scoped_materialization_run(run, payload)
+            ):
+                candidate.status = "requires_resolution"
+                candidate.materialized_target_type = None
+                candidate.materialized_target_id = None
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_candidate"
+                self.session.add(candidate)
+                result.skipped_candidates += 1
+                continue
             if (
                 candidate.candidate_type == "object_review_audit"
                 and candidate.status in {"candidate", "pending", "requires_resolution"}
@@ -222,6 +250,17 @@ class ExternalAnalysisMaterializationMixin:
                 result.skipped_candidates += 1
                 continue
             payload = candidate.normalized_payload or {}
+            if (
+                candidate.candidate_type in {"note", "correction", "relationship"}
+                and self._is_dft_scoped_materialization_run(run, payload)
+            ):
+                candidate.status = "requires_resolution"
+                candidate.materialized_target_type = None
+                candidate.materialized_target_id = None
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_candidate"
+                self.session.add(candidate)
+                result.skipped_candidates += 1
+                continue
 
             if candidate.candidate_type == "note":
                 note = PaperNote(

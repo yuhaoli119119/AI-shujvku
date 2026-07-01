@@ -36,6 +36,7 @@ from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.services.review_service import ReviewService
+from app.services.supplementary_dft_lifecycle_service import SupplementaryDFTLifecycleService
 from app.services.table_curation_service import TableCurationService
 from app.services.verification_session_service import VerificationSessionService
 from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
@@ -93,6 +94,8 @@ def _mcp_review_identity(
       used to validate caller-supplied ``write_lock_token``\\ s. When both
       identities coincide the list collapses to a single entry.
     """
+    if not auth.identity_verified or not str(auth.source_identity or "").strip():
+        raise PermissionError("MCP review identity is not server-authenticated")
     effective_reviewer = str(reviewer or auth.source_prefix or "ide_ai").strip() or str(auth.source_prefix or "ide_ai")
     effective_internal_reviewer = str(auth.source_prefix or effective_reviewer or "ide_ai").strip() or "ide_ai"
     effective_lock_owners = list(
@@ -611,9 +614,9 @@ def get_dft_audit_issues(
 @mcp_server.tool(
     name="repair_dft_audit_issue",
     description=(
-        "Repair exactly one DFT audit issue through a controlled primary-AI path. "
+        "Repair exactly one DFT audit issue through the fast DFT processing path. "
         "Allowed actions: create_missing_dft, update_dft_fields, link_existing_duplicate, "
-        "mark_needs_user_decision. Audit AI must not call this tool. False-positive closure is human-only."
+        "mark_needs_user_decision. Existing authenticated DFT write identities may use this tool."
     ),
 )
 def repair_dft_audit_issue(
@@ -623,8 +626,12 @@ def repair_dft_audit_issue(
     reason: str,
     evidence_payload: dict[str, Any] | list[Any],
 ) -> dict[str, Any]:
-    required_capability = "repair_dft_issues"
-    auth = require_mcp_capability(required_capability)
+    auth = require_mcp_capability_any("repair_dft_issues", "propose_corrections", "review_dft")
+    required_capability = next(
+        capability
+        for capability in ("repair_dft_issues", "propose_corrections", "review_dft")
+        if capability in auth.capabilities
+    )
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return DFTAuditIssueRepairService(session).repair_issue(
@@ -635,8 +642,164 @@ def repair_dft_audit_issue(
             evidence_payload=evidence_payload,
             repaired_by=auth.source_prefix,
             required_capability=required_capability,
-            repair_actor_role="primary_ai_repair",
+            repair_actor_role="dft_fast_processor",
         )
+
+
+@mcp_server.tool(
+    name="repair_dft_audit_issues_batch",
+    description=(
+        "Repair all actionable DFT audit issues for one paper in one call and optionally finalize "
+        "the resulting DFT rows. This is the default fast path for DFT data processing."
+    ),
+)
+def repair_dft_audit_issues_batch(
+    paper_id: str,
+    issue_ids: list[str] | None = None,
+    auto_finalize: bool = True,
+    limit: int = 200,
+) -> dict[str, Any]:
+    auth = require_mcp_capability_any("repair_dft_issues", "propose_corrections", "review_dft")
+    capability_used = next(
+        capability
+        for capability in ("repair_dft_issues", "propose_corrections", "review_dft")
+        if capability in auth.capabilities
+    )
+    target_paper_id = UUID(paper_id)
+    requested_ids = {UUID(str(issue_id)) for issue_id in (issue_ids or [])}
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        issue_service = DFTAuditIssueService(session)
+        issues = issue_service.list_issues(
+            paper_id=target_paper_id,
+            statuses={"needs_primary_ai", "needs_user_decision", "fixed_by_primary_ai"},
+            limit=limit,
+        )
+        if requested_ids:
+            issues = [issue for issue in issues if issue.id in requested_ids]
+
+        repair_service = DFTAuditIssueRepairService(session)
+        review_service = DFTResultReviewService(session)
+        results: list[dict[str, Any]] = []
+        for issue in issues:
+            try:
+                with session.begin_nested():
+                    action, repair_payload = _fast_dft_repair_action(issue)
+                    if action == "verify_existing":
+                        repair_result = {
+                            "status": "existing_candidate",
+                            "issue_id": str(issue.id),
+                            "dft_result_id": str(issue.target_id),
+                            "changed_fields": [],
+                        }
+                    elif action == "reject_existing":
+                        rejected = review_service.reject_result(
+                            paper_id=target_paper_id,
+                            result_id=UUID(str(issue.target_id)),
+                            confirm_reject_candidate=True,
+                            reviewer=auth.source_prefix,
+                            reviewer_note=f"Fast-mode resolution for {issue.issue_type}.",
+                            commit=False,
+                        )
+                        results.append(
+                            {
+                                "issue_id": str(issue.id),
+                                "issue_type": issue.issue_type,
+                                "status": "rejected",
+                                "dft_result_id": str(issue.target_id),
+                                "finalized": True,
+                                "result": rejected,
+                            }
+                        )
+                        continue
+                    else:
+                        repair_result = repair_service.repair_issue(
+                            issue_id=issue.id,
+                            action=action,
+                            repair_payload=repair_payload,
+                            reason=f"Fast-mode batch processing for {issue.issue_type}.",
+                            evidence_payload=issue.evidence_payload or {},
+                            repaired_by=auth.source_prefix,
+                            required_capability=capability_used,
+                            repair_actor_role="dft_fast_processor",
+                        )
+
+                    dft_result_id = repair_result.get("dft_result_id")
+                    finalized = False
+                    final_result = None
+                    if auto_finalize and dft_result_id:
+                        final_result = review_service.verify_result(
+                            paper_id=target_paper_id,
+                            result_id=UUID(str(dft_result_id)),
+                            confirm_reviewed_against_pdf=True,
+                            reviewer=auth.source_prefix,
+                            reviewer_note="Fast-mode DFT processing completed from stored evidence.",
+                            evidence_payload=issue.evidence_payload or {},
+                            commit=False,
+                        )
+                        finalized = True
+                    results.append(
+                        {
+                            "issue_id": str(issue.id),
+                            "issue_type": issue.issue_type,
+                            "status": repair_result.get("status"),
+                            "dft_result_id": dft_result_id,
+                            "finalized": finalized,
+                            "result": final_result,
+                        }
+                    )
+            except Exception as exc:
+                results.append(
+                    {
+                        "issue_id": str(issue.id),
+                        "issue_type": issue.issue_type,
+                        "status": "failed",
+                        "error": str(exc),
+                        "finalized": False,
+                    }
+                )
+
+        status_counts = Counter(str(item.get("status") or "unknown") for item in results)
+        return {
+            "paper_id": paper_id,
+            "requested_count": len(issues),
+            "processed_count": len(results),
+            "finalized_count": sum(1 for item in results if item.get("finalized")),
+            "failed_count": status_counts.get("failed", 0),
+            "status_counts": dict(status_counts),
+            "capability_used": capability_used,
+            "items": results,
+        }
+
+
+def _fast_dft_repair_action(issue: Any) -> tuple[str, dict[str, Any]]:
+    if issue.issue_type == "missing_dft_result":
+        return "create_missing_dft", {}
+    if issue.issue_type in DFTAuditIssueRepairService.UPDATE_ISSUE_TYPES:
+        suggested = issue.suggested_value
+        if isinstance(suggested, dict):
+            return "update_dft_fields", {"fields": suggested}
+        field_by_issue_type = {
+            "wrong_value": "value",
+            "wrong_unit": "unit",
+            "wrong_material": "material_identity",
+            "wrong_adsorbate": "adsorbate",
+            "wrong_reaction_step": "reaction_step",
+            "wrong_property_type": "property_type",
+            "missing_evidence": "evidence_text",
+        }
+        return "update_dft_fields", {"fields": {field_by_issue_type[issue.issue_type]: suggested}}
+    if issue.issue_type == "duplicate_suspected" and isinstance(issue.suggested_value, dict):
+        linked_id = issue.suggested_value.get("dft_result_id") or issue.suggested_value.get("target_id")
+        if linked_id:
+            return "link_existing_duplicate", {"dft_result_id": linked_id}
+    if issue.issue_type == "consensus_ready" and str(issue.target_id or "").lower() != "new":
+        return "verify_existing", {}
+    if issue.issue_type in {"negative_consensus", "source_scope_error", "uncertain"} and str(
+        issue.target_id or ""
+    ).lower() != "new":
+        return "reject_existing", {}
+    return "mark_needs_user_decision", {}
 
 
 @mcp_server.tool(
@@ -862,7 +1025,9 @@ def delete_table(
     name="merge_table",
     description=(
         "Merge a source table object into an already-complete target table. The source "
-        "is deleted; target fields change only when target_updates is explicitly supplied."
+        "is deleted; target fields change only when target_updates is explicitly supplied. "
+        "For the common markdown replacement case, target_markdown_content is accepted as "
+        "an alias for target_updates.markdown_content."
     ),
 )
 def merge_table(
@@ -872,15 +1037,27 @@ def merge_table(
     reason: str,
     evidence_payload: dict[str, Any] | list[Any],
     target_updates: dict[str, Any] | None = None,
+    target_markdown_content: str | None = None,
 ) -> dict[str, Any]:
     auth = require_mcp_capability("review_corrections")
+    resolved_target_updates = dict(target_updates or {})
+    if target_markdown_content is not None:
+        if (
+            "markdown_content" in resolved_target_updates
+            and resolved_target_updates["markdown_content"] != target_markdown_content
+        ):
+            raise ValueError(
+                "merge_table_conflict: target_markdown_content does not match "
+                "target_updates.markdown_content"
+            )
+        resolved_target_updates["markdown_content"] = target_markdown_content
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return TableCurationService(session, reviewer=auth.source_prefix).merge_table(
             paper_id=UUID(paper_id),
             source_table_id=UUID(source_table_id),
             target_table_id=UUID(target_table_id),
-            target_updates=target_updates,
+            target_updates=resolved_target_updates,
             reason=reason,
             evidence_payload=evidence_payload,
         )
@@ -1273,6 +1450,8 @@ def import_analysis(
             source_label=source_label or source,
             raw_text=raw_text,
             raw_payload=raw_payload,
+            source_identity=auth.source_identity,
+            source_identity_verified=True,
         )
         auto_apply_summary = None
         if auto_apply_review_rules:
@@ -1382,6 +1561,39 @@ def apply_analysis_review_rules(
                 for c in candidates
             ],
         }
+
+
+@mcp_server.tool(
+    name="resolve_supplementary_dft_candidate",
+    description=(
+        "Persist the lifecycle outcome for one SI-owned DFT candidate. Use ignored, replaced, written_back, "
+        "or needs_human. replaced/written_back require a canonical main-paper DFT result id."
+    ),
+)
+def resolve_supplementary_dft_candidate(
+    main_paper_id: str,
+    support_candidate_id: str,
+    status: str,
+    reason: str = "",
+    canonical_dft_result_id: str | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability_any("propose_corrections", "review_dft", "repair_dft_issues")
+    if not auth.identity_verified or not str(auth.source_identity or "").strip():
+        raise PermissionError("MCP review identity is not server-authenticated")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        result = SupplementaryDFTLifecycleService(session).resolve(
+            main_paper_id=UUID(main_paper_id),
+            support_candidate_id=UUID(support_candidate_id),
+            status=status,
+            actor=str(auth.source_identity),
+            reason=reason,
+            canonical_dft_result_id=(
+                UUID(canonical_dft_result_id) if canonical_dft_result_id else None
+            ),
+        )
+        session.commit()
+        return result
 
 
 @mcp_server.tool(

@@ -286,7 +286,7 @@ def test_d4_mark_verified_is_the_only_verified_path(tmp_path):
         engine.dispose()
 
 
-def test_d4_missing_exact_locator_blocks_export_and_writing_even_with_review_like_data(tmp_path):
+def test_d4_fast_dft_ignores_missing_locator_but_writing_gate_stays_independent(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -310,7 +310,8 @@ def test_d4_missing_exact_locator_blocks_export_and_writing_even_with_review_lik
             card = PaperQueryService(session).get_paper_detail(paper.id).writing_cards_items[0]
 
             assert export_gate.eligible is False
-            assert "unsafe_locator" in export_gate.reasons
+            assert "unsafe_locator" not in export_gate.reasons
+            assert "missing_material_identity" in export_gate.reasons
             assert card.can_use_for_writing is False
             assert "unsafe_locator" in card.blocked_reasons
     finally:
@@ -362,4 +363,3 @@ def test_d4_exact_locator_and_human_verified_are_required_for_export_and_writing
             assert "insufficient_reliable_core_fields" in card.blocked_reasons
     finally:
         engine.dispose()
-

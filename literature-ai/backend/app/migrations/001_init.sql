@@ -179,6 +179,8 @@ CREATE TABLE external_analysis_runs (
 	paper_id UUID NOT NULL, 
 	source VARCHAR(64) NOT NULL, 
 	source_label VARCHAR(128), 
+	source_identity VARCHAR(160) DEFAULT 'untrusted:external_analysis',
+	source_identity_verified BOOLEAN DEFAULT FALSE NOT NULL,
 	raw_text TEXT, 
 	raw_payload JSONB, 
 	normalized_payload JSONB, 
@@ -446,10 +448,18 @@ CREATE TABLE dft_results (
 	evidence_payload JSONB, 
 	extraction_protocol_version VARCHAR(64), 
 	candidate_identity VARCHAR(64),
+	support_lifecycle_status VARCHAR(32),
+	support_writeback_paper_id UUID,
+	support_writeback_dft_result_id UUID,
+	support_lifecycle_reason TEXT,
+	support_lifecycle_actor VARCHAR(160),
+	support_lifecycle_updated_at TIMESTAMP WITHOUT TIME ZONE,
 	PRIMARY KEY (id), 
 	CONSTRAINT uq_dft_result_candidate_identity UNIQUE (paper_id, candidate_identity),
 	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE, 
-	FOREIGN KEY(catalyst_sample_id) REFERENCES catalyst_samples (id) ON DELETE SET NULL
+	FOREIGN KEY(catalyst_sample_id) REFERENCES catalyst_samples (id) ON DELETE SET NULL,
+	FOREIGN KEY(support_writeback_paper_id) REFERENCES papers (id) ON DELETE SET NULL,
+	FOREIGN KEY(support_writeback_dft_result_id) REFERENCES dft_results (id) ON DELETE SET NULL
 );
 
 

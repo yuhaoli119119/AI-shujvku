@@ -79,9 +79,8 @@
     <header class="page-head">
       <div>
         <h1>DFT 核验中心</h1>
-        <p class="subtitle">只读查看 DFT audit issue 队列、主 AI 修复状态和 repair 审计健康情况。</p>
+        <p class="subtitle">后台诊断只读队列，用于查看 DFT audit issue、修复状态和 repair 审计健康情况；日常主 AI 任务请从审核中心按单篇文献发起。</p>
       </div>
-      <button class="btn local secondary" type="button" id="copyQueueHintBtn">复制主 AI 处理提示</button>
     </header>
 
     <section class="notice-row" aria-label="DFT safety notices">
@@ -162,7 +161,7 @@
         <div class="panel-head"><div class="panel-title">Warnings</div></div>
         <div class="panel-body">
           <div id="warningList" class="warning-list"><div class="empty">暂无 warning。</div></div>
-          <div class="copy-hint" style="margin-top:12px;">下一步：复制 issue_id 给带 <strong>repair_dft_issues</strong> 的 primary repair AI。不要把 repair 输出描述为 human_verified 或 ML_Ready。</div>
+          <div class="copy-hint" style="margin-top:12px;">本页仅供后台诊断和复制单个 issue_id。日常 DFT 主 AI 判断/修复提示词必须回审核中心选择一篇主文献后复制；不要从这里发起全库混合处理。</div>
         </div>
       </aside>
     </section>
@@ -440,18 +439,6 @@
       document.getElementById("issueMeta").textContent = "已复制 issue_id";
     }
 
-    async function copyQueueHint() {
-      const visible = state.filteredIssues || [];
-      const ids = visible.map(item => item.id).filter(Boolean).slice(0, 20);
-      const text = [
-        "请由带 repair_dft_issues 的 DFT Primary Repair AI 处理以下 issue_id。",
-        "注意：repair 后仍不是 human_verified、safe_verified 或 ML_Ready。",
-        ids.join("\n")
-      ].join("\n\n");
-      await navigator.clipboard.writeText(text);
-      document.getElementById("reportMeta").textContent = "已复制主 AI 处理提示";
-    }
-
     function syncUrl() {
       const params = buildReportParams();
       const status = document.getElementById("statusFilter").value;
@@ -462,7 +449,6 @@
     }
 
     document.getElementById("refreshBtn").addEventListener("click", loadData);
-    document.getElementById("copyQueueHintBtn").addEventListener("click", copyQueueHint);
     document.getElementById("issueTypeFilter").addEventListener("change", renderAll);
     document.getElementById("statusFilter").addEventListener("change", loadData);
     document.getElementById("includeClosedInput").addEventListener("change", loadData);

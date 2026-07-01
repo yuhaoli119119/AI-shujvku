@@ -8,7 +8,16 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import DFTResult, EvidenceLocator, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote
+from app.db.models import (
+    DFTResult,
+    EvidenceLocator,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
+    Paper,
+    PaperCorrection,
+    PaperFigure,
+    PaperNote,
+)
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
@@ -274,6 +283,23 @@ class CodexContextService:
         warnings = self._build_warnings(detail, locators, dft_export_readiness)
         locator_status_counts = dict(Counter(item.get("locator_status") or "unknown" for item in locators))
         dft_results = self._dump_items(detail.dft_results_items, max_candidates)
+        dft_review_handoff = self._load_pending_dft_review_handoff(detail.id, limit=max_candidates)
+        linked_supplementary_dft_groups = self._load_linked_supplementary_dft_groups(
+            detail,
+            limit=max_candidates,
+        )
+        if dft_review_handoff["processable_dft_candidate_count"]:
+            warnings.append(
+                {
+                    "code": "pending_dft_review_rules",
+                    "message": (
+                        f"{dft_review_handoff['processable_dft_candidate_count']} processable DFT AI opinions across "
+                        f"{dft_review_handoff['pending_run_count']} run(s) still require apply_analysis_review_rules. "
+                        f"{dft_review_handoff['blocked_ml_predicted_count']} additional ML-predicted value(s) are "
+                        "blocked from DFTResult materialization."
+                    ),
+                }
+            )
         knowledge_candidates = PaperKnowledgeService(self.session).build_candidates(
             detail,
             max_candidates=max_candidates,
@@ -411,6 +437,7 @@ class CodexContextService:
                 "dft_settings": self._dump_items(detail.dft_settings_items, max_candidates),
                 "catalyst_samples": self._dump_catalyst_samples(detail, max_candidates),
                 "dft_results": dft_results,
+                "linked_supplementary_dft_result_groups": linked_supplementary_dft_groups,
                 "electrochemical_performance": self._dump_items(detail.electrochemical_performance_items, max_candidates),
                 "mechanism_claims": self._dump_items(detail.mechanism_claims_items, max_candidates),
                 "writing_cards": self._dump_items(detail.writing_cards_items, max_candidates),
@@ -429,6 +456,7 @@ class CodexContextService:
                 "items": knowledge_candidates,
             },
             "dft_export_readiness": dft_export_readiness,
+            "dft_review_handoff": dft_review_handoff,
             "evidence_locators": {
                 "status_counts": locator_status_counts,
                 "items": locators,
@@ -498,6 +526,162 @@ class CodexContextService:
                 }
             )
         return documents
+
+    def _load_linked_supplementary_dft_groups(
+        self,
+        detail: PaperDetailResponse,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        supplementary_types = {"supplementary", "supplementary_information", "supporting_information", "si"}
+        groups: list[dict[str, Any]] = []
+        seen: set[UUID] = set()
+        for relationship in detail.outgoing_relationships or []:
+            relationship_type = str(relationship.relationship_type or "").strip().lower()
+            related_paper_id = relationship.target_paper_id
+            if relationship_type not in supplementary_types or related_paper_id in seen:
+                continue
+            seen.add(related_paper_id)
+            related_detail = PaperQueryService(self.session).get_paper_detail(related_paper_id)
+            if related_detail is None:
+                continue
+            all_items = related_detail.dft_results_items or []
+            items = self._dump_items(all_items, limit)
+            for item in items:
+                item.update(
+                    {
+                        "record_paper_id": str(related_paper_id),
+                        "source_dft_result_id": str(item.get("id") or ""),
+                        "source_paper_id": str(related_paper_id),
+                        "source_document_type": "supplementary_information",
+                        "related_paper_id": str(related_paper_id),
+                        "read_paper_page_paper_id": str(related_paper_id),
+                        "writeback_paper_id": str(detail.id),
+                        "support_lifecycle_status": item.get("support_lifecycle_status") or "pending",
+                    }
+                )
+            groups.append(
+                {
+                    "related_paper_id": str(related_paper_id),
+                    "related_human_ref": related_detail.paper_code,
+                    "title": related_detail.title,
+                    "source_document_type": "supplementary_information",
+                    "read_paper_page_paper_id": str(related_paper_id),
+                    "writeback_paper_id": str(detail.id),
+                    "candidate_count": len(all_items),
+                    "items_included": len(items),
+                    "truncated": len(all_items) > len(items),
+                    "items": items,
+                    "policy": (
+                        "These are SI-owned parser/system candidates for evidence comparison. "
+                        "New or corrected canonical DFT candidates must be written to writeback_paper_id and carry "
+                        "source_dft_result_id so the SI row can be closed persistently. Rows not written back must be "
+                        "closed as ignored, replaced, or needs_human through resolve_supplementary_dft_candidate."
+                    ),
+                }
+            )
+        return groups
+
+    def _load_pending_dft_review_handoff(self, paper_id: UUID, *, limit: int) -> dict[str, Any]:
+        active_statuses = {"candidate", "pending", "requires_resolution"}
+        rows = self.session.execute(
+            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            .where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+                ExternalAnalysisCandidate.status.in_(active_statuses),
+            )
+            .order_by(ExternalAnalysisRun.created_at.asc(), ExternalAnalysisCandidate.created_at.asc())
+        ).all()
+        pending: list[tuple[ExternalAnalysisCandidate, ExternalAnalysisRun, dict[str, Any]]] = []
+        for candidate, run in rows:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = str(payload.get("target_type") or "").strip().lower()
+            if target_type not in {"dft_result", "dft_results"}:
+                continue
+            decision = str(payload.get("decision") or payload.get("verdict") or "").strip().lower()
+            target_id = str(payload.get("target_id") or "").strip().lower()
+            if decision != "new_candidate" and target_id != "new":
+                continue
+            pending.append((candidate, run, payload))
+
+        runs: dict[str, dict[str, Any]] = {}
+        ml_predicted_count = 0
+        for candidate, run, payload in pending:
+            run_id = str(run.id)
+            corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
+            ml_predicted = payload.get("ml_predicted", corrected.get("ml_predicted"))
+            is_ml_predicted = ml_predicted is True or str(ml_predicted or "").strip().lower() in {"1", "true", "yes"}
+            if is_ml_predicted:
+                ml_predicted_count += 1
+            summary = runs.setdefault(
+                run_id,
+                {
+                    "run_id": run_id,
+                    "source": run.source,
+                    "source_label": run.source_label,
+                    "created_at": run.created_at.isoformat() if run.created_at else None,
+                    "pending_candidate_count": 0,
+                    "ml_predicted_count": 0,
+                    "action_tool": "apply_analysis_review_rules",
+                    "action_scope": "run",
+                },
+            )
+            summary["pending_candidate_count"] += 1
+            if is_ml_predicted:
+                summary["ml_predicted_count"] += 1
+
+        items: list[dict[str, Any]] = []
+        for candidate, run, payload in pending[:limit]:
+            corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
+            ml_predicted = payload.get("ml_predicted", corrected.get("ml_predicted"))
+            is_ml_predicted = ml_predicted is True or str(ml_predicted or "").strip().lower() in {"1", "true", "yes"}
+            items.append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "run_id": str(run.id),
+                    "source": run.source,
+                    "source_label": run.source_label,
+                    "status": candidate.status,
+                    "decision": payload.get("decision") or payload.get("verdict"),
+                    "target_id": payload.get("target_id"),
+                    "field_name": payload.get("field_name"),
+                    "agent_role": payload.get("agent_role"),
+                    "corrected_value": corrected,
+                    "ml_predicted": is_ml_predicted,
+                    "evidence_location": payload.get("evidence_location"),
+                    "reason": payload.get("reason"),
+                    "action_tool": "apply_analysis_review_rules",
+                    "action_scope": "run",
+                }
+            )
+        processable_count = len(pending) - ml_predicted_count
+        return {
+            "state": (
+                "requires_apply_review_rules"
+                if processable_count
+                else "needs_user_decision"
+                if ml_predicted_count
+                else "clear"
+            ),
+            "writeback_paper_id": str(paper_id),
+            "pending_candidate_count": len(pending),
+            "pending_run_count": len(runs),
+            "processable_dft_candidate_count": processable_count,
+            "blocked_ml_predicted_count": ml_predicted_count,
+            "runs": list(runs.values()),
+            "items_included": len(items),
+            "truncated": len(pending) > len(items),
+            "items": items,
+            "required_order": (
+                "Apply every pending run with apply_analysis_review_rules, then reload DFT audit issues and DFT rows."
+                if processable_count
+                else "Keep ML-predicted values out of DFTResult and route them to user-controlled prediction data review."
+                if ml_predicted_count
+                else None
+            ),
+        }
 
     def _load_supplementary_figure_payloads(self, detail: PaperDetailResponse) -> list[dict[str, Any]]:
         supplementary_types = {"supplementary", "supplementary_information", "supporting_information", "si"}

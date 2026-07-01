@@ -277,6 +277,18 @@ class DFTResult(Base):
     evidence_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     extraction_protocol_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     candidate_identity: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    support_lifecycle_status: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
+    support_writeback_paper_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    support_writeback_dft_result_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("dft_results.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    support_lifecycle_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    support_lifecycle_actor: Mapped[str | None] = mapped_column(sa.String(160), nullable=True)
+    support_lifecycle_updated_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=False), nullable=True
+    )
 
     __table_args__ = (
         sa.UniqueConstraint("paper_id", "candidate_identity", name="uq_dft_result_candidate_identity"),
@@ -603,6 +615,16 @@ class ExternalAnalysisRun(Base):
     paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
     source: Mapped[str] = mapped_column(sa.String(64))
     source_label: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    source_identity: Mapped[str | None] = mapped_column(
+        sa.String(160),
+        nullable=True,
+        index=True,
+        default="untrusted:external_analysis",
+        server_default="untrusted:external_analysis",
+    )
+    source_identity_verified: Mapped[bool] = mapped_column(
+        sa.Boolean, default=False, server_default=sa.false(), nullable=False
+    )
     raw_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     raw_payload: Mapped[dict | list | str | None] = mapped_column(json_type(), nullable=True)
     normalized_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)

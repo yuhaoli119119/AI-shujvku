@@ -154,15 +154,16 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert payload["mcp_url"].endswith("/mcp")
     assert payload["cursor_config"]["mcpServers"]["literature-ai"]["command"] in {"npx", "npx.cmd"}
     assert "--header" in payload["cursor_config"]["mcpServers"]["literature-ai"]["args"]
-    assert payload["prompt_schema_version"] == "ide_review_prompt_v8"
+    assert payload["prompt_schema_version"] == "ide_review_prompt_v16"
     by_source = {item["source_prefix"]: item for item in payload["mcp_key_role_examples"]}
     assert by_source["dft_primary_repair"]["capabilities"] == ["read_papers", "repair_dft_issues"]
     assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]
     assert "repair_dft_issues" not in by_source["assigned_dft_audit"]["capabilities"]
     assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
-    assert "dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues" in payload["legacy_english_suggested_prompt"]
-    assert "审核 AI / 普通 IDE AI / propose-only key 不应包含 repair_dft_issues" in payload["legacy_suggested_prompt"]
-    assert "请检查 mcp_capability_warnings" in payload["legacy_suggested_prompt"]
+    assert "repair_dft_audit_issues_batch(auto_finalize=true)" in payload["legacy_english_suggested_prompt"]
+    assert "dedicated repair key is optional" in payload["legacy_english_suggested_prompt"]
+    assert "DFT 快速处理直接复用当前已认证的 DFT 写身份" in payload["legacy_suggested_prompt"]
+    assert "专用修复 key 仅为可选配置" in payload["legacy_suggested_prompt"]
     assert "SRR_LiS" in payload["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["project_library_contexts"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["topic_field_dictionaries"]

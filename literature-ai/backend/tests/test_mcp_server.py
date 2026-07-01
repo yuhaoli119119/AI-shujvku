@@ -35,7 +35,7 @@ from app.db.models import (
 )
 from app.main import app
 from app.mcp.auth import parse_mcp_api_keys, validate_mcp_capability_assignments
-from app.mcp.context import MCPAuthInfo, mcp_auth_context
+from app.mcp.context import MCPAuthInfo, get_mcp_auth, mcp_auth_context
 from app.mcp.server import (
     append_note,
     approve_correction,
@@ -77,7 +77,10 @@ def mcp_test_env(monkeypatch):
             "LITAI_MCP_API_KEYS",
             "claude|Claude Desktop|litmcp_claude|read_papers,append_notes,propose_corrections,request_parse;"
             "dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues;"
-            "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections",
+            "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections;"
+            "ide_ai|IDE AI|litmcp_ide_ai|read_papers,append_notes,propose_corrections,request_parse;"
+            "owner_export|Owner Export|litmcp_owner_export|read_papers,export_data;"
+            "ai_pc_1|AI PC 1|litmcp_ai_pc_1|read_papers,append_notes,propose_corrections,request_parse,review_corrections",
         )
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", tmpdir)
@@ -102,68 +105,28 @@ def mcp_test_env(monkeypatch):
         get_settings.cache_clear()
 
 
-def _auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="claude",
-        display_name="Claude Desktop",
-        capabilities=frozenset({"read_papers", "append_notes", "propose_corrections", "request_parse"}),
-        raw_key="litmcp_claude",
-    )
+def _auth() -> str:
+    return "litmcp_claude"
 
 
-def _ide_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="ide_ai",
-        display_name="IDE AI",
-        capabilities=frozenset({"read_papers", "append_notes", "propose_corrections", "request_parse"}),
-        raw_key="litmcp_ide_ai",
-    )
+def _ide_auth() -> str:
+    return "litmcp_ide_ai"
 
 
-def _export_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="owner_export",
-        display_name="Owner Export",
-        capabilities=frozenset({"read_papers", "export_data"}),
-        raw_key="litmcp_owner_export",
-    )
+def _export_auth() -> str:
+    return "litmcp_owner_export"
 
 
-def _admin_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="admin",
-        display_name="Admin",
-        capabilities=frozenset(
-            {
-                "read_papers",
-                "append_notes",
-                "propose_corrections",
-                "request_parse",
-                "review_corrections",
-            }
-        ),
-        raw_key="litmcp_admin",
-    )
+def _admin_auth() -> str:
+    return "litmcp_admin"
 
 
-def _dft_primary_repair_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="dft_primary_repair",
-        display_name="DFT Primary Repair AI",
-        capabilities=frozenset({"read_papers", "repair_dft_issues"}),
-        raw_key="litmcp_dft_primary_repair",
-    )
+def _dft_primary_repair_auth() -> str:
+    return "litmcp_dft_primary_repair"
 
 
-def _ai_reviewer_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="ai_pc_1",
-        display_name="AI PC 1",
-        capabilities=frozenset(
-            {"read_papers", "append_notes", "propose_corrections", "request_parse", "review_corrections"}
-        ),
-        raw_key="litmcp_ai_pc_1",
-    )
+def _ai_reviewer_auth() -> str:
+    return "litmcp_ai_pc_1"
 
 
 def test_example_mcp_key_split_reserves_repair_for_primary_repair_key(mcp_test_env):
@@ -178,8 +141,30 @@ def test_example_mcp_key_split_reserves_repair_for_primary_repair_key(mcp_test_e
     assert "repair_dft_issues" not in configs["litmcp_claude"].capabilities
     assert "repair_dft_issues" not in configs["litmcp_admin"].capabilities
     assert "propose_corrections" not in configs["litmcp_dft_primary_repair"].capabilities
-    assert "review_dft" not in configs["litmcp_dft_primary_repair"].capabilities
-    assert "review_corrections" not in configs["litmcp_dft_primary_repair"].capabilities
+
+
+def test_in_process_mcp_context_uses_configured_key_identity(mcp_test_env):
+    with mcp_auth_context("litmcp_claude"):
+        auth = get_mcp_auth()
+        assert auth is not None
+        assert auth.source_identity == "mcp:claude"
+        assert auth.identity_verified is True
+
+
+def test_in_process_mcp_context_rejects_direct_identity_injection_even_if_pytest_env_is_spoofed(monkeypatch):
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "spoofed-by-runtime")
+
+    spoofed = MCPAuthInfo(
+        source_prefix="spoofed",
+        display_name="Spoofed",
+        capabilities=frozenset({"read_papers", "repair_dft_issues"}),
+        raw_key="not-a-real-configured-key",
+        source_identity="mcp:spoofed",
+        identity_verified=True,
+    )
+    with pytest.raises(PermissionError, match="Invalid MCP API key"):
+        with mcp_auth_context(spoofed):  # type: ignore[arg-type]
+            pass
 
 
 def test_repair_capability_lint_allows_primary_repair_keys():
@@ -219,7 +204,7 @@ def test_repair_capability_lint_warns_without_raw_key(raw_config, source_prefix,
     assert "litmcp_" not in str(warning)
 
 
-def test_agent_guide_documents_primary_repair_key_split():
+def test_agent_guide_documents_optional_fast_dft_roles():
     import asyncio
 
     from app.api.system import get_agent_guide
@@ -231,8 +216,8 @@ def test_agent_guide_documents_primary_repair_key_split():
     assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]
     assert "repair_dft_issues" not in by_source["assigned_dft_audit"]["capabilities"]
     assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
-    assert "audit AI can create issue/candidate evidence but must not repair" in by_source["assigned_dft_audit"]["purpose"]
-    assert "DFT issue repair remains separate" in by_source["human_reviewer"]["purpose"]
+    assert "same authenticated identity may run the fast processor" in by_source["assigned_dft_audit"]["purpose"]
+    assert "fast DFT processing does not wait for it" in by_source["human_reviewer"]["purpose"]
     assert guide["mcp"]["capability_warnings"] == []
 
 
@@ -936,7 +921,7 @@ def test_mcp_import_analysis_treats_ambiguous_as_manual_dft_decision(mcp_test_en
     assert imported["warnings"] == []
 
 
-def test_mcp_codex_context_and_item_use_compact_detail_query(mcp_test_env, monkeypatch):
+def test_mcp_codex_context_and_item_use_full_candidate_detail_query(mcp_test_env, monkeypatch):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="Compact Codex Context Paper", pdf_path="compact-context.pdf", authors=[])
         session.add(paper)
@@ -973,7 +958,7 @@ def test_mcp_codex_context_and_item_use_compact_detail_query(mcp_test_env, monke
         context = get_codex_context(paper_id=paper_id)
         item = get_codex_item(paper_id=paper_id, item_type="figure", item_id=figure_id)
 
-    assert compact_flags == [True, True]
+    assert compact_flags == [False, False]
     assert len(context["context"]["content"]["sections"]) == 1
     assert item["context"]["item"]["caption"] == "Figure 1. Compact detail figure."
 
@@ -1045,6 +1030,13 @@ def test_mcp_import_analysis_records_dual_ai_dft_reviews_without_auto_apply(mcp_
             source_label="Assigned AI DFT audit A",
             raw_payload=payload,
         )
+        rerun = import_analysis(
+            paper_id=paper_id,
+            source="assigned_dft_audit",
+            source_label="Assigned AI DFT audit A rerun with new timestamp",
+            raw_payload=payload,
+        )
+    with mcp_auth_context(_admin_auth()):
         second = import_analysis(
             paper_id=paper_id,
             source="assigned_dft_audit",
@@ -1053,8 +1045,10 @@ def test_mcp_import_analysis_records_dual_ai_dft_reviews_without_auto_apply(mcp_
         )
 
     assert first["candidate_count"] == 1
+    assert rerun["candidate_count"] == 1
     assert second["candidate_count"] == 1
     assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
+    assert rerun["auto_apply_summary"]["dft_settlement"]["audit_consensus_count"] == 0
     assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 0
     assert second["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
     assert second["auto_apply_summary"]["dft_settlement"]["audit_consensus_count"] == 1
@@ -1062,11 +1056,14 @@ def test_mcp_import_analysis_records_dual_ai_dft_reviews_without_auto_apply(mcp_
     with Session(mcp_test_env["engine"]) as session:
         stored_row = session.get(DFTResult, UUID(row_id))
         candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+        runs = session.query(ExternalAnalysisRun).order_by(ExternalAnalysisRun.created_at.asc()).all()
         reviews = session.query(ExtractionFieldReview).all()
         audit_logs = session.query(AuditLog).filter(AuditLog.action == "verify_dft_result").all()
 
     assert stored_row is not None
     assert stored_row.candidate_status == "system_candidate"
+    assert [run.source_identity for run in runs] == ["mcp:claude", "mcp:claude", "mcp:admin"]
+    assert all(run.source_identity_verified for run in runs)
     assert {candidate.status for candidate in candidates} == {"requires_resolution"}
     assert reviews == []
     assert audit_logs == []
@@ -2249,6 +2246,8 @@ def test_mcp_review_identity_helper_consistency():
         display_name="claude",
         capabilities=frozenset(),
         raw_key="",
+        source_identity="mcp:claude",
+        identity_verified=True,
     )
     reviewer, internal, owners = _mcp_review_identity(None, auth)
     assert reviewer == "claude"

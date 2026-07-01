@@ -420,6 +420,13 @@ class DFTResultReviewService(
         skipped: list[dict[str, Any]] = []
         for rid in result_ids:
             try:
+                existing_reviews = self.session.scalars(
+                    select(ExtractionFieldReview).where(
+                        ExtractionFieldReview.paper_id == paper_id,
+                        ExtractionFieldReview.target_type == "dft_results",
+                        ExtractionFieldReview.target_id == str(rid),
+                    )
+                ).all()
                 result = self.verify_result(
                     paper_id=paper_id,
                     result_id=rid,
@@ -427,6 +434,10 @@ class DFTResultReviewService(
                     reviewer=reviewer,
                     reviewer_note=reviewer_note,
                     field_names=field_names,
+                    expected_write_versions={
+                        review.field_name: review.write_version
+                        for review in existing_reviews
+                    },
                 )
                 verified.append(result)
             except Exception as exc:

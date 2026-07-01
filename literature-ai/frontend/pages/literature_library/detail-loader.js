@@ -402,17 +402,99 @@ async function loadPaperDetail(paperId, options) {
     }
 }
 
+async function ensureCompleteSelectedDftResults() {
+    const detail = state.selectedPaper;
+    const paperId = String(state.selectedPaperId || "");
+    if (!detail || !paperId || hasCompleteDftResults(detail)) return detail;
+    state.dftResultsInflight = state.dftResultsInflight || {};
+    state.dftResultsLoadErrors = state.dftResultsLoadErrors || {};
+    if (state.dftResultsInflight[paperId]) {
+        return state.dftResultsInflight[paperId];
+    }
+    delete state.dftResultsLoadErrors[paperId];
+    const task = (async function() {
+        let existing = Array.isArray(detail.dft_results_items) ? detail.dft_results_items.slice() : [];
+        let page = detail.dft_results_page || {};
+        let total = Number(page.total || (detail.counts && detail.counts.dft_results) || existing.length);
+        let requestCount = 0;
+        while (page.has_more === true || existing.length < total) {
+            requestCount += 1;
+            if (requestCount > 100) {
+                throw new Error("DFT 分页超过安全批次数。");
+            }
+            const nextPage = await fetchJSON(
+                API_BASE + "/" + encodeURIComponent(paperId) +
+                "/dft-results?offset=" + existing.length + "&limit=50"
+            );
+            total = Number(nextPage.total || total);
+            const seen = new Set(existing.map(function(item) { return String(item && item.id || ""); }));
+            const appended = (nextPage.items || []).filter(function(item) {
+                return !seen.has(String(item && item.id || ""));
+            });
+            if (!appended.length && (nextPage.has_more === true || existing.length < total)) {
+                throw new Error("DFT 分页未返回新的记录。");
+            }
+            existing = existing.concat(appended);
+            page = {
+                ...nextPage,
+                offset: 0,
+                returned: existing.length,
+                total: total,
+                has_more: nextPage.has_more === true || existing.length < total,
+            };
+            detail.dft_results_items = existing;
+            detail.dft_results_page = page;
+            if (state.selectedPaperId === paperId) {
+                rerenderSelectedDetail(paperId);
+            }
+        }
+        detail.dft_results_page = {
+            ...page,
+            offset: 0,
+            returned: existing.length,
+            total: total,
+            has_more: false,
+        };
+        cachePaperDetail(detail);
+        return detail;
+    })();
+    state.dftResultsInflight[paperId] = task;
+    rerenderSelectedDetail(paperId);
+    try {
+        return await task;
+    } catch (error) {
+        state.dftResultsLoadErrors[paperId] = error.message || String(error);
+        showToast("完整 DFT 数据加载失败：" + (error.message || error), "error");
+        return detail;
+    } finally {
+        delete state.dftResultsInflight[paperId];
+        if (state.selectedPaperId === paperId) {
+            rerenderSelectedDetail(paperId);
+        }
+    }
+}
+
 function ensureFullPaperDetailForTab(tab) {
     if (!state.selectedPaperId || detailModeForTab(tab) !== "full") return;
-    if (state.selectedPaper && state.selectedPaper._detailMode === "full") return;
+    if (state.selectedPaper && state.selectedPaper._detailMode === "full") {
+        if (tab === "dft") ensureCompleteSelectedDftResults();
+        return;
+    }
     if (state.fullDetailLoadingFor === state.selectedPaperId) return;
     const paperId = state.selectedPaperId;
     state.fullDetailLoadingFor = paperId;
-    loadPaperDetail(paperId, { mode: "full" }).finally(function() {
-        if (state.fullDetailLoadingFor === paperId) {
-            state.fullDetailLoadingFor = null;
-        }
-    });
+    loadPaperDetail(paperId, { mode: "full" })
+        .then(function() {
+            if (tab === "dft" && state.selectedPaperId === paperId) {
+                return ensureCompleteSelectedDftResults();
+            }
+            return null;
+        })
+        .finally(function() {
+            if (state.fullDetailLoadingFor === paperId) {
+                state.fullDetailLoadingFor = null;
+            }
+        });
 }
 
 function rerenderSelectedDetail(paperId) {
@@ -450,6 +532,9 @@ async function refreshSelectedPaperDetail(options) {
         updatedAt: detailResult.updatedAt,
         fromCache: detailResult.fromCache,
     });
+    if (state.currentTab === "dft" && mode === "full") {
+        await ensureCompleteSelectedDftResults();
+    }
     await Promise.all([
         loadEvidenceLocators(paperId, { forceRefresh: shouldForce, silent: true }),
         loadPaperDetailEnrichment(paperId, state.detailLoadToken, { forceRefresh: shouldForce, silent: true }),

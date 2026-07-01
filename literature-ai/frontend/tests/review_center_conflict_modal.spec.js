@@ -11,6 +11,136 @@ function jsonResponse(route, payload) {
 }
 
 test.describe('Review Center Conflict Modal', () => {
+  test('exposes single-paper prompt entrypoints and rejects multi-target copy', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__clipboardText = '';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async text => {
+            window.__clipboardText = text;
+          },
+        },
+      });
+    });
+
+    await page.route('**/api/**', async route => {
+      const url = new URL(route.request().url());
+      const pathname = url.pathname;
+
+      if (pathname === '/api/workbench/review-center') {
+        return jsonResponse(route, {
+          metadata: { returned: 2, quality_counts: { A_text_readable: 2 } },
+          rows: [
+            {
+              paper_id: 'main-paper',
+              paper_code: 'M0001',
+              title: 'Main DFT Paper',
+              year: 2026,
+              journal: 'Journal Main',
+              paper_type: 'research',
+              library_name: 'Default Library',
+              workflow_status: 'Parsed_Material_Ready',
+              pdf_quality_status: 'A_text_readable',
+              figure_count: 2,
+              table_count: 1,
+              supplementary_group: {
+                role: 'main',
+                main_paper_id: 'main-paper',
+                main_paper_code: 'M0001',
+                member_paper_ids: ['main-paper', 'si-paper'],
+                support_papers: [{ paper_id: 'si-paper', paper_code: 'SI0001' }],
+              },
+            },
+            {
+              paper_id: 'si-paper',
+              paper_code: 'SI0001',
+              title: 'Supporting Information',
+              year: 2026,
+              journal: 'Journal Main',
+              paper_type: 'supplementary_information',
+              library_name: 'Default Library',
+              workflow_status: 'Parsed_Material_Ready',
+              pdf_quality_status: 'A_text_readable',
+              figure_count: 3,
+              table_count: 2,
+              supplementary_group: {
+                role: 'supplementary',
+                main_paper_id: 'main-paper',
+                main_paper_code: 'M0001',
+                member_paper_ids: ['main-paper', 'si-paper'],
+              },
+            },
+          ],
+        });
+      }
+
+      if (pathname === '/api/libraries') {
+        return jsonResponse(route, []);
+      }
+
+      if (pathname === '/api/system/agent-guide') {
+        return jsonResponse(route, {
+          prompt_contract: {
+            target_list_token: '{{TARGET_LIST}}',
+            source_label_token: '{{SOURCE_LABEL}}',
+            target_reaction_token: '{{TARGET_REACTION}}',
+            templates: {
+              figure: 'FIGURE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
+              table: 'TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
+              dft: 'DFT TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}\n{{TARGET_REACTION}}',
+              dft_primary: 'DFT PRIMARY TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
+            },
+            composite_templates: {},
+            reaction_profile_templates: {},
+            project_library_contexts: {},
+            project_library_prompt_templates: {},
+          },
+        });
+      }
+
+      return jsonResponse(route, {});
+    });
+
+    await page.goto(`${BASE_URL}/pages/review_center/index.html?paper_id=main-paper`);
+
+    const promptSelect = page.locator('#promptCopySelect');
+    await expect(promptSelect).toContainText('主文图片审核提示词');
+    await expect(promptSelect).toContainText('支撑文献图片审核提示词');
+    await expect(promptSelect).toContainText('表格审核提示词');
+    await expect(promptSelect).toContainText('DFT 普通 AI 审核提示词');
+    await expect(promptSelect).toContainText('DFT 主 AI 判断/修复提示词');
+    await expect(promptSelect).not.toContainText('图表指令');
+
+    const rowChecks = page.locator('#rows input[type="checkbox"]');
+    await expect(rowChecks).toHaveCount(2);
+    await rowChecks.nth(0).check();
+    await rowChecks.nth(1).check();
+    await page.selectOption('#promptCopySelect', 'dft');
+    await expect(page.locator('#toast')).toContainText('一次只能选择一个目标');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toBe('');
+
+    await rowChecks.nth(1).uncheck();
+    await page.selectOption('#promptCopySelect', 'dft');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('DFT TEMPLATE');
+    const dftPrompt = await page.evaluate(() => window.__clipboardText);
+    expect(dftPrompt).toContain('paper_id: main-paper');
+    expect(dftPrompt).toContain('role: main_paper');
+    expect(dftPrompt).toContain('DFT 普通 AI 审核提示词');
+
+    await rowChecks.nth(0).uncheck();
+    await rowChecks.nth(1).check();
+    await page.selectOption('#promptCopySelect', 'table');
+    await expect(page.locator('#toast')).toContainText('只能选择主文献');
+
+    await page.selectOption('#promptCopySelect', 'support_figure');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('FIGURE TEMPLATE');
+    const supportPrompt = await page.evaluate(() => window.__clipboardText);
+    expect(supportPrompt).toContain('paper_id: si-paper');
+    expect(supportPrompt).toContain('role: supplementary_information');
+    expect(supportPrompt).toContain('支撑文献图片审核提示词');
+  });
+
   test('links grouped conflicts to read-only evidence preview', async ({ page }) => {
     const writeCalls = [];
 
@@ -288,8 +418,12 @@ test.describe('Review Center Conflict Modal', () => {
 
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
 
-    await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveCount(0);
-    await expect(page.locator('#promptCopySelect')).not.toContainText('DFT 指令');
+    await expect(page.locator('#promptCopySelect')).toContainText('主文图片审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('支撑文献图片审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('表格审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('DFT 普通 AI 审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('DFT 主 AI 判断/修复提示词');
+    await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');
     const rows = page.locator('#rows tr');
     await expect(rows).toHaveCount(2);
 

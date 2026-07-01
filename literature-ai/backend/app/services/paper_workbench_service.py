@@ -37,6 +37,7 @@ from app.services.paper_workbench_review_center import PaperWorkbenchReviewCente
 from app.services.paper_workbench_workspace import PaperWorkbenchWorkspaceMixin
 from app.services.review_adjudication_service import ReviewAdjudicationService
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.services.supplementary_dft_lifecycle_service import SupplementaryDFTLifecycleService
 from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.workbench_status import (
     WORKBENCH_SCHEMA_VERSION,
@@ -260,6 +261,15 @@ class PaperWorkbenchService(
             group_main_by_paper[support_id] = main_id
             support_ids_by_main[main_id].add(support_id)
             related_paper_ids.update({main_id, support_id})
+        initialized_support_lifecycle_count = SupplementaryDFTLifecycleService(self.session).initialize_pending(
+            main_id_by_support_id={
+                support_id: main_id
+                for main_id, support_ids in support_ids_by_main.items()
+                for support_id in support_ids
+            }
+        )
+        if initialized_support_lifecycle_count:
+            self.session.commit()
         related_paper_meta: dict[UUID, dict[str, Any]] = {}
         if related_paper_ids:
             for related in self.session.execute(
@@ -272,6 +282,9 @@ class PaperWorkbenchService(
                     "paper_type": related.paper_type,
                 }
         group_dft_status_counts_by_paper: dict[UUID, dict[str, int]] = {paper_id: {} for paper_id in related_paper_ids}
+        group_dft_lifecycle_counts_by_paper: dict[UUID, dict[str, int]] = {
+            paper_id: {} for paper_id in related_paper_ids
+        }
         if related_paper_ids:
             for paper_id, candidate_status, count in self.session.execute(
                 select(
@@ -284,6 +297,21 @@ class PaperWorkbenchService(
             ).all():
                 group_dft_status_counts_by_paper.setdefault(paper_id, {})[
                     str(candidate_status or "system_candidate")
+                ] = int(count or 0)
+            for paper_id, lifecycle_status, count in self.session.execute(
+                select(
+                    DFTResult.paper_id,
+                    DFTResult.support_lifecycle_status,
+                    func.count(DFTResult.id),
+                )
+                .where(
+                    DFTResult.paper_id.in_(related_paper_ids),
+                    DFTResult.support_lifecycle_status.is_not(None),
+                )
+                .group_by(DFTResult.paper_id, DFTResult.support_lifecycle_status)
+            ).all():
+                group_dft_lifecycle_counts_by_paper.setdefault(paper_id, {})[
+                    str(lifecycle_status or "pending")
                 ] = int(count or 0)
         rows = []
         status_counts: Counter[str] = Counter()
@@ -404,6 +432,7 @@ class PaperWorkbenchService(
         candidates_by_paper: dict[UUID, list[ExternalAnalysisCandidate]] = {paper_id: [] for paper_id in paper_ids}
         external_audit_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
         object_review_audit_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
+        dft_object_review_audit_count_by_paper: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
         if summary_only:
             candidate_count_rows = (
                 self.session.execute(
@@ -431,6 +460,23 @@ class PaperWorkbenchService(
                     external_audit_count_by_paper[paper_id] = int(count or 0)
                 elif candidate_type == "object_review_audit":
                     object_review_audit_count_by_paper[paper_id] = int(count or 0)
+            dft_object_review_rows = (
+                self.session.execute(
+                    select(
+                        ExternalAnalysisCandidate.paper_id,
+                        ExternalAnalysisCandidate.normalized_payload,
+                    )
+                    .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
+                    .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
+                ).all()
+                if paper_ids
+                else []
+            )
+            for paper_id, payload in dft_object_review_rows:
+                if self._is_dft_object_review_payload(payload):
+                    dft_object_review_audit_count_by_paper[paper_id] = (
+                        dft_object_review_audit_count_by_paper.get(paper_id, 0) + 1
+                    )
         else:
             candidate_types = {"external_audit_opinion", "object_review_audit"}
             for candidate in (
@@ -553,38 +599,42 @@ class PaperWorkbenchService(
                 )
             object_review_source_counts: Counter[str] = Counter()
             object_review_audits: list[dict[str, Any]] = []
+            dft_object_review_source_counts: Counter[str] = Counter()
+            dft_object_review_audits: list[dict[str, Any]] = []
             for candidate in object_review_candidates:
                 payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
                 source = str(payload.get("source") or "unknown")
                 object_review_source_counts[source] += 1
-                if len(object_review_audits) >= 5:
-                    continue
-                object_review_audits.append(
-                    {
-                        "candidate_id": str(candidate.id),
-                        "candidate_type": candidate.candidate_type,
-                        "status": candidate.status,
-                        "target_type": payload.get("target_type"),
-                        "target_id": payload.get("target_id"),
-                        "field_name": payload.get("field_name"),
-                        "source": source,
-                        "source_label": payload.get("source_label"),
-                        "agent_role": payload.get("agent_role"),
-                        "model_name": payload.get("model_name"),
-                        "decision": payload.get("decision") or payload.get("verdict"),
-                        "recommended_action": payload.get("recommended_action"),
-                        "verification_status": payload.get("verification_status", "unverified"),
-                        "confidence": (
-                            payload.get("confidence")
-                            if payload.get("confidence") is not None
-                            else candidate.confidence
-                        ),
-                        "reason": payload.get("reason") or payload.get("reviewer_note") or payload.get("summary"),
-                        "evidence_checked": payload.get("evidence_checked"),
-                        "evidence_location": payload.get("evidence_location"),
-                        "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
-                    }
-                )
+                audit_payload = {
+                    "candidate_id": str(candidate.id),
+                    "candidate_type": candidate.candidate_type,
+                    "status": candidate.status,
+                    "target_type": payload.get("target_type"),
+                    "target_id": payload.get("target_id"),
+                    "field_name": payload.get("field_name"),
+                    "source": source,
+                    "source_label": payload.get("source_label"),
+                    "agent_role": payload.get("agent_role"),
+                    "model_name": payload.get("model_name"),
+                    "decision": payload.get("decision") or payload.get("verdict"),
+                    "recommended_action": payload.get("recommended_action"),
+                    "verification_status": payload.get("verification_status", "unverified"),
+                    "confidence": (
+                        payload.get("confidence")
+                        if payload.get("confidence") is not None
+                        else candidate.confidence
+                    ),
+                    "reason": payload.get("reason") or payload.get("reviewer_note") or payload.get("summary"),
+                    "evidence_checked": payload.get("evidence_checked"),
+                    "evidence_location": payload.get("evidence_location"),
+                    "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+                }
+                if len(object_review_audits) < 5:
+                    object_review_audits.append(audit_payload)
+                if self._is_dft_object_review_payload(payload):
+                    dft_object_review_source_counts[source] += 1
+                    if len(dft_object_review_audits) < 5:
+                        dft_object_review_audits.append(audit_payload)
             latest_notes = [
                 {
                     "id": str(note.id),
@@ -606,6 +656,17 @@ class PaperWorkbenchService(
                 object_review_audit_count_by_paper.get(paper.id, 0)
                 if summary_only
                 else len(object_review_candidates)
+            )
+            dft_object_review_audit_count = (
+                dft_object_review_audit_count_by_paper.get(paper.id, 0)
+                if summary_only
+                else len(
+                    [
+                        candidate
+                        for candidate in object_review_candidates
+                        if self._is_dft_object_review_payload(candidate.normalized_payload)
+                    ]
+                )
             )
             paper_note_count = (
                 paper_note_count_by_paper.get(paper.id, 0)
@@ -682,6 +743,7 @@ class PaperWorkbenchService(
                 support_ids_by_main=support_ids_by_main,
                 related_paper_meta=related_paper_meta,
                 dft_status_counts_by_paper=group_dft_status_counts_by_paper,
+                dft_lifecycle_counts_by_paper=group_dft_lifecycle_counts_by_paper,
             )
             has_parsed_content = bool(
                 paper.abstract
@@ -744,6 +806,9 @@ class PaperWorkbenchService(
                     "object_review_audit_count": object_review_audit_count,
                     "object_review_audit_source_counts": dict(sorted(object_review_source_counts.items())),
                     "object_review_audits": object_review_audits,
+                    "dft_object_review_audit_count": dft_object_review_audit_count,
+                    "dft_object_review_audit_source_counts": dict(sorted(dft_object_review_source_counts.items())),
+                    "dft_object_review_audits": dft_object_review_audits,
                     "paper_note_count": paper_note_count,
                     "latest_paper_notes": latest_notes,
                     "review_conflict_count": conflict_counts.get(str(paper.id), 0),

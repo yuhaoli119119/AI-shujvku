@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, EvidenceSpan
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
+from app.services.dft_material_binding_service import DFTMaterialBindingService
 from app.services.dft_rescan_policy import build_dft_dedupe_signature, normalize_source_document_type
 from app.utils.evidence_anchors import has_evidence_anchor
 
@@ -186,6 +187,10 @@ class DFTAuditIssueRepairService:
             evidence=evidence,
         )
         if existing is not None:
+            material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
+                row=existing,
+                material_identity=suggested["material_identity"],
+            )
             self._bind_missing_issue_to_result(
                 issue,
                 row=existing,
@@ -196,7 +201,8 @@ class DFTAuditIssueRepairService:
                 "status": "linked_existing",
                 "issue_id": str(issue.id),
                 "dft_result_id": str(existing.id),
-                "changed_fields": [],
+                "changed_fields": ["catalyst_sample_id"] if material_binding["status"] == "bound" else [],
+                "material_binding": material_binding,
                 "writes_final_truth": False,
             }
         sample = self._get_or_create_catalyst_sample(issue.paper_id, suggested["material_identity"])
@@ -648,16 +654,10 @@ class DFTAuditIssueRepairService:
         return self._first_text(evidence.get("material_identity"), evidence.get("material"), evidence.get("catalyst"))
 
     def _get_or_create_catalyst_sample(self, paper_id: UUID, material_identity: Any) -> CatalystSample:
-        name = self._first_text(material_identity)
-        if not name:
-            raise ValueError("material_identity is required.")
-        rows = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
-        for row in rows:
-            if str(row.name or "").strip().lower() == name.lower():
-                return row
-        sample = CatalystSample(paper_id=paper_id, name=name, catalyst_type="unknown")
-        self.session.add(sample)
-        self.session.flush()
+        sample, _created = DFTMaterialBindingService(self.session).resolve_or_create_sample(
+            paper_id=paper_id,
+            material_identity=material_identity,
+        )
         return sample
 
     def _candidate_identity_for_issue(self, issue: DFTAuditIssue, suggested: dict[str, Any], evidence: dict[str, Any]) -> str:

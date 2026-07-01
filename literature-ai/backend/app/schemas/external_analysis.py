@@ -12,9 +12,12 @@ class ExternalAnalysisImportRequest(BaseModel):
     source: str = Field(..., description="Source system, e.g. chatgpt, claude_web, manual")
     source_label: str | None = Field(default=None, description="Optional human-readable source label")
     raw_text: str | None = None
-    auto_apply_review_rules: bool = Field(
-        default=False,
-        description="When True, immediately try to apply the minimal IDE-AI review rules after import.",
+    auto_apply_review_rules: bool | None = Field(
+        default=None,
+        description=(
+            "When True, immediately apply IDE-AI review rules; when False, explicitly defer them. "
+            "When omitted, DFT object-review imports apply automatically so AI opinions cannot silently stall."
+        ),
     )
     reviewer: str | None = Field(
         default=None,
@@ -135,6 +138,8 @@ class ExternalAnalysisRunResponse(BaseModel):
     paper_id: UUID
     source: str
     source_label: str | None = None
+    source_identity: str | None = None
+    source_identity_verified: bool = False
     raw_text: str | None = None
     raw_payload: Any = None
     normalized_payload: Any = None

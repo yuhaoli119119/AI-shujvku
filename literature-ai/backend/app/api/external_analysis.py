@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.api.settings import sync_writer_settings_from_session
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
+from app.mcp.auth import get_optional_request_mcp_auth
+from app.mcp.context import MCPAuthInfo
 from app.schemas.api import InternalAIParseRequest, InternalAIParseResponse
 from app.schemas.external_analysis import (
     ExternalAnalysisApplyReviewRulesRequest,
@@ -18,6 +20,7 @@ from app.schemas.external_analysis import (
     ExternalAnalysisRunResponse,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.external_analysis_identity import UNTRUSTED_HTTP_SOURCE_IDENTITY
 
 router = APIRouter()
 
@@ -47,10 +50,29 @@ def _candidate_action(candidate) -> tuple[str, str]:
     return "readonly", "candidate"
 
 
-def _serialize_run(service: ExternalAnalysisService, run) -> ExternalAnalysisRunResponse:
+def _contains_dft_object_reviews(candidates) -> bool:
+    for candidate in candidates:
+        if str(candidate.candidate_type or "").strip().lower() != "object_review_audit":
+            continue
+        payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+        if str(payload.get("target_type") or "").strip().lower() in {"dft_result", "dft_results"}:
+            return True
+    return False
+
+
+def _serialize_run(
+    service: ExternalAnalysisService,
+    run,
+    *,
+    auto_apply_summary: dict | None = None,
+) -> ExternalAnalysisRunResponse:
     base = ExternalAnalysisRunResponse.model_validate(run).model_dump(exclude={"candidates", "warnings"})
     candidates = service.list_candidates(run.id)
-    warnings = service.diagnose_import_warnings(run, candidates=candidates)
+    warnings = service.diagnose_import_warnings(
+        run,
+        candidates=candidates,
+        auto_apply_summary=auto_apply_summary,
+    )
     return ExternalAnalysisRunResponse(
         **{**base, "created_at": _as_utc(run.created_at)},
         candidates=[
@@ -70,24 +92,42 @@ async def import_external_analysis(
     payload: ExternalAnalysisImportRequest,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
+    auth: MCPAuthInfo | None = Depends(get_optional_request_mcp_auth),
 ) -> ExternalAnalysisRunResponse:
     try:
         effective_reviewer = (
             str(payload.reviewer or payload.source_label or payload.source or "ide_ai").strip() or "ide_ai"
         )
         service = ExternalAnalysisService(session=session, settings=settings)
+        identity_verified = bool(
+            auth
+            and auth.identity_verified
+            and auth.source_identity
+            and "propose_corrections" in auth.capabilities
+        )
         run = service.import_run(
             paper_id=payload.paper_id,
             source=payload.source,
             source_label=payload.source_label,
             raw_text=payload.raw_text,
             raw_payload=payload.raw_payload,
+            source_identity=(
+                str(auth.source_identity)
+                if identity_verified
+                else UNTRUSTED_HTTP_SOURCE_IDENTITY
+            ),
+            source_identity_verified=identity_verified,
         )
-        if payload.auto_apply_review_rules:
+        imported_candidates = service.list_candidates(run.id)
+        should_apply_review_rules = payload.auto_apply_review_rules
+        if should_apply_review_rules is None:
+            should_apply_review_rules = _contains_dft_object_reviews(imported_candidates)
+        auto_apply_summary = None
+        if should_apply_review_rules:
             write_lock_tokens = [*payload.write_lock_tokens]
             if payload.write_lock_token:
                 write_lock_tokens.append(payload.write_lock_token)
-            service.apply_review_rules_for_run(
+            auto_apply_summary = service.apply_review_rules_for_run(
                 run.id,
                 reviewer=effective_reviewer,
                 write_lock_tokens=write_lock_tokens or None,
@@ -96,7 +136,7 @@ async def import_external_analysis(
                 lock_meta_source="http_import_analysis",
             )
         session.commit()
-        return _serialize_run(service, run)
+        return _serialize_run(service, run, auto_apply_summary=auto_apply_summary)
     except ValueError as exc:
         session.rollback()
         status_code = 409 if str(exc).startswith(("module_write_lock_required", "module_write_lock_conflict")) else 400

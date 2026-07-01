@@ -86,7 +86,7 @@ test('renders DFT audit report summary and issue list', async ({ page }) => {
   await expect(page.locator('#issueList')).toContainText('sources 2');
 });
 
-test('copies serializer ids with real newlines and keeps API access readonly', async ({ page }) => {
+test('copies individual issue ids and keeps API access readonly', async ({ page }) => {
   const requests = [];
   page.on('request', request => {
     if (new URL(request.url()).pathname.startsWith('/api/')) {
@@ -119,14 +119,8 @@ test('copies serializer ids with real newlines and keeps API access readonly', a
   await expect.poll(() => page.evaluate(() => window.__clipboardText))
     .toBe('11111111-1111-4111-8111-111111111111');
 
-  await page.getByRole('button', { name: '复制主 AI 处理提示' }).click();
-  const queueText = await page.evaluate(() => window.__clipboardText);
-  expect(queueText).toContain('11111111-1111-4111-8111-111111111111');
-  expect(queueText).toContain('22222222-2222-4222-8222-222222222222');
-  expect(queueText).toContain('\n');
-  expect(queueText).not.toContain('\\n');
-  expect(queueText.split('\n')).toContain('11111111-1111-4111-8111-111111111111');
-  expect(queueText.split('\n')).toContain('22222222-2222-4222-8222-222222222222');
+  await expect(page.getByRole('button', { name: '复制主 AI 处理提示' })).toHaveCount(0);
+  await expect(page.locator('body')).toContainText('日常 DFT 主 AI 判断/修复提示词必须回审核中心选择一篇主文献后复制');
 
   expect(requests).toHaveLength(2);
   expect(requests.every(request => request.method === 'GET')).toBe(true);

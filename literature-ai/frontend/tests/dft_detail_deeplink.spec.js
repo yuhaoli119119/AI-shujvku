@@ -153,7 +153,7 @@ test('paper detail edits one DFT row through the audited manual update API', asy
   await expect(page.locator('#dftEditOverlay')).toBeHidden();
 });
 
-test('paper detail starts light and paginates DFT results in batches of 50', async ({ page }) => {
+test('paper detail starts light and automatically loads the complete DFT collection', async ({ page }) => {
   const allItems = Array.from({ length: 60 }, (_, index) => ({
     id: `dft-${index + 1}`,
     property_type: 'adsorption_energy',
@@ -174,9 +174,10 @@ test('paper detail starts light and paginates DFT results in batches of 50', asy
     dft_results_page: { offset: 0, limit: 50, returned: 50, total: 60, has_more: true },
   };
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
-  await page.route('**/api/**', route => {
+  await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/papers/paper-1/dft-results') {
+      await new Promise(resolve => setTimeout(resolve, 250));
       return jsonResponse(route, {
         paper_id: 'paper-1',
         items: allItems.slice(50),
@@ -197,11 +198,11 @@ test('paper detail starts light and paginates DFT results in batches of 50', asy
   await page.goto(`${BASE_URL}/pages/paper_detail/index.html?paper_id=paper-1`);
   await expect(page.locator('#dftResults [data-collection="dft_results"]')).toHaveCount(0);
   await page.getByRole('button', { name: 'DFT 候选与性能' }).click();
-  await expect(page.locator('#dftResults [data-collection="dft_results"]')).toHaveCount(50);
-  await expect(page.locator('[data-role="dft-pagination"]')).toContainText('已加载 50 / 60 条');
-  await page.locator('[data-role="load-more-dft"]').click();
+  await expect(page.locator('[data-role="dft-pagination"]')).toContainText('正在加载完整 DFT 数据 50 / 60 条');
+  await expect(page.locator('#dftResults [data-collection="dft_results"]')).toHaveCount(0);
   await expect(page.locator('#dftResults [data-collection="dft_results"]')).toHaveCount(60);
   await expect(page.locator('[data-role="load-more-dft"]')).toHaveCount(0);
+  await expect(page.locator('[data-role="dft-pagination"]')).toHaveCount(0);
 });
 
 test('DFT deep link fetches a target outside the first server page', async ({ page }) => {
@@ -209,6 +210,12 @@ test('DFT deep link fetches a target outside the first server page', async ({ pa
     id: `dft-${index + 1}`,
     property_type: 'adsorption_energy',
     value: -index / 10,
+    unit: 'eV',
+  }));
+  const remainingPage = Array.from({ length: 10 }, (_, index) => ({
+    id: `dft-${index + 51}`,
+    property_type: 'adsorption_energy',
+    value: -(index + 50) / 10,
     unit: 'eV',
   }));
   const lightPaper = {
@@ -225,6 +232,17 @@ test('DFT deep link fetches a target outside the first server page', async ({ pa
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
+    if (url.pathname === '/api/papers/paper-1/dft-results' && !url.searchParams.get('result_id')) {
+      return jsonResponse(route, {
+        paper_id: 'paper-1',
+        items: remainingPage,
+        offset: 50,
+        limit: 50,
+        returned: 10,
+        total: 60,
+        has_more: false,
+      });
+    }
     if (url.pathname === '/api/papers/paper-1/dft-results' && url.searchParams.get('result_id') === 'dft-55') {
       return jsonResponse(route, {
         items: [{ id: 'dft-55', property_type: 'adsorption_energy', value: -5.5, unit: 'eV' }],
@@ -241,5 +259,5 @@ test('DFT deep link fetches a target outside the first server page', async ({ pa
 
   await page.goto(`${BASE_URL}/pages/paper_detail/index.html?paper_id=paper-1&tab=dft&target_type=dft_results&target_id=dft-55`);
   await expect(page.locator('#dftResults [data-record-id="dft-55"]')).toHaveClass(/deep-link-target/);
-  await expect(page.locator('#dftResults [data-collection="dft_results"]')).toHaveCount(51);
+  await expect(page.locator('#dftResults [data-collection="dft_results"]')).toHaveCount(60);
 });

@@ -279,7 +279,9 @@
       deepLink: {},
       currentTab: "summary",
       fullDetailLoaded: false,
-      fullDetailPromise: null
+      fullDetailPromise: null,
+      dftResultsPromise: null,
+      dftResultsError: null
     };
 
     function esc(value) {
@@ -647,7 +649,18 @@
       return candidateStatus === "ml_ready" || workflowState === "exportable";
     }
 
+    function hasCompleteDftResultCollection() {
+      const paper = state.paper || {};
+      const page = paper.dft_results_page || {};
+      const loaded = Array.isArray(paper.dft_results_items) ? paper.dft_results_items.length : 0;
+      const total = Number(page.total || (paper.counts && paper.counts.dft_results) || loaded);
+      return page.has_more !== true && loaded >= total;
+    }
+
     function renderDftCompactCollection(items) {
+      if (!hasCompleteDftResultCollection()) {
+        return renderDftPagination();
+      }
       const readyCount = items.filter(isDftItemReady).length;
       const reviewedCount = items.filter(item => Number(item && item.object_review_audit_count || 0) > 0).length;
       const conflictCount = items.filter(item => Number(item && item.conflict_count || 0) > 0).length;
@@ -669,30 +682,84 @@
       const page = state.paper && state.paper.dft_results_page || {};
       const total = Number(page.total || (state.paper && state.paper.counts && state.paper.counts.dft_results) || 0);
       const loaded = (state.paper && state.paper.dft_results_items || []).length;
-      if (!page.has_more && loaded >= total) return "";
+      if (hasCompleteDftResultCollection()) return "";
       return `<div class="dft-pagination" data-role="dft-pagination">
-        <span>已加载 ${loaded} / ${total} 条</span>
-        <button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">加载下一页</button>
+        <span>${state.dftResultsError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据"} ${loaded} / ${total} 条</span>
+        ${state.dftResultsError
+          ? '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">重新加载完整数据</button>'
+          : (state.dftResultsPromise ? "" : '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">立即加载完整数据</button>')}
       </div>`;
     }
 
-    async function loadMoreDftResults(button) {
+    async function ensureCompleteDftResults() {
       if (!state.paper || !state.paperId) return;
-      const existing = state.paper.dft_results_items || [];
-      if (button) button.disabled = true;
+      if (hasCompleteDftResultCollection()) return state.paper;
+      if (state.dftResultsPromise) return state.dftResultsPromise;
+      state.dftResultsError = null;
+      const task = (async () => {
+        let existing = Array.isArray(state.paper.dft_results_items)
+          ? state.paper.dft_results_items.slice()
+          : [];
+        let page = state.paper.dft_results_page || {};
+        let total = Number(page.total || state.paper.counts?.dft_results || existing.length);
+        let requestCount = 0;
+        while (page.has_more === true || existing.length < total) {
+          requestCount += 1;
+          if (requestCount > 100) throw new Error("DFT 分页超过安全批次数。");
+          const nextPage = await fetchJSON(
+            `${API_BASE}/${encodeURIComponent(state.paperId)}/dft-results?offset=${existing.length}&limit=50`
+          );
+          total = Number(nextPage.total || total);
+          const seen = new Set(existing.map(item => String(item && item.id || "")));
+          const appended = (nextPage.items || []).filter(item => !seen.has(String(item && item.id || "")));
+          if (!appended.length && (nextPage.has_more === true || existing.length < total)) {
+            throw new Error("DFT 分页未返回新的记录。");
+          }
+          existing = existing.concat(appended);
+          page = {
+            ...nextPage,
+            offset: 0,
+            returned: existing.length,
+            total,
+            has_more: nextPage.has_more === true || existing.length < total
+          };
+          state.paper.dft_results_items = existing;
+          state.paper.dft_results_page = page;
+          document.getElementById("dftResults").innerHTML =
+            deepLinkIssueContextHtml() +
+            renderStructuredCollection(existing, "暂无 DFT 候选结果。", { collection: "dft_results" });
+        }
+        state.paper.dft_results_page = {
+          ...page,
+          offset: 0,
+          returned: existing.length,
+          total,
+          has_more: false
+        };
+        return state.paper;
+      })();
+      state.dftResultsPromise = task;
+      document.getElementById("dftResults").innerHTML =
+        deepLinkIssueContextHtml() +
+        renderStructuredCollection(state.paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
       try {
-        const page = await fetchJSON(
-          `${API_BASE}/${encodeURIComponent(state.paperId)}/dft-results?offset=${existing.length}&limit=50`
-        );
-        const seen = new Set(existing.map(item => String(item.id || "")));
-        const appended = (page.items || []).filter(item => !seen.has(String(item.id || "")));
-        state.paper.dft_results_items = existing.concat(appended);
-        state.paper.dft_results_page = page;
+        return await task;
+      } catch (error) {
+        state.dftResultsError = error.message || String(error);
+        showToast("完整 DFT 数据加载失败：" + state.dftResultsError);
+        return state.paper;
+      } finally {
+        state.dftResultsPromise = null;
         document.getElementById("dftResults").innerHTML =
           deepLinkIssueContextHtml() +
-          renderStructuredCollection(state.paper.dft_results_items, "暂无 DFT 候选结果。", { collection: "dft_results" });
-      } catch (error) {
-        showToast("DFT 下一页加载失败：" + error.message);
+          renderStructuredCollection(state.paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
+      }
+    }
+
+    async function loadMoreDftResults(button) {
+      if (button) button.disabled = true;
+      try {
+        await ensureCompleteDftResults();
       } finally {
         if (button) button.disabled = false;
       }
@@ -1149,12 +1216,20 @@
     }
 
     async function ensureFullDetail(tab) {
-      if (!state.paperId || tab === "summary" || state.fullDetailLoaded) return;
+      if (!state.paperId || tab === "summary") return;
+      if (state.fullDetailLoaded) {
+        if (tab === "dft") await ensureCompleteDftResults();
+        return;
+      }
       if (!state.fullDetailPromise) {
         state.fullDetailPromise = fetchJSON(`${API_BASE}/${state.paperId}?mode=full`)
           .then(async detail => {
             state.paper = detail;
             state.fullDetailLoaded = true;
+            renderPaperDetails();
+            if (tab === "dft") {
+              await ensureCompleteDftResults();
+            }
             const link = state.deepLink || {};
             const hasTarget = (detail.dft_results_items || []).some(
               item => String(item.id || "") === String(link.targetId || "")

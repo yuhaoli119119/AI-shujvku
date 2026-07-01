@@ -455,6 +455,8 @@ def is_export_eligible_extraction(
         borrowed_supporting_reference=is_borrowed_supporting_reference(row),
     )
     is_dft_target = _normalized(target_type) in {_normalized(value) for value in _target_type_values("dft_results")}
+    if is_dft_target and has_evidence_text:
+        reasons = tuple(reason for reason in reasons if reason not in {"missing_evidence", "unsafe_locator"})
     if is_dft_target and _normalized(getattr(row, "candidate_status", None)) == "rejected" and "target_rejected" not in reasons:
         reasons = (*reasons, "target_rejected")
     review_status = safe_review.reviewer_status if safe_review is not None else (
@@ -577,6 +579,8 @@ def bulk_export_gate_results(
             ),
             borrowed_supporting_reference=is_dft_target and is_borrowed_supporting_reference(row),
         )
+        if is_dft_target and has_required_evidence_text(row):
+            reasons = tuple(reason for reason in reasons if reason not in {"missing_evidence", "unsafe_locator"})
         if is_dft_target and _normalized(getattr(row, "candidate_status", None)) == "rejected" and "target_rejected" not in reasons:
             reasons = (*reasons, "target_rejected")
         review_status = safe_review.reviewer_status if safe_review is not None else (

@@ -23,6 +23,10 @@ from app.db.models import (
     utcnow,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.external_analysis_identity import (
+    UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+    review_source_identity,
+)
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -91,6 +95,20 @@ class VerificationSessionService(
         self.session = session
         self.settings = settings
         self.conflicts = ReviewConflictAggregationService(session)
+
+    @staticmethod
+    def _is_dft_scoped_external_run(run: ExternalAnalysisRun | None, payload: dict[str, Any] | None = None) -> bool:
+        payload = payload or {}
+        parts = [
+            getattr(run, "source", None),
+            getattr(run, "source_label", None),
+            payload.get("source"),
+            payload.get("source_label"),
+            payload.get("agent_role"),
+            payload.get("adjudication_scope"),
+        ]
+        text = " ".join(str(part or "") for part in parts).casefold()
+        return "dft" in text
 
     def create_session(
         self,
@@ -839,6 +857,19 @@ class VerificationSessionService(
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            run = self.session.get(ExternalAnalysisRun, candidate.run_id)
+            if self._is_dft_scoped_external_run(run, payload):
+                candidate.status = "requires_resolution"
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_candidate"
+                self.session.add(candidate)
+                skipped.append(
+                    {
+                        "candidate_id": str(candidate.id),
+                        "reason": "dft_scoped_run_rejects_non_dft_candidate",
+                    }
+                )
+                continue
             if candidate.status not in {"pending", "requires_resolution"}:
                 skipped.append({"candidate_id": str(candidate.id), "reason": f"status={candidate.status}"})
                 continue
@@ -905,9 +936,24 @@ class VerificationSessionService(
             stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
         rows = self.session.execute(stmt).all()
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        skipped: list[dict[str, Any]] = []
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_type = self._normalize_object_review_target_type(payload.get("target_type"))
+            if target_type != "dft_results" and self._is_dft_scoped_external_run(run, payload):
+                candidate.status = "requires_resolution"
+                candidate.materialized_target_type = None
+                candidate.materialized_target_id = None
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_target"
+                self.session.add(candidate)
+                skipped.append(
+                    {
+                        "candidate_id": str(candidate.id),
+                        "target_type": target_type,
+                        "reason": "dft_scoped_run_rejects_non_dft_target",
+                    }
+                )
+                continue
             if include_target_types is not None and target_type not in include_target_types:
                 continue
             if exclude_target_types is not None and target_type in exclude_target_types:
@@ -922,13 +968,11 @@ class VerificationSessionService(
                 or bool(payload.get("borrowed_from_reference"))
             ):
                 continue
-            identity = str(
-                payload.get("source_label")
-                or run.source_label
-                or payload.get("source")
-                or run.source
-                or candidate.id
-            ).strip()
+            identity = review_source_identity(
+                run.source_identity,
+                run.source_identity_verified,
+                default_untrusted=UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+            )
             grouped[(target_type, target_id, field_name)].append(
                 {
                     "candidate_id": str(candidate.id),
@@ -952,6 +996,7 @@ class VerificationSessionService(
                     "source_label": run.source_label,
                     "source": payload.get("source") or run.source,
                     "source_identity": identity,
+                    "source_identity_verified": bool(run.source_identity_verified),
                     "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
                     "adjudication_role": payload.get("adjudication_role"),
                     "adjudication_scope": payload.get("adjudication_scope"),
@@ -962,13 +1007,16 @@ class VerificationSessionService(
 
         applied: list[dict[str, Any]] = []
         pending: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
         for (target_type, target_id, field_name), opinions in grouped.items():
             deduped: dict[str, dict[str, Any]] = {}
             for opinion in opinions:
                 if opinion["candidate"].status not in {"candidate", "pending", "requires_resolution"}:
                     continue
-                key = opinion["candidate_id"] if target_type == "dft_results" else opinion["source_identity"]
+                key = (
+                    self._dft_review_submission_identity(opinion)
+                    if target_type == "dft_results"
+                    else opinion["source_identity"]
+                )
                 current = deduped.get(key)
                 if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
                     deduped[key] = opinion

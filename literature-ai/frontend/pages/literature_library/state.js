@@ -34,6 +34,8 @@ const state = {
     paperResourceInflight: {},
     paperResourceFreshness: {},
     fullDetailLoadingFor: null,
+    dftResultsInflight: {},
+    dftResultsLoadErrors: {},
     pendingNavigationTarget: null,
     pendingPdfJump: null,
 };

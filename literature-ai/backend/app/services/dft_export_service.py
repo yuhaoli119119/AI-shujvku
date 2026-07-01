@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample as CS
@@ -21,7 +21,12 @@ from app.db.models import EvidenceSpan as ES
 from app.db.models import Paper as P
 from app.domain.reaction_taxonomy import PROFILE_VERSION as REACTION_PROFILE_VERSION
 from app.domain.tabular_task_profiles import evaluate_tabular_readiness, get_tabular_task_profile
-from app.normalizers.chemistry_normalizer import ChemistryNormalizer, canonicalize_adsorbate, get_property_taxonomy
+from app.normalizers.chemistry_normalizer import (
+    ChemistryNormalizer,
+    canonicalize_adsorbate,
+    get_property_taxonomy,
+    property_type_filter_aliases,
+)
 from app.normalizers.unit_normalizer import UnitNormalizer
 from app.services.catalyst_sample_identity import resolve_sample_identity
 from app.utils.library_names import build_library_name_clause, normalize_library_name
@@ -84,6 +89,13 @@ def _optional_float_filter(value: Any) -> float | None:
         return None
 
 
+def _property_type_filter_clause(column: Any, property_type: str | None):
+    aliases = property_type_filter_aliases(property_type)
+    if not aliases:
+        return None
+    return or_(*(column.ilike(f"%{alias}%") for alias in aliases))
+
+
 def _authors_text(authors) -> str:
     if isinstance(authors, list):
         return ", ".join(str(author) for author in authors if author)
@@ -140,17 +152,21 @@ def _dft_rows_statement(
     year_max: int | None,
     library_name: str | None,
     min_confidence: float | None = None,
+    catalyst_name: str | None = None,
 ):
     property_type = _optional_text_filter(property_type)
     adsorbate = _optional_text_filter(adsorbate)
     catalyst_type = _optional_text_filter(catalyst_type)
+    catalyst_name = _optional_text_filter(catalyst_name)
     year_min = _optional_int_filter(year_min)
     year_max = _optional_int_filter(year_max)
     library_name = _optional_text_filter(library_name)
     min_confidence = _optional_float_filter(min_confidence)
     stmt = select(DR, P).join(P, DR.paper_id == P.id).order_by(P.year.desc().nulls_last(), P.title)
     if property_type:
-        stmt = stmt.where(DR.property_type.ilike(f"%{property_type}%"))
+        property_clause = _property_type_filter_clause(DR.property_type, property_type)
+        if property_clause is not None:
+            stmt = stmt.where(property_clause)
     if adsorbate:
         stmt = stmt.where(DR.adsorbate.ilike(f"%{adsorbate}%"))
     if min_confidence is not None:
@@ -161,8 +177,12 @@ def _dft_rows_statement(
         stmt = stmt.where(P.year <= year_max)
     if library_name is not None:
         stmt = stmt.where(build_library_name_clause(P.library_name, library_name))
-    if catalyst_type:
-        stmt = stmt.join(CS, DR.catalyst_sample_id == CS.id).where(CS.catalyst_type.ilike(catalyst_type))
+    if catalyst_type or catalyst_name:
+        stmt = stmt.join(CS, DR.catalyst_sample_id == CS.id)
+        if catalyst_type:
+            stmt = stmt.where(CS.catalyst_type.ilike(catalyst_type))
+        if catalyst_name:
+            stmt = stmt.where(CS.name.ilike(f"%{catalyst_name}%"))
     return stmt
 
 
@@ -792,6 +812,7 @@ def build_dft_ml_dataset(
     property_type: str | None = None,
     adsorbate: str | None = None,
     catalyst_type: str | None = None,
+    catalyst_name: str | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
     library_name: str | None = None,
@@ -810,6 +831,7 @@ def build_dft_ml_dataset(
     """
     property_type = _optional_text_filter(property_type)
     adsorbate = _optional_text_filter(adsorbate)
+    catalyst_name = _optional_text_filter(catalyst_name)
     year_min = _optional_int_filter(year_min)
     year_max = _optional_int_filter(year_max)
     library_name = _optional_text_filter(library_name)
@@ -817,6 +839,7 @@ def build_dft_ml_dataset(
         property_type=property_type,
         adsorbate=adsorbate,
         catalyst_type=catalyst_type,
+        catalyst_name=catalyst_name,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
@@ -1171,6 +1194,7 @@ def build_dft_ml_dataset_v3(
     property_type: str | None = None,
     adsorbate: str | None = None,
     catalyst_type: str | None = None,
+    catalyst_name: str | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
     library_name: str | None = None,
@@ -1193,6 +1217,7 @@ def build_dft_ml_dataset_v3(
         property_type=property_type,
         adsorbate=adsorbate,
         catalyst_type=catalyst_type,
+        catalyst_name=catalyst_name,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
@@ -1413,6 +1438,7 @@ def build_dft_ml_dataset_v3_csv(
     property_type: str | None = None,
     adsorbate: str | None = None,
     catalyst_type: str | None = None,
+    catalyst_name: str | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
     library_name: str | None = None,
@@ -1428,6 +1454,7 @@ def build_dft_ml_dataset_v3_csv(
         property_type=property_type,
         adsorbate=adsorbate,
         catalyst_type=catalyst_type,
+        catalyst_name=catalyst_name,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
@@ -1454,6 +1481,7 @@ def build_dft_csv_rows(
     property_type: str | None = None,
     adsorbate: str | None = None,
     catalyst_type: str | None = None,
+    catalyst_name: str | None = None,
     year_min: int | None = None,
     year_max: int | None = None,
     library_name: str | None = None,
@@ -1466,6 +1494,7 @@ def build_dft_csv_rows(
     """
     property_type = _optional_text_filter(property_type)
     adsorbate = _optional_text_filter(adsorbate)
+    catalyst_name = _optional_text_filter(catalyst_name)
     year_min = _optional_int_filter(year_min)
     year_max = _optional_int_filter(year_max)
     library_name = _optional_text_filter(library_name)
@@ -1473,6 +1502,7 @@ def build_dft_csv_rows(
         property_type=property_type,
         adsorbate=adsorbate,
         catalyst_type=catalyst_type,
+        catalyst_name=catalyst_name,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,

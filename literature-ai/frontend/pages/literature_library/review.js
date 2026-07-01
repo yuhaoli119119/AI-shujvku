@@ -77,12 +77,9 @@ async function loadAgentGuide() {
             const entry = guide.recommended_entrypoint || {};
             const endpoints = Array.isArray(guide.http_endpoints) ? guide.http_endpoints : [];
             const tools = guide.mcp && Array.isArray(guide.mcp.common_tools) ? guide.mcp.common_tools : [];
-            const overallPrompt = guide.suggested_client_prompt || "";
             mcpGuide.innerHTML =
                 '<div class="section-card"><h3>IDE AI 审阅指南</h3>' +
-                '<div class="subtle">IDE AI 优先使用当前会话的 MCP 工具；工具未注入时，可通过仓库内 `app.mcp.context.mcp_auth_context` 与 `app.mcp.server` 受控调用同一套公开 MCP 工具。正式 HTTP API只补充其已覆盖的读取和操作，不能替代没有 HTTP 等价入口的 MCP 工具。本区只展示入口，不会自动写入正式数据。</div>' +
-                (overallPrompt ? '<div class="modal-actions" style="justify-content:flex-start;margin-top:10px;"><button class="btn primary small" onclick="copyOverallParseInstruction()">复制总体解析指令</button></div>' : '') +
-                (overallPrompt ? '<details style="margin-top:10px;"><summary>总体解析指令</summary><div id="overallParseInstruction" class="mono prewrap">' + esc(overallPrompt) + '</div></details>' : '') +
+                '<div class="subtle">IDE AI 优先使用当前会话的 MCP 工具；工具未注入时，可通过仓库内 `app.mcp.context.mcp_auth_context` 与 `app.mcp.server` 受控调用同一套公开 MCP 工具。正式 HTTP API只补充其已覆盖的读取和操作，不能替代没有 HTTP 等价入口的 MCP 工具。本区只展示入口，不复制正式任务提示词；请回审核中心按单篇文献发起 AI 审核任务。</div>' +
                 '<div class="readable-grid" style="margin-top:10px;">' +
                     '<div class="readable-field"><div class="k">推荐入口</div><div class="v">' + esc((entry.method || "") + " " + (entry.path || "")) + '</div></div>' +
                     '<div class="readable-field"><div class="k">适用场景</div><div class="v">' + esc(entry.description || "通过外部工具读取和审阅文献。") + '</div></div>' +
@@ -98,17 +95,6 @@ async function loadAgentGuide() {
     } catch (error) {
         showToast("读取 IDE AI 指南失败：" + error.message, "error");
     }
-}
-
-async function copyOverallParseInstruction() {
-    const el = $("overallParseInstruction");
-    const text = el ? el.textContent : "";
-    if (!text) {
-        showToast("暂无总体解析指令。", "error");
-        return;
-    }
-    await navigator.clipboard.writeText(text);
-    showToast("总体解析指令已复制。", "success");
 }
 
 async function importExternalAnalysis() {

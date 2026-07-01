@@ -1218,12 +1218,13 @@
           <option value="prepare_suspected_missing">漏提材料</option>
           <option value="prepare_library">重建材料</option>
         </select>
-        <select class="btn btn-ghost" id="promptCopySelect" title="复制 IDE AI 指令" onchange="handlePromptCopySelect()">
-          <option value="">复制指令</option>
-          <option value="overall">总体指令</option>
-          <option value="figure">图表指令</option>
-          <option value="sections_writing">章节写作指令</option>
-          <option value="text_review">文字审核指令</option>
+        <select class="btn btn-ghost" id="promptCopySelect" title="复制单篇 AI 审核提示词" onchange="handlePromptCopySelect()">
+          <option value="">复制单篇任务提示词</option>
+          <option value="main_figure">主文图片审核提示词</option>
+          <option value="support_figure">支撑文献图片审核提示词</option>
+          <option value="table">表格审核提示词</option>
+          <option value="dft">DFT 普通 AI 审核提示词</option>
+          <option value="dft_primary">DFT 主 AI 判断/修复提示词</option>
         </select>
       </div>
     </div>
@@ -1325,6 +1326,79 @@
     const REVIEW_CENTER_FILTER_SESSION_KEY = "litai:review-center:filters:v1";
     const REVIEW_CENTER_FETCH_LIMITS = [5000, 500];
     const selectedPaperIds = new Set();
+    const PROMPT_COPY_ACTIONS = {
+      main_figure: {
+        kind: "figure",
+        sourceKind: "main_figure",
+        label: "主文图片审核提示词",
+        targetScope: "main",
+        scopeNote: [
+          "本次审核中心入口：主文图片审核提示词。",
+          "- 只处理上方唯一目标主文献的图片对象和主文 PDF figure 证据。",
+          "- 不处理表格，不扫描支撑文献/SI 图片，不把图片与表格合并成同一个任务。",
+          "- 如图片中发现明确 DFT 数值，只能提交 DFT candidate/object_review_audit，不能写成最终 verified 或 ML_Ready。"
+        ].join("\n")
+      },
+      support_figure: {
+        kind: "figure",
+        sourceKind: "support_figure",
+        label: "支撑文献图片审核提示词",
+        targetScope: "support",
+        scopeNote: [
+          "本次审核中心入口：支撑文献图片审核提示词。",
+          "- 只处理上方唯一目标支撑文献/SI 行的图片对象和 SI PDF figure 证据。",
+          "- 不处理主文图片，不处理表格，不把支撑文献图片与主文图片合并成同一个任务。",
+          "- 需要回写到主文科学候选时，必须按 codex context 的 writeback_paper_id 与 source_document_type 规则保留 SI 证据来源。"
+        ].join("\n")
+      },
+      table: {
+        kind: "table",
+        sourceKind: "table",
+        label: "表格审核提示词",
+        targetScope: "main",
+        scopeNote: [
+          "本次审核中心入口：表格审核提示词。",
+          "- 只从上方唯一主文献发起任务。",
+          "- 同时检查主文表格和已关联 SI 表格；SI 表对象修改必须使用该 SI 表真实 paper_id。",
+          "- 不处理图片；发现 DFT 表格漏项只提交 DFT candidate/audit，不在表格任务里最终确认 DFT。"
+        ].join("\n")
+      },
+      dft: {
+        kind: "dft",
+        sourceKind: "dft",
+        label: "DFT 普通 AI 审核提示词",
+        targetScope: "main",
+        scopeNote: [
+          "本次审核中心入口：DFT 普通 AI 审核提示词。",
+          "你的角色：DFT 数据审核员。只负责核对已有 DFT 数据、发现漏项并提交审核意见或候选。",
+          "本轮唯一目标：只核验 DFT 数据。",
+          "- 执行前自检：本轮允许写入的 target_type 只有 dft_results；如果准备写入非 dft_results，立即停止。",
+          "- 禁止修改 figure、writing_card、mechanism_claim、metadata、普通表格对象、章节、摘要；即使发现缺陷也不能顺手修。",
+          "- 只处理上方唯一主文献；必须读取主文与已关联 SI 的 DFT 文本/表格证据。DFT 漏项常在普通 tables 或 PDF 表格里，不能跳过。",
+          "- 发现漏项必须写 object_review_audits decision=new_candidate，让前端可见候选进入后续受控处理。",
+          "- 审核员不能 repair_dft_audit_issue，不能 verify/reject，不能写 human_verified/safe_verified/ML_Ready，不能说可导出。"
+        ].join("\n")
+      },
+      dft_primary: {
+        kind: "dft_primary",
+        sourceKind: "dft_primary",
+        label: "DFT 主 AI 判断/修复提示词",
+        targetScope: "main",
+        scopeNote: [
+          "本次审核中心入口：DFT 主 AI 判断/修复提示词。",
+          "你的角色：DFT 数据处理员。只负责读取已有审核结果，判断、修复、回填并回读确认。",
+          "本轮唯一目标：只核验 DFT 数据。",
+          "- 执行前自检：本轮允许写入的 target_type 只有 dft_results；如果准备写入非 dft_results，立即停止。",
+          "- 禁止修改 figure、writing_card、mechanism_claim、metadata、普通表格对象、章节、摘要；但必须读取其中与 DFT issue/candidate 直接相关的表格证据。",
+          "- 只处理上方唯一主文献的 DFT audit issue / DFT candidate。",
+          "- 必须按当前 paper_id 调用 get_dft_audit_issues；不要全库混抓或跨 paper_id 批量处理。",
+          "- 直接使用当前已认证的 DFT 写身份；不再要求切换 dft_primary_repair key，也不因缺少 repair_dft_issues capability 阻断。",
+          "- 优先调用 repair_dft_audit_issues_batch(paper_id=<当前 paper_id>, auto_finalize=true)，一次修复并确认当前论文的可处理 issue。",
+          "- issue_count=0 或 candidate 为 0 条审核意见都不是阻塞原因；继续依据 PDF、表格和 SI 证据直接判断、修复、确认或拒绝。",
+          "- 批量失败只重试失败项；不得让单项失败阻断整篇论文。回读后 open issue=0 且没有未定 candidate 才报告 completed。"
+        ].join("\n")
+      }
+    };
     const conflictState = {
       activeRow: null,
       groups: [],
@@ -1372,14 +1446,19 @@
       const group = supplementaryGroup(row);
       if (!group) return "";
       const mainCode = group.main_paper_code || "主文献";
-      const supportActive = toCount(group.support_active_dft_candidate_count);
+      const supportActive = toCount(
+        group.support_dft_lifecycle_open_count != null
+          ? group.support_dft_lifecycle_open_count
+          : group.support_active_dft_candidate_count
+      );
       const mainActive = toCount(group.main_active_dft_candidate_count);
       const groupTotal = toCount(group.dft_candidate_count);
       const groupActive = toCount(group.active_dft_candidate_count);
+      const supportLifecycleLabel = group.support_dft_lifecycle_label || "SI 证据待闭环";
       if (group.role === "supplementary") {
-        return "这行是 " + mainCode + " 的支撑文献记录；主文献待处理 DFT " + mainActive + " 条，SI 待处理 DFT " + supportActive + " 条，同步组总候选 " + groupTotal + " 条。";
+        return "这行是 " + mainCode + " 的支撑文献记录；主文献待处理 DFT " + mainActive + " 条，" + supportLifecycleLabel + " " + supportActive + " 条，规范化新行需回写主文；同步组总候选 " + groupTotal + " 条。";
       }
-      return "这是主文献行；同步组总候选 " + groupTotal + " 条，组内待处理 " + groupActive + " 条，其中 SI 待处理 " + supportActive + " 条。";
+      return "这是主文献行；同步组总候选 " + groupTotal + " 条，组内待处理 " + groupActive + " 条，其中 " + supportLifecycleLabel + " " + supportActive + " 条，规范化新行需回写主文。";
     }
 
     function getValue(id) {
@@ -1587,17 +1666,33 @@
       document.body.removeChild(box);
     }
 
-    function currentPromptTargets() {
-      const rows = promptTargetRows();
-      if (!rows.length) {
+    function currentPromptTargets(rows) {
+      const targetRows = rows || promptTargetRows();
+      if (!targetRows.length) {
         return "";
       }
-      return rows.map(function (row) {
+      return targetRows.map(function (row) {
+        const role = isSupportingInformationRow(row) ? "supplementary_information" : "main_paper";
+        const group = supplementaryGroup(row);
+        const mainPaperId = group && group.main_paper_id ? group.main_paper_id : "";
+        const mainPaperPart = role === "supplementary_information" && mainPaperId
+          ? " | main_paper_id: " + mainPaperId
+          : "";
         return "- human_ref: " + (row.paper_code || "-") +
           " | paper_id: " + row.paper_id +
+          " | role: " + role +
+          mainPaperPart +
           " | type: " + (row.paper_type || "-") +
           " | title: " + (row.title || "未命名文献");
       }).join("\n");
+    }
+
+    function currentPromptTargetRows() {
+      const rows = promptTargetRows();
+      if (!rows.length) {
+        throw new Error("请先勾选一篇文献作为任务目标。");
+      }
+      return rows;
     }
 
     function inferReactionProfileFromText(text) {
@@ -1656,14 +1751,23 @@
     }
 
     function promptTargetRows() {
-      const selected = selectedPromptRows();
-      const selectedMainRows = selected.filter(function (row) { return !isSupportingInformationRow(row); });
-      if (selectedMainRows.length) return selectedMainRows;
-      const focusPaperId = String(state.metadata && state.metadata.focus_main_paper_id || getQueryPaperId() || "");
-      if (!focusPaperId) return [];
-      return (state.rows || []).filter(function (row) {
-        return String(row && row.paper_id || "") === String(focusPaperId) && !isSupportingInformationRow(row);
-      });
+      return selectedPromptRows();
+    }
+
+    function validatePromptCopyTarget(actionConfig) {
+      const rows = currentPromptTargetRows();
+      if (rows.length !== 1) {
+        throw new Error("一次只能选择一个目标；请取消多选后再复制单篇任务提示词。");
+      }
+      const row = rows[0];
+      const isSupport = isSupportingInformationRow(row);
+      if (actionConfig.targetScope === "support" && !isSupport) {
+        throw new Error(actionConfig.label + "只能选择支撑文献/SI 行作为任务目标。");
+      }
+      if (actionConfig.targetScope === "main" && isSupport) {
+        throw new Error(actionConfig.label + "只能选择主文献作为任务目标。");
+      }
+      return row;
     }
 
     function togglePaperSelection(paperId, checked) {
@@ -1744,21 +1848,6 @@
       ensureValidPage(rows.length);
       const start = (state.pagination.page - 1) * pageSize;
       return rows.slice(start, start + pageSize);
-    }
-
-    function resolveVisualPromptKind() {
-      const rows = typeof window.currentVisibleRows === "function"
-        ? window.currentVisibleRows()
-        : currentVisibleRows();
-      const hasFigures = (rows || []).some(function (row) {
-        return toCount(row.figure_count) > 0;
-      });
-      const hasTables = (rows || []).some(function (row) {
-        return toCount(row.table_count) > 0;
-      });
-      if (hasFigures && hasTables) return "figure_table";
-      if (hasTables) return "table";
-      return "figure";
     }
 
     function goToPage(page) {
@@ -1845,10 +1934,10 @@
         targetList,
         "",
         "目标说明：human_ref 是给人沟通用的稳定短号；调用 MCP/API 时必须使用同一行的 paper_id(UUID)，不要使用页面序号或旧 #001 编号。",
-        "source_label 必须写成：" + sourceLabel + "。请把 <agent_name> 替换成你的实际模型或窗口名，例如 gemini、kimi、codex、claude。",
+        "source_label 必须写成：" + sourceLabel + "。请把 <agent_name> 替换成你的实际模型或窗口名，例如 gemini、kimi、codex、claude；source_label 只用于展示和追踪本轮运行，不是 AI 身份，双 AI 判重只认服务端认证 key 写入的 source_identity。",
         "",
         "必须执行：",
-        "0. 先检查当前可用工具列表：应能看到 literature-ai/query_papers、get_paper、get_codex_context、get_codex_item、read_paper_page、import_analysis 等 MCP 工具；如果 IDE 会话里没有这些工具，不要立刻停，而是通过 literature-ai/backend 的 app.mcp.context.mcp_auth_context 建立明确身份，再受控调用 app.mcp.server 已公开的 MCP 工具。禁止借此直接调用 service/session/model 或数据库。只有两条 MCP 路径和相关正式 HTTP API 都不可用时，才报告 blocked_by_missing_mcp_tool。不要自行写 mcp_config.json。",
+        "0. 先检查当前可用工具列表：应能看到 literature-ai/query_papers、get_paper、get_codex_context、get_codex_item、read_paper_page、import_analysis 等 MCP 工具；如果 IDE 会话里没有这些工具，只能把服务端已配置的 MCP API key 传给 literature-ai/backend 的 app.mcp.context.mcp_auth_context，再受控调用 app.mcp.server 已公开的 MCP 工具。禁止构造 MCPAuthInfo、自填 source_identity，禁止直接调用 service/session/model 或数据库。受控入口不可用时报告 blocked_by_missing_mcp_tool。不要自行写 mcp_config.json。",
         "1. 每篇文献先准备材料：优先使用 MCP 的 prepare/get context 能力；如果工具提示材料已存在，可以继续；如果无法读取 codex-context 或 source_assets/artifact_status 不存在，先切到项目内后端 MCP 兜底再判断，只有两条路径都失败才报告阻塞。",
         "1a. 先判断本文文献类型与系统解析是否一致；若不一致，直接按 PDF 证据修正系统解析类型，再继续后续审核。",
         "2. 读取证据优先用当前 Literature AI MCP 工具：get_codex_context(paper_id)、get_codex_item(paper_id,item_type,item_id)、read_paper_page(paper_id,page_start,page_end)、import_analysis。若 IDE 会话没有暴露这些工具，就用项目内后端 MCP 兜底路径完成同样的调用，不要默认绕过 MCP 或改成只写文字总结。",
@@ -1897,22 +1986,23 @@
       return commonWithHardening + "\n\n本次任务模块：表格/章节专项核验\n目标：核验 tables/sections，发现问题必须通过对应的受控工具修正。\n\n开始前读取 source_assets.pdf_path，用 read_paper_page 核对表格缺失、跨页、列错位、页码、单位和章节边界。\n\n回写规则：\n- 表格 caption/markdown/page/extraction_source/prov 修正调用 update_table；漏表调用 create_table；重复、跨页拆分表调用 merge_table；无效表调用 delete_table。每次必须提供结构化 evidence_payload 并回读表对象。\n- 禁止通过 import_analysis correction_proposals 修改、新建、删除或合并表格。\n- 表格无需修改时可提交 PASS/REJECT object_review_audits；若携带 corrected_value，系统只记录意见并要求调用 direct table tool，不会修改表对象。\n- 章节字段错误或缺失仍可使用 import_analysis 的 sections replace/create correction_proposals。\n- 若发现 DFT 候选来自错误表格列，只转交 DFT 专项，不在表格任务里确认 DFT 入库。\n\nPASS audit 示例：{\"object_review_audits\":[{\"paper_id\":\"<paper_id>\",\"target_type\":\"tables\",\"target_id\":\"<table_uuid>\",\"field_name\":\"table_review\",\"decision\":\"PASS\",\"confidence\":0.9,\"reason\":\"Table matches the source PDF\",\"evidence_location\":{\"page\":8,\"table\":\"Table 2\",\"quoted_text\":\"Table 2 ...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}]}\n\n章节 correction 示例：{\"correction_proposals\":[{\"field_name\":\"sections\",\"target_path\":\"sections:new:create\",\"operation\":\"create\",\"proposed_value\":{\"section_title\":\"Results and discussion\",\"section_type\":\"results\",\"text\":\"section text...\",\"page_start\":4,\"page_end\":7},\"reason\":\"parser missed logical results section\",\"evidence_payload\":{\"page\":4,\"quoted_text\":\"Results and discussion...\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}]}";
     }
 
-    async function copyIdePrompt(kind) {
+    async function copyIdePrompt(actionKey) {
       try {
-        if (!promptTargetRows().length) {
-          throw new Error("请先勾选要处理的主文献；SI 不单独作为提示词目标。");
+        const actionConfig = PROMPT_COPY_ACTIONS[actionKey];
+        if (!actionConfig) {
+          throw new Error("未知提示词入口：" + actionKey);
         }
-        const resolvedKind = kind;
-        await copyTextToClipboard(await buildIdePromptForCopy(resolvedKind));
-        const labels = { overall: "总体解析", dft: "DFT 核验", figure: "图片审核", table: "表格审核", text_review: "文字审核", sections_writing: "文字审核" };
-        showToast("已复制 " + (labels[resolvedKind] || "IDE AI") + " 指令模板");
+        validatePromptCopyTarget(actionConfig);
+        await copyTextToClipboard(await buildIdePromptForCopy(actionConfig));
+        showToast("已复制 " + actionConfig.label);
       } catch (error) {
         showToast("复制失败：" + error.message);
       }
     }
 
-    async function buildIdePromptForCopy(kind) {
+    async function buildIdePromptForCopy(actionConfig) {
       try {
+        const kind = actionConfig.kind;
         const guide = await fetchJSON("/api/system/agent-guide");
         const contract = guide && guide.prompt_contract ? guide.prompt_contract : {};
         const templates = contract.templates && typeof contract.templates === "object" ? contract.templates : {};
@@ -1928,7 +2018,7 @@
         const profileTemplates = reactionProfileTemplates[targetReaction] && typeof reactionProfileTemplates[targetReaction] === "object"
           ? reactionProfileTemplates[targetReaction]
           : {};
-        const template = profileTemplates[kind] || templates[kind] || compositeTemplates[kind] || templates.overall;
+        const template = profileTemplates[kind] || templates[kind] || compositeTemplates[kind];
         if (!template) throw new Error("prompt contract does not include kind=" + kind);
         const projectTemplates = projectLibraryContext && projectLibraryTemplates[projectLibraryContext] && typeof projectLibraryTemplates[projectLibraryContext] === "object"
           ? projectLibraryTemplates[projectLibraryContext]
@@ -1946,26 +2036,27 @@
           pad(now.getMinutes()),
           pad(now.getSeconds())
         ].join("");
-        const sourceLabel = "<agent_name>_" + kind + "_" + runTag;
+        const sourceLabel = "<agent_name>_" + (actionConfig.sourceKind || kind) + "_" + runTag;
         const targetToken = contract.target_list_token || "{{TARGET_LIST}}";
         const sourceToken = contract.source_label_token || "{{SOURCE_LABEL}}";
         const reactionToken = contract.target_reaction_token || "{{TARGET_REACTION}}";
+        const targetList = currentPromptTargets();
         let rendered = String(template)
-          .split(targetToken).join(currentPromptTargets())
+          .split(targetToken).join(targetList)
           .split(sourceToken).join(sourceLabel)
           .split(reactionToken).join(targetReaction);
         if (projectFragment && !rendered.includes("专题项目库上下文（ProjectLibraryContext）")) {
           rendered += "\n\n" + String(projectFragment)
-            .split(targetToken).join(currentPromptTargets())
+            .split(targetToken).join(targetList)
             .split(sourceToken).join(sourceLabel)
             .split(reactionToken).join(targetReaction);
         }
-        return rendered;
+        return actionConfig.scopeNote + "\n\n" + rendered;
       } catch (error) {
         console.warn("canonical IDE prompt unavailable", error);
         return [
           "统一 IDE 审核提示词当前不可用。",
-          "请先使用当前会话已暴露的 literature-ai MCP 工具；若工具未注入，只能通过 app.mcp.context.mcp_auth_context 建立身份后，受控调用 app.mcp.server 已公开工具。",
+          "请先使用当前会话已暴露的 literature-ai MCP 工具；若工具未注入，只能把服务端已配置的 MCP API key 传给 app.mcp.context.mcp_auth_context，再受控调用 app.mcp.server 已公开工具；禁止构造 MCPAuthInfo 或自填 source_identity。",
           "禁止直接调用 service/session/model 或数据库。无法取得统一提示词与受控证据入口时，请报告 blocked_by_prompt_contract_unavailable。"
         ].join("\n");
       }
@@ -1974,9 +2065,9 @@
     function handlePromptCopySelect() {
       const select = document.getElementById("promptCopySelect");
       if (!select || !select.value) return;
-      const kind = select.value;
+      const actionKey = select.value;
       select.value = "";
-      copyIdePrompt(kind);
+      copyIdePrompt(actionKey);
     }
 
     async function fetchJSON(url, options) {
@@ -2600,7 +2691,13 @@
       const dftAudit = row.dft_audit && typeof row.dft_audit === "object" ? row.dft_audit : {};
       const group = supplementaryGroup(row);
       const groupRole = group && group.role;
-      const groupSupportActive = group ? toCount(group.support_active_dft_candidate_count) : 0;
+      const groupSupportActive = group
+        ? toCount(
+            group.support_dft_lifecycle_open_count != null
+              ? group.support_dft_lifecycle_open_count
+              : group.support_active_dft_candidate_count
+          )
+        : 0;
       const groupMainActive = group ? toCount(group.main_active_dft_candidate_count) : 0;
       const suspectedMissing = hasOwnValue(row.suspected_missing_dft_count)
         ? toCount(row.suspected_missing_dft_count)
@@ -2782,6 +2879,7 @@
       const totalConflictCount = toCount(row.review_conflict_total_count);
       const dftConflictCount = toCount(row.dft_review_conflict_count);
       const dftConflictTotalCount = toCount(row.dft_review_conflict_total_count);
+      const dftObjectReviewCount = toCount(row.dft_object_review_audit_count);
       const activeDftCount = hasOwnValue(row.active_dft_candidate_count)
         ? toCount(row.active_dft_candidate_count)
         : (row.has_active_dft_candidates !== undefined
@@ -2795,6 +2893,15 @@
             verificationStatusLabel(latestAudit.verification_status || "unverified")
           ].filter(Boolean).join(" | ")
         : "暂无外部审核记录。";
+      const dftObjectAuditLines = (row.dft_object_review_audits || []).slice(0, 5).map(function (audit) {
+        const fieldLabel = audit.field_name ? ("字段 " + audit.field_name) : "";
+        return [
+          audit.source_label || audit.source || audit.agent_role || audit.model_name || "DFT 审核",
+          fieldLabel,
+          reviewDecisionLabel(audit.decision || audit.recommended_action || "review"),
+          verificationStatusLabel(audit.verification_status || "unverified")
+        ].filter(Boolean).join(" | ");
+      });
       const objectAuditLines = (row.object_review_audits || []).slice(0, 5).map(function (audit) {
         const targetLabel = formatTargetType(audit.target_type || "");
         const fieldLabel = audit.field_name ? ("字段 " + audit.field_name) : "";
@@ -2824,7 +2931,11 @@
             "同步组候选 " + toCount(group.dft_candidate_count),
             "同步组待处理 " + toCount(group.active_dft_candidate_count),
             "主文待处理 " + toCount(group.main_active_dft_candidate_count),
-            "SI 待处理 " + toCount(group.support_active_dft_candidate_count)
+            (group.support_dft_lifecycle_label || "SI 证据待闭环") + " " + toCount(
+              group.support_dft_lifecycle_open_count != null
+                ? group.support_dft_lifecycle_open_count
+                : group.support_active_dft_candidate_count
+            )
           ].filter(Boolean).join(" | ")
         : "";
       const pdfSummary = !pdfDisplay.pdf.hasPdf
@@ -2860,7 +2971,7 @@
           '<div class="detail-kpi-grid">' +
             '<div class="detail-kpi"><div class="detail-kpi-label">待处理 DFT</div><div class="detail-kpi-value">' + esc(activeDftCount) + '</div><div class="detail-kpi-note">仍在候选队列里、还没收口的 DFT 项。</div></div>' +
             '<div class="detail-kpi"><div class="detail-kpi-label">DFT 冲突</div><div class="detail-kpi-value">' + esc(dftConflictCount) + '</div><div class="detail-kpi-note">当前还没处理完的 DFT 冲突项。</div></div>' +
-            '<div class="detail-kpi"><div class="detail-kpi-label">AI 可覆盖项</div><div class="detail-kpi-value">' + esc(toCount(row.object_review_audit_count)) + '</div><div class="detail-kpi-note">图表和内容类 AI 回写不再进入冲突队列，可由后续 AI 继续覆盖。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">DFT 审核</div><div class="detail-kpi-value">' + esc(dftObjectReviewCount) + '</div><div class="detail-kpi-note">只统计 target_type=dft_results 的对象审核。</div></div>' +
             '<div class="detail-kpi"><div class="detail-kpi-label">疑似漏提</div><div class="detail-kpi-value">' + esc(suspectedMissing) + '</div><div class="detail-kpi-note">系统怀疑原文里还有没被提取出来的 DFT 线索。</div></div>' +
             '<div class="detail-kpi"><div class="detail-kpi-label">证据定位</div><div class="detail-kpi-value">' + esc(toCount(row.evidence_count)) + '</div><div class="detail-kpi-note">目前能用于核对的定位/证据条数。</div></div>' +
           '</div>' +
@@ -2887,7 +2998,8 @@
           '</div>' +
           '<div class="detail-columns">' +
             compactDetailSection("外部审核", '<div class="detail-value">外部审核：' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>') +
-            compactDetailSection("对象审核", '<div class="detail-value">对象审核：' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "暂无对象级 AI 审核记录。")) +
+            compactDetailSection("DFT 审核", '<div class="detail-value">DFT 审核：' + esc(dftObjectReviewCount) + '</div>' + compactInfoList(dftObjectAuditLines, "暂无 DFT 对象级 AI 审核记录。")) +
+            compactDetailSection("对象审核", '<div class="detail-value">对象审核总数：' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "暂无对象级 AI 审核记录。")) +
             compactDetailSection("AI 笔记", '<div class="detail-value">AI 笔记：' + esc(toCount(row.paper_note_count)) + '</div>' + compactInfoList(noteLines, "暂无 IDE AI 回写笔记。")) +
           '</div>' +
         '</section>' +
@@ -3937,6 +4049,7 @@
         const activeDftCount = hasOwnValue(row.active_dft_candidate_count)
           ? toCount(row.active_dft_candidate_count)
           : (row.has_active_dft_candidates !== undefined ? (row.has_active_dft_candidates ? toCount(row.dft_candidate_count) : 0) : null);
+        const dftObjectReviewCount = toCount(row.dft_object_review_audit_count);
         if (activeDftCount > 0) {
           auditMetrics.push('<span class="active">待处理 ' + esc(activeDftCount) + '</span>');
         }
@@ -3944,16 +4057,23 @@
           auditMetrics.push('<span class="active">疑似漏提 ' + esc(suspectedMissing) + '</span>');
         }
         const group = supplementaryGroup(row);
-        if (group && group.role === "main" && toCount(group.support_active_dft_candidate_count) > 0) {
-          auditMetrics.push('<span title="' + esc(supplementaryGroupTip(row)) + '">SI 待处理 ' + esc(toCount(group.support_active_dft_candidate_count)) + '</span>');
+        const supportLifecycleOpen = group
+          ? toCount(
+              group.support_dft_lifecycle_open_count != null
+                ? group.support_dft_lifecycle_open_count
+                : group.support_active_dft_candidate_count
+            )
+          : 0;
+        if (group && group.role === "main" && supportLifecycleOpen > 0) {
+          auditMetrics.push('<span title="' + esc(supplementaryGroupTip(row)) + '">' + esc(group.support_dft_lifecycle_label || "SI 证据待闭环") + ' ' + esc(supportLifecycleOpen) + '</span>');
         } else if (group && group.role === "supplementary") {
           auditMetrics.push('<span title="' + esc(supplementaryGroupTip(row)) + '">归属 ' + esc(group.main_paper_code || "主文献") + '</span>');
         }
         if (toCount(row.external_audit_count) > 0) {
           auditMetrics.push('外部审核 ' + esc(toCount(row.external_audit_count)));
         }
-        if (toCount(row.object_review_audit_count) > 0) {
-          auditMetrics.push('对象审核 ' + esc(toCount(row.object_review_audit_count)));
+        if (dftObjectReviewCount > 0) {
+          auditMetrics.push('DFT 审核 ' + esc(dftObjectReviewCount));
         }
         if (toCount(row.paper_note_count) > 0) {
           auditMetrics.push('AI 笔记 ' + esc(toCount(row.paper_note_count)));

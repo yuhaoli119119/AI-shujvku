@@ -8,54 +8,34 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, ExtractionFieldReview, Paper
-from app.mcp.context import MCPAuthInfo, mcp_auth_context
-from app.mcp.server import get_dft_audit_issues, mcp_server, repair_dft_audit_issue
+from app.mcp.context import mcp_auth_context
+from app.mcp.server import (
+    get_dft_audit_issues,
+    mcp_server,
+    repair_dft_audit_issue,
+    repair_dft_audit_issues_batch,
+)
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 
 
-def _review_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="primary_ai",
-        display_name="Primary AI",
-        capabilities=frozenset({"read_papers", "repair_dft_issues"}),
-        raw_key="test",
-    )
+def _review_auth() -> str:
+    return "test-primary-repair-key"
 
 
-def _review_dft_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="audit_ai",
-        display_name="Audit AI",
-        capabilities=frozenset({"read_papers", "review_dft"}),
-        raw_key="audit-only-key",
-    )
+def _review_dft_auth() -> str:
+    return "test-audit-only-key"
 
 
-def _review_corrections_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="correction_reviewer",
-        display_name="Correction Reviewer",
-        capabilities=frozenset({"read_papers", "review_corrections"}),
-        raw_key="correction-only-key",
-    )
+def _review_corrections_auth() -> str:
+    return "test-correction-only-key"
 
 
-def _read_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="reader",
-        display_name="Reader",
-        capabilities=frozenset({"read_papers"}),
-        raw_key="test",
-    )
+def _read_auth() -> str:
+    return "test-reader-key"
 
 
-def _propose_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="ordinary_ide_ai",
-        display_name="Ordinary IDE AI",
-        capabilities=frozenset({"read_papers", "append_notes", "propose_corrections"}),
-        raw_key="propose-only-key",
-    )
+def _propose_auth() -> str:
+    return "test-propose-only-key"
 
 
 def _paper(session: Session, title: str = "DFT issue repair paper") -> Paper:
@@ -65,15 +45,22 @@ def _paper(session: Session, title: str = "DFT issue repair paper") -> Paper:
     return paper
 
 
-def _missing_issue(session: Session, paper: Paper, *, evidence: dict | None = None) -> DFTAuditIssue:
+def _missing_issue(
+    session: Session,
+    paper: Paper,
+    *,
+    evidence: dict | None = None,
+    suffix: str = "",
+) -> DFTAuditIssue:
+    material_identity = f"Fe-GDY{suffix}"
     return DFTAuditIssueService(session).upsert_issue(
         paper_id=paper.id,
         target_id="new",
         issue_type="missing_dft_result",
         status="needs_primary_ai",
-        fingerprint=f"missing-{paper.id}",
+        fingerprint=f"missing-{paper.id}{suffix}",
         suggested_dft={
-            "material_identity": "Fe-GDY",
+            "material_identity": material_identity,
             "property_type": "adsorption_energy",
             "adsorbate": "Li2S4",
             "reaction_step": "Li2S4 adsorption",
@@ -85,10 +72,10 @@ def _missing_issue(session: Session, paper: Paper, *, evidence: dict | None = No
             "source_document_type": "main_text",
             "page": 5,
             "table": "Table 1",
-            "quoted_text": "Fe-GDY Li2S4 adsorption energy is -1.10 eV.",
+            "quoted_text": f"{material_identity} Li2S4 adsorption energy is -1.10 eV.",
         },
         source_identity="audit_ai",
-        source_candidate_id="candidate-1",
+        source_candidate_id=f"candidate-1{suffix}",
     )
 
 
@@ -111,7 +98,7 @@ def test_dft_audit_issue_mcp_tools_are_registered_with_expected_contract():
     tools = asyncio.run(mcp_server.list_tools())
     by_name = {tool.name: tool for tool in tools}
 
-    assert {"get_dft_audit_issues", "repair_dft_audit_issue"} <= set(by_name)
+    assert {"get_dft_audit_issues", "repair_dft_audit_issue", "repair_dft_audit_issues_batch"} <= set(by_name)
     assert set(by_name["get_dft_audit_issues"].inputSchema["required"]) == {"paper_id"}
     assert set(by_name["repair_dft_audit_issue"].inputSchema["required"]) == {
         "issue_id",
@@ -120,6 +107,7 @@ def test_dft_audit_issue_mcp_tools_are_registered_with_expected_contract():
         "reason",
         "evidence_payload",
     }
+    assert set(by_name["repair_dft_audit_issues_batch"].inputSchema["required"]) == {"paper_id"}
 
 
 def test_get_dft_audit_issues_mcp_returns_read_only_issue_summary(setup_test_db):
@@ -139,16 +127,8 @@ def test_get_dft_audit_issues_mcp_returns_read_only_issue_summary(setup_test_db)
     assert payload["items"][0]["source_count"] == 1
 
 
-@pytest.mark.parametrize(
-    "auth_factory",
-    [
-        _read_auth,
-        _review_dft_auth,
-        _review_corrections_auth,
-        _propose_auth,
-    ],
-)
-def test_repair_dft_audit_issue_requires_repair_capability(setup_test_db, auth_factory):
+@pytest.mark.parametrize("auth_factory", [_read_auth, _review_corrections_auth])
+def test_repair_dft_audit_issue_requires_dft_write_capability(setup_test_db, auth_factory):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Repair capability denied")
         issue = _missing_issue(session, paper)
@@ -156,7 +136,7 @@ def test_repair_dft_audit_issue_requires_repair_capability(setup_test_db, auth_f
         issue_id = str(issue.id)
 
     with mcp_auth_context(auth_factory()):
-        with pytest.raises(PermissionError, match="repair_dft_issues"):
+        with pytest.raises(PermissionError):
             repair_dft_audit_issue(
                 issue_id=issue_id,
                 action="create_missing_dft",
@@ -164,6 +144,26 @@ def test_repair_dft_audit_issue_requires_repair_capability(setup_test_db, auth_f
                 reason="should not be allowed",
                 evidence_payload={},
             )
+
+
+@pytest.mark.parametrize("auth_factory", [_review_auth, _review_dft_auth, _propose_auth])
+def test_repair_dft_audit_issue_accepts_existing_dft_write_identity(setup_test_db, auth_factory):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, f"Fast repair {auth_factory.__name__}")
+        issue = _missing_issue(session, paper)
+        session.commit()
+        issue_id = str(issue.id)
+
+    with mcp_auth_context(auth_factory()):
+        result = repair_dft_audit_issue(
+            issue_id=issue_id,
+            action="create_missing_dft",
+            repair_payload={},
+            reason="fast processing",
+            evidence_payload={},
+        )
+
+    assert result["status"] == "created"
 
 
 def test_create_missing_dft_creates_sample_and_ai_candidate_without_human_verification(setup_test_db):
@@ -209,14 +209,55 @@ def test_create_missing_dft_creates_sample_and_ai_candidate_without_human_verifi
         assert audit.payload["writes_final_truth"] is False
         assert audit.payload["required_capability"] == "repair_dft_issues"
         assert audit.payload["capability_used"] == "repair_dft_issues"
-        assert audit.payload["actor_role"] == "primary_ai_repair"
+        assert audit.payload["actor_role"] == "dft_fast_processor"
         assert audit.payload["source_prefix"] == "primary_ai"
         assert audit.payload["repair_actor"] == {
             "source_prefix": "primary_ai",
-            "actor_role": "primary_ai_repair",
+            "actor_role": "dft_fast_processor",
             "required_capability": "repair_dft_issues",
         }
         assert "test" not in str(audit.payload)
+
+
+def test_batch_fast_path_repairs_and_finalizes_all_missing_issues(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Batch fast DFT")
+        first = _missing_issue(session, paper, suffix="-1")
+        second = _missing_issue(session, paper, suffix="-2")
+        other_paper = _paper(session, "Batch fast DFT other paper")
+        other_issue = _missing_issue(session, other_paper, suffix="-other")
+        session.commit()
+        paper_id = paper.id
+        issue_ids = {first.id, second.id}
+        other_issue_id = other_issue.id
+
+    with mcp_auth_context(_propose_auth()):
+        result = repair_dft_audit_issues_batch(
+            paper_id=str(paper_id),
+            auto_finalize=True,
+        )
+
+    assert result["requested_count"] == 2
+    assert result["processed_count"] == 2
+    assert result["finalized_count"] == 2
+    assert result["failed_count"] == 0
+    assert result["capability_used"] == "propose_corrections"
+
+    with Session(setup_test_db) as session:
+        issues = [session.get(DFTAuditIssue, issue_id) for issue_id in issue_ids]
+        untouched_other_issue = session.get(DFTAuditIssue, other_issue_id)
+        rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        reviews = session.scalars(
+            select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == paper_id)
+        ).all()
+
+        assert len(rows) == 2
+        assert all(issue is not None and issue.status == "closed" for issue in issues)
+        assert untouched_other_issue is not None
+        assert untouched_other_issue.status == "needs_primary_ai"
+        assert all(row.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"} for row in rows)
+        assert reviews
+        assert all(review.reviewer_status == "verified" for review in reviews)
 
 
 def test_create_missing_dft_is_idempotent_for_same_issue(setup_test_db):
@@ -242,12 +283,8 @@ def test_create_missing_dft_is_idempotent_for_same_issue(setup_test_db):
 def test_create_missing_dft_dedupes_generic_adsorption_step_against_existing_row(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Generic dedupe repair")
-        sample = CatalystSample(paper_id=paper.id, name="Fe-GDY", catalyst_type="unknown")
-        session.add(sample)
-        session.flush()
         existing = DFTResult(
             paper_id=paper.id,
-            catalyst_sample_id=sample.id,
             property_type="adsorption_energy",
             adsorbate="Li2S4",
             reaction_step="adsorption",
@@ -269,8 +306,15 @@ def test_create_missing_dft_dedupes_generic_adsorption_step_against_existing_row
 
     assert result["status"] == "linked_existing"
     assert result["dft_result_id"] == existing_id
+    assert result["changed_fields"] == ["catalyst_sample_id"]
+    assert result["material_binding"]["status"] == "bound"
     with Session(setup_test_db) as session:
-        assert len(session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()) == 1
+        rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        samples = session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
+        assert len(rows) == 1
+        assert len(samples) == 1
+        assert samples[0].name == "Fe-GDY"
+        assert rows[0].catalyst_sample_id == samples[0].id
 
 
 def test_supporting_reference_missing_repair_does_not_create_main_paper_dft(setup_test_db):

@@ -15,6 +15,10 @@ from app.services.dft_audit_issue_lifecycle_service import (
     DFTAuditIssueLifecycleService,
 )
 from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity, normalize_source_document_type
+from app.services.external_analysis_identity import (
+    UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+    review_source_identity,
+)
 
 
 DFT_AUDIT_ISSUE_OPEN_STATUSES = set(DFT_AUDIT_ISSUE_PENDING_STATUSES)
@@ -200,7 +204,11 @@ class DFTAuditIssueService:
             current_snapshot=self.snapshot_dft_result(row),
             suggested_value=suggested,
             evidence_payload=evidence,
-            source_identity=source_identity or str(opinion.get("source_identity") or opinion.get("source_label") or opinion.get("source") or ""),
+            source_identity=source_identity
+            or review_source_identity(
+                opinion.get("source_identity"),
+                opinion.get("source_identity_verified"),
+            ),
             source_candidate_id=source_candidate_id or str(opinion.get("candidate_id") or ""),
             fingerprint=fingerprint,
             resolution_note="DFT audit consensus recorded as an issue; underlying DFTResult was not verified, rejected, or edited.",
@@ -217,8 +225,10 @@ class DFTAuditIssueService:
         corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
         evidence = payload.get("evidence_location") or payload.get("evidence_payload") or candidate.evidence_payload
         is_supporting_reference = self._is_supporting_reference_payload(payload, corrected, evidence)
-        issue_type = "source_scope_error" if is_supporting_reference else "missing_dft_result"
-        status = "closed" if is_supporting_reference else "needs_primary_ai"
+        ml_predicted = payload.get("ml_predicted", corrected.get("ml_predicted"))
+        is_ml_predicted = ml_predicted is True or str(ml_predicted or "").strip().lower() in {"1", "true", "yes"}
+        issue_type = "source_scope_error" if is_supporting_reference or is_ml_predicted else "missing_dft_result"
+        status = "closed" if is_supporting_reference else "needs_user_decision" if is_ml_predicted else "needs_primary_ai"
         suggested_dft = self._suggested_dft_from_payload(payload)
         fingerprint = self.fingerprint_missing_issue(
             paper_id=paper_id,
@@ -230,15 +240,21 @@ class DFTAuditIssueService:
             target_id="new",
             issue_type=issue_type,
             status=status,
-            severity="low" if is_supporting_reference else "high",
+            severity="low" if is_supporting_reference else "medium" if is_ml_predicted else "high",
             suggested_dft=suggested_dft,
             evidence_payload=evidence,
-            source_identity=str(payload.get("source_label") or run.source_label or payload.get("source") or run.source or ""),
+            source_identity=review_source_identity(
+                run.source_identity,
+                run.source_identity_verified,
+                default_untrusted=UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+            ),
             source_candidate_id=str(candidate.id),
             fingerprint=fingerprint,
             resolution_note=(
                 "Supporting-reference DFT finding is tracked as source_scope_error, not as a main-paper missing result."
                 if is_supporting_reference
+                else "ML-predicted value is outside the DFTResult lane and requires user-controlled prediction-data review."
+                if is_ml_predicted
                 else "Missing DFT result draft queued for primary AI or user-controlled follow-up."
             ),
         )

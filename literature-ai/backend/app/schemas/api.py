@@ -259,6 +259,12 @@ class DFTResultResponse(BaseModel):
     candidate_status: str = "system_candidate"
     evidence_payload: dict[str, Any] | None = None
     extraction_protocol_version: str | None = None
+    support_lifecycle_status: str | None = None
+    support_writeback_paper_id: UUID | None = None
+    support_writeback_dft_result_id: UUID | None = None
+    support_lifecycle_reason: str | None = None
+    support_lifecycle_actor: str | None = None
+    support_lifecycle_updated_at: datetime | None = None
     object_review_audit_count: int = 0
     object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
     latest_object_review_audit: dict[str, Any] | None = None

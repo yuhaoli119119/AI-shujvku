@@ -19,6 +19,11 @@ from app.services.dft_review_helpers import (
     normalize_dft_value_for_comparison,
     same_normalized_dft_value,
 )
+from app.services.external_analysis_identity import (
+    UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+    review_source_identity,
+    review_submission_identity,
+)
 from app.utils.review_safety import is_safe_verified_review
 
 
@@ -70,13 +75,12 @@ class VerificationSessionDFTConsensusMixin:
                     "normalized_energy_type": payload.get("normalized_energy_type"),
                     "source_label": str(payload.get("source_label") or run.source_label or run.source or "").strip(),
                     "source": str(payload.get("source") or run.source or "").strip(),
-                    "source_identity": str(
-                        payload.get("source_label")
-                        or run.source_label
-                        or payload.get("source")
-                        or run.source
-                        or candidate.id
-                    ).strip(),
+                    "source_identity": review_source_identity(
+                        run.source_identity,
+                        run.source_identity_verified,
+                        default_untrusted=UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+                    ),
+                    "source_identity_verified": bool(run.source_identity_verified),
                     "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
                     "adjudication_role": payload.get("adjudication_role"),
                     "adjudication_scope": payload.get("adjudication_scope"),
@@ -111,7 +115,7 @@ class VerificationSessionDFTConsensusMixin:
         for audit in audits:
             if audit["status"] not in {"candidate", "pending", "requires_resolution", "materialized"}:
                 continue
-            submission_id = str(audit.get("candidate_id") or "").strip()
+            submission_id = self._dft_review_submission_identity(audit)
             if not submission_id:
                 continue
             current = deduped.get(submission_id)
@@ -743,11 +747,19 @@ class VerificationSessionDFTConsensusMixin:
 
     @staticmethod
     def _same_dft_review_submission(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        left_identity = VerificationSessionDFTConsensusMixin._dft_review_submission_identity(left)
+        right_identity = VerificationSessionDFTConsensusMixin._dft_review_submission_identity(right)
+        if left_identity and right_identity:
+            return left_identity == right_identity
         left_id = str(left.get("candidate_id") or "").strip()
         right_id = str(right.get("candidate_id") or "").strip()
         if left_id and right_id:
             return left_id == right_id
         return left is right
+
+    @staticmethod
+    def _dft_review_submission_identity(audit: dict[str, Any]) -> str:
+        return review_submission_identity(audit)
 
     def _synthesize_dft_whole_row_proposal(
         self,

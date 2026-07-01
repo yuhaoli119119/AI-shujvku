@@ -16,7 +16,7 @@ from app.db.models import (
     PaperCorrection,
     PaperTable,
 )
-from app.mcp.context import MCPAuthInfo, mcp_auth_context
+from app.mcp.context import mcp_auth_context
 from app.mcp.server import (
     create_table,
     delete_table,
@@ -40,6 +40,10 @@ EVIDENCE = {
 def table_tool_env(monkeypatch):
     database_url = os.environ["LITAI_TEST_DATABASE_URL"]
     monkeypatch.setenv("LITAI_DATABASE_URL", database_url)
+    monkeypatch.setenv(
+        "LITAI_MCP_API_KEYS",
+        "table_curator|Table Curator|table-curator-key|review_corrections",
+    )
     get_settings.cache_clear()
     engine = create_engine(database_url, future=True)
     try:
@@ -55,13 +59,8 @@ def table_tool_env(monkeypatch):
         get_settings.cache_clear()
 
 
-def _review_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="table_curator",
-        display_name="Table Curator",
-        capabilities=frozenset({"review_corrections"}),
-        raw_key="table-curator-key",
-    )
+def _review_auth() -> str:
+    return "table-curator-key"
 
 
 def _paper(session: Session, title: str) -> Paper:
@@ -123,6 +122,7 @@ def test_agent_guide_table_tools_are_registered_with_expected_contract():
         "reason",
         "evidence_payload",
     }
+    assert "target_markdown_content" in schemas["merge_table"]["properties"]
 
 
 def test_update_table_is_approved_audited_and_idempotent(table_tool_env):
@@ -325,6 +325,76 @@ def test_merge_table_atomically_updates_target_deletes_source_and_retries(
         assert audit.payload["target_updates"] == {"markdown_content": merged_markdown}
         assert audit.payload["source_before"]["id"] == str(source_id)
         assert audit.payload["target_before"]["id"] == str(target_id)
+
+
+def test_merge_table_target_markdown_content_alias_updates_target(table_tool_env):
+    with Session(table_tool_env) as session:
+        paper = _paper(session, "merge-table-markdown-alias")
+        source = _table(
+            session,
+            paper,
+            caption="Table 3 continued",
+            markdown_content="| row 9 |",
+            page=10,
+        )
+        target = _table(
+            session,
+            paper,
+            caption="Table 3",
+            markdown_content="| row 1 |",
+            page=9,
+        )
+        session.commit()
+        paper_id, source_id, target_id = paper.id, source.id, target.id
+
+    merged_markdown = "| merged |\n| --- |\n| row 1 |\n| row 9 |"
+    with mcp_auth_context(_review_auth()):
+        result = merge_table(
+            str(paper_id),
+            str(source_id),
+            str(target_id),
+            "The target table should contain all rows from both table fragments.",
+            {**EVIDENCE, "page": 9, "table": "Table 3"},
+            target_markdown_content=merged_markdown,
+        )
+
+    assert result["idempotent"] is False
+    assert result["table"]["markdown_content"] == merged_markdown
+    with Session(table_tool_env) as session:
+        assert session.get(PaperTable, source_id) is None
+        assert session.get(PaperTable, target_id).markdown_content == merged_markdown
+        audit = session.scalars(
+            select(AuditLog).where(AuditLog.action == "merge_table")
+        ).one()
+        assert audit.payload["target_updates"] == {"markdown_content": merged_markdown}
+        assert audit.payload["changed_fields"] == ["markdown_content"]
+
+
+def test_merge_table_rejects_conflicting_markdown_alias(table_tool_env):
+    with Session(table_tool_env) as session:
+        paper = _paper(session, "merge-table-markdown-conflict")
+        source = _table(session, paper, caption="Source", markdown_content="| S |", page=2)
+        target = _table(session, paper, caption="Target", markdown_content="| T |", page=1)
+        session.commit()
+        paper_id, source_id, target_id = paper.id, source.id, target.id
+
+    with mcp_auth_context(_review_auth()):
+        with pytest.raises(ValueError, match="target_markdown_content does not match"):
+            merge_table(
+                str(paper_id),
+                str(source_id),
+                str(target_id),
+                "Conflicting markdown aliases should be rejected before any write.",
+                EVIDENCE,
+                {"markdown_content": "from target_updates"},
+                target_markdown_content="from alias",
+            )
+
+    with Session(table_tool_env) as session:
+        assert session.get(PaperTable, source_id) is not None
+        assert session.get(PaperTable, target_id).markdown_content == "| T |"
+        assert session.query(PaperCorrection).count() == 0
+        assert session.query(AuditLog).count() == 0
 
 
 def test_merge_table_rejects_cross_paper_same_source_target_and_missing_evidence(

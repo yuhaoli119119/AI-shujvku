@@ -12,30 +12,25 @@ from sqlalchemy.orm import Session
 from app.api.papers.aggregation import export_dft_results_csv
 from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, EvidenceSpan, ExtractionFieldReview, Paper
 from app.main import app
-from app.mcp.context import MCPAuthInfo, mcp_auth_context
-from app.mcp.server import get_dft_audit_issues, repair_dft_audit_issue
+from app.mcp.context import mcp_auth_context
+from app.mcp.server import (
+    get_dft_audit_issues,
+    repair_dft_audit_issue,
+    repair_dft_audit_issues_batch,
+    verify_dft_results_batch,
+)
 from app.rag.eligibility import is_rag_eligible
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_export_service import build_dft_ml_dataset
 from app.services.dft_review_service import DFTResultReviewService
 
 
-def _primary_repair_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="dft_primary_repair",
-        display_name="DFT Primary Repair AI",
-        capabilities=frozenset({"read_papers", "repair_dft_issues"}),
-        raw_key="test-primary-repair-key",
-    )
+def _primary_repair_auth() -> str:
+    return "test-primary-repair-e2e-key"
 
 
-def _audit_only_auth() -> MCPAuthInfo:
-    return MCPAuthInfo(
-        source_prefix="assigned_dft_audit",
-        display_name="Assigned DFT Audit AI",
-        capabilities=frozenset({"read_papers", "review_dft"}),
-        raw_key="test-audit-only-key",
-    )
+def _audit_only_auth() -> str:
+    return "test-audit-only-e2e-key"
 
 
 def _paper(session: Session, title: str) -> Paper:
@@ -179,7 +174,7 @@ def _export_rows(session: Session):
     return response, list(csv.DictReader(io.StringIO(text)))
 
 
-def test_missing_issue_primary_repair_then_human_verify_closes_issue_and_opens_export_gate(setup_test_db):
+def test_missing_issue_fast_processing_closes_issue_and_opens_export_gate(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "DFT lifecycle missing to verify")
         issue = _missing_issue(session, paper)
@@ -195,110 +190,48 @@ def test_missing_issue_primary_repair_then_human_verify_closes_issue_and_opens_e
     assert issues_payload["items"][0]["live_snapshot"] is None
 
     with mcp_auth_context(_audit_only_auth()):
-        try:
-            repair_dft_audit_issue(issue_id, "create_missing_dft", {}, "audit-only attempt", {})
-            assert False, "audit-only MCP key must not repair DFT audit issues"
-        except PermissionError as exc:
-            assert "repair_dft_issues" in str(exc)
-
-    with mcp_auth_context(_primary_repair_auth()):
-        repair_result = repair_dft_audit_issue(
-            issue_id,
-            "create_missing_dft",
-            {},
-            "Primary repair checked Table 1 against PDF evidence.",
-            {},
-        )
-        retry_result = repair_dft_audit_issue(
-            issue_id,
-            "create_missing_dft",
-            {},
-            "Repeated repair should only relink existing DFTResult.",
-            {},
+        fast_result = repair_dft_audit_issues_batch(
+            paper_id=str(paper_id),
+            auto_finalize=True,
         )
 
-    assert repair_result["status"] == "created"
-    assert retry_result["status"] == "linked_existing"
-    assert retry_result["dft_result_id"] == repair_result["dft_result_id"]
+    assert fast_result["requested_count"] == 1
+    assert fast_result["processed_count"] == 1
+    assert fast_result["finalized_count"] == 1
+    assert fast_result["failed_count"] == 0
+    assert fast_result["capability_used"] == "review_dft"
+    row_id = UUID(fast_result["items"][0]["dft_result_id"])
+    with mcp_auth_context(_audit_only_auth()):
+        repeated_verify = verify_dft_results_batch(
+            paper_id=str(paper_id),
+            dft_result_ids=[str(row_id)],
+            confirm_reviewed_against_pdf=True,
+            reviewer_note="Repeated fast verification automatically uses current write versions.",
+        )
+    assert repeated_verify["verified"] == 1
+    assert repeated_verify["skipped"] == 0
+
     with Session(setup_test_db) as session:
-        row_id = UUID(repair_result["dft_result_id"])
         row = session.get(DFTResult, row_id)
         issue = session.get(DFTAuditIssue, UUID(issue_id))
         repair_logs = session.scalars(select(AuditLog).where(AuditLog.action == "repair_dft_audit_issue")).all()
         reviews = session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == paper_id)).all()
+        verify_logs = session.scalars(select(AuditLog).where(AuditLog.action == "verify_dft_result")).all()
         response, rows = _export_rows(session)
         dataset = build_dft_ml_dataset(session)
 
         assert row is not None
-        assert row.candidate_status == "ai_primary_applied"
-        assert row.candidate_status not in {"ML_Ready", "human_verified", "safe_verified"}
-        assert issue.status == "fixed_by_primary_ai"
-        assert issue.target_id == str(row.id)
-        assert issue.resolved_by is None
-        assert issue.resolved_at is None
-        assert reviews == []
-        assert all(log.payload["writes_final_truth"] is False for log in repair_logs)
-        assert "test-primary-repair-key" not in str(repair_logs[0].payload)
-        assert rows == []
-        assert response.headers["x-d1-exported-count"] == "0"
-        assert dataset["records"] == []
-
-    with Session(setup_test_db) as session:
-        verify_result = DFTResultReviewService(session).verify_result(
-            paper_id=paper_id,
-            result_id=row_id,
-            confirm_reviewed_against_pdf=True,
-            reviewer="human_reviewer",
-            reviewer_note="Human checked Table 1 and confirmed the repaired DFT row.",
-            field_names=["value"],
-            evidence_payload={
-                "page": 5,
-                "table": "Table 1",
-                "quoted_text": "Fe-GDY Li2S4 adsorption energy is -1.10 eV.",
-                "source_document_type": "main_text",
-            },
-        )
-        current_review = session.scalar(
-            select(ExtractionFieldReview)
-            .where(ExtractionFieldReview.paper_id == paper_id)
-            .where(ExtractionFieldReview.target_id == str(row_id))
-            .where(ExtractionFieldReview.field_name == "value")
-        )
-        second_verify = DFTResultReviewService(session).verify_result(
-            paper_id=paper_id,
-            result_id=row_id,
-            confirm_reviewed_against_pdf=True,
-            reviewer="human_reviewer",
-            reviewer_note="Repeated human verify should not create new issue closures.",
-            field_names=["value"],
-            expected_write_version=current_review.write_version,
-            evidence_payload={"page": 5, "quoted_text": "Fe-GDY Li2S4 adsorption energy is -1.10 eV."},
-        )
-
-    assert verify_result["closed_audit_issue_ids"] == [issue_id]
-    assert second_verify["closed_audit_issue_ids"] == []
-    assert verify_result["export_safety"]["is_exportable"] is True
-    with Session(setup_test_db) as session:
-        row = session.get(DFTResult, row_id)
-        issue = session.get(DFTAuditIssue, UUID(issue_id))
-        reviews = session.scalars(
-            select(ExtractionFieldReview)
-            .where(ExtractionFieldReview.paper_id == paper_id)
-            .where(ExtractionFieldReview.target_id == str(row_id))
-        ).all()
-        verify_log = session.scalar(select(AuditLog).where(AuditLog.action == "verify_dft_result"))
-        response, rows = _export_rows(session)
-        dataset = build_dft_ml_dataset(session)
-
         assert row.candidate_status == "ML_Ready"
         assert issue.status == "closed"
-        assert issue.resolution_note == "human_verified"
-        assert issue.resolved_by == "human_reviewer"
-        assert len(reviews) == 1
-        assert reviews[0].reviewer_status == "verified"
-        assert reviews[0].reviewer == "human_reviewer"
-        assert reviews[0].review_payload["human_verification"]["reviewer"] == "human_reviewer"
-        assert verify_log.payload["closed_audit_issue_ids"] == [issue_id]
+        assert issue.target_id == str(row.id)
+        assert issue.resolved_by == "assigned_dft_audit"
+        assert issue.resolved_at is not None
+        assert reviews
+        assert all(review.reviewer_status == "verified" for review in reviews)
+        assert all(review.reviewer == "assigned_dft_audit" for review in reviews)
+        assert all(log.payload["writes_final_truth"] is False for log in repair_logs)
+        assert repair_logs[0].payload["capability_used"] == "review_dft"
+        assert any(log.payload["closed_audit_issue_ids"] == [issue_id] for log in verify_logs)
         assert response.headers["x-d1-exported-count"] == "1"
         assert rows[0]["paper_id"] == str(paper_id)
         assert rows[0]["value"] == "-1.1"

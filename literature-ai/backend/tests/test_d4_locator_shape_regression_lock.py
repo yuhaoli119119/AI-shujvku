@@ -205,7 +205,7 @@ def test_d4_text_only_missing_page_evidence_does_not_unlock_writing_pack(tmp_pat
         engine.dispose()
 
 
-def test_d4_text_only_missing_page_evidence_does_not_unlock_dft_export(tmp_path):
+def test_d4_text_only_evidence_no_longer_adds_locator_block_in_fast_mode(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -221,9 +221,10 @@ def test_d4_text_only_missing_page_evidence_does_not_unlock_dft_export(tmp_path)
             assert gate.eligible is False
             assert gate.provenance_level == "text_evidence_only"
             assert gate.locator_status == "text_only"
-            assert "unsafe_locator" in gate.reasons
+            assert "unsafe_locator" not in gate.reasons
+            assert "missing_material_identity" in gate.reasons
             assert rows == []
-            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
+            assert "unsafe_locator" not in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 
@@ -281,4 +282,3 @@ def test_d4_api_serialization_marks_bbox_unusable_when_page_missing(tmp_path):
             assert payload["can_highlight_in_pdf"] is False
     finally:
         engine.dispose()
-

@@ -103,6 +103,16 @@ def setup_test_db(monkeypatch, tmp_path):
     monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
     monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", str(tmp_path))
     monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
+    monkeypatch.setenv(
+        "LITAI_MCP_API_KEYS",
+        "reader|Reader|test-reader-key|read_papers;"
+        "primary_ai|Primary AI|test-primary-repair-key|read_papers,repair_dft_issues;"
+        "audit_ai|Audit AI|test-audit-only-key|read_papers,review_dft;"
+        "correction_reviewer|Correction Reviewer|test-correction-only-key|read_papers,review_corrections;"
+        "ordinary_ide_ai|Ordinary IDE AI|test-propose-only-key|read_papers,append_notes,propose_corrections;"
+        "dft_primary_repair|DFT Primary Repair AI|test-primary-repair-e2e-key|read_papers,repair_dft_issues;"
+        "assigned_dft_audit|Assigned DFT Audit AI|test-audit-only-e2e-key|read_papers,review_dft",
+    )
     get_settings.cache_clear()
 
     engine = create_engine(test_url, future=True)

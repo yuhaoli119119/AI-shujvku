@@ -12,6 +12,7 @@ venv/
 
 # Environment configurations
 .env
+.mcp.json
 literature-ai/.env
 
 # Node modules

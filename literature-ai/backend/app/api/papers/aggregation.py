@@ -29,6 +29,7 @@ from app.services.dft_export_service import (
     _normalized_property_type,
     _optional_int_filter,
     _optional_text_filter,
+    _property_type_filter_clause,
     build_dft_csv_rows,
     build_dft_ml_dataset,
     normalize_dft_display_value,
@@ -50,6 +51,7 @@ async def export_dft_results_csv(
     property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
+    catalyst_name: str | None = Query(default=None, description="Optional catalyst name filter, e.g. Fe-GDY"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
@@ -61,6 +63,7 @@ async def export_dft_results_csv(
         property_type=property_type,
         adsorbate=adsorbate,
         catalyst_type=catalyst_type,
+        catalyst_name=catalyst_name,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
@@ -87,6 +90,7 @@ async def export_dft_dataset(
     property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
+    catalyst_name: str | None = Query(default=None, description="Optional catalyst name filter, e.g. Fe-GDY"),
     year_min: int | None = Query(default=None, description="Minimum publication year"),
     year_max: int | None = Query(default=None, description="Maximum publication year"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
@@ -98,6 +102,7 @@ async def export_dft_dataset(
         property_type=property_type,
         adsorbate=adsorbate,
         catalyst_type=catalyst_type,
+        catalyst_name=catalyst_name,
         year_min=year_min,
         year_max=year_max,
         library_name=library_name,
@@ -264,6 +269,7 @@ async def compare_dft_results(
     property_type: str | None = Query(default=None, description="Optional property type, e.g. adsorption_energy"),
     adsorbate: str | None = Query(default=None, description="Optional adsorbate filter, e.g. Li2S4"),
     catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
+    catalyst_name: str | None = Query(default=None, description="Optional catalyst name filter, e.g. Fe-GDY"),
     year_min: int | None = Query(default=None),
     year_max: int | None = Query(default=None),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
@@ -272,7 +278,7 @@ async def compare_dft_results(
     compact: bool = Query(default=False, description="Return a lighter payload optimized for list/table rendering"),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
-    sort: str = Query(default="value", description="value or property_mix"),
+    sort: str = Query(default="value", description="value, property_mix, or catalyst_group"),
     session: Session = Depends(get_db_session),
 ):
     normalized_status = (status or "all").strip().lower()
@@ -289,7 +295,9 @@ async def compare_dft_results(
     else:
         base_stmt = base_stmt.where(DR.confidence >= min_confidence)
     if property_type:
-        base_stmt = base_stmt.where(DR.property_type.ilike(f"%{property_type}%"))
+        property_clause = _property_type_filter_clause(DR.property_type, property_type)
+        if property_clause is not None:
+            base_stmt = base_stmt.where(property_clause)
     if adsorbate:
         base_stmt = base_stmt.where(DR.adsorbate.ilike(f"%{adsorbate}%"))
     if year_min:
@@ -314,6 +322,31 @@ async def compare_dft_results(
                 "support": cat.support,
             }
         return catalyst_by_id
+
+    def _matches_catalyst_filters(dr: Any, catalysts: list[dict[str, Any]]) -> bool:
+        if catalyst_type:
+            if not any((item.get("type") or "").lower() == catalyst_type.lower() for item in catalysts):
+                return False
+        if catalyst_name:
+            needle = catalyst_name.strip().lower()
+            evidence_context = _extract_evidence_context(dr.evidence_payload)
+            names = [
+                item.get("name")
+                for item in catalysts
+                if item.get("name")
+            ]
+            names.extend(
+                value
+                for value in (
+                    evidence_context.get("material_identity"),
+                    evidence_context.get("material"),
+                    evidence_context.get("structure_name"),
+                )
+                if value
+            )
+            if not any(needle in str(name).lower() for name in names):
+                return False
+        return True
 
     def _row_payload(dr: Any, paper: Any, catalysts: list[dict[str, Any]], gate: Any) -> dict[str, Any]:
         pid = str(paper.id)
@@ -393,7 +426,25 @@ async def compare_dft_results(
                     ordered.append(grouped[key].pop(0))
         return ordered
 
-    if compact and normalized_sort in {"property_mix", "mixed", "property"} and not property_type:
+    def _sort_by_catalyst_group(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        def sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+            catalyst = str(item.get("display_catalyst_name") or "-").strip()
+            catalyst_key = catalyst.casefold()
+            unbound_or_missing = catalyst_key in {"", "-"}
+            return (
+                unbound_or_missing,
+                catalyst_key,
+                str(item.get("title") or "").casefold(),
+                str(item.get("property_type") or "").casefold(),
+                str(item.get("adsorbate") or "").casefold(),
+                item.get("value") is None,
+                item.get("value") if item.get("value") is not None else 0,
+                str(item.get("record_id") or ""),
+            )
+
+        return sorted(items, key=sort_key)
+
+    if compact and normalized_sort in {"catalyst", "catalyst_group", "catalyst_name", "material"}:
         fetch_limit = 2500
         rows = session.execute(base_stmt.limit(fetch_limit)).all()
         catalyst_by_id = _catalyst_map(rows)
@@ -403,10 +454,36 @@ async def compare_dft_results(
         for dr, paper in rows:
             linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
             catalysts = [linked_catalyst] if linked_catalyst else []
-            if catalyst_type:
-                catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
-                if not catalysts:
-                    continue
+            if not _matches_catalyst_filters(dr, catalysts):
+                continue
+            gate = gate_by_id[str(dr.id)]
+            if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
+                continue
+            if normalized_status in {"needs_review", "candidate", "blocked"} and gate.eligible:
+                continue
+            all_items.append(_row_payload(dr, paper, catalysts, gate))
+
+        ordered_items = _sort_by_catalyst_group(all_items)
+        total = len(ordered_items)
+        page_end = offset + limit
+        items = ordered_items[offset:page_end]
+        has_more = total > page_end
+        stats = {
+            "count": total,
+            "property_type_counts": dict(Counter(item["property_type"] for item in all_items if item.get("property_type"))),
+        }
+    elif compact and normalized_sort in {"property_mix", "mixed", "property"} and not property_type:
+        fetch_limit = 2500
+        rows = session.execute(base_stmt.limit(fetch_limit)).all()
+        catalyst_by_id = _catalyst_map(rows)
+        gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
+        all_items: list[dict[str, Any]] = []
+
+        for dr, paper in rows:
+            linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
+            catalysts = [linked_catalyst] if linked_catalyst else []
+            if not _matches_catalyst_filters(dr, catalysts):
+                continue
             gate = gate_by_id[str(dr.id)]
             if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
                 continue
@@ -440,10 +517,8 @@ async def compare_dft_results(
             for dr, paper in chunk_rows:
                 linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
                 catalysts = [linked_catalyst] if linked_catalyst else []
-                if catalyst_type:
-                    catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
-                    if not catalysts:
-                        continue
+                if not _matches_catalyst_filters(dr, catalysts):
+                    continue
                 gate = gate_by_id[str(dr.id)]
                 if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
                     continue
@@ -469,10 +544,8 @@ async def compare_dft_results(
         for dr, paper in rows:
             linked_catalyst = catalyst_by_id.get(str(dr.catalyst_sample_id)) if dr.catalyst_sample_id else None
             catalysts = [linked_catalyst] if linked_catalyst else []
-            if catalyst_type:
-                catalysts = [item for item in catalysts if (item.get("type") or "").lower() == catalyst_type.lower()]
-                if not catalysts:
-                    continue
+            if not _matches_catalyst_filters(dr, catalysts):
+                continue
             gate = gate_by_id[str(dr.id)]
             if normalized_status in {"exportable", "eligible", "validated"} and not gate.eligible:
                 continue
@@ -480,6 +553,8 @@ async def compare_dft_results(
                 continue
             filtered_items.append(_row_payload(dr, paper, catalysts, gate))
 
+        if normalized_sort in {"catalyst", "catalyst_group", "catalyst_name", "material"}:
+            filtered_items = _sort_by_catalyst_group(filtered_items)
         total = len(filtered_items)
         items = filtered_items[offset : offset + limit]
         property_types = {item["property_type"] for item in filtered_items if item.get("property_type")}
@@ -500,6 +575,7 @@ async def compare_dft_results(
             "property_type": property_type,
             "adsorbate": adsorbate,
             "catalyst_type": catalyst_type,
+            "catalyst_name": catalyst_name,
             "library_name": normalize_library_name(library_name) if library_name is not None else None,
             "status": status,
             "compact": compact,

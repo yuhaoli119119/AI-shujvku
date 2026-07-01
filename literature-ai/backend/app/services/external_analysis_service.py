@@ -26,6 +26,7 @@ from app.services.external_analysis_models import (
     ExternalSupportingPaperModel,
     MaterializationResult,
 )
+from app.services.external_analysis_identity import normalize_external_source_identity
 from app.services.external_analysis_normalization import ExternalAnalysisNormalizationMixin
 from app.services.llm_service import LLMService
 from app.utils.library_names import normalize_library_name
@@ -81,6 +82,8 @@ class ExternalAnalysisService(
         source_label: str | None,
         raw_text: str | None,
         raw_payload: dict[str, Any] | list[Any] | str | None,
+        source_identity: str | None = None,
+        source_identity_verified: bool = False,
     ) -> ExternalAnalysisRun:
         paper = self.session.get(Paper, paper_id)
         if not paper:
@@ -93,10 +96,16 @@ class ExternalAnalysisService(
             raw_payload=sanitized_raw_payload,
             source_paper=paper,
         )
+        stored_source_identity, stored_source_identity_verified = normalize_external_source_identity(
+            source_identity,
+            source_identity_verified,
+        )
         run = ExternalAnalysisRun(
             paper_id=paper_id,
             source=source,
             source_label=source_label,
+            source_identity=stored_source_identity,
+            source_identity_verified=stored_source_identity_verified,
             raw_text=sanitized_raw_text,
             raw_payload=sanitized_raw_payload,
             normalized_payload=normalized.model_dump(mode="json") if normalized else None,
@@ -138,6 +147,8 @@ class ExternalAnalysisService(
                 target_id=str(run.id),
                 payload={
                     "source_label": source_label,
+                    "source_identity": stored_source_identity,
+                    "source_identity_verified": stored_source_identity_verified,
                     "mapping_status": run.mapping_status,
                     "mapping_error": run.mapping_error,
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
@@ -302,6 +313,8 @@ class ExternalAnalysisService(
                 )
 
         rows = candidates if candidates is not None else self.list_candidates(run.id)
+        pending_new_dft_candidate_ids: list[str] = []
+        ml_predicted_dft_candidate_ids: list[str] = []
         for candidate in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             if candidate.candidate_type != "object_review_audit":
@@ -313,6 +326,17 @@ class ExternalAnalysisService(
             normalized_decision = self._normalize_dft_review_decision_for_warning(decision)
             target_id = str(payload.get("target_id") or "").strip()
             if normalized_decision == "NEW_CANDIDATE" or target_id.lower() == "new":
+                corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
+                ml_predicted = payload.get("ml_predicted", corrected.get("ml_predicted"))
+                is_ml_predicted = ml_predicted is True or str(ml_predicted or "").strip().lower() in {"1", "true", "yes"}
+                if is_ml_predicted:
+                    ml_predicted_dft_candidate_ids.append(str(candidate.id))
+                if not is_ml_predicted and str(candidate.status or "").strip().lower() in {
+                    "candidate",
+                    "pending",
+                    "requires_resolution",
+                }:
+                    pending_new_dft_candidate_ids.append(str(candidate.id))
                 continue
             if not normalized_decision:
                 continue
@@ -334,6 +358,38 @@ class ExternalAnalysisService(
                         "Use PASS, REJECT, REJECTED, PROPOSED, REVISE, or NEEDS_HUMAN for existing DFT rows. "
                         "needs_user_decision and ambiguous are normalized to NEEDS_HUMAN and stay in manual adjudication; "
                         "they are not auto-adoptable opinions."
+                    ),
+                }
+            )
+
+        if pending_new_dft_candidate_ids:
+            warnings.append(
+                {
+                    "code": "dft_new_candidates_pending_review_rules",
+                    "severity": "warning",
+                    "run_id": str(run.id),
+                    "pending_count": len(pending_new_dft_candidate_ids),
+                    "candidate_ids": pending_new_dft_candidate_ids[:20],
+                    "next_action": "apply_analysis_review_rules",
+                    "message": (
+                        f"{len(pending_new_dft_candidate_ids)} DFT new_candidate opinion(s) were imported but are "
+                        "not yet materialized or represented by DFT audit issues. Apply review rules for this run."
+                    ),
+                }
+            )
+
+        if ml_predicted_dft_candidate_ids:
+            warnings.append(
+                {
+                    "code": "ml_predicted_values_not_dft_results",
+                    "severity": "warning",
+                    "run_id": str(run.id),
+                    "candidate_count": len(ml_predicted_dft_candidate_ids),
+                    "candidate_ids": ml_predicted_dft_candidate_ids[:20],
+                    "next_action": "needs_user_decision",
+                    "message": (
+                        f"{len(ml_predicted_dft_candidate_ids)} ML-predicted value(s) are present in DFT new_candidate "
+                        "payloads. They will remain requires_resolution and must not become DFTResult rows."
                     ),
                 }
             )

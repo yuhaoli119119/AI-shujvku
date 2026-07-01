@@ -5,7 +5,7 @@ import math
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -44,9 +44,13 @@ ELEMENT_SYMBOLS = {
 REACTION_CATEGORY_ORDER = ["HER", "OER/ORR", "CO2RR", "NRR", "电池/离子", "分子/污染物", "其他"]
 TARGET_PROPERTY_ORDER = [
     "adsorption_energy",
+    "binding_energy",
     "gibbs_free_energy_change",
     "overpotential",
     "reaction_barrier",
+    "li2s_decomposition_barrier",
+    "migration_barrier",
+    "formation_energy",
     "limiting_potential",
     "band_gap",
 ]
@@ -61,7 +65,49 @@ DESCRIPTOR_PROPERTY_ORDER = [
     "bond_length",
     "adsorption_distance",
 ]
-CORRELATION_PROPERTY_TYPES = frozenset(TARGET_PROPERTY_ORDER) | frozenset(DESCRIPTOR_PROPERTY_ORDER)
+CORRELATION_VARIABLE_ORDER = [
+    "adsorption_energy",
+    "binding_energy",
+    "gibbs_free_energy_change",
+    "rds_energy",
+    "reaction_barrier",
+    "li2s_decomposition_barrier",
+    "migration_barrier",
+    "formation_energy",
+    "overpotential",
+    "limiting_potential",
+    "band_gap",
+    "d_band_center",
+    "charge_transfer",
+    "bader_charge",
+    "work_function",
+    "metal_electronegativity",
+    "coordination_number",
+    "bond_length",
+    "adsorption_distance",
+]
+CORRELATION_VARIABLE_GROUPS = {
+    "adsorption_energy": "energy",
+    "binding_energy": "energy",
+    "gibbs_free_energy_change": "energy",
+    "rds_energy": "energy",
+    "reaction_barrier": "barrier",
+    "li2s_decomposition_barrier": "barrier",
+    "migration_barrier": "barrier",
+    "formation_energy": "energy",
+    "overpotential": "potential",
+    "limiting_potential": "potential",
+    "band_gap": "electronic",
+    "d_band_center": "electronic",
+    "charge_transfer": "charge",
+    "bader_charge": "charge",
+    "work_function": "electronic",
+    "metal_electronegativity": "structure",
+    "coordination_number": "structure",
+    "bond_length": "structure",
+    "adsorption_distance": "structure",
+}
+CORRELATION_PROPERTY_TYPES = frozenset(CORRELATION_VARIABLE_ORDER)
 DFT_TARGET_TYPES = {"dft_result", "dft_results"}
 
 
@@ -102,12 +148,23 @@ def _canonical_property_type(value: Any) -> str:
         "e_ads": "adsorption_energy",
         "eads": "adsorption_energy",
         "adsorption_energy_ev": "adsorption_energy",
-        "binding_energy": "adsorption_energy",
+        "e_bind": "binding_energy",
+        "ebind": "binding_energy",
+        "binding_energy_ev": "binding_energy",
         "gibbs_free_energy": "gibbs_free_energy_change",
         "free_energy_change": "gibbs_free_energy_change",
         "delta_g": "gibbs_free_energy_change",
         "reaction_energy_barrier": "reaction_barrier",
         "energy_barrier": "reaction_barrier",
+        "li2s_decomposition": "li2s_decomposition_barrier",
+        "li2s_decomposition_energy_barrier": "li2s_decomposition_barrier",
+        "li2s_decomposition_barrier_ev": "li2s_decomposition_barrier",
+        "diffusion_barrier": "migration_barrier",
+        "migration_energy_barrier": "migration_barrier",
+        "migration_barrier_ev": "migration_barrier",
+        "formation_energy_ev": "formation_energy",
+        "e_form": "formation_energy",
+        "eformation": "formation_energy",
         "d_band": "d_band_center",
         "d_band_centre": "d_band_center",
         "dband_center": "d_band_center",
@@ -734,6 +791,17 @@ def _correlation_color(value: float | None) -> str:
     return "neutral"
 
 
+def _correlation_variable_payload(key: str) -> dict[str, str]:
+    return {
+        "key": key,
+        "group": CORRELATION_VARIABLE_GROUPS.get(key, "other"),
+    }
+
+
+def _correlation_variable_list() -> list[dict[str, str]]:
+    return [_correlation_variable_payload(key) for key in CORRELATION_VARIABLE_ORDER]
+
+
 def _paper_filters(library_name: str | None) -> list[Any]:
     if not library_name:
         return []
@@ -1108,29 +1176,22 @@ def _paired_descriptor_points_v2(
     return pairs, len(filtered_targets)
 
 
-def _median_numeric(values: list[float]) -> float | None:
-    finite = sorted(float(value) for value in values if isinstance(value, int | float) and math.isfinite(float(value)))
-    if not finite:
-        return None
-    middle = len(finite) // 2
-    if len(finite) % 2:
-        return finite[middle]
-    return (finite[middle - 1] + finite[middle]) / 2
-
-
 def _build_exploratory_descriptor_index(
     rows: list[tuple[DFTResult, Paper]],
     catalysts_by_id: dict[str, CatalystSample],
     *,
+    eligible_result_ids: set[str],
     reaction_category: str | None = None,
     adsorbate: str | None = None,
     material_family: str | None = None,
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    """Index all non-rejected exploratory rows once for every correlation cell."""
+    """Index reviewed/exportable exploratory rows once for every correlation cell."""
     requested_adsorbate = _canonical_adsorbate(adsorbate)[0] if adsorbate else None
     requested_family = _norm_key(material_family or "")
     grouped: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     for result, paper in rows:
+        if str(result.id) not in eligible_result_ids:
+            continue
         if result.value is None or str(result.candidate_status or "").strip().lower() == "rejected":
             continue
         prop = _canonical_property_type(result.property_type)
@@ -1139,7 +1200,7 @@ def _build_exploratory_descriptor_index(
         result_adsorbate = _canonical_adsorbate(result.adsorbate)[0]
         if requested_adsorbate and result_adsorbate != requested_adsorbate:
             continue
-        category = _adsorbate_category(result_adsorbate) if result_adsorbate else "其他"
+        category = _dft_correlation_category(result_adsorbate, result.reaction_step)
         if reaction_category and category != reaction_category:
             continue
         catalyst = catalysts_by_id.get(str(result.catalyst_sample_id or ""))
@@ -1147,7 +1208,11 @@ def _build_exploratory_descriptor_index(
         family = catalyst_payload.get("family") or catalyst_payload.get("label") or catalyst_payload.get("name") or ""
         if requested_family and requested_family not in _norm_key(family):
             continue
-        group_key = str(result.catalyst_sample_id or result.paper_id)
+        group_key = (
+            f"catalyst:{result.catalyst_sample_id}"
+            if result.catalyst_sample_id
+            else f"unassigned:{result.id}"
+        )
         entry = {
             "value": float(result.value),
             "unit": result.unit,
@@ -1158,7 +1223,33 @@ def _build_exploratory_descriptor_index(
             "category": category,
         }
         grouped[group_key][prop].append(entry)
+    _add_derived_rds_entries(grouped)
     return grouped
+
+
+def _dft_correlation_category(adsorbate: str | None, reaction_step: Any) -> str:
+    if adsorbate:
+        return _adsorbate_category(adsorbate)
+    step = _clean_pdf_text(reaction_step).lower()
+    if any(token in step for token in ("li2s", "lips", "li-s", "lithium", "polysulfide", "sulfur")):
+        return "电池/离子"
+    return "其他"
+
+
+def _add_derived_rds_entries(grouped: dict[str, dict[str, list[dict[str, Any]]]]) -> None:
+    for group in grouped.values():
+        if group.get("rds_energy"):
+            continue
+        free_energy_entries = [
+            item
+            for item in group.get("gibbs_free_energy_change", [])
+            if isinstance(item.get("value"), int | float) and math.isfinite(float(item["value"]))
+        ]
+        if not free_energy_entries:
+            continue
+        rds_entry = max(free_energy_entries, key=lambda item: float(item["value"])).copy()
+        rds_entry["derived_from_property"] = "gibbs_free_energy_change"
+        group["rds_energy"].append(rds_entry)
 
 
 def _exploratory_descriptor_points_from_index(
@@ -1168,56 +1259,108 @@ def _exploratory_descriptor_points_from_index(
     descriptor: str,
 ) -> list[dict[str, Any]]:
     """Build one target/descriptor pair set from the request-local exploratory index."""
+    return _exploratory_variable_points_from_index(
+        grouped,
+        y_property=target_property,
+        x_property=descriptor,
+    )
 
+
+def _entries_context_compatible(x_entry: dict[str, Any], y_entry: dict[str, Any]) -> bool:
+    x_adsorbate = x_entry.get("adsorbate")
+    y_adsorbate = y_entry.get("adsorbate")
+    return (
+        not x_adsorbate
+        or x_adsorbate == "none"
+        or not y_adsorbate
+        or y_adsorbate == "none"
+        or x_adsorbate == y_adsorbate
+    )
+
+
+def _exploratory_variable_points_from_index(
+    grouped: dict[str, dict[str, list[dict[str, Any]]]],
+    *,
+    y_property: str,
+    x_property: str,
+) -> list[dict[str, Any]]:
+    """Build one x/y variable pair set from the request-local exploratory index."""
     points: list[dict[str, Any]] = []
     for group in grouped.values():
-        targets = group.get(target_property) or []
-        descriptors = group.get(descriptor) or []
-        if not targets or not descriptors:
+        y_entries = group.get(y_property) or []
+        x_entries = group.get(x_property) or []
+        if not y_entries or not x_entries:
             continue
-        for target_entry in targets:
-            compatible = [
-                item
-                for item in descriptors
-                if not item.get("adsorbate")
-                or item.get("adsorbate") == "none"
-                or not target_entry.get("adsorbate")
-                or item.get("adsorbate") == target_entry.get("adsorbate")
-            ]
-            if not compatible:
-                compatible = descriptors
-            x = _median_numeric([item["value"] for item in compatible])
-            y = float(target_entry["value"])
-            if x is None or not math.isfinite(y):
-                continue
-            descriptor_entry = compatible[0]
-            paper = target_entry["paper"]
-            target_result = target_entry["result"]
-            descriptor_result = descriptor_entry["result"]
-            points.append(
-                {
-                    "x": x,
-                    "y": y,
-                    "descriptor_unit": descriptor_entry.get("unit"),
-                    "target_unit": target_entry.get("unit"),
-                    "paper_id": str(paper.id),
-                    "paper_title": paper.title,
-                    "doi": paper.doi,
-                    "year": paper.year,
-                    "journal": paper.journal,
-                    "catalyst": (target_entry.get("catalyst") or {}).get("label"),
-                    "adsorbate": target_entry.get("adsorbate"),
-                    "reaction_category": target_entry.get("category"),
-                    "reaction_step": _clean_pdf_text(target_result.reaction_step).lower(),
-                    "match_scope": "exploratory_same_sample",
-                    "target_result_id": str(target_result.id),
-                    "descriptor_result_id": str(descriptor_result.id),
-                    "target_evidence": _clean_pdf_text(target_result.evidence_text)[:420],
-                    "descriptor_evidence": _clean_pdf_text(descriptor_result.evidence_text)[:420],
-                    "source_section": target_result.source_section or descriptor_result.source_section,
-                    "source_figure": target_result.source_figure or descriptor_result.source_figure,
-                }
-            )
+        if x_property == y_property:
+            for entry in y_entries:
+                value = float(entry["value"])
+                if not math.isfinite(value):
+                    continue
+                paper = entry["paper"]
+                result = entry["result"]
+                points.append(
+                    {
+                        "x": value,
+                        "y": value,
+                        "descriptor_unit": entry.get("unit"),
+                        "target_unit": entry.get("unit"),
+                        "paper_id": str(paper.id),
+                        "paper_title": paper.title,
+                        "doi": paper.doi,
+                        "year": paper.year,
+                        "journal": paper.journal,
+                        "catalyst": (entry.get("catalyst") or {}).get("label"),
+                        "adsorbate": entry.get("adsorbate"),
+                        "reaction_category": entry.get("category"),
+                        "reaction_step": _clean_pdf_text(result.reaction_step).lower(),
+                        "match_scope": "self_identity",
+                        "target_result_id": str(result.id),
+                        "descriptor_result_id": str(result.id),
+                        "target_evidence": _clean_pdf_text(result.evidence_text)[:420],
+                        "descriptor_evidence": _clean_pdf_text(result.evidence_text)[:420],
+                        "source_section": result.source_section,
+                        "source_figure": result.source_figure,
+                    }
+                )
+            continue
+        if len(y_entries) != 1:
+            continue
+        y_entry = y_entries[0]
+        compatible = [item for item in x_entries if _entries_context_compatible(item, y_entry)]
+        if len(compatible) != 1:
+            continue
+        x_entry = compatible[0]
+        x = float(x_entry["value"])
+        y = float(y_entry["value"])
+        if not math.isfinite(x) or not math.isfinite(y):
+            continue
+        paper = y_entry["paper"]
+        y_result = y_entry["result"]
+        x_result = x_entry["result"]
+        points.append(
+            {
+                "x": x,
+                "y": y,
+                "descriptor_unit": x_entry.get("unit"),
+                "target_unit": y_entry.get("unit"),
+                "paper_id": str(paper.id),
+                "paper_title": paper.title,
+                "doi": paper.doi,
+                "year": paper.year,
+                "journal": paper.journal,
+                "catalyst": (y_entry.get("catalyst") or {}).get("label"),
+                "adsorbate": y_entry.get("adsorbate"),
+                "reaction_category": y_entry.get("category"),
+                "reaction_step": _clean_pdf_text(y_result.reaction_step).lower(),
+                "match_scope": "exploratory_same_sample",
+                "target_result_id": str(y_result.id),
+                "descriptor_result_id": str(x_result.id),
+                "target_evidence": _clean_pdf_text(y_result.evidence_text)[:420],
+                "descriptor_evidence": _clean_pdf_text(x_result.evidence_text)[:420],
+                "source_section": y_result.source_section or x_result.source_section,
+                "source_figure": y_result.source_figure or x_result.source_figure,
+            }
+        )
     return points
 
 
@@ -1245,6 +1388,15 @@ def _raw_exploratory_descriptor_points(
     grouped = _build_exploratory_descriptor_index(
         rows,
         {str(item.id): item for item in catalysts},
+        eligible_result_ids={
+            result_id
+            for result_id, gate in bulk_export_gate_results(
+                session,
+                [row for row, _paper in rows],
+                target_type="dft_results",
+            ).items()
+            if gate.eligible
+        },
         reaction_category=reaction_category,
         adsorbate=adsorbate,
         material_family=material_family,
@@ -1254,6 +1406,60 @@ def _raw_exploratory_descriptor_points(
         target_property=target_property,
         descriptor=descriptor,
     )
+
+
+def _raw_exploratory_variable_points(
+    session: Session,
+    filters: list[Any],
+    *,
+    y_property: str,
+    x_property: str,
+    reaction_category: str | None = None,
+    adsorbate: str | None = None,
+    material_family: str | None = None,
+) -> list[dict[str, Any]]:
+    """Backward-compatible one-pair helper backed by one bulk DFT read."""
+    stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
+    for clause in filters:
+        stmt = stmt.where(clause)
+    rows = session.execute(stmt).all()
+    paper_ids = {paper.id for _result, paper in rows}
+    catalysts = (
+        session.scalars(select(CatalystSample).where(CatalystSample.paper_id.in_(paper_ids))).all()
+        if paper_ids
+        else []
+    )
+    grouped = _build_exploratory_descriptor_index(
+        rows,
+        {str(item.id): item for item in catalysts},
+        eligible_result_ids={
+            result_id
+            for result_id, gate in bulk_export_gate_results(
+                session,
+                [row for row, _paper in rows],
+                target_type="dft_results",
+            ).items()
+            if gate.eligible
+        },
+        reaction_category=reaction_category,
+        adsorbate=adsorbate,
+        material_family=material_family,
+    )
+    return _exploratory_variable_points_from_index(
+        grouped,
+        y_property=y_property,
+        x_property=x_property,
+    )
+
+
+def _correlation_property_counts_from_index(
+    exploratory_index: dict[str, dict[str, list[dict[str, Any]]]]
+) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for group in exploratory_index.values():
+        for property_type, entries in group.items():
+            counts[property_type] += len(entries)
+    return counts
 
 
 def _build_descriptor_correlation_summary_v2(
@@ -1273,46 +1479,59 @@ def _build_descriptor_correlation_summary_v2(
         material_family=material_family,
     )
     cells = []
-    property_counts: Counter[str] = Counter()
+    property_counts = _correlation_property_counts_from_index(exploratory_index)
     for record in filtered_targets:
         property_counts[_record_target(record).get("canonical_property_type") or ""] += 1
-    for target in TARGET_PROPERTY_ORDER:
-        for descriptor in DESCRIPTOR_PROPERTY_ORDER:
+    variables = _correlation_variable_list()
+    variable_keys = [item["key"] for item in variables]
+    for y_property in variable_keys:
+        for x_property in variable_keys:
             strict_pair_payload, _ = _paired_descriptor_points_v2(
                 dataset,
                 reaction_category=reaction_category,
                 adsorbate=adsorbate,
                 material_family=material_family,
-                target_property=target,
-                descriptor=descriptor,
+                target_property=y_property,
+                descriptor=x_property,
             )
             pair_payload = strict_pair_payload
             source = "reviewed_exportable"
             if allow_exploratory and not pair_payload:
-                pair_payload = _exploratory_descriptor_points_from_index(
+                pair_payload = _exploratory_variable_points_from_index(
                     exploratory_index,
-                    target_property=target,
-                    descriptor=descriptor,
+                    y_property=y_property,
+                    x_property=x_property,
                 )
                 if pair_payload:
                     source = "exploratory_same_sample"
-            stats = _correlation_stats(pair_payload)
             n = len(pair_payload)
-            status = (
-                "ready"
-                if n >= min_n and stats["pearson_r"] is not None
-                else "insufficient_paired_data"
-            )
-            color = _correlation_color(stats["pearson_r"]) if status == "ready" else "gray"
+            if x_property == y_property and n:
+                stats = {
+                    "pearson_r": 1.0,
+                    "spearman_rho": 1.0,
+                    "slope": 1.0,
+                    "intercept": 0.0,
+                }
+                status = "identity"
+            else:
+                stats = _correlation_stats(pair_payload)
+                status = (
+                    "ready"
+                    if n >= min_n and stats["pearson_r"] is not None
+                    else "insufficient_paired_data"
+                )
+            color = _correlation_color(stats["pearson_r"]) if status in {"ready", "identity"} else "gray"
             cells.append(
                 {
-                    "target_property": target,
-                    "descriptor": descriptor,
+                    "y_property": y_property,
+                    "x_property": x_property,
+                    "target_property": y_property,
+                    "descriptor": x_property,
                     "n": n,
-                    "pearson_r": stats["pearson_r"] if status == "ready" else None,
-                    "spearman_rho": stats["spearman_rho"] if status == "ready" else None,
-                    "slope": stats["slope"] if status == "ready" else None,
-                    "intercept": stats["intercept"] if status == "ready" else None,
+                    "pearson_r": stats["pearson_r"] if status in {"ready", "identity"} else None,
+                    "spearman_rho": stats["spearman_rho"] if status in {"ready", "identity"} else None,
+                    "slope": stats["slope"] if status in {"ready", "identity"} else None,
+                    "intercept": stats["intercept"] if status in {"ready", "identity"} else None,
                     "status": status,
                     "color": color,
                     "source": source,
@@ -1320,24 +1539,27 @@ def _build_descriptor_correlation_summary_v2(
                         (
                             f"已形成 {n} 个最新导出逻辑下的配对样本。"
                             if source == "reviewed_exportable"
-                            else f"已形成 {n} 个同样本探索性配对样本。"
+                            else f"已形成 {n} 个已审核同样本配对样本。"
                         )
-                        if status == "ready"
+                        if status in {"ready", "identity"}
                         else (
                             "Correlation is withheld until the current ML dataset logic yields paired descriptor/target "
                             f"values with n >= {min_n} under the selected reaction/adsorbate/material filters."
                             if source == "reviewed_exportable"
-                            else "Strict reviewed/exportable pairing is empty, and the exploratory same-sample fallback "
+                            else "Strict reviewed/exportable pairing is empty, and the reviewed same-sample fallback "
                             f"still has n < {min_n} under the selected reaction/adsorbate/material filters."
                         )
                     ),
                 }
             )
     return {
-        "schema_version": "descriptor_correlation_v2",
+        "schema_version": "dft_total_correlation_v3",
+        "matrix_kind": "total_variable_correlation",
         "min_n": min_n,
-        "target_properties": TARGET_PROPERTY_ORDER,
-        "descriptor_properties": DESCRIPTOR_PROPERTY_ORDER,
+        "variables": variables,
+        "variable_properties": variable_keys,
+        "target_properties": variable_keys,
+        "descriptor_properties": variable_keys,
         "cells": cells,
         "property_counts": dict(property_counts),
         "reviewed_numeric_points": len(filtered_targets),
@@ -1349,9 +1571,8 @@ def _build_descriptor_correlation_summary_v2(
             "dataset_schema_version": (dataset.get("metadata") or {}).get("schema_version"),
         },
         "correlation_policy": (
-            "Correlations are derived from the current DFT ML dataset export logic. "
-            "Strict reviewed/exportable matching is preferred. When strict pairing is empty, the visualization falls back "
-            "to same-sample non-rejected exploratory pairs."
+            "The heatmap is a single DFT variable-by-variable matrix. Strict reviewed/exportable matching is preferred. "
+            "When strict pairing is empty, an explicitly requested fallback may use reviewed/exportable same-sample pairs."
         ),
     }
 
@@ -1488,7 +1709,7 @@ def visualization_overview(
     corr_min_n: int = Query(default=3, ge=3, le=50),
     corr_allow_exploratory: bool = Query(
         default=False,
-        description="When true, correlation falls back to same-sample non-rejected exploratory pairs.",
+        description="When true, correlation may fall back to reviewed/exportable same-sample pairs.",
     ),
     sections: str | None = Query(
         default=None,
@@ -1634,6 +1855,11 @@ def visualization_overview(
             _build_exploratory_descriptor_index(
                 dft_rows,
                 {str(item.id): item for item in catalysts},
+                eligible_result_ids={
+                    result_id
+                    for result_id, gate in gate_by_id.items()
+                    if gate.eligible
+                },
                 reaction_category=corr_reaction,
                 adsorbate=corr_adsorbate,
                 material_family=corr_family,
@@ -1656,8 +1882,10 @@ def visualization_overview(
 
 @router.get("/correlation-pairs")
 def descriptor_correlation_pairs(
-    target_property: str = Query(...),
-    descriptor: str = Query(...),
+    target_property: str | None = Query(default=None),
+    descriptor: str | None = Query(default=None),
+    y_property: str | None = Query(default=None),
+    x_property: str | None = Query(default=None),
     library_name: str | None = Query(default=None),
     reaction_category: str | None = Query(default=None),
     adsorbate: str | None = Query(default=None),
@@ -1665,21 +1893,28 @@ def descriptor_correlation_pairs(
     min_n: int = Query(default=3, ge=3, le=50),
     allow_exploratory: bool = Query(
         default=False,
-        description="When true, falls back to same-sample non-rejected exploratory pairs.",
+        description="When true, may fall back to reviewed/exportable same-sample pairs.",
     ),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
-    target = _canonical_property_type(target_property)
-    descriptor_key = _canonical_property_type(descriptor)
+    y_raw = y_property or target_property
+    x_raw = x_property or descriptor
+    if not y_raw or not x_raw:
+        raise HTTPException(status_code=400, detail="x_property/y_property or descriptor/target_property are required")
+    target = _canonical_property_type(y_raw)
+    descriptor_key = _canonical_property_type(x_raw)
     filters = _paper_filters(library_name)
     stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
     for clause in filters:
         stmt = stmt.where(clause)
     source_rows = session.execute(stmt).all()
+    required_properties = {target, descriptor_key}
+    if "rds_energy" in required_properties:
+        required_properties.add("gibbs_free_energy_change")
     pair_rows = [
         (row, paper)
         for row, paper in source_rows
-        if _canonical_property_type(row.property_type) in {target, descriptor_key}
+        if _canonical_property_type(row.property_type) in required_properties
     ]
     gate_by_id = bulk_export_gate_results(
         session,
@@ -1713,21 +1948,37 @@ def descriptor_correlation_pairs(
         exploratory_index = _build_exploratory_descriptor_index(
             pair_rows,
             {str(item.id): item for item in catalysts},
+            eligible_result_ids={
+                result_id
+                for result_id, gate in gate_by_id.items()
+                if gate.eligible
+            },
             reaction_category=reaction_category,
             adsorbate=adsorbate,
             material_family=material_family,
         )
-        pairs = _exploratory_descriptor_points_from_index(
+        pairs = _exploratory_variable_points_from_index(
             exploratory_index,
-            target_property=target,
-            descriptor=descriptor_key,
+            y_property=target,
+            x_property=descriptor_key,
         )
         if pairs:
             source = "exploratory_same_sample"
-    stats = _correlation_stats(pairs)
-    ready = len(pairs) >= min_n and stats["pearson_r"] is not None
+    if target == descriptor_key and pairs:
+        stats = {
+            "pearson_r": 1.0,
+            "spearman_rho": 1.0,
+            "slope": 1.0,
+            "intercept": 0.0,
+        }
+        ready = len(pairs) >= min_n
+    else:
+        stats = _correlation_stats(pairs)
+        ready = len(pairs) >= min_n and stats["pearson_r"] is not None
     return {
-        "schema_version": "descriptor_scatter_v2",
+        "schema_version": "dft_total_correlation_scatter_v3",
+        "y_property": target,
+        "x_property": descriptor_key,
         "target_property": target,
         "descriptor": descriptor_key,
         "library_name": normalize_library_name(library_name) if library_name else None,
@@ -1751,6 +2002,6 @@ def descriptor_correlation_pairs(
         "points": pairs,
         "policy": (
             "Scatter pairs use the current reviewed/exportable DFT ML dataset by default. "
-            "Same-sample non-rejected exploratory pairs are returned only when explicitly requested."
+            "Reviewed/exportable same-sample pairs are returned only when explicitly requested."
         ),
     }

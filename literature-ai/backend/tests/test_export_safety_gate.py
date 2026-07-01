@@ -172,7 +172,7 @@ def test_dft_export_default_excludes_unsafe_review_statuses(tmp_path):
         engine.dispose()
 
 
-def test_dft_export_default_excludes_missing_evidence_reference(tmp_path):
+def test_dft_fast_mode_allows_verified_text_without_separate_evidence_reference(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -183,9 +183,9 @@ def test_dft_export_default_excludes_missing_evidence_reference(tmp_path):
 
             response, rows = _export_rows(session)
 
-            assert rows == []
-            assert response.headers["x-d1-blocked-count"] == "1"
-            assert "missing_evidence" in response.headers["x-d1-blocked-reasons"]
+            assert len(rows) == 1
+            assert response.headers["x-d1-exported-count"] == "1"
+            assert response.headers["x-d1-blocked-count"] == "0"
     finally:
         engine.dispose()
 
@@ -250,7 +250,7 @@ def test_dft_export_default_excludes_missing_evidence_text(tmp_path):
         engine.dispose()
 
 
-def test_dft_export_blocks_missing_page_and_does_not_fabricate_page_or_bbox(tmp_path):
+def test_dft_fast_mode_allows_text_evidence_without_fabricating_page_or_bbox(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -262,10 +262,10 @@ def test_dft_export_blocks_missing_page_and_does_not_fabricate_page_or_bbox(tmp_
 
             response, rows = _export_rows(session)
 
-            assert rows == []
-            assert response.headers["x-d3-export-count"] == "0"
-            assert response.headers["x-d3-block-count"] == "1"
-            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
+            assert len(rows) == 1
+            assert response.headers["x-d3-export-count"] == "1"
+            assert response.headers["x-d3-block-count"] == "0"
+            assert "unsafe_locator" not in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 
@@ -418,7 +418,7 @@ def test_dft_export_rejects_imported_page_anchor_from_unsafe_review(tmp_path):
 
             assert rows == []
             assert "unsafe_review" in response.headers["x-d1-blocked-reasons"]
-            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
+            assert "unsafe_locator" not in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 

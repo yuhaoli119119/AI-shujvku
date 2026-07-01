@@ -76,7 +76,7 @@ async def get_agent_guide() -> dict:
             "path": CANONICAL_MCP_PATH,
             "json_schema_hint": {
                 "read_tools": ["query_papers", "get_paper", "get_codex_context", "get_codex_item", "get_paper_knowledge", "search_external_papers", "get_dft_review_queue", "get_dft_audit_issues", "get_correction_queue", "retrieve_evidence", "compare_papers", "read_paper_page", "review_figure", "get_review_coverage", "get_field_disputes", "scan_duplicate_dois"],
-                "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "repair_dft_audit_issue", "import_analysis", "update_table", "create_table", "delete_table", "merge_table", "verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure"],
+                "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "repair_dft_audit_issue", "repair_dft_audit_issues_batch", "import_analysis", "update_table", "create_table", "delete_table", "merge_table", "verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure"],
                 "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper", "get_parse_status", "recrop_figure"],
                 "writing_tools": ["insert_word_citation"],
             },
@@ -203,21 +203,21 @@ async def get_agent_guide() -> dict:
                     "display_name": "Assigned DFT Audit AI",
                     "sample_key": "litmcp_assigned_dft_audit",
                     "capabilities": ["read_papers", "propose_corrections"],
-                    "purpose": "DFT audit AI can create issue/candidate evidence but must not repair DFT audit issues",
+                    "purpose": "DFT audit AI creates issue/candidate evidence; the same authenticated identity may run the fast processor when requested",
                 },
                 {
                     "source_prefix": "dft_primary_repair",
                     "display_name": "DFT Primary Repair AI",
                     "sample_key": "litmcp_dft_primary_repair",
                     "capabilities": ["read_papers", "repair_dft_issues"],
-                    "purpose": "primary repair AI can read DFT audit issues and repair one issue at a time",
+                    "purpose": "optional dedicated repair identity; no longer required for the fast DFT workflow",
                 },
                 {
                     "source_prefix": "human_reviewer",
                     "display_name": "Human Reviewer",
                     "sample_key": "litmcp_human_reviewer",
                     "capabilities": ["read_papers", "review_corrections", "review_dft"],
-                    "purpose": "trusted human/admin reviewer may verify or reject through explicit review tools; DFT issue repair remains separate",
+                    "purpose": "optional human/admin review identity; fast DFT processing does not wait for it",
                 },
             ],
             "recommended_when": "Use MCP as the primary Codex interface for interactive paper reading, evidence retrieval, note taking, imported analysis, comparison, and correction proposals.",
@@ -241,6 +241,7 @@ async def get_agent_guide() -> dict:
                 "propose_correction",
                 "propose_dft_result_correction",
                 "repair_dft_audit_issue",
+                "repair_dft_audit_issues_batch",
                 "import_analysis",
                 "update_table",
                 "create_table",
@@ -292,16 +293,16 @@ async def get_agent_guide() -> dict:
         },
         "legacy_suggested_client_prompt": (
             "First call GET /api/system/agent-guide. "
-            "Then inspect the current IDE/project MCP tool list and use the already exposed literature-ai tools first. Do not rewrite mcp_config.json or invent a new MCP server unless the user explicitly asks for manual MCP setup. Only if the current project session truly does not expose literature-ai should you reconnect to /mcp/ with a configured Bearer key. Prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_dft_audit_issues, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, append_note, propose_correction, propose_dft_result_correction for field fixes, repair_dft_audit_issue for single DFT audit issue primary-AI repair, verify_dft_result after explicit evidence review, reject_dft_result for bad candidates, verify_dft_results_batch and reject_dft_results_batch to approve/reject multiple DFT results at once, approve_correction and reject_correction for single proposals, and approve_corrections_batch and reject_corrections_batch to bulk-approve/reject multiple corrections. Exports remain disabled unless the server export policy is explicitly enabled. "
+            "Then inspect the current IDE/project MCP tool list and use the already exposed literature-ai tools first. Do not rewrite mcp_config.json or invent a new MCP server unless the user explicitly asks for manual MCP setup. Only if the current project session truly does not expose literature-ai should you reconnect to /mcp/ with a configured Bearer key. Prefer query_papers, search_external_papers to discover new literature from OpenAlex/arXiv, get_dft_review_queue, get_dft_audit_issues, get_codex_context, get_codex_item, get_paper_knowledge, get_paper, retrieve_evidence, compare_papers, append_note, propose_correction, propose_dft_result_correction for field fixes, repair_dft_audit_issues_batch for one-call DFT repair/finalization, repair_dft_audit_issue only for failed-item retry, and verify_dft_results_batch or reject_dft_results_batch for remaining candidates. Exports remain disabled unless the server export policy is explicitly enabled. "
             "Use read_paper_page to read a specific page when evidence is truncated or missing context. "
             "Inspect main-paper figures in the IDE workflow when stored captions or crops are insufficient. Figure review defaults to main paper only; do not automatically sweep all supplementary/SI figures unless include_supplementary_figures=true, the task explicitly cites Figure Sxx, or an evidence anchor points to an SI figure. "
             "Use recrop_figure to recalculate and persist an image crop. You can use 'full_page', 'wider', or 'ai_bbox' strategies. "
             "Figure image operations are direct-tool-only: when recropping an existing figure, you MUST call the MCP recrop_figure tool with the current figure_id and strategy='full_page'/'wider'/'ai_bbox'. Do not submit recrop_figure, bbox, or proposed_value={'bbox':...} through import_analysis/correction_proposals; the backend rejects that path. After calling recrop_figure, read back the figure and confirm image_path, crop_status, crop_source, and page. If you cannot access the MCP tool, report that you are blocked instead of saying the request was submitted. "
             "Use create_figure_from_bbox when a figure is missing entirely: read the PDF page, choose a bbox or full_page strategy, crop from the original PDF, and create the figure object directly. "
             "Use review_figure when the task is to record a figure verdict such as verified, needs_repair, or rejected; use import_analysis when the task is to correct figure_role, content_summary, key_elements, page, or caption metadata. Figure-derived DFT data must be submitted as DFT candidates/object_review_audits with figure/page/text/value/unit/property/material anchors, not as final verified or ML_Ready data. "
-            "DFT audit AI may submit object_review_audits, issues, and correction candidates only. Dual-AI DFT consensus is recorded as an audit opinion and must not auto-verify, auto-reject, write human_verification, or move a DFTResult to ML_Ready. get_dft_audit_issues remains read_papers for both audit and primary AI, but only a primary repair AI key with repair_dft_issues may repair exactly one issue_id through repair_dft_audit_issue; audit AI, ordinary IDE AI, and propose-only keys must not call that repair tool. Repair output remains AI-applied candidate data pending later review, not human_verified or ML_Ready, and primary repair may mark needs_user_decision but may not mark false positive. Use verify_dft_result/reject_dft_result only after explicit human/user-authorized evidence review on the DFT detail page or equivalent dedicated review tool, never as an automatic audit-consensus step. "
+            "DFT uses a fast operational workflow. The audit task submits object_review_audits and candidates; the data-processing task may reuse the current authenticated DFT write identity, call repair_dft_audit_issues_batch(auto_finalize=true), retry only failed issues, and then batch-verify or reject remaining candidates. A separate dft_primary_repair key and a separate human-finalization step are optional, not blockers. Keep structured evidence, readback, deduplication, and audit logs for traceability. "
             "Use GET /api/dft/audit-report for read-only DFT audit/repair health checks; it summarizes issue status/type counts, repair actor/capability counts, suspect repair warnings, and MCP capability lint warnings without exposing raw keys. The DFT audit center UI is a read-only issue queue and navigation entry into the paper DFT detail view; legacy AI adjudication/auto-advance flows are not final truth paths for DFT. "
-            "Check mcp.capability_warnings in this agent guide; if repair_dft_issues appears on a non-primary-repair key, fix the key split before using repair_dft_audit_issue. "
+            "Do not stop the DFT workflow because the current authenticated identity lacks a dedicated repair-only capability; propose_corrections, review_dft, or repair_dft_issues can enter the fast processing path. "
             "Table object lifecycle is direct-tool-only: use update_table for caption/markdown/page/prov fixes, create_table for missing parsed tables, merge_table for split/continued/duplicate table fragments, and delete_table for invalid table objects. Do not only write a backend-request note, and do not submit table deletion/merge through import_analysis. Use the table object's real paper_id for table tools; SI table objects usually belong to the related SI paper_id even when their scientific evidence is used for the main paper. "
             "Use get_review_coverage only as a high-level coverage aid; for authoritative field readback, prefer get_paper or get_codex_item. "
             "Use get_field_disputes to find conflicting values proposed by different AIs. Includes historically resolved disputes (status='resolved') so later AIs know what was already settled. "

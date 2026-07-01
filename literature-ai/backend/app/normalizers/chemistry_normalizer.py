@@ -227,6 +227,21 @@ def get_property_taxonomy(raw: str | None) -> dict[str, Any]:
     return asdict(taxonomy)
 
 
+def property_type_filter_aliases(raw: str | None) -> tuple[str, ...]:
+    raw_text = str(raw or "").strip()
+    normalized = ChemistryNormalizer._normalize_property(raw_text)
+    if not normalized:
+        return ()
+    aliases = {raw_text, normalized, normalized.replace("_", " ")}
+    taxonomy = _PROPERTY_TAXONOMY_MAP.get(normalized)
+    if taxonomy and taxonomy.canonical_property_type == normalized:
+        for key, item in _PROPERTY_TAXONOMY_MAP.items():
+            if item.canonical_property_type == normalized:
+                aliases.add(key)
+                aliases.add(key.replace("_", " "))
+    return tuple(sorted(value for value in aliases if value))
+
+
 def _extract_metal_from_name(name: str) -> str | None:
     """Extract metal elements from a catalyst name like 'Fe-N4' or 'Co-N-C'."""
     for el in ["Fe", "Co", "Ni", "Cu", "Zn", "Mn", "Pt", "Ru", "Ir", "Pd", "Mo", "W", "V", "Au", "Ag", "Ti", "Zr", "Cr", "Ce"]:

@@ -21,6 +21,7 @@ from app.db.models import (
 )
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_audit_service import DFTCompletenessAuditor
+from app.services.external_analysis_identity import review_submission_identity
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
@@ -521,6 +522,8 @@ class DFTReviewQueueService:
                 payload["source"] = run.source
             if not payload.get("source_label"):
                 payload["source_label"] = run.source_label
+            payload["source_identity"] = run.source_identity
+            payload["source_identity_verified"] = bool(run.source_identity_verified)
             target_type = str(payload.get("target_type") or "").strip()
             target_id = str(payload.get("target_id") or payload.get("dft_result_id") or payload.get("record_id") or "")
             decision = str(payload.get("decision") or "").strip().lower()
@@ -534,7 +537,9 @@ class DFTReviewQueueService:
             if target_id not in target_ids or target_type not in DFT_TARGET_TYPES:
                 continue
             audit_payload = self._object_review_audit_payload(candidate, payload)
-            dedupe_key = (str(candidate.id),)
+            dedupe_key = (
+                self._review_submission_identity(payload, candidate_id=str(candidate.id)),
+            )
             target_bucket = deduped_by_target.setdefault(target_id, {})
             existing = target_bucket.get(dedupe_key)
             if existing is None or self._object_review_audit_payload_rank(audit_payload) > self._object_review_audit_payload_rank(existing):
@@ -561,6 +566,8 @@ class DFTReviewQueueService:
             "field_name": payload.get("field_name"),
             "source": str(payload.get("source") or "unknown"),
             "source_label": payload.get("source_label"),
+            "source_identity": payload.get("source_identity"),
+            "source_identity_verified": bool(payload.get("source_identity_verified")),
             "agent_role": payload.get("agent_role"),
             "model_name": payload.get("model_name"),
             "decision": payload.get("decision") or payload.get("verdict"),
@@ -582,7 +589,7 @@ class DFTReviewQueueService:
         if decision == "new_candidate" and field_name in {"", "dft_results"}:
             field_name = "dft_results"
         return (
-            str(payload.get("source_label") or payload.get("source") or "").strip().lower(),
+            DFTReviewQueueService._review_submission_identity(payload),
             decision,
             field_name,
             json.dumps(payload.get("corrected_value"), sort_keys=True, ensure_ascii=False, default=str),
@@ -847,15 +854,19 @@ class DFTReviewQueueService:
     @staticmethod
     def _unique_dft_review_submissions(audits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         unique: list[dict[str, Any]] = []
-        seen_candidate_ids: set[str] = set()
+        seen_identities: set[str] = set()
         for audit in audits:
-            candidate_id = str(audit.get("candidate_id") or "").strip()
-            if candidate_id:
-                if candidate_id in seen_candidate_ids:
+            identity = DFTReviewQueueService._review_submission_identity(audit)
+            if identity:
+                if identity in seen_identities:
                     continue
-                seen_candidate_ids.add(candidate_id)
+                seen_identities.add(identity)
             unique.append(audit)
         return unique
+
+    @staticmethod
+    def _review_submission_identity(payload: dict[str, Any], *, candidate_id: str = "") -> str:
+        return review_submission_identity(payload)
 
     @staticmethod
     def _gate_review_statuses(gate: Any) -> set[str]:
@@ -883,6 +894,8 @@ class DFTReviewQueueService:
         has_anchor = DFTReviewQueueService._has_valid_evidence_anchor(location)
         return {
             "source_label": audit.get("source_label") or audit.get("source") or "unknown",
+            "source_identity": audit.get("source_identity"),
+            "source_identity_verified": bool(audit.get("source_identity_verified")),
             "decision": DFTReviewQueueService._normalize_ai_review_decision(audit.get("decision")),
             "has_anchor": has_anchor,
             "anchor_summary": DFTReviewQueueService._anchor_summary(location),
