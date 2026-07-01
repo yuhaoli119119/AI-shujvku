@@ -3008,6 +3008,7 @@ def test_visuals_total_correlation_matrix_pairs_energy_variables(setup_test_db):
     assert "adsorption_energy" in variable_keys
     assert "reaction_barrier" in variable_keys
     assert "rds_energy" in variable_keys
+    assert "gibbs_free_energy_change" not in variable_keys
     cell = next(
         item
         for item in overview["cells"]

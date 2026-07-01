@@ -68,7 +68,6 @@ DESCRIPTOR_PROPERTY_ORDER = [
 CORRELATION_VARIABLE_ORDER = [
     "adsorption_energy",
     "binding_energy",
-    "gibbs_free_energy_change",
     "rds_energy",
     "reaction_barrier",
     "li2s_decomposition_barrier",
@@ -107,7 +106,9 @@ CORRELATION_VARIABLE_GROUPS = {
     "bond_length": "structure",
     "adsorption_distance": "structure",
 }
-CORRELATION_PROPERTY_TYPES = frozenset(CORRELATION_VARIABLE_ORDER)
+CORRELATION_PROPERTY_TYPES = frozenset(
+    [*CORRELATION_VARIABLE_ORDER, "gibbs_free_energy_change"]
+)
 DFT_TARGET_TYPES = {"dft_result", "dft_results"}
 
 
