@@ -53,9 +53,11 @@ git branch -vv
 
 ## 4. 文档同步原则
 
-- 优先维护当前有效文档：`../README.md`、`AGENTS.md`、`README.md`、`使用说明.md`、`docs/README.md`
+- 优先维护当前有效文档：`../README.md`（仓库主 README）、`AGENTS.md`、`docs/README.md`
+- `README.md` 仅保留 `literature-ai/` 目录落点与入口跳转，不再承载完整系统说明
+- 如仓库入口或目录跳转发生变化，再同步 `README.md`
 - 历史规划、旧报告统一放入 `docs/archive/`（若 archive 目录已删除，以 git history 为准）
-- 当前真实进度以 `README + AGENTS + git history` 为准
+- 当前真实进度以 `../README.md`、`AGENTS.md` 和 `git history` 为准
 
 ## 5. 数据安全原则
 
